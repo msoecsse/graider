@@ -1,36 +1,31 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { registerApplyCommand } from "./commands/apply.command.js";
+import { registerArchiveCommand } from "./commands/archive.command.js";
+import { registerGradeCommand } from "./commands/grade.command.js";
+import { registerPlanCommand } from "./commands/plan.command.js";
+import { registerRemoveAccessCommand } from "./commands/remove-access.command.js";
+import { registerReportCommand } from "./commands/report.command.js";
+import { registerValidateCommand } from "./commands/validate.command.js";
 
-const program = new Command();
+export const buildProgram = (): Command => {
+  const program = new Command();
 
-program
-  .name("graider")
-  .description("CLI-based GitHub assignment management for course repositories.")
-  .version("0.1.0");
+  program
+    .name("graider")
+    .description("CLI-based GitHub assignment management for course repositories.")
+    .version("0.1.0");
 
-program
-  .command("validate")
-  .argument("<assignment-file>")
-  .option("--json", "Emit JSON output")
-  .option("--verbose", "Emit verbose diagnostics")
-  .description("Validate assignment configuration.")
-  .action((assignmentFile: string, options: { json?: boolean; verbose?: boolean }) => {
-    const result = {
-      commandName: "validate",
-      assignmentFile,
-      status: "success",
-      exitCode: 0,
-      warnings: [],
-      errors: [],
-      options
-    };
+  registerValidateCommand(program);
+  registerPlanCommand(program);
+  registerApplyCommand(program);
+  registerGradeCommand(program);
+  registerReportCommand(program);
+  registerArchiveCommand(program);
+  registerRemoveAccessCommand(program);
 
-    if (options.json === true) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.log(`graider validate: ${assignmentFile}`);
-    }
-  });
+  return program;
+};
 
-program.parse();
+buildProgram().parse();
