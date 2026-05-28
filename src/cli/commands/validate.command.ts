@@ -6,6 +6,7 @@ import {
 } from "../../core/command-context.js";
 import type { CommandResult } from "../../core/command-result.js";
 import { ExitCode } from "../../core/exit-codes.js";
+import { loadAssignmentRosters } from "../../roster/roster-loader.js";
 import { writeCommandResult } from "../output.js";
 
 const COMMAND_NAME = "validate";
@@ -34,17 +35,37 @@ const createValidateResult = (
     };
   }
 
+  const rosterResult = loadAssignmentRosters(configResult.config);
+
+  if (rosterResult.errors.length > 0) {
+    return {
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      exitCode: ExitCode.CommandError,
+      warnings: rosterResult.warnings,
+      errors: rosterResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary
+      }
+    };
+  }
+
   return {
     commandName: COMMAND_NAME,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
     exitCode: ExitCode.Success,
-    warnings: [],
+    warnings: rosterResult.warnings,
     errors: [],
     generatedFiles: [],
     summary: {
       options,
-      ...configResult.config.summary
+      ...configResult.config.summary,
+      ...rosterResult.summary
     }
   };
 };

@@ -81,6 +81,16 @@ var INVALID_ASSIGNMENT_STATUS_CODE = "invalid_assignment_status";
 var INVALID_REPOSITORY_VISIBILITY_CODE = "invalid_repository_visibility";
 var INVALID_PERMISSION_CODE = "invalid_permission";
 var INVALID_GRADING_CONFIG_CODE = "invalid_grading_config";
+var MISSING_REQUIRED_COLUMN_CODE = "missing_required_column";
+var MISSING_REQUIRED_VALUE_CODE = "missing_required_value";
+var INVALID_ROSTER_STATUS_CODE = "invalid_roster_status";
+var SECTION_MISMATCH_CODE = "section_mismatch";
+var DUPLICATE_STUDENT_ID_CODE = "duplicate_student_id";
+var DUPLICATE_GITHUB_USERNAME_CODE = "duplicate_github_username";
+var INVALID_GITHUB_USERNAME_CODE = "invalid_github_username";
+var STUDENT_ID_NORMALIZED_CODE = "student_id_normalized";
+var GITHUB_USERNAME_NORMALIZED_CODE = "github_username_normalized";
+var ROSTER_STATUS_NORMALIZED_CODE = "roster_status_normalized";
 var createNotSupportedInMvpDiagnostic = (commandName) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
   severity: "error",
@@ -110,6 +120,12 @@ var createInvalidYamlDiagnostic = (filePath, reason) => ({
 var createConfigDiagnostic = (code, message, context) => ({
   code,
   severity: "error",
+  message,
+  ...context === void 0 ? {} : { context }
+});
+var createWarningDiagnostic = (code, message, context) => ({
+  code,
+  severity: "warning",
   message,
   ...context === void 0 ? {} : { context }
 });
@@ -703,6 +719,348 @@ var loadGraiderConfig = (request) => {
   };
 };
 
+// src/roster/roster-loader.ts
+import path4 from "path";
+
+// src/io/csv.ts
+var HEADER_ROW_NUMBER = 1;
+var FIRST_DATA_ROW_NUMBER = 2;
+var EMPTY_LINE_COUNT = 0;
+var EMPTY_FIELD = "";
+var COMMA = ",";
+var QUOTE = '"';
+var DOUBLE_QUOTE = '""';
+var CARRIAGE_RETURN = "\r";
+var NEWLINE_PATTERN = /\n/;
+var stripCarriageReturn = (line) => line.endsWith(CARRIAGE_RETURN) ? line.slice(0, -CARRIAGE_RETURN.length) : line;
+var parseCsvLine = (line) => {
+  const fields = [];
+  let current = EMPTY_FIELD;
+  let inQuotes = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? EMPTY_FIELD;
+    const nextTwoCharacters = line.slice(index, index + DOUBLE_QUOTE.length);
+    if (nextTwoCharacters === DOUBLE_QUOTE && inQuotes) {
+      current += QUOTE;
+      index += QUOTE.length;
+    } else if (character === QUOTE) {
+      inQuotes = !inQuotes;
+    } else if (character === COMMA && !inQuotes) {
+      fields.push(current.trim());
+      current = EMPTY_FIELD;
+    } else {
+      current += character;
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+};
+var parseCsv = (content) => {
+  const lines = content.split(NEWLINE_PATTERN).map(stripCarriageReturn);
+  const nonEmptyLines = lines.filter((line) => line.trim().length > EMPTY_LINE_COUNT);
+  const headerLine = nonEmptyLines[HEADER_ROW_NUMBER - HEADER_ROW_NUMBER] ?? EMPTY_FIELD;
+  const dataLines = nonEmptyLines.slice(FIRST_DATA_ROW_NUMBER - HEADER_ROW_NUMBER);
+  return {
+    headers: parseCsvLine(headerLine),
+    rows: dataLines.map((line, index) => ({
+      rowNumber: index + FIRST_DATA_ROW_NUMBER,
+      values: parseCsvLine(line)
+    }))
+  };
+};
+
+// src/roster/roster-normalization.ts
+var normalizeLowercaseValue = (value, code, message, context) => {
+  const normalized = value.toLowerCase();
+  if (normalized === value) {
+    return {
+      value
+    };
+  }
+  return {
+    value: normalized,
+    warning: createWarningDiagnostic(code, message, {
+      ...context,
+      originalValue: value,
+      normalizedValue: normalized
+    })
+  };
+};
+var normalizeStudentId = (value, context) => normalizeLowercaseValue(
+  value,
+  STUDENT_ID_NORMALIZED_CODE,
+  "student_id was normalized to lowercase.",
+  context
+);
+var normalizeGithubUsername = (value, context) => normalizeLowercaseValue(
+  value,
+  GITHUB_USERNAME_NORMALIZED_CODE,
+  "github_username was normalized to lowercase.",
+  context
+);
+var normalizeRosterStatus = (value, context) => normalizeLowercaseValue(
+  value,
+  ROSTER_STATUS_NORMALIZED_CODE,
+  "Roster status was normalized to lowercase.",
+  context
+);
+
+// src/roster/roster-models.ts
+var ROSTER_STATUS_ACTIVE = "active";
+var ROSTER_STATUS_DROPPED = "dropped";
+var ROSTER_STATUS_HOLD = "hold";
+
+// src/roster/roster-validation.ts
+var STUDENT_ID_COLUMN = "student_id";
+var GITHUB_USERNAME_COLUMN = "github_username";
+var SECTION_COLUMN = "section";
+var STATUS_COLUMN = "status";
+var REQUIRED_ROSTER_COLUMNS = [
+  STUDENT_ID_COLUMN,
+  GITHUB_USERNAME_COLUMN,
+  SECTION_COLUMN,
+  STATUS_COLUMN
+];
+var GITHUB_USERNAME_MAX_LENGTH = 39;
+var FIRST_MATCH_INDEX = 0;
+var SECOND_MATCH_INDEX = 1;
+var VALID_ROSTER_STATUSES = [
+  ROSTER_STATUS_ACTIVE,
+  ROSTER_STATUS_DROPPED,
+  ROSTER_STATUS_HOLD
+];
+var GITHUB_USERNAME_PATTERN = /^[a-z0-9-]+$/;
+var CONSECUTIVE_HYPHENS = "--";
+var HYPHEN = "-";
+var isRosterStatus = (value) => VALID_ROSTER_STATUSES.some((status) => status === value);
+var validateRequiredColumns = (rosterPath, headers) => REQUIRED_ROSTER_COLUMNS.filter((column) => !headers.includes(column)).map(
+  (column) => createConfigDiagnostic(
+    MISSING_REQUIRED_COLUMN_CODE,
+    `Roster is missing required column ${column}.`,
+    {
+      rosterPath,
+      columnName: column
+    }
+  )
+);
+var createMissingRequiredValueDiagnostic = (rosterPath, rowNumber, columnName) => createConfigDiagnostic(
+  MISSING_REQUIRED_VALUE_CODE,
+  `Roster row ${String(rowNumber)} is missing required value ${columnName}.`,
+  {
+    rosterPath,
+    rowNumber,
+    columnName
+  }
+);
+var validateRosterStatus = (rosterPath, rowNumber, status) => isRosterStatus(status) ? [] : [
+  createConfigDiagnostic(
+    INVALID_ROSTER_STATUS_CODE,
+    `Roster row ${String(rowNumber)} has invalid status ${status}.`,
+    {
+      rosterPath,
+      rowNumber,
+      status
+    }
+  )
+];
+var validateRosterSection = (rosterPath, rowNumber, expectedSection, actualSection) => actualSection === expectedSection ? [] : [
+  createConfigDiagnostic(
+    SECTION_MISMATCH_CODE,
+    `Roster row ${String(rowNumber)} has section ${actualSection}; expected ${expectedSection}.`,
+    {
+      rosterPath,
+      rowNumber,
+      expectedSection,
+      actualSection
+    }
+  )
+];
+var validateGithubUsername = (rosterPath, rowNumber, githubUsername) => {
+  const isValid = githubUsername.length > 0 && githubUsername.length <= GITHUB_USERNAME_MAX_LENGTH && GITHUB_USERNAME_PATTERN.test(githubUsername) && !githubUsername.startsWith(HYPHEN) && !githubUsername.endsWith(HYPHEN) && !githubUsername.includes(CONSECUTIVE_HYPHENS);
+  return isValid ? [] : [
+    createConfigDiagnostic(
+      INVALID_GITHUB_USERNAME_CODE,
+      `Roster row ${String(rowNumber)} has invalid GitHub username ${githubUsername}.`,
+      {
+        rosterPath,
+        rowNumber,
+        githubUsername
+      }
+    )
+  ];
+};
+var createDuplicateDiagnostic = (code, message, valueKey, matches) => {
+  const firstMatch = matches[FIRST_MATCH_INDEX];
+  const secondMatch = matches[SECOND_MATCH_INDEX];
+  return createConfigDiagnostic(code, message, {
+    [valueKey]: firstMatch?.[valueKey === STUDENT_ID_COLUMN ? "studentId" : "githubUsername"],
+    firstRosterPath: firstMatch?.rosterPath,
+    firstRowNumber: firstMatch?.rowNumber,
+    secondRosterPath: secondMatch?.rosterPath,
+    secondRowNumber: secondMatch?.rowNumber
+  });
+};
+var findDuplicateDiagnostics = (students, getValue2, code, message, valueKey) => {
+  const grouped = /* @__PURE__ */ new Map();
+  for (const student of students) {
+    grouped.set(getValue2(student), [...grouped.get(getValue2(student)) ?? [], student]);
+  }
+  return [...grouped.values()].filter((matches) => matches.length > SECOND_MATCH_INDEX).map((matches) => createDuplicateDiagnostic(code, message, valueKey, matches));
+};
+var validateRosterDuplicates = (students) => [
+  ...findDuplicateDiagnostics(
+    students,
+    (student) => student.studentId,
+    DUPLICATE_STUDENT_ID_CODE,
+    "Duplicate student_id found in rosters.",
+    STUDENT_ID_COLUMN
+  ),
+  ...findDuplicateDiagnostics(
+    students,
+    (student) => student.githubUsername,
+    DUPLICATE_GITHUB_USERNAME_CODE,
+    "Duplicate github_username found in rosters.",
+    GITHUB_USERNAME_COLUMN
+  )
+];
+
+// src/roster/roster-loader.ts
+var EMPTY_COUNT = 0;
+var TERM_DIRECTORY_DEPTH = 2;
+var MISSING_COLUMN_INDEX = -1;
+var createEmptySummary = (rosterFiles) => ({
+  rosterFiles,
+  studentCount: EMPTY_COUNT,
+  activeStudentCount: EMPTY_COUNT,
+  droppedStudentCount: EMPTY_COUNT,
+  holdStudentCount: EMPTY_COUNT
+});
+var createSummary2 = (rosterFiles, students) => ({
+  rosterFiles,
+  studentCount: students.length,
+  activeStudentCount: students.filter((student) => student.status === ROSTER_STATUS_ACTIVE).length,
+  droppedStudentCount: students.filter((student) => student.status === ROSTER_STATUS_DROPPED).length,
+  holdStudentCount: students.filter((student) => student.status === ROSTER_STATUS_HOLD).length
+});
+var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT, TERM_DIRECTORY_DEPTH).join("/");
+var getSectionSources = (config) => {
+  const termDirectory = getTermDirectory(config.summary.termConfigPath);
+  const sectionsById = new Map(
+    config.term.sections.map((section) => [
+      section.id,
+      toForwardSlashPath(path4.posix.join(termDirectory, section.roster))
+    ])
+  );
+  return config.assignment.sections.map((sectionId) => ({
+    sectionId,
+    rosterPath: sectionsById.get(sectionId) ?? ""
+  }));
+};
+var getColumnIndexes = (headers) => ({
+  studentId: headers.indexOf(STUDENT_ID_COLUMN),
+  githubUsername: headers.indexOf(GITHUB_USERNAME_COLUMN),
+  section: headers.indexOf(SECTION_COLUMN),
+  status: headers.indexOf(STATUS_COLUMN)
+});
+var getValue = (values, index) => index === MISSING_COLUMN_INDEX ? "" : (values[index] ?? "").trim();
+var createContext = (rosterPath, rowNumber, expectedSection) => ({
+  rosterPath,
+  rowNumber,
+  expectedSection
+});
+var loadSectionRoster = (repoRoot, source) => {
+  const fileResult = readTextFile(path4.join(repoRoot, source.rosterPath));
+  if (fileResult.status === "failure") {
+    return {
+      students: [],
+      warnings: [],
+      errors: [fileResult.diagnostic]
+    };
+  }
+  const document = parseCsv(fileResult.content);
+  const missingColumnErrors = validateRequiredColumns(source.rosterPath, document.headers);
+  if (missingColumnErrors.length > EMPTY_COUNT) {
+    return {
+      students: [],
+      warnings: [],
+      errors: missingColumnErrors
+    };
+  }
+  const indexes = getColumnIndexes(document.headers);
+  const students = [];
+  const warnings = [];
+  const errors = [];
+  for (const row of document.rows) {
+    const rawStudentId = getValue(row.values, indexes.studentId);
+    const rawGithubUsername = getValue(row.values, indexes.githubUsername);
+    const rawSection = getValue(row.values, indexes.section);
+    const rawStatus = getValue(row.values, indexes.status);
+    const rowContext = createContext(source.rosterPath, row.rowNumber, source.sectionId);
+    const missingValueErrors = REQUIRED_ROSTER_COLUMNS.flatMap((column) => {
+      const valueByColumn = {
+        [STUDENT_ID_COLUMN]: rawStudentId,
+        [GITHUB_USERNAME_COLUMN]: rawGithubUsername,
+        [SECTION_COLUMN]: rawSection,
+        [STATUS_COLUMN]: rawStatus
+      };
+      return valueByColumn[column].length === EMPTY_COUNT ? [createMissingRequiredValueDiagnostic(source.rosterPath, row.rowNumber, column)] : [];
+    });
+    if (missingValueErrors.length > EMPTY_COUNT) {
+      errors.push(...missingValueErrors);
+    } else {
+      const normalizedStudentId = normalizeStudentId(rawStudentId, rowContext);
+      const normalizedGithubUsername = normalizeGithubUsername(rawGithubUsername, rowContext);
+      const normalizedStatus = normalizeRosterStatus(rawStatus, rowContext);
+      const rowWarnings = [
+        normalizedStudentId.warning,
+        normalizedGithubUsername.warning,
+        normalizedStatus.warning
+      ].filter((warning) => warning !== void 0);
+      const rowErrors = [
+        ...validateRosterStatus(source.rosterPath, row.rowNumber, normalizedStatus.value),
+        ...validateRosterSection(source.rosterPath, row.rowNumber, source.sectionId, rawSection),
+        ...validateGithubUsername(source.rosterPath, row.rowNumber, normalizedGithubUsername.value)
+      ];
+      warnings.push(...rowWarnings);
+      errors.push(...rowErrors);
+      if (rowErrors.length === EMPTY_COUNT && isRosterStatus(normalizedStatus.value)) {
+        students.push({
+          studentId: normalizedStudentId.value,
+          githubUsername: normalizedGithubUsername.value,
+          section: rawSection,
+          status: normalizedStatus.value,
+          rosterPath: source.rosterPath,
+          rowNumber: row.rowNumber
+        });
+      }
+    }
+  }
+  return {
+    students,
+    warnings,
+    errors
+  };
+};
+var loadAssignmentRosters = (config) => {
+  const sources = getSectionSources(config);
+  const rosterFiles = sources.map((source) => source.rosterPath);
+  const loadedSections = sources.map(
+    (source) => loadSectionRoster(config.summary.repoRoot, source)
+  );
+  const students = loadedSections.flatMap((section) => section.students);
+  const warnings = loadedSections.flatMap((section) => section.warnings);
+  const errors = [
+    ...loadedSections.flatMap((section) => section.errors),
+    ...validateRosterDuplicates(students)
+  ];
+  return {
+    students,
+    warnings,
+    errors,
+    summary: errors.length > EMPTY_COUNT ? createEmptySummary(rosterFiles) : createSummary2(rosterFiles, students)
+  };
+};
+
 // src/cli/commands/validate.command.ts
 var COMMAND_NAME = "validate";
 var createValidateResult = (assignmentFile, options) => {
@@ -724,17 +1082,35 @@ var createValidateResult = (assignmentFile, options) => {
       }
     };
   }
+  const rosterResult = loadAssignmentRosters(configResult.config);
+  if (rosterResult.errors.length > 0) {
+    return {
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      exitCode: 1 /* CommandError */,
+      warnings: rosterResult.warnings,
+      errors: rosterResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary
+      }
+    };
+  }
   return {
     commandName: COMMAND_NAME,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
     exitCode: 0 /* Success */,
-    warnings: [],
+    warnings: rosterResult.warnings,
     errors: [],
     generatedFiles: [],
     summary: {
       options,
-      ...configResult.config.summary
+      ...configResult.config.summary,
+      ...rosterResult.summary
     }
   };
 };

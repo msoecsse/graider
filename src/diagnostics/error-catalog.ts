@@ -13,6 +13,16 @@ export const INVALID_ASSIGNMENT_STATUS_CODE = "invalid_assignment_status";
 export const INVALID_REPOSITORY_VISIBILITY_CODE = "invalid_repository_visibility";
 export const INVALID_PERMISSION_CODE = "invalid_permission";
 export const INVALID_GRADING_CONFIG_CODE = "invalid_grading_config";
+export const MISSING_REQUIRED_COLUMN_CODE = "missing_required_column";
+export const MISSING_REQUIRED_VALUE_CODE = "missing_required_value";
+export const INVALID_ROSTER_STATUS_CODE = "invalid_roster_status";
+export const SECTION_MISMATCH_CODE = "section_mismatch";
+export const DUPLICATE_STUDENT_ID_CODE = "duplicate_student_id";
+export const DUPLICATE_GITHUB_USERNAME_CODE = "duplicate_github_username";
+export const INVALID_GITHUB_USERNAME_CODE = "invalid_github_username";
+export const STUDENT_ID_NORMALIZED_CODE = "student_id_normalized";
+export const GITHUB_USERNAME_NORMALIZED_CODE = "github_username_normalized";
+export const ROSTER_STATUS_NORMALIZED_CODE = "roster_status_normalized";
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
@@ -53,6 +63,17 @@ export const createConfigDiagnostic = (
 ): Diagnostic => ({
   code,
   severity: "error",
+  message,
+  ...(context === undefined ? {} : { context })
+});
+
+export const createWarningDiagnostic = (
+  code: string,
+  message: string,
+  context?: Record<string, unknown>
+): Diagnostic => ({
+  code,
+  severity: "warning",
   message,
   ...(context === undefined ? {} : { context })
 });

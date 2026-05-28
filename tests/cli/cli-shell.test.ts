@@ -6,10 +6,16 @@ const CLI_ENTRYPOINT = path.resolve("src/cli/index.ts");
 const TEST_ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
 const NODE_ARGUMENTS = ["--import", "tsx", CLI_ENTRYPOINT] as const;
 const CONFIG_FIXTURE_ROOT = path.resolve("tests/fixtures/config");
+const ROSTER_FIXTURE_ROOT = path.resolve("tests/fixtures/roster");
 const VALID_REPO_ROOT = path.join(CONFIG_FIXTURE_ROOT, "valid-course");
 const VALID_REPO_SUBDIRECTORY = path.join(VALID_REPO_ROOT, "terms", "27s1");
 const MISSING_REPO_ROOT = path.join(CONFIG_FIXTURE_ROOT, "missing-course-yml");
 const MALFORMED_YAML_ROOT = path.join(CONFIG_FIXTURE_ROOT, "malformed-yaml");
+const VALID_ROSTER_REPO_ROOT = path.join(ROSTER_FIXTURE_ROOT, "valid-course");
+const MISSING_ROSTER_COLUMN_ROOT = path.join(ROSTER_FIXTURE_ROOT, "missing-column");
+const DUPLICATE_STUDENT_ROOT = path.join(ROSTER_FIXTURE_ROOT, "duplicate-student-id");
+const DUPLICATE_GITHUB_ROOT = path.join(ROSTER_FIXTURE_ROOT, "duplicate-github-username");
+const NORMALIZATION_WARNINGS_ROOT = path.join(ROSTER_FIXTURE_ROOT, "normalization-warnings");
 const SUCCESS_EXIT_CODE = 0;
 const COMMAND_ERROR_EXIT_CODE = 1;
 const CONFIGURATION_ERROR_EXIT_CODE = 5;
@@ -25,7 +31,7 @@ interface JsonCommandResult {
   readonly assignmentFile: string;
   readonly status: string;
   readonly exitCode: number;
-  readonly warnings: unknown[];
+  readonly warnings: Array<{ readonly code: string }>;
   readonly errors: Array<{ readonly code: string }>;
   readonly generatedFiles: string[];
   readonly summary: Record<string, unknown>;
@@ -169,6 +175,114 @@ describe("graider CLI shell", () => {
         code: "not_supported_in_mvp"
       })
     ]);
+  });
+});
+
+describe("graider validate roster validation", () => {
+  it("succeeds for a valid fixture with rosters", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE], VALID_ROSTER_REPO_ROOT);
+
+    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.stdout).toContain("validate");
+    expect(result.stdout).toContain("success");
+  });
+
+  it("emits parseable JSON with roster summary counts", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_ROSTER_REPO_ROOT);
+    const json = parseJsonResult(result.stdout);
+
+    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(json.summary).toMatchObject({
+      rosterFiles: ["terms/27s1/rosters/section-001.csv", "terms/27s1/rosters/section-002.csv"],
+      studentCount: 4,
+      activeStudentCount: 2,
+      droppedStudentCount: 1,
+      holdStudentCount: 1
+    });
+  });
+
+  it("exits 1 for missing roster column", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], MISSING_ROSTER_COLUMN_ROOT);
+    const json = parseJsonResult(result.stdout);
+
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.exitCode).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([
+      expect.objectContaining({
+        code: "missing_required_column"
+      })
+    ]);
+  });
+
+  it("exits 1 for duplicate student ID", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], DUPLICATE_STUDENT_ROOT);
+    const json = parseJsonResult(result.stdout);
+
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([
+      expect.objectContaining({
+        code: "duplicate_student_id"
+      })
+    ]);
+  });
+
+  it("exits 1 for duplicate GitHub username", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], DUPLICATE_GITHUB_ROOT);
+    const json = parseJsonResult(result.stdout);
+
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([
+      expect.objectContaining({
+        code: "duplicate_github_username"
+      })
+    ]);
+  });
+
+  it("exits 0 when only normalization warnings occur", () => {
+    const result = runCli(
+      ["validate", TEST_ASSIGNMENT_FILE, "--json"],
+      NORMALIZATION_WARNINGS_ROOT
+    );
+    const json = parseJsonResult(result.stdout);
+
+    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(json.status).toBe("success");
+    expect(json.warnings).toEqual([
+      expect.objectContaining({
+        code: "student_id_normalized"
+      }),
+      expect.objectContaining({
+        code: "github_username_normalized"
+      }),
+      expect.objectContaining({
+        code: "roster_status_normalized"
+      })
+    ]);
+  });
+
+  it("includes warning diagnostics for normalization", () => {
+    const result = runCli(
+      ["validate", TEST_ASSIGNMENT_FILE, "--json"],
+      NORMALIZATION_WARNINGS_ROOT
+    );
+    const json = parseJsonResult(result.stdout);
+
+    expect(json.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "student_id_normalized",
+          severity: "warning"
+        }),
+        expect.objectContaining({
+          code: "github_username_normalized",
+          severity: "warning"
+        }),
+        expect.objectContaining({
+          code: "roster_status_normalized",
+          severity: "warning"
+        })
+      ])
+    );
   });
 });
 
