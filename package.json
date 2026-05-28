@@ -1,0 +1,49 @@
+{
+  "name": "graider",
+  "version": "0.1.0",
+  "description": "CLI-based GitHub assignment management for course repositories.",
+  "type": "module",
+  "bin": {
+    "graider": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/cli/index.ts --format esm --dts --clean --out-dir dist",
+    "dev": "tsx src/cli/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+  },
+  "keywords": [
+    "github",
+    "education",
+    "cli",
+    "grading"
+  ],
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@octokit/rest": "latest",
+    "commander": "latest",
+    "nvm": "^0.0.4",
+    "yaml": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@types/node": "^25.9.1",
+    "eslint": "latest",
+    "jiti": "^2.7.0",
+    "prettier": "latest",
+    "tsup": "latest",
+    "tsx": "^4.22.3",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "latest",
+    "vitest": "latest"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  }
+}

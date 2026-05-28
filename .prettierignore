@@ -1,0 +1,11 @@
+dist
+node_modules
+coverage
+package-lock.json
+
+docs/graider_complete_requirements.md
+docs/graider_error_warning_catalog.md
+docs/graider-architecture.md
+docs/graider-test-plan.md
+docs/graider-traceability-matrix.md
+docs/graider-implementation-plan.md
