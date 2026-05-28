@@ -7,7 +7,6 @@ import {
   normalizeCommonCommandOptions,
   type RawCommonCommandOptions
 } from "../../core/command-context.js";
-import { ExitCode } from "../../core/exit-codes.js";
 import { resolveAssignmentPath, toRepositoryRelativePath } from "../../core/paths.js";
 import { findRepositoryRoot } from "../../core/repo-root.js";
 import { createNotSupportedInMvpDiagnostic } from "../../diagnostics/error-catalog.js";
@@ -58,11 +57,7 @@ export const registerPlaceholderCommand = (
 
       const result =
         repositoryRootResult?.found === false
-          ? createFailedPlaceholderResult(
-              context,
-              repositoryRootResult.diagnostic,
-              ExitCode.ConfigurationOrSchemaError
-            )
+          ? createFailedPlaceholderResult(context, repositoryRootResult.diagnostic)
           : registration.support === "supported-placeholder"
             ? createSuccessfulPlaceholderResult(context)
             : createFailedPlaceholderResult(

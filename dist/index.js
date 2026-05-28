@@ -3,12 +3,156 @@
 // src/cli/index.ts
 import { Command } from "commander";
 
+// src/diagnostics/error-catalog.ts
+var DiagnosticCode = {
+  MissingRequiredFile: "missing_required_file",
+  InvalidYaml: "invalid_yaml",
+  InvalidSchemaVersion: "invalid_schema_version",
+  MissingRequiredField: "missing_required_field",
+  InvalidTermCode: "invalid_term_code",
+  AssignmentSlugMismatch: "assignment_slug_mismatch",
+  TermCodeMismatch: "term_code_mismatch",
+  InvalidAssignmentType: "invalid_assignment_type",
+  InvalidAssignmentStatus: "invalid_assignment_status",
+  InvalidRepositoryVisibility: "invalid_repository_visibility",
+  InvalidPermission: "invalid_permission",
+  InvalidGradingConfig: "invalid_grading_config",
+  MissingRequiredColumn: "missing_required_column",
+  MissingRequiredValue: "missing_required_value",
+  InvalidRosterStatus: "invalid_roster_status",
+  SectionMismatch: "section_mismatch",
+  DuplicateStudentId: "duplicate_student_id",
+  DuplicateGithubUsername: "duplicate_github_username",
+  InvalidGithubUsername: "invalid_github_username",
+  StudentIdNormalized: "student_id_normalized",
+  GithubUsernameNormalized: "github_username_normalized",
+  RosterStatusNormalized: "roster_status_normalized",
+  NotSupportedInMvp: "not_supported_in_mvp",
+  GithubAuthMissing: "github_auth_missing",
+  GithubAuthFailed: "github_auth_failed",
+  GithubPermissionDenied: "github_permission_denied",
+  GithubApiError: "github_api_error",
+  GithubNetworkError: "github_network_error",
+  GithubRateLimited: "github_rate_limited",
+  GithubTimeout: "github_timeout"
+};
+var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
+var MISSING_REQUIRED_FILE_CODE = DiagnosticCode.MissingRequiredFile;
+var INVALID_YAML_CODE = DiagnosticCode.InvalidYaml;
+var INVALID_SCHEMA_VERSION_CODE = DiagnosticCode.InvalidSchemaVersion;
+var MISSING_REQUIRED_FIELD_CODE = DiagnosticCode.MissingRequiredField;
+var INVALID_TERM_CODE_CODE = DiagnosticCode.InvalidTermCode;
+var ASSIGNMENT_SLUG_MISMATCH_CODE = DiagnosticCode.AssignmentSlugMismatch;
+var TERM_CODE_MISMATCH_CODE = DiagnosticCode.TermCodeMismatch;
+var INVALID_ASSIGNMENT_TYPE_CODE = DiagnosticCode.InvalidAssignmentType;
+var INVALID_ASSIGNMENT_STATUS_CODE = DiagnosticCode.InvalidAssignmentStatus;
+var INVALID_REPOSITORY_VISIBILITY_CODE = DiagnosticCode.InvalidRepositoryVisibility;
+var INVALID_PERMISSION_CODE = DiagnosticCode.InvalidPermission;
+var INVALID_GRADING_CONFIG_CODE = DiagnosticCode.InvalidGradingConfig;
+var MISSING_REQUIRED_COLUMN_CODE = DiagnosticCode.MissingRequiredColumn;
+var MISSING_REQUIRED_VALUE_CODE = DiagnosticCode.MissingRequiredValue;
+var INVALID_ROSTER_STATUS_CODE = DiagnosticCode.InvalidRosterStatus;
+var SECTION_MISMATCH_CODE = DiagnosticCode.SectionMismatch;
+var DUPLICATE_STUDENT_ID_CODE = DiagnosticCode.DuplicateStudentId;
+var DUPLICATE_GITHUB_USERNAME_CODE = DiagnosticCode.DuplicateGithubUsername;
+var INVALID_GITHUB_USERNAME_CODE = DiagnosticCode.InvalidGithubUsername;
+var STUDENT_ID_NORMALIZED_CODE = DiagnosticCode.StudentIdNormalized;
+var GITHUB_USERNAME_NORMALIZED_CODE = DiagnosticCode.GithubUsernameNormalized;
+var ROSTER_STATUS_NORMALIZED_CODE = DiagnosticCode.RosterStatusNormalized;
+var createNotSupportedInMvpDiagnostic = (commandName) => ({
+  code: NOT_SUPPORTED_IN_MVP_CODE,
+  severity: "error",
+  message: `The ${commandName} command is not supported in the MVP placeholder CLI shell.`,
+  context: {
+    commandName
+  }
+});
+var createMissingRequiredFileDiagnostic = (fileName, startDirectory) => ({
+  code: MISSING_REQUIRED_FILE_CODE,
+  severity: "error",
+  message: `Missing required file ${fileName}; could not find it in ${startDirectory} or any parent directory.`,
+  context: {
+    fileName,
+    startDirectory
+  }
+});
+var createInvalidYamlDiagnostic = (filePath, reason) => ({
+  code: INVALID_YAML_CODE,
+  severity: "error",
+  message: `Invalid YAML in ${filePath}: ${reason}`,
+  context: {
+    filePath,
+    reason
+  }
+});
+var createConfigDiagnostic = (code, message, context) => ({
+  code,
+  severity: "error",
+  message,
+  ...context === void 0 ? {} : { context }
+});
+var createWarningDiagnostic = (code, message, context) => ({
+  code,
+  severity: "warning",
+  message,
+  ...context === void 0 ? {} : { context }
+});
+
+// src/core/exit-codes.ts
+var AUTHORIZATION_ERROR_CODES = /* @__PURE__ */ new Set([
+  DiagnosticCode.GithubAuthMissing,
+  DiagnosticCode.GithubAuthFailed,
+  DiagnosticCode.GithubPermissionDenied
+]);
+var CONFIGURATION_ERROR_CODES = /* @__PURE__ */ new Set([
+  DiagnosticCode.MissingRequiredFile,
+  DiagnosticCode.InvalidYaml,
+  DiagnosticCode.InvalidSchemaVersion,
+  DiagnosticCode.MissingRequiredField,
+  DiagnosticCode.InvalidTermCode,
+  DiagnosticCode.AssignmentSlugMismatch,
+  DiagnosticCode.TermCodeMismatch,
+  DiagnosticCode.InvalidAssignmentType,
+  DiagnosticCode.InvalidAssignmentStatus,
+  DiagnosticCode.InvalidRepositoryVisibility,
+  DiagnosticCode.InvalidPermission,
+  DiagnosticCode.InvalidGradingConfig
+]);
+var GITHUB_ERROR_CODES = /* @__PURE__ */ new Set([
+  DiagnosticCode.GithubApiError,
+  DiagnosticCode.GithubNetworkError,
+  DiagnosticCode.GithubRateLimited,
+  DiagnosticCode.GithubTimeout
+]);
+var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic) => codes.has(diagnostic.code));
+var resolveExitCode = ({ status, errors }) => {
+  if (hasCodeInSet(errors, AUTHORIZATION_ERROR_CODES)) {
+    return 3 /* AuthenticationOrAuthorizationFailure */;
+  }
+  if (hasCodeInSet(errors, CONFIGURATION_ERROR_CODES)) {
+    return 5 /* ConfigurationOrSchemaError */;
+  }
+  if (hasCodeInSet(errors, GITHUB_ERROR_CODES)) {
+    return 4 /* GitHubOrNetworkFailure */;
+  }
+  if (status === "partial_success") {
+    return 2 /* PartialSuccess */;
+  }
+  if (errors.length > 0 || status === "failure") {
+    return 1 /* CommandError */;
+  }
+  return 0 /* Success */;
+};
+
 // src/core/command-result.ts
-var createSuccessfulPlaceholderResult = (context) => ({
+var createCommandResult = (input) => ({
+  ...input,
+  exitCode: resolveExitCode(input)
+});
+var createSuccessfulPlaceholderResult = (context) => createCommandResult({
   commandName: context.commandName,
   assignmentFile: context.assignmentRelativePath ?? context.assignmentFile,
   status: "success",
-  exitCode: 0 /* Success */,
   warnings: [],
   errors: [],
   generatedFiles: [],
@@ -21,11 +165,10 @@ var createSuccessfulPlaceholderResult = (context) => ({
     ...context.assignmentRelativePath === void 0 ? {} : { assignmentRelativePath: context.assignmentRelativePath }
   }
 });
-var createFailedPlaceholderResult = (context, error, exitCode = 1 /* CommandError */) => ({
+var createFailedPlaceholderResult = (context, error) => createCommandResult({
   commandName: context.commandName,
   assignmentFile: context.assignmentRelativePath ?? context.assignmentFile,
   status: "failure",
-  exitCode,
   warnings: [],
   errors: [error],
   generatedFiles: [],
@@ -66,71 +209,6 @@ var toRepositoryRelativePath = (repoRoot, absolutePath) => {
 // src/core/repo-root.ts
 import fs from "fs";
 import path2 from "path";
-
-// src/diagnostics/error-catalog.ts
-var NOT_SUPPORTED_IN_MVP_CODE = "not_supported_in_mvp";
-var MISSING_REQUIRED_FILE_CODE = "missing_required_file";
-var INVALID_YAML_CODE = "invalid_yaml";
-var INVALID_SCHEMA_VERSION_CODE = "invalid_schema_version";
-var MISSING_REQUIRED_FIELD_CODE = "missing_required_field";
-var INVALID_TERM_CODE_CODE = "invalid_term_code";
-var ASSIGNMENT_SLUG_MISMATCH_CODE = "assignment_slug_mismatch";
-var TERM_CODE_MISMATCH_CODE = "term_code_mismatch";
-var INVALID_ASSIGNMENT_TYPE_CODE = "invalid_assignment_type";
-var INVALID_ASSIGNMENT_STATUS_CODE = "invalid_assignment_status";
-var INVALID_REPOSITORY_VISIBILITY_CODE = "invalid_repository_visibility";
-var INVALID_PERMISSION_CODE = "invalid_permission";
-var INVALID_GRADING_CONFIG_CODE = "invalid_grading_config";
-var MISSING_REQUIRED_COLUMN_CODE = "missing_required_column";
-var MISSING_REQUIRED_VALUE_CODE = "missing_required_value";
-var INVALID_ROSTER_STATUS_CODE = "invalid_roster_status";
-var SECTION_MISMATCH_CODE = "section_mismatch";
-var DUPLICATE_STUDENT_ID_CODE = "duplicate_student_id";
-var DUPLICATE_GITHUB_USERNAME_CODE = "duplicate_github_username";
-var INVALID_GITHUB_USERNAME_CODE = "invalid_github_username";
-var STUDENT_ID_NORMALIZED_CODE = "student_id_normalized";
-var GITHUB_USERNAME_NORMALIZED_CODE = "github_username_normalized";
-var ROSTER_STATUS_NORMALIZED_CODE = "roster_status_normalized";
-var createNotSupportedInMvpDiagnostic = (commandName) => ({
-  code: NOT_SUPPORTED_IN_MVP_CODE,
-  severity: "error",
-  message: `The ${commandName} command is not supported in the MVP placeholder CLI shell.`,
-  context: {
-    commandName
-  }
-});
-var createMissingRequiredFileDiagnostic = (fileName, startDirectory) => ({
-  code: MISSING_REQUIRED_FILE_CODE,
-  severity: "error",
-  message: `Missing required file ${fileName}; could not find it in ${startDirectory} or any parent directory.`,
-  context: {
-    fileName,
-    startDirectory
-  }
-});
-var createInvalidYamlDiagnostic = (filePath, reason) => ({
-  code: INVALID_YAML_CODE,
-  severity: "error",
-  message: `Invalid YAML in ${filePath}: ${reason}`,
-  context: {
-    filePath,
-    reason
-  }
-});
-var createConfigDiagnostic = (code, message, context) => ({
-  code,
-  severity: "error",
-  message,
-  ...context === void 0 ? {} : { context }
-});
-var createWarningDiagnostic = (code, message, context) => ({
-  code,
-  severity: "warning",
-  message,
-  ...context === void 0 ? {} : { context }
-});
-
-// src/core/repo-root.ts
 var COURSE_CONFIG_FILE_NAME = "course.yml";
 var isFile = (filePath) => {
   try {
@@ -161,17 +239,55 @@ var findRepositoryRoot = (startDirectory) => {
   return findRepositoryRootFromDirectory(resolvedStartDirectory, resolvedStartDirectory);
 };
 
+// src/diagnostics/redaction.ts
+var REDACTED_VALUE = "[REDACTED]";
+var GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,})\b/g;
+var SENSITIVE_KEY_PARTS = ["token", "authorization", "password", "secret", "apikey"];
+var KEY_SEPARATOR_PATTERN = /[-_]/g;
+var redactString = (value) => value.replace(GITHUB_TOKEN_PATTERN, REDACTED_VALUE);
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isSensitiveKey = (key) => {
+  const normalizedKey = key.replace(KEY_SEPARATOR_PATTERN, "").toLowerCase();
+  return SENSITIVE_KEY_PARTS.some((keyPart) => normalizedKey.includes(keyPart));
+};
+var redactValue = (value) => {
+  if (typeof value === "string") {
+    return redactString(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactValue(item));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entryValue]) => [
+        key,
+        isSensitiveKey(key) ? REDACTED_VALUE : redactValue(entryValue)
+      ])
+    );
+  }
+  return value;
+};
+var redactCommandResult = (result) => redactValue(result);
+
 // src/cli/output.ts
 var JSON_INDENT_SPACES = 2;
 var EMPTY_COLLECTION_LENGTH = 0;
-var formatCommandResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES);
+var formatCommandResultAsJson = (result) => JSON.stringify(redactCommandResult(result), void 0, JSON_INDENT_SPACES);
+var formatDiagnostic = (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`;
 var formatCommandResultAsText = (result) => {
-  const assignmentFile = result.assignmentFile ?? "<none>";
-  const errorCodes = result.errors.map((error) => error.code);
-  if (errorCodes.length === EMPTY_COLLECTION_LENGTH) {
-    return `${result.commandName}: ${assignmentFile}: ${result.status}`;
+  const redactedResult = redactCommandResult(result);
+  const assignmentFile = redactedResult.assignmentFile ?? "<none>";
+  const lines = [`${redactedResult.commandName}: ${assignmentFile}: ${redactedResult.status}`];
+  if (redactedResult.generatedFiles.length > EMPTY_COLLECTION_LENGTH) {
+    lines.push(`generated: ${redactedResult.generatedFiles.join(", ")}`);
   }
-  return `${result.commandName}: ${assignmentFile}: ${result.status}: ${errorCodes.join(", ")}`;
+  if (redactedResult.warnings.length > EMPTY_COLLECTION_LENGTH) {
+    lines.push(`warnings: ${redactedResult.warnings.map(formatDiagnostic).join("; ")}`);
+  }
+  if (redactedResult.errors.length > EMPTY_COLLECTION_LENGTH) {
+    lines.push(`errors: ${redactedResult.errors.map(formatDiagnostic).join("; ")}`);
+  }
+  return lines.join("\n");
 };
 var writeCommandResult = (result, json) => {
   const output = json ? formatCommandResultAsJson(result) : formatCommandResultAsText(result);
@@ -198,11 +314,7 @@ var registerPlaceholderCommand = (program, registration) => {
       } : {},
       options: normalizeCommonCommandOptions(rawOptions)
     };
-    const result = repositoryRootResult?.found === false ? createFailedPlaceholderResult(
-      context,
-      repositoryRootResult.diagnostic,
-      5 /* ConfigurationOrSchemaError */
-    ) : registration.support === "supported-placeholder" ? createSuccessfulPlaceholderResult(context) : createFailedPlaceholderResult(
+    const result = repositoryRootResult?.found === false ? createFailedPlaceholderResult(context, repositoryRootResult.diagnostic) : registration.support === "supported-placeholder" ? createSuccessfulPlaceholderResult(context) : createFailedPlaceholderResult(
       context,
       createNotSupportedInMvpDiagnostic(registration.name)
     );
@@ -1069,26 +1181,24 @@ var createValidateResult = (assignmentFile, options) => {
     assignmentFile
   });
   if (configResult.status === "failure") {
-    return {
+    return createCommandResult({
       commandName: COMMAND_NAME,
       assignmentFile,
       status: "failure",
-      exitCode: 5 /* ConfigurationOrSchemaError */,
       warnings: [],
       errors: configResult.diagnostics,
       generatedFiles: [],
       summary: {
         options
       }
-    };
+    });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > 0) {
-    return {
+    return createCommandResult({
       commandName: COMMAND_NAME,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
-      exitCode: 1 /* CommandError */,
       warnings: rosterResult.warnings,
       errors: rosterResult.errors,
       generatedFiles: [],
@@ -1097,13 +1207,12 @@ var createValidateResult = (assignmentFile, options) => {
         ...configResult.config.summary,
         ...rosterResult.summary
       }
-    };
+    });
   }
-  return {
+  return createCommandResult({
     commandName: COMMAND_NAME,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
-    exitCode: 0 /* Success */,
     warnings: rosterResult.warnings,
     errors: [],
     generatedFiles: [],
@@ -1112,7 +1221,7 @@ var createValidateResult = (assignmentFile, options) => {
       ...configResult.config.summary,
       ...rosterResult.summary
     }
-  };
+  });
 };
 var registerValidateCommand = (program) => {
   program.command(COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action((assignmentFile, rawOptions) => {

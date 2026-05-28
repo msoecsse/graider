@@ -4,8 +4,7 @@ import {
   normalizeCommonCommandOptions,
   type RawCommonCommandOptions
 } from "../../core/command-context.js";
-import type { CommandResult } from "../../core/command-result.js";
-import { ExitCode } from "../../core/exit-codes.js";
+import { createCommandResult, type CommandResult } from "../../core/command-result.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
 import { writeCommandResult } from "../output.js";
 
@@ -21,28 +20,26 @@ const createValidateResult = (
   });
 
   if (configResult.status === "failure") {
-    return {
+    return createCommandResult({
       commandName: COMMAND_NAME,
       assignmentFile,
       status: "failure",
-      exitCode: ExitCode.ConfigurationOrSchemaError,
       warnings: [],
       errors: configResult.diagnostics,
       generatedFiles: [],
       summary: {
         options
       }
-    };
+    });
   }
 
   const rosterResult = loadAssignmentRosters(configResult.config);
 
   if (rosterResult.errors.length > 0) {
-    return {
+    return createCommandResult({
       commandName: COMMAND_NAME,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
-      exitCode: ExitCode.CommandError,
       warnings: rosterResult.warnings,
       errors: rosterResult.errors,
       generatedFiles: [],
@@ -51,14 +48,13 @@ const createValidateResult = (
         ...configResult.config.summary,
         ...rosterResult.summary
       }
-    };
+    });
   }
 
-  return {
+  return createCommandResult({
     commandName: COMMAND_NAME,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
-    exitCode: ExitCode.Success,
     warnings: rosterResult.warnings,
     errors: [],
     generatedFiles: [],
@@ -67,7 +63,7 @@ const createValidateResult = (
       ...configResult.config.summary,
       ...rosterResult.summary
     }
-  };
+  });
 };
 
 export const registerValidateCommand = (program: Command): void => {

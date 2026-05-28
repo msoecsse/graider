@@ -1,28 +1,63 @@
 import type { Diagnostic } from "./diagnostic.js";
 
-export const NOT_SUPPORTED_IN_MVP_CODE = "not_supported_in_mvp";
-export const MISSING_REQUIRED_FILE_CODE = "missing_required_file";
-export const INVALID_YAML_CODE = "invalid_yaml";
-export const INVALID_SCHEMA_VERSION_CODE = "invalid_schema_version";
-export const MISSING_REQUIRED_FIELD_CODE = "missing_required_field";
-export const INVALID_TERM_CODE_CODE = "invalid_term_code";
-export const ASSIGNMENT_SLUG_MISMATCH_CODE = "assignment_slug_mismatch";
-export const TERM_CODE_MISMATCH_CODE = "term_code_mismatch";
-export const INVALID_ASSIGNMENT_TYPE_CODE = "invalid_assignment_type";
-export const INVALID_ASSIGNMENT_STATUS_CODE = "invalid_assignment_status";
-export const INVALID_REPOSITORY_VISIBILITY_CODE = "invalid_repository_visibility";
-export const INVALID_PERMISSION_CODE = "invalid_permission";
-export const INVALID_GRADING_CONFIG_CODE = "invalid_grading_config";
-export const MISSING_REQUIRED_COLUMN_CODE = "missing_required_column";
-export const MISSING_REQUIRED_VALUE_CODE = "missing_required_value";
-export const INVALID_ROSTER_STATUS_CODE = "invalid_roster_status";
-export const SECTION_MISMATCH_CODE = "section_mismatch";
-export const DUPLICATE_STUDENT_ID_CODE = "duplicate_student_id";
-export const DUPLICATE_GITHUB_USERNAME_CODE = "duplicate_github_username";
-export const INVALID_GITHUB_USERNAME_CODE = "invalid_github_username";
-export const STUDENT_ID_NORMALIZED_CODE = "student_id_normalized";
-export const GITHUB_USERNAME_NORMALIZED_CODE = "github_username_normalized";
-export const ROSTER_STATUS_NORMALIZED_CODE = "roster_status_normalized";
+export const DiagnosticCode = {
+  MissingRequiredFile: "missing_required_file",
+  InvalidYaml: "invalid_yaml",
+  InvalidSchemaVersion: "invalid_schema_version",
+  MissingRequiredField: "missing_required_field",
+  InvalidTermCode: "invalid_term_code",
+  AssignmentSlugMismatch: "assignment_slug_mismatch",
+  TermCodeMismatch: "term_code_mismatch",
+  InvalidAssignmentType: "invalid_assignment_type",
+  InvalidAssignmentStatus: "invalid_assignment_status",
+  InvalidRepositoryVisibility: "invalid_repository_visibility",
+  InvalidPermission: "invalid_permission",
+  InvalidGradingConfig: "invalid_grading_config",
+  MissingRequiredColumn: "missing_required_column",
+  MissingRequiredValue: "missing_required_value",
+  InvalidRosterStatus: "invalid_roster_status",
+  SectionMismatch: "section_mismatch",
+  DuplicateStudentId: "duplicate_student_id",
+  DuplicateGithubUsername: "duplicate_github_username",
+  InvalidGithubUsername: "invalid_github_username",
+  StudentIdNormalized: "student_id_normalized",
+  GithubUsernameNormalized: "github_username_normalized",
+  RosterStatusNormalized: "roster_status_normalized",
+  NotSupportedInMvp: "not_supported_in_mvp",
+  GithubAuthMissing: "github_auth_missing",
+  GithubAuthFailed: "github_auth_failed",
+  GithubPermissionDenied: "github_permission_denied",
+  GithubApiError: "github_api_error",
+  GithubNetworkError: "github_network_error",
+  GithubRateLimited: "github_rate_limited",
+  GithubTimeout: "github_timeout"
+} as const;
+
+export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
+
+export const NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
+export const MISSING_REQUIRED_FILE_CODE = DiagnosticCode.MissingRequiredFile;
+export const INVALID_YAML_CODE = DiagnosticCode.InvalidYaml;
+export const INVALID_SCHEMA_VERSION_CODE = DiagnosticCode.InvalidSchemaVersion;
+export const MISSING_REQUIRED_FIELD_CODE = DiagnosticCode.MissingRequiredField;
+export const INVALID_TERM_CODE_CODE = DiagnosticCode.InvalidTermCode;
+export const ASSIGNMENT_SLUG_MISMATCH_CODE = DiagnosticCode.AssignmentSlugMismatch;
+export const TERM_CODE_MISMATCH_CODE = DiagnosticCode.TermCodeMismatch;
+export const INVALID_ASSIGNMENT_TYPE_CODE = DiagnosticCode.InvalidAssignmentType;
+export const INVALID_ASSIGNMENT_STATUS_CODE = DiagnosticCode.InvalidAssignmentStatus;
+export const INVALID_REPOSITORY_VISIBILITY_CODE = DiagnosticCode.InvalidRepositoryVisibility;
+export const INVALID_PERMISSION_CODE = DiagnosticCode.InvalidPermission;
+export const INVALID_GRADING_CONFIG_CODE = DiagnosticCode.InvalidGradingConfig;
+export const MISSING_REQUIRED_COLUMN_CODE = DiagnosticCode.MissingRequiredColumn;
+export const MISSING_REQUIRED_VALUE_CODE = DiagnosticCode.MissingRequiredValue;
+export const INVALID_ROSTER_STATUS_CODE = DiagnosticCode.InvalidRosterStatus;
+export const SECTION_MISMATCH_CODE = DiagnosticCode.SectionMismatch;
+export const DUPLICATE_STUDENT_ID_CODE = DiagnosticCode.DuplicateStudentId;
+export const DUPLICATE_GITHUB_USERNAME_CODE = DiagnosticCode.DuplicateGithubUsername;
+export const INVALID_GITHUB_USERNAME_CODE = DiagnosticCode.InvalidGithubUsername;
+export const STUDENT_ID_NORMALIZED_CODE = DiagnosticCode.StudentIdNormalized;
+export const GITHUB_USERNAME_NORMALIZED_CODE = DiagnosticCode.GithubUsernameNormalized;
+export const ROSTER_STATUS_NORMALIZED_CODE = DiagnosticCode.RosterStatusNormalized;
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
