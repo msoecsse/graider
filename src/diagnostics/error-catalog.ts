@@ -40,7 +40,14 @@ export const DiagnosticCode = {
   TemplateReadmeMissing: "template_readme_missing",
   FacultyTeamMissing: "faculty_team_missing",
   GraderTeamMissing: "grader_team_missing",
-  GithubUserMissing: "github_user_missing"
+  GithubUserMissing: "github_user_missing",
+  InvalidRepositoryName: "invalid_repository_name",
+  RepoNamePatternMissingPlaceholder: "repo_name_pattern_missing_placeholder",
+  RepoNamePatternUnknownPlaceholder: "repo_name_pattern_unknown_placeholder",
+  SourceFileMissing: "source_file_missing",
+  SourceFileOutsideRepo: "source_file_outside_repo",
+  SourceFileNotFile: "source_file_not_file",
+  SourceFingerprintFailed: "source_fingerprint_failed"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -78,6 +85,15 @@ export const TEMPLATE_README_MISSING_CODE = DiagnosticCode.TemplateReadmeMissing
 export const FACULTY_TEAM_MISSING_CODE = DiagnosticCode.FacultyTeamMissing;
 export const GRADER_TEAM_MISSING_CODE = DiagnosticCode.GraderTeamMissing;
 export const GITHUB_USER_MISSING_CODE = DiagnosticCode.GithubUserMissing;
+export const INVALID_REPOSITORY_NAME_CODE = DiagnosticCode.InvalidRepositoryName;
+export const REPO_NAME_PATTERN_MISSING_PLACEHOLDER_CODE =
+  DiagnosticCode.RepoNamePatternMissingPlaceholder;
+export const REPO_NAME_PATTERN_UNKNOWN_PLACEHOLDER_CODE =
+  DiagnosticCode.RepoNamePatternUnknownPlaceholder;
+export const SOURCE_FILE_MISSING_CODE = DiagnosticCode.SourceFileMissing;
+export const SOURCE_FILE_OUTSIDE_REPO_CODE = DiagnosticCode.SourceFileOutsideRepo;
+export const SOURCE_FILE_NOT_FILE_CODE = DiagnosticCode.SourceFileNotFile;
+export const SOURCE_FINGERPRINT_FAILED_CODE = DiagnosticCode.SourceFingerprintFailed;
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,

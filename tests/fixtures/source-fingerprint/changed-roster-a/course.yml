@@ -1,0 +1,5 @@
+schema_version: 1
+course:
+  code: se2030
+  title: Software Engineering
+  repository: se2030-graider

@@ -44,7 +44,14 @@ var DiagnosticCode = {
   TemplateReadmeMissing: "template_readme_missing",
   FacultyTeamMissing: "faculty_team_missing",
   GraderTeamMissing: "grader_team_missing",
-  GithubUserMissing: "github_user_missing"
+  GithubUserMissing: "github_user_missing",
+  InvalidRepositoryName: "invalid_repository_name",
+  RepoNamePatternMissingPlaceholder: "repo_name_pattern_missing_placeholder",
+  RepoNamePatternUnknownPlaceholder: "repo_name_pattern_unknown_placeholder",
+  SourceFileMissing: "source_file_missing",
+  SourceFileOutsideRepo: "source_file_outside_repo",
+  SourceFileNotFile: "source_file_not_file",
+  SourceFingerprintFailed: "source_fingerprint_failed"
 };
 var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
 var MISSING_REQUIRED_FILE_CODE = DiagnosticCode.MissingRequiredFile;
@@ -79,6 +86,13 @@ var TEMPLATE_README_MISSING_CODE = DiagnosticCode.TemplateReadmeMissing;
 var FACULTY_TEAM_MISSING_CODE = DiagnosticCode.FacultyTeamMissing;
 var GRADER_TEAM_MISSING_CODE = DiagnosticCode.GraderTeamMissing;
 var GITHUB_USER_MISSING_CODE = DiagnosticCode.GithubUserMissing;
+var INVALID_REPOSITORY_NAME_CODE = DiagnosticCode.InvalidRepositoryName;
+var REPO_NAME_PATTERN_MISSING_PLACEHOLDER_CODE = DiagnosticCode.RepoNamePatternMissingPlaceholder;
+var REPO_NAME_PATTERN_UNKNOWN_PLACEHOLDER_CODE = DiagnosticCode.RepoNamePatternUnknownPlaceholder;
+var SOURCE_FILE_MISSING_CODE = DiagnosticCode.SourceFileMissing;
+var SOURCE_FILE_OUTSIDE_REPO_CODE = DiagnosticCode.SourceFileOutsideRepo;
+var SOURCE_FILE_NOT_FILE_CODE = DiagnosticCode.SourceFileNotFile;
+var SOURCE_FINGERPRINT_FAILED_CODE = DiagnosticCode.SourceFingerprintFailed;
 var createNotSupportedInMvpDiagnostic = (commandName) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
   severity: "error",

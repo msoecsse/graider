@@ -1,0 +1,9 @@
+schema_version: 1
+assignment:
+  slug: lab04
+  title: Lab 04
+  type: individual
+  status: active
+template:
+  repository: example-org/lab04-template
+  branch: main
