@@ -5,10 +5,11 @@ import { describe, expect, it } from "vitest";
 const CLI_ENTRYPOINT = path.resolve("src/cli/index.ts");
 const TEST_ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
 const NODE_ARGUMENTS = ["--import", "tsx", CLI_ENTRYPOINT] as const;
-const FIXTURE_ROOT = path.resolve("tests/fixtures/path-resolution");
-const VALID_REPO_ROOT = path.join(FIXTURE_ROOT, "valid-root");
+const CONFIG_FIXTURE_ROOT = path.resolve("tests/fixtures/config");
+const VALID_REPO_ROOT = path.join(CONFIG_FIXTURE_ROOT, "valid-course");
 const VALID_REPO_SUBDIRECTORY = path.join(VALID_REPO_ROOT, "terms", "27s1");
-const MISSING_REPO_ROOT = path.join(FIXTURE_ROOT, "no-course-yml");
+const MISSING_REPO_ROOT = path.join(CONFIG_FIXTURE_ROOT, "missing-course-yml");
+const MALFORMED_YAML_ROOT = path.join(CONFIG_FIXTURE_ROOT, "malformed-yaml");
 const SUCCESS_EXIT_CODE = 0;
 const COMMAND_ERROR_EXIT_CODE = 1;
 const CONFIGURATION_ERROR_EXIT_CODE = 5;
@@ -119,14 +120,11 @@ describe("graider CLI shell", () => {
   });
 
   it("TC-CLI-SHELL-009 --json emits valid JSON placeholder output", () => {
-    const result = runCli(
-      ["validate", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"],
-      VALID_REPO_ROOT
-    );
+    const result = runCli(["plan", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"]);
     const json = parseJsonResult(result.stdout);
 
     expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.commandName).toBe("validate");
+    expect(json.commandName).toBe("plan");
     expect(json.assignmentFile).toBe(TEST_ASSIGNMENT_FILE);
     expect(json.status).toBe("success");
     expect(json.exitCode).toBe(SUCCESS_EXIT_CODE);
@@ -139,10 +137,7 @@ describe("graider CLI shell", () => {
         json: true,
         verbose: true,
         yes: true
-      },
-      repoRoot: VALID_REPO_ROOT,
-      assignmentPath: path.join(VALID_REPO_ROOT, TEST_ASSIGNMENT_FILE),
-      assignmentRelativePath: TEST_ASSIGNMENT_FILE
+      }
     });
   });
 
@@ -215,5 +210,69 @@ describe("graider validate path resolution", () => {
         code: "missing_required_file"
       })
     ]);
+  });
+});
+
+describe("graider validate config validation", () => {
+  it("succeeds for a valid fixture", () => {
+    const output = runCliText(["validate", TEST_ASSIGNMENT_FILE], VALID_REPO_ROOT);
+
+    expect(output).toContain("validate");
+    expect(output).toContain("success");
+    expect(output).toContain(TEST_ASSIGNMENT_FILE);
+  });
+
+  it("emits parseable JSON for a valid fixture", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
+    const json = parseJsonResult(result.stdout);
+
+    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(json.status).toBe("success");
+    expect(json.summary).toMatchObject({
+      courseConfigPath: "course.yml",
+      termConfigPath: "terms/27s1/term.yml",
+      assignmentConfigPath: TEST_ASSIGNMENT_FILE,
+      termCode: "27s1",
+      assignmentSlug: "lab04"
+    });
+  });
+
+  it("exits 5 for missing course.yml", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], MISSING_REPO_ROOT);
+    const json = parseJsonResult(result.stdout);
+
+    expect(result.status).toBe(CONFIGURATION_ERROR_EXIT_CODE);
+    expect(json.exitCode).toBe(CONFIGURATION_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([
+      expect.objectContaining({
+        code: "missing_required_file"
+      })
+    ]);
+  });
+
+  it("exits 5 for malformed YAML", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], MALFORMED_YAML_ROOT);
+    const json = parseJsonResult(result.stdout);
+
+    expect(result.status).toBe(CONFIGURATION_ERROR_EXIT_CODE);
+    expect(json.exitCode).toBe(CONFIGURATION_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([
+      expect.objectContaining({
+        code: "invalid_yaml"
+      })
+    ]);
+  });
+
+  it("includes structured errors on failure", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], MALFORMED_YAML_ROOT);
+    const json = parseJsonResult(result.stdout);
+
+    expect(json.status).toBe("failure");
+    expect(json.warnings).toEqual([]);
+    expect(json.generatedFiles).toEqual([]);
+    expect(json.errors[0]).toMatchObject({
+      code: "invalid_yaml",
+      severity: "error"
+    });
   });
 });

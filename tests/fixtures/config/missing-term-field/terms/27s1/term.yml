@@ -1,0 +1,8 @@
+schema_version: 1
+term:
+  code: 27s1
+  academic_year: 2027
+  semester: 1
+  display_name: Spring 2027
+sections:
+  - id: "001"

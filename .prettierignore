@@ -9,3 +9,4 @@ docs/graider-architecture.md
 docs/graider-test-plan.md
 docs/graider-traceability-matrix.md
 docs/graider-implementation-plan.md
+tests/fixtures/config/malformed-yaml/course.yml
