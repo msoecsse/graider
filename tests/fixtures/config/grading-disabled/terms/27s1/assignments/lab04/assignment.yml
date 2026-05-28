@@ -5,7 +5,7 @@ assignment:
   type: individual
   status: active
 template:
-  repository: lab04-template
+  repository: example-org/lab04-template
   branch: main
 sections:
   - "001"

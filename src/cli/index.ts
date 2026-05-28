@@ -28,4 +28,4 @@ export const buildProgram = (): Command => {
   return program;
 };
 
-buildProgram().parse();
+await buildProgram().parseAsync();

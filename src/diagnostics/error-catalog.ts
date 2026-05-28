@@ -30,7 +30,17 @@ export const DiagnosticCode = {
   GithubApiError: "github_api_error",
   GithubNetworkError: "github_network_error",
   GithubRateLimited: "github_rate_limited",
-  GithubTimeout: "github_timeout"
+  GithubTimeout: "github_timeout",
+  InvalidTemplateRepository: "invalid_template_repository",
+  TemplateRepositoryOutsideOrg: "template_repository_outside_org",
+  TemplateRepositoryMissing: "template_repository_missing",
+  TemplateRepositoryNotTemplate: "template_repository_not_template",
+  TemplateBranchMissing: "template_branch_missing",
+  TemplateBranchNotDefault: "template_branch_not_default",
+  TemplateReadmeMissing: "template_readme_missing",
+  FacultyTeamMissing: "faculty_team_missing",
+  GraderTeamMissing: "grader_team_missing",
+  GithubUserMissing: "github_user_missing"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -58,6 +68,16 @@ export const INVALID_GITHUB_USERNAME_CODE = DiagnosticCode.InvalidGithubUsername
 export const STUDENT_ID_NORMALIZED_CODE = DiagnosticCode.StudentIdNormalized;
 export const GITHUB_USERNAME_NORMALIZED_CODE = DiagnosticCode.GithubUsernameNormalized;
 export const ROSTER_STATUS_NORMALIZED_CODE = DiagnosticCode.RosterStatusNormalized;
+export const INVALID_TEMPLATE_REPOSITORY_CODE = DiagnosticCode.InvalidTemplateRepository;
+export const TEMPLATE_REPOSITORY_OUTSIDE_ORG_CODE = DiagnosticCode.TemplateRepositoryOutsideOrg;
+export const TEMPLATE_REPOSITORY_MISSING_CODE = DiagnosticCode.TemplateRepositoryMissing;
+export const TEMPLATE_REPOSITORY_NOT_TEMPLATE_CODE = DiagnosticCode.TemplateRepositoryNotTemplate;
+export const TEMPLATE_BRANCH_MISSING_CODE = DiagnosticCode.TemplateBranchMissing;
+export const TEMPLATE_BRANCH_NOT_DEFAULT_CODE = DiagnosticCode.TemplateBranchNotDefault;
+export const TEMPLATE_README_MISSING_CODE = DiagnosticCode.TemplateReadmeMissing;
+export const FACULTY_TEAM_MISSING_CODE = DiagnosticCode.FacultyTeamMissing;
+export const GRADER_TEAM_MISSING_CODE = DiagnosticCode.GraderTeamMissing;
+export const GITHUB_USER_MISSING_CODE = DiagnosticCode.GithubUserMissing;
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,

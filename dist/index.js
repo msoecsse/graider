@@ -34,7 +34,17 @@ var DiagnosticCode = {
   GithubApiError: "github_api_error",
   GithubNetworkError: "github_network_error",
   GithubRateLimited: "github_rate_limited",
-  GithubTimeout: "github_timeout"
+  GithubTimeout: "github_timeout",
+  InvalidTemplateRepository: "invalid_template_repository",
+  TemplateRepositoryOutsideOrg: "template_repository_outside_org",
+  TemplateRepositoryMissing: "template_repository_missing",
+  TemplateRepositoryNotTemplate: "template_repository_not_template",
+  TemplateBranchMissing: "template_branch_missing",
+  TemplateBranchNotDefault: "template_branch_not_default",
+  TemplateReadmeMissing: "template_readme_missing",
+  FacultyTeamMissing: "faculty_team_missing",
+  GraderTeamMissing: "grader_team_missing",
+  GithubUserMissing: "github_user_missing"
 };
 var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
 var MISSING_REQUIRED_FILE_CODE = DiagnosticCode.MissingRequiredFile;
@@ -59,6 +69,16 @@ var INVALID_GITHUB_USERNAME_CODE = DiagnosticCode.InvalidGithubUsername;
 var STUDENT_ID_NORMALIZED_CODE = DiagnosticCode.StudentIdNormalized;
 var GITHUB_USERNAME_NORMALIZED_CODE = DiagnosticCode.GithubUsernameNormalized;
 var ROSTER_STATUS_NORMALIZED_CODE = DiagnosticCode.RosterStatusNormalized;
+var INVALID_TEMPLATE_REPOSITORY_CODE = DiagnosticCode.InvalidTemplateRepository;
+var TEMPLATE_REPOSITORY_OUTSIDE_ORG_CODE = DiagnosticCode.TemplateRepositoryOutsideOrg;
+var TEMPLATE_REPOSITORY_MISSING_CODE = DiagnosticCode.TemplateRepositoryMissing;
+var TEMPLATE_REPOSITORY_NOT_TEMPLATE_CODE = DiagnosticCode.TemplateRepositoryNotTemplate;
+var TEMPLATE_BRANCH_MISSING_CODE = DiagnosticCode.TemplateBranchMissing;
+var TEMPLATE_BRANCH_NOT_DEFAULT_CODE = DiagnosticCode.TemplateBranchNotDefault;
+var TEMPLATE_README_MISSING_CODE = DiagnosticCode.TemplateReadmeMissing;
+var FACULTY_TEAM_MISSING_CODE = DiagnosticCode.FacultyTeamMissing;
+var GRADER_TEAM_MISSING_CODE = DiagnosticCode.GraderTeamMissing;
+var GITHUB_USER_MISSING_CODE = DiagnosticCode.GithubUserMissing;
 var createNotSupportedInMvpDiagnostic = (commandName) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
   severity: "error",
@@ -831,6 +851,605 @@ var loadGraiderConfig = (request) => {
   };
 };
 
+// src/config/github-config-validation.ts
+var TEMPLATE_REPOSITORY_SEGMENTS = 2;
+var hasBlankSegment = (segments) => segments.some((segment) => segment.trim().length === 0);
+var parseTemplateRepository = (configuredOrganization, repository) => {
+  const segments = repository.split("/");
+  if (segments.length === TEMPLATE_REPOSITORY_SEGMENTS && !hasBlankSegment(segments)) {
+    const [owner, repo] = segments;
+    return {
+      status: "success",
+      repository: {
+        owner,
+        repo,
+        fullName: `${owner}/${repo}`
+      }
+    };
+  }
+  return {
+    status: "failure",
+    diagnostic: createConfigDiagnostic(
+      DiagnosticCode.InvalidTemplateRepository,
+      `Template repository ${repository} must be specified as owner/repo.`,
+      {
+        repository,
+        organization: configuredOrganization
+      }
+    )
+  };
+};
+
+// src/github/github-errors.ts
+var DIAGNOSTIC_CODE_BY_KIND = {
+  auth_missing: DiagnosticCode.GithubAuthMissing,
+  auth_failed: DiagnosticCode.GithubAuthFailed,
+  permission_denied: DiagnosticCode.GithubPermissionDenied,
+  rate_limited: DiagnosticCode.GithubRateLimited,
+  network_error: DiagnosticCode.GithubNetworkError,
+  api_error: DiagnosticCode.GithubApiError
+};
+var RETRYABLE_ERROR_KINDS = /* @__PURE__ */ new Set([
+  "rate_limited",
+  "network_error",
+  "api_error"
+]);
+var GitHubClientError = class extends Error {
+  kind;
+  diagnosticCode;
+  retryAfterSeconds;
+  retryable;
+  constructor(kind, message, options) {
+    super(redactString(message));
+    this.name = "GitHubClientError";
+    this.kind = kind;
+    this.diagnosticCode = DIAGNOSTIC_CODE_BY_KIND[kind];
+    this.retryable = RETRYABLE_ERROR_KINDS.has(kind);
+    if (options?.retryAfterSeconds !== void 0) {
+      this.retryAfterSeconds = options.retryAfterSeconds;
+    }
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+};
+var createGitHubDiagnostic = (error) => ({
+  code: error.diagnosticCode,
+  severity: "error",
+  message: error.message,
+  context: {
+    kind: error.kind,
+    retryable: error.retryable,
+    ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds }
+  }
+});
+
+// src/github/fake-github-client.ts
+var DEFAULT_AUTHENTICATED_USER = {
+  username: "graider-fake-user"
+};
+var DEFAULT_BRANCH = "main";
+var DEFAULT_ACTIONS_STATE = "disabled";
+var DEFAULT_PERMISSION_STATE = {
+  permission: "none",
+  pendingInvite: false
+};
+var GENERATED_COMMIT_SHA_PREFIX = "fake-commit-";
+var normalizeKeyPart = (value) => value.toLowerCase();
+var repositoryKey = (owner, repo) => `${normalizeKeyPart(owner)}/${normalizeKeyPart(repo)}`;
+var userKey = (username) => normalizeKeyPart(username);
+var teamKey = (org, teamSlug) => `${normalizeKeyPart(org)}/${normalizeKeyPart(teamSlug)}`;
+var workflowKey = (owner, repo, workflowPath) => `${repositoryKey(owner, repo)}:${workflowPath}`;
+var collaboratorKey = (owner, repo, username) => `${repositoryKey(owner, repo)}:${userKey(username)}`;
+var teamPermissionKey = (owner, repo, teamSlug) => `${repositoryKey(owner, repo)}:${normalizeKeyPart(teamSlug)}`;
+var actionsStateKey = (owner, repo) => repositoryKey(owner, repo);
+var createGitHubClientError = (failure) => new GitHubClientError(failure.kind, `Fake GitHub ${failure.kind} failure.`, {
+  ...failure.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: failure.retryAfterSeconds }
+});
+var FakeGitHubClient = class {
+  mutations = {
+    createdRepositories: [],
+    addedCollaborators: [],
+    removedCollaborators: [],
+    teamPermissions: [],
+    enabledActions: [],
+    workflowDispatches: [],
+    archivedRepositories: [],
+    fileWrites: []
+  };
+  authenticatedUser;
+  users;
+  teams;
+  repositories;
+  templateRepositories;
+  collaboratorPermissions;
+  teamPermissions;
+  actionsStates;
+  workflows;
+  workflowRuns;
+  artifacts;
+  repositoryFiles;
+  failures;
+  nextRepositoryId;
+  nextCommitNumber;
+  constructor(state = {}) {
+    this.authenticatedUser = state.authenticatedUser ?? DEFAULT_AUTHENTICATED_USER;
+    this.users = [...state.users ?? []];
+    this.teams = [...state.teams ?? []];
+    this.repositories = [...state.repositories ?? []];
+    this.templateRepositories = [...state.templateRepositories ?? []];
+    this.collaboratorPermissions = [...state.collaboratorPermissions ?? []];
+    this.teamPermissions = [...state.teamPermissions ?? []];
+    this.actionsStates = [...state.actionsStates ?? []];
+    this.workflows = [...state.workflows ?? []];
+    this.workflowRuns = [...state.workflowRuns ?? []];
+    this.artifacts = [...state.artifacts ?? []];
+    this.repositoryFiles = [...state.repositoryFiles ?? []];
+    this.failures = [...state.failures ?? []];
+    this.nextRepositoryId = 1e3 /* FirstGeneratedRepositoryId */;
+    this.nextCommitNumber = 1 /* FirstGeneratedCommitNumber */;
+  }
+  failNext(method, kind, options = {}) {
+    this.failures.push({
+      method,
+      kind,
+      ...options
+    });
+  }
+  failAll(kind, options = {}) {
+    this.failures.push({
+      kind,
+      persistent: true,
+      ...options
+    });
+  }
+  clearFailures() {
+    this.failures.splice(0);
+  }
+  getAuthenticatedUser() {
+    return this.run("getAuthenticatedUser", () => this.authenticatedUser);
+  }
+  getRepository(owner, repo) {
+    return this.run(
+      "getRepository",
+      () => this.repositories.find(
+        (repository) => repositoryKey(repository.owner, repository.name) === repositoryKey(owner, repo)
+      ) ?? null
+    );
+  }
+  getTemplateRepository(owner, repo) {
+    return this.run(
+      "getTemplateRepository",
+      () => this.templateRepositories.find(
+        (repository) => repositoryKey(repository.owner, repository.name) === repositoryKey(owner, repo)
+      ) ?? null
+    );
+  }
+  createRepositoryFromTemplate(input) {
+    return this.run("createRepositoryFromTemplate", () => {
+      const templateRepository = this.templateRepositories.find(
+        (repository2) => repositoryKey(repository2.owner, repository2.name) === repositoryKey(input.templateOwner, input.templateRepo)
+      );
+      const defaultBranch = templateRepository?.defaultBranch ?? DEFAULT_BRANCH;
+      const repository = {
+        owner: input.owner,
+        name: input.name,
+        fullName: `${input.owner}/${input.name}`,
+        id: this.consumeRepositoryId(),
+        private: input.private,
+        archived: false,
+        defaultBranch,
+        htmlUrl: `https://github.com/${input.owner}/${input.name}`
+      };
+      this.repositories.push(repository);
+      this.mutations.createdRepositories.push({
+        input,
+        repository
+      });
+      return repository;
+    });
+  }
+  getUser(username) {
+    return this.run(
+      "getUser",
+      () => this.users.find((user) => userKey(user.username) === userKey(username)) ?? null
+    );
+  }
+  getTeam(org, teamSlug) {
+    return this.run(
+      "getTeam",
+      () => this.teams.find((team) => teamKey(team.org, team.slug) === teamKey(org, teamSlug)) ?? null
+    );
+  }
+  getCollaboratorPermission(owner, repo, username) {
+    return this.run("getCollaboratorPermission", () => {
+      const permissionRecord = this.collaboratorPermissions.find(
+        (record) => collaboratorKey(record.owner, record.repo, record.username) === collaboratorKey(owner, repo, username)
+      );
+      if (permissionRecord === void 0) {
+        return DEFAULT_PERMISSION_STATE;
+      }
+      return {
+        permission: permissionRecord.permission,
+        pendingInvite: permissionRecord.pendingInvite ?? false
+      };
+    });
+  }
+  addCollaborator(input) {
+    return this.run("addCollaborator", () => {
+      const existingIndex = this.collaboratorPermissions.findIndex(
+        (record2) => collaboratorKey(record2.owner, record2.repo, record2.username) === collaboratorKey(input.owner, input.repo, input.username)
+      );
+      const record = {
+        ...input,
+        pendingInvite: false
+      };
+      if (existingIndex < 0) {
+        this.collaboratorPermissions.push(record);
+      } else {
+        this.collaboratorPermissions[existingIndex] = record;
+      }
+      this.mutations.addedCollaborators.push(input);
+      return {
+        username: input.username,
+        permission: input.permission,
+        pendingInvite: false
+      };
+    });
+  }
+  removeCollaborator(input) {
+    return this.run("removeCollaborator", () => {
+      const existingIndex = this.collaboratorPermissions.findIndex(
+        (record) => collaboratorKey(record.owner, record.repo, record.username) === collaboratorKey(input.owner, input.repo, input.username)
+      );
+      if (existingIndex >= 0) {
+        this.collaboratorPermissions.splice(existingIndex, 1 /* SingleRecord */);
+      }
+      this.mutations.removedCollaborators.push(input);
+    });
+  }
+  getTeamPermission(owner, repo, teamSlug) {
+    return this.run("getTeamPermission", () => {
+      const permissionRecord = this.teamPermissions.find(
+        (record) => teamPermissionKey(record.owner, record.repo, record.teamSlug) === teamPermissionKey(owner, repo, teamSlug)
+      );
+      if (permissionRecord === void 0) {
+        return DEFAULT_PERMISSION_STATE;
+      }
+      return {
+        permission: permissionRecord.permission,
+        pendingInvite: false
+      };
+    });
+  }
+  addTeamPermission(input) {
+    return this.run("addTeamPermission", () => {
+      const existingIndex = this.teamPermissions.findIndex(
+        (record) => teamPermissionKey(record.owner, record.repo, record.teamSlug) === teamPermissionKey(input.owner, input.repo, input.teamSlug)
+      );
+      if (existingIndex < 0) {
+        this.teamPermissions.push(input);
+      } else {
+        this.teamPermissions[existingIndex] = input;
+      }
+      this.mutations.teamPermissions.push(input);
+    });
+  }
+  getActionsState(owner, repo) {
+    return this.run(
+      "getActionsState",
+      () => this.actionsStates.find(
+        (record) => actionsStateKey(record.owner, record.repo) === actionsStateKey(owner, repo)
+      )?.state ?? DEFAULT_ACTIONS_STATE
+    );
+  }
+  enableActions(owner, repo) {
+    return this.run("enableActions", () => {
+      const existingIndex = this.actionsStates.findIndex(
+        (record2) => actionsStateKey(record2.owner, record2.repo) === actionsStateKey(owner, repo)
+      );
+      const record = {
+        owner,
+        repo,
+        state: "enabled"
+      };
+      if (existingIndex < 0) {
+        this.actionsStates.push(record);
+      } else {
+        this.actionsStates[existingIndex] = record;
+      }
+      this.mutations.enabledActions.push({ owner, repo });
+    });
+  }
+  getWorkflow(owner, repo, workflowPath) {
+    return this.run(
+      "getWorkflow",
+      () => this.workflows.find(
+        (record) => workflowKey(record.owner, record.repo, record.workflow.path) === workflowKey(owner, repo, workflowPath)
+      )?.workflow ?? null
+    );
+  }
+  dispatchWorkflow(input) {
+    return this.run("dispatchWorkflow", () => {
+      this.mutations.workflowDispatches.push(input);
+    });
+  }
+  listWorkflowRuns(input) {
+    return this.run(
+      "listWorkflowRuns",
+      () => this.workflowRuns.filter(
+        (record) => repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo)
+      ).filter(
+        (record) => input.workflowPath === void 0 || record.run.workflowPath === input.workflowPath
+      ).map((record) => record.run)
+    );
+  }
+  downloadArtifact(input) {
+    return this.run(
+      "downloadArtifact",
+      () => this.artifacts.find(
+        (record) => repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo) && record.runId === input.runId && record.artifact.name === input.artifactName
+      )?.artifact ?? null
+    );
+  }
+  archiveRepository(owner, repo) {
+    return this.run("archiveRepository", () => {
+      const existingIndex = this.repositories.findIndex(
+        (repository) => repositoryKey(repository.owner, repository.name) === repositoryKey(owner, repo)
+      );
+      if (existingIndex >= 0) {
+        const existingRepository = this.repositories[existingIndex];
+        if (existingRepository !== void 0) {
+          this.repositories[existingIndex] = {
+            ...existingRepository,
+            archived: true
+          };
+        }
+      }
+      this.mutations.archivedRepositories.push({ owner, repo });
+    });
+  }
+  writeRepositoryFile(input) {
+    return this.run("writeRepositoryFile", () => {
+      const commitSha = this.consumeCommitSha();
+      const record = {
+        owner: input.owner,
+        repo: input.repo,
+        path: input.path,
+        content: input.content,
+        message: input.message,
+        commitSha,
+        ...input.branch === void 0 ? {} : { branch: input.branch }
+      };
+      const existingIndex = this.repositoryFiles.findIndex(
+        (file) => repositoryKey(file.owner, file.repo) === repositoryKey(input.owner, input.repo) && file.path === input.path && file.branch === input.branch
+      );
+      if (existingIndex < 0) {
+        this.repositoryFiles.push(record);
+      } else {
+        this.repositoryFiles[existingIndex] = record;
+      }
+      this.mutations.fileWrites.push(record);
+      return {
+        path: input.path,
+        commitSha
+      };
+    });
+  }
+  run(method, action) {
+    const failure = this.consumeFailure(method);
+    if (failure !== void 0) {
+      return Promise.reject(createGitHubClientError(failure));
+    }
+    return Promise.resolve(action());
+  }
+  consumeFailure(method) {
+    const failureIndex = this.failures.findIndex(
+      (failure2) => failure2.method === void 0 || failure2.method === method
+    );
+    if (failureIndex < 0) {
+      return void 0;
+    }
+    const failure = this.failures[failureIndex];
+    if (failure?.persistent !== true) {
+      this.failures.splice(failureIndex, 1 /* SingleRecord */);
+    }
+    return failure;
+  }
+  consumeRepositoryId() {
+    const repositoryId = this.nextRepositoryId;
+    this.nextRepositoryId += 1 /* SingleRecord */;
+    return repositoryId;
+  }
+  consumeCommitSha() {
+    const commitSha = `${GENERATED_COMMIT_SHA_PREFIX}${String(this.nextCommitNumber)}`;
+    this.nextCommitNumber += 1 /* SingleRecord */;
+    return commitSha;
+  }
+};
+
+// src/github/github-readiness-validation.ts
+var README_FILE = "README.md";
+var EMPTY_COUNT = 0;
+var createUnexpectedGitHubDiagnostic = () => createConfigDiagnostic(
+  DiagnosticCode.GithubApiError,
+  "Unexpected GitHub client failure during readiness validation."
+);
+var normalizeGitHubError = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createUnexpectedGitHubDiagnostic();
+var validateAuthentication = async (githubClient) => {
+  try {
+    await githubClient.getAuthenticatedUser();
+    return [];
+  } catch (error) {
+    return [normalizeGitHubError(error)];
+  }
+};
+var createTemplateOutsideOrgDiagnostic = (reference) => createConfigDiagnostic(
+  DiagnosticCode.TemplateRepositoryOutsideOrg,
+  `Template repository ${reference.fullName} must belong to GitHub organization ${reference.organization}.`,
+  {
+    repository: reference.fullName,
+    organization: reference.organization
+  }
+);
+var createTemplateMissingDiagnostic = (reference) => createConfigDiagnostic(
+  DiagnosticCode.TemplateRepositoryMissing,
+  `Template repository ${reference.fullName} was not found.`,
+  {
+    repository: reference.fullName,
+    organization: reference.organization
+  }
+);
+var createTemplateNotTemplateDiagnostic = (reference) => createConfigDiagnostic(
+  DiagnosticCode.TemplateRepositoryNotTemplate,
+  `Template repository ${reference.fullName} is not marked as a template.`,
+  {
+    repository: reference.fullName
+  }
+);
+var createTemplateBranchMissingDiagnostic = (reference) => createConfigDiagnostic(
+  DiagnosticCode.TemplateBranchMissing,
+  `Template repository ${reference.fullName} does not contain branch ${reference.branch}.`,
+  {
+    repository: reference.fullName,
+    templateBranch: reference.branch
+  }
+);
+var createTemplateBranchNotDefaultDiagnostic = (reference, templateRepository) => createConfigDiagnostic(
+  DiagnosticCode.TemplateBranchNotDefault,
+  `Template branch ${reference.branch} must be the default branch for ${reference.fullName}.`,
+  {
+    repository: reference.fullName,
+    templateBranch: reference.branch,
+    expectedDefaultBranch: reference.branch,
+    actualDefaultBranch: templateRepository.defaultBranch
+  }
+);
+var createTemplateReadmeMissingDiagnostic = (reference) => createConfigDiagnostic(
+  DiagnosticCode.TemplateReadmeMissing,
+  `Template repository ${reference.fullName} must contain ${README_FILE}.`,
+  {
+    repository: reference.fullName,
+    requiredFile: README_FILE
+  }
+);
+var validateTemplateRepositoryFields = (reference, templateRepository) => [
+  ...templateRepository.isTemplate ? [] : [createTemplateNotTemplateDiagnostic(reference)],
+  ...templateRepository.branches.includes(reference.branch) ? [] : [createTemplateBranchMissingDiagnostic(reference)],
+  ...templateRepository.defaultBranch === reference.branch ? [] : [createTemplateBranchNotDefaultDiagnostic(reference, templateRepository)],
+  ...templateRepository.files.includes(README_FILE) ? [] : [createTemplateReadmeMissingDiagnostic(reference)]
+];
+var validateTemplateRepository = async (courseConfig, assignmentConfig, githubClient) => {
+  const parsedRepository = parseTemplateRepository(
+    courseConfig.github.organization,
+    assignmentConfig.template.repository
+  );
+  if (parsedRepository.status === "failure") {
+    return [parsedRepository.diagnostic];
+  }
+  const reference = {
+    ...parsedRepository.repository,
+    branch: assignmentConfig.template.branch,
+    organization: courseConfig.github.organization
+  };
+  if (reference.owner !== reference.organization) {
+    return [createTemplateOutsideOrgDiagnostic(reference)];
+  }
+  try {
+    const templateRepository = await githubClient.getTemplateRepository(
+      reference.owner,
+      reference.repo
+    );
+    if (templateRepository === null) {
+      return [createTemplateMissingDiagnostic(reference)];
+    }
+    if (templateRepository.owner !== reference.organization) {
+      return [createTemplateOutsideOrgDiagnostic(reference)];
+    }
+    return validateTemplateRepositoryFields(reference, templateRepository);
+  } catch (error) {
+    return [normalizeGitHubError(error)];
+  }
+};
+var createTeamMissingDiagnostic = (code, label, organization, teamSlug) => createConfigDiagnostic(code, `${label} team ${teamSlug} was not found in ${organization}.`, {
+  organization,
+  teamSlug
+});
+var validateTeam = async (githubClient, organization, teamSlug, code, label) => {
+  try {
+    const team = await githubClient.getTeam(organization, teamSlug);
+    return team === null ? [createTeamMissingDiagnostic(code, label, organization, teamSlug)] : [];
+  } catch (error) {
+    return [normalizeGitHubError(error)];
+  }
+};
+var validateTeams = async (courseConfig, githubClient) => {
+  const organization = courseConfig.github.organization;
+  const facultyTeamErrors = await validateTeam(
+    githubClient,
+    organization,
+    courseConfig.github.faculty_team,
+    DiagnosticCode.FacultyTeamMissing,
+    "Faculty"
+  );
+  const graderTeamErrors = await validateTeam(
+    githubClient,
+    organization,
+    courseConfig.github.grader_team,
+    DiagnosticCode.GraderTeamMissing,
+    "Grader"
+  );
+  return [...facultyTeamErrors, ...graderTeamErrors];
+};
+var createMissingUserDiagnostic = (student) => createConfigDiagnostic(
+  DiagnosticCode.GithubUserMissing,
+  `GitHub user ${student.githubUsername} was not found for student ${student.studentId}.`,
+  {
+    student_id: student.studentId,
+    github_username: student.githubUsername,
+    section: student.section,
+    status: student.status,
+    rosterPath: student.rosterPath,
+    rowNumber: student.rowNumber
+  }
+);
+var validateGithubUser = async (githubClient, student) => {
+  try {
+    const user = await githubClient.getUser(student.githubUsername);
+    return user === null ? [createMissingUserDiagnostic(student)] : [];
+  } catch (error) {
+    return [normalizeGitHubError(error)];
+  }
+};
+var validateGithubUsers = async (githubClient, students) => {
+  const diagnostics = [];
+  for (const student of students) {
+    diagnostics.push(...await validateGithubUser(githubClient, student));
+  }
+  return diagnostics;
+};
+var validateGitHubReadiness = async ({
+  courseConfig,
+  assignmentConfig,
+  students,
+  githubClient
+}) => {
+  const authenticationErrors = await validateAuthentication(githubClient);
+  if (authenticationErrors.length > EMPTY_COUNT) {
+    return {
+      warnings: [],
+      errors: authenticationErrors
+    };
+  }
+  const errors = [
+    ...await validateTemplateRepository(courseConfig, assignmentConfig, githubClient),
+    ...await validateTeams(courseConfig, githubClient),
+    ...await validateGithubUsers(githubClient, students)
+  ];
+  return {
+    warnings: [],
+    errors
+  };
+};
+
 // src/roster/roster-loader.ts
 import path4 from "path";
 
@@ -1037,15 +1656,15 @@ var validateRosterDuplicates = (students) => [
 ];
 
 // src/roster/roster-loader.ts
-var EMPTY_COUNT = 0;
+var EMPTY_COUNT2 = 0;
 var TERM_DIRECTORY_DEPTH = 2;
 var MISSING_COLUMN_INDEX = -1;
 var createEmptySummary = (rosterFiles) => ({
   rosterFiles,
-  studentCount: EMPTY_COUNT,
-  activeStudentCount: EMPTY_COUNT,
-  droppedStudentCount: EMPTY_COUNT,
-  holdStudentCount: EMPTY_COUNT
+  studentCount: EMPTY_COUNT2,
+  activeStudentCount: EMPTY_COUNT2,
+  droppedStudentCount: EMPTY_COUNT2,
+  holdStudentCount: EMPTY_COUNT2
 });
 var createSummary2 = (rosterFiles, students) => ({
   rosterFiles,
@@ -1054,7 +1673,7 @@ var createSummary2 = (rosterFiles, students) => ({
   droppedStudentCount: students.filter((student) => student.status === ROSTER_STATUS_DROPPED).length,
   holdStudentCount: students.filter((student) => student.status === ROSTER_STATUS_HOLD).length
 });
-var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT, TERM_DIRECTORY_DEPTH).join("/");
+var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT2, TERM_DIRECTORY_DEPTH).join("/");
 var getSectionSources = (config) => {
   const termDirectory = getTermDirectory(config.summary.termConfigPath);
   const sectionsById = new Map(
@@ -1091,7 +1710,7 @@ var loadSectionRoster = (repoRoot, source) => {
   }
   const document = parseCsv(fileResult.content);
   const missingColumnErrors = validateRequiredColumns(source.rosterPath, document.headers);
-  if (missingColumnErrors.length > EMPTY_COUNT) {
+  if (missingColumnErrors.length > EMPTY_COUNT2) {
     return {
       students: [],
       warnings: [],
@@ -1115,9 +1734,9 @@ var loadSectionRoster = (repoRoot, source) => {
         [SECTION_COLUMN]: rawSection,
         [STATUS_COLUMN]: rawStatus
       };
-      return valueByColumn[column].length === EMPTY_COUNT ? [createMissingRequiredValueDiagnostic(source.rosterPath, row.rowNumber, column)] : [];
+      return valueByColumn[column].length === EMPTY_COUNT2 ? [createMissingRequiredValueDiagnostic(source.rosterPath, row.rowNumber, column)] : [];
     });
-    if (missingValueErrors.length > EMPTY_COUNT) {
+    if (missingValueErrors.length > EMPTY_COUNT2) {
       errors.push(...missingValueErrors);
     } else {
       const normalizedStudentId = normalizeStudentId(rawStudentId, rowContext);
@@ -1135,7 +1754,7 @@ var loadSectionRoster = (repoRoot, source) => {
       ];
       warnings.push(...rowWarnings);
       errors.push(...rowErrors);
-      if (rowErrors.length === EMPTY_COUNT && isRosterStatus(normalizedStatus.value)) {
+      if (rowErrors.length === EMPTY_COUNT2 && isRosterStatus(normalizedStatus.value)) {
         students.push({
           studentId: normalizedStudentId.value,
           githubUsername: normalizedGithubUsername.value,
@@ -1169,15 +1788,65 @@ var loadAssignmentRosters = (config) => {
     students,
     warnings,
     errors,
-    summary: errors.length > EMPTY_COUNT ? createEmptySummary(rosterFiles) : createSummary2(rosterFiles, students)
+    summary: errors.length > EMPTY_COUNT2 ? createEmptySummary(rosterFiles) : createSummary2(rosterFiles, students)
   };
 };
 
 // src/cli/commands/validate.command.ts
 var COMMAND_NAME = "validate";
-var createValidateResult = (assignmentFile, options) => {
+var DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
+var README_FILE2 = "README.md";
+var createDefaultTemplateRepository = (owner, repo, branch) => ({
+  owner,
+  name: repo,
+  fullName: `${owner}/${repo}`,
+  id: 1 /* DefaultTemplateRepositoryId */,
+  private: true,
+  archived: false,
+  defaultBranch: branch,
+  htmlUrl: `https://github.com/${owner}/${repo}`,
+  isTemplate: true,
+  branches: [branch],
+  files: [README_FILE2],
+  latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA
+});
+var createDefaultGitHubClient = (config, students) => {
+  const parsedTemplateRepository = parseTemplateRepository(
+    config.course.github.organization,
+    config.assignment.template.repository
+  );
+  const templateRepositories = parsedTemplateRepository.status === "success" ? [
+    createDefaultTemplateRepository(
+      parsedTemplateRepository.repository.owner,
+      parsedTemplateRepository.repository.repo,
+      config.assignment.template.branch
+    )
+  ] : [];
+  return new FakeGitHubClient({
+    templateRepositories,
+    users: students.map((student) => ({ username: student.githubUsername })),
+    teams: [
+      {
+        org: config.course.github.organization,
+        slug: config.course.github.faculty_team,
+        name: config.course.github.faculty_team
+      },
+      {
+        org: config.course.github.organization,
+        slug: config.course.github.grader_team,
+        name: config.course.github.grader_team
+      }
+    ]
+  });
+};
+var runValidateCommand = async ({
+  cwd,
+  assignmentFile,
+  options,
+  githubClient
+}) => {
   const configResult = loadGraiderConfig({
-    cwd: process.cwd(),
+    cwd,
     assignmentFile
   });
   if (configResult.status === "failure") {
@@ -1209,24 +1878,52 @@ var createValidateResult = (assignmentFile, options) => {
       }
     });
   }
+  const readinessResult = await validateGitHubReadiness({
+    courseConfig: configResult.config.course,
+    termConfig: configResult.config.term,
+    assignmentConfig: configResult.config.assignment,
+    students: rosterResult.students,
+    githubClient: githubClient ?? createDefaultGitHubClient(configResult.config, rosterResult.students)
+  });
+  if (readinessResult.errors.length > 0) {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...readinessResult.warnings],
+      errors: readinessResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        githubReadinessChecked: true
+      }
+    });
+  }
   return createCommandResult({
     commandName: COMMAND_NAME,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
-    warnings: rosterResult.warnings,
+    warnings: [...rosterResult.warnings, ...readinessResult.warnings],
     errors: [],
     generatedFiles: [],
     summary: {
       options,
       ...configResult.config.summary,
-      ...rosterResult.summary
+      ...rosterResult.summary,
+      githubReadinessChecked: true
     }
   });
 };
 var registerValidateCommand = (program) => {
-  program.command(COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action((assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
-    const result = createValidateResult(assignmentFile, options);
+    const result = await runValidateCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options
+    });
     writeCommandResult(result, options.json);
     process.exitCode = result.exitCode;
   });
@@ -1245,7 +1942,7 @@ var buildProgram = () => {
   registerRemoveAccessCommand(program);
   return program;
 };
-buildProgram().parse();
+await buildProgram().parseAsync();
 export {
   buildProgram
 };
