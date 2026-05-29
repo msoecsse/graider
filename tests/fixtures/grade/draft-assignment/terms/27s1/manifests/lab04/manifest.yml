@@ -1,0 +1,16 @@
+schema_version: 1
+assignment:
+  term_code: 27s1
+  course_code: se2030
+  assignment_slug: lab04
+  assignment_title: Lab 04
+source:
+  source_files: []
+  input_fingerprint: draft-fingerprint
+template:
+  repository: example-org/lab04-template
+  branch: main
+repositories: []
+operation_history: []
+warnings: []
+errors: []

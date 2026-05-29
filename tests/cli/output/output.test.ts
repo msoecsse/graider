@@ -47,12 +47,12 @@ const expectNoStackTrace = (output: string): void => {
 };
 
 describe("CLI output formatting", () => {
-  it("successful placeholder command JSON output is parseable", () => {
-    const result = runCli(["grade", ASSIGNMENT_FILE, "--json"]);
+  it("successful command JSON output is parseable", () => {
+    const result = runCli(["validate", ASSIGNMENT_FILE, "--json"], VALID_ROOT);
     const json = parseJson(result.stdout);
 
     expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.commandName).toBe("grade");
+    expect(json.commandName).toBe("validate");
     expect(json.status).toBe("success");
   });
 

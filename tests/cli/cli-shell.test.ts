@@ -83,11 +83,10 @@ describe("graider CLI shell", () => {
   });
 
   it("TC-CLI-SHELL-004 command exists: grade", () => {
-    const output = runCliText(["grade", TEST_ASSIGNMENT_FILE]);
+    const output = runCliText(["grade", "--help"]);
 
     expect(output).toContain("grade");
-    expect(output).toContain(TEST_ASSIGNMENT_FILE);
-    expect(output).toContain("success");
+    expect(output).toContain("Run assignment grading");
   });
 
   it("TC-CLI-SHELL-005 command exists: report", () => {
@@ -122,12 +121,15 @@ describe("graider CLI shell", () => {
     expect(result.stderr).toContain("unknown command");
   });
 
-  it("TC-CLI-SHELL-009 --json emits valid JSON placeholder output", () => {
-    const result = runCli(["grade", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"]);
+  it("TC-CLI-SHELL-009 --json emits valid JSON command output", () => {
+    const result = runCli(
+      ["validate", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"],
+      VALID_REPO_ROOT
+    );
     const json = parseJsonResult(result.stdout);
 
     expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.commandName).toBe("grade");
+    expect(json.commandName).toBe("validate");
     expect(json.assignmentFile).toBe(TEST_ASSIGNMENT_FILE);
     expect(json.status).toBe("success");
     expect(json.exitCode).toBe(SUCCESS_EXIT_CODE);
@@ -135,7 +137,6 @@ describe("graider CLI shell", () => {
     expect(json.errors).toEqual([]);
     expect(json.generatedFiles).toEqual([]);
     expect(json.summary).toMatchObject({
-      placeholder: true,
       options: {
         json: true,
         verbose: true,

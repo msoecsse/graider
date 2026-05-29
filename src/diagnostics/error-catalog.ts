@@ -67,8 +67,18 @@ export const DiagnosticCode = {
   ManifestTrackedRepositoryMissing: "manifest_tracked_repository_missing",
   GradingWorkflowMissing: "grading_workflow_missing",
   WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
+  WorkflowDispatchMissing: "workflow_dispatch_missing",
+  WorkflowDispatchFailed: "workflow_dispatch_failed",
   PermissionNotDowngraded: "permission_not_downgraded",
   UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved",
+  GradingNotConfigured: "grading_not_configured",
+  AssignmentStatusBlocksGrade: "assignment_status_blocks_grade",
+  TargetSelectorMissing: "target_selector_missing",
+  TargetSelectorAmbiguous: "target_selector_ambiguous",
+  TargetMatchesNoStudents: "target_matches_no_students",
+  TargetStudentNotActive: "target_student_not_active",
+  StudentRepositoryMissing: "student_repository_missing",
+  ManifestRepositoryMissing: "manifest_repository_missing",
   InvalidGradingResult: "invalid_grading_result",
   InvalidGradingResultSchemaVersion: "invalid_grading_result_schema_version",
   InvalidGradingResultStatus: "invalid_grading_result_status",
@@ -149,9 +159,19 @@ export const MANIFEST_TRACKED_REPOSITORY_MISSING_CODE =
   DiagnosticCode.ManifestTrackedRepositoryMissing;
 export const GRADING_WORKFLOW_MISSING_CODE = DiagnosticCode.GradingWorkflowMissing;
 export const WORKFLOW_DISPATCH_UNSUPPORTED_CODE = DiagnosticCode.WorkflowDispatchUnsupported;
+export const WORKFLOW_DISPATCH_MISSING_CODE = DiagnosticCode.WorkflowDispatchMissing;
+export const WORKFLOW_DISPATCH_FAILED_CODE = DiagnosticCode.WorkflowDispatchFailed;
 export const PERMISSION_NOT_DOWNGRADED_CODE = DiagnosticCode.PermissionNotDowngraded;
 export const UNEXPECTED_COLLABORATOR_PRESERVED_CODE =
   DiagnosticCode.UnexpectedCollaboratorPreserved;
+export const GRADING_NOT_CONFIGURED_CODE = DiagnosticCode.GradingNotConfigured;
+export const ASSIGNMENT_STATUS_BLOCKS_GRADE_CODE = DiagnosticCode.AssignmentStatusBlocksGrade;
+export const TARGET_SELECTOR_MISSING_CODE = DiagnosticCode.TargetSelectorMissing;
+export const TARGET_SELECTOR_AMBIGUOUS_CODE = DiagnosticCode.TargetSelectorAmbiguous;
+export const TARGET_MATCHES_NO_STUDENTS_CODE = DiagnosticCode.TargetMatchesNoStudents;
+export const TARGET_STUDENT_NOT_ACTIVE_CODE = DiagnosticCode.TargetStudentNotActive;
+export const STUDENT_REPOSITORY_MISSING_CODE = DiagnosticCode.StudentRepositoryMissing;
+export const MANIFEST_REPOSITORY_MISSING_CODE = DiagnosticCode.ManifestRepositoryMissing;
 export const INVALID_GRADING_RESULT_CODE = DiagnosticCode.InvalidGradingResult;
 export const INVALID_GRADING_RESULT_SCHEMA_VERSION_CODE =
   DiagnosticCode.InvalidGradingResultSchemaVersion;

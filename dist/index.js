@@ -74,8 +74,18 @@ var DiagnosticCode = {
   ManifestTrackedRepositoryMissing: "manifest_tracked_repository_missing",
   GradingWorkflowMissing: "grading_workflow_missing",
   WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
+  WorkflowDispatchMissing: "workflow_dispatch_missing",
+  WorkflowDispatchFailed: "workflow_dispatch_failed",
   PermissionNotDowngraded: "permission_not_downgraded",
   UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved",
+  GradingNotConfigured: "grading_not_configured",
+  AssignmentStatusBlocksGrade: "assignment_status_blocks_grade",
+  TargetSelectorMissing: "target_selector_missing",
+  TargetSelectorAmbiguous: "target_selector_ambiguous",
+  TargetMatchesNoStudents: "target_matches_no_students",
+  TargetStudentNotActive: "target_student_not_active",
+  StudentRepositoryMissing: "student_repository_missing",
+  ManifestRepositoryMissing: "manifest_repository_missing",
   InvalidGradingResult: "invalid_grading_result",
   InvalidGradingResultSchemaVersion: "invalid_grading_result_schema_version",
   InvalidGradingResultStatus: "invalid_grading_result_status",
@@ -149,8 +159,18 @@ var CONFIRMATION_REQUIRED_CODE = DiagnosticCode.ConfirmationRequired;
 var MANIFEST_TRACKED_REPOSITORY_MISSING_CODE = DiagnosticCode.ManifestTrackedRepositoryMissing;
 var GRADING_WORKFLOW_MISSING_CODE = DiagnosticCode.GradingWorkflowMissing;
 var WORKFLOW_DISPATCH_UNSUPPORTED_CODE = DiagnosticCode.WorkflowDispatchUnsupported;
+var WORKFLOW_DISPATCH_MISSING_CODE = DiagnosticCode.WorkflowDispatchMissing;
+var WORKFLOW_DISPATCH_FAILED_CODE = DiagnosticCode.WorkflowDispatchFailed;
 var PERMISSION_NOT_DOWNGRADED_CODE = DiagnosticCode.PermissionNotDowngraded;
 var UNEXPECTED_COLLABORATOR_PRESERVED_CODE = DiagnosticCode.UnexpectedCollaboratorPreserved;
+var GRADING_NOT_CONFIGURED_CODE = DiagnosticCode.GradingNotConfigured;
+var ASSIGNMENT_STATUS_BLOCKS_GRADE_CODE = DiagnosticCode.AssignmentStatusBlocksGrade;
+var TARGET_SELECTOR_MISSING_CODE = DiagnosticCode.TargetSelectorMissing;
+var TARGET_SELECTOR_AMBIGUOUS_CODE = DiagnosticCode.TargetSelectorAmbiguous;
+var TARGET_MATCHES_NO_STUDENTS_CODE = DiagnosticCode.TargetMatchesNoStudents;
+var TARGET_STUDENT_NOT_ACTIVE_CODE = DiagnosticCode.TargetStudentNotActive;
+var STUDENT_REPOSITORY_MISSING_CODE = DiagnosticCode.StudentRepositoryMissing;
+var MANIFEST_REPOSITORY_MISSING_CODE = DiagnosticCode.ManifestRepositoryMissing;
 var INVALID_GRADING_RESULT_CODE = DiagnosticCode.InvalidGradingResult;
 var INVALID_GRADING_RESULT_SCHEMA_VERSION_CODE = DiagnosticCode.InvalidGradingResultSchemaVersion;
 var INVALID_GRADING_RESULT_STATUS_CODE = DiagnosticCode.InvalidGradingResultStatus;
@@ -3891,13 +3911,496 @@ var registerArchiveCommand = (program) => {
   });
 };
 
+// src/core/target-selector.ts
+var EMPTY_COUNT7 = 0;
+var SINGLE_SELECTOR_COUNT = 1;
+var normalizeIdentity = (value) => value.trim().toLowerCase();
+var createSelectorDiagnostic = (code, message, context) => createConfigDiagnostic(code, message, context);
+var describeSelector = (selector) => {
+  if (selector.kind === "all") {
+    return "all";
+  }
+  if (selector.kind === "section") {
+    return `section:${selector.section}`;
+  }
+  if (selector.kind === "student_id") {
+    return `student_id:${selector.studentId}`;
+  }
+  return `github_username:${selector.githubUsername}`;
+};
+var validateTargetSelector = (rawSelector) => {
+  const selectors = [];
+  if (rawSelector.all === true) {
+    selectors.push({ kind: "all" });
+  }
+  if (rawSelector.section !== void 0) {
+    selectors.push({ kind: "section", section: rawSelector.section.trim() });
+  }
+  if (rawSelector.studentId !== void 0) {
+    selectors.push({ kind: "student_id", studentId: normalizeIdentity(rawSelector.studentId) });
+  }
+  if (rawSelector.githubUsername !== void 0) {
+    selectors.push({
+      kind: "github_username",
+      githubUsername: normalizeIdentity(rawSelector.githubUsername)
+    });
+  }
+  if (selectors.length === EMPTY_COUNT7) {
+    return {
+      warnings: [],
+      errors: [
+        createSelectorDiagnostic(
+          DiagnosticCode.TargetSelectorMissing,
+          "Grade requires exactly one target selector."
+        )
+      ]
+    };
+  }
+  if (selectors.length > SINGLE_SELECTOR_COUNT) {
+    return {
+      warnings: [],
+      errors: [
+        createSelectorDiagnostic(
+          DiagnosticCode.TargetSelectorAmbiguous,
+          "Grade received more than one target selector."
+        )
+      ]
+    };
+  }
+  const selector = selectors[EMPTY_COUNT7];
+  return selector === void 0 ? {
+    warnings: [],
+    errors: [
+      createSelectorDiagnostic(
+        DiagnosticCode.TargetSelectorMissing,
+        "Grade requires exactly one target selector."
+      )
+    ]
+  } : {
+    selector,
+    warnings: [],
+    errors: []
+  };
+};
+var createNoMatchesDiagnostic = (selector) => createSelectorDiagnostic(
+  DiagnosticCode.TargetMatchesNoStudents,
+  "Target selector matched no active students.",
+  { targetSelector: describeSelector(selector) }
+);
+var createInactiveDiagnostic = (selector, student) => createSelectorDiagnostic(
+  DiagnosticCode.TargetStudentNotActive,
+  "Target selector matched a student who is not active.",
+  {
+    targetSelector: describeSelector(selector),
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    section: student.section,
+    status: student.status
+  }
+);
+var matchesSelector = (student, selector) => {
+  if (selector.kind === "all") {
+    return true;
+  }
+  if (selector.kind === "section") {
+    return student.section === selector.section;
+  }
+  if (selector.kind === "student_id") {
+    return student.studentId === selector.studentId;
+  }
+  return normalizeIdentity(student.githubUsername) === normalizeIdentity(selector.githubUsername);
+};
+var selectTargetStudents = (students, selector) => {
+  const matchingStudents = students.filter((student) => matchesSelector(student, selector));
+  const activeStudents = matchingStudents.filter(
+    (student) => student.status === ROSTER_STATUS_ACTIVE
+  );
+  if (activeStudents.length > EMPTY_COUNT7) {
+    return {
+      students: activeStudents,
+      warnings: [],
+      errors: [],
+      summary: {
+        targetsSelected: activeStudents.length,
+        targetSelector: describeSelector(selector)
+      }
+    };
+  }
+  const directInactiveMatch = (selector.kind === "student_id" || selector.kind === "github_username") && matchingStudents.length > EMPTY_COUNT7 ? matchingStudents[EMPTY_COUNT7] : void 0;
+  return {
+    students: [],
+    warnings: [],
+    errors: directInactiveMatch === void 0 ? [createNoMatchesDiagnostic(selector)] : [createInactiveDiagnostic(selector, directInactiveMatch)],
+    summary: {
+      targetsSelected: EMPTY_COUNT7,
+      targetSelector: describeSelector(selector)
+    }
+  };
+};
+
+// src/execution/grade-executor.ts
+var EMPTY_COUNT8 = 0;
+var SUCCESS_INCREMENT = 1;
+var FAILED_INCREMENT = 1;
+var createInitialSummary = (targetsSelected) => ({
+  targetsSelected,
+  dispatchAttempted: EMPTY_COUNT8,
+  dispatchSucceeded: EMPTY_COUNT8,
+  dispatchFailed: EMPTY_COUNT8,
+  skipped: EMPTY_COUNT8,
+  warnings: EMPTY_COUNT8,
+  errors: EMPTY_COUNT8
+});
+var getEffectiveGrading = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
+var findManifestRecord3 = (manifest, student) => manifest.repositories.find(
+  (record) => record.studentId === student.studentId && record.section === student.section
+);
+var normalizeGitHubError4 = (error, student, repository) => error instanceof GitHubClientError ? createConfigDiagnostic(
+  DiagnosticCode.WorkflowDispatchFailed,
+  "Workflow dispatch failed for a selected student repository.",
+  {
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    section: student.section,
+    repositoryName: repository?.repository.name,
+    underlyingDiagnosticCode: error.diagnosticCode,
+    kind: error.kind
+  }
+) : createConfigDiagnostic(
+  DiagnosticCode.WorkflowDispatchFailed,
+  "Unexpected workflow dispatch failure.",
+  {
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    section: student.section,
+    repositoryName: repository?.repository.name
+  }
+);
+var createStudentRepositoryMissingDiagnostic = (student) => createConfigDiagnostic(
+  DiagnosticCode.StudentRepositoryMissing,
+  "Selected student does not have a manifest-tracked repository.",
+  {
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    section: student.section
+  }
+);
+var createWorkflowMissingDiagnostic2 = (student, repository, workflowPath) => createConfigDiagnostic(
+  DiagnosticCode.GradingWorkflowMissing,
+  "Configured grading workflow was not found.",
+  {
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    section: student.section,
+    repositoryName: repository.repository.name,
+    workflowPath
+  }
+);
+var createWorkflowDispatchMissingDiagnostic = (student, repository, workflowPath) => createConfigDiagnostic(
+  DiagnosticCode.WorkflowDispatchMissing,
+  "Configured grading workflow does not support manual dispatch.",
+  {
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    section: student.section,
+    repositoryName: repository.repository.name,
+    workflowPath
+  }
+);
+var runGitHubOperation2 = async (input, operation) => withGitHubRetry(operation, input.retryOptions);
+var recordFailure = (state, diagnostic) => ({
+  summary: {
+    ...state.summary,
+    dispatchFailed: state.summary.dispatchFailed + FAILED_INCREMENT,
+    errors: state.summary.errors + FAILED_INCREMENT
+  },
+  warnings: state.warnings,
+  errors: [...state.errors, diagnostic]
+});
+var recordSuccess = (state) => ({
+  summary: {
+    ...state.summary,
+    dispatchSucceeded: state.summary.dispatchSucceeded + SUCCESS_INCREMENT
+  },
+  warnings: state.warnings,
+  errors: state.errors
+});
+var createDispatchInputs = (config, student) => ({
+  student_id: student.studentId,
+  github_username: student.githubUsername,
+  section: student.section,
+  assignment_slug: config.summary.assignmentSlug
+});
+var dispatchForStudent = async (input, state, student, workflowPath) => {
+  const repository = findManifestRecord3(input.manifest, student);
+  if (repository === void 0) {
+    return recordFailure(state, createStudentRepositoryMissingDiagnostic(student));
+  }
+  try {
+    const workflow = await runGitHubOperation2(
+      input,
+      () => input.githubClient.getWorkflow(
+        repository.repository.owner,
+        repository.repository.name,
+        workflowPath
+      )
+    );
+    if (workflow === null) {
+      return recordFailure(
+        state,
+        createWorkflowMissingDiagnostic2(student, repository, workflowPath)
+      );
+    }
+    if (!workflow.supportsDispatch) {
+      return recordFailure(
+        state,
+        createWorkflowDispatchMissingDiagnostic(student, repository, workflowPath)
+      );
+    }
+    await runGitHubOperation2(
+      input,
+      () => input.githubClient.dispatchWorkflow({
+        owner: repository.repository.owner,
+        repo: repository.repository.name,
+        workflowPath,
+        ref: input.config.assignment.template.branch,
+        inputs: createDispatchInputs(input.config, student)
+      })
+    );
+    return recordSuccess(state);
+  } catch (error) {
+    return recordFailure(state, normalizeGitHubError4(error, student, repository));
+  }
+};
+var getGradeGitHubDiagnostics = (errors) => errors.flatMap((error) => {
+  const underlyingDiagnosticCode = error.context?.underlyingDiagnosticCode;
+  return typeof underlyingDiagnosticCode === "string" ? [
+    {
+      code: underlyingDiagnosticCode,
+      severity: "error",
+      message: error.message,
+      ...error.context === void 0 ? {} : { context: error.context }
+    }
+  ] : [];
+});
+var executeGrade = async (input) => {
+  const grading = getEffectiveGrading(input.config);
+  const workflowPath = grading.workflow;
+  let state = {
+    summary: createInitialSummary(input.targetStudents.length),
+    warnings: [],
+    errors: []
+  };
+  if (workflowPath === void 0) {
+    return {
+      summary: {
+        ...state.summary,
+        skipped: input.targetStudents.length,
+        errors: SUCCESS_INCREMENT
+      },
+      warnings: [],
+      errors: [
+        createConfigDiagnostic(
+          DiagnosticCode.GradingNotConfigured,
+          "Grading workflow is not configured for this assignment."
+        )
+      ]
+    };
+  }
+  for (const student of input.targetStudents) {
+    state = {
+      ...state,
+      summary: {
+        ...state.summary,
+        dispatchAttempted: state.summary.dispatchAttempted + SUCCESS_INCREMENT
+      }
+    };
+    state = await dispatchForStudent(input, state, student, workflowPath);
+  }
+  return state;
+};
+
 // src/cli/commands/grade.command.ts
+var COMMAND_NAME2 = "grade";
+var EMPTY_COUNT9 = 0;
+var createDefaultGitHubClient2 = () => new FakeGitHubClient();
+var getEffectiveGrading2 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
+var getCommandStatus = (result) => {
+  if (result.errors.length === EMPTY_COUNT9) {
+    return "success";
+  }
+  return result.summary.dispatchSucceeded > EMPTY_COUNT9 ? "partial_success" : "failure";
+};
+var createLifecycleDiagnostic2 = (status) => createConfigDiagnostic(
+  DiagnosticCode.AssignmentStatusBlocksGrade,
+  `Assignment status ${status} does not allow grade.`,
+  { assignmentStatus: status }
+);
+var runGradeCommand = async ({
+  cwd,
+  assignmentFile,
+  options,
+  targetSelector,
+  githubClient,
+  retryOptions
+}) => {
+  const selectorResult = validateTargetSelector(targetSelector);
+  if (selectorResult.errors.length > EMPTY_COUNT9 || selectorResult.selector === void 0) {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
+      assignmentFile,
+      status: "failure",
+      warnings: selectorResult.warnings,
+      errors: selectorResult.errors,
+      generatedFiles: [],
+      summary: { options }
+    });
+  }
+  const configResult = loadGraiderConfig({ cwd, assignmentFile });
+  if (configResult.status === "failure") {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
+      assignmentFile,
+      status: "failure",
+      warnings: [],
+      errors: configResult.diagnostics,
+      generatedFiles: [],
+      summary: { options }
+    });
+  }
+  const assignmentStatus = configResult.config.assignment.assignment.status;
+  if (assignmentStatus === "draft" || assignmentStatus === "archived") {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [],
+      errors: [createLifecycleDiagnostic2(assignmentStatus)],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary
+      }
+    });
+  }
+  const grading = getEffectiveGrading2(configResult.config);
+  if (!grading.enabled || grading.workflow === void 0) {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [],
+      errors: [
+        createConfigDiagnostic(
+          DiagnosticCode.GradingNotConfigured,
+          "Grading workflow is not configured for this assignment."
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary
+      }
+    });
+  }
+  const rosterResult = loadAssignmentRosters(configResult.config);
+  if (rosterResult.errors.length > EMPTY_COUNT9) {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: rosterResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary
+      }
+    });
+  }
+  const selectionResult = selectTargetStudents(rosterResult.students, selectorResult.selector);
+  if (selectionResult.errors.length > EMPTY_COUNT9) {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...selectionResult.warnings],
+      errors: selectionResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        ...selectionResult.summary
+      }
+    });
+  }
+  const manifestPath = createManifestPath(
+    configResult.config.summary.repoRoot,
+    configResult.config.summary.termCode,
+    configResult.config.summary.assignmentSlug
+  );
+  const manifestResult = loadManifest(manifestPath.absolutePath, { required: true });
+  if (manifestResult.status !== "loaded") {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: manifestResult.warnings,
+      errors: manifestResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        ...selectionResult.summary,
+        manifestFile: manifestPath.relativePath
+      }
+    });
+  }
+  const executionResult = await executeGrade({
+    config: configResult.config,
+    manifest: manifestResult.manifest,
+    targetStudents: selectionResult.students,
+    githubClient: githubClient ?? createDefaultGitHubClient2(),
+    ...retryOptions === void 0 ? {} : { retryOptions }
+  });
+  const status = getCommandStatus(executionResult);
+  const executionErrors = status === "failure" ? [...executionResult.errors, ...getGradeGitHubDiagnostics(executionResult.errors)] : executionResult.errors;
+  return createCommandResult({
+    commandName: COMMAND_NAME2,
+    assignmentFile: configResult.config.summary.assignmentConfigPath,
+    status,
+    warnings: [...rosterResult.warnings, ...selectionResult.warnings, ...executionResult.warnings],
+    errors: executionErrors,
+    generatedFiles: [],
+    summary: {
+      options,
+      ...configResult.config.summary,
+      ...rosterResult.summary,
+      ...selectionResult.summary,
+      manifestFile: manifestPath.relativePath,
+      ...executionResult.summary
+    }
+  });
+};
 var registerGradeCommand = (program) => {
-  registerPlaceholderCommand(program, {
-    name: "grade",
-    description: "Run assignment grading.",
-    support: "supported-placeholder",
-    requireRepositoryRoot: false
+  program.command(COMMAND_NAME2).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Target all active students").option("--section <section-id>", "Target active students in a section").option("--student-id <student-id>", "Target one active student by student ID").option("--github-username <github-username>", "Target one active student by GitHub username").description("Run assignment grading.").action(async (assignmentFile, rawOptions) => {
+    const options = normalizeCommonCommandOptions(rawOptions);
+    const result = await runGradeCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options,
+      targetSelector: {
+        ...rawOptions.all === void 0 ? {} : { all: rawOptions.all },
+        ...rawOptions.section === void 0 ? {} : { section: rawOptions.section },
+        ...rawOptions.studentId === void 0 ? {} : { studentId: rawOptions.studentId },
+        ...rawOptions.githubUsername === void 0 ? {} : { githubUsername: rawOptions.githubUsername }
+      }
+    });
+    writeCommandResult(result, options.json);
+    process.exitCode = result.exitCode;
   });
 };
 
@@ -3971,10 +4474,10 @@ var writePlanJsonFile = (plan, absolutePath) => {
 };
 
 // src/cli/commands/plan.command.ts
-var COMMAND_NAME2 = "plan";
+var COMMAND_NAME3 = "plan";
 var DEFAULT_TEMPLATE_COMMIT_SHA2 = "fake-template-sha";
 var README_FILE3 = "README.md";
-var EMPTY_COUNT7 = 0;
+var EMPTY_COUNT10 = 0;
 var createDefaultTemplateRepository2 = (owner, repo, branch) => ({
   owner,
   name: repo,
@@ -3989,7 +4492,7 @@ var createDefaultTemplateRepository2 = (owner, repo, branch) => ({
   files: [README_FILE3],
   latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA2
 });
-var createDefaultGitHubClient2 = (config, students) => {
+var createDefaultGitHubClient3 = (config, students) => {
   const parsedTemplateRepository = parseTemplateRepository(
     config.course.github.organization,
     config.assignment.template.repository
@@ -4031,7 +4534,7 @@ var runPlanCommand = async ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME2,
+      commandName: COMMAND_NAME3,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -4043,9 +4546,9 @@ var runPlanCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > EMPTY_COUNT7) {
+  if (rosterResult.errors.length > EMPTY_COUNT10) {
     return createCommandResult({
-      commandName: COMMAND_NAME2,
+      commandName: COMMAND_NAME3,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -4058,7 +4561,7 @@ var runPlanCommand = async ({
       }
     });
   }
-  const effectiveGitHubClient = githubClient ?? createDefaultGitHubClient2(configResult.config, rosterResult.students);
+  const effectiveGitHubClient = githubClient ?? createDefaultGitHubClient3(configResult.config, rosterResult.students);
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,
@@ -4066,9 +4569,9 @@ var runPlanCommand = async ({
     students: rosterResult.students,
     githubClient: effectiveGitHubClient
   });
-  if (readinessResult.errors.length > EMPTY_COUNT7) {
+  if (readinessResult.errors.length > EMPTY_COUNT10) {
     return createCommandResult({
-      commandName: COMMAND_NAME2,
+      commandName: COMMAND_NAME3,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -4103,9 +4606,9 @@ var runPlanCommand = async ({
   const errors = [...plan.errors, ...writeErrors];
   const generatedFiles = writeResult.status === "success" ? [planPath.relativePath] : [];
   return createCommandResult({
-    commandName: COMMAND_NAME2,
+    commandName: COMMAND_NAME3,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
-    status: errors.length > EMPTY_COUNT7 ? "failure" : "success",
+    status: errors.length > EMPTY_COUNT10 ? "failure" : "success",
     warnings: [...rosterResult.warnings, ...readinessResult.warnings, ...plan.warnings],
     errors,
     generatedFiles,
@@ -4124,7 +4627,7 @@ var runPlanCommand = async ({
   });
 };
 var registerPlanCommand = (program) => {
-  program.command(COMMAND_NAME2).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Plan assignment provisioning.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME3).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Plan assignment provisioning.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runPlanCommand({
       cwd: process.cwd(),
@@ -4361,7 +4864,7 @@ var publishStudentReport = async ({
 };
 
 // src/execution/report-publisher.ts
-var EMPTY_COUNT8 = 0;
+var EMPTY_COUNT11 = 0;
 var publishStudentReports = async ({
   report,
   githubClient
@@ -4369,9 +4872,9 @@ var publishStudentReports = async ({
   const publishedFiles = [];
   const warnings = [];
   const errors = [];
-  let studentsPublished = EMPTY_COUNT8;
-  let publishFailed = EMPTY_COUNT8;
-  let publishSkipped = EMPTY_COUNT8;
+  let studentsPublished = EMPTY_COUNT11;
+  let publishFailed = EMPTY_COUNT11;
+  let publishSkipped = EMPTY_COUNT11;
   for (const student of report.students) {
     const result = await publishStudentReport({
       githubClient,
@@ -4384,7 +4887,7 @@ var publishStudentReports = async ({
     errors.push(...result.errors);
     if (result.skipped) {
       publishSkipped += 1;
-    } else if (result.errors.length > EMPTY_COUNT8) {
+    } else if (result.errors.length > EMPTY_COUNT11) {
       publishFailed += 1;
     } else {
       studentsPublished += 1;
@@ -4736,33 +5239,33 @@ var parseGradingResultsJsonText = (jsonText) => {
 var REPORT_SCHEMA_VERSION = 1;
 
 // src/reporting/report-collector.ts
-var EMPTY_COUNT9 = 0;
+var EMPTY_COUNT12 = 0;
 var FIRST_SORT_BEFORE_SECOND = -1;
 var FIRST_SORT_AFTER_SECOND = 1;
 var FIRST_WORKFLOW_RUN_INDEX = 0;
 var compareStudents = (left, right) => {
   const sectionComparison = left.section.localeCompare(right.section);
-  if (sectionComparison !== EMPTY_COUNT9) {
+  if (sectionComparison !== EMPTY_COUNT12) {
     return sectionComparison;
   }
   return left.studentId.localeCompare(right.studentId);
 };
 var compareRuns = (left, right) => {
   const updatedComparison = right.updatedAt.localeCompare(left.updatedAt);
-  if (updatedComparison !== EMPTY_COUNT9) {
+  if (updatedComparison !== EMPTY_COUNT12) {
     return updatedComparison;
   }
   return left.id < right.id ? FIRST_SORT_BEFORE_SECOND : FIRST_SORT_AFTER_SECOND;
 };
-var findManifestRecord3 = (manifest, student) => manifest.repositories.find(
+var findManifestRecord4 = (manifest, student) => manifest.repositories.find(
   (record) => record.studentId === student.studentId && record.section === student.section
 );
-var normalizeGitHubError4 = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : {
+var normalizeGitHubError5 = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : {
   code: "github_api_error",
   severity: "error",
   message: "Unexpected GitHub client failure during report collection."
 };
-var getEffectiveGrading = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
+var getEffectiveGrading3 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getWorkflowRunStatus = (run) => run === void 0 ? void 0 : run.status;
 var getWorkflowRunConclusion = (run) => run === void 0 ? void 0 : run.conclusion;
 var createDefaultGrading = () => ({
@@ -4773,7 +5276,7 @@ var createDefaultGrading = () => ({
   checks: []
 });
 var collectStudentGrading = async (input, record, repositoryStatus) => {
-  const gradingConfig = getEffectiveGrading(input.config);
+  const gradingConfig = getEffectiveGrading3(input.config);
   if (!gradingConfig.enabled) {
     const mapping2 = mapGradingStatus({
       gradingEnabled: false,
@@ -4874,7 +5377,7 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
   const resultText = artifact?.files[gradingConfig.result_file];
   const resultFileStatus = artifact === null ? "not_checked" : resultText === void 0 ? "missing" : "valid";
   const validationResult = resultText === void 0 ? void 0 : parseGradingResultsJsonText(resultText);
-  const finalResultFileStatus = validationResult === void 0 || validationResult.errors.length === EMPTY_COUNT9 ? resultFileStatus : "invalid";
+  const finalResultFileStatus = validationResult === void 0 || validationResult.errors.length === EMPTY_COUNT12 ? resultFileStatus : "invalid";
   const parsedResultStatus = validationResult?.result?.status;
   const workflowRunStatus = getWorkflowRunStatus(workflowRun);
   const workflowRunConclusion = getWorkflowRunConclusion(workflowRun);
@@ -4930,7 +5433,7 @@ var collectRepositoryStatus = async (githubClient, record) => {
   };
 };
 var collectStudent = async (input, student) => {
-  const record = findManifestRecord3(input.manifest, student);
+  const record = findManifestRecord4(input.manifest, student);
   const warnings = [...record?.warnings ?? []];
   const errors = [...record?.errors ?? []];
   try {
@@ -4961,12 +5464,12 @@ var collectStudent = async (input, student) => {
       repositoryStatus: "missing",
       grading: createDefaultGrading(),
       warnings,
-      errors: [...errors, normalizeGitHubError4(error)]
+      errors: [...errors, normalizeGitHubError5(error)]
     };
   }
 };
 var countResultStatus = (students, status) => students.filter((student) => student.grading.resultStatus === status).length;
-var countDiagnostics = (students, fieldName) => students.reduce((total, student) => total + student[fieldName].length, EMPTY_COUNT9);
+var countDiagnostics = (students, fieldName) => students.reduce((total, student) => total + student[fieldName].length, EMPTY_COUNT12);
 var createSummary3 = (rosterSummary, students) => ({
   studentCount: rosterSummary.studentCount,
   activeStudentCount: rosterSummary.activeStudentCount,
@@ -5235,15 +5738,15 @@ var writeReportFiles = (files) => {
 };
 
 // src/cli/commands/report.command.ts
-var COMMAND_NAME3 = "report";
-var EMPTY_COUNT10 = 0;
-var getCommandStatus = (errorCount, generatedFileCount) => {
-  if (errorCount === EMPTY_COUNT10) {
+var COMMAND_NAME4 = "report";
+var EMPTY_COUNT13 = 0;
+var getCommandStatus2 = (errorCount, generatedFileCount) => {
+  if (errorCount === EMPTY_COUNT13) {
     return "success";
   }
-  return generatedFileCount > EMPTY_COUNT10 ? "partial_success" : "failure";
+  return generatedFileCount > EMPTY_COUNT13 ? "partial_success" : "failure";
 };
-var createDefaultGitHubClient3 = () => new FakeGitHubClient();
+var createDefaultGitHubClient4 = () => new FakeGitHubClient();
 var createReportFiles = (repoRoot, report) => {
   const paths = createReportPaths(
     repoRoot,
@@ -5293,7 +5796,7 @@ var runReportCommand = async ({
   const configResult = loadGraiderConfig({ cwd, assignmentFile });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME3,
+      commandName: COMMAND_NAME4,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -5303,9 +5806,9 @@ var runReportCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > EMPTY_COUNT10) {
+  if (rosterResult.errors.length > EMPTY_COUNT13) {
     return createCommandResult({
-      commandName: COMMAND_NAME3,
+      commandName: COMMAND_NAME4,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -5326,7 +5829,7 @@ var runReportCommand = async ({
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: true });
   if (manifestResult.status !== "loaded") {
     return createCommandResult({
-      commandName: COMMAND_NAME3,
+      commandName: COMMAND_NAME4,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -5340,7 +5843,7 @@ var runReportCommand = async ({
       }
     });
   }
-  const activeGitHubClient = githubClient ?? createDefaultGitHubClient3();
+  const activeGitHubClient = githubClient ?? createDefaultGitHubClient4();
   const collectResult = await collectReport({
     config: configResult.config,
     rosterSummary: rosterResult.summary,
@@ -5352,7 +5855,7 @@ var runReportCommand = async ({
   const writeResult = writeReportFiles(
     createReportFiles(configResult.config.summary.repoRoot, collectResult.report)
   );
-  const publishResult = publishStudentReports2 && writeResult.errors.length === EMPTY_COUNT10 ? await publishStudentReports({
+  const publishResult = publishStudentReports2 && writeResult.errors.length === EMPTY_COUNT13 ? await publishStudentReports({
     report: collectResult.report,
     githubClient: activeGitHubClient
   }) : {
@@ -5360,13 +5863,13 @@ var runReportCommand = async ({
     warnings: [],
     errors: [],
     studentsReported: collectResult.report.students.length,
-    studentsPublished: EMPTY_COUNT10,
-    publishFailed: EMPTY_COUNT10,
-    publishSkipped: EMPTY_COUNT10
+    studentsPublished: EMPTY_COUNT13,
+    publishFailed: EMPTY_COUNT13,
+    publishSkipped: EMPTY_COUNT13
   };
-  const commandStatus = publishResult.errors.length > EMPTY_COUNT10 ? getCommandStatus(publishResult.errors.length, publishResult.studentsPublished) : getCommandStatus(writeResult.errors.length, writeResult.generatedFiles.length);
+  const commandStatus = publishResult.errors.length > EMPTY_COUNT13 ? getCommandStatus2(publishResult.errors.length, publishResult.studentsPublished) : getCommandStatus2(writeResult.errors.length, writeResult.generatedFiles.length);
   return createCommandResult({
-    commandName: COMMAND_NAME3,
+    commandName: COMMAND_NAME4,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: commandStatus,
     warnings: [
@@ -5394,7 +5897,7 @@ var runReportCommand = async ({
   });
 };
 var registerReportCommand = (program) => {
-  program.command(COMMAND_NAME3).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--publish-student-reports", "Publish per-student reports to student repositories").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME4).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--publish-student-reports", "Publish per-student reports to student repositories").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runReportCommand({
       cwd: process.cwd(),
@@ -5408,7 +5911,7 @@ var registerReportCommand = (program) => {
 };
 
 // src/cli/commands/validate.command.ts
-var COMMAND_NAME4 = "validate";
+var COMMAND_NAME5 = "validate";
 var DEFAULT_TEMPLATE_COMMIT_SHA3 = "fake-template-sha";
 var README_FILE4 = "README.md";
 var createDefaultTemplateRepository3 = (owner, repo, branch) => ({
@@ -5425,7 +5928,7 @@ var createDefaultTemplateRepository3 = (owner, repo, branch) => ({
   files: [README_FILE4],
   latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA3
 });
-var createDefaultGitHubClient4 = (config, students) => {
+var createDefaultGitHubClient5 = (config, students) => {
   const parsedTemplateRepository = parseTemplateRepository(
     config.course.github.organization,
     config.assignment.template.repository
@@ -5466,7 +5969,7 @@ var runValidateCommand = async ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME4,
+      commandName: COMMAND_NAME5,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -5480,7 +5983,7 @@ var runValidateCommand = async ({
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME4,
+      commandName: COMMAND_NAME5,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -5498,11 +6001,11 @@ var runValidateCommand = async ({
     termConfig: configResult.config.term,
     assignmentConfig: configResult.config.assignment,
     students: rosterResult.students,
-    githubClient: githubClient ?? createDefaultGitHubClient4(configResult.config, rosterResult.students)
+    githubClient: githubClient ?? createDefaultGitHubClient5(configResult.config, rosterResult.students)
   });
   if (readinessResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME4,
+      commandName: COMMAND_NAME5,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -5517,7 +6020,7 @@ var runValidateCommand = async ({
     });
   }
   return createCommandResult({
-    commandName: COMMAND_NAME4,
+    commandName: COMMAND_NAME5,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
     warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -5532,7 +6035,7 @@ var runValidateCommand = async ({
   });
 };
 var registerValidateCommand = (program) => {
-  program.command(COMMAND_NAME4).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME5).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runValidateCommand({
       cwd: process.cwd(),

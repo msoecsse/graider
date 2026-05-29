@@ -1,0 +1,35 @@
+schema_version: 1
+assignment:
+  term_code: 27s1
+  course_code: se2030
+  assignment_slug: lab04
+  assignment_title: Lab 04
+source:
+  source_files: []
+  input_fingerprint: grade-disabled-fingerprint
+template:
+  repository: example-org/lab04-template
+  branch: main
+repositories:
+  - student_id: jones
+    github_username: seanjones
+    section: "001"
+    roster_status: active
+    repository:
+      owner: example-org
+      name: 27s1-se2030-lab04-seanjones
+      full_name: example-org/27s1-se2030-lab04-seanjones
+      created_from_template: true
+      template_repository: example-org/lab04-template
+    permissions: {}
+    actions:
+      enabled: true
+    lifecycle:
+      repository_archived: false
+      student_access_removed: false
+      status: active
+    warnings: []
+    errors: []
+operation_history: []
+warnings: []
+errors: []

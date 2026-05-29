@@ -1,0 +1,9 @@
+schema_version: 1
+term:
+  code: 27s1
+  academic_year: 2027
+  semester: 1
+  display_name: 2027 Semester 1
+sections:
+  - id: "001"
+    roster: rosters/section-001.csv
