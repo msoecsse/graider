@@ -48,11 +48,11 @@ const expectNoStackTrace = (output: string): void => {
 
 describe("CLI output formatting", () => {
   it("successful placeholder command JSON output is parseable", () => {
-    const result = runCli(["plan", ASSIGNMENT_FILE, "--json"]);
+    const result = runCli(["apply", ASSIGNMENT_FILE, "--json"]);
     const json = parseJson(result.stdout);
 
     expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.commandName).toBe("plan");
+    expect(json.commandName).toBe("apply");
     expect(json.status).toBe("success");
   });
 

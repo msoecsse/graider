@@ -69,11 +69,10 @@ describe("graider CLI shell", () => {
   });
 
   it("TC-CLI-SHELL-002 command exists: plan", () => {
-    const output = runCliText(["plan", TEST_ASSIGNMENT_FILE]);
+    const output = runCliText(["plan", "--help"]);
 
     expect(output).toContain("plan");
-    expect(output).toContain(TEST_ASSIGNMENT_FILE);
-    expect(output).toContain("success");
+    expect(output).toContain("Plan assignment provisioning");
   });
 
   it("TC-CLI-SHELL-003 command exists: apply", () => {
@@ -126,11 +125,11 @@ describe("graider CLI shell", () => {
   });
 
   it("TC-CLI-SHELL-009 --json emits valid JSON placeholder output", () => {
-    const result = runCli(["plan", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"]);
+    const result = runCli(["apply", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"]);
     const json = parseJsonResult(result.stdout);
 
     expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.commandName).toBe("plan");
+    expect(json.commandName).toBe("apply");
     expect(json.assignmentFile).toBe(TEST_ASSIGNMENT_FILE);
     expect(json.status).toBe("success");
     expect(json.exitCode).toBe(SUCCESS_EXIT_CODE);

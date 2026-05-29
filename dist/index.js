@@ -51,7 +51,13 @@ var DiagnosticCode = {
   SourceFileMissing: "source_file_missing",
   SourceFileOutsideRepo: "source_file_outside_repo",
   SourceFileNotFile: "source_file_not_file",
-  SourceFingerprintFailed: "source_fingerprint_failed"
+  SourceFingerprintFailed: "source_fingerprint_failed",
+  RepoNameCollision: "repo_name_collision",
+  AssignmentNotActive: "assignment_not_active",
+  AssignmentClosedBlocksCreation: "assignment_closed_blocks_creation",
+  AssignmentArchived: "assignment_archived",
+  PlanContainsBlockedOperations: "plan_contains_blocked_operations",
+  PlanWriteFailed: "plan_write_failed"
 };
 var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
 var MISSING_REQUIRED_FILE_CODE = DiagnosticCode.MissingRequiredFile;
@@ -93,6 +99,12 @@ var SOURCE_FILE_MISSING_CODE = DiagnosticCode.SourceFileMissing;
 var SOURCE_FILE_OUTSIDE_REPO_CODE = DiagnosticCode.SourceFileOutsideRepo;
 var SOURCE_FILE_NOT_FILE_CODE = DiagnosticCode.SourceFileNotFile;
 var SOURCE_FINGERPRINT_FAILED_CODE = DiagnosticCode.SourceFingerprintFailed;
+var REPO_NAME_COLLISION_CODE = DiagnosticCode.RepoNameCollision;
+var ASSIGNMENT_NOT_ACTIVE_CODE = DiagnosticCode.AssignmentNotActive;
+var ASSIGNMENT_CLOSED_BLOCKS_CREATION_CODE = DiagnosticCode.AssignmentClosedBlocksCreation;
+var ASSIGNMENT_ARCHIVED_CODE = DiagnosticCode.AssignmentArchived;
+var PLAN_CONTAINS_BLOCKED_OPERATIONS_CODE = DiagnosticCode.PlanContainsBlockedOperations;
+var PLAN_WRITE_FAILED_CODE = DiagnosticCode.PlanWriteFailed;
 var createNotSupportedInMvpDiagnostic = (commandName) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
   severity: "error",
@@ -387,34 +399,33 @@ var registerGradeCommand = (program) => {
   });
 };
 
-// src/cli/commands/plan.command.ts
-var registerPlanCommand = (program) => {
-  registerPlaceholderCommand(program, {
-    name: "plan",
-    description: "Create an assignment execution plan.",
-    support: "supported-placeholder",
-    requireRepositoryRoot: false
-  });
-};
-
-// src/cli/commands/remove-access.command.ts
-var registerRemoveAccessCommand = (program) => {
-  registerPlaceholderCommand(program, {
-    name: "remove-access",
-    description: "Remove student access from assignment repositories.",
-    support: "unsupported-in-mvp",
-    requireRepositoryRoot: false
-  });
-};
-
-// src/cli/commands/report.command.ts
-var registerReportCommand = (program) => {
-  registerPlaceholderCommand(program, {
-    name: "report",
-    description: "Generate assignment reports.",
-    support: "supported-placeholder",
-    requireRepositoryRoot: false
-  });
+// src/config/github-config-validation.ts
+var TEMPLATE_REPOSITORY_SEGMENTS = 2;
+var hasBlankSegment = (segments) => segments.some((segment) => segment.trim().length === 0);
+var parseTemplateRepository = (configuredOrganization, repository) => {
+  const segments = repository.split("/");
+  if (segments.length === TEMPLATE_REPOSITORY_SEGMENTS && !hasBlankSegment(segments)) {
+    const [owner, repo] = segments;
+    return {
+      status: "success",
+      repository: {
+        owner,
+        repo,
+        fullName: `${owner}/${repo}`
+      }
+    };
+  }
+  return {
+    status: "failure",
+    diagnostic: createConfigDiagnostic(
+      DiagnosticCode.InvalidTemplateRepository,
+      `Template repository ${repository} must be specified as owner/repo.`,
+      {
+        repository,
+        organization: configuredOrganization
+      }
+    )
+  };
 };
 
 // src/config/config-loader.ts
@@ -865,34 +876,15 @@ var loadGraiderConfig = (request) => {
   };
 };
 
-// src/config/github-config-validation.ts
-var TEMPLATE_REPOSITORY_SEGMENTS = 2;
-var hasBlankSegment = (segments) => segments.some((segment) => segment.trim().length === 0);
-var parseTemplateRepository = (configuredOrganization, repository) => {
-  const segments = repository.split("/");
-  if (segments.length === TEMPLATE_REPOSITORY_SEGMENTS && !hasBlankSegment(segments)) {
-    const [owner, repo] = segments;
-    return {
-      status: "success",
-      repository: {
-        owner,
-        repo,
-        fullName: `${owner}/${repo}`
-      }
-    };
-  }
-  return {
-    status: "failure",
-    diagnostic: createConfigDiagnostic(
-      DiagnosticCode.InvalidTemplateRepository,
-      `Template repository ${repository} must be specified as owner/repo.`,
-      {
-        repository,
-        organization: configuredOrganization
-      }
-    )
-  };
+// src/core/clock.ts
+var COLON_PATTERN = /:/gu;
+var PERIOD_PATTERN = /\./gu;
+var FILESYSTEM_TIMESTAMP_SEPARATOR = "-";
+var systemClock = {
+  now: () => /* @__PURE__ */ new Date()
 };
+var formatPlanCreatedAt = (date) => date.toISOString();
+var formatFilesystemTimestamp = (date) => date.toISOString().replace(COLON_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR).replace(PERIOD_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR);
 
 // src/github/github-errors.ts
 var DIAGNOSTIC_CODE_BY_KIND = {
@@ -1464,8 +1456,602 @@ var validateGitHubReadiness = async ({
   };
 };
 
-// src/roster/roster-loader.ts
+// src/config/source-fingerprint.ts
 import path4 from "path";
+
+// src/core/hash.ts
+import { createHash } from "crypto";
+import fs3 from "fs";
+var SHA_256_ALGORITHM = "sha256";
+var HEX_ENCODING = "hex";
+var hashStringSha256 = (value) => createHash(SHA_256_ALGORITHM).update(value).digest(HEX_ENCODING);
+var hashBufferSha256 = (value) => createHash(SHA_256_ALGORITHM).update(value).digest(HEX_ENCODING);
+var hashFileSha256 = (filePath) => {
+  if (!fs3.existsSync(filePath)) {
+    return {
+      status: "failure",
+      diagnostic: createConfigDiagnostic(
+        DiagnosticCode.SourceFileMissing,
+        `Source file ${filePath} was not found.`,
+        {
+          filePath
+        }
+      )
+    };
+  }
+  const fileStats = fs3.statSync(filePath);
+  if (!fileStats.isFile()) {
+    return {
+      status: "failure",
+      diagnostic: createConfigDiagnostic(
+        DiagnosticCode.SourceFileNotFile,
+        `Source path ${filePath} is not a file.`,
+        {
+          filePath
+        }
+      )
+    };
+  }
+  return {
+    status: "success",
+    sha256: hashBufferSha256(fs3.readFileSync(filePath))
+  };
+};
+
+// src/config/source-fingerprint.ts
+var EMPTY_FINGERPRINT = "";
+var EMPTY_LENGTH = 0;
+var sortSourceFiles = (sourceFiles) => [...sourceFiles].sort((left, right) => left.path.localeCompare(right.path));
+var createSourceOutsideRepoDiagnostic = (repoRoot, sourceFilePath) => createConfigDiagnostic(
+  DiagnosticCode.SourceFileOutsideRepo,
+  `Source file ${sourceFilePath} must be inside repository root.`,
+  {
+    repoRoot,
+    sourceFilePath
+  }
+);
+var resolveSourcePath = (repoRoot, sourceFilePath) => {
+  const absolutePath = path4.isAbsolute(sourceFilePath) ? path4.resolve(sourceFilePath) : path4.resolve(repoRoot, sourceFilePath);
+  try {
+    return {
+      absolutePath,
+      relativePath: toRepositoryRelativePath(repoRoot, absolutePath)
+    };
+  } catch {
+    return createSourceOutsideRepoDiagnostic(repoRoot, sourceFilePath);
+  }
+};
+var createInputFingerprint = (sourceFiles) => hashStringSha256(JSON.stringify(sortSourceFiles(sourceFiles)));
+var createSourceFingerprint = ({
+  repoRoot,
+  sourceFilePaths
+}) => {
+  const sourceFiles = [];
+  const errors = [];
+  for (const sourceFilePath of sourceFilePaths) {
+    const resolvedSourcePath = resolveSourcePath(repoRoot, sourceFilePath);
+    if ("code" in resolvedSourcePath) {
+      errors.push(resolvedSourcePath);
+    } else {
+      const hashResult = hashFileSha256(resolvedSourcePath.absolutePath);
+      if (hashResult.status === "failure") {
+        errors.push(hashResult.diagnostic);
+      } else {
+        sourceFiles.push({
+          path: resolvedSourcePath.relativePath,
+          sha256: hashResult.sha256
+        });
+      }
+    }
+  }
+  const orderedSourceFiles = sortSourceFiles(sourceFiles);
+  return {
+    sourceFiles: orderedSourceFiles,
+    inputFingerprint: errors.length === EMPTY_LENGTH ? createInputFingerprint(orderedSourceFiles) : EMPTY_FINGERPRINT,
+    warnings: [],
+    errors
+  };
+};
+var getSourceFingerprintPaths = ({
+  courseConfigPath,
+  termConfigPath,
+  assignmentConfigPath,
+  rosterFiles
+}) => [
+  courseConfigPath,
+  termConfigPath,
+  assignmentConfigPath,
+  ...rosterFiles
+];
+
+// src/roster/roster-models.ts
+var ROSTER_STATUS_ACTIVE = "active";
+var ROSTER_STATUS_DROPPED = "dropped";
+var ROSTER_STATUS_HOLD = "hold";
+
+// src/planning/operation-models.ts
+var PLAN_OPERATION_TYPES = [
+  "create_repository_from_template",
+  "add_student_collaborator",
+  "add_faculty_team_permission",
+  "add_grader_team_permission",
+  "enable_actions",
+  "verify_grading_workflow",
+  "verify_workflow_dispatch"
+];
+
+// src/planning/operation-ordering.ts
+var OPERATION_ID_SEPARATOR = ":";
+var UNKNOWN_OPERATION_INDEX = PLAN_OPERATION_TYPES.length;
+var operationOrderIndex = (type) => {
+  const index = PLAN_OPERATION_TYPES.indexOf(type);
+  return index < 0 ? UNKNOWN_OPERATION_INDEX : index;
+};
+var createOperationId = (section, studentId, type) => [section, studentId, type].join(OPERATION_ID_SEPARATOR);
+var comparePlanOperations = (left, right) => (left.section ?? "").localeCompare(right.section ?? "") || (left.student_id ?? "").localeCompare(right.student_id ?? "") || operationOrderIndex(left.type) - operationOrderIndex(right.type);
+
+// src/planning/plan-models.ts
+var PLAN_SCHEMA_VERSION = 1;
+
+// src/planning/repo-name.ts
+var PLACEHOLDER_PATTERN = /\{([a-z_]+)\}/gu;
+var REPOSITORY_NAME_PATTERN = /^[a-z0-9-]+$/u;
+var HYPHEN = "-";
+var CONSECUTIVE_HYPHENS = "--";
+var EMPTY_LENGTH2 = 0;
+var getMaxRepositoryNameLength = () => 100 /* MaxLength */;
+var REQUIRED_PLACEHOLDERS = ["term", "course", "assignment", "github_username"];
+var LEGACY_STUDENT_PLACEHOLDER = "student";
+var GITHUB_USERNAME_PLACEHOLDER = "github_username";
+var createRepositoryNameError = (name, reason) => createConfigDiagnostic(
+  DiagnosticCode.InvalidRepositoryName,
+  `Invalid repository name ${name}: ${reason}.`,
+  {
+    repositoryName: name,
+    reason
+  }
+);
+var isKnownPlaceholder = (placeholder) => REQUIRED_PLACEHOLDERS.some((requiredPlaceholder) => requiredPlaceholder === placeholder) || placeholder === LEGACY_STUDENT_PLACEHOLDER;
+var extractPlaceholders = (pattern) => Array.from(pattern.matchAll(PLACEHOLDER_PATTERN), (match) => match[1] ?? "");
+var normalizePlaceholders = (placeholders) => placeholders.map(
+  (placeholder) => placeholder === LEGACY_STUDENT_PLACEHOLDER ? GITHUB_USERNAME_PLACEHOLDER : placeholder
+);
+var getUnknownPlaceholderErrors = (placeholders) => placeholders.filter((placeholder) => !isKnownPlaceholder(placeholder)).map(
+  (placeholder) => createConfigDiagnostic(
+    DiagnosticCode.RepoNamePatternUnknownPlaceholder,
+    `Unknown repository name pattern placeholder ${placeholder}.`,
+    {
+      placeholder
+    }
+  )
+);
+var getMissingPlaceholderErrors = (placeholders) => {
+  const normalizedPlaceholders = normalizePlaceholders(placeholders);
+  return REQUIRED_PLACEHOLDERS.filter(
+    (requiredPlaceholder) => !normalizedPlaceholders.includes(requiredPlaceholder)
+  ).map(
+    (placeholder) => createConfigDiagnostic(
+      DiagnosticCode.RepoNamePatternMissingPlaceholder,
+      `Repository name pattern is missing required placeholder ${placeholder}.`,
+      {
+        placeholder
+      }
+    )
+  );
+};
+var getPlaceholderValues = (input) => ({
+  term: input.termCode.toLowerCase(),
+  course: input.courseCode.toLowerCase(),
+  assignment: input.assignmentSlug.toLowerCase(),
+  github_username: input.githubUsername.toLowerCase(),
+  student: input.githubUsername.toLowerCase()
+});
+var replacePlaceholders = (input) => {
+  const values = getPlaceholderValues(input);
+  return input.pattern.replace(
+    PLACEHOLDER_PATTERN,
+    (_, placeholder) => isKnownPlaceholder(placeholder) ? values[placeholder] : `{${placeholder}}`
+  );
+};
+var validateRepositoryName = (repositoryName) => {
+  const errors = [
+    ...repositoryName.length === EMPTY_LENGTH2 ? [createRepositoryNameError(repositoryName, "repository name must not be empty")] : [],
+    ...repositoryName.length > getMaxRepositoryNameLength() ? [
+      createRepositoryNameError(
+        repositoryName,
+        `repository name must be at most ${String(getMaxRepositoryNameLength())} characters`
+      )
+    ] : [],
+    ...repositoryName !== repositoryName.toLowerCase() ? [createRepositoryNameError(repositoryName, "repository name must be lowercase")] : [],
+    ...REPOSITORY_NAME_PATTERN.test(repositoryName) ? [] : [
+      createRepositoryNameError(
+        repositoryName,
+        "repository name may contain only lowercase letters, digits, and hyphens"
+      )
+    ],
+    ...repositoryName.startsWith(HYPHEN) ? [createRepositoryNameError(repositoryName, "repository name must not start with a hyphen")] : [],
+    ...repositoryName.endsWith(HYPHEN) ? [createRepositoryNameError(repositoryName, "repository name must not end with a hyphen")] : [],
+    ...repositoryName.includes(CONSECUTIVE_HYPHENS) ? [
+      createRepositoryNameError(
+        repositoryName,
+        "repository name must not contain consecutive hyphens"
+      )
+    ] : []
+  ];
+  return {
+    warnings: [],
+    errors
+  };
+};
+var generateRepositoryName = (input) => {
+  const placeholders = extractPlaceholders(input.pattern);
+  const patternErrors = [
+    ...getUnknownPlaceholderErrors(placeholders),
+    ...getMissingPlaceholderErrors(placeholders)
+  ];
+  if (patternErrors.length > EMPTY_LENGTH2) {
+    return {
+      warnings: [],
+      errors: patternErrors
+    };
+  }
+  const repositoryName = replacePlaceholders(input).toLowerCase();
+  const validationResult = validateRepositoryName(repositoryName);
+  if (validationResult.errors.length > EMPTY_LENGTH2) {
+    return validationResult;
+  }
+  return {
+    repositoryName,
+    warnings: [],
+    errors: []
+  };
+};
+
+// src/planning/plan-builder.ts
+var EMPTY_COUNT2 = 0;
+var NO_REPOSITORY_NAME = "";
+var ACTIVE_ASSIGNMENT_STATUS = "active";
+var DRAFT_ASSIGNMENT_STATUS = "draft";
+var CLOSED_ASSIGNMENT_STATUS = "closed";
+var ARCHIVED_ASSIGNMENT_STATUS = "archived";
+var STUDENT_STATUS_REASON_PREFIX = "student_status";
+var GRADING_DISABLED_REASON = "grading_disabled";
+var createUnexpectedGitHubDiagnostic2 = () => createConfigDiagnostic(
+  DiagnosticCode.GithubApiError,
+  "Unexpected GitHub client failure during planning."
+);
+var normalizeGitHubError2 = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createUnexpectedGitHubDiagnostic2();
+var createOperation = (student, type, status, input = {}) => ({
+  id: createOperationId(student.section, student.studentId, type),
+  type,
+  status,
+  requires: input.requires ?? [],
+  student_id: student.studentId,
+  github_username: student.githubUsername,
+  section: student.section,
+  ...input.repositoryName === void 0 ? {} : { repository_name: input.repositoryName },
+  ...input.reason === void 0 ? {} : { reason: input.reason },
+  warnings: input.warnings ?? [],
+  errors: input.errors ?? []
+});
+var createCollisionDiagnostic = (organization, repositoryName) => createConfigDiagnostic(
+  DiagnosticCode.RepoNameCollision,
+  `Repository ${organization}/${repositoryName} already exists and is not manifest-tracked.`,
+  {
+    organization,
+    repositoryName
+  }
+);
+var createLifecycleDiagnostic = (code, message, assignmentStatus, student) => createConfigDiagnostic(code, message, {
+  assignmentStatus,
+  student_id: student.studentId,
+  github_username: student.githubUsername,
+  section: student.section
+});
+var createPlanBlockedDiagnostic = (blockedOperationCount) => createConfigDiagnostic(
+  DiagnosticCode.PlanContainsBlockedOperations,
+  "Plan contains blocked operations.",
+  {
+    blockedOperationCount
+  }
+);
+var generateStudentRepositoryName = (config, student) => {
+  const result = generateRepositoryName({
+    pattern: config.course.github.repo_name_pattern,
+    termCode: config.summary.termCode,
+    courseCode: config.course.course.code,
+    assignmentSlug: config.summary.assignmentSlug,
+    githubUsername: student.githubUsername
+  });
+  return {
+    repositoryName: result.repositoryName ?? NO_REPOSITORY_NAME,
+    warnings: result.warnings,
+    errors: result.errors
+  };
+};
+var createLifecycleBlockedOperation = (config, student, diagnostic, repositoryName) => createOperation(student, "create_repository_from_template", "blocked", {
+  repositoryName,
+  reason: config.assignment.assignment.status,
+  errors: [diagnostic]
+});
+var buildSkippedStudentOperation = (student) => createOperation(student, "create_repository_from_template", "skipped", {
+  reason: `${STUDENT_STATUS_REASON_PREFIX}_${student.status}`
+});
+var buildLifecycleOperations = (config, student, repositoryName) => {
+  const assignmentStatus = config.assignment.assignment.status;
+  if (assignmentStatus === DRAFT_ASSIGNMENT_STATUS) {
+    return [
+      createLifecycleBlockedOperation(
+        config,
+        student,
+        createLifecycleDiagnostic(
+          DiagnosticCode.AssignmentNotActive,
+          "Draft assignments cannot be applied.",
+          assignmentStatus,
+          student
+        ),
+        repositoryName
+      )
+    ];
+  }
+  if (assignmentStatus === CLOSED_ASSIGNMENT_STATUS) {
+    return [
+      createLifecycleBlockedOperation(
+        config,
+        student,
+        createLifecycleDiagnostic(
+          DiagnosticCode.AssignmentClosedBlocksCreation,
+          "Closed assignments block new repository creation.",
+          assignmentStatus,
+          student
+        ),
+        repositoryName
+      )
+    ];
+  }
+  if (assignmentStatus === ARCHIVED_ASSIGNMENT_STATUS) {
+    return [
+      createLifecycleBlockedOperation(
+        config,
+        student,
+        createLifecycleDiagnostic(
+          DiagnosticCode.AssignmentArchived,
+          "Archived assignments cannot be planned for provisioning.",
+          assignmentStatus,
+          student
+        ),
+        repositoryName
+      )
+    ];
+  }
+  return [];
+};
+var buildPlannedProvisioningOperations = (config, student, repositoryName) => {
+  const createRepositoryId = createOperationId(
+    student.section,
+    student.studentId,
+    "create_repository_from_template"
+  );
+  const enableActionsId = createOperationId(student.section, student.studentId, "enable_actions");
+  const verifyWorkflowId = createOperationId(
+    student.section,
+    student.studentId,
+    "verify_grading_workflow"
+  );
+  const sharedInput = {
+    repositoryName,
+    requires: [createRepositoryId]
+  };
+  return [
+    createOperation(student, "create_repository_from_template", "planned", {
+      repositoryName
+    }),
+    createOperation(student, "add_student_collaborator", "planned", sharedInput),
+    createOperation(student, "add_faculty_team_permission", "planned", sharedInput),
+    createOperation(student, "add_grader_team_permission", "planned", sharedInput),
+    createOperation(student, "enable_actions", "planned", sharedInput),
+    ...config.summary.gradingEnabled ? [
+      createOperation(student, "verify_grading_workflow", "planned", {
+        repositoryName,
+        requires: [enableActionsId]
+      }),
+      createOperation(student, "verify_workflow_dispatch", "planned", {
+        repositoryName,
+        requires: [verifyWorkflowId]
+      })
+    ] : [
+      createOperation(student, "verify_grading_workflow", "skipped", {
+        repositoryName,
+        requires: [enableActionsId],
+        reason: GRADING_DISABLED_REASON
+      }),
+      createOperation(student, "verify_workflow_dispatch", "skipped", {
+        repositoryName,
+        requires: [verifyWorkflowId],
+        reason: GRADING_DISABLED_REASON
+      })
+    ]
+  ];
+};
+var buildActiveStudentOperations = async (config, student, githubClient) => {
+  const repositoryNameResult = generateStudentRepositoryName(config, student);
+  if (repositoryNameResult.errors.length > EMPTY_COUNT2) {
+    return [
+      createOperation(student, "create_repository_from_template", "blocked", {
+        errors: repositoryNameResult.errors,
+        warnings: repositoryNameResult.warnings
+      })
+    ];
+  }
+  const lifecycleOperations = buildLifecycleOperations(
+    config,
+    student,
+    repositoryNameResult.repositoryName
+  );
+  if (lifecycleOperations.length > EMPTY_COUNT2) {
+    return lifecycleOperations;
+  }
+  if (config.assignment.assignment.status !== ACTIVE_ASSIGNMENT_STATUS) {
+    return [];
+  }
+  try {
+    const existingRepository = await githubClient.getRepository(
+      config.course.github.organization,
+      repositoryNameResult.repositoryName
+    );
+    if (existingRepository !== null) {
+      return [
+        createOperation(student, "create_repository_from_template", "blocked", {
+          repositoryName: repositoryNameResult.repositoryName,
+          errors: [
+            createCollisionDiagnostic(
+              config.course.github.organization,
+              repositoryNameResult.repositoryName
+            )
+          ]
+        })
+      ];
+    }
+    return buildPlannedProvisioningOperations(config, student, repositoryNameResult.repositoryName);
+  } catch (error) {
+    return [
+      createOperation(student, "create_repository_from_template", "blocked", {
+        repositoryName: repositoryNameResult.repositoryName,
+        errors: [normalizeGitHubError2(error)]
+      })
+    ];
+  }
+};
+var buildStudentOperations = async (config, student, githubClient) => student.status === ROSTER_STATUS_ACTIVE ? buildActiveStudentOperations(config, student, githubClient) : [buildSkippedStudentOperation(student)];
+var createPlanSummary = (rosterSummary, operations) => ({
+  total_students: rosterSummary.studentCount,
+  active_students: rosterSummary.activeStudentCount,
+  dropped_students: rosterSummary.droppedStudentCount,
+  hold_students: rosterSummary.holdStudentCount,
+  planned_operations: operations.filter((operation) => operation.status === "planned").length,
+  noop_operations: operations.filter((operation) => operation.status === "noop").length,
+  skipped_operations: operations.filter((operation) => operation.status === "skipped").length,
+  blocked_operations: operations.filter((operation) => operation.status === "blocked").length
+});
+var collectOperationDiagnostics = (operations) => operations.flatMap((operation) => operation.errors);
+var buildPlan = async ({
+  config,
+  students,
+  rosterSummary,
+  githubClient,
+  createdAt
+}) => {
+  const sourceFingerprint = createSourceFingerprint({
+    repoRoot: config.summary.repoRoot,
+    sourceFilePaths: getSourceFingerprintPaths({
+      courseConfigPath: config.summary.courseConfigPath,
+      termConfigPath: config.summary.termConfigPath,
+      assignmentConfigPath: config.summary.assignmentConfigPath,
+      rosterFiles: rosterSummary.rosterFiles
+    })
+  });
+  const operationGroups = [];
+  for (const student of students) {
+    operationGroups.push(...[await buildStudentOperations(config, student, githubClient)]);
+  }
+  const operations = operationGroups.flat().sort(comparePlanOperations);
+  const summary = createPlanSummary(rosterSummary, operations);
+  const blockedPlanErrors = summary.blocked_operations > EMPTY_COUNT2 ? [createPlanBlockedDiagnostic(summary.blocked_operations)] : [];
+  return {
+    schema_version: PLAN_SCHEMA_VERSION,
+    created_at: createdAt,
+    assignment: {
+      term_code: config.summary.termCode,
+      course_code: config.course.course.code,
+      assignment_slug: config.summary.assignmentSlug,
+      assignment_title: config.assignment.assignment.title
+    },
+    source: {
+      source_files: sourceFingerprint.sourceFiles,
+      input_fingerprint: sourceFingerprint.inputFingerprint
+    },
+    summary,
+    operations,
+    warnings: sourceFingerprint.warnings,
+    errors: [
+      ...sourceFingerprint.errors,
+      ...collectOperationDiagnostics(operations),
+      ...blockedPlanErrors
+    ]
+  };
+};
+
+// src/planning/plan-paths.ts
+import path5 from "path";
+var TERMS_DIRECTORY2 = "terms";
+var PLANS_DIRECTORY = "plans";
+var PLAN_FILE_PREFIX = "plan";
+var PLAN_FILE_EXTENSION = "json";
+var createPlanPath = (repoRoot, termCode, assignmentSlug, clock) => {
+  const relativeDirectory = path5.posix.join(
+    TERMS_DIRECTORY2,
+    termCode,
+    PLANS_DIRECTORY,
+    assignmentSlug
+  );
+  const fileName = `${PLAN_FILE_PREFIX}-${formatFilesystemTimestamp(clock.now())}.${PLAN_FILE_EXTENSION}`;
+  const relativePath = path5.posix.join(relativeDirectory, fileName);
+  return {
+    relativeDirectory,
+    relativePath,
+    absolutePath: path5.join(repoRoot, relativePath)
+  };
+};
+
+// src/planning/plan-renderer.ts
+import fs4 from "fs";
+import path6 from "path";
+
+// src/io/stable-json.ts
+var JSON_INDENT_SPACES2 = 2;
+var isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var orderValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(orderValue);
+  }
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey)).map(([key, nestedValue]) => [key, orderValue(nestedValue)])
+    );
+  }
+  return value;
+};
+var stringifyStableJson = (value) => JSON.stringify(orderValue(value), void 0, JSON_INDENT_SPACES2);
+
+// src/planning/plan-renderer.ts
+var renderPlanJson = (plan) => stringifyStableJson(plan);
+var writePlanJsonFile = (plan, absolutePath) => {
+  try {
+    fs4.mkdirSync(path6.dirname(absolutePath), {
+      recursive: true
+    });
+    fs4.writeFileSync(absolutePath, `${renderPlanJson(plan)}
+`, "utf8");
+    return {
+      status: "success"
+    };
+  } catch (error) {
+    return {
+      status: "failure",
+      diagnostic: createConfigDiagnostic(
+        DiagnosticCode.PlanWriteFailed,
+        "Failed to write plan file.",
+        {
+          path: absolutePath,
+          reason: error instanceof Error ? error.message : "unknown"
+        }
+      )
+    };
+  }
+};
+
+// src/roster/roster-loader.ts
+import path7 from "path";
 
 // src/io/csv.ts
 var HEADER_ROW_NUMBER = 1;
@@ -1550,11 +2136,6 @@ var normalizeRosterStatus = (value, context) => normalizeLowercaseValue(
   context
 );
 
-// src/roster/roster-models.ts
-var ROSTER_STATUS_ACTIVE = "active";
-var ROSTER_STATUS_DROPPED = "dropped";
-var ROSTER_STATUS_HOLD = "hold";
-
 // src/roster/roster-validation.ts
 var STUDENT_ID_COLUMN = "student_id";
 var GITHUB_USERNAME_COLUMN = "github_username";
@@ -1575,8 +2156,8 @@ var VALID_ROSTER_STATUSES = [
   ROSTER_STATUS_HOLD
 ];
 var GITHUB_USERNAME_PATTERN = /^[a-z0-9-]+$/;
-var CONSECUTIVE_HYPHENS = "--";
-var HYPHEN = "-";
+var CONSECUTIVE_HYPHENS2 = "--";
+var HYPHEN2 = "-";
 var isRosterStatus = (value) => VALID_ROSTER_STATUSES.some((status) => status === value);
 var validateRequiredColumns = (rosterPath, headers) => REQUIRED_ROSTER_COLUMNS.filter((column) => !headers.includes(column)).map(
   (column) => createConfigDiagnostic(
@@ -1621,7 +2202,7 @@ var validateRosterSection = (rosterPath, rowNumber, expectedSection, actualSecti
   )
 ];
 var validateGithubUsername = (rosterPath, rowNumber, githubUsername) => {
-  const isValid = githubUsername.length > 0 && githubUsername.length <= GITHUB_USERNAME_MAX_LENGTH && GITHUB_USERNAME_PATTERN.test(githubUsername) && !githubUsername.startsWith(HYPHEN) && !githubUsername.endsWith(HYPHEN) && !githubUsername.includes(CONSECUTIVE_HYPHENS);
+  const isValid = githubUsername.length > 0 && githubUsername.length <= GITHUB_USERNAME_MAX_LENGTH && GITHUB_USERNAME_PATTERN.test(githubUsername) && !githubUsername.startsWith(HYPHEN2) && !githubUsername.endsWith(HYPHEN2) && !githubUsername.includes(CONSECUTIVE_HYPHENS2);
   return isValid ? [] : [
     createConfigDiagnostic(
       INVALID_GITHUB_USERNAME_CODE,
@@ -1670,15 +2251,15 @@ var validateRosterDuplicates = (students) => [
 ];
 
 // src/roster/roster-loader.ts
-var EMPTY_COUNT2 = 0;
+var EMPTY_COUNT3 = 0;
 var TERM_DIRECTORY_DEPTH = 2;
 var MISSING_COLUMN_INDEX = -1;
 var createEmptySummary = (rosterFiles) => ({
   rosterFiles,
-  studentCount: EMPTY_COUNT2,
-  activeStudentCount: EMPTY_COUNT2,
-  droppedStudentCount: EMPTY_COUNT2,
-  holdStudentCount: EMPTY_COUNT2
+  studentCount: EMPTY_COUNT3,
+  activeStudentCount: EMPTY_COUNT3,
+  droppedStudentCount: EMPTY_COUNT3,
+  holdStudentCount: EMPTY_COUNT3
 });
 var createSummary2 = (rosterFiles, students) => ({
   rosterFiles,
@@ -1687,13 +2268,13 @@ var createSummary2 = (rosterFiles, students) => ({
   droppedStudentCount: students.filter((student) => student.status === ROSTER_STATUS_DROPPED).length,
   holdStudentCount: students.filter((student) => student.status === ROSTER_STATUS_HOLD).length
 });
-var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT2, TERM_DIRECTORY_DEPTH).join("/");
+var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT3, TERM_DIRECTORY_DEPTH).join("/");
 var getSectionSources = (config) => {
   const termDirectory = getTermDirectory(config.summary.termConfigPath);
   const sectionsById = new Map(
     config.term.sections.map((section) => [
       section.id,
-      toForwardSlashPath(path4.posix.join(termDirectory, section.roster))
+      toForwardSlashPath(path7.posix.join(termDirectory, section.roster))
     ])
   );
   return config.assignment.sections.map((sectionId) => ({
@@ -1714,7 +2295,7 @@ var createContext = (rosterPath, rowNumber, expectedSection) => ({
   expectedSection
 });
 var loadSectionRoster = (repoRoot, source) => {
-  const fileResult = readTextFile(path4.join(repoRoot, source.rosterPath));
+  const fileResult = readTextFile(path7.join(repoRoot, source.rosterPath));
   if (fileResult.status === "failure") {
     return {
       students: [],
@@ -1724,7 +2305,7 @@ var loadSectionRoster = (repoRoot, source) => {
   }
   const document = parseCsv(fileResult.content);
   const missingColumnErrors = validateRequiredColumns(source.rosterPath, document.headers);
-  if (missingColumnErrors.length > EMPTY_COUNT2) {
+  if (missingColumnErrors.length > EMPTY_COUNT3) {
     return {
       students: [],
       warnings: [],
@@ -1748,9 +2329,9 @@ var loadSectionRoster = (repoRoot, source) => {
         [SECTION_COLUMN]: rawSection,
         [STATUS_COLUMN]: rawStatus
       };
-      return valueByColumn[column].length === EMPTY_COUNT2 ? [createMissingRequiredValueDiagnostic(source.rosterPath, row.rowNumber, column)] : [];
+      return valueByColumn[column].length === EMPTY_COUNT3 ? [createMissingRequiredValueDiagnostic(source.rosterPath, row.rowNumber, column)] : [];
     });
-    if (missingValueErrors.length > EMPTY_COUNT2) {
+    if (missingValueErrors.length > EMPTY_COUNT3) {
       errors.push(...missingValueErrors);
     } else {
       const normalizedStudentId = normalizeStudentId(rawStudentId, rowContext);
@@ -1768,7 +2349,7 @@ var loadSectionRoster = (repoRoot, source) => {
       ];
       warnings.push(...rowWarnings);
       errors.push(...rowErrors);
-      if (rowErrors.length === EMPTY_COUNT2 && isRosterStatus(normalizedStatus.value)) {
+      if (rowErrors.length === EMPTY_COUNT3 && isRosterStatus(normalizedStatus.value)) {
         students.push({
           studentId: normalizedStudentId.value,
           githubUsername: normalizedGithubUsername.value,
@@ -1802,14 +2383,15 @@ var loadAssignmentRosters = (config) => {
     students,
     warnings,
     errors,
-    summary: errors.length > EMPTY_COUNT2 ? createEmptySummary(rosterFiles) : createSummary2(rosterFiles, students)
+    summary: errors.length > EMPTY_COUNT3 ? createEmptySummary(rosterFiles) : createSummary2(rosterFiles, students)
   };
 };
 
-// src/cli/commands/validate.command.ts
-var COMMAND_NAME = "validate";
+// src/cli/commands/plan.command.ts
+var COMMAND_NAME = "plan";
 var DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
 var README_FILE2 = "README.md";
+var EMPTY_COUNT4 = 0;
 var createDefaultTemplateRepository = (owner, repo, branch) => ({
   owner,
   name: repo,
@@ -1853,11 +2435,12 @@ var createDefaultGitHubClient = (config, students) => {
     ]
   });
 };
-var runValidateCommand = async ({
+var runPlanCommand = async ({
   cwd,
   assignmentFile,
   options,
-  githubClient
+  githubClient,
+  clock = systemClock
 }) => {
   const configResult = loadGraiderConfig({
     cwd,
@@ -1877,9 +2460,193 @@ var runValidateCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > 0) {
+  if (rosterResult.errors.length > EMPTY_COUNT4) {
     return createCommandResult({
       commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: rosterResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary
+      }
+    });
+  }
+  const effectiveGitHubClient = githubClient ?? createDefaultGitHubClient(configResult.config, rosterResult.students);
+  const readinessResult = await validateGitHubReadiness({
+    courseConfig: configResult.config.course,
+    termConfig: configResult.config.term,
+    assignmentConfig: configResult.config.assignment,
+    students: rosterResult.students,
+    githubClient: effectiveGitHubClient
+  });
+  if (readinessResult.errors.length > EMPTY_COUNT4) {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...readinessResult.warnings],
+      errors: readinessResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        githubReadinessChecked: true
+      }
+    });
+  }
+  const now = clock.now();
+  const plan = await buildPlan({
+    config: configResult.config,
+    students: rosterResult.students,
+    rosterSummary: rosterResult.summary,
+    githubClient: effectiveGitHubClient,
+    createdAt: formatPlanCreatedAt(now)
+  });
+  const planPath = createPlanPath(
+    configResult.config.summary.repoRoot,
+    configResult.config.summary.termCode,
+    configResult.config.summary.assignmentSlug,
+    {
+      now: () => now
+    }
+  );
+  const writeResult = writePlanJsonFile(plan, planPath.absolutePath);
+  const writeErrors = writeResult.diagnostic === void 0 ? [] : [writeResult.diagnostic];
+  const errors = [...plan.errors, ...writeErrors];
+  const generatedFiles = writeResult.status === "success" ? [planPath.relativePath] : [];
+  return createCommandResult({
+    commandName: COMMAND_NAME,
+    assignmentFile: configResult.config.summary.assignmentConfigPath,
+    status: errors.length > EMPTY_COUNT4 ? "failure" : "success",
+    warnings: [...rosterResult.warnings, ...readinessResult.warnings, ...plan.warnings],
+    errors,
+    generatedFiles,
+    summary: {
+      options,
+      ...configResult.config.summary,
+      ...rosterResult.summary,
+      githubReadinessChecked: true,
+      planFile: planPath.relativePath,
+      operationCount: plan.operations.length,
+      plannedOperationCount: plan.summary.planned_operations,
+      skippedOperationCount: plan.summary.skipped_operations,
+      blockedOperationCount: plan.summary.blocked_operations,
+      inputFingerprint: plan.source.input_fingerprint
+    }
+  });
+};
+var registerPlanCommand = (program) => {
+  program.command(COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Plan assignment provisioning.").action(async (assignmentFile, rawOptions) => {
+    const options = normalizeCommonCommandOptions(rawOptions);
+    const result = await runPlanCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options
+    });
+    writeCommandResult(result, options.json);
+    process.exitCode = result.exitCode;
+  });
+};
+
+// src/cli/commands/remove-access.command.ts
+var registerRemoveAccessCommand = (program) => {
+  registerPlaceholderCommand(program, {
+    name: "remove-access",
+    description: "Remove student access from assignment repositories.",
+    support: "unsupported-in-mvp",
+    requireRepositoryRoot: false
+  });
+};
+
+// src/cli/commands/report.command.ts
+var registerReportCommand = (program) => {
+  registerPlaceholderCommand(program, {
+    name: "report",
+    description: "Generate assignment reports.",
+    support: "supported-placeholder",
+    requireRepositoryRoot: false
+  });
+};
+
+// src/cli/commands/validate.command.ts
+var COMMAND_NAME2 = "validate";
+var DEFAULT_TEMPLATE_COMMIT_SHA2 = "fake-template-sha";
+var README_FILE3 = "README.md";
+var createDefaultTemplateRepository2 = (owner, repo, branch) => ({
+  owner,
+  name: repo,
+  fullName: `${owner}/${repo}`,
+  id: 1 /* DefaultTemplateRepositoryId */,
+  private: true,
+  archived: false,
+  defaultBranch: branch,
+  htmlUrl: `https://github.com/${owner}/${repo}`,
+  isTemplate: true,
+  branches: [branch],
+  files: [README_FILE3],
+  latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA2
+});
+var createDefaultGitHubClient2 = (config, students) => {
+  const parsedTemplateRepository = parseTemplateRepository(
+    config.course.github.organization,
+    config.assignment.template.repository
+  );
+  const templateRepositories = parsedTemplateRepository.status === "success" ? [
+    createDefaultTemplateRepository2(
+      parsedTemplateRepository.repository.owner,
+      parsedTemplateRepository.repository.repo,
+      config.assignment.template.branch
+    )
+  ] : [];
+  return new FakeGitHubClient({
+    templateRepositories,
+    users: students.map((student) => ({ username: student.githubUsername })),
+    teams: [
+      {
+        org: config.course.github.organization,
+        slug: config.course.github.faculty_team,
+        name: config.course.github.faculty_team
+      },
+      {
+        org: config.course.github.organization,
+        slug: config.course.github.grader_team,
+        name: config.course.github.grader_team
+      }
+    ]
+  });
+};
+var runValidateCommand = async ({
+  cwd,
+  assignmentFile,
+  options,
+  githubClient
+}) => {
+  const configResult = loadGraiderConfig({
+    cwd,
+    assignmentFile
+  });
+  if (configResult.status === "failure") {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
+      assignmentFile,
+      status: "failure",
+      warnings: [],
+      errors: configResult.diagnostics,
+      generatedFiles: [],
+      summary: {
+        options
+      }
+    });
+  }
+  const rosterResult = loadAssignmentRosters(configResult.config);
+  if (rosterResult.errors.length > 0) {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -1897,11 +2664,11 @@ var runValidateCommand = async ({
     termConfig: configResult.config.term,
     assignmentConfig: configResult.config.assignment,
     students: rosterResult.students,
-    githubClient: githubClient ?? createDefaultGitHubClient(configResult.config, rosterResult.students)
+    githubClient: githubClient ?? createDefaultGitHubClient2(configResult.config, rosterResult.students)
   });
   if (readinessResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName: COMMAND_NAME2,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -1916,7 +2683,7 @@ var runValidateCommand = async ({
     });
   }
   return createCommandResult({
-    commandName: COMMAND_NAME,
+    commandName: COMMAND_NAME2,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
     warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -1931,7 +2698,7 @@ var runValidateCommand = async ({
   });
 };
 var registerValidateCommand = (program) => {
-  program.command(COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME2).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runValidateCommand({
       cwd: process.cwd(),

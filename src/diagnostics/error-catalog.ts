@@ -47,7 +47,13 @@ export const DiagnosticCode = {
   SourceFileMissing: "source_file_missing",
   SourceFileOutsideRepo: "source_file_outside_repo",
   SourceFileNotFile: "source_file_not_file",
-  SourceFingerprintFailed: "source_fingerprint_failed"
+  SourceFingerprintFailed: "source_fingerprint_failed",
+  RepoNameCollision: "repo_name_collision",
+  AssignmentNotActive: "assignment_not_active",
+  AssignmentClosedBlocksCreation: "assignment_closed_blocks_creation",
+  AssignmentArchived: "assignment_archived",
+  PlanContainsBlockedOperations: "plan_contains_blocked_operations",
+  PlanWriteFailed: "plan_write_failed"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -94,6 +100,12 @@ export const SOURCE_FILE_MISSING_CODE = DiagnosticCode.SourceFileMissing;
 export const SOURCE_FILE_OUTSIDE_REPO_CODE = DiagnosticCode.SourceFileOutsideRepo;
 export const SOURCE_FILE_NOT_FILE_CODE = DiagnosticCode.SourceFileNotFile;
 export const SOURCE_FINGERPRINT_FAILED_CODE = DiagnosticCode.SourceFingerprintFailed;
+export const REPO_NAME_COLLISION_CODE = DiagnosticCode.RepoNameCollision;
+export const ASSIGNMENT_NOT_ACTIVE_CODE = DiagnosticCode.AssignmentNotActive;
+export const ASSIGNMENT_CLOSED_BLOCKS_CREATION_CODE = DiagnosticCode.AssignmentClosedBlocksCreation;
+export const ASSIGNMENT_ARCHIVED_CODE = DiagnosticCode.AssignmentArchived;
+export const PLAN_CONTAINS_BLOCKED_OPERATIONS_CODE = DiagnosticCode.PlanContainsBlockedOperations;
+export const PLAN_WRITE_FAILED_CODE = DiagnosticCode.PlanWriteFailed;
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
