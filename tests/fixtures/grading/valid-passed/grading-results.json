@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "student_id": "jones",
+  "github_username": "seanjones",
+  "assignment_slug": "lab04",
+  "status": "passed",
+  "score": 10,
+  "max_score": 10,
+  "summary": "All checks passed.",
+  "checks": [
+    {
+      "name": "Unit tests",
+      "status": "passed",
+      "message": "All tests passed.",
+      "points_earned": 10,
+      "points_possible": 10,
+      "details": ["10 tests passed"]
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

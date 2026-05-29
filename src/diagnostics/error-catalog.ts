@@ -68,7 +68,14 @@ export const DiagnosticCode = {
   GradingWorkflowMissing: "grading_workflow_missing",
   WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
   PermissionNotDowngraded: "permission_not_downgraded",
-  UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved"
+  UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved",
+  InvalidGradingResult: "invalid_grading_result",
+  InvalidGradingResultSchemaVersion: "invalid_grading_result_schema_version",
+  InvalidGradingResultStatus: "invalid_grading_result_status",
+  InvalidGradingCheckStatus: "invalid_grading_check_status",
+  MissingGradingCheckName: "missing_grading_check_name",
+  InvalidGradingScore: "invalid_grading_score",
+  GradingWorkflowFailedWithResults: "grading_workflow_failed_with_results"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -139,6 +146,15 @@ export const WORKFLOW_DISPATCH_UNSUPPORTED_CODE = DiagnosticCode.WorkflowDispatc
 export const PERMISSION_NOT_DOWNGRADED_CODE = DiagnosticCode.PermissionNotDowngraded;
 export const UNEXPECTED_COLLABORATOR_PRESERVED_CODE =
   DiagnosticCode.UnexpectedCollaboratorPreserved;
+export const INVALID_GRADING_RESULT_CODE = DiagnosticCode.InvalidGradingResult;
+export const INVALID_GRADING_RESULT_SCHEMA_VERSION_CODE =
+  DiagnosticCode.InvalidGradingResultSchemaVersion;
+export const INVALID_GRADING_RESULT_STATUS_CODE = DiagnosticCode.InvalidGradingResultStatus;
+export const INVALID_GRADING_CHECK_STATUS_CODE = DiagnosticCode.InvalidGradingCheckStatus;
+export const MISSING_GRADING_CHECK_NAME_CODE = DiagnosticCode.MissingGradingCheckName;
+export const INVALID_GRADING_SCORE_CODE = DiagnosticCode.InvalidGradingScore;
+export const GRADING_WORKFLOW_FAILED_WITH_RESULTS_CODE =
+  DiagnosticCode.GradingWorkflowFailedWithResults;
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,

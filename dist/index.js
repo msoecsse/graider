@@ -75,7 +75,14 @@ var DiagnosticCode = {
   GradingWorkflowMissing: "grading_workflow_missing",
   WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
   PermissionNotDowngraded: "permission_not_downgraded",
-  UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved"
+  UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved",
+  InvalidGradingResult: "invalid_grading_result",
+  InvalidGradingResultSchemaVersion: "invalid_grading_result_schema_version",
+  InvalidGradingResultStatus: "invalid_grading_result_status",
+  InvalidGradingCheckStatus: "invalid_grading_check_status",
+  MissingGradingCheckName: "missing_grading_check_name",
+  InvalidGradingScore: "invalid_grading_score",
+  GradingWorkflowFailedWithResults: "grading_workflow_failed_with_results"
 };
 var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
 var MISSING_REQUIRED_FILE_CODE = DiagnosticCode.MissingRequiredFile;
@@ -138,6 +145,13 @@ var GRADING_WORKFLOW_MISSING_CODE = DiagnosticCode.GradingWorkflowMissing;
 var WORKFLOW_DISPATCH_UNSUPPORTED_CODE = DiagnosticCode.WorkflowDispatchUnsupported;
 var PERMISSION_NOT_DOWNGRADED_CODE = DiagnosticCode.PermissionNotDowngraded;
 var UNEXPECTED_COLLABORATOR_PRESERVED_CODE = DiagnosticCode.UnexpectedCollaboratorPreserved;
+var INVALID_GRADING_RESULT_CODE = DiagnosticCode.InvalidGradingResult;
+var INVALID_GRADING_RESULT_SCHEMA_VERSION_CODE = DiagnosticCode.InvalidGradingResultSchemaVersion;
+var INVALID_GRADING_RESULT_STATUS_CODE = DiagnosticCode.InvalidGradingResultStatus;
+var INVALID_GRADING_CHECK_STATUS_CODE = DiagnosticCode.InvalidGradingCheckStatus;
+var MISSING_GRADING_CHECK_NAME_CODE = DiagnosticCode.MissingGradingCheckName;
+var INVALID_GRADING_SCORE_CODE = DiagnosticCode.InvalidGradingScore;
+var GRADING_WORKFLOW_FAILED_WITH_RESULTS_CODE = DiagnosticCode.GradingWorkflowFailedWithResults;
 var createNotSupportedInMvpDiagnostic = (commandName) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
   severity: "error",

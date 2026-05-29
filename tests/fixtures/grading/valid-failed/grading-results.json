@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "status": "failed",
+  "score": 4,
+  "max_score": 10,
+  "summary": "Some checks failed.",
+  "checks": [
+    {
+      "name": "Unit tests",
+      "status": "failed",
+      "message": "One test failed.",
+      "points_earned": 4,
+      "points_possible": 10
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}
