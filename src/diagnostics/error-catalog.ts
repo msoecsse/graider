@@ -53,7 +53,15 @@ export const DiagnosticCode = {
   AssignmentClosedBlocksCreation: "assignment_closed_blocks_creation",
   AssignmentArchived: "assignment_archived",
   PlanContainsBlockedOperations: "plan_contains_blocked_operations",
-  PlanWriteFailed: "plan_write_failed"
+  PlanWriteFailed: "plan_write_failed",
+  ManifestMissing: "manifest_missing",
+  InvalidManifest: "invalid_manifest",
+  InvalidManifestSchemaVersion: "invalid_manifest_schema_version",
+  MissingManifestSection: "missing_manifest_section",
+  InvalidManifestRepositoryRecord: "invalid_manifest_repository_record",
+  InvalidManifestLifecycleStatus: "invalid_manifest_lifecycle_status",
+  InvalidManifestPermission: "invalid_manifest_permission",
+  ManifestWriteFailed: "manifest_write_failed"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -106,6 +114,15 @@ export const ASSIGNMENT_CLOSED_BLOCKS_CREATION_CODE = DiagnosticCode.AssignmentC
 export const ASSIGNMENT_ARCHIVED_CODE = DiagnosticCode.AssignmentArchived;
 export const PLAN_CONTAINS_BLOCKED_OPERATIONS_CODE = DiagnosticCode.PlanContainsBlockedOperations;
 export const PLAN_WRITE_FAILED_CODE = DiagnosticCode.PlanWriteFailed;
+export const MANIFEST_MISSING_CODE = DiagnosticCode.ManifestMissing;
+export const INVALID_MANIFEST_CODE = DiagnosticCode.InvalidManifest;
+export const INVALID_MANIFEST_SCHEMA_VERSION_CODE = DiagnosticCode.InvalidManifestSchemaVersion;
+export const MISSING_MANIFEST_SECTION_CODE = DiagnosticCode.MissingManifestSection;
+export const INVALID_MANIFEST_REPOSITORY_RECORD_CODE =
+  DiagnosticCode.InvalidManifestRepositoryRecord;
+export const INVALID_MANIFEST_LIFECYCLE_STATUS_CODE = DiagnosticCode.InvalidManifestLifecycleStatus;
+export const INVALID_MANIFEST_PERMISSION_CODE = DiagnosticCode.InvalidManifestPermission;
+export const MANIFEST_WRITE_FAILED_CODE = DiagnosticCode.ManifestWriteFailed;
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,

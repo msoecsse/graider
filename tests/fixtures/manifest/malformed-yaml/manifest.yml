@@ -1,0 +1,10 @@
+schema_version: 1
+assignment:
+  term_code: 27s1
+  course_code: se2030
+  assignment_slug: lab04
+  assignment_title: Lab 04
+source:
+  source_files:
+    - path: course.yml
+      sha256: [unterminated

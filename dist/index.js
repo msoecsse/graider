@@ -57,7 +57,15 @@ var DiagnosticCode = {
   AssignmentClosedBlocksCreation: "assignment_closed_blocks_creation",
   AssignmentArchived: "assignment_archived",
   PlanContainsBlockedOperations: "plan_contains_blocked_operations",
-  PlanWriteFailed: "plan_write_failed"
+  PlanWriteFailed: "plan_write_failed",
+  ManifestMissing: "manifest_missing",
+  InvalidManifest: "invalid_manifest",
+  InvalidManifestSchemaVersion: "invalid_manifest_schema_version",
+  MissingManifestSection: "missing_manifest_section",
+  InvalidManifestRepositoryRecord: "invalid_manifest_repository_record",
+  InvalidManifestLifecycleStatus: "invalid_manifest_lifecycle_status",
+  InvalidManifestPermission: "invalid_manifest_permission",
+  ManifestWriteFailed: "manifest_write_failed"
 };
 var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
 var MISSING_REQUIRED_FILE_CODE = DiagnosticCode.MissingRequiredFile;
@@ -105,6 +113,14 @@ var ASSIGNMENT_CLOSED_BLOCKS_CREATION_CODE = DiagnosticCode.AssignmentClosedBloc
 var ASSIGNMENT_ARCHIVED_CODE = DiagnosticCode.AssignmentArchived;
 var PLAN_CONTAINS_BLOCKED_OPERATIONS_CODE = DiagnosticCode.PlanContainsBlockedOperations;
 var PLAN_WRITE_FAILED_CODE = DiagnosticCode.PlanWriteFailed;
+var MANIFEST_MISSING_CODE = DiagnosticCode.ManifestMissing;
+var INVALID_MANIFEST_CODE = DiagnosticCode.InvalidManifest;
+var INVALID_MANIFEST_SCHEMA_VERSION_CODE = DiagnosticCode.InvalidManifestSchemaVersion;
+var MISSING_MANIFEST_SECTION_CODE = DiagnosticCode.MissingManifestSection;
+var INVALID_MANIFEST_REPOSITORY_RECORD_CODE = DiagnosticCode.InvalidManifestRepositoryRecord;
+var INVALID_MANIFEST_LIFECYCLE_STATUS_CODE = DiagnosticCode.InvalidManifestLifecycleStatus;
+var INVALID_MANIFEST_PERMISSION_CODE = DiagnosticCode.InvalidManifestPermission;
+var MANIFEST_WRITE_FAILED_CODE = DiagnosticCode.ManifestWriteFailed;
 var createNotSupportedInMvpDiagnostic = (commandName) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
   severity: "error",

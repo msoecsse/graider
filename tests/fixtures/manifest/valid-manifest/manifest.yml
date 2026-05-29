@@ -1,0 +1,71 @@
+schema_version: 1
+assignment:
+  term_code: 27s1
+  course_code: se2030
+  assignment_slug: lab04
+  assignment_title: Lab 04
+source:
+  source_files:
+    - path: course.yml
+      sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    - path: terms/27s1/assignments/lab04/assignment.yml
+      sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  input_fingerprint: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+template:
+  repository: example-org/lab04-template
+  branch: main
+  commit_sha: template-sha
+repositories:
+  - student_id: jones
+    github_username: seanjones
+    section: "001"
+    roster_status: active
+    repository:
+      owner: example-org
+      name: 27s1-se2030-lab04-seanjones
+      full_name: example-org/27s1-se2030-lab04-seanjones
+      id: 101
+      html_url: https://github.com/example-org/27s1-se2030-lab04-seanjones
+      created_from_template: true
+      template_repository: example-org/lab04-template
+      template_commit_sha: template-sha
+      created_at: "2026-09-01T14:30:00.000Z"
+      last_observed_at: "2026-09-01T14:30:00.000Z"
+    permissions:
+      student:
+        username: seanjones
+        permission: push
+        pending_invite: false
+        last_applied_at: "2026-09-01T14:31:00.000Z"
+      faculty_team:
+        team_slug: faculty
+        permission: admin
+        last_applied_at: "2026-09-01T14:32:00.000Z"
+      grader_team:
+        team_slug: graders
+        permission: maintain
+        last_applied_at: "2026-09-01T14:33:00.000Z"
+    actions:
+      enabled: true
+      grading_workflow_path: grade.yml
+      grading_workflow_found: true
+      workflow_dispatch_supported: true
+      last_observed_at: "2026-09-01T14:34:00.000Z"
+    lifecycle:
+      repository_archived: false
+      student_access_removed: false
+      status: active
+      last_changed_at: "2026-09-01T14:35:00.000Z"
+    warnings: []
+    errors: []
+operation_history:
+  - command: apply
+    started_at: "2026-09-01T14:30:00.000Z"
+    completed_at: "2026-09-01T14:36:00.000Z"
+    status: success
+    summary:
+      repositories_created: 1
+    warnings: []
+    errors: []
+warnings: []
+errors: []
