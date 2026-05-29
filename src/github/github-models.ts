@@ -35,6 +35,10 @@ export interface GitHubPermissionState {
   pendingInvite: boolean;
 }
 
+export interface GitHubCollaboratorPermissionState extends GitHubPermissionState {
+  username: string;
+}
+
 export interface GitHubCollaboratorResult {
   username: string;
   permission: GitHubPermission;

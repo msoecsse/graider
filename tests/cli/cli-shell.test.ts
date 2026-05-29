@@ -76,11 +76,10 @@ describe("graider CLI shell", () => {
   });
 
   it("TC-CLI-SHELL-003 command exists: apply", () => {
-    const output = runCliText(["apply", TEST_ASSIGNMENT_FILE]);
+    const output = runCliText(["apply", "--help"]);
 
     expect(output).toContain("apply");
-    expect(output).toContain(TEST_ASSIGNMENT_FILE);
-    expect(output).toContain("success");
+    expect(output).toContain("Apply assignment repository changes");
   });
 
   it("TC-CLI-SHELL-004 command exists: grade", () => {
@@ -125,11 +124,11 @@ describe("graider CLI shell", () => {
   });
 
   it("TC-CLI-SHELL-009 --json emits valid JSON placeholder output", () => {
-    const result = runCli(["apply", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"]);
+    const result = runCli(["grade", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"]);
     const json = parseJsonResult(result.stdout);
 
     expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.commandName).toBe("apply");
+    expect(json.commandName).toBe("grade");
     expect(json.assignmentFile).toBe(TEST_ASSIGNMENT_FILE);
     expect(json.status).toBe("success");
     expect(json.exitCode).toBe(SUCCESS_EXIT_CODE);

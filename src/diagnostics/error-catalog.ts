@@ -61,7 +61,14 @@ export const DiagnosticCode = {
   InvalidManifestRepositoryRecord: "invalid_manifest_repository_record",
   InvalidManifestLifecycleStatus: "invalid_manifest_lifecycle_status",
   InvalidManifestPermission: "invalid_manifest_permission",
-  ManifestWriteFailed: "manifest_write_failed"
+  ManifestWriteFailed: "manifest_write_failed",
+  MutationBlocked: "mutation_blocked",
+  ConfirmationRequired: "confirmation_required",
+  ManifestTrackedRepositoryMissing: "manifest_tracked_repository_missing",
+  GradingWorkflowMissing: "grading_workflow_missing",
+  WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
+  PermissionNotDowngraded: "permission_not_downgraded",
+  UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -123,6 +130,15 @@ export const INVALID_MANIFEST_REPOSITORY_RECORD_CODE =
 export const INVALID_MANIFEST_LIFECYCLE_STATUS_CODE = DiagnosticCode.InvalidManifestLifecycleStatus;
 export const INVALID_MANIFEST_PERMISSION_CODE = DiagnosticCode.InvalidManifestPermission;
 export const MANIFEST_WRITE_FAILED_CODE = DiagnosticCode.ManifestWriteFailed;
+export const MUTATION_BLOCKED_CODE = DiagnosticCode.MutationBlocked;
+export const CONFIRMATION_REQUIRED_CODE = DiagnosticCode.ConfirmationRequired;
+export const MANIFEST_TRACKED_REPOSITORY_MISSING_CODE =
+  DiagnosticCode.ManifestTrackedRepositoryMissing;
+export const GRADING_WORKFLOW_MISSING_CODE = DiagnosticCode.GradingWorkflowMissing;
+export const WORKFLOW_DISPATCH_UNSUPPORTED_CODE = DiagnosticCode.WorkflowDispatchUnsupported;
+export const PERMISSION_NOT_DOWNGRADED_CODE = DiagnosticCode.PermissionNotDowngraded;
+export const UNEXPECTED_COLLABORATOR_PRESERVED_CODE =
+  DiagnosticCode.UnexpectedCollaboratorPreserved;
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,

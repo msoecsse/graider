@@ -7,6 +7,7 @@ import { DiagnosticCode, createConfigDiagnostic } from "../diagnostics/error-cat
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
 import { GitHubClientError, createGitHubDiagnostic } from "../github/github-errors.js";
+import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import type { RosterStudent, RosterSummary } from "../roster/roster-models.js";
 import { ROSTER_STATUS_ACTIVE } from "../roster/roster-models.js";
 import type { PlanOperation, PlanOperationType } from "./operation-models.js";
@@ -29,6 +30,7 @@ export interface BuildPlanInput {
   rosterSummary: RosterSummary;
   githubClient: GitHubClient;
   createdAt: string;
+  manifest?: Manifest;
 }
 
 const createUnexpectedGitHubDiagnostic = (): Diagnostic =>
@@ -74,6 +76,23 @@ const createCollisionDiagnostic = (organization: string, repositoryName: string)
     {
       organization,
       repositoryName
+    }
+  );
+
+const createManifestTrackedMissingDiagnostic = (
+  organization: string,
+  repositoryName: string,
+  student: RosterStudent
+): Diagnostic =>
+  createConfigDiagnostic(
+    DiagnosticCode.ManifestTrackedRepositoryMissing,
+    `Manifest-tracked repository ${organization}/${repositoryName} was not found on GitHub.`,
+    {
+      organization,
+      repositoryName,
+      student_id: student.studentId,
+      github_username: student.githubUsername,
+      section: student.section
     }
   );
 
@@ -252,10 +271,73 @@ const buildPlannedProvisioningOperations = (
   ];
 };
 
+const buildTrackedRepositoryOperations = (
+  config: LoadedGraiderConfig,
+  student: RosterStudent,
+  repositoryName: string
+): PlanOperation[] => {
+  const createRepositoryId = createOperationId(
+    student.section,
+    student.studentId,
+    "create_repository_from_template"
+  );
+  const enableActionsId = createOperationId(student.section, student.studentId, "enable_actions");
+  const verifyWorkflowId = createOperationId(
+    student.section,
+    student.studentId,
+    "verify_grading_workflow"
+  );
+  const sharedInput = {
+    repositoryName,
+    requires: [createRepositoryId]
+  };
+
+  return [
+    createOperation(student, "create_repository_from_template", "noop", {
+      repositoryName,
+      reason: "manifest_tracked_repository"
+    }),
+    createOperation(student, "add_student_collaborator", "planned", sharedInput),
+    createOperation(student, "add_faculty_team_permission", "planned", sharedInput),
+    createOperation(student, "add_grader_team_permission", "planned", sharedInput),
+    createOperation(student, "enable_actions", "planned", sharedInput),
+    ...(config.summary.gradingEnabled
+      ? [
+          createOperation(student, "verify_grading_workflow", "planned", {
+            repositoryName,
+            requires: [enableActionsId]
+          }),
+          createOperation(student, "verify_workflow_dispatch", "planned", {
+            repositoryName,
+            requires: [verifyWorkflowId]
+          })
+        ]
+      : [
+          createOperation(student, "verify_grading_workflow", "skipped", {
+            repositoryName,
+            requires: [enableActionsId],
+            reason: GRADING_DISABLED_REASON
+          }),
+          createOperation(student, "verify_workflow_dispatch", "skipped", {
+            repositoryName,
+            requires: [verifyWorkflowId],
+            reason: GRADING_DISABLED_REASON
+          })
+        ])
+  ];
+};
+
+const findManifestRecord = (
+  manifest: Manifest | undefined,
+  student: RosterStudent
+): ManifestRepositoryRecord | undefined =>
+  manifest?.repositories.find((record) => record.studentId === student.studentId);
+
 const buildActiveStudentOperations = async (
   config: LoadedGraiderConfig,
   student: RosterStudent,
-  githubClient: GitHubClient
+  githubClient: GitHubClient,
+  manifest: Manifest | undefined
 ): Promise<PlanOperation[]> => {
   const repositoryNameResult = generateStudentRepositoryName(config, student);
 
@@ -268,11 +350,50 @@ const buildActiveStudentOperations = async (
     ];
   }
 
-  const lifecycleOperations = buildLifecycleOperations(
-    config,
-    student,
-    repositoryNameResult.repositoryName
-  );
+  const manifestRecord = findManifestRecord(manifest, student);
+  const repositoryName = manifestRecord?.repository.name ?? repositoryNameResult.repositoryName;
+
+  if (
+    config.assignment.assignment.status === DRAFT_ASSIGNMENT_STATUS ||
+    config.assignment.assignment.status === ARCHIVED_ASSIGNMENT_STATUS
+  ) {
+    return buildLifecycleOperations(config, student, repositoryName);
+  }
+
+  if (manifestRecord !== undefined) {
+    try {
+      const existingRepository = await githubClient.getRepository(
+        config.course.github.organization,
+        manifestRecord.repository.name
+      );
+
+      if (existingRepository === null) {
+        return [
+          createOperation(student, "create_repository_from_template", "blocked", {
+            repositoryName: manifestRecord.repository.name,
+            errors: [
+              createManifestTrackedMissingDiagnostic(
+                config.course.github.organization,
+                manifestRecord.repository.name,
+                student
+              )
+            ]
+          })
+        ];
+      }
+
+      return buildTrackedRepositoryOperations(config, student, manifestRecord.repository.name);
+    } catch (error: unknown) {
+      return [
+        createOperation(student, "create_repository_from_template", "blocked", {
+          repositoryName: manifestRecord.repository.name,
+          errors: [normalizeGitHubError(error)]
+        })
+      ];
+    }
+  }
+
+  const lifecycleOperations = buildLifecycleOperations(config, student, repositoryName);
 
   if (lifecycleOperations.length > EMPTY_COUNT) {
     return lifecycleOperations;
@@ -291,22 +412,17 @@ const buildActiveStudentOperations = async (
     if (existingRepository !== null) {
       return [
         createOperation(student, "create_repository_from_template", "blocked", {
-          repositoryName: repositoryNameResult.repositoryName,
-          errors: [
-            createCollisionDiagnostic(
-              config.course.github.organization,
-              repositoryNameResult.repositoryName
-            )
-          ]
+          repositoryName,
+          errors: [createCollisionDiagnostic(config.course.github.organization, repositoryName)]
         })
       ];
     }
 
-    return buildPlannedProvisioningOperations(config, student, repositoryNameResult.repositoryName);
+    return buildPlannedProvisioningOperations(config, student, repositoryName);
   } catch (error: unknown) {
     return [
       createOperation(student, "create_repository_from_template", "blocked", {
-        repositoryName: repositoryNameResult.repositoryName,
+        repositoryName,
         errors: [normalizeGitHubError(error)]
       })
     ];
@@ -316,10 +432,11 @@ const buildActiveStudentOperations = async (
 const buildStudentOperations = async (
   config: LoadedGraiderConfig,
   student: RosterStudent,
-  githubClient: GitHubClient
+  githubClient: GitHubClient,
+  manifest: Manifest | undefined
 ): Promise<PlanOperation[]> =>
   student.status === ROSTER_STATUS_ACTIVE
-    ? buildActiveStudentOperations(config, student, githubClient)
+    ? buildActiveStudentOperations(config, student, githubClient, manifest)
     : [buildSkippedStudentOperation(student)];
 
 const createPlanSummary = (
@@ -344,7 +461,8 @@ export const buildPlan = async ({
   students,
   rosterSummary,
   githubClient,
-  createdAt
+  createdAt,
+  manifest
 }: BuildPlanInput): Promise<Plan> => {
   const sourceFingerprint = createSourceFingerprint({
     repoRoot: config.summary.repoRoot,
@@ -358,7 +476,9 @@ export const buildPlan = async ({
   const operationGroups: PlanOperation[][] = [];
 
   for (const student of students) {
-    operationGroups.push(...[await buildStudentOperations(config, student, githubClient)]);
+    operationGroups.push(
+      ...[await buildStudentOperations(config, student, githubClient, manifest)]
+    );
   }
 
   const operations = operationGroups.flat().sort(comparePlanOperations);

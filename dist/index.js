@@ -3,6 +3,9 @@
 // src/cli/index.ts
 import { Command } from "commander";
 
+// src/cli/commands/apply.command.ts
+import fs6 from "fs";
+
 // src/diagnostics/error-catalog.ts
 var DiagnosticCode = {
   MissingRequiredFile: "missing_required_file",
@@ -65,7 +68,14 @@ var DiagnosticCode = {
   InvalidManifestRepositoryRecord: "invalid_manifest_repository_record",
   InvalidManifestLifecycleStatus: "invalid_manifest_lifecycle_status",
   InvalidManifestPermission: "invalid_manifest_permission",
-  ManifestWriteFailed: "manifest_write_failed"
+  ManifestWriteFailed: "manifest_write_failed",
+  MutationBlocked: "mutation_blocked",
+  ConfirmationRequired: "confirmation_required",
+  ManifestTrackedRepositoryMissing: "manifest_tracked_repository_missing",
+  GradingWorkflowMissing: "grading_workflow_missing",
+  WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
+  PermissionNotDowngraded: "permission_not_downgraded",
+  UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved"
 };
 var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
 var MISSING_REQUIRED_FILE_CODE = DiagnosticCode.MissingRequiredFile;
@@ -121,6 +131,13 @@ var INVALID_MANIFEST_REPOSITORY_RECORD_CODE = DiagnosticCode.InvalidManifestRepo
 var INVALID_MANIFEST_LIFECYCLE_STATUS_CODE = DiagnosticCode.InvalidManifestLifecycleStatus;
 var INVALID_MANIFEST_PERMISSION_CODE = DiagnosticCode.InvalidManifestPermission;
 var MANIFEST_WRITE_FAILED_CODE = DiagnosticCode.ManifestWriteFailed;
+var MUTATION_BLOCKED_CODE = DiagnosticCode.MutationBlocked;
+var CONFIRMATION_REQUIRED_CODE = DiagnosticCode.ConfirmationRequired;
+var MANIFEST_TRACKED_REPOSITORY_MISSING_CODE = DiagnosticCode.ManifestTrackedRepositoryMissing;
+var GRADING_WORKFLOW_MISSING_CODE = DiagnosticCode.GradingWorkflowMissing;
+var WORKFLOW_DISPATCH_UNSUPPORTED_CODE = DiagnosticCode.WorkflowDispatchUnsupported;
+var PERMISSION_NOT_DOWNGRADED_CODE = DiagnosticCode.PermissionNotDowngraded;
+var UNEXPECTED_COLLABORATOR_PRESERVED_CODE = DiagnosticCode.UnexpectedCollaboratorPreserved;
 var createNotSupportedInMvpDiagnostic = (commandName) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
   severity: "error",
@@ -159,261 +176,6 @@ var createWarningDiagnostic = (code, message, context) => ({
   message,
   ...context === void 0 ? {} : { context }
 });
-
-// src/core/exit-codes.ts
-var AUTHORIZATION_ERROR_CODES = /* @__PURE__ */ new Set([
-  DiagnosticCode.GithubAuthMissing,
-  DiagnosticCode.GithubAuthFailed,
-  DiagnosticCode.GithubPermissionDenied
-]);
-var CONFIGURATION_ERROR_CODES = /* @__PURE__ */ new Set([
-  DiagnosticCode.MissingRequiredFile,
-  DiagnosticCode.InvalidYaml,
-  DiagnosticCode.InvalidSchemaVersion,
-  DiagnosticCode.MissingRequiredField,
-  DiagnosticCode.InvalidTermCode,
-  DiagnosticCode.AssignmentSlugMismatch,
-  DiagnosticCode.TermCodeMismatch,
-  DiagnosticCode.InvalidAssignmentType,
-  DiagnosticCode.InvalidAssignmentStatus,
-  DiagnosticCode.InvalidRepositoryVisibility,
-  DiagnosticCode.InvalidPermission,
-  DiagnosticCode.InvalidGradingConfig
-]);
-var GITHUB_ERROR_CODES = /* @__PURE__ */ new Set([
-  DiagnosticCode.GithubApiError,
-  DiagnosticCode.GithubNetworkError,
-  DiagnosticCode.GithubRateLimited,
-  DiagnosticCode.GithubTimeout
-]);
-var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic) => codes.has(diagnostic.code));
-var resolveExitCode = ({ status, errors }) => {
-  if (hasCodeInSet(errors, AUTHORIZATION_ERROR_CODES)) {
-    return 3 /* AuthenticationOrAuthorizationFailure */;
-  }
-  if (hasCodeInSet(errors, CONFIGURATION_ERROR_CODES)) {
-    return 5 /* ConfigurationOrSchemaError */;
-  }
-  if (hasCodeInSet(errors, GITHUB_ERROR_CODES)) {
-    return 4 /* GitHubOrNetworkFailure */;
-  }
-  if (status === "partial_success") {
-    return 2 /* PartialSuccess */;
-  }
-  if (errors.length > 0 || status === "failure") {
-    return 1 /* CommandError */;
-  }
-  return 0 /* Success */;
-};
-
-// src/core/command-result.ts
-var createCommandResult = (input) => ({
-  ...input,
-  exitCode: resolveExitCode(input)
-});
-var createSuccessfulPlaceholderResult = (context) => createCommandResult({
-  commandName: context.commandName,
-  assignmentFile: context.assignmentRelativePath ?? context.assignmentFile,
-  status: "success",
-  warnings: [],
-  errors: [],
-  generatedFiles: [],
-  summary: {
-    placeholder: true,
-    options: context.options,
-    cwd: context.cwd,
-    assignmentPath: context.assignmentPath,
-    ...context.repoRoot === void 0 ? {} : { repoRoot: context.repoRoot },
-    ...context.assignmentRelativePath === void 0 ? {} : { assignmentRelativePath: context.assignmentRelativePath }
-  }
-});
-var createFailedPlaceholderResult = (context, error) => createCommandResult({
-  commandName: context.commandName,
-  assignmentFile: context.assignmentRelativePath ?? context.assignmentFile,
-  status: "failure",
-  warnings: [],
-  errors: [error],
-  generatedFiles: [],
-  summary: {
-    placeholder: true,
-    options: context.options,
-    cwd: context.cwd,
-    assignmentPath: context.assignmentPath,
-    ...context.repoRoot === void 0 ? {} : { repoRoot: context.repoRoot },
-    ...context.assignmentRelativePath === void 0 ? {} : { assignmentRelativePath: context.assignmentRelativePath }
-  }
-});
-
-// src/core/command-context.ts
-var normalizeCommonCommandOptions = (options) => ({
-  json: options.json === true,
-  verbose: options.verbose === true,
-  yes: options.yes === true
-});
-
-// src/core/paths.ts
-import path from "path";
-var WINDOWS_SEPARATOR_PATTERN = /\\/g;
-var PARENT_DIRECTORY_REFERENCE = "..";
-var OUTSIDE_REPOSITORY_ROOT_MESSAGE = "Path is outside the repository root.";
-var resolveAssignmentPath = (cwd, assignmentPath) => path.resolve(cwd, assignmentPath);
-var toForwardSlashPath = (pathValue) => pathValue.replace(WINDOWS_SEPARATOR_PATTERN, "/");
-var toRepositoryRelativePath = (repoRoot, absolutePath) => {
-  const resolvedRepoRoot = path.resolve(repoRoot);
-  const resolvedPath = path.resolve(absolutePath);
-  const relativePath = path.relative(resolvedRepoRoot, resolvedPath);
-  if (relativePath === PARENT_DIRECTORY_REFERENCE || relativePath.startsWith(`${PARENT_DIRECTORY_REFERENCE}${path.sep}`) || path.isAbsolute(relativePath)) {
-    throw new Error(OUTSIDE_REPOSITORY_ROOT_MESSAGE);
-  }
-  return toForwardSlashPath(relativePath);
-};
-
-// src/core/repo-root.ts
-import fs from "fs";
-import path2 from "path";
-var COURSE_CONFIG_FILE_NAME = "course.yml";
-var isFile = (filePath) => {
-  try {
-    return fs.statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
-};
-var findRepositoryRootFromDirectory = (currentDirectory, startDirectory) => {
-  const courseConfigPath = path2.join(currentDirectory, COURSE_CONFIG_FILE_NAME);
-  if (isFile(courseConfigPath)) {
-    return {
-      found: true,
-      repoRoot: currentDirectory
-    };
-  }
-  const parentDirectory = path2.dirname(currentDirectory);
-  if (parentDirectory === currentDirectory) {
-    return {
-      found: false,
-      diagnostic: createMissingRequiredFileDiagnostic(COURSE_CONFIG_FILE_NAME, startDirectory)
-    };
-  }
-  return findRepositoryRootFromDirectory(parentDirectory, startDirectory);
-};
-var findRepositoryRoot = (startDirectory) => {
-  const resolvedStartDirectory = path2.resolve(startDirectory);
-  return findRepositoryRootFromDirectory(resolvedStartDirectory, resolvedStartDirectory);
-};
-
-// src/diagnostics/redaction.ts
-var REDACTED_VALUE = "[REDACTED]";
-var GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,})\b/g;
-var SENSITIVE_KEY_PARTS = ["token", "authorization", "password", "secret", "apikey"];
-var KEY_SEPARATOR_PATTERN = /[-_]/g;
-var redactString = (value) => value.replace(GITHUB_TOKEN_PATTERN, REDACTED_VALUE);
-var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var isSensitiveKey = (key) => {
-  const normalizedKey = key.replace(KEY_SEPARATOR_PATTERN, "").toLowerCase();
-  return SENSITIVE_KEY_PARTS.some((keyPart) => normalizedKey.includes(keyPart));
-};
-var redactValue = (value) => {
-  if (typeof value === "string") {
-    return redactString(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => redactValue(item));
-  }
-  if (isRecord(value)) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entryValue]) => [
-        key,
-        isSensitiveKey(key) ? REDACTED_VALUE : redactValue(entryValue)
-      ])
-    );
-  }
-  return value;
-};
-var redactCommandResult = (result) => redactValue(result);
-
-// src/cli/output.ts
-var JSON_INDENT_SPACES = 2;
-var EMPTY_COLLECTION_LENGTH = 0;
-var formatCommandResultAsJson = (result) => JSON.stringify(redactCommandResult(result), void 0, JSON_INDENT_SPACES);
-var formatDiagnostic = (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`;
-var formatCommandResultAsText = (result) => {
-  const redactedResult = redactCommandResult(result);
-  const assignmentFile = redactedResult.assignmentFile ?? "<none>";
-  const lines = [`${redactedResult.commandName}: ${assignmentFile}: ${redactedResult.status}`];
-  if (redactedResult.generatedFiles.length > EMPTY_COLLECTION_LENGTH) {
-    lines.push(`generated: ${redactedResult.generatedFiles.join(", ")}`);
-  }
-  if (redactedResult.warnings.length > EMPTY_COLLECTION_LENGTH) {
-    lines.push(`warnings: ${redactedResult.warnings.map(formatDiagnostic).join("; ")}`);
-  }
-  if (redactedResult.errors.length > EMPTY_COLLECTION_LENGTH) {
-    lines.push(`errors: ${redactedResult.errors.map(formatDiagnostic).join("; ")}`);
-  }
-  return lines.join("\n");
-};
-var writeCommandResult = (result, json) => {
-  const output = json ? formatCommandResultAsJson(result) : formatCommandResultAsText(result);
-  console.log(output);
-};
-
-// src/cli/commands/placeholder-command.ts
-var registerPlaceholderCommand = (program, registration) => {
-  program.command(registration.name).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description(registration.description).action((assignmentFile, rawOptions) => {
-    const cwd = process.cwd();
-    const assignmentPath = resolveAssignmentPath(cwd, assignmentFile);
-    const repositoryRootResult = registration.requireRepositoryRoot ? findRepositoryRoot(cwd) : void 0;
-    const context = {
-      commandName: registration.name,
-      cwd,
-      assignmentFile,
-      assignmentPath,
-      ...repositoryRootResult?.found === true ? {
-        repoRoot: repositoryRootResult.repoRoot,
-        assignmentRelativePath: toRepositoryRelativePath(
-          repositoryRootResult.repoRoot,
-          assignmentPath
-        )
-      } : {},
-      options: normalizeCommonCommandOptions(rawOptions)
-    };
-    const result = repositoryRootResult?.found === false ? createFailedPlaceholderResult(context, repositoryRootResult.diagnostic) : registration.support === "supported-placeholder" ? createSuccessfulPlaceholderResult(context) : createFailedPlaceholderResult(
-      context,
-      createNotSupportedInMvpDiagnostic(registration.name)
-    );
-    writeCommandResult(result, context.options.json);
-    process.exitCode = result.exitCode;
-  });
-};
-
-// src/cli/commands/apply.command.ts
-var registerApplyCommand = (program) => {
-  registerPlaceholderCommand(program, {
-    name: "apply",
-    description: "Apply assignment repository changes.",
-    support: "supported-placeholder",
-    requireRepositoryRoot: false
-  });
-};
-
-// src/cli/commands/archive.command.ts
-var registerArchiveCommand = (program) => {
-  registerPlaceholderCommand(program, {
-    name: "archive",
-    description: "Archive assignment repositories.",
-    support: "unsupported-in-mvp",
-    requireRepositoryRoot: false
-  });
-};
-
-// src/cli/commands/grade.command.ts
-var registerGradeCommand = (program) => {
-  registerPlaceholderCommand(program, {
-    name: "grade",
-    description: "Run assignment grading.",
-    support: "supported-placeholder",
-    requireRepositoryRoot: false
-  });
-};
 
 // src/config/github-config-validation.ts
 var TEMPLATE_REPOSITORY_SEGMENTS = 2;
@@ -693,12 +455,12 @@ var validateAssignmentConfig = (filePath, config, expectedAssignmentSlug) => [
 ];
 
 // src/io/file-system.ts
-import fs2 from "fs";
+import fs from "fs";
 var readTextFile = (filePath) => {
   try {
     return {
       status: "success",
-      content: fs2.readFileSync(filePath, "utf8")
+      content: fs.readFileSync(filePath, "utf8")
     };
   } catch {
     return {
@@ -784,6 +546,56 @@ var loadTermConfig = (filePath) => {
     };
   }
   return validateRawConfigSchema(filePath, rawTermConfigSchema, yamlResult.value);
+};
+
+// src/core/paths.ts
+import path from "path";
+var WINDOWS_SEPARATOR_PATTERN = /\\/g;
+var PARENT_DIRECTORY_REFERENCE = "..";
+var OUTSIDE_REPOSITORY_ROOT_MESSAGE = "Path is outside the repository root.";
+var resolveAssignmentPath = (cwd, assignmentPath) => path.resolve(cwd, assignmentPath);
+var toForwardSlashPath = (pathValue) => pathValue.replace(WINDOWS_SEPARATOR_PATTERN, "/");
+var toRepositoryRelativePath = (repoRoot, absolutePath) => {
+  const resolvedRepoRoot = path.resolve(repoRoot);
+  const resolvedPath = path.resolve(absolutePath);
+  const relativePath = path.relative(resolvedRepoRoot, resolvedPath);
+  if (relativePath === PARENT_DIRECTORY_REFERENCE || relativePath.startsWith(`${PARENT_DIRECTORY_REFERENCE}${path.sep}`) || path.isAbsolute(relativePath)) {
+    throw new Error(OUTSIDE_REPOSITORY_ROOT_MESSAGE);
+  }
+  return toForwardSlashPath(relativePath);
+};
+
+// src/core/repo-root.ts
+import fs2 from "fs";
+import path2 from "path";
+var COURSE_CONFIG_FILE_NAME = "course.yml";
+var isFile = (filePath) => {
+  try {
+    return fs2.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+};
+var findRepositoryRootFromDirectory = (currentDirectory, startDirectory) => {
+  const courseConfigPath = path2.join(currentDirectory, COURSE_CONFIG_FILE_NAME);
+  if (isFile(courseConfigPath)) {
+    return {
+      found: true,
+      repoRoot: currentDirectory
+    };
+  }
+  const parentDirectory = path2.dirname(currentDirectory);
+  if (parentDirectory === currentDirectory) {
+    return {
+      found: false,
+      diagnostic: createMissingRequiredFileDiagnostic(COURSE_CONFIG_FILE_NAME, startDirectory)
+    };
+  }
+  return findRepositoryRootFromDirectory(parentDirectory, startDirectory);
+};
+var findRepositoryRoot = (startDirectory) => {
+  const resolvedStartDirectory = path2.resolve(startDirectory);
+  return findRepositoryRootFromDirectory(resolvedStartDirectory, resolvedStartDirectory);
 };
 
 // src/config/config-loader.ts
@@ -902,6 +714,127 @@ var systemClock = {
 var formatPlanCreatedAt = (date) => date.toISOString();
 var formatFilesystemTimestamp = (date) => date.toISOString().replace(COLON_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR).replace(PERIOD_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR);
 
+// src/core/command-context.ts
+var normalizeCommonCommandOptions = (options) => ({
+  json: options.json === true,
+  verbose: options.verbose === true,
+  yes: options.yes === true
+});
+
+// src/core/exit-codes.ts
+var AUTHORIZATION_ERROR_CODES = /* @__PURE__ */ new Set([
+  DiagnosticCode.GithubAuthMissing,
+  DiagnosticCode.GithubAuthFailed,
+  DiagnosticCode.GithubPermissionDenied
+]);
+var CONFIGURATION_ERROR_CODES = /* @__PURE__ */ new Set([
+  DiagnosticCode.MissingRequiredFile,
+  DiagnosticCode.InvalidYaml,
+  DiagnosticCode.InvalidSchemaVersion,
+  DiagnosticCode.MissingRequiredField,
+  DiagnosticCode.InvalidTermCode,
+  DiagnosticCode.AssignmentSlugMismatch,
+  DiagnosticCode.TermCodeMismatch,
+  DiagnosticCode.InvalidAssignmentType,
+  DiagnosticCode.InvalidAssignmentStatus,
+  DiagnosticCode.InvalidRepositoryVisibility,
+  DiagnosticCode.InvalidPermission,
+  DiagnosticCode.InvalidGradingConfig
+]);
+var GITHUB_ERROR_CODES = /* @__PURE__ */ new Set([
+  DiagnosticCode.GithubApiError,
+  DiagnosticCode.GithubNetworkError,
+  DiagnosticCode.GithubRateLimited,
+  DiagnosticCode.GithubTimeout
+]);
+var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic) => codes.has(diagnostic.code));
+var resolveExitCode = ({ status, errors }) => {
+  if (hasCodeInSet(errors, AUTHORIZATION_ERROR_CODES)) {
+    return 3 /* AuthenticationOrAuthorizationFailure */;
+  }
+  if (hasCodeInSet(errors, CONFIGURATION_ERROR_CODES)) {
+    return 5 /* ConfigurationOrSchemaError */;
+  }
+  if (hasCodeInSet(errors, GITHUB_ERROR_CODES)) {
+    return 4 /* GitHubOrNetworkFailure */;
+  }
+  if (status === "partial_success") {
+    return 2 /* PartialSuccess */;
+  }
+  if (errors.length > 0 || status === "failure") {
+    return 1 /* CommandError */;
+  }
+  return 0 /* Success */;
+};
+
+// src/core/command-result.ts
+var createCommandResult = (input) => ({
+  ...input,
+  exitCode: resolveExitCode(input)
+});
+var createSuccessfulPlaceholderResult = (context) => createCommandResult({
+  commandName: context.commandName,
+  assignmentFile: context.assignmentRelativePath ?? context.assignmentFile,
+  status: "success",
+  warnings: [],
+  errors: [],
+  generatedFiles: [],
+  summary: {
+    placeholder: true,
+    options: context.options,
+    cwd: context.cwd,
+    assignmentPath: context.assignmentPath,
+    ...context.repoRoot === void 0 ? {} : { repoRoot: context.repoRoot },
+    ...context.assignmentRelativePath === void 0 ? {} : { assignmentRelativePath: context.assignmentRelativePath }
+  }
+});
+var createFailedPlaceholderResult = (context, error) => createCommandResult({
+  commandName: context.commandName,
+  assignmentFile: context.assignmentRelativePath ?? context.assignmentFile,
+  status: "failure",
+  warnings: [],
+  errors: [error],
+  generatedFiles: [],
+  summary: {
+    placeholder: true,
+    options: context.options,
+    cwd: context.cwd,
+    assignmentPath: context.assignmentPath,
+    ...context.repoRoot === void 0 ? {} : { repoRoot: context.repoRoot },
+    ...context.assignmentRelativePath === void 0 ? {} : { assignmentRelativePath: context.assignmentRelativePath }
+  }
+});
+
+// src/diagnostics/redaction.ts
+var REDACTED_VALUE = "[REDACTED]";
+var GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,})\b/g;
+var SENSITIVE_KEY_PARTS = ["token", "authorization", "password", "secret", "apikey"];
+var KEY_SEPARATOR_PATTERN = /[-_]/g;
+var redactString = (value) => value.replace(GITHUB_TOKEN_PATTERN, REDACTED_VALUE);
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isSensitiveKey = (key) => {
+  const normalizedKey = key.replace(KEY_SEPARATOR_PATTERN, "").toLowerCase();
+  return SENSITIVE_KEY_PARTS.some((keyPart) => normalizedKey.includes(keyPart));
+};
+var redactValue = (value) => {
+  if (typeof value === "string") {
+    return redactString(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactValue(item));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entryValue]) => [
+        key,
+        isSensitiveKey(key) ? REDACTED_VALUE : redactValue(entryValue)
+      ])
+    );
+  }
+  return value;
+};
+var redactCommandResult = (result) => redactValue(result);
+
 // src/github/github-errors.ts
 var DIAGNOSTIC_CODE_BY_KIND = {
   auth_missing: DiagnosticCode.GithubAuthMissing,
@@ -943,6 +876,809 @@ var createGitHubDiagnostic = (error) => ({
     ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds }
   }
 });
+
+// src/manifest/manifest-renderer.ts
+import fs3 from "fs";
+import path4 from "path";
+import { stringify } from "yaml";
+
+// src/manifest/manifest-models.ts
+var MANIFEST_SCHEMA_VERSION = 1;
+var MANIFEST_LIFECYCLE_STATUSES = [
+  "created",
+  "active",
+  "archived",
+  "access_removed",
+  "missing",
+  "error"
+];
+
+// src/manifest/manifest-updater.ts
+var MISSING_INDEX = -1;
+var EMPTY_DIAGNOSTICS = [];
+var compareManifestRepositoryRecords = (left, right) => left.section.localeCompare(right.section) || left.studentId.localeCompare(right.studentId) || left.repository.name.localeCompare(right.repository.name);
+var sortManifestRepositories = (repositories) => [...repositories].sort(compareManifestRepositoryRecords);
+var createEmptyManifest = ({
+  assignment,
+  source,
+  template,
+  warnings = EMPTY_DIAGNOSTICS,
+  errors = EMPTY_DIAGNOSTICS
+}) => ({
+  schemaVersion: MANIFEST_SCHEMA_VERSION,
+  assignment,
+  source,
+  template,
+  repositories: [],
+  operationHistory: [],
+  warnings: [...warnings],
+  errors: [...errors]
+});
+var repositoryRecordIndex = (manifest, studentId) => manifest.repositories.findIndex((record) => record.studentId === studentId);
+var mergeRepositoryRecord = (existing, incoming) => ({
+  ...existing,
+  ...incoming,
+  repository: {
+    ...existing.repository,
+    ...incoming.repository
+  },
+  permissions: {
+    ...existing.permissions,
+    ...incoming.permissions
+  },
+  actions: {
+    ...existing.actions,
+    ...incoming.actions
+  },
+  lifecycle: {
+    ...existing.lifecycle,
+    ...incoming.lifecycle
+  },
+  warnings: incoming.warnings,
+  errors: incoming.errors
+});
+var updateRepositoryRecord = (manifest, studentId, updater) => ({
+  ...manifest,
+  repositories: sortManifestRepositories(
+    manifest.repositories.map(
+      (record) => record.studentId === studentId ? updater(record) : record
+    )
+  )
+});
+var upsertRepositoryRecord = (manifest, record) => {
+  const existingIndex = repositoryRecordIndex(manifest, record.studentId);
+  const repositories = existingIndex === MISSING_INDEX ? [...manifest.repositories, record] : manifest.repositories.map(
+    (existingRecord, index) => index === existingIndex ? mergeRepositoryRecord(existingRecord, record) : existingRecord
+  );
+  return {
+    ...manifest,
+    repositories: sortManifestRepositories(repositories)
+  };
+};
+var updatePermissionState = (manifest, input) => updateRepositoryRecord(manifest, input.studentId, (record) => ({
+  ...record,
+  permissions: {
+    ...record.permissions,
+    ...input.permissions
+  }
+}));
+var updateActionsState = (manifest, input) => updateRepositoryRecord(manifest, input.studentId, (record) => ({
+  ...record,
+  actions: {
+    ...record.actions,
+    ...input.actions
+  }
+}));
+
+// src/manifest/manifest-renderer.ts
+var YAML_INDENT_SPACES = 2;
+var LINE_WIDTH_DISABLED = 0;
+var optionalEntries = (entries) => Object.fromEntries(
+  Object.entries(entries).filter(([, value]) => value !== void 0)
+);
+var toRawRepositoryIdentity = (repository) => ({
+  owner: repository.owner,
+  name: repository.name,
+  full_name: repository.fullName,
+  ...optionalEntries({
+    id: repository.id,
+    html_url: repository.htmlUrl
+  }),
+  created_from_template: repository.createdFromTemplate,
+  template_repository: repository.templateRepository,
+  ...optionalEntries({
+    template_commit_sha: repository.templateCommitSha,
+    created_at: repository.createdAt,
+    last_observed_at: repository.lastObservedAt
+  })
+});
+var toRawCollaboratorPermission = (permission) => ({
+  username: permission.username,
+  permission: permission.permission,
+  pending_invite: permission.pendingInvite,
+  ...optionalEntries({
+    last_applied_at: permission.lastAppliedAt,
+    last_observed_at: permission.lastObservedAt
+  })
+});
+var toRawTeamPermission = (permission) => ({
+  team_slug: permission.teamSlug,
+  permission: permission.permission,
+  ...optionalEntries({
+    last_applied_at: permission.lastAppliedAt,
+    last_observed_at: permission.lastObservedAt
+  })
+});
+var toRawPermissionState = (permissions) => ({
+  ...optionalEntries({
+    student: permissions.student === void 0 ? void 0 : toRawCollaboratorPermission(permissions.student),
+    faculty_team: permissions.facultyTeam === void 0 ? void 0 : toRawTeamPermission(permissions.facultyTeam),
+    grader_team: permissions.graderTeam === void 0 ? void 0 : toRawTeamPermission(permissions.graderTeam)
+  })
+});
+var toRawActionsState = (actions) => ({
+  enabled: actions.enabled,
+  ...optionalEntries({
+    grading_workflow_path: actions.gradingWorkflowPath,
+    grading_workflow_found: actions.gradingWorkflowFound,
+    workflow_dispatch_supported: actions.workflowDispatchSupported,
+    last_observed_at: actions.lastObservedAt
+  })
+});
+var toRawLifecycleState = (lifecycle) => ({
+  repository_archived: lifecycle.repositoryArchived,
+  student_access_removed: lifecycle.studentAccessRemoved,
+  status: lifecycle.status,
+  ...optionalEntries({
+    last_changed_at: lifecycle.lastChangedAt
+  })
+});
+var toRawRepositoryRecord = (record) => ({
+  student_id: record.studentId,
+  github_username: record.githubUsername,
+  section: record.section,
+  roster_status: record.rosterStatus,
+  repository: toRawRepositoryIdentity(record.repository),
+  permissions: toRawPermissionState(record.permissions),
+  actions: toRawActionsState(record.actions),
+  lifecycle: toRawLifecycleState(record.lifecycle),
+  warnings: record.warnings,
+  errors: record.errors
+});
+var toRawOperationHistory = (operation) => ({
+  command: operation.command,
+  started_at: operation.startedAt,
+  ...optionalEntries({
+    completed_at: operation.completedAt
+  }),
+  status: operation.status,
+  summary: operation.summary,
+  warnings: operation.warnings,
+  errors: operation.errors
+});
+var toRawManifest = (manifest) => ({
+  schema_version: manifest.schemaVersion,
+  assignment: {
+    term_code: manifest.assignment.termCode,
+    course_code: manifest.assignment.courseCode,
+    assignment_slug: manifest.assignment.assignmentSlug,
+    assignment_title: manifest.assignment.assignmentTitle
+  },
+  source: {
+    source_files: manifest.source.sourceFiles,
+    input_fingerprint: manifest.source.inputFingerprint
+  },
+  template: {
+    repository: manifest.template.repository,
+    branch: manifest.template.branch,
+    ...optionalEntries({
+      commit_sha: manifest.template.commitSha
+    })
+  },
+  repositories: sortManifestRepositories(manifest.repositories).map(toRawRepositoryRecord),
+  operation_history: manifest.operationHistory.map(toRawOperationHistory),
+  warnings: manifest.warnings,
+  errors: manifest.errors
+});
+var renderManifestYaml = (manifest) => stringify(toRawManifest(manifest), {
+  indent: YAML_INDENT_SPACES,
+  lineWidth: LINE_WIDTH_DISABLED
+});
+var writeManifest = (manifestPath, manifest) => {
+  try {
+    fs3.mkdirSync(path4.dirname(manifestPath), {
+      recursive: true
+    });
+    fs3.writeFileSync(manifestPath, renderManifestYaml(manifest), "utf8");
+    return {
+      status: "success"
+    };
+  } catch (error) {
+    return {
+      status: "failure",
+      diagnostic: createConfigDiagnostic(
+        DiagnosticCode.ManifestWriteFailed,
+        "Failed to write manifest.",
+        {
+          manifestPath,
+          reason: error instanceof Error ? error.message : "unknown"
+        }
+      )
+    };
+  }
+};
+
+// src/execution/apply-executor.ts
+var EMPTY_COUNT = 0;
+var PRIVATE_REPOSITORY = true;
+var DEFAULT_ACTIONS_ENABLED = true;
+var STUDENT_PERMISSION2 = "push";
+var FACULTY_PERMISSION2 = "admin";
+var GRADER_PERMISSION2 = "maintain";
+var PERMISSION_RANK = {
+  none: 0,
+  pull: 1,
+  triage: 2,
+  push: 3,
+  maintain: 4,
+  admin: 5
+};
+var createEmptySummary = () => ({
+  created: EMPTY_COUNT,
+  existing: EMPTY_COUNT,
+  verified: EMPTY_COUNT,
+  noop: EMPTY_COUNT,
+  skipped: EMPTY_COUNT,
+  blocked: EMPTY_COUNT,
+  failed: EMPTY_COUNT,
+  warnings: EMPTY_COUNT,
+  errors: EMPTY_COUNT
+});
+var normalizeGitHubError = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createConfigDiagnostic(
+  DiagnosticCode.GithubApiError,
+  "Unexpected GitHub client failure during apply."
+);
+var createWorkflowMissingDiagnostic = (operation) => createConfigDiagnostic(
+  DiagnosticCode.GradingWorkflowMissing,
+  `Grading workflow was not found for ${operation.repository_name ?? "repository"}.`,
+  {
+    repositoryName: operation.repository_name,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section
+  }
+);
+var createWorkflowDispatchDiagnostic = (operation) => createConfigDiagnostic(
+  DiagnosticCode.WorkflowDispatchUnsupported,
+  `Workflow dispatch is not supported for ${operation.repository_name ?? "repository"}.`,
+  {
+    repositoryName: operation.repository_name,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section
+  }
+);
+var createPermissionWarning = (operation, currentPermission, expectedPermission) => createWarningDiagnostic(
+  DiagnosticCode.PermissionNotDowngraded,
+  `Existing permission ${currentPermission} is higher than requested ${expectedPermission}; leaving it unchanged.`,
+  {
+    repositoryName: operation.repository_name,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section,
+    currentPermission,
+    expectedPermission
+  }
+);
+var createUnexpectedCollaboratorWarning = (operation, username, permission) => createWarningDiagnostic(
+  DiagnosticCode.UnexpectedCollaboratorPreserved,
+  `Unexpected collaborator ${username} is present and was left unchanged.`,
+  {
+    repositoryName: operation.repository_name,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section,
+    unexpectedUsername: username,
+    permission
+  }
+);
+var findStudent = (students, operation) => students.find((student) => student.studentId === operation.student_id);
+var findManifestRecord = (manifest, operation) => manifest.repositories.find((record) => record.studentId === operation.student_id);
+var createManifestRecord = (config, student, repository, observedAt, templateCommitSha) => ({
+  studentId: student.studentId,
+  githubUsername: student.githubUsername,
+  section: student.section,
+  rosterStatus: student.status,
+  repository: {
+    owner: repository.owner,
+    name: repository.name,
+    fullName: repository.fullName,
+    id: repository.id,
+    htmlUrl: repository.htmlUrl,
+    createdFromTemplate: true,
+    templateRepository: config.assignment.template.repository,
+    ...templateCommitSha === void 0 ? {} : { templateCommitSha },
+    createdAt: observedAt,
+    lastObservedAt: observedAt
+  },
+  permissions: {},
+  actions: {
+    enabled: false
+  },
+  lifecycle: {
+    repositoryArchived: false,
+    studentAccessRemoved: false,
+    status: "created",
+    lastChangedAt: observedAt
+  },
+  warnings: [],
+  errors: []
+});
+var createInitialManifest = async (config, plan, githubClient) => {
+  const parsedTemplate = parseTemplateRepository(
+    config.course.github.organization,
+    config.assignment.template.repository
+  );
+  const templateRepository = parsedTemplate.status === "success" ? await githubClient.getTemplateRepository(parsedTemplate.repository.owner, parsedTemplate.repository.repo).catch(() => null) : null;
+  return createEmptyManifest({
+    assignment: {
+      termCode: config.summary.termCode,
+      courseCode: config.course.course.code,
+      assignmentSlug: config.summary.assignmentSlug,
+      assignmentTitle: config.assignment.assignment.title
+    },
+    source: {
+      sourceFiles: plan.source.source_files,
+      inputFingerprint: plan.source.input_fingerprint
+    },
+    template: {
+      repository: config.assignment.template.repository,
+      branch: config.assignment.template.branch,
+      ...templateRepository?.latestCommitSha === void 0 ? {} : { commitSha: templateRepository.latestCommitSha }
+    }
+  });
+};
+var persistManifest = (state, manifestPath) => {
+  const writeResult = writeManifest(manifestPath, state.manifest);
+  if (writeResult.status === "failure" && writeResult.diagnostic !== void 0) {
+    return recordError(state, writeResult.diagnostic);
+  }
+  return state;
+};
+var recordWarning = (state, diagnostic) => ({
+  ...state,
+  warnings: [...state.warnings, diagnostic],
+  summary: {
+    ...state.summary,
+    warnings: state.summary.warnings + 1
+  }
+});
+var recordError = (state, diagnostic) => ({
+  ...state,
+  errors: [...state.errors, diagnostic],
+  summary: {
+    ...state.summary,
+    failed: state.summary.failed + 1,
+    errors: state.summary.errors + 1
+  }
+});
+var incrementSummary = (state, key) => ({
+  ...state,
+  summary: {
+    ...state.summary,
+    [key]: state.summary[key] + 1
+  }
+});
+var hasAtLeastPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] >= PERMISSION_RANK[expectedPermission];
+var hasHigherPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] > PERMISSION_RANK[expectedPermission];
+var executeCreateRepository = async (input, state, operation, observedAt) => {
+  const student = findStudent(input.students, operation);
+  if (student === void 0 || operation.repository_name === void 0) {
+    return state;
+  }
+  try {
+    const parsedTemplate = parseTemplateRepository(
+      input.config.course.github.organization,
+      input.config.assignment.template.repository
+    );
+    if (parsedTemplate.status === "failure") {
+      return recordError(state, parsedTemplate.diagnostic);
+    }
+    const repository = await input.githubClient.createRepositoryFromTemplate({
+      templateOwner: parsedTemplate.repository.owner,
+      templateRepo: parsedTemplate.repository.repo,
+      owner: input.config.course.github.organization,
+      name: operation.repository_name,
+      private: PRIVATE_REPOSITORY
+    });
+    const manifest = upsertRepositoryRecord(
+      state.manifest,
+      createManifestRecord(
+        input.config,
+        student,
+        repository,
+        observedAt,
+        state.manifest.template.commitSha
+      )
+    );
+    return persistManifest(
+      incrementSummary(
+        {
+          ...state,
+          manifest
+        },
+        "created"
+      ),
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeStudentCollaborator = async (input, state, operation, observedAt) => {
+  if (operation.repository_name === void 0 || operation.github_username === void 0) {
+    return state;
+  }
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const currentPermission = await input.githubClient.getCollaboratorPermission(
+      input.config.course.github.organization,
+      operation.repository_name,
+      operation.github_username
+    );
+    let nextState = state;
+    if (hasAtLeastPermission(currentPermission.permission, STUDENT_PERMISSION2)) {
+      nextState = incrementSummary(nextState, "noop");
+      if (hasHigherPermission(currentPermission.permission, STUDENT_PERMISSION2)) {
+        nextState = recordWarning(
+          nextState,
+          createPermissionWarning(operation, currentPermission.permission, STUDENT_PERMISSION2)
+        );
+      }
+    } else {
+      await input.githubClient.addCollaborator({
+        owner: input.config.course.github.organization,
+        repo: operation.repository_name,
+        username: operation.github_username,
+        permission: STUDENT_PERMISSION2
+      });
+      nextState = incrementSummary(nextState, "verified");
+    }
+    const collaborators = await input.githubClient.listCollaboratorPermissions(
+      input.config.course.github.organization,
+      operation.repository_name
+    );
+    for (const collaborator of collaborators) {
+      if (collaborator.username !== operation.github_username) {
+        nextState = recordWarning(
+          nextState,
+          createUnexpectedCollaboratorWarning(
+            operation,
+            collaborator.username,
+            collaborator.permission
+          )
+        );
+      }
+    }
+    return persistManifest(
+      {
+        ...nextState,
+        manifest: updatePermissionState(nextState.manifest, {
+          studentId: operation.student_id ?? "",
+          permissions: {
+            student: {
+              username: operation.github_username,
+              permission: currentPermission.permission === "none" ? STUDENT_PERMISSION2 : currentPermission.permission,
+              pendingInvite: currentPermission.pendingInvite,
+              lastObservedAt: observedAt,
+              lastAppliedAt: observedAt
+            }
+          }
+        })
+      },
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeTeamPermission = async (input, state, operation, teamSlug, expectedPermission, observedAt) => {
+  if (operation.repository_name === void 0) {
+    return state;
+  }
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const currentPermission = await input.githubClient.getTeamPermission(
+      input.config.course.github.organization,
+      operation.repository_name,
+      teamSlug
+    );
+    let nextState = state;
+    if (hasAtLeastPermission(currentPermission.permission, expectedPermission)) {
+      nextState = incrementSummary(nextState, "noop");
+      if (hasHigherPermission(currentPermission.permission, expectedPermission)) {
+        nextState = recordWarning(
+          nextState,
+          createPermissionWarning(operation, currentPermission.permission, expectedPermission)
+        );
+      }
+    } else {
+      await input.githubClient.addTeamPermission({
+        owner: input.config.course.github.organization,
+        repo: operation.repository_name,
+        teamSlug,
+        permission: expectedPermission
+      });
+      nextState = incrementSummary(nextState, "verified");
+    }
+    return persistManifest(
+      {
+        ...nextState,
+        manifest: updatePermissionState(nextState.manifest, {
+          studentId: operation.student_id ?? "",
+          permissions: operation.type === "add_faculty_team_permission" ? {
+            facultyTeam: {
+              teamSlug,
+              permission: currentPermission.permission === "none" ? expectedPermission : currentPermission.permission,
+              lastObservedAt: observedAt,
+              lastAppliedAt: observedAt
+            }
+          } : {
+            graderTeam: {
+              teamSlug,
+              permission: currentPermission.permission === "none" ? expectedPermission : currentPermission.permission,
+              lastObservedAt: observedAt,
+              lastAppliedAt: observedAt
+            }
+          }
+        })
+      },
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeEnableActions = async (input, state, operation, observedAt) => {
+  if (operation.repository_name === void 0) {
+    return state;
+  }
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const actionsState = await input.githubClient.getActionsState(
+      input.config.course.github.organization,
+      operation.repository_name
+    );
+    let nextState = state;
+    if (actionsState === "enabled") {
+      nextState = incrementSummary(nextState, "noop");
+    } else {
+      await input.githubClient.enableActions(
+        input.config.course.github.organization,
+        operation.repository_name
+      );
+      nextState = incrementSummary(nextState, "verified");
+    }
+    return persistManifest(
+      {
+        ...nextState,
+        manifest: updateActionsState(nextState.manifest, {
+          studentId: operation.student_id ?? "",
+          actions: {
+            enabled: DEFAULT_ACTIONS_ENABLED,
+            lastObservedAt: observedAt
+          }
+        })
+      },
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
+  if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
+    return state;
+  }
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const workflow = await input.githubClient.getWorkflow(
+      input.config.course.github.organization,
+      operation.repository_name,
+      input.config.course.grading.workflow
+    );
+    if (workflow === null) {
+      const diagnostic = createWorkflowMissingDiagnostic(operation);
+      return persistManifest(
+        recordError(
+          {
+            ...state,
+            manifest: updateActionsState(state.manifest, {
+              studentId: operation.student_id ?? "",
+              actions: {
+                gradingWorkflowPath: input.config.course.grading.workflow,
+                gradingWorkflowFound: false,
+                lastObservedAt: observedAt
+              }
+            })
+          },
+          diagnostic
+        ),
+        input.manifestPath
+      );
+    }
+    return persistManifest(
+      incrementSummary(
+        {
+          ...state,
+          manifest: updateActionsState(state.manifest, {
+            studentId: operation.student_id ?? "",
+            actions: {
+              gradingWorkflowPath: workflow.path,
+              gradingWorkflowFound: true,
+              lastObservedAt: observedAt
+            }
+          })
+        },
+        "verified"
+      ),
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeVerifyDispatch = async (input, state, operation, observedAt) => {
+  if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
+    return state;
+  }
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const workflow = await input.githubClient.getWorkflow(
+      input.config.course.github.organization,
+      operation.repository_name,
+      input.config.course.grading.workflow
+    );
+    if (workflow === null || !workflow.supportsDispatch) {
+      const diagnostic = createWorkflowDispatchDiagnostic(operation);
+      return persistManifest(
+        recordError(
+          {
+            ...state,
+            manifest: updateActionsState(state.manifest, {
+              studentId: operation.student_id ?? "",
+              actions: {
+                workflowDispatchSupported: false,
+                lastObservedAt: observedAt
+              }
+            })
+          },
+          diagnostic
+        ),
+        input.manifestPath
+      );
+    }
+    return persistManifest(
+      incrementSummary(
+        {
+          ...state,
+          manifest: updateActionsState(state.manifest, {
+            studentId: operation.student_id ?? "",
+            actions: {
+              workflowDispatchSupported: true,
+              lastObservedAt: observedAt
+            }
+          })
+        },
+        "verified"
+      ),
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeOperation = async (input, state, operation, observedAt) => {
+  if (operation.status === "skipped") {
+    return incrementSummary(state, "skipped");
+  }
+  if (operation.status === "noop") {
+    return incrementSummary(state, "existing");
+  }
+  if (operation.status !== "planned") {
+    return state;
+  }
+  if (operation.type === "create_repository_from_template") {
+    return executeCreateRepository(input, state, operation, observedAt);
+  }
+  if (operation.type === "add_student_collaborator") {
+    return executeStudentCollaborator(input, state, operation, observedAt);
+  }
+  if (operation.type === "add_faculty_team_permission") {
+    return executeTeamPermission(
+      input,
+      state,
+      operation,
+      input.config.course.github.faculty_team,
+      FACULTY_PERMISSION2,
+      observedAt
+    );
+  }
+  if (operation.type === "add_grader_team_permission") {
+    return executeTeamPermission(
+      input,
+      state,
+      operation,
+      input.config.course.github.grader_team,
+      GRADER_PERMISSION2,
+      observedAt
+    );
+  }
+  if (operation.type === "enable_actions") {
+    return executeEnableActions(input, state, operation, observedAt);
+  }
+  if (operation.type === "verify_grading_workflow") {
+    return executeVerifyWorkflow(input, state, operation, observedAt);
+  }
+  return executeVerifyDispatch(input, state, operation, observedAt);
+};
+var executeApplyPlan = async (input) => {
+  const initialManifest = input.manifest ?? await createInitialManifest(input.config, input.plan, input.githubClient);
+  let state = {
+    manifest: initialManifest,
+    summary: createEmptySummary(),
+    warnings: [],
+    errors: []
+  };
+  const observedAt = input.clock.now().toISOString();
+  for (const operation of input.plan.operations) {
+    state = await executeOperation(input, state, operation, observedAt);
+  }
+  return state;
+};
+
+// src/execution/mutation-guard.ts
+var EMPTY_COUNT2 = 0;
+var createMutationBlockedDiagnostic = () => createConfigDiagnostic(
+  DiagnosticCode.MutationBlocked,
+  "Apply is blocked because the computed plan contains blocked operations or errors."
+);
+var createConfirmationRequiredDiagnostic = () => createConfigDiagnostic(
+  DiagnosticCode.ConfirmationRequired,
+  "Apply requires --yes in non-interactive execution before making GitHub mutations."
+);
+var evaluateMutationGuard = ({
+  plan,
+  options
+}) => {
+  const hasBlockedOperations = plan.operations.some((operation) => operation.status === "blocked");
+  if (hasBlockedOperations || plan.errors.length > EMPTY_COUNT2) {
+    return {
+      allowed: false,
+      errors: [createMutationBlockedDiagnostic(), ...plan.errors]
+    };
+  }
+  if (!options.yes) {
+    return {
+      allowed: false,
+      errors: [createConfirmationRequiredDiagnostic()]
+    };
+  }
+  return {
+    allowed: true,
+    errors: []
+  };
+};
 
 // src/github/fake-github-client.ts
 var DEFAULT_AUTHENTICATED_USER = {
@@ -1094,6 +1830,16 @@ var FakeGitHubClient = class {
         pendingInvite: permissionRecord.pendingInvite ?? false
       };
     });
+  }
+  listCollaboratorPermissions(owner, repo) {
+    return this.run(
+      "listCollaboratorPermissions",
+      () => this.collaboratorPermissions.filter((record) => repositoryKey(record.owner, record.repo) === repositoryKey(owner, repo)).map((record) => ({
+        username: record.username,
+        permission: record.permission,
+        pendingInvite: record.pendingInvite ?? false
+      }))
+    );
   }
   addCollaborator(input) {
     return this.run("addCollaborator", () => {
@@ -1290,18 +2036,18 @@ var FakeGitHubClient = class {
 
 // src/github/github-readiness-validation.ts
 var README_FILE = "README.md";
-var EMPTY_COUNT = 0;
+var EMPTY_COUNT3 = 0;
 var createUnexpectedGitHubDiagnostic = () => createConfigDiagnostic(
   DiagnosticCode.GithubApiError,
   "Unexpected GitHub client failure during readiness validation."
 );
-var normalizeGitHubError = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createUnexpectedGitHubDiagnostic();
+var normalizeGitHubError2 = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createUnexpectedGitHubDiagnostic();
 var validateAuthentication = async (githubClient) => {
   try {
     await githubClient.getAuthenticatedUser();
     return [];
   } catch (error) {
-    return [normalizeGitHubError(error)];
+    return [normalizeGitHubError2(error)];
   }
 };
 var createTemplateOutsideOrgDiagnostic = (reference) => createConfigDiagnostic(
@@ -1388,7 +2134,7 @@ var validateTemplateRepository = async (courseConfig, assignmentConfig, githubCl
     }
     return validateTemplateRepositoryFields(reference, templateRepository);
   } catch (error) {
-    return [normalizeGitHubError(error)];
+    return [normalizeGitHubError2(error)];
   }
 };
 var createTeamMissingDiagnostic = (code, label, organization, teamSlug) => createConfigDiagnostic(code, `${label} team ${teamSlug} was not found in ${organization}.`, {
@@ -1400,7 +2146,7 @@ var validateTeam = async (githubClient, organization, teamSlug, code, label) => 
     const team = await githubClient.getTeam(organization, teamSlug);
     return team === null ? [createTeamMissingDiagnostic(code, label, organization, teamSlug)] : [];
   } catch (error) {
-    return [normalizeGitHubError(error)];
+    return [normalizeGitHubError2(error)];
   }
 };
 var validateTeams = async (courseConfig, githubClient) => {
@@ -1438,7 +2184,7 @@ var validateGithubUser = async (githubClient, student) => {
     const user = await githubClient.getUser(student.githubUsername);
     return user === null ? [createMissingUserDiagnostic(student)] : [];
   } catch (error) {
-    return [normalizeGitHubError(error)];
+    return [normalizeGitHubError2(error)];
   }
 };
 var validateGithubUsers = async (githubClient, students) => {
@@ -1455,7 +2201,7 @@ var validateGitHubReadiness = async ({
   githubClient
 }) => {
   const authenticationErrors = await validateAuthentication(githubClient);
-  if (authenticationErrors.length > EMPTY_COUNT) {
+  if (authenticationErrors.length > EMPTY_COUNT3) {
     return {
       warnings: [],
       errors: authenticationErrors
@@ -1472,18 +2218,329 @@ var validateGitHubReadiness = async ({
   };
 };
 
+// src/manifest/manifest-loader.ts
+import fs4 from "fs";
+import { z as z2 } from "zod";
+var MINIMUM_ITEMS = 1;
+var EMPTY_INDEX = 0;
+var diagnosticSchema = z2.object({
+  code: z2.string().min(MINIMUM_ITEMS),
+  severity: z2.union([z2.literal("error"), z2.literal("warning"), z2.literal("info")]),
+  message: z2.string().min(MINIMUM_ITEMS),
+  context: z2.record(z2.string(), z2.unknown()).optional(),
+  observedAt: z2.string().optional()
+}).strict();
+var sourceFileSchema = z2.object({
+  path: z2.string().min(MINIMUM_ITEMS),
+  sha256: z2.string().min(MINIMUM_ITEMS)
+}).strict();
+var permissionSchema = z2.union([
+  z2.literal("pull"),
+  z2.literal("triage"),
+  z2.literal("push"),
+  z2.literal("maintain"),
+  z2.literal("admin")
+]);
+var collaboratorPermissionSchema = z2.object({
+  username: z2.string().min(MINIMUM_ITEMS),
+  permission: permissionSchema,
+  pending_invite: z2.boolean(),
+  last_applied_at: z2.string().optional(),
+  last_observed_at: z2.string().optional()
+}).strict();
+var teamPermissionSchema = z2.object({
+  team_slug: z2.string().min(MINIMUM_ITEMS),
+  permission: permissionSchema,
+  last_applied_at: z2.string().optional(),
+  last_observed_at: z2.string().optional()
+}).strict();
+var permissionStateSchema = z2.object({
+  student: collaboratorPermissionSchema.optional(),
+  faculty_team: teamPermissionSchema.optional(),
+  grader_team: teamPermissionSchema.optional()
+}).strict();
+var repositoryIdentitySchema = z2.object({
+  owner: z2.string().min(MINIMUM_ITEMS),
+  name: z2.string().min(MINIMUM_ITEMS),
+  full_name: z2.string().min(MINIMUM_ITEMS),
+  id: z2.number().optional(),
+  html_url: z2.string().optional(),
+  created_from_template: z2.boolean(),
+  template_repository: z2.string().min(MINIMUM_ITEMS),
+  template_commit_sha: z2.string().optional(),
+  created_at: z2.string().optional(),
+  last_observed_at: z2.string().optional()
+}).strict();
+var actionsStateSchema = z2.object({
+  enabled: z2.boolean(),
+  grading_workflow_path: z2.string().optional(),
+  grading_workflow_found: z2.boolean().optional(),
+  workflow_dispatch_supported: z2.boolean().optional(),
+  last_observed_at: z2.string().optional()
+}).strict();
+var lifecycleStateSchema = z2.object({
+  repository_archived: z2.boolean(),
+  student_access_removed: z2.boolean(),
+  status: z2.union(MANIFEST_LIFECYCLE_STATUSES.map((status) => z2.literal(status))),
+  last_changed_at: z2.string().optional()
+}).strict();
+var repositoryRecordSchema = z2.object({
+  student_id: z2.string().min(MINIMUM_ITEMS),
+  github_username: z2.string().min(MINIMUM_ITEMS),
+  section: z2.string().min(MINIMUM_ITEMS),
+  roster_status: z2.union([z2.literal("active"), z2.literal("dropped"), z2.literal("hold")]),
+  repository: repositoryIdentitySchema,
+  permissions: permissionStateSchema,
+  actions: actionsStateSchema,
+  lifecycle: lifecycleStateSchema,
+  warnings: z2.array(diagnosticSchema),
+  errors: z2.array(diagnosticSchema)
+}).strict();
+var operationRecordSchema = z2.object({
+  command: z2.string().min(MINIMUM_ITEMS),
+  started_at: z2.string().min(MINIMUM_ITEMS),
+  completed_at: z2.string().optional(),
+  status: z2.union([z2.literal("success"), z2.literal("failure"), z2.literal("partial_success")]),
+  summary: z2.record(z2.string(), z2.unknown()),
+  warnings: z2.array(diagnosticSchema),
+  errors: z2.array(diagnosticSchema)
+}).strict();
+var rawManifestSchema = z2.object({
+  schema_version: z2.number(),
+  assignment: z2.object({
+    term_code: z2.string().min(MINIMUM_ITEMS),
+    course_code: z2.string().min(MINIMUM_ITEMS),
+    assignment_slug: z2.string().min(MINIMUM_ITEMS),
+    assignment_title: z2.string().min(MINIMUM_ITEMS)
+  }).strict(),
+  source: z2.object({
+    source_files: z2.array(sourceFileSchema),
+    input_fingerprint: z2.string().min(MINIMUM_ITEMS)
+  }).strict(),
+  template: z2.object({
+    repository: z2.string().min(MINIMUM_ITEMS),
+    branch: z2.string().min(MINIMUM_ITEMS),
+    commit_sha: z2.string().optional()
+  }).strict(),
+  repositories: z2.array(repositoryRecordSchema),
+  operation_history: z2.array(operationRecordSchema),
+  warnings: z2.array(diagnosticSchema),
+  errors: z2.array(diagnosticSchema)
+}).strict();
+var createFailure2 = (errors) => ({
+  status: "failure",
+  warnings: [],
+  errors
+});
+var createManifestMissingDiagnostic = (manifestPath) => createConfigDiagnostic(
+  DiagnosticCode.ManifestMissing,
+  `Manifest ${manifestPath} was not found.`,
+  {
+    manifestPath
+  }
+);
+var createManifestSchemaVersionDiagnostic = (schemaVersion) => createConfigDiagnostic(
+  DiagnosticCode.InvalidManifestSchemaVersion,
+  `Unsupported manifest schema version ${String(schemaVersion)}.`,
+  {
+    schemaVersion,
+    supportedSchemaVersion: MANIFEST_SCHEMA_VERSION
+  }
+);
+var createManifestValidationDiagnostic = (code, filePath, issue) => createConfigDiagnostic(code, `Invalid manifest ${filePath}: ${issue.message}`, {
+  filePath,
+  path: issue.path.join("."),
+  reason: issue.message
+});
+var normalizeDiagnostic = (diagnostic) => ({
+  code: diagnostic.code,
+  severity: diagnostic.severity,
+  message: diagnostic.message,
+  ...diagnostic.context === void 0 ? {} : { context: diagnostic.context },
+  ...diagnostic.observedAt === void 0 ? {} : { observedAt: diagnostic.observedAt }
+});
+var getIssueCode = (issue) => {
+  const pathParts = issue.path.map(String);
+  const path10 = pathParts.join(".");
+  if (pathParts.length === MINIMUM_ITEMS) {
+    return DiagnosticCode.MissingManifestSection;
+  }
+  if (path10.endsWith("lifecycle.status")) {
+    return DiagnosticCode.InvalidManifestLifecycleStatus;
+  }
+  if (path10.endsWith("permission")) {
+    return DiagnosticCode.InvalidManifestPermission;
+  }
+  if (path10.startsWith("repositories.")) {
+    return DiagnosticCode.InvalidManifestRepositoryRecord;
+  }
+  return DiagnosticCode.InvalidManifest;
+};
+var validateRawManifest = (filePath, value) => {
+  const schemaVersion = z2.looseObject({
+    schema_version: z2.number()
+  }).safeParse(value);
+  if (schemaVersion.success && schemaVersion.data.schema_version !== MANIFEST_SCHEMA_VERSION) {
+    return createFailure2([
+      createManifestSchemaVersionDiagnostic(schemaVersion.data.schema_version)
+    ]);
+  }
+  const schemaResult = rawManifestSchema.safeParse(value);
+  if (!schemaResult.success) {
+    const issue = schemaResult.error.issues[EMPTY_INDEX];
+    return createFailure2([
+      issue === void 0 ? createConfigDiagnostic(
+        DiagnosticCode.InvalidManifest,
+        `Invalid manifest ${filePath}: unknown schema validation failure.`,
+        { filePath }
+      ) : createManifestValidationDiagnostic(getIssueCode(issue), filePath, issue)
+    ]);
+  }
+  return {
+    status: "loaded",
+    manifest: normalizeManifest(schemaResult.data),
+    warnings: [],
+    errors: []
+  };
+};
+var normalizeRepositoryIdentity = (repository) => ({
+  owner: repository.owner,
+  name: repository.name,
+  fullName: repository.full_name,
+  ...repository.id === void 0 ? {} : { id: repository.id },
+  ...repository.html_url === void 0 ? {} : { htmlUrl: repository.html_url },
+  createdFromTemplate: repository.created_from_template,
+  templateRepository: repository.template_repository,
+  ...repository.template_commit_sha === void 0 ? {} : { templateCommitSha: repository.template_commit_sha },
+  ...repository.created_at === void 0 ? {} : { createdAt: repository.created_at },
+  ...repository.last_observed_at === void 0 ? {} : { lastObservedAt: repository.last_observed_at }
+});
+var normalizePermissionState = (permissions) => ({
+  ...permissions.student === void 0 ? {} : {
+    student: {
+      username: permissions.student.username,
+      permission: permissions.student.permission,
+      pendingInvite: permissions.student.pending_invite,
+      ...permissions.student.last_applied_at === void 0 ? {} : { lastAppliedAt: permissions.student.last_applied_at },
+      ...permissions.student.last_observed_at === void 0 ? {} : { lastObservedAt: permissions.student.last_observed_at }
+    }
+  },
+  ...permissions.faculty_team === void 0 ? {} : { facultyTeam: normalizeTeamPermission(permissions.faculty_team) },
+  ...permissions.grader_team === void 0 ? {} : { graderTeam: normalizeTeamPermission(permissions.grader_team) }
+});
+var normalizeTeamPermission = (permission) => ({
+  teamSlug: permission.team_slug,
+  permission: permission.permission,
+  ...permission.last_applied_at === void 0 ? {} : { lastAppliedAt: permission.last_applied_at },
+  ...permission.last_observed_at === void 0 ? {} : { lastObservedAt: permission.last_observed_at }
+});
+var normalizeActionsState = (actions) => ({
+  enabled: actions.enabled,
+  ...actions.grading_workflow_path === void 0 ? {} : { gradingWorkflowPath: actions.grading_workflow_path },
+  ...actions.grading_workflow_found === void 0 ? {} : { gradingWorkflowFound: actions.grading_workflow_found },
+  ...actions.workflow_dispatch_supported === void 0 ? {} : { workflowDispatchSupported: actions.workflow_dispatch_supported },
+  ...actions.last_observed_at === void 0 ? {} : { lastObservedAt: actions.last_observed_at }
+});
+var normalizeLifecycleState = (lifecycle) => ({
+  repositoryArchived: lifecycle.repository_archived,
+  studentAccessRemoved: lifecycle.student_access_removed,
+  status: lifecycle.status,
+  ...lifecycle.last_changed_at === void 0 ? {} : { lastChangedAt: lifecycle.last_changed_at }
+});
+var normalizeRepositoryRecord = (record) => ({
+  studentId: record.student_id,
+  githubUsername: record.github_username,
+  section: record.section,
+  rosterStatus: record.roster_status,
+  repository: normalizeRepositoryIdentity(record.repository),
+  permissions: normalizePermissionState(record.permissions),
+  actions: normalizeActionsState(record.actions),
+  lifecycle: normalizeLifecycleState(record.lifecycle),
+  warnings: record.warnings.map(normalizeDiagnostic),
+  errors: record.errors.map(normalizeDiagnostic)
+});
+var normalizeOperationRecord = (operation) => ({
+  command: operation.command,
+  startedAt: operation.started_at,
+  ...operation.completed_at === void 0 ? {} : { completedAt: operation.completed_at },
+  status: operation.status,
+  summary: operation.summary,
+  warnings: operation.warnings.map(normalizeDiagnostic),
+  errors: operation.errors.map(normalizeDiagnostic)
+});
+var normalizeManifest = (manifest) => ({
+  schemaVersion: MANIFEST_SCHEMA_VERSION,
+  assignment: {
+    termCode: manifest.assignment.term_code,
+    courseCode: manifest.assignment.course_code,
+    assignmentSlug: manifest.assignment.assignment_slug,
+    assignmentTitle: manifest.assignment.assignment_title
+  },
+  source: {
+    sourceFiles: manifest.source.source_files,
+    inputFingerprint: manifest.source.input_fingerprint
+  },
+  template: {
+    repository: manifest.template.repository,
+    branch: manifest.template.branch,
+    ...manifest.template.commit_sha === void 0 ? {} : { commitSha: manifest.template.commit_sha }
+  },
+  repositories: sortManifestRepositories(manifest.repositories.map(normalizeRepositoryRecord)),
+  operationHistory: manifest.operation_history.map(normalizeOperationRecord),
+  warnings: manifest.warnings.map(normalizeDiagnostic),
+  errors: manifest.errors.map(normalizeDiagnostic)
+});
+var loadManifest = (manifestPath, options = {}) => {
+  if (!fs4.existsSync(manifestPath)) {
+    return options.required === true ? createFailure2([createManifestMissingDiagnostic(manifestPath)]) : {
+      status: "missing",
+      warnings: [],
+      errors: []
+    };
+  }
+  const fileResult = readTextFile(manifestPath);
+  if (fileResult.status === "failure") {
+    return createFailure2([fileResult.diagnostic]);
+  }
+  const yamlResult = parseYaml(fileResult.content, manifestPath);
+  if (yamlResult.status === "failure") {
+    return createFailure2([yamlResult.diagnostic]);
+  }
+  return validateRawManifest(manifestPath, yamlResult.value);
+};
+
+// src/manifest/manifest-paths.ts
+import path5 from "path";
+var TERMS_DIRECTORY2 = "terms";
+var MANIFESTS_DIRECTORY = "manifests";
+var MANIFEST_FILE_NAME = "manifest.yml";
+var createManifestPath = (repoRoot, termCode, assignmentSlug) => {
+  const relativeDirectory = path5.posix.join(
+    TERMS_DIRECTORY2,
+    termCode,
+    MANIFESTS_DIRECTORY,
+    assignmentSlug
+  );
+  const relativePath = path5.posix.join(relativeDirectory, MANIFEST_FILE_NAME);
+  return {
+    relativeDirectory,
+    relativePath,
+    absolutePath: path5.join(repoRoot, relativePath)
+  };
+};
+
 // src/config/source-fingerprint.ts
-import path4 from "path";
+import path6 from "path";
 
 // src/core/hash.ts
 import { createHash } from "crypto";
-import fs3 from "fs";
+import fs5 from "fs";
 var SHA_256_ALGORITHM = "sha256";
 var HEX_ENCODING = "hex";
 var hashStringSha256 = (value) => createHash(SHA_256_ALGORITHM).update(value).digest(HEX_ENCODING);
 var hashBufferSha256 = (value) => createHash(SHA_256_ALGORITHM).update(value).digest(HEX_ENCODING);
 var hashFileSha256 = (filePath) => {
-  if (!fs3.existsSync(filePath)) {
+  if (!fs5.existsSync(filePath)) {
     return {
       status: "failure",
       diagnostic: createConfigDiagnostic(
@@ -1495,7 +2552,7 @@ var hashFileSha256 = (filePath) => {
       )
     };
   }
-  const fileStats = fs3.statSync(filePath);
+  const fileStats = fs5.statSync(filePath);
   if (!fileStats.isFile()) {
     return {
       status: "failure",
@@ -1510,7 +2567,7 @@ var hashFileSha256 = (filePath) => {
   }
   return {
     status: "success",
-    sha256: hashBufferSha256(fs3.readFileSync(filePath))
+    sha256: hashBufferSha256(fs5.readFileSync(filePath))
   };
 };
 
@@ -1527,7 +2584,7 @@ var createSourceOutsideRepoDiagnostic = (repoRoot, sourceFilePath) => createConf
   }
 );
 var resolveSourcePath = (repoRoot, sourceFilePath) => {
-  const absolutePath = path4.isAbsolute(sourceFilePath) ? path4.resolve(sourceFilePath) : path4.resolve(repoRoot, sourceFilePath);
+  const absolutePath = path6.isAbsolute(sourceFilePath) ? path6.resolve(sourceFilePath) : path6.resolve(repoRoot, sourceFilePath);
   try {
     return {
       absolutePath,
@@ -1724,7 +2781,7 @@ var generateRepositoryName = (input) => {
 };
 
 // src/planning/plan-builder.ts
-var EMPTY_COUNT2 = 0;
+var EMPTY_COUNT4 = 0;
 var NO_REPOSITORY_NAME = "";
 var ACTIVE_ASSIGNMENT_STATUS = "active";
 var DRAFT_ASSIGNMENT_STATUS = "draft";
@@ -1736,7 +2793,7 @@ var createUnexpectedGitHubDiagnostic2 = () => createConfigDiagnostic(
   DiagnosticCode.GithubApiError,
   "Unexpected GitHub client failure during planning."
 );
-var normalizeGitHubError2 = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createUnexpectedGitHubDiagnostic2();
+var normalizeGitHubError3 = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createUnexpectedGitHubDiagnostic2();
 var createOperation = (student, type, status, input = {}) => ({
   id: createOperationId(student.section, student.studentId, type),
   type,
@@ -1756,6 +2813,17 @@ var createCollisionDiagnostic = (organization, repositoryName) => createConfigDi
   {
     organization,
     repositoryName
+  }
+);
+var createManifestTrackedMissingDiagnostic = (organization, repositoryName, student) => createConfigDiagnostic(
+  DiagnosticCode.ManifestTrackedRepositoryMissing,
+  `Manifest-tracked repository ${organization}/${repositoryName} was not found on GitHub.`,
+  {
+    organization,
+    repositoryName,
+    student_id: student.studentId,
+    github_username: student.githubUsername,
+    section: student.section
   }
 );
 var createLifecycleDiagnostic = (code, message, assignmentStatus, student) => createConfigDiagnostic(code, message, {
@@ -1889,9 +2957,58 @@ var buildPlannedProvisioningOperations = (config, student, repositoryName) => {
     ]
   ];
 };
-var buildActiveStudentOperations = async (config, student, githubClient) => {
+var buildTrackedRepositoryOperations = (config, student, repositoryName) => {
+  const createRepositoryId = createOperationId(
+    student.section,
+    student.studentId,
+    "create_repository_from_template"
+  );
+  const enableActionsId = createOperationId(student.section, student.studentId, "enable_actions");
+  const verifyWorkflowId = createOperationId(
+    student.section,
+    student.studentId,
+    "verify_grading_workflow"
+  );
+  const sharedInput = {
+    repositoryName,
+    requires: [createRepositoryId]
+  };
+  return [
+    createOperation(student, "create_repository_from_template", "noop", {
+      repositoryName,
+      reason: "manifest_tracked_repository"
+    }),
+    createOperation(student, "add_student_collaborator", "planned", sharedInput),
+    createOperation(student, "add_faculty_team_permission", "planned", sharedInput),
+    createOperation(student, "add_grader_team_permission", "planned", sharedInput),
+    createOperation(student, "enable_actions", "planned", sharedInput),
+    ...config.summary.gradingEnabled ? [
+      createOperation(student, "verify_grading_workflow", "planned", {
+        repositoryName,
+        requires: [enableActionsId]
+      }),
+      createOperation(student, "verify_workflow_dispatch", "planned", {
+        repositoryName,
+        requires: [verifyWorkflowId]
+      })
+    ] : [
+      createOperation(student, "verify_grading_workflow", "skipped", {
+        repositoryName,
+        requires: [enableActionsId],
+        reason: GRADING_DISABLED_REASON
+      }),
+      createOperation(student, "verify_workflow_dispatch", "skipped", {
+        repositoryName,
+        requires: [verifyWorkflowId],
+        reason: GRADING_DISABLED_REASON
+      })
+    ]
+  ];
+};
+var findManifestRecord2 = (manifest, student) => manifest?.repositories.find((record) => record.studentId === student.studentId);
+var buildActiveStudentOperations = async (config, student, githubClient, manifest) => {
   const repositoryNameResult = generateStudentRepositoryName(config, student);
-  if (repositoryNameResult.errors.length > EMPTY_COUNT2) {
+  if (repositoryNameResult.errors.length > EMPTY_COUNT4) {
     return [
       createOperation(student, "create_repository_from_template", "blocked", {
         errors: repositoryNameResult.errors,
@@ -1899,12 +3016,43 @@ var buildActiveStudentOperations = async (config, student, githubClient) => {
       })
     ];
   }
-  const lifecycleOperations = buildLifecycleOperations(
-    config,
-    student,
-    repositoryNameResult.repositoryName
-  );
-  if (lifecycleOperations.length > EMPTY_COUNT2) {
+  const manifestRecord = findManifestRecord2(manifest, student);
+  const repositoryName = manifestRecord?.repository.name ?? repositoryNameResult.repositoryName;
+  if (config.assignment.assignment.status === DRAFT_ASSIGNMENT_STATUS || config.assignment.assignment.status === ARCHIVED_ASSIGNMENT_STATUS) {
+    return buildLifecycleOperations(config, student, repositoryName);
+  }
+  if (manifestRecord !== void 0) {
+    try {
+      const existingRepository = await githubClient.getRepository(
+        config.course.github.organization,
+        manifestRecord.repository.name
+      );
+      if (existingRepository === null) {
+        return [
+          createOperation(student, "create_repository_from_template", "blocked", {
+            repositoryName: manifestRecord.repository.name,
+            errors: [
+              createManifestTrackedMissingDiagnostic(
+                config.course.github.organization,
+                manifestRecord.repository.name,
+                student
+              )
+            ]
+          })
+        ];
+      }
+      return buildTrackedRepositoryOperations(config, student, manifestRecord.repository.name);
+    } catch (error) {
+      return [
+        createOperation(student, "create_repository_from_template", "blocked", {
+          repositoryName: manifestRecord.repository.name,
+          errors: [normalizeGitHubError3(error)]
+        })
+      ];
+    }
+  }
+  const lifecycleOperations = buildLifecycleOperations(config, student, repositoryName);
+  if (lifecycleOperations.length > EMPTY_COUNT4) {
     return lifecycleOperations;
   }
   if (config.assignment.assignment.status !== ACTIVE_ASSIGNMENT_STATUS) {
@@ -1918,27 +3066,22 @@ var buildActiveStudentOperations = async (config, student, githubClient) => {
     if (existingRepository !== null) {
       return [
         createOperation(student, "create_repository_from_template", "blocked", {
-          repositoryName: repositoryNameResult.repositoryName,
-          errors: [
-            createCollisionDiagnostic(
-              config.course.github.organization,
-              repositoryNameResult.repositoryName
-            )
-          ]
+          repositoryName,
+          errors: [createCollisionDiagnostic(config.course.github.organization, repositoryName)]
         })
       ];
     }
-    return buildPlannedProvisioningOperations(config, student, repositoryNameResult.repositoryName);
+    return buildPlannedProvisioningOperations(config, student, repositoryName);
   } catch (error) {
     return [
       createOperation(student, "create_repository_from_template", "blocked", {
-        repositoryName: repositoryNameResult.repositoryName,
-        errors: [normalizeGitHubError2(error)]
+        repositoryName,
+        errors: [normalizeGitHubError3(error)]
       })
     ];
   }
 };
-var buildStudentOperations = async (config, student, githubClient) => student.status === ROSTER_STATUS_ACTIVE ? buildActiveStudentOperations(config, student, githubClient) : [buildSkippedStudentOperation(student)];
+var buildStudentOperations = async (config, student, githubClient, manifest) => student.status === ROSTER_STATUS_ACTIVE ? buildActiveStudentOperations(config, student, githubClient, manifest) : [buildSkippedStudentOperation(student)];
 var createPlanSummary = (rosterSummary, operations) => ({
   total_students: rosterSummary.studentCount,
   active_students: rosterSummary.activeStudentCount,
@@ -1955,7 +3098,8 @@ var buildPlan = async ({
   students,
   rosterSummary,
   githubClient,
-  createdAt
+  createdAt,
+  manifest
 }) => {
   const sourceFingerprint = createSourceFingerprint({
     repoRoot: config.summary.repoRoot,
@@ -1968,11 +3112,13 @@ var buildPlan = async ({
   });
   const operationGroups = [];
   for (const student of students) {
-    operationGroups.push(...[await buildStudentOperations(config, student, githubClient)]);
+    operationGroups.push(
+      ...[await buildStudentOperations(config, student, githubClient, manifest)]
+    );
   }
   const operations = operationGroups.flat().sort(comparePlanOperations);
   const summary = createPlanSummary(rosterSummary, operations);
-  const blockedPlanErrors = summary.blocked_operations > EMPTY_COUNT2 ? [createPlanBlockedDiagnostic(summary.blocked_operations)] : [];
+  const blockedPlanErrors = summary.blocked_operations > EMPTY_COUNT4 ? [createPlanBlockedDiagnostic(summary.blocked_operations)] : [];
   return {
     schema_version: PLAN_SCHEMA_VERSION,
     created_at: createdAt,
@@ -1995,75 +3141,6 @@ var buildPlan = async ({
       ...blockedPlanErrors
     ]
   };
-};
-
-// src/planning/plan-paths.ts
-import path5 from "path";
-var TERMS_DIRECTORY2 = "terms";
-var PLANS_DIRECTORY = "plans";
-var PLAN_FILE_PREFIX = "plan";
-var PLAN_FILE_EXTENSION = "json";
-var createPlanPath = (repoRoot, termCode, assignmentSlug, clock) => {
-  const relativeDirectory = path5.posix.join(
-    TERMS_DIRECTORY2,
-    termCode,
-    PLANS_DIRECTORY,
-    assignmentSlug
-  );
-  const fileName = `${PLAN_FILE_PREFIX}-${formatFilesystemTimestamp(clock.now())}.${PLAN_FILE_EXTENSION}`;
-  const relativePath = path5.posix.join(relativeDirectory, fileName);
-  return {
-    relativeDirectory,
-    relativePath,
-    absolutePath: path5.join(repoRoot, relativePath)
-  };
-};
-
-// src/planning/plan-renderer.ts
-import fs4 from "fs";
-import path6 from "path";
-
-// src/io/stable-json.ts
-var JSON_INDENT_SPACES2 = 2;
-var isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var orderValue = (value) => {
-  if (Array.isArray(value)) {
-    return value.map(orderValue);
-  }
-  if (isPlainObject(value)) {
-    return Object.fromEntries(
-      Object.entries(value).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey)).map(([key, nestedValue]) => [key, orderValue(nestedValue)])
-    );
-  }
-  return value;
-};
-var stringifyStableJson = (value) => JSON.stringify(orderValue(value), void 0, JSON_INDENT_SPACES2);
-
-// src/planning/plan-renderer.ts
-var renderPlanJson = (plan) => stringifyStableJson(plan);
-var writePlanJsonFile = (plan, absolutePath) => {
-  try {
-    fs4.mkdirSync(path6.dirname(absolutePath), {
-      recursive: true
-    });
-    fs4.writeFileSync(absolutePath, `${renderPlanJson(plan)}
-`, "utf8");
-    return {
-      status: "success"
-    };
-  } catch (error) {
-    return {
-      status: "failure",
-      diagnostic: createConfigDiagnostic(
-        DiagnosticCode.PlanWriteFailed,
-        "Failed to write plan file.",
-        {
-          path: absolutePath,
-          reason: error instanceof Error ? error.message : "unknown"
-        }
-      )
-    };
-  }
 };
 
 // src/roster/roster-loader.ts
@@ -2267,15 +3344,15 @@ var validateRosterDuplicates = (students) => [
 ];
 
 // src/roster/roster-loader.ts
-var EMPTY_COUNT3 = 0;
+var EMPTY_COUNT5 = 0;
 var TERM_DIRECTORY_DEPTH = 2;
 var MISSING_COLUMN_INDEX = -1;
-var createEmptySummary = (rosterFiles) => ({
+var createEmptySummary2 = (rosterFiles) => ({
   rosterFiles,
-  studentCount: EMPTY_COUNT3,
-  activeStudentCount: EMPTY_COUNT3,
-  droppedStudentCount: EMPTY_COUNT3,
-  holdStudentCount: EMPTY_COUNT3
+  studentCount: EMPTY_COUNT5,
+  activeStudentCount: EMPTY_COUNT5,
+  droppedStudentCount: EMPTY_COUNT5,
+  holdStudentCount: EMPTY_COUNT5
 });
 var createSummary2 = (rosterFiles, students) => ({
   rosterFiles,
@@ -2284,7 +3361,7 @@ var createSummary2 = (rosterFiles, students) => ({
   droppedStudentCount: students.filter((student) => student.status === ROSTER_STATUS_DROPPED).length,
   holdStudentCount: students.filter((student) => student.status === ROSTER_STATUS_HOLD).length
 });
-var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT3, TERM_DIRECTORY_DEPTH).join("/");
+var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT5, TERM_DIRECTORY_DEPTH).join("/");
 var getSectionSources = (config) => {
   const termDirectory = getTermDirectory(config.summary.termConfigPath);
   const sectionsById = new Map(
@@ -2321,7 +3398,7 @@ var loadSectionRoster = (repoRoot, source) => {
   }
   const document = parseCsv(fileResult.content);
   const missingColumnErrors = validateRequiredColumns(source.rosterPath, document.headers);
-  if (missingColumnErrors.length > EMPTY_COUNT3) {
+  if (missingColumnErrors.length > EMPTY_COUNT5) {
     return {
       students: [],
       warnings: [],
@@ -2345,9 +3422,9 @@ var loadSectionRoster = (repoRoot, source) => {
         [SECTION_COLUMN]: rawSection,
         [STATUS_COLUMN]: rawStatus
       };
-      return valueByColumn[column].length === EMPTY_COUNT3 ? [createMissingRequiredValueDiagnostic(source.rosterPath, row.rowNumber, column)] : [];
+      return valueByColumn[column].length === EMPTY_COUNT5 ? [createMissingRequiredValueDiagnostic(source.rosterPath, row.rowNumber, column)] : [];
     });
-    if (missingValueErrors.length > EMPTY_COUNT3) {
+    if (missingValueErrors.length > EMPTY_COUNT5) {
       errors.push(...missingValueErrors);
     } else {
       const normalizedStudentId = normalizeStudentId(rawStudentId, rowContext);
@@ -2365,7 +3442,7 @@ var loadSectionRoster = (repoRoot, source) => {
       ];
       warnings.push(...rowWarnings);
       errors.push(...rowErrors);
-      if (rowErrors.length === EMPTY_COUNT3 && isRosterStatus(normalizedStatus.value)) {
+      if (rowErrors.length === EMPTY_COUNT5 && isRosterStatus(normalizedStatus.value)) {
         students.push({
           studentId: normalizedStudentId.value,
           githubUsername: normalizedGithubUsername.value,
@@ -2399,15 +3476,40 @@ var loadAssignmentRosters = (config) => {
     students,
     warnings,
     errors,
-    summary: errors.length > EMPTY_COUNT3 ? createEmptySummary(rosterFiles) : createSummary2(rosterFiles, students)
+    summary: errors.length > EMPTY_COUNT5 ? createEmptySummary2(rosterFiles) : createSummary2(rosterFiles, students)
   };
 };
 
-// src/cli/commands/plan.command.ts
-var COMMAND_NAME = "plan";
+// src/cli/output.ts
+var JSON_INDENT_SPACES = 2;
+var EMPTY_COLLECTION_LENGTH = 0;
+var formatCommandResultAsJson = (result) => JSON.stringify(redactCommandResult(result), void 0, JSON_INDENT_SPACES);
+var formatDiagnostic = (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`;
+var formatCommandResultAsText = (result) => {
+  const redactedResult = redactCommandResult(result);
+  const assignmentFile = redactedResult.assignmentFile ?? "<none>";
+  const lines = [`${redactedResult.commandName}: ${assignmentFile}: ${redactedResult.status}`];
+  if (redactedResult.generatedFiles.length > EMPTY_COLLECTION_LENGTH) {
+    lines.push(`generated: ${redactedResult.generatedFiles.join(", ")}`);
+  }
+  if (redactedResult.warnings.length > EMPTY_COLLECTION_LENGTH) {
+    lines.push(`warnings: ${redactedResult.warnings.map(formatDiagnostic).join("; ")}`);
+  }
+  if (redactedResult.errors.length > EMPTY_COLLECTION_LENGTH) {
+    lines.push(`errors: ${redactedResult.errors.map(formatDiagnostic).join("; ")}`);
+  }
+  return lines.join("\n");
+};
+var writeCommandResult = (result, json) => {
+  const output = json ? formatCommandResultAsJson(result) : formatCommandResultAsText(result);
+  console.log(output);
+};
+
+// src/cli/commands/apply.command.ts
+var COMMAND_NAME = "apply";
 var DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
 var README_FILE2 = "README.md";
-var EMPTY_COUNT4 = 0;
+var EMPTY_COUNT6 = 0;
 var createDefaultTemplateRepository = (owner, repo, branch) => ({
   owner,
   name: repo,
@@ -2451,7 +3553,14 @@ var createDefaultGitHubClient = (config, students) => {
     ]
   });
 };
-var runPlanCommand = async ({
+var getExecutionStatus = (errorsLength, summary) => {
+  if (errorsLength === EMPTY_COUNT6) {
+    return "success";
+  }
+  const successfulWorkCount = summary.created + summary.existing + summary.verified + summary.noop + summary.skipped;
+  return successfulWorkCount > EMPTY_COUNT6 ? "partial_success" : "failure";
+};
+var runApplyCommand = async ({
   cwd,
   assignmentFile,
   options,
@@ -2470,13 +3579,11 @@ var runPlanCommand = async ({
       warnings: [],
       errors: configResult.diagnostics,
       generatedFiles: [],
-      summary: {
-        options
-      }
+      summary: { options }
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > EMPTY_COUNT4) {
+  if (rosterResult.errors.length > EMPTY_COUNT6) {
     return createCommandResult({
       commandName: COMMAND_NAME,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
@@ -2499,7 +3606,7 @@ var runPlanCommand = async ({
     students: rosterResult.students,
     githubClient: effectiveGitHubClient
   });
-  if (readinessResult.errors.length > EMPTY_COUNT4) {
+  if (readinessResult.errors.length > EMPTY_COUNT6) {
     return createCommandResult({
       commandName: COMMAND_NAME,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
@@ -2515,51 +3622,86 @@ var runPlanCommand = async ({
       }
     });
   }
-  const now = clock.now();
+  const manifestPath = createManifestPath(
+    configResult.config.summary.repoRoot,
+    configResult.config.summary.termCode,
+    configResult.config.summary.assignmentSlug
+  );
+  const manifestResult = loadManifest(manifestPath.absolutePath);
+  if (manifestResult.status === "failure") {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: manifestResult.warnings,
+      errors: manifestResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        manifestFile: manifestPath.relativePath
+      }
+    });
+  }
   const plan = await buildPlan({
     config: configResult.config,
     students: rosterResult.students,
     rosterSummary: rosterResult.summary,
     githubClient: effectiveGitHubClient,
-    createdAt: formatPlanCreatedAt(now)
+    createdAt: formatPlanCreatedAt(clock.now()),
+    ...manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {}
   });
-  const planPath = createPlanPath(
-    configResult.config.summary.repoRoot,
-    configResult.config.summary.termCode,
-    configResult.config.summary.assignmentSlug,
-    {
-      now: () => now
-    }
-  );
-  const writeResult = writePlanJsonFile(plan, planPath.absolutePath);
-  const writeErrors = writeResult.diagnostic === void 0 ? [] : [writeResult.diagnostic];
-  const errors = [...plan.errors, ...writeErrors];
-  const generatedFiles = writeResult.status === "success" ? [planPath.relativePath] : [];
+  const guardResult = evaluateMutationGuard({ plan, options });
+  if (!guardResult.allowed) {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...plan.warnings],
+      errors: guardResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        githubReadinessChecked: true,
+        manifestFile: manifestPath.relativePath,
+        blockedOperationCount: plan.summary.blocked_operations
+      }
+    });
+  }
+  const executionResult = await executeApplyPlan({
+    config: configResult.config,
+    plan,
+    ...manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {},
+    manifestPath: manifestPath.absolutePath,
+    students: rosterResult.students,
+    githubClient: effectiveGitHubClient,
+    clock
+  });
+  const generatedFiles = fs6.existsSync(manifestPath.absolutePath) ? [manifestPath.relativePath] : [];
   return createCommandResult({
     commandName: COMMAND_NAME,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
-    status: errors.length > EMPTY_COUNT4 ? "failure" : "success",
-    warnings: [...rosterResult.warnings, ...readinessResult.warnings, ...plan.warnings],
-    errors,
+    status: getExecutionStatus(executionResult.errors.length, executionResult.summary),
+    warnings: [...rosterResult.warnings, ...plan.warnings, ...executionResult.warnings],
+    errors: executionResult.errors,
     generatedFiles,
     summary: {
       options,
       ...configResult.config.summary,
       ...rosterResult.summary,
       githubReadinessChecked: true,
-      planFile: planPath.relativePath,
-      operationCount: plan.operations.length,
-      plannedOperationCount: plan.summary.planned_operations,
-      skippedOperationCount: plan.summary.skipped_operations,
-      blockedOperationCount: plan.summary.blocked_operations,
-      inputFingerprint: plan.source.input_fingerprint
+      manifestFile: manifestPath.relativePath,
+      ...executionResult.summary
     }
   });
 };
-var registerPlanCommand = (program) => {
-  program.command(COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Plan assignment provisioning.").action(async (assignmentFile, rawOptions) => {
+var registerApplyCommand = (program) => {
+  program.command(COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Apply assignment repository changes.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
-    const result = await runPlanCommand({
+    const result = await runApplyCommand({
       cwd: process.cwd(),
       assignmentFile,
       options
@@ -2569,30 +3711,129 @@ var registerPlanCommand = (program) => {
   });
 };
 
-// src/cli/commands/remove-access.command.ts
-var registerRemoveAccessCommand = (program) => {
+// src/cli/commands/placeholder-command.ts
+var registerPlaceholderCommand = (program, registration) => {
+  program.command(registration.name).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description(registration.description).action((assignmentFile, rawOptions) => {
+    const cwd = process.cwd();
+    const assignmentPath = resolveAssignmentPath(cwd, assignmentFile);
+    const repositoryRootResult = registration.requireRepositoryRoot ? findRepositoryRoot(cwd) : void 0;
+    const context = {
+      commandName: registration.name,
+      cwd,
+      assignmentFile,
+      assignmentPath,
+      ...repositoryRootResult?.found === true ? {
+        repoRoot: repositoryRootResult.repoRoot,
+        assignmentRelativePath: toRepositoryRelativePath(
+          repositoryRootResult.repoRoot,
+          assignmentPath
+        )
+      } : {},
+      options: normalizeCommonCommandOptions(rawOptions)
+    };
+    const result = repositoryRootResult?.found === false ? createFailedPlaceholderResult(context, repositoryRootResult.diagnostic) : registration.support === "supported-placeholder" ? createSuccessfulPlaceholderResult(context) : createFailedPlaceholderResult(
+      context,
+      createNotSupportedInMvpDiagnostic(registration.name)
+    );
+    writeCommandResult(result, context.options.json);
+    process.exitCode = result.exitCode;
+  });
+};
+
+// src/cli/commands/archive.command.ts
+var registerArchiveCommand = (program) => {
   registerPlaceholderCommand(program, {
-    name: "remove-access",
-    description: "Remove student access from assignment repositories.",
+    name: "archive",
+    description: "Archive assignment repositories.",
     support: "unsupported-in-mvp",
     requireRepositoryRoot: false
   });
 };
 
-// src/cli/commands/report.command.ts
-var registerReportCommand = (program) => {
+// src/cli/commands/grade.command.ts
+var registerGradeCommand = (program) => {
   registerPlaceholderCommand(program, {
-    name: "report",
-    description: "Generate assignment reports.",
+    name: "grade",
+    description: "Run assignment grading.",
     support: "supported-placeholder",
     requireRepositoryRoot: false
   });
 };
 
-// src/cli/commands/validate.command.ts
-var COMMAND_NAME2 = "validate";
+// src/planning/plan-paths.ts
+import path8 from "path";
+var TERMS_DIRECTORY3 = "terms";
+var PLANS_DIRECTORY = "plans";
+var PLAN_FILE_PREFIX = "plan";
+var PLAN_FILE_EXTENSION = "json";
+var createPlanPath = (repoRoot, termCode, assignmentSlug, clock) => {
+  const relativeDirectory = path8.posix.join(
+    TERMS_DIRECTORY3,
+    termCode,
+    PLANS_DIRECTORY,
+    assignmentSlug
+  );
+  const fileName = `${PLAN_FILE_PREFIX}-${formatFilesystemTimestamp(clock.now())}.${PLAN_FILE_EXTENSION}`;
+  const relativePath = path8.posix.join(relativeDirectory, fileName);
+  return {
+    relativeDirectory,
+    relativePath,
+    absolutePath: path8.join(repoRoot, relativePath)
+  };
+};
+
+// src/planning/plan-renderer.ts
+import fs7 from "fs";
+import path9 from "path";
+
+// src/io/stable-json.ts
+var JSON_INDENT_SPACES2 = 2;
+var isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var orderValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(orderValue);
+  }
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey)).map(([key, nestedValue]) => [key, orderValue(nestedValue)])
+    );
+  }
+  return value;
+};
+var stringifyStableJson = (value) => JSON.stringify(orderValue(value), void 0, JSON_INDENT_SPACES2);
+
+// src/planning/plan-renderer.ts
+var renderPlanJson = (plan) => stringifyStableJson(plan);
+var writePlanJsonFile = (plan, absolutePath) => {
+  try {
+    fs7.mkdirSync(path9.dirname(absolutePath), {
+      recursive: true
+    });
+    fs7.writeFileSync(absolutePath, `${renderPlanJson(plan)}
+`, "utf8");
+    return {
+      status: "success"
+    };
+  } catch (error) {
+    return {
+      status: "failure",
+      diagnostic: createConfigDiagnostic(
+        DiagnosticCode.PlanWriteFailed,
+        "Failed to write plan file.",
+        {
+          path: absolutePath,
+          reason: error instanceof Error ? error.message : "unknown"
+        }
+      )
+    };
+  }
+};
+
+// src/cli/commands/plan.command.ts
+var COMMAND_NAME2 = "plan";
 var DEFAULT_TEMPLATE_COMMIT_SHA2 = "fake-template-sha";
 var README_FILE3 = "README.md";
+var EMPTY_COUNT7 = 0;
 var createDefaultTemplateRepository2 = (owner, repo, branch) => ({
   owner,
   name: repo,
@@ -2636,11 +3877,12 @@ var createDefaultGitHubClient2 = (config, students) => {
     ]
   });
 };
-var runValidateCommand = async ({
+var runPlanCommand = async ({
   cwd,
   assignmentFile,
   options,
-  githubClient
+  githubClient,
+  clock = systemClock
 }) => {
   const configResult = loadGraiderConfig({
     cwd,
@@ -2660,9 +3902,193 @@ var runValidateCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > 0) {
+  if (rosterResult.errors.length > EMPTY_COUNT7) {
     return createCommandResult({
       commandName: COMMAND_NAME2,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: rosterResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary
+      }
+    });
+  }
+  const effectiveGitHubClient = githubClient ?? createDefaultGitHubClient2(configResult.config, rosterResult.students);
+  const readinessResult = await validateGitHubReadiness({
+    courseConfig: configResult.config.course,
+    termConfig: configResult.config.term,
+    assignmentConfig: configResult.config.assignment,
+    students: rosterResult.students,
+    githubClient: effectiveGitHubClient
+  });
+  if (readinessResult.errors.length > EMPTY_COUNT7) {
+    return createCommandResult({
+      commandName: COMMAND_NAME2,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...readinessResult.warnings],
+      errors: readinessResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        githubReadinessChecked: true
+      }
+    });
+  }
+  const now = clock.now();
+  const plan = await buildPlan({
+    config: configResult.config,
+    students: rosterResult.students,
+    rosterSummary: rosterResult.summary,
+    githubClient: effectiveGitHubClient,
+    createdAt: formatPlanCreatedAt(now)
+  });
+  const planPath = createPlanPath(
+    configResult.config.summary.repoRoot,
+    configResult.config.summary.termCode,
+    configResult.config.summary.assignmentSlug,
+    {
+      now: () => now
+    }
+  );
+  const writeResult = writePlanJsonFile(plan, planPath.absolutePath);
+  const writeErrors = writeResult.diagnostic === void 0 ? [] : [writeResult.diagnostic];
+  const errors = [...plan.errors, ...writeErrors];
+  const generatedFiles = writeResult.status === "success" ? [planPath.relativePath] : [];
+  return createCommandResult({
+    commandName: COMMAND_NAME2,
+    assignmentFile: configResult.config.summary.assignmentConfigPath,
+    status: errors.length > EMPTY_COUNT7 ? "failure" : "success",
+    warnings: [...rosterResult.warnings, ...readinessResult.warnings, ...plan.warnings],
+    errors,
+    generatedFiles,
+    summary: {
+      options,
+      ...configResult.config.summary,
+      ...rosterResult.summary,
+      githubReadinessChecked: true,
+      planFile: planPath.relativePath,
+      operationCount: plan.operations.length,
+      plannedOperationCount: plan.summary.planned_operations,
+      skippedOperationCount: plan.summary.skipped_operations,
+      blockedOperationCount: plan.summary.blocked_operations,
+      inputFingerprint: plan.source.input_fingerprint
+    }
+  });
+};
+var registerPlanCommand = (program) => {
+  program.command(COMMAND_NAME2).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Plan assignment provisioning.").action(async (assignmentFile, rawOptions) => {
+    const options = normalizeCommonCommandOptions(rawOptions);
+    const result = await runPlanCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options
+    });
+    writeCommandResult(result, options.json);
+    process.exitCode = result.exitCode;
+  });
+};
+
+// src/cli/commands/remove-access.command.ts
+var registerRemoveAccessCommand = (program) => {
+  registerPlaceholderCommand(program, {
+    name: "remove-access",
+    description: "Remove student access from assignment repositories.",
+    support: "unsupported-in-mvp",
+    requireRepositoryRoot: false
+  });
+};
+
+// src/cli/commands/report.command.ts
+var registerReportCommand = (program) => {
+  registerPlaceholderCommand(program, {
+    name: "report",
+    description: "Generate assignment reports.",
+    support: "supported-placeholder",
+    requireRepositoryRoot: false
+  });
+};
+
+// src/cli/commands/validate.command.ts
+var COMMAND_NAME3 = "validate";
+var DEFAULT_TEMPLATE_COMMIT_SHA3 = "fake-template-sha";
+var README_FILE4 = "README.md";
+var createDefaultTemplateRepository3 = (owner, repo, branch) => ({
+  owner,
+  name: repo,
+  fullName: `${owner}/${repo}`,
+  id: 1 /* DefaultTemplateRepositoryId */,
+  private: true,
+  archived: false,
+  defaultBranch: branch,
+  htmlUrl: `https://github.com/${owner}/${repo}`,
+  isTemplate: true,
+  branches: [branch],
+  files: [README_FILE4],
+  latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA3
+});
+var createDefaultGitHubClient3 = (config, students) => {
+  const parsedTemplateRepository = parseTemplateRepository(
+    config.course.github.organization,
+    config.assignment.template.repository
+  );
+  const templateRepositories = parsedTemplateRepository.status === "success" ? [
+    createDefaultTemplateRepository3(
+      parsedTemplateRepository.repository.owner,
+      parsedTemplateRepository.repository.repo,
+      config.assignment.template.branch
+    )
+  ] : [];
+  return new FakeGitHubClient({
+    templateRepositories,
+    users: students.map((student) => ({ username: student.githubUsername })),
+    teams: [
+      {
+        org: config.course.github.organization,
+        slug: config.course.github.faculty_team,
+        name: config.course.github.faculty_team
+      },
+      {
+        org: config.course.github.organization,
+        slug: config.course.github.grader_team,
+        name: config.course.github.grader_team
+      }
+    ]
+  });
+};
+var runValidateCommand = async ({
+  cwd,
+  assignmentFile,
+  options,
+  githubClient
+}) => {
+  const configResult = loadGraiderConfig({
+    cwd,
+    assignmentFile
+  });
+  if (configResult.status === "failure") {
+    return createCommandResult({
+      commandName: COMMAND_NAME3,
+      assignmentFile,
+      status: "failure",
+      warnings: [],
+      errors: configResult.diagnostics,
+      generatedFiles: [],
+      summary: {
+        options
+      }
+    });
+  }
+  const rosterResult = loadAssignmentRosters(configResult.config);
+  if (rosterResult.errors.length > 0) {
+    return createCommandResult({
+      commandName: COMMAND_NAME3,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -2680,11 +4106,11 @@ var runValidateCommand = async ({
     termConfig: configResult.config.term,
     assignmentConfig: configResult.config.assignment,
     students: rosterResult.students,
-    githubClient: githubClient ?? createDefaultGitHubClient2(configResult.config, rosterResult.students)
+    githubClient: githubClient ?? createDefaultGitHubClient3(configResult.config, rosterResult.students)
   });
   if (readinessResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME2,
+      commandName: COMMAND_NAME3,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -2699,7 +4125,7 @@ var runValidateCommand = async ({
     });
   }
   return createCommandResult({
-    commandName: COMMAND_NAME2,
+    commandName: COMMAND_NAME3,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
     warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -2714,7 +4140,7 @@ var runValidateCommand = async ({
   });
 };
 var registerValidateCommand = (program) => {
-  program.command(COMMAND_NAME2).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME3).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runValidateCommand({
       cwd: process.cwd(),
