@@ -189,12 +189,16 @@ export const STUDENT_REPORT_PUBLISH_PARTIAL_CODE = DiagnosticCode.StudentReportP
 export const STUDENT_REPORT_PUBLISH_NOT_REQUESTED_CODE =
   DiagnosticCode.StudentReportPublishNotRequested;
 
-export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
+export const createNotSupportedInMvpDiagnostic = (
+  commandName: string,
+  assignmentFile?: string
+): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
   severity: "error",
   message: `The ${commandName} command is not supported in the MVP placeholder CLI shell.`,
   context: {
-    commandName
+    commandName,
+    ...(assignmentFile === undefined ? {} : { assignmentFile })
   }
 });
 
