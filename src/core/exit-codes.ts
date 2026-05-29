@@ -35,7 +35,14 @@ const CONFIGURATION_ERROR_CODES = new Set<string>([
   DiagnosticCode.InvalidAssignmentStatus,
   DiagnosticCode.InvalidRepositoryVisibility,
   DiagnosticCode.InvalidPermission,
-  DiagnosticCode.InvalidGradingConfig
+  DiagnosticCode.InvalidGradingConfig,
+  DiagnosticCode.ManifestMissing,
+  DiagnosticCode.InvalidManifest,
+  DiagnosticCode.InvalidManifestSchemaVersion,
+  DiagnosticCode.MissingManifestSection,
+  DiagnosticCode.InvalidManifestRepositoryRecord,
+  DiagnosticCode.InvalidManifestLifecycleStatus,
+  DiagnosticCode.InvalidManifestPermission
 ]);
 
 const GITHUB_ERROR_CODES = new Set<string>([

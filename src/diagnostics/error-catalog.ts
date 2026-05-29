@@ -75,7 +75,8 @@ export const DiagnosticCode = {
   InvalidGradingCheckStatus: "invalid_grading_check_status",
   MissingGradingCheckName: "missing_grading_check_name",
   InvalidGradingScore: "invalid_grading_score",
-  GradingWorkflowFailedWithResults: "grading_workflow_failed_with_results"
+  GradingWorkflowFailedWithResults: "grading_workflow_failed_with_results",
+  ReportWriteFailed: "report_write_failed"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -155,6 +156,7 @@ export const MISSING_GRADING_CHECK_NAME_CODE = DiagnosticCode.MissingGradingChec
 export const INVALID_GRADING_SCORE_CODE = DiagnosticCode.InvalidGradingScore;
 export const GRADING_WORKFLOW_FAILED_WITH_RESULTS_CODE =
   DiagnosticCode.GradingWorkflowFailedWithResults;
+export const REPORT_WRITE_FAILED_CODE = DiagnosticCode.ReportWriteFailed;
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,

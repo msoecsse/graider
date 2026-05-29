@@ -91,11 +91,10 @@ describe("graider CLI shell", () => {
   });
 
   it("TC-CLI-SHELL-005 command exists: report", () => {
-    const output = runCliText(["report", TEST_ASSIGNMENT_FILE]);
+    const output = runCliText(["report", "--help"]);
 
     expect(output).toContain("report");
-    expect(output).toContain(TEST_ASSIGNMENT_FILE);
-    expect(output).toContain("success");
+    expect(output).toContain("Generate assignment reports");
   });
 
   it("TC-CLI-SHELL-006 command exists: archive", () => {
