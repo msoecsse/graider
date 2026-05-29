@@ -10,6 +10,7 @@ import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
 import { GitHubClientError, createGitHubDiagnostic } from "../github/github-errors.js";
 import type { GitHubPermission, GitHubRepository } from "../github/github-models.js";
+import { type RetryOptions, withGitHubRetry } from "../github/github-retry.js";
 import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import { writeManifest } from "../manifest/manifest-renderer.js";
 import {
@@ -46,6 +47,7 @@ export interface ApplyExecutionInput {
   students: RosterStudent[];
   githubClient: GitHubClient;
   clock: Clock;
+  retryOptions?: Partial<RetryOptions>;
 }
 
 export interface ApplySummary {
@@ -93,6 +95,11 @@ const normalizeGitHubError = (error: unknown): Diagnostic =>
         DiagnosticCode.GithubApiError,
         "Unexpected GitHub client failure during apply."
       );
+
+const runGitHubOperation = async <T>(
+  input: ApplyExecutionInput,
+  operation: () => Promise<T>
+): Promise<T> => withGitHubRetry(operation, input.retryOptions);
 
 const createWorkflowMissingDiagnostic = (operation: PlanOperation): Diagnostic =>
   createConfigDiagnostic(
@@ -299,6 +306,8 @@ const executeCreateRepository = async (
     return state;
   }
 
+  const repositoryName = operation.repository_name;
+
   try {
     const parsedTemplate = parseTemplateRepository(
       input.config.course.github.organization,
@@ -309,13 +318,15 @@ const executeCreateRepository = async (
       return recordError(state, parsedTemplate.diagnostic);
     }
 
-    const repository = await input.githubClient.createRepositoryFromTemplate({
-      templateOwner: parsedTemplate.repository.owner,
-      templateRepo: parsedTemplate.repository.repo,
-      owner: input.config.course.github.organization,
-      name: operation.repository_name,
-      private: PRIVATE_REPOSITORY
-    });
+    const repository = await runGitHubOperation(input, () =>
+      input.githubClient.createRepositoryFromTemplate({
+        templateOwner: parsedTemplate.repository.owner,
+        templateRepo: parsedTemplate.repository.repo,
+        owner: input.config.course.github.organization,
+        name: repositoryName,
+        private: PRIVATE_REPOSITORY
+      })
+    );
     const manifest = upsertRepositoryRecord(
       state.manifest,
       createManifestRecord(
@@ -352,15 +363,20 @@ const executeStudentCollaborator = async (
     return state;
   }
 
+  const repositoryName = operation.repository_name;
+  const githubUsername = operation.github_username;
+
   if (findManifestRecord(state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
   try {
-    const currentPermission = await input.githubClient.getCollaboratorPermission(
-      input.config.course.github.organization,
-      operation.repository_name,
-      operation.github_username
+    const currentPermission = await runGitHubOperation(input, () =>
+      input.githubClient.getCollaboratorPermission(
+        input.config.course.github.organization,
+        repositoryName,
+        githubUsername
+      )
     );
     let nextState = state;
 
@@ -374,22 +390,26 @@ const executeStudentCollaborator = async (
         );
       }
     } else {
-      await input.githubClient.addCollaborator({
-        owner: input.config.course.github.organization,
-        repo: operation.repository_name,
-        username: operation.github_username,
-        permission: STUDENT_PERMISSION
-      });
+      await runGitHubOperation(input, () =>
+        input.githubClient.addCollaborator({
+          owner: input.config.course.github.organization,
+          repo: repositoryName,
+          username: githubUsername,
+          permission: STUDENT_PERMISSION
+        })
+      );
       nextState = incrementSummary(nextState, "verified");
     }
 
-    const collaborators = await input.githubClient.listCollaboratorPermissions(
-      input.config.course.github.organization,
-      operation.repository_name
+    const collaborators = await runGitHubOperation(input, () =>
+      input.githubClient.listCollaboratorPermissions(
+        input.config.course.github.organization,
+        repositoryName
+      )
     );
 
     for (const collaborator of collaborators) {
-      if (collaborator.username !== operation.github_username) {
+      if (collaborator.username !== githubUsername) {
         nextState = recordWarning(
           nextState,
           createUnexpectedCollaboratorWarning(
@@ -408,7 +428,7 @@ const executeStudentCollaborator = async (
           studentId: operation.student_id ?? "",
           permissions: {
             student: {
-              username: operation.github_username,
+              username: githubUsername,
               permission:
                 currentPermission.permission === "none"
                   ? STUDENT_PERMISSION
@@ -439,15 +459,19 @@ const executeTeamPermission = async (
     return state;
   }
 
+  const repositoryName = operation.repository_name;
+
   if (findManifestRecord(state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
   try {
-    const currentPermission = await input.githubClient.getTeamPermission(
-      input.config.course.github.organization,
-      operation.repository_name,
-      teamSlug
+    const currentPermission = await runGitHubOperation(input, () =>
+      input.githubClient.getTeamPermission(
+        input.config.course.github.organization,
+        repositoryName,
+        teamSlug
+      )
     );
     let nextState = state;
 
@@ -461,12 +485,14 @@ const executeTeamPermission = async (
         );
       }
     } else {
-      await input.githubClient.addTeamPermission({
-        owner: input.config.course.github.organization,
-        repo: operation.repository_name,
-        teamSlug,
-        permission: expectedPermission
-      });
+      await runGitHubOperation(input, () =>
+        input.githubClient.addTeamPermission({
+          owner: input.config.course.github.organization,
+          repo: repositoryName,
+          teamSlug,
+          permission: expectedPermission
+        })
+      );
       nextState = incrementSummary(nextState, "verified");
     }
 
@@ -518,23 +544,23 @@ const executeEnableActions = async (
     return state;
   }
 
+  const repositoryName = operation.repository_name;
+
   if (findManifestRecord(state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
   try {
-    const actionsState = await input.githubClient.getActionsState(
-      input.config.course.github.organization,
-      operation.repository_name
+    const actionsState = await runGitHubOperation(input, () =>
+      input.githubClient.getActionsState(input.config.course.github.organization, repositoryName)
     );
     let nextState = state;
 
     if (actionsState === "enabled") {
       nextState = incrementSummary(nextState, "noop");
     } else {
-      await input.githubClient.enableActions(
-        input.config.course.github.organization,
-        operation.repository_name
+      await runGitHubOperation(input, () =>
+        input.githubClient.enableActions(input.config.course.github.organization, repositoryName)
       );
       nextState = incrementSummary(nextState, "verified");
     }
@@ -570,15 +596,20 @@ const executeVerifyWorkflow = async (
     return state;
   }
 
+  const repositoryName = operation.repository_name;
+  const workflowPath = input.config.course.grading.workflow;
+
   if (findManifestRecord(state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
   try {
-    const workflow = await input.githubClient.getWorkflow(
-      input.config.course.github.organization,
-      operation.repository_name,
-      input.config.course.grading.workflow
+    const workflow = await runGitHubOperation(input, () =>
+      input.githubClient.getWorkflow(
+        input.config.course.github.organization,
+        repositoryName,
+        workflowPath
+      )
     );
 
     if (workflow === null) {
@@ -591,7 +622,7 @@ const executeVerifyWorkflow = async (
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
-                gradingWorkflowPath: input.config.course.grading.workflow,
+                gradingWorkflowPath: workflowPath,
                 gradingWorkflowFound: false,
                 lastObservedAt: observedAt
               }
@@ -638,15 +669,20 @@ const executeVerifyDispatch = async (
     return state;
   }
 
+  const repositoryName = operation.repository_name;
+  const workflowPath = input.config.course.grading.workflow;
+
   if (findManifestRecord(state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
   try {
-    const workflow = await input.githubClient.getWorkflow(
-      input.config.course.github.organization,
-      operation.repository_name,
-      input.config.course.grading.workflow
+    const workflow = await runGitHubOperation(input, () =>
+      input.githubClient.getWorkflow(
+        input.config.course.github.organization,
+        repositoryName,
+        workflowPath
+      )
     );
 
     if (workflow === null || !workflow.supportsDispatch) {

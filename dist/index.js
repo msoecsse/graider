@@ -842,12 +842,14 @@ var DIAGNOSTIC_CODE_BY_KIND = {
   permission_denied: DiagnosticCode.GithubPermissionDenied,
   rate_limited: DiagnosticCode.GithubRateLimited,
   network_error: DiagnosticCode.GithubNetworkError,
-  api_error: DiagnosticCode.GithubApiError
+  api_error: DiagnosticCode.GithubApiError,
+  timeout: DiagnosticCode.GithubNetworkError
 };
 var RETRYABLE_ERROR_KINDS = /* @__PURE__ */ new Set([
   "rate_limited",
   "network_error",
-  "api_error"
+  "api_error",
+  "timeout"
 ]);
 var GitHubClientError = class extends Error {
   kind;
@@ -866,6 +868,7 @@ var GitHubClientError = class extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
   }
 };
+var isRetryableGitHubError = (error) => error.retryable;
 var createGitHubDiagnostic = (error) => ({
   code: error.diagnosticCode,
   severity: "error",
@@ -876,6 +879,59 @@ var createGitHubDiagnostic = (error) => ({
     ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds }
   }
 });
+
+// src/github/github-rate-limit.ts
+var MILLISECONDS_PER_SECOND = 1e3;
+var retryAfterSecondsToMilliseconds = (seconds) => seconds * MILLISECONDS_PER_SECOND;
+var getGitHubRetryDelayMs = (error, fallbackDelayMs) => error.retryAfterSeconds === void 0 ? fallbackDelayMs : retryAfterSecondsToMilliseconds(error.retryAfterSeconds);
+
+// src/github/github-retry.ts
+var DEFAULT_GITHUB_RETRY_ATTEMPTS = 3;
+var DEFAULT_INITIAL_BACKOFF_MS = 250;
+var DEFAULT_BACKOFF_MULTIPLIER = 2;
+var defaultSleep = async (milliseconds) => new Promise((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
+var createDefaultRetryOptions = () => ({
+  maxAttempts: DEFAULT_GITHUB_RETRY_ATTEMPTS,
+  initialBackoffMs: DEFAULT_INITIAL_BACKOFF_MS,
+  backoffMultiplier: DEFAULT_BACKOFF_MULTIPLIER,
+  sleep: defaultSleep
+});
+var normalizeRetryOptions = (options = {}) => ({
+  ...createDefaultRetryOptions(),
+  ...options
+});
+var shouldRetryGitHubError = (error) => isRetryableGitHubError(error);
+var withGitHubRetry = async (operation, options) => {
+  const retryOptions = normalizeRetryOptions(options);
+  let nextBackoffMs = retryOptions.initialBackoffMs;
+  let lastError;
+  for (let attempt = 1; attempt <= retryOptions.maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof GitHubClientError) || !shouldRetryGitHubError(error)) {
+        throw error;
+      }
+      if (attempt >= retryOptions.maxAttempts) {
+        throw error;
+      }
+      const delayMs = getGitHubRetryDelayMs(error, nextBackoffMs);
+      retryOptions.onRetry?.({
+        attempt,
+        maxAttempts: retryOptions.maxAttempts,
+        diagnosticCode: error.diagnosticCode,
+        ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds },
+        delayMs
+      });
+      await retryOptions.sleep(delayMs);
+      nextBackoffMs *= retryOptions.backoffMultiplier;
+    }
+  }
+  throw lastError;
+};
 
 // src/manifest/manifest-renderer.ts
 import fs3 from "fs";
@@ -1138,6 +1194,7 @@ var normalizeGitHubError = (error) => error instanceof GitHubClientError ? creat
   DiagnosticCode.GithubApiError,
   "Unexpected GitHub client failure during apply."
 );
+var runGitHubOperation = async (input, operation) => withGitHubRetry(operation, input.retryOptions);
 var createWorkflowMissingDiagnostic = (operation) => createConfigDiagnostic(
   DiagnosticCode.GradingWorkflowMissing,
   `Grading workflow was not found for ${operation.repository_name ?? "repository"}.`,
@@ -1276,6 +1333,7 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
   if (student === void 0 || operation.repository_name === void 0) {
     return state;
   }
+  const repositoryName = operation.repository_name;
   try {
     const parsedTemplate = parseTemplateRepository(
       input.config.course.github.organization,
@@ -1284,13 +1342,16 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
     if (parsedTemplate.status === "failure") {
       return recordError(state, parsedTemplate.diagnostic);
     }
-    const repository = await input.githubClient.createRepositoryFromTemplate({
-      templateOwner: parsedTemplate.repository.owner,
-      templateRepo: parsedTemplate.repository.repo,
-      owner: input.config.course.github.organization,
-      name: operation.repository_name,
-      private: PRIVATE_REPOSITORY
-    });
+    const repository = await runGitHubOperation(
+      input,
+      () => input.githubClient.createRepositoryFromTemplate({
+        templateOwner: parsedTemplate.repository.owner,
+        templateRepo: parsedTemplate.repository.repo,
+        owner: input.config.course.github.organization,
+        name: repositoryName,
+        private: PRIVATE_REPOSITORY
+      })
+    );
     const manifest = upsertRepositoryRecord(
       state.manifest,
       createManifestRecord(
@@ -1319,14 +1380,19 @@ var executeStudentCollaborator = async (input, state, operation, observedAt) => 
   if (operation.repository_name === void 0 || operation.github_username === void 0) {
     return state;
   }
+  const repositoryName = operation.repository_name;
+  const githubUsername = operation.github_username;
   if (findManifestRecord(state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
-    const currentPermission = await input.githubClient.getCollaboratorPermission(
-      input.config.course.github.organization,
-      operation.repository_name,
-      operation.github_username
+    const currentPermission = await runGitHubOperation(
+      input,
+      () => input.githubClient.getCollaboratorPermission(
+        input.config.course.github.organization,
+        repositoryName,
+        githubUsername
+      )
     );
     let nextState = state;
     if (hasAtLeastPermission(currentPermission.permission, STUDENT_PERMISSION2)) {
@@ -1338,20 +1404,26 @@ var executeStudentCollaborator = async (input, state, operation, observedAt) => 
         );
       }
     } else {
-      await input.githubClient.addCollaborator({
-        owner: input.config.course.github.organization,
-        repo: operation.repository_name,
-        username: operation.github_username,
-        permission: STUDENT_PERMISSION2
-      });
+      await runGitHubOperation(
+        input,
+        () => input.githubClient.addCollaborator({
+          owner: input.config.course.github.organization,
+          repo: repositoryName,
+          username: githubUsername,
+          permission: STUDENT_PERMISSION2
+        })
+      );
       nextState = incrementSummary(nextState, "verified");
     }
-    const collaborators = await input.githubClient.listCollaboratorPermissions(
-      input.config.course.github.organization,
-      operation.repository_name
+    const collaborators = await runGitHubOperation(
+      input,
+      () => input.githubClient.listCollaboratorPermissions(
+        input.config.course.github.organization,
+        repositoryName
+      )
     );
     for (const collaborator of collaborators) {
-      if (collaborator.username !== operation.github_username) {
+      if (collaborator.username !== githubUsername) {
         nextState = recordWarning(
           nextState,
           createUnexpectedCollaboratorWarning(
@@ -1369,7 +1441,7 @@ var executeStudentCollaborator = async (input, state, operation, observedAt) => 
           studentId: operation.student_id ?? "",
           permissions: {
             student: {
-              username: operation.github_username,
+              username: githubUsername,
               permission: currentPermission.permission === "none" ? STUDENT_PERMISSION2 : currentPermission.permission,
               pendingInvite: currentPermission.pendingInvite,
               lastObservedAt: observedAt,
@@ -1388,14 +1460,18 @@ var executeTeamPermission = async (input, state, operation, teamSlug, expectedPe
   if (operation.repository_name === void 0) {
     return state;
   }
+  const repositoryName = operation.repository_name;
   if (findManifestRecord(state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
-    const currentPermission = await input.githubClient.getTeamPermission(
-      input.config.course.github.organization,
-      operation.repository_name,
-      teamSlug
+    const currentPermission = await runGitHubOperation(
+      input,
+      () => input.githubClient.getTeamPermission(
+        input.config.course.github.organization,
+        repositoryName,
+        teamSlug
+      )
     );
     let nextState = state;
     if (hasAtLeastPermission(currentPermission.permission, expectedPermission)) {
@@ -1407,12 +1483,15 @@ var executeTeamPermission = async (input, state, operation, teamSlug, expectedPe
         );
       }
     } else {
-      await input.githubClient.addTeamPermission({
-        owner: input.config.course.github.organization,
-        repo: operation.repository_name,
-        teamSlug,
-        permission: expectedPermission
-      });
+      await runGitHubOperation(
+        input,
+        () => input.githubClient.addTeamPermission({
+          owner: input.config.course.github.organization,
+          repo: repositoryName,
+          teamSlug,
+          permission: expectedPermission
+        })
+      );
       nextState = incrementSummary(nextState, "verified");
     }
     return persistManifest(
@@ -1447,21 +1526,22 @@ var executeEnableActions = async (input, state, operation, observedAt) => {
   if (operation.repository_name === void 0) {
     return state;
   }
+  const repositoryName = operation.repository_name;
   if (findManifestRecord(state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
-    const actionsState = await input.githubClient.getActionsState(
-      input.config.course.github.organization,
-      operation.repository_name
+    const actionsState = await runGitHubOperation(
+      input,
+      () => input.githubClient.getActionsState(input.config.course.github.organization, repositoryName)
     );
     let nextState = state;
     if (actionsState === "enabled") {
       nextState = incrementSummary(nextState, "noop");
     } else {
-      await input.githubClient.enableActions(
-        input.config.course.github.organization,
-        operation.repository_name
+      await runGitHubOperation(
+        input,
+        () => input.githubClient.enableActions(input.config.course.github.organization, repositoryName)
       );
       nextState = incrementSummary(nextState, "verified");
     }
@@ -1486,14 +1566,19 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
   if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
     return state;
   }
+  const repositoryName = operation.repository_name;
+  const workflowPath = input.config.course.grading.workflow;
   if (findManifestRecord(state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
-    const workflow = await input.githubClient.getWorkflow(
-      input.config.course.github.organization,
-      operation.repository_name,
-      input.config.course.grading.workflow
+    const workflow = await runGitHubOperation(
+      input,
+      () => input.githubClient.getWorkflow(
+        input.config.course.github.organization,
+        repositoryName,
+        workflowPath
+      )
     );
     if (workflow === null) {
       const diagnostic = createWorkflowMissingDiagnostic(operation);
@@ -1504,7 +1589,7 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
-                gradingWorkflowPath: input.config.course.grading.workflow,
+                gradingWorkflowPath: workflowPath,
                 gradingWorkflowFound: false,
                 lastObservedAt: observedAt
               }
@@ -1540,14 +1625,19 @@ var executeVerifyDispatch = async (input, state, operation, observedAt) => {
   if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
     return state;
   }
+  const repositoryName = operation.repository_name;
+  const workflowPath = input.config.course.grading.workflow;
   if (findManifestRecord(state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
-    const workflow = await input.githubClient.getWorkflow(
-      input.config.course.github.organization,
-      operation.repository_name,
-      input.config.course.grading.workflow
+    const workflow = await runGitHubOperation(
+      input,
+      () => input.githubClient.getWorkflow(
+        input.config.course.github.organization,
+        repositoryName,
+        workflowPath
+      )
     );
     if (workflow === null || !workflow.supportsDispatch) {
       const diagnostic = createWorkflowDispatchDiagnostic(operation);
@@ -1681,6 +1771,7 @@ var evaluateMutationGuard = ({
 };
 
 // src/github/fake-github-client.ts
+var NO_FAKE_GITHUB_FAILURES = 0;
 var DEFAULT_AUTHENTICATED_USER = {
   username: "graider-fake-user"
 };
@@ -1751,6 +1842,11 @@ var FakeGitHubClient = class {
       kind,
       ...options
     });
+  }
+  failTimes(method, kind, count, options = {}) {
+    for (let remaining = count; remaining > NO_FAKE_GITHUB_FAILURES; remaining -= 1) {
+      this.failNext(method, kind, options);
+    }
   }
   failAll(kind, options = {}) {
     this.failures.push({
@@ -3565,8 +3661,17 @@ var runApplyCommand = async ({
   assignmentFile,
   options,
   githubClient,
-  clock = systemClock
+  clock = systemClock,
+  retryOptions
 }) => {
+  const retryEvents = [];
+  const effectiveRetryOptions = {
+    ...retryOptions,
+    onRetry: (event) => {
+      retryEvents.push(event);
+      retryOptions?.onRetry?.(event);
+    }
+  };
   const configResult = loadGraiderConfig({
     cwd,
     assignmentFile
@@ -3678,7 +3783,8 @@ var runApplyCommand = async ({
     manifestPath: manifestPath.absolutePath,
     students: rosterResult.students,
     githubClient: effectiveGitHubClient,
-    clock
+    clock,
+    retryOptions: effectiveRetryOptions
   });
   const generatedFiles = fs6.existsSync(manifestPath.absolutePath) ? [manifestPath.relativePath] : [];
   return createCommandResult({
@@ -3694,6 +3800,8 @@ var runApplyCommand = async ({
       ...rosterResult.summary,
       githubReadinessChecked: true,
       manifestFile: manifestPath.relativePath,
+      retryCount: retryEvents.length,
+      retryDiagnostics: retryEvents.map((event) => event.diagnosticCode),
       ...executionResult.summary
     }
   });

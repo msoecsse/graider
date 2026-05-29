@@ -33,6 +33,7 @@ enum FakeGitHubCount {
   SingleRecord = 1
 }
 
+const NO_FAKE_GITHUB_FAILURES = 0;
 const DEFAULT_AUTHENTICATED_USER: GitHubUser = {
   username: "graider-fake-user"
 };
@@ -221,6 +222,17 @@ export class FakeGitHubClient implements GitHubClient {
       kind,
       ...options
     });
+  }
+
+  failTimes(
+    method: GitHubClientMethodName,
+    kind: GitHubErrorKind,
+    count: number,
+    options: FakeGitHubFailureOptions = {}
+  ): void {
+    for (let remaining = count; remaining > NO_FAKE_GITHUB_FAILURES; remaining -= 1) {
+      this.failNext(method, kind, options);
+    }
   }
 
   failAll(kind: GitHubErrorKind, options: FakeGitHubFailureOptions = {}): void {

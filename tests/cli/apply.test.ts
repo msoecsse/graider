@@ -7,6 +7,7 @@ import { formatCommandResultAsJson } from "../../src/cli/output.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { ExitCode } from "../../src/core/exit-codes.js";
 import { FakeGitHubClient } from "../../src/github/fake-github-client.js";
+import { DEFAULT_GITHUB_RETRY_ATTEMPTS } from "../../src/github/github-retry.js";
 import type {
   GitHubRepository,
   GitHubTemplateRepository,
@@ -117,7 +118,8 @@ const runApply = async (
     assignmentFile: ASSIGNMENT_FILE,
     options,
     githubClient,
-    clock: fixedClock
+    clock: fixedClock,
+    retryOptions: { sleep: async () => {} }
   });
 
   return {
@@ -276,7 +278,7 @@ describe("graider apply command", () => {
 
   it("TC-CLI-APPLY-007 manifest is updated incrementally", async () => {
     const githubClient = createReadyClient();
-    githubClient.failNext("addCollaborator", "api_error");
+    githubClient.failTimes("addCollaborator", "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS);
     const { cwd, result } = await runApply("grading-disabled", githubClient);
     const manifestResult = loadWrittenManifest(cwd);
 
@@ -284,6 +286,44 @@ describe("graider apply command", () => {
     expect(manifestResult.status).toBe("loaded");
     expect(manifestResult.manifest?.repositories[0]?.studentId).toBe("jones");
     expect(manifestResult.manifest?.repositories[0]?.repository.name).toBe(JONES_REPOSITORY);
+  });
+
+  it("repository creation retries a transient API failure and succeeds", async () => {
+    const githubClient = createReadyClient();
+    githubClient.failNext("createRepositoryFromTemplate", "api_error");
+
+    const { result } = await runApply("grading-disabled", githubClient);
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.createdRepositories).toHaveLength(1);
+    expect(result.summary.retryCount).toBe(1);
+  });
+
+  it("collaborator add retries a transient network failure and succeeds", async () => {
+    const githubClient = createReadyClient();
+    githubClient.failNext("addCollaborator", "network_error");
+
+    const { result } = await runApply("grading-disabled", githubClient);
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.addedCollaborators).toHaveLength(1);
+    expect(result.summary.retryDiagnostics).toEqual(["github_network_error"]);
+  });
+
+  it("exhausted GitHub API retry produces a structured diagnostic", async () => {
+    const githubClient = createReadyClient();
+    githubClient.failTimes(
+      "createRepositoryFromTemplate",
+      "api_error",
+      DEFAULT_GITHUB_RETRY_ATTEMPTS
+    );
+
+    const { result } = await runApply("grading-disabled", githubClient);
+
+    expect(result.exitCode).toBe(ExitCode.GitHubOrNetworkFailure);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
+    );
   });
 
   it("TC-CLI-APPLY-008 confirmation required unless --yes", async () => {

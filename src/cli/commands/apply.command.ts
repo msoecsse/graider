@@ -20,6 +20,7 @@ import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
 import { validateGitHubReadiness } from "../../github/github-readiness-validation.js";
 import type { GitHubTemplateRepository } from "../../github/github-models.js";
+import type { GitHubRetryEvent, RetryOptions } from "../../github/github-retry.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { buildPlan } from "../../planning/plan-builder.js";
@@ -42,6 +43,7 @@ export interface ApplyCommandRequest {
   options: CommonCommandOptions;
   githubClient?: GitHubClient;
   clock?: Clock;
+  retryOptions?: Partial<RetryOptions>;
 }
 
 const createDefaultTemplateRepository = (
@@ -125,8 +127,17 @@ export const runApplyCommand = async ({
   assignmentFile,
   options,
   githubClient,
-  clock = systemClock
+  clock = systemClock,
+  retryOptions
 }: ApplyCommandRequest): Promise<CommandResult> => {
+  const retryEvents: GitHubRetryEvent[] = [];
+  const effectiveRetryOptions: Partial<RetryOptions> = {
+    ...retryOptions,
+    onRetry: (event) => {
+      retryEvents.push(event);
+      retryOptions?.onRetry?.(event);
+    }
+  };
   const configResult = loadGraiderConfig({
     cwd,
     assignmentFile
@@ -249,7 +260,8 @@ export const runApplyCommand = async ({
     manifestPath: manifestPath.absolutePath,
     students: rosterResult.students,
     githubClient: effectiveGitHubClient,
-    clock
+    clock,
+    retryOptions: effectiveRetryOptions
   });
   const generatedFiles = fs.existsSync(manifestPath.absolutePath)
     ? [manifestPath.relativePath]
@@ -268,6 +280,8 @@ export const runApplyCommand = async ({
       ...rosterResult.summary,
       githubReadinessChecked: true,
       manifestFile: manifestPath.relativePath,
+      retryCount: retryEvents.length,
+      retryDiagnostics: retryEvents.map((event) => event.diagnosticCode),
       ...executionResult.summary
     }
   });

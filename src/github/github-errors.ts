@@ -8,7 +8,8 @@ export type GitHubErrorKind =
   | "permission_denied"
   | "rate_limited"
   | "network_error"
-  | "api_error";
+  | "api_error"
+  | "timeout";
 
 interface GitHubClientErrorOptions {
   retryAfterSeconds?: number;
@@ -20,13 +21,15 @@ const DIAGNOSTIC_CODE_BY_KIND = {
   permission_denied: DiagnosticCode.GithubPermissionDenied,
   rate_limited: DiagnosticCode.GithubRateLimited,
   network_error: DiagnosticCode.GithubNetworkError,
-  api_error: DiagnosticCode.GithubApiError
+  api_error: DiagnosticCode.GithubApiError,
+  timeout: DiagnosticCode.GithubNetworkError
 } as const satisfies Record<GitHubErrorKind, string>;
 
 const RETRYABLE_ERROR_KINDS = new Set<GitHubErrorKind>([
   "rate_limited",
   "network_error",
-  "api_error"
+  "api_error",
+  "timeout"
 ]);
 
 export class GitHubClientError extends Error {
