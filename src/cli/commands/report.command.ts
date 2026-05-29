@@ -12,6 +12,7 @@ import {
   type CommandStatus
 } from "../../core/command-result.js";
 import { type Clock, systemClock } from "../../core/clock.js";
+import { publishStudentReports as publishReportsToStudentRepositories } from "../../execution/report-publisher.js";
 import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
@@ -36,8 +37,13 @@ export interface ReportCommandRequest {
   cwd: string;
   assignmentFile: string;
   options: CommonCommandOptions;
+  publishStudentReports?: boolean;
   githubClient?: GitHubClient;
   clock?: Clock;
+}
+
+interface ReportRawOptions extends RawCommonCommandOptions {
+  publishStudentReports?: boolean;
 }
 
 const getCommandStatus = (errorCount: number, generatedFileCount: number): CommandStatus => {
@@ -98,6 +104,7 @@ export const runReportCommand = async ({
   cwd,
   assignmentFile,
   options,
+  publishStudentReports = false,
   githubClient,
   clock = systemClock
 }: ReportCommandRequest): Promise<CommandResult> => {
@@ -157,31 +164,62 @@ export const runReportCommand = async ({
     });
   }
 
+  const activeGitHubClient = githubClient ?? createDefaultGitHubClient();
   const collectResult = await collectReport({
     config: configResult.config,
     rosterSummary: rosterResult.summary,
     students: rosterResult.students,
     manifest: manifestResult.manifest,
-    githubClient: githubClient ?? createDefaultGitHubClient(),
+    githubClient: activeGitHubClient,
     generatedAt: clock.now().toISOString()
   });
   const writeResult = writeReportFiles(
     createReportFiles(configResult.config.summary.repoRoot, collectResult.report)
   );
+  const publishResult =
+    publishStudentReports && writeResult.errors.length === EMPTY_COUNT
+      ? await publishReportsToStudentRepositories({
+          report: collectResult.report,
+          githubClient: activeGitHubClient
+        })
+      : {
+          publishedFiles: [],
+          warnings: [],
+          errors: [],
+          studentsReported: collectResult.report.students.length,
+          studentsPublished: EMPTY_COUNT,
+          publishFailed: EMPTY_COUNT,
+          publishSkipped: EMPTY_COUNT
+        };
+  const commandStatus =
+    publishResult.errors.length > EMPTY_COUNT
+      ? getCommandStatus(publishResult.errors.length, publishResult.studentsPublished)
+      : getCommandStatus(writeResult.errors.length, writeResult.generatedFiles.length);
 
   return createCommandResult({
     commandName: COMMAND_NAME,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
-    status: getCommandStatus(writeResult.errors.length, writeResult.generatedFiles.length),
-    warnings: [...rosterResult.warnings, ...collectResult.report.warnings, ...writeResult.warnings],
-    errors: writeResult.errors,
+    status: commandStatus,
+    warnings: [
+      ...rosterResult.warnings,
+      ...collectResult.report.warnings,
+      ...writeResult.warnings,
+      ...publishResult.warnings
+    ],
+    errors: [...writeResult.errors, ...publishResult.errors],
     generatedFiles: writeResult.generatedFiles,
     summary: {
       options,
+      publishStudentReports,
       ...configResult.config.summary,
       ...rosterResult.summary,
       manifestFile: manifestPath.relativePath,
       reportFileCount: writeResult.generatedFiles.length,
+      publishedFiles: publishResult.publishedFiles,
+      studentsReported: publishResult.studentsReported,
+      studentsPublished: publishResult.studentsPublished,
+      publishFailed: publishResult.publishFailed,
+      publishSkipped: publishResult.publishSkipped,
       ...collectResult.report.summary
     }
   });
@@ -194,13 +232,15 @@ export const registerReportCommand = (program: Command): void => {
     .option("--json", "Emit JSON output")
     .option("--verbose", "Emit verbose diagnostics")
     .option("--yes", "Confirm non-interactive execution")
+    .option("--publish-student-reports", "Publish per-student reports to student repositories")
     .description("Generate assignment reports.")
-    .action(async (assignmentFile: string, rawOptions: RawCommonCommandOptions) => {
+    .action(async (assignmentFile: string, rawOptions: ReportRawOptions) => {
       const options = normalizeCommonCommandOptions(rawOptions);
       const result = await runReportCommand({
         cwd: process.cwd(),
         assignmentFile,
-        options
+        options,
+        publishStudentReports: rawOptions.publishStudentReports === true
       });
 
       writeCommandResult(result, options.json);

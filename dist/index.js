@@ -83,7 +83,12 @@ var DiagnosticCode = {
   MissingGradingCheckName: "missing_grading_check_name",
   InvalidGradingScore: "invalid_grading_score",
   GradingWorkflowFailedWithResults: "grading_workflow_failed_with_results",
-  ReportWriteFailed: "report_write_failed"
+  ReportWriteFailed: "report_write_failed",
+  StudentReportPublishFailed: "student_report_publish_failed",
+  StudentReportRepositoryMissing: "student_report_repository_missing",
+  StudentReportWriteFailed: "student_report_write_failed",
+  StudentReportPublishPartial: "student_report_publish_partial",
+  StudentReportPublishNotRequested: "student_report_publish_not_requested"
 };
 var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
 var MISSING_REQUIRED_FILE_CODE = DiagnosticCode.MissingRequiredFile;
@@ -154,6 +159,11 @@ var MISSING_GRADING_CHECK_NAME_CODE = DiagnosticCode.MissingGradingCheckName;
 var INVALID_GRADING_SCORE_CODE = DiagnosticCode.InvalidGradingScore;
 var GRADING_WORKFLOW_FAILED_WITH_RESULTS_CODE = DiagnosticCode.GradingWorkflowFailedWithResults;
 var REPORT_WRITE_FAILED_CODE = DiagnosticCode.ReportWriteFailed;
+var STUDENT_REPORT_PUBLISH_FAILED_CODE = DiagnosticCode.StudentReportPublishFailed;
+var STUDENT_REPORT_REPOSITORY_MISSING_CODE = DiagnosticCode.StudentReportRepositoryMissing;
+var STUDENT_REPORT_WRITE_FAILED_CODE = DiagnosticCode.StudentReportWriteFailed;
+var STUDENT_REPORT_PUBLISH_PARTIAL_CODE = DiagnosticCode.StudentReportPublishPartial;
+var STUDENT_REPORT_PUBLISH_NOT_REQUESTED_CODE = DiagnosticCode.StudentReportPublishNotRequested;
 var createNotSupportedInMvpDiagnostic = (commandName) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
   severity: "error",
@@ -4139,6 +4149,258 @@ var registerRemoveAccessCommand = (program) => {
 // src/cli/commands/report.command.ts
 import path12 from "path";
 
+// src/reporting/student-markdown-renderer.ts
+var NEWLINE = "\n";
+var EMPTY_DISPLAY = "";
+var diagnosticCodes = (diagnostics) => diagnostics.map((diagnostic) => diagnostic.code).join("; ");
+var formatNullableNumber = (value) => value === void 0 || value === null ? EMPTY_DISPLAY : String(value);
+var renderRepositoryLine = (student) => {
+  if (student.repositoryName === void 0) {
+    return "- Repository: missing";
+  }
+  if (student.repositoryUrl === void 0) {
+    return `- Repository: ${student.repositoryName}`;
+  }
+  return `- Repository: [${student.repositoryName}](${student.repositoryUrl})`;
+};
+var renderCheckRows = (student) => student.grading.checks.length === 0 ? ["No check details were reported."] : [
+  "| Check | Status | Points | Message |",
+  "| --- | --- | --- | --- |",
+  ...student.grading.checks.map((check) => {
+    const points = check.pointsEarned === void 0 && check.pointsPossible === void 0 ? EMPTY_DISPLAY : `${formatNullableNumber(check.pointsEarned)}/${formatNullableNumber(check.pointsPossible)}`;
+    return `| ${check.name} | ${check.status} | ${points} | ${check.message ?? EMPTY_DISPLAY} |`;
+  })
+];
+var renderDetails = (student) => {
+  const details = student.grading.checks.flatMap(
+    (check) => check.details === void 0 || check.details.length === 0 ? [] : [`### ${check.name}`, ...check.details.map((detail) => `- ${detail}`), ""]
+  );
+  return details.length === 0 ? ["No additional details were reported."] : details;
+};
+var renderNotConfiguredMessage = (student) => student.grading.resultStatus === "not_configured" ? ["", "Grading was not configured for this assignment."] : [];
+var renderStudentMarkdownReport = (assignment, student) => [
+  `# ${assignment.assignmentTitle}`,
+  "",
+  `Student: ${student.studentId} (${student.githubUsername})`,
+  `Section: ${student.section}`,
+  "",
+  "## Submission",
+  "",
+  renderRepositoryLine(student),
+  `- Repository status: ${student.repositoryStatus}`,
+  `- Roster status: ${student.rosterStatus}`,
+  "",
+  "## Grading Result",
+  "",
+  `- Workflow status: ${student.grading.workflowStatus}`,
+  `- Result status: ${student.grading.resultStatus}`,
+  `- Artifact status: ${student.grading.artifactStatus}`,
+  `- Result file status: ${student.grading.resultFileStatus}`,
+  ...student.grading.score === void 0 ? [] : [
+    `- Score: ${formatNullableNumber(student.grading.score)}/${formatNullableNumber(student.grading.maxScore)}`
+  ],
+  ...renderNotConfiguredMessage(student),
+  "",
+  "## Checks",
+  "",
+  ...renderCheckRows(student),
+  "",
+  "## Details",
+  "",
+  ...renderDetails(student),
+  "",
+  "## Diagnostics",
+  "",
+  `Warnings: ${diagnosticCodes(student.warnings)}`,
+  `Errors: ${diagnosticCodes(student.errors)}`,
+  ""
+].join(NEWLINE);
+
+// src/reporting/student-results-json-renderer.ts
+var PUBLISHED_STUDENT_RESULTS_SCHEMA_VERSION = 1;
+var mapChecks = (student) => student.grading.checks.map((check) => ({
+  name: check.name,
+  status: check.status,
+  ...check.message === void 0 ? {} : { message: check.message },
+  ...check.pointsEarned === void 0 ? {} : { points_earned: check.pointsEarned },
+  ...check.pointsPossible === void 0 ? {} : { points_possible: check.pointsPossible },
+  ...check.details === void 0 ? {} : { details: check.details }
+}));
+var toStudentResultsJsonValue = (assignment, student, generatedAt) => ({
+  schema_version: PUBLISHED_STUDENT_RESULTS_SCHEMA_VERSION,
+  generated_at: generatedAt,
+  assignment: {
+    course_code: assignment.courseCode,
+    term_code: assignment.termCode,
+    assignment_slug: assignment.assignmentSlug,
+    assignment_title: assignment.assignmentTitle
+  },
+  student: {
+    student_id: student.studentId,
+    github_username: student.githubUsername,
+    section: student.section,
+    roster_status: student.rosterStatus
+  },
+  repository: {
+    ...student.repositoryName === void 0 ? {} : { name: student.repositoryName },
+    ...student.repositoryUrl === void 0 ? {} : { url: student.repositoryUrl },
+    status: student.repositoryStatus
+  },
+  grading: {
+    workflow_status: student.grading.workflowStatus,
+    result_status: student.grading.resultStatus,
+    artifact_status: student.grading.artifactStatus,
+    result_file_status: student.grading.resultFileStatus,
+    ...student.grading.score === void 0 ? {} : { score: student.grading.score },
+    ...student.grading.maxScore === void 0 ? {} : { max_score: student.grading.maxScore },
+    checks: mapChecks(student)
+  },
+  warnings: student.warnings,
+  errors: student.errors
+});
+var renderStudentResultsJson = (assignment, student, generatedAt) => `${stringifyStableJson(toStudentResultsJsonValue(assignment, student, generatedAt))}
+`;
+
+// src/reporting/student-report-publisher.ts
+var PUBLISHED_STUDENT_REPORT_PATH = "grading/report.md";
+var PUBLISHED_STUDENT_RESULTS_PATH = "grading/results.json";
+var PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE = "Update Graider student report";
+var PUBLISHED_FILE_COUNT_PER_STUDENT = 2;
+var FIRST_PUBLISHED_FILE_COUNT = 1;
+var createPublishedFileReference = (owner, repo, filePath) => `${owner}/${repo}:${filePath}`;
+var createRepositoryMissingWarning = (student) => createWarningDiagnostic(
+  DiagnosticCode.StudentReportRepositoryMissing,
+  "Student report was not published because the student repository is unavailable.",
+  {
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    repositoryName: student.repositoryName,
+    repositoryStatus: student.repositoryStatus
+  }
+);
+var createWriteDiagnostic = (student, filePath, error) => createConfigDiagnostic(
+  DiagnosticCode.StudentReportWriteFailed,
+  "Student report publish failed.",
+  {
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    repositoryName: student.repositoryName,
+    path: filePath,
+    operation: "writeRepositoryFile",
+    ...error instanceof GitHubClientError ? {
+      underlyingDiagnosticCode: error.diagnosticCode,
+      kind: error.kind
+    } : {}
+  }
+);
+var publishStudentReport = async ({
+  githubClient,
+  assignment,
+  student,
+  generatedAt
+}) => {
+  if (student.repositoryOwner === void 0 || student.repositoryName === void 0 || student.repositoryStatus !== "available") {
+    return {
+      studentId: student.studentId,
+      githubUsername: student.githubUsername,
+      publishedFiles: [],
+      warnings: [createRepositoryMissingWarning(student)],
+      errors: [],
+      skipped: true
+    };
+  }
+  const publishedFiles = [];
+  try {
+    await githubClient.writeRepositoryFile({
+      owner: student.repositoryOwner,
+      repo: student.repositoryName,
+      path: PUBLISHED_STUDENT_REPORT_PATH,
+      content: renderStudentMarkdownReport(assignment, student),
+      message: PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE
+    });
+    publishedFiles.push(
+      createPublishedFileReference(
+        student.repositoryOwner,
+        student.repositoryName,
+        PUBLISHED_STUDENT_REPORT_PATH
+      )
+    );
+    await githubClient.writeRepositoryFile({
+      owner: student.repositoryOwner,
+      repo: student.repositoryName,
+      path: PUBLISHED_STUDENT_RESULTS_PATH,
+      content: renderStudentResultsJson(assignment, student, generatedAt),
+      message: PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE
+    });
+    publishedFiles.push(
+      createPublishedFileReference(
+        student.repositoryOwner,
+        student.repositoryName,
+        PUBLISHED_STUDENT_RESULTS_PATH
+      )
+    );
+    return {
+      studentId: student.studentId,
+      githubUsername: student.githubUsername,
+      publishedFiles,
+      warnings: [],
+      errors: [],
+      skipped: false
+    };
+  } catch (error) {
+    const attemptedPath = publishedFiles.length === PUBLISHED_FILE_COUNT_PER_STUDENT - FIRST_PUBLISHED_FILE_COUNT ? PUBLISHED_STUDENT_RESULTS_PATH : PUBLISHED_STUDENT_REPORT_PATH;
+    return {
+      studentId: student.studentId,
+      githubUsername: student.githubUsername,
+      publishedFiles,
+      warnings: [],
+      errors: [createWriteDiagnostic(student, attemptedPath, error)],
+      skipped: false
+    };
+  }
+};
+
+// src/execution/report-publisher.ts
+var EMPTY_COUNT8 = 0;
+var publishStudentReports = async ({
+  report,
+  githubClient
+}) => {
+  const publishedFiles = [];
+  const warnings = [];
+  const errors = [];
+  let studentsPublished = EMPTY_COUNT8;
+  let publishFailed = EMPTY_COUNT8;
+  let publishSkipped = EMPTY_COUNT8;
+  for (const student of report.students) {
+    const result = await publishStudentReport({
+      githubClient,
+      assignment: report.assignment,
+      student,
+      generatedAt: report.generatedAt
+    });
+    publishedFiles.push(...result.publishedFiles);
+    warnings.push(...result.warnings);
+    errors.push(...result.errors);
+    if (result.skipped) {
+      publishSkipped += 1;
+    } else if (result.errors.length > EMPTY_COUNT8) {
+      publishFailed += 1;
+    } else {
+      studentsPublished += 1;
+    }
+  }
+  return {
+    publishedFiles,
+    warnings,
+    errors,
+    studentsReported: report.students.length,
+    studentsPublished,
+    publishFailed,
+    publishSkipped
+  };
+};
+
 // src/grading/grading-result-models.ts
 var SUPPORTED_GRADING_RESULT_SCHEMA_VERSION = 1;
 var GRADING_RESULT_STATUSES = [
@@ -4474,20 +4736,20 @@ var parseGradingResultsJsonText = (jsonText) => {
 var REPORT_SCHEMA_VERSION = 1;
 
 // src/reporting/report-collector.ts
-var EMPTY_COUNT8 = 0;
+var EMPTY_COUNT9 = 0;
 var FIRST_SORT_BEFORE_SECOND = -1;
 var FIRST_SORT_AFTER_SECOND = 1;
 var FIRST_WORKFLOW_RUN_INDEX = 0;
 var compareStudents = (left, right) => {
   const sectionComparison = left.section.localeCompare(right.section);
-  if (sectionComparison !== EMPTY_COUNT8) {
+  if (sectionComparison !== EMPTY_COUNT9) {
     return sectionComparison;
   }
   return left.studentId.localeCompare(right.studentId);
 };
 var compareRuns = (left, right) => {
   const updatedComparison = right.updatedAt.localeCompare(left.updatedAt);
-  if (updatedComparison !== EMPTY_COUNT8) {
+  if (updatedComparison !== EMPTY_COUNT9) {
     return updatedComparison;
   }
   return left.id < right.id ? FIRST_SORT_BEFORE_SECOND : FIRST_SORT_AFTER_SECOND;
@@ -4612,7 +4874,7 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
   const resultText = artifact?.files[gradingConfig.result_file];
   const resultFileStatus = artifact === null ? "not_checked" : resultText === void 0 ? "missing" : "valid";
   const validationResult = resultText === void 0 ? void 0 : parseGradingResultsJsonText(resultText);
-  const finalResultFileStatus = validationResult === void 0 || validationResult.errors.length === EMPTY_COUNT8 ? resultFileStatus : "invalid";
+  const finalResultFileStatus = validationResult === void 0 || validationResult.errors.length === EMPTY_COUNT9 ? resultFileStatus : "invalid";
   const parsedResultStatus = validationResult?.result?.status;
   const workflowRunStatus = getWorkflowRunStatus(workflowRun);
   const workflowRunConclusion = getWorkflowRunConclusion(workflowRun);
@@ -4679,6 +4941,7 @@ var collectStudent = async (input, student) => {
       githubUsername: student.githubUsername,
       section: student.section,
       rosterStatus: student.status,
+      ...record?.repository.owner === void 0 ? {} : { repositoryOwner: record.repository.owner },
       ...record?.repository.name === void 0 ? {} : { repositoryName: record.repository.name },
       ...record?.repository.htmlUrl === void 0 ? {} : { repositoryUrl: record.repository.htmlUrl },
       repositoryStatus: repository.repositoryStatus,
@@ -4692,6 +4955,7 @@ var collectStudent = async (input, student) => {
       githubUsername: student.githubUsername,
       section: student.section,
       rosterStatus: student.status,
+      ...record?.repository.owner === void 0 ? {} : { repositoryOwner: record.repository.owner },
       ...record?.repository.name === void 0 ? {} : { repositoryName: record.repository.name },
       ...record?.repository.htmlUrl === void 0 ? {} : { repositoryUrl: record.repository.htmlUrl },
       repositoryStatus: "missing",
@@ -4702,7 +4966,7 @@ var collectStudent = async (input, student) => {
   }
 };
 var countResultStatus = (students, status) => students.filter((student) => student.grading.resultStatus === status).length;
-var countDiagnostics = (students, fieldName) => students.reduce((total, student) => total + student[fieldName].length, EMPTY_COUNT8);
+var countDiagnostics = (students, fieldName) => students.reduce((total, student) => total + student[fieldName].length, EMPTY_COUNT9);
 var createSummary3 = (rosterSummary, students) => ({
   studentCount: rosterSummary.studentCount,
   activeStudentCount: rosterSummary.activeStudentCount,
@@ -4767,7 +5031,7 @@ var EMPTY_FIELD2 = "";
 var COMMA2 = ",";
 var QUOTE2 = '"';
 var ESCAPED_QUOTE = '""';
-var NEWLINE = "\n";
+var NEWLINE2 = "\n";
 var CSV_NEEDS_QUOTES_PATTERN = /[",\n\r]/;
 var renderDiagnosticCodes = (diagnostics) => diagnostics.map((diagnostic) => diagnostic.code).join(";");
 var renderValue = (value) => {
@@ -4795,7 +5059,7 @@ var createRow = (student) => [
 var renderFacultyCsvReport = (report) => [
   CSV_HEADERS.join(COMMA2),
   ...report.students.map((student) => createRow(student).map(renderValue).join(COMMA2))
-].join(NEWLINE) + NEWLINE;
+].join(NEWLINE2) + NEWLINE2;
 
 // src/reporting/faculty-json-renderer.ts
 var mapStudent = (student) => ({
@@ -4862,14 +5126,14 @@ var renderFacultyJsonReport = (report) => `${stringifyStableJson(toFacultyJsonVa
 `;
 
 // src/reporting/faculty-markdown-renderer.ts
-var EMPTY_DISPLAY = "";
-var NEWLINE2 = "\n";
+var EMPTY_DISPLAY2 = "";
+var NEWLINE3 = "\n";
 var escapeCell = (value) => value.replaceAll("|", "\\|");
 var formatCount = (value) => String(value);
-var diagnosticCodes = (diagnostics) => diagnostics.map((diagnostic) => diagnostic.code).join("; ");
+var diagnosticCodes2 = (diagnostics) => diagnostics.map((diagnostic) => diagnostic.code).join("; ");
 var renderRepository = (student) => {
   if (student.repositoryName === void 0) {
-    return EMPTY_DISPLAY;
+    return EMPTY_DISPLAY2;
   }
   return student.repositoryUrl === void 0 ? student.repositoryName : `[${student.repositoryName}](${student.repositoryUrl})`;
 };
@@ -4882,8 +5146,8 @@ var renderStudentRow = (student) => [
   student.repositoryStatus,
   student.grading.workflowStatus,
   student.grading.resultStatus,
-  diagnosticCodes(student.warnings),
-  diagnosticCodes(student.errors)
+  diagnosticCodes2(student.warnings),
+  diagnosticCodes2(student.errors)
 ].map(escapeCell).join(" | ");
 var renderFacultyMarkdownReport = (report) => [
   `# ${report.assignment.assignmentTitle} (${report.assignment.courseCode} ${report.assignment.termCode})`,
@@ -4910,7 +5174,7 @@ var renderFacultyMarkdownReport = (report) => [
   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ...report.students.map((student) => `| ${renderStudentRow(student)} |`),
   ""
-].join(NEWLINE2);
+].join(NEWLINE3);
 
 // src/reporting/report-paths.ts
 import path10 from "path";
@@ -4970,81 +5234,14 @@ var writeReportFiles = (files) => {
   };
 };
 
-// src/reporting/student-markdown-renderer.ts
-var NEWLINE3 = "\n";
-var EMPTY_DISPLAY2 = "";
-var diagnosticCodes2 = (diagnostics) => diagnostics.map((diagnostic) => diagnostic.code).join("; ");
-var formatNullableNumber = (value) => value === void 0 || value === null ? EMPTY_DISPLAY2 : String(value);
-var renderRepositoryLine = (student) => {
-  if (student.repositoryName === void 0) {
-    return "- Repository: missing";
-  }
-  if (student.repositoryUrl === void 0) {
-    return `- Repository: ${student.repositoryName}`;
-  }
-  return `- Repository: [${student.repositoryName}](${student.repositoryUrl})`;
-};
-var renderCheckRows = (student) => student.grading.checks.length === 0 ? ["No check details were reported."] : [
-  "| Check | Status | Points | Message |",
-  "| --- | --- | --- | --- |",
-  ...student.grading.checks.map((check) => {
-    const points = check.pointsEarned === void 0 && check.pointsPossible === void 0 ? EMPTY_DISPLAY2 : `${formatNullableNumber(check.pointsEarned)}/${formatNullableNumber(check.pointsPossible)}`;
-    return `| ${check.name} | ${check.status} | ${points} | ${check.message ?? EMPTY_DISPLAY2} |`;
-  })
-];
-var renderDetails = (student) => {
-  const details = student.grading.checks.flatMap(
-    (check) => check.details === void 0 || check.details.length === 0 ? [] : [`### ${check.name}`, ...check.details.map((detail) => `- ${detail}`), ""]
-  );
-  return details.length === 0 ? ["No additional details were reported."] : details;
-};
-var renderNotConfiguredMessage = (student) => student.grading.resultStatus === "not_configured" ? ["", "Grading was not configured for this assignment."] : [];
-var renderStudentMarkdownReport = (assignment, student) => [
-  `# ${assignment.assignmentTitle}`,
-  "",
-  `Student: ${student.studentId} (${student.githubUsername})`,
-  `Section: ${student.section}`,
-  "",
-  "## Submission",
-  "",
-  renderRepositoryLine(student),
-  `- Repository status: ${student.repositoryStatus}`,
-  `- Roster status: ${student.rosterStatus}`,
-  "",
-  "## Grading Result",
-  "",
-  `- Workflow status: ${student.grading.workflowStatus}`,
-  `- Result status: ${student.grading.resultStatus}`,
-  `- Artifact status: ${student.grading.artifactStatus}`,
-  `- Result file status: ${student.grading.resultFileStatus}`,
-  ...student.grading.score === void 0 ? [] : [
-    `- Score: ${formatNullableNumber(student.grading.score)}/${formatNullableNumber(student.grading.maxScore)}`
-  ],
-  ...renderNotConfiguredMessage(student),
-  "",
-  "## Checks",
-  "",
-  ...renderCheckRows(student),
-  "",
-  "## Details",
-  "",
-  ...renderDetails(student),
-  "",
-  "## Diagnostics",
-  "",
-  `Warnings: ${diagnosticCodes2(student.warnings)}`,
-  `Errors: ${diagnosticCodes2(student.errors)}`,
-  ""
-].join(NEWLINE3);
-
 // src/cli/commands/report.command.ts
 var COMMAND_NAME3 = "report";
-var EMPTY_COUNT9 = 0;
+var EMPTY_COUNT10 = 0;
 var getCommandStatus = (errorCount, generatedFileCount) => {
-  if (errorCount === EMPTY_COUNT9) {
+  if (errorCount === EMPTY_COUNT10) {
     return "success";
   }
-  return generatedFileCount > EMPTY_COUNT9 ? "partial_success" : "failure";
+  return generatedFileCount > EMPTY_COUNT10 ? "partial_success" : "failure";
 };
 var createDefaultGitHubClient3 = () => new FakeGitHubClient();
 var createReportFiles = (repoRoot, report) => {
@@ -5089,6 +5286,7 @@ var runReportCommand = async ({
   cwd,
   assignmentFile,
   options,
+  publishStudentReports: publishStudentReports2 = false,
   githubClient,
   clock = systemClock
 }) => {
@@ -5105,7 +5303,7 @@ var runReportCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > EMPTY_COUNT9) {
+  if (rosterResult.errors.length > EMPTY_COUNT10) {
     return createCommandResult({
       commandName: COMMAND_NAME3,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
@@ -5142,41 +5340,67 @@ var runReportCommand = async ({
       }
     });
   }
+  const activeGitHubClient = githubClient ?? createDefaultGitHubClient3();
   const collectResult = await collectReport({
     config: configResult.config,
     rosterSummary: rosterResult.summary,
     students: rosterResult.students,
     manifest: manifestResult.manifest,
-    githubClient: githubClient ?? createDefaultGitHubClient3(),
+    githubClient: activeGitHubClient,
     generatedAt: clock.now().toISOString()
   });
   const writeResult = writeReportFiles(
     createReportFiles(configResult.config.summary.repoRoot, collectResult.report)
   );
+  const publishResult = publishStudentReports2 && writeResult.errors.length === EMPTY_COUNT10 ? await publishStudentReports({
+    report: collectResult.report,
+    githubClient: activeGitHubClient
+  }) : {
+    publishedFiles: [],
+    warnings: [],
+    errors: [],
+    studentsReported: collectResult.report.students.length,
+    studentsPublished: EMPTY_COUNT10,
+    publishFailed: EMPTY_COUNT10,
+    publishSkipped: EMPTY_COUNT10
+  };
+  const commandStatus = publishResult.errors.length > EMPTY_COUNT10 ? getCommandStatus(publishResult.errors.length, publishResult.studentsPublished) : getCommandStatus(writeResult.errors.length, writeResult.generatedFiles.length);
   return createCommandResult({
     commandName: COMMAND_NAME3,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
-    status: getCommandStatus(writeResult.errors.length, writeResult.generatedFiles.length),
-    warnings: [...rosterResult.warnings, ...collectResult.report.warnings, ...writeResult.warnings],
-    errors: writeResult.errors,
+    status: commandStatus,
+    warnings: [
+      ...rosterResult.warnings,
+      ...collectResult.report.warnings,
+      ...writeResult.warnings,
+      ...publishResult.warnings
+    ],
+    errors: [...writeResult.errors, ...publishResult.errors],
     generatedFiles: writeResult.generatedFiles,
     summary: {
       options,
+      publishStudentReports: publishStudentReports2,
       ...configResult.config.summary,
       ...rosterResult.summary,
       manifestFile: manifestPath.relativePath,
       reportFileCount: writeResult.generatedFiles.length,
+      publishedFiles: publishResult.publishedFiles,
+      studentsReported: publishResult.studentsReported,
+      studentsPublished: publishResult.studentsPublished,
+      publishFailed: publishResult.publishFailed,
+      publishSkipped: publishResult.publishSkipped,
       ...collectResult.report.summary
     }
   });
 };
 var registerReportCommand = (program) => {
-  program.command(COMMAND_NAME3).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME3).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--publish-student-reports", "Publish per-student reports to student repositories").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runReportCommand({
       cwd: process.cwd(),
       assignmentFile,
-      options
+      options,
+      publishStudentReports: rawOptions.publishStudentReports === true
     });
     writeCommandResult(result, options.json);
     process.exitCode = result.exitCode;

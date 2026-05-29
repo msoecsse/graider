@@ -10,5 +10,4 @@ docs/graider-test-plan.md
 docs/graider-traceability-matrix.md
 docs/graider-implementation-plan.md
 tests/fixtures/config/malformed-yaml/course.yml
-tests/fixtures/grading/malformed-json/grading-results.json
 tests/fixtures/manifest/malformed-yaml/manifest.yml

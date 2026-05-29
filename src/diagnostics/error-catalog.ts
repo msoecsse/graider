@@ -76,7 +76,12 @@ export const DiagnosticCode = {
   MissingGradingCheckName: "missing_grading_check_name",
   InvalidGradingScore: "invalid_grading_score",
   GradingWorkflowFailedWithResults: "grading_workflow_failed_with_results",
-  ReportWriteFailed: "report_write_failed"
+  ReportWriteFailed: "report_write_failed",
+  StudentReportPublishFailed: "student_report_publish_failed",
+  StudentReportRepositoryMissing: "student_report_repository_missing",
+  StudentReportWriteFailed: "student_report_write_failed",
+  StudentReportPublishPartial: "student_report_publish_partial",
+  StudentReportPublishNotRequested: "student_report_publish_not_requested"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -157,6 +162,12 @@ export const INVALID_GRADING_SCORE_CODE = DiagnosticCode.InvalidGradingScore;
 export const GRADING_WORKFLOW_FAILED_WITH_RESULTS_CODE =
   DiagnosticCode.GradingWorkflowFailedWithResults;
 export const REPORT_WRITE_FAILED_CODE = DiagnosticCode.ReportWriteFailed;
+export const STUDENT_REPORT_PUBLISH_FAILED_CODE = DiagnosticCode.StudentReportPublishFailed;
+export const STUDENT_REPORT_REPOSITORY_MISSING_CODE = DiagnosticCode.StudentReportRepositoryMissing;
+export const STUDENT_REPORT_WRITE_FAILED_CODE = DiagnosticCode.StudentReportWriteFailed;
+export const STUDENT_REPORT_PUBLISH_PARTIAL_CODE = DiagnosticCode.StudentReportPublishPartial;
+export const STUDENT_REPORT_PUBLISH_NOT_REQUESTED_CODE =
+  DiagnosticCode.StudentReportPublishNotRequested;
 
 export const createNotSupportedInMvpDiagnostic = (commandName: string): Diagnostic => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,

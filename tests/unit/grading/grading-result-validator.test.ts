@@ -15,9 +15,10 @@ import {
 
 const FIXTURE_ROOT = path.resolve("tests/fixtures/grading");
 const RESULT_FILE = "grading-results.json";
+const INVALID_JSON_RESULT_FILE = "grading-results.invalid";
 
-const readFixture = (fixtureName: string): string =>
-  fs.readFileSync(path.join(FIXTURE_ROOT, fixtureName, RESULT_FILE), "utf8");
+const readFixture = (fixtureName: string, fileName = RESULT_FILE): string =>
+  fs.readFileSync(path.join(FIXTURE_ROOT, fixtureName, fileName), "utf8");
 
 describe("grading result validation", () => {
   it("TC-GRADING-001 valid passed result validates", () => {
@@ -83,7 +84,9 @@ describe("grading result validation", () => {
   });
 
   it("invalid JSON text returns structured diagnostic", () => {
-    const result = parseGradingResultsJsonText(readFixture("malformed-json"));
+    const result = parseGradingResultsJsonText(
+      readFixture("malformed-json", INVALID_JSON_RESULT_FILE)
+    );
 
     expect(result.errors).toEqual([
       expect.objectContaining({ code: DiagnosticCode.InvalidGradingResult })

@@ -319,6 +319,9 @@ const collectStudent = async (
       githubUsername: student.githubUsername,
       section: student.section,
       rosterStatus: student.status,
+      ...(record?.repository.owner === undefined
+        ? {}
+        : { repositoryOwner: record.repository.owner }),
       ...(record?.repository.name === undefined ? {} : { repositoryName: record.repository.name }),
       ...(record?.repository.htmlUrl === undefined
         ? {}
@@ -334,6 +337,9 @@ const collectStudent = async (
       githubUsername: student.githubUsername,
       section: student.section,
       rosterStatus: student.status,
+      ...(record?.repository.owner === undefined
+        ? {}
+        : { repositoryOwner: record.repository.owner }),
       ...(record?.repository.name === undefined ? {} : { repositoryName: record.repository.name }),
       ...(record?.repository.htmlUrl === undefined
         ? {}
