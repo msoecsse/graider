@@ -826,38 +826,6 @@ var createCommandResult = (input) => ({
   ...input,
   exitCode: resolveExitCode(input)
 });
-var createSuccessfulPlaceholderResult = (context) => createCommandResult({
-  commandName: context.commandName,
-  assignmentFile: context.assignmentRelativePath ?? context.assignmentFile,
-  status: "success",
-  warnings: [],
-  errors: [],
-  generatedFiles: [],
-  summary: {
-    placeholder: true,
-    options: context.options,
-    cwd: context.cwd,
-    assignmentPath: context.assignmentPath,
-    ...context.repoRoot === void 0 ? {} : { repoRoot: context.repoRoot },
-    ...context.assignmentRelativePath === void 0 ? {} : { assignmentRelativePath: context.assignmentRelativePath }
-  }
-});
-var createFailedPlaceholderResult = (context, error) => createCommandResult({
-  commandName: context.commandName,
-  assignmentFile: context.assignmentRelativePath ?? context.assignmentFile,
-  status: "failure",
-  warnings: [],
-  errors: [error],
-  generatedFiles: [],
-  summary: {
-    placeholder: true,
-    options: context.options,
-    cwd: context.cwd,
-    assignmentPath: context.assignmentPath,
-    ...context.repoRoot === void 0 ? {} : { repoRoot: context.repoRoot },
-    ...context.assignmentRelativePath === void 0 ? {} : { assignmentRelativePath: context.assignmentRelativePath }
-  }
-});
 
 // src/diagnostics/redaction.ts
 var REDACTED_VALUE = "[REDACTED]";
@@ -4644,42 +4612,45 @@ var registerPlanCommand = (program) => {
   });
 };
 
-// src/cli/commands/placeholder-command.ts
-var registerPlaceholderCommand = (program, registration) => {
-  program.command(registration.name).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description(registration.description).action((assignmentFile, rawOptions) => {
-    const cwd = process.cwd();
-    const assignmentPath = resolveAssignmentPath(cwd, assignmentFile);
-    const repositoryRootResult = registration.requireRepositoryRoot ? findRepositoryRoot(cwd) : void 0;
-    const context = {
-      commandName: registration.name,
-      cwd,
-      assignmentFile,
-      assignmentPath,
-      ...repositoryRootResult?.found === true ? {
-        repoRoot: repositoryRootResult.repoRoot,
-        assignmentRelativePath: toRepositoryRelativePath(
-          repositoryRootResult.repoRoot,
-          assignmentPath
-        )
-      } : {},
-      options: normalizeCommonCommandOptions(rawOptions)
-    };
-    const result = repositoryRootResult?.found === false ? createFailedPlaceholderResult(context, repositoryRootResult.diagnostic) : registration.support === "supported-placeholder" ? createSuccessfulPlaceholderResult(context) : createFailedPlaceholderResult(
-      context,
-      createNotSupportedInMvpDiagnostic(registration.name)
-    );
-    writeCommandResult(result, context.options.json);
-    process.exitCode = result.exitCode;
-  });
-};
-
 // src/cli/commands/remove-access.command.ts
+var COMMAND_NAME5 = "remove-access";
+var normalizeRemoveAccessTargetSelector = (rawOptions) => ({
+  ...rawOptions.all === void 0 ? {} : { all: rawOptions.all },
+  ...rawOptions.section === void 0 ? {} : { section: rawOptions.section },
+  ...rawOptions.studentId === void 0 ? {} : { studentId: rawOptions.studentId },
+  ...rawOptions.githubUsername === void 0 ? {} : { githubUsername: rawOptions.githubUsername }
+});
+var runRemoveAccessCommand = ({
+  cwd,
+  assignmentFile,
+  options,
+  targetSelector
+}) => createCommandResult({
+  commandName: COMMAND_NAME5,
+  assignmentFile,
+  status: "failure",
+  warnings: [],
+  errors: [createNotSupportedInMvpDiagnostic(COMMAND_NAME5, assignmentFile)],
+  generatedFiles: [],
+  summary: {
+    unsupported: true,
+    mvpSupported: false,
+    cwd,
+    options,
+    targetSelector
+  }
+});
 var registerRemoveAccessCommand = (program) => {
-  registerPlaceholderCommand(program, {
-    name: "remove-access",
-    description: "Remove student access from assignment repositories.",
-    support: "unsupported-in-mvp",
-    requireRepositoryRoot: false
+  program.command(COMMAND_NAME5).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Reserved for future remove-access targeting").option("--section <section-id>", "Reserved for future remove-access targeting").option("--student-id <student-id>", "Reserved for future remove-access targeting").option("--github-username <github-username>", "Reserved for future remove-access targeting").description("Remove student access from assignment repositories.").action((assignmentFile, rawOptions) => {
+    const options = normalizeCommonCommandOptions(rawOptions);
+    const result = runRemoveAccessCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options,
+      targetSelector: normalizeRemoveAccessTargetSelector(rawOptions)
+    });
+    writeCommandResult(result, options.json);
+    process.exitCode = result.exitCode;
   });
 };
 
@@ -5772,7 +5743,7 @@ var writeReportFiles = (files) => {
 };
 
 // src/cli/commands/report.command.ts
-var COMMAND_NAME5 = "report";
+var COMMAND_NAME6 = "report";
 var EMPTY_COUNT13 = 0;
 var getCommandStatus2 = (errorCount, generatedFileCount) => {
   if (errorCount === EMPTY_COUNT13) {
@@ -5830,7 +5801,7 @@ var runReportCommand = async ({
   const configResult = loadGraiderConfig({ cwd, assignmentFile });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME6,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -5842,7 +5813,7 @@ var runReportCommand = async ({
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > EMPTY_COUNT13) {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME6,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -5863,7 +5834,7 @@ var runReportCommand = async ({
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: true });
   if (manifestResult.status !== "loaded") {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME6,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -5903,7 +5874,7 @@ var runReportCommand = async ({
   };
   const commandStatus = publishResult.errors.length > EMPTY_COUNT13 ? getCommandStatus2(publishResult.errors.length, publishResult.studentsPublished) : getCommandStatus2(writeResult.errors.length, writeResult.generatedFiles.length);
   return createCommandResult({
-    commandName: COMMAND_NAME5,
+    commandName: COMMAND_NAME6,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: commandStatus,
     warnings: [
@@ -5931,7 +5902,7 @@ var runReportCommand = async ({
   });
 };
 var registerReportCommand = (program) => {
-  program.command(COMMAND_NAME5).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--publish-student-reports", "Publish per-student reports to student repositories").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME6).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--publish-student-reports", "Publish per-student reports to student repositories").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runReportCommand({
       cwd: process.cwd(),
@@ -5945,7 +5916,7 @@ var registerReportCommand = (program) => {
 };
 
 // src/cli/commands/validate.command.ts
-var COMMAND_NAME6 = "validate";
+var COMMAND_NAME7 = "validate";
 var DEFAULT_TEMPLATE_COMMIT_SHA3 = "fake-template-sha";
 var README_FILE4 = "README.md";
 var createDefaultTemplateRepository3 = (owner, repo, branch) => ({
@@ -6003,7 +5974,7 @@ var runValidateCommand = async ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME6,
+      commandName: COMMAND_NAME7,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -6017,7 +5988,7 @@ var runValidateCommand = async ({
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME6,
+      commandName: COMMAND_NAME7,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -6039,7 +6010,7 @@ var runValidateCommand = async ({
   });
   if (readinessResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME6,
+      commandName: COMMAND_NAME7,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -6054,7 +6025,7 @@ var runValidateCommand = async ({
     });
   }
   return createCommandResult({
-    commandName: COMMAND_NAME6,
+    commandName: COMMAND_NAME7,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
     warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -6069,7 +6040,7 @@ var runValidateCommand = async ({
   });
 };
 var registerValidateCommand = (program) => {
-  program.command(COMMAND_NAME6).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME7).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runValidateCommand({
       cwd: process.cwd(),
