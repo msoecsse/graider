@@ -1,0 +1,73 @@
+# Generated Files
+
+Graider generated files are intended to be reviewable, deterministic, and safe to commit when they contain expected course-admin data. They must not contain GitHub tokens or raw workflow logs.
+
+## Plans
+
+Path:
+
+```text
+terms/<term-code>/plans/<assignment-slug>/plan-<timestamp>.json
+```
+
+Plans are timestamped JSON review artifacts produced by `graider plan` and may also be produced before `apply` execution. They include assignment identity, source file hashes, an input fingerprint, planned operations, warnings, and errors.
+
+Plans are safe to commit if the course-admin repository is allowed to contain roster identifiers and GitHub usernames.
+
+## Manifests
+
+Path:
+
+```text
+terms/<term-code>/manifests/<assignment-slug>/manifest.yml
+```
+
+Manifests are durable generated-state records. They include source hashes, template identity, repository records, permission state, Actions state, lifecycle state, operation history, warnings, and errors.
+
+Manifests are safe to commit under the same privacy policy as rosters and faculty reports.
+
+## Faculty Reports
+
+Paths:
+
+```text
+terms/<term-code>/reports/<assignment-slug>/faculty-summary.json
+terms/<term-code>/reports/<assignment-slug>/faculty-summary.csv
+terms/<term-code>/reports/<assignment-slug>/faculty-summary.md
+```
+
+Faculty reports include one row per included roster student, repository state, grading status, scores/checks when available, and warning/error codes. They do not include raw workflow logs.
+
+Faculty reports contain student data and should be stored only where course staff access is appropriate.
+
+## Local Student Reports
+
+Path:
+
+```text
+terms/<term-code>/reports/<assignment-slug>/students/<section>/<student_id>.md
+```
+
+Each local student report contains only that student's data. It includes assignment identity, repository status, grading status, check results when available, and warning/error codes.
+
+## Published Student Repository Files
+
+Paths in each student repository:
+
+```text
+grading/report.md
+grading/results.json
+```
+
+Publishing occurs only when `graider report --publish-student-reports` is used. Published files contain only the target student's report/result data. Faculty summaries and other students' data must not be published to student repositories.
+
+## Logs
+
+Graider MVP does not create committed log files. If local logs are added later, they should remain local-only and must redact token-like values.
+
+## Retention Notes
+
+- Plan files are timestamped and retained as review artifacts.
+- Report paths are overwritten on rerun; history is provided by Git if committed.
+- Manifest history is represented by Git history and manifest operation history.
+- Generated files should not contain secrets.

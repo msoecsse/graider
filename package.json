@@ -4,8 +4,14 @@
   "description": "CLI-based GitHub assignment management for course repositories.",
   "type": "module",
   "bin": {
-    "graider": "./dist/cli/index.js"
+    "graider": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "docs"
+  ],
+  "packageManager": "npm@11.13.0",
   "scripts": {
     "build": "tsup src/cli/index.ts --format esm --dts --clean --out-dir dist",
     "dev": "tsx src/cli/index.ts",

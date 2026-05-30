@@ -1,0 +1,4 @@
+student_id,github_username,section,status
+s1234567,octocat,001,active
+s2345678,hubot,001,hold
+s3456789,monalisa,001,dropped
