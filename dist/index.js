@@ -2152,6 +2152,607 @@ var FakeGitHubClient = class {
   }
 };
 
+// src/github/octokit-github-client.ts
+import { Buffer } from "buffer";
+import { inflateRawSync } from "zlib";
+import { Octokit } from "@octokit/rest";
+var HTTP_STATUS_UNAUTHORIZED = 401;
+var HTTP_STATUS_CREATED = 201;
+var HTTP_STATUS_FORBIDDEN = 403;
+var HTTP_STATUS_NOT_FOUND = 404;
+var HTTP_STATUS_TOO_MANY_REQUESTS = 429;
+var HTTP_STATUS_SERVER_ERROR_MIN = 500;
+var DEFAULT_BRANCH_FALLBACK = "main";
+var ROOT_CONTENT_PATH = "";
+var FIRST_PAGE_LIMIT = 1;
+var UNKNOWN_COMMIT_SHA = "unknown";
+var UNKNOWN_ID = 0;
+var EMPTY_LENGTH = 0;
+var DECIMAL_RADIX = 10;
+var ZIP_LOCAL_FILE_HEADER_SIGNATURE = 67324752;
+var ZIP_DEFLATE_COMPRESSION = 8;
+var ZIP_STORED_COMPRESSION = 0;
+var ZIP_GENERAL_PURPOSE_DATA_DESCRIPTOR_FLAG = 8;
+var ZIP_MIN_LOCAL_FILE_HEADER_BYTES = 30;
+var ZIP_COMPRESSION_METHOD_OFFSET = 8;
+var ZIP_GENERAL_PURPOSE_FLAG_OFFSET = 6;
+var ZIP_COMPRESSED_SIZE_OFFSET = 18;
+var ZIP_FILE_NAME_LENGTH_OFFSET = 26;
+var ZIP_EXTRA_FIELD_LENGTH_OFFSET = 28;
+var ZIP_LOCAL_FILE_NAME_OFFSET = 30;
+var BASE64_ENCODING = "base64";
+var UTF8_ENCODING = "utf8";
+var OctokitGitHubClient = class {
+  octokit;
+  token;
+  constructor(options = {}) {
+    this.token = normalizeToken(options.token);
+    this.octokit = options.octokit ?? new Octokit({ auth: this.token });
+  }
+  async getAuthenticatedUser() {
+    const data = await this.run(() => this.octokit.rest.users.getAuthenticated());
+    return mapUser(data);
+  }
+  async getRepository(owner, repo) {
+    const data = await this.runNullable(() => this.octokit.rest.repos.get({ owner, repo }));
+    return data === null ? null : mapRepository(data);
+  }
+  async getTemplateRepository(owner, repo) {
+    const repository = await this.getRepository(owner, repo);
+    if (repository === null) {
+      return null;
+    }
+    const repoData = await this.run(() => this.octokit.rest.repos.get({ owner, repo }));
+    const repoRecord = asRecord(repoData);
+    const branches = await this.listBranchNames(owner, repo);
+    const files = await this.listRootFiles(owner, repo);
+    const latestCommitSha = await this.getLatestCommitSha(owner, repo, repository.defaultBranch);
+    return {
+      ...repository,
+      branches,
+      files,
+      isTemplate: asBoolean(repoRecord.is_template) ?? false,
+      latestCommitSha
+    };
+  }
+  async createRepositoryFromTemplate(input) {
+    const data = await this.run(
+      () => this.octokit.rest.repos.createUsingTemplate({
+        description: input.description,
+        include_all_branches: false,
+        name: input.name,
+        owner: input.owner,
+        private: input.private,
+        template_owner: input.templateOwner,
+        template_repo: input.templateRepo
+      })
+    );
+    return mapRepository(data);
+  }
+  async getUser(username) {
+    const data = await this.runNullable(() => this.octokit.rest.users.getByUsername({ username }));
+    return data === null ? null : mapUser(data);
+  }
+  async getTeam(org, teamSlug) {
+    const data = await this.runNullable(
+      () => this.octokit.rest.teams.getByName({ org, team_slug: teamSlug })
+    );
+    if (data === null) {
+      return null;
+    }
+    const record = asRecord(data);
+    const id = asNumber(record.id);
+    return {
+      name: asString(record.name) ?? teamSlug,
+      org,
+      slug: asString(record.slug) ?? teamSlug,
+      ...id === void 0 ? {} : { id }
+    };
+  }
+  async getCollaboratorPermission(owner, repo, username) {
+    const data = await this.runNullable(
+      () => this.octokit.rest.repos.getCollaboratorPermissionLevel({
+        owner,
+        repo,
+        username
+      })
+    );
+    if (data === null) {
+      return noPermission();
+    }
+    const record = asRecord(data);
+    return {
+      pendingInvite: false,
+      permission: toPermission(asString(record.permission))
+    };
+  }
+  async listCollaboratorPermissions(owner, repo) {
+    this.ensureAuthenticated();
+    const collaborators = await this.runPaginated(this.octokit.rest.repos.listCollaborators, {
+      affiliation: "all",
+      owner,
+      repo
+    });
+    return collaborators.map(asRecord).map((collaborator) => ({
+      pendingInvite: false,
+      permission: toCollaboratorPermission(collaborator),
+      username: asString(collaborator.login) ?? ""
+    })).filter((collaborator) => collaborator.username.length > EMPTY_LENGTH);
+  }
+  async addCollaborator(input) {
+    const response = await this.runResponse(
+      () => this.octokit.rest.repos.addCollaborator({
+        owner: input.owner,
+        permission: input.permission,
+        repo: input.repo,
+        username: input.username
+      })
+    );
+    return {
+      pendingInvite: response.status === HTTP_STATUS_CREATED,
+      permission: input.permission,
+      username: input.username
+    };
+  }
+  async removeCollaborator(input) {
+    await this.run(
+      () => this.octokit.rest.repos.removeCollaborator({
+        owner: input.owner,
+        repo: input.repo,
+        username: input.username
+      })
+    );
+  }
+  async getTeamPermission(owner, repo, teamSlug) {
+    const data = await this.runNullable(
+      () => this.octokit.rest.teams.checkPermissionsForRepoInOrg({
+        org: owner,
+        owner,
+        repo,
+        team_slug: teamSlug
+      })
+    );
+    if (data === null) {
+      return noPermission();
+    }
+    const record = asRecord(data);
+    return {
+      pendingInvite: false,
+      permission: toPermission(asString(record.permission))
+    };
+  }
+  async addTeamPermission(input) {
+    await this.run(
+      () => this.octokit.rest.teams.addOrUpdateRepoPermissionsInOrg({
+        org: input.owner,
+        owner: input.owner,
+        permission: input.permission,
+        repo: input.repo,
+        team_slug: input.teamSlug
+      })
+    );
+  }
+  async getActionsState(owner, repo) {
+    const data = await this.run(
+      () => this.octokit.rest.actions.getGithubActionsPermissionsRepository({
+        owner,
+        repo
+      })
+    );
+    const record = asRecord(data);
+    return asBoolean(record.enabled) === false ? "disabled" : "enabled";
+  }
+  async enableActions(owner, repo) {
+    await this.run(
+      () => this.octokit.rest.actions.setGithubActionsPermissionsRepository({
+        allowed_actions: "all",
+        enabled: true,
+        owner,
+        repo
+      })
+    );
+  }
+  async getWorkflow(owner, repo, workflowPath) {
+    const data = await this.runNullable(
+      () => this.octokit.rest.actions.getWorkflow({
+        owner,
+        repo,
+        workflow_id: workflowPath
+      })
+    );
+    if (data === null) {
+      return null;
+    }
+    const record = asRecord(data);
+    return {
+      id: asNumber(record.id) ?? UNKNOWN_ID,
+      name: asString(record.name) ?? workflowPath,
+      path: asString(record.path) ?? workflowPath,
+      supportsDispatch: asString(record.state) !== "disabled_manually"
+    };
+  }
+  async dispatchWorkflow(input) {
+    await this.run(
+      () => this.octokit.rest.actions.createWorkflowDispatch({
+        inputs: input.inputs,
+        owner: input.owner,
+        ref: input.ref,
+        repo: input.repo,
+        workflow_id: input.workflowPath
+      })
+    );
+  }
+  async listWorkflowRuns(input) {
+    const response = input.workflowPath === void 0 ? await this.run(
+      () => this.octokit.rest.actions.listWorkflowRunsForRepo({
+        owner: input.owner,
+        repo: input.repo
+      })
+    ) : await this.run(
+      () => this.octokit.rest.actions.listWorkflowRuns({
+        owner: input.owner,
+        repo: input.repo,
+        workflow_id: input.workflowPath
+      })
+    );
+    const record = asRecord(response);
+    const runs = asArray(record.workflow_runs);
+    return runs.map((run) => mapWorkflowRun(run, input.workflowPath));
+  }
+  async downloadArtifact(input) {
+    const artifactsData = await this.run(
+      () => this.octokit.rest.actions.listWorkflowRunArtifacts({
+        owner: input.owner,
+        repo: input.repo,
+        run_id: input.runId
+      })
+    );
+    const artifactsRecord = asRecord(artifactsData);
+    const artifacts = asArray(artifactsRecord.artifacts);
+    const artifact = artifacts.map(asRecord).find((candidate) => asString(candidate.name) === input.artifactName);
+    if (artifact === void 0) {
+      return null;
+    }
+    const artifactId = asNumber(artifact.id);
+    if (artifactId === void 0) {
+      return null;
+    }
+    const archiveData = await this.run(
+      () => this.octokit.rest.actions.downloadArtifact({
+        archive_format: "zip",
+        artifact_id: artifactId,
+        owner: input.owner,
+        repo: input.repo
+      })
+    );
+    return {
+      files: extractZipTextFiles(archiveData),
+      name: input.artifactName
+    };
+  }
+  async archiveRepository(owner, repo) {
+    await this.run(() => this.octokit.rest.repos.update({ archived: true, owner, repo }));
+  }
+  async writeRepositoryFile(input) {
+    const existingSha = await this.getExistingFileSha(input);
+    const response = await this.run(
+      () => this.octokit.rest.repos.createOrUpdateFileContents({
+        branch: input.branch,
+        content: Buffer.from(input.content, UTF8_ENCODING).toString(BASE64_ENCODING),
+        message: input.message,
+        owner: input.owner,
+        path: input.path,
+        repo: input.repo,
+        sha: existingSha
+      })
+    );
+    const record = asRecord(response);
+    const content = asRecord(record.content);
+    const commit = asRecord(record.commit);
+    return {
+      commitSha: asString(commit.sha) ?? UNKNOWN_COMMIT_SHA,
+      path: asString(content.path) ?? input.path
+    };
+  }
+  async listBranchNames(owner, repo) {
+    const branches = await this.runPaginated(this.octokit.rest.repos.listBranches, { owner, repo });
+    return branches.map(asRecord).map((branch) => asString(branch.name)).filter((name) => name !== void 0);
+  }
+  async listRootFiles(owner, repo) {
+    const data = await this.runNullable(
+      () => this.octokit.rest.repos.getContent({
+        owner,
+        path: ROOT_CONTENT_PATH,
+        repo
+      })
+    );
+    if (data === null) {
+      return [];
+    }
+    return asArray(data).map(asRecord).map((file) => asString(file.name)).filter((name) => name !== void 0);
+  }
+  async getLatestCommitSha(owner, repo, branch) {
+    const data = await this.runNullable(
+      () => this.octokit.rest.repos.listCommits({
+        owner,
+        per_page: FIRST_PAGE_LIMIT,
+        repo,
+        sha: branch
+      })
+    );
+    const commit = asArray(data).map(asRecord).at(0);
+    return commit === void 0 ? UNKNOWN_COMMIT_SHA : asString(commit.sha) ?? UNKNOWN_COMMIT_SHA;
+  }
+  async getExistingFileSha(input) {
+    const data = await this.runNullable(
+      () => this.octokit.rest.repos.getContent({
+        owner: input.owner,
+        path: input.path,
+        ref: input.branch,
+        repo: input.repo
+      })
+    );
+    if (data === null || Array.isArray(data)) {
+      return void 0;
+    }
+    return asString(asRecord(data).sha);
+  }
+  async run(operation) {
+    const response = await this.runResponse(operation);
+    return response.data;
+  }
+  async runNullable(operation) {
+    this.ensureAuthenticated();
+    try {
+      const response = await operation();
+      return response.data;
+    } catch (error) {
+      if (getErrorStatus(error) === HTTP_STATUS_NOT_FOUND) {
+        return null;
+      }
+      throw normalizeOctokitError(error);
+    }
+  }
+  async runPaginated(method, parameters) {
+    this.ensureAuthenticated();
+    try {
+      return await this.octokit.paginate(method, parameters);
+    } catch (error) {
+      throw normalizeOctokitError(error);
+    }
+  }
+  async runResponse(operation) {
+    this.ensureAuthenticated();
+    try {
+      return await operation();
+    } catch (error) {
+      throw normalizeOctokitError(error);
+    }
+  }
+  ensureAuthenticated() {
+    if (this.token === void 0) {
+      throw new GitHubClientError("auth_missing", "GitHub token is not configured.");
+    }
+  }
+};
+function normalizeToken(token) {
+  const normalized = token?.trim();
+  return normalized === void 0 || normalized.length === EMPTY_LENGTH ? void 0 : normalized;
+}
+function normalizeOctokitError(error) {
+  if (error instanceof GitHubClientError) {
+    return error;
+  }
+  const status = getErrorStatus(error);
+  const retryAfterSeconds = getRetryAfterSeconds(error);
+  if (status === HTTP_STATUS_UNAUTHORIZED) {
+    return new GitHubClientError("auth_failed", "GitHub authentication failed.");
+  }
+  if (status === HTTP_STATUS_TOO_MANY_REQUESTS || status === HTTP_STATUS_FORBIDDEN && isRateLimitError(error)) {
+    const options = retryAfterSeconds === void 0 ? {} : { retryAfterSeconds };
+    return new GitHubClientError("rate_limited", "GitHub rate limit was reached.", options);
+  }
+  if (status === HTTP_STATUS_FORBIDDEN) {
+    return new GitHubClientError("permission_denied", "GitHub permission was denied.");
+  }
+  if (status !== void 0 && status >= HTTP_STATUS_SERVER_ERROR_MIN) {
+    return new GitHubClientError("api_error", "GitHub API request failed.");
+  }
+  if (status !== void 0) {
+    return new GitHubClientError("api_error", "GitHub API request failed.");
+  }
+  return new GitHubClientError("network_error", "GitHub network request failed.");
+}
+function getErrorStatus(error) {
+  const record = asRecord(error);
+  return asNumber(record.status);
+}
+function getRetryAfterSeconds(error) {
+  const headers = getErrorHeaders(error);
+  const retryAfter = headers["retry-after"] ?? headers["Retry-After"];
+  return typeof retryAfter === "string" ? Number.parseInt(retryAfter, DECIMAL_RADIX) : void 0;
+}
+function isRateLimitError(error) {
+  const headers = getErrorHeaders(error);
+  const remaining = headers["x-ratelimit-remaining"] ?? headers["X-RateLimit-Remaining"];
+  const message = asString(asRecord(error).message)?.toLowerCase() ?? "";
+  return remaining === "0" || headers["retry-after"] !== void 0 || message.includes("rate limit");
+}
+function getErrorHeaders(error) {
+  const response = asRecord(asRecord(error).response);
+  const headers = asRecord(response.headers);
+  const normalized = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (typeof value === "string") {
+      normalized[key] = value;
+    }
+  }
+  return normalized;
+}
+function mapUser(value) {
+  const record = asRecord(value);
+  const id = asNumber(record.id);
+  if (id === void 0) {
+    return {
+      username: asString(record.login) ?? ""
+    };
+  }
+  return {
+    id,
+    username: asString(record.login) ?? ""
+  };
+}
+function mapRepository(value) {
+  const record = asRecord(value);
+  const ownerRecord = asRecord(record.owner);
+  const owner = asString(ownerRecord.login) ?? "";
+  const name = asString(record.name) ?? "";
+  return {
+    archived: asBoolean(record.archived) ?? false,
+    defaultBranch: asString(record.default_branch) ?? DEFAULT_BRANCH_FALLBACK,
+    fullName: asString(record.full_name) ?? `${owner}/${name}`,
+    htmlUrl: asString(record.html_url) ?? "",
+    id: asNumber(record.id) ?? UNKNOWN_ID,
+    name,
+    owner,
+    private: asBoolean(record.private) ?? true
+  };
+}
+function mapWorkflowRun(value, workflowPath) {
+  const record = asRecord(value);
+  return {
+    conclusion: toWorkflowConclusion(record.conclusion),
+    createdAt: asString(record.created_at) ?? "",
+    headSha: asString(record.head_sha) ?? "",
+    id: asNumber(record.id) ?? UNKNOWN_ID,
+    status: toWorkflowStatus(record.status),
+    updatedAt: asString(record.updated_at) ?? "",
+    workflowPath: asString(record.path) ?? workflowPath ?? ""
+  };
+}
+function toPermission(value) {
+  const allowed = ["none", "pull", "triage", "push", "maintain", "admin"];
+  return value !== void 0 && allowed.includes(value) ? value : "none";
+}
+function toCollaboratorPermission(collaborator) {
+  const permissions = asRecord(collaborator.permissions);
+  if (asBoolean(permissions.admin) === true) {
+    return "admin";
+  }
+  if (asBoolean(permissions.maintain) === true) {
+    return "maintain";
+  }
+  if (asBoolean(permissions.push) === true || asBoolean(permissions.write) === true) {
+    return "push";
+  }
+  if (asBoolean(permissions.triage) === true) {
+    return "triage";
+  }
+  if (asBoolean(permissions.pull) === true || asBoolean(permissions.read) === true) {
+    return "pull";
+  }
+  return "none";
+}
+function toWorkflowStatus(value) {
+  const status = asString(value);
+  if (status === "queued" || status === "in_progress" || status === "completed") {
+    return status;
+  }
+  return "queued";
+}
+function toWorkflowConclusion(value) {
+  const conclusion = asString(value);
+  if (conclusion === "success" || conclusion === "failure" || conclusion === "cancelled" || conclusion === "skipped" || conclusion === "timed_out" || conclusion === "action_required") {
+    return conclusion;
+  }
+  return null;
+}
+function noPermission() {
+  return {
+    pendingInvite: false,
+    permission: "none"
+  };
+}
+function extractZipTextFiles(value) {
+  const buffer = toBuffer(value);
+  const files = {};
+  for (let offset = 0, scanning = true; scanning && offset + ZIP_MIN_LOCAL_FILE_HEADER_BYTES <= buffer.length; ) {
+    const signature = buffer.readUInt32LE(offset);
+    if (signature !== ZIP_LOCAL_FILE_HEADER_SIGNATURE) {
+      scanning = false;
+    } else {
+      const flags = buffer.readUInt16LE(offset + ZIP_GENERAL_PURPOSE_FLAG_OFFSET);
+      const compressionMethod = buffer.readUInt16LE(offset + ZIP_COMPRESSION_METHOD_OFFSET);
+      const compressedSize = buffer.readUInt32LE(offset + ZIP_COMPRESSED_SIZE_OFFSET);
+      const fileNameLength = buffer.readUInt16LE(offset + ZIP_FILE_NAME_LENGTH_OFFSET);
+      const extraFieldLength = buffer.readUInt16LE(offset + ZIP_EXTRA_FIELD_LENGTH_OFFSET);
+      const nameStart = offset + ZIP_LOCAL_FILE_NAME_OFFSET;
+      const nameEnd = nameStart + fileNameLength;
+      const dataStart = nameEnd + extraFieldLength;
+      const dataEnd = dataStart + compressedSize;
+      if ((flags & ZIP_GENERAL_PURPOSE_DATA_DESCRIPTOR_FLAG) !== 0 || dataEnd > buffer.length) {
+        scanning = false;
+      } else {
+        const name = buffer.subarray(nameStart, nameEnd).toString(UTF8_ENCODING);
+        const compressed = buffer.subarray(dataStart, dataEnd);
+        const content = compressionMethod === ZIP_DEFLATE_COMPRESSION ? inflateRawSync(compressed) : compressionMethod === ZIP_STORED_COMPRESSION ? compressed : void 0;
+        if (content !== void 0 && name.length > EMPTY_LENGTH && !name.endsWith("/")) {
+          files[name] = content.toString(UTF8_ENCODING);
+        }
+        offset = dataEnd;
+      }
+    }
+  }
+  return files;
+}
+function toBuffer(value) {
+  if (Buffer.isBuffer(value)) {
+    return value;
+  }
+  if (value instanceof ArrayBuffer) {
+    return Buffer.from(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return Buffer.alloc(0);
+}
+function asRecord(value) {
+  return typeof value === "object" && value !== null ? value : {};
+}
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+function asString(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function asNumber(value) {
+  return typeof value === "number" ? value : void 0;
+}
+function asBoolean(value) {
+  return typeof value === "boolean" ? value : void 0;
+}
+
+// src/github/github-client-factory.ts
+var GRAIDER_GITHUB_TOKEN_ENV = "GRAIDER_GITHUB_TOKEN";
+var GITHUB_TOKEN_ENV = "GITHUB_TOKEN";
+var EMPTY_LENGTH2 = 0;
+function createGitHubClient(options = {}) {
+  const token = options.token ?? readGitHubToken(options.env);
+  return new OctokitGitHubClient(token === void 0 ? {} : { token });
+}
+function readGitHubToken(env = process.env) {
+  const graiderToken = normalizeToken2(env[GRAIDER_GITHUB_TOKEN_ENV]);
+  if (graiderToken !== void 0) {
+    return graiderToken;
+  }
+  return normalizeToken2(env[GITHUB_TOKEN_ENV]);
+}
+function normalizeToken2(token) {
+  const normalized = token?.trim();
+  return normalized === void 0 || normalized.length === EMPTY_LENGTH2 ? void 0 : normalized;
+}
+
 // src/github/github-readiness-validation.ts
 var README_FILE = "README.md";
 var EMPTY_COUNT3 = 0;
@@ -2691,7 +3292,7 @@ var hashFileSha256 = (filePath) => {
 
 // src/config/source-fingerprint.ts
 var EMPTY_FINGERPRINT = "";
-var EMPTY_LENGTH = 0;
+var EMPTY_LENGTH3 = 0;
 var sortSourceFiles = (sourceFiles) => [...sourceFiles].sort((left, right) => left.path.localeCompare(right.path));
 var createSourceOutsideRepoDiagnostic = (repoRoot, sourceFilePath) => createConfigDiagnostic(
   DiagnosticCode.SourceFileOutsideRepo,
@@ -2738,7 +3339,7 @@ var createSourceFingerprint = ({
   const orderedSourceFiles = sortSourceFiles(sourceFiles);
   return {
     sourceFiles: orderedSourceFiles,
-    inputFingerprint: errors.length === EMPTY_LENGTH ? createInputFingerprint(orderedSourceFiles) : EMPTY_FINGERPRINT,
+    inputFingerprint: errors.length === EMPTY_LENGTH3 ? createInputFingerprint(orderedSourceFiles) : EMPTY_FINGERPRINT,
     warnings: [],
     errors
   };
@@ -2789,7 +3390,7 @@ var PLACEHOLDER_PATTERN = /\{([a-z_]+)\}/gu;
 var REPOSITORY_NAME_PATTERN = /^[a-z0-9-]+$/u;
 var HYPHEN = "-";
 var CONSECUTIVE_HYPHENS = "--";
-var EMPTY_LENGTH2 = 0;
+var EMPTY_LENGTH4 = 0;
 var getMaxRepositoryNameLength = () => 100 /* MaxLength */;
 var REQUIRED_PLACEHOLDERS = ["term", "course", "assignment", "github_username"];
 var LEGACY_STUDENT_PLACEHOLDER = "student";
@@ -2846,7 +3447,7 @@ var replacePlaceholders = (input) => {
 };
 var validateRepositoryName = (repositoryName) => {
   const errors = [
-    ...repositoryName.length === EMPTY_LENGTH2 ? [createRepositoryNameError(repositoryName, "repository name must not be empty")] : [],
+    ...repositoryName.length === EMPTY_LENGTH4 ? [createRepositoryNameError(repositoryName, "repository name must not be empty")] : [],
     ...repositoryName.length > getMaxRepositoryNameLength() ? [
       createRepositoryNameError(
         repositoryName,
@@ -2880,7 +3481,7 @@ var generateRepositoryName = (input) => {
     ...getUnknownPlaceholderErrors(placeholders),
     ...getMissingPlaceholderErrors(placeholders)
   ];
-  if (patternErrors.length > EMPTY_LENGTH2) {
+  if (patternErrors.length > EMPTY_LENGTH4) {
     return {
       warnings: [],
       errors: patternErrors
@@ -2888,7 +3489,7 @@ var generateRepositoryName = (input) => {
   }
   const repositoryName = replacePlaceholders(input).toLowerCase();
   const validationResult = validateRepositoryName(repositoryName);
-  if (validationResult.errors.length > EMPTY_LENGTH2) {
+  if (validationResult.errors.length > EMPTY_LENGTH4) {
     return validationResult;
   }
   return {
@@ -3643,6 +4244,9 @@ var createDefaultTemplateRepository = (owner, repo, branch) => ({
   latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA
 });
 var createDefaultGitHubClient = (config, students) => {
+  if (readGitHubToken() !== void 0) {
+    return createGitHubClient();
+  }
   const parsedTemplateRepository = parseTemplateRepository(
     config.course.github.organization,
     config.assignment.template.repository
@@ -4196,7 +4800,7 @@ var executeGrade = async (input) => {
 // src/cli/commands/grade.command.ts
 var COMMAND_NAME3 = "grade";
 var EMPTY_COUNT9 = 0;
-var createDefaultGitHubClient2 = () => new FakeGitHubClient();
+var createDefaultGitHubClient2 = () => readGitHubToken() === void 0 ? new FakeGitHubClient() : createGitHubClient();
 var getEffectiveGrading2 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getCommandStatus = (result) => {
   if (result.errors.length === EMPTY_COUNT9) {
@@ -5751,7 +6355,7 @@ var getCommandStatus2 = (errorCount, generatedFileCount) => {
   }
   return generatedFileCount > EMPTY_COUNT13 ? "partial_success" : "failure";
 };
-var createDefaultGitHubClient4 = () => new FakeGitHubClient();
+var createDefaultGitHubClient4 = () => readGitHubToken() === void 0 ? new FakeGitHubClient() : createGitHubClient();
 var createReportFiles = (repoRoot, report) => {
   const paths = createReportPaths(
     repoRoot,
@@ -5934,6 +6538,9 @@ var createDefaultTemplateRepository3 = (owner, repo, branch) => ({
   latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA3
 });
 var createDefaultGitHubClient5 = (config, students) => {
+  if (readGitHubToken() !== void 0) {
+    return createGitHubClient();
+  }
   const parsedTemplateRepository = parseTemplateRepository(
     config.course.github.organization,
     config.assignment.template.repository

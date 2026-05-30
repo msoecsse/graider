@@ -15,6 +15,7 @@ import { type Clock, systemClock } from "../../core/clock.js";
 import { publishStudentReports as publishReportsToStudentRepositories } from "../../execution/report-publisher.js";
 import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
+import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
@@ -54,7 +55,8 @@ const getCommandStatus = (errorCount: number, generatedFileCount: number): Comma
   return generatedFileCount > EMPTY_COUNT ? "partial_success" : "failure";
 };
 
-const createDefaultGitHubClient = (): GitHubClient => new FakeGitHubClient();
+const createDefaultGitHubClient = (): GitHubClient =>
+  readGitHubToken() === undefined ? new FakeGitHubClient() : createGitHubClient();
 
 const createReportFiles = (
   repoRoot: string,

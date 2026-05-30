@@ -24,6 +24,7 @@ import {
 } from "../../execution/grade-executor.js";
 import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
+import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
 import type { RetryOptions } from "../../github/github-retry.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";
@@ -49,7 +50,8 @@ interface GradeRawOptions extends RawCommonCommandOptions {
   githubUsername?: string;
 }
 
-const createDefaultGitHubClient = (): GitHubClient => new FakeGitHubClient();
+const createDefaultGitHubClient = (): GitHubClient =>
+  readGitHubToken() === undefined ? new FakeGitHubClient() : createGitHubClient();
 
 const getEffectiveGrading = (config: LoadedGraiderConfig) =>
   config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;

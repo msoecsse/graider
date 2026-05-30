@@ -10,6 +10,7 @@ import { createCommandResult, type CommandResult } from "../../core/command-resu
 import { parseTemplateRepository } from "../../config/github-config-validation.js";
 import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
+import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
 import { validateGitHubReadiness } from "../../github/github-readiness-validation.js";
 import type { GitHubTemplateRepository } from "../../github/github-models.js";
 import type { RosterStudent } from "../../roster/roster-models.js";
@@ -54,6 +55,10 @@ const createDefaultGitHubClient = (
   config: LoadedGraiderConfig,
   students: readonly RosterStudent[]
 ): GitHubClient => {
+  if (readGitHubToken() !== undefined) {
+    return createGitHubClient();
+  }
+
   const parsedTemplateRepository = parseTemplateRepository(
     config.course.github.organization,
     config.assignment.template.repository
