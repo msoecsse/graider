@@ -14,10 +14,12 @@ const requiredLiveEnvNames = [
   "GRAIDER_LIVE_FACULTY_TEAM",
   "GRAIDER_LIVE_GRADER_TEAM"
 ] as const;
+const tokenEnvNames = ["GRAIDER_GITHUB_TOKEN", "GITHUB_TOKEN"] as const;
 
 const liveTestsReady =
   process.env.GRAIDER_RUN_LIVE_GITHUB_TESTS === LIVE_TESTS_ENABLED &&
   readGitHubToken() !== undefined &&
+  tokenEnvNames.some((name) => process.env[name]?.trim().length !== EMPTY_LENGTH) &&
   requiredLiveEnvNames.every((name) => process.env[name]?.trim().length !== EMPTY_LENGTH);
 
 const destructiveLiveTestsReady =
