@@ -107,6 +107,21 @@ const createReadyClient = (repositories: GitHubRepository[] = []): FakeGitHubCli
     }))
   });
 
+class NonPersistingCreateGitHubClient extends FakeGitHubClient {
+  override createRepositoryFromTemplate(
+    input: Parameters<FakeGitHubClient["createRepositoryFromTemplate"]>[0]
+  ): Promise<GitHubRepository> {
+    const repository = createRepository(input.name);
+
+    this.mutations.createdRepositories.push({
+      input,
+      repository
+    });
+
+    return Promise.resolve(repository);
+  }
+}
+
 const runApply = async (
   fixtureName: string,
   githubClient: FakeGitHubClient = createReadyClient(),
@@ -324,6 +339,48 @@ describe("graider apply command", () => {
     expect(result.errors).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
     );
+  });
+
+  it("does not write a manifest repository record when repository creation is not observable", async () => {
+    const githubClient = new NonPersistingCreateGitHubClient({
+      templateRepositories: [templateRepository],
+      users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ]
+    });
+    const { cwd, result } = await runApply("active-assignment", githubClient);
+    const manifestResult = loadWrittenManifest(cwd);
+
+    expect(result.exitCode).toBe(ExitCode.GitHubOrNetworkFailure);
+    expect(result.errors.map((error) => error.code)).toEqual([
+      "github_api_error",
+      "github_api_error"
+    ]);
+    expect(result.errors.map((error) => error.context)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operation: "createRepositoryFromTemplate",
+          repositoryName: JONES_REPOSITORY
+        }),
+        expect.objectContaining({
+          operation: "createRepositoryFromTemplate",
+          repositoryName: PATEL_REPOSITORY
+        })
+      ])
+    );
+    expect(result.errors).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "grading_workflow_missing" }),
+        expect.objectContaining({ code: "workflow_dispatch_unsupported" })
+      ])
+    );
+    if (manifestResult.status === "loaded") {
+      expect(manifestResult.manifest.repositories).toEqual([]);
+    } else {
+      expect(manifestResult.status).toBe("missing");
+    }
   });
 
   it("TC-CLI-APPLY-008 confirmation required unless --yes", async () => {

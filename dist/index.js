@@ -1193,6 +1193,7 @@ var DEFAULT_ACTIONS_ENABLED = true;
 var STUDENT_PERMISSION2 = "push";
 var FACULTY_PERMISSION2 = "admin";
 var GRADER_PERMISSION2 = "maintain";
+var CREATE_REPOSITORY_OPERATION = "createRepositoryFromTemplate";
 var PERMISSION_RANK = {
   none: 0,
   pull: 1,
@@ -1259,6 +1260,18 @@ var createUnexpectedCollaboratorWarning = (operation, username, permission) => c
     section: operation.section,
     unexpectedUsername: username,
     permission
+  }
+);
+var createRepositoryCreationNotObservedDiagnostic = (operation, owner, repositoryName) => createConfigDiagnostic(
+  DiagnosticCode.GithubApiError,
+  `Repository creation did not produce an observable repository for ${owner}/${repositoryName}.`,
+  {
+    operation: CREATE_REPOSITORY_OPERATION,
+    owner,
+    repositoryName,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section
   }
 );
 var findStudent = (students, operation) => students.find((student) => student.studentId === operation.student_id);
@@ -1364,7 +1377,7 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
     if (parsedTemplate.status === "failure") {
       return recordError(state, parsedTemplate.diagnostic);
     }
-    const repository = await runGitHubOperation(
+    await runGitHubOperation(
       input,
       () => input.githubClient.createRepositoryFromTemplate({
         templateOwner: parsedTemplate.repository.owner,
@@ -1374,6 +1387,20 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
         private: PRIVATE_REPOSITORY
       })
     );
+    const repository = await runGitHubOperation(
+      input,
+      () => input.githubClient.getRepository(input.config.course.github.organization, repositoryName)
+    );
+    if (repository === null) {
+      return recordError(
+        state,
+        createRepositoryCreationNotObservedDiagnostic(
+          operation,
+          input.config.course.github.organization,
+          repositoryName
+        )
+      );
+    }
     const manifest = upsertRepositoryRecord(
       state.manifest,
       createManifestRecord(
