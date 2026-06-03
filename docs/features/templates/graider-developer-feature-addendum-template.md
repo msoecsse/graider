@@ -171,8 +171,8 @@ Implementation hints, architecture notes, or preferred approach:
 Potential edge cases:
 
 ```text
-- 
-- 
+-
+-
 ```
 
 Potential migration or compatibility concerns:
