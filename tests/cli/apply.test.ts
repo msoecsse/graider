@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { runApplyCommand } from "../../src/cli/commands/apply.command.js";
 import { formatCommandResultAsJson } from "../../src/cli/output.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
@@ -202,6 +202,33 @@ const writeTrackedManifest = (cwd: string, repositoryName: string): void => {
 };
 
 describe("graider apply command", () => {
+  it("uses the production GitHub client path unless a fake client is injected", async () => {
+    vi.stubEnv("GRAIDER_GITHUB_TOKEN", "");
+    vi.stubEnv("GITHUB_TOKEN", "");
+
+    try {
+      const cwd = copyFixtureToTemp("grading-disabled");
+      const result = await runApplyCommand({
+        cwd,
+        assignmentFile: ASSIGNMENT_FILE,
+        options: yesOptions,
+        clock: fixedClock,
+        retryOptions: { sleep: async () => {} }
+      });
+      const manifestResult = loadWrittenManifest(cwd);
+
+      expect(result.exitCode).toBe(ExitCode.AuthenticationOrAuthorizationFailure);
+      expect(result.errors).toEqual([
+        expect.objectContaining({
+          code: "github_auth_missing"
+        })
+      ]);
+      expect(manifestResult.status).toBe("missing");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("TC-CLI-APPLY-001 active assignment creates expected repos", async () => {
     const { result, githubClient } = await runApply("active-assignment");
 

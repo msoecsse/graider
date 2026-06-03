@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import type { Command } from "commander";
-import { parseTemplateRepository } from "../../config/github-config-validation.js";
 import { loadGraiderConfig } from "../../config/config-loader.js";
-import type { LoadedGraiderConfig } from "../../config/config-models.js";
 import { type Clock, formatPlanCreatedAt, systemClock } from "../../core/clock.js";
 import {
   type CommonCommandOptions,
@@ -16,27 +14,18 @@ import {
 } from "../../core/command-result.js";
 import { executeApplyPlan } from "../../execution/apply-executor.js";
 import { evaluateMutationGuard } from "../../execution/mutation-guard.js";
-import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
+import { createGitHubClient } from "../../github/github-client-factory.js";
 import { validateGitHubReadiness } from "../../github/github-readiness-validation.js";
-import type { GitHubTemplateRepository } from "../../github/github-models.js";
 import type { GitHubRetryEvent, RetryOptions } from "../../github/github-retry.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { buildPlan } from "../../planning/plan-builder.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
-import type { RosterStudent } from "../../roster/roster-models.js";
 import { writeCommandResult } from "../output.js";
 
 const COMMAND_NAME = "apply";
-const DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
-const README_FILE = "README.md";
 const EMPTY_COUNT = 0;
-
-enum ApplyCommandNumber {
-  DefaultTemplateRepositoryId = 1
-}
 
 export interface ApplyCommandRequest {
   cwd: string;
@@ -46,66 +35,6 @@ export interface ApplyCommandRequest {
   clock?: Clock;
   retryOptions?: Partial<RetryOptions>;
 }
-
-const createDefaultTemplateRepository = (
-  owner: string,
-  repo: string,
-  branch: string
-): GitHubTemplateRepository => ({
-  owner,
-  name: repo,
-  fullName: `${owner}/${repo}`,
-  id: ApplyCommandNumber.DefaultTemplateRepositoryId,
-  private: true,
-  archived: false,
-  defaultBranch: branch,
-  htmlUrl: `https://github.com/${owner}/${repo}`,
-  isTemplate: true,
-  branches: [branch],
-  files: [README_FILE],
-  latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA
-});
-
-const createDefaultGitHubClient = (
-  config: LoadedGraiderConfig,
-  students: readonly RosterStudent[]
-): GitHubClient => {
-  if (readGitHubToken() !== undefined) {
-    return createGitHubClient();
-  }
-
-  const parsedTemplateRepository = parseTemplateRepository(
-    config.course.github.organization,
-    config.assignment.template.repository
-  );
-  const templateRepositories =
-    parsedTemplateRepository.status === "success"
-      ? [
-          createDefaultTemplateRepository(
-            parsedTemplateRepository.repository.owner,
-            parsedTemplateRepository.repository.repo,
-            config.assignment.template.branch
-          )
-        ]
-      : [];
-
-  return new FakeGitHubClient({
-    templateRepositories,
-    users: students.map((student) => ({ username: student.githubUsername })),
-    teams: [
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.faculty_team,
-        name: config.course.github.faculty_team
-      },
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.grader_team,
-        name: config.course.github.grader_team
-      }
-    ]
-  });
-};
 
 const getExecutionStatus = (
   errorsLength: number,
@@ -178,8 +107,7 @@ export const runApplyCommand = async ({
     });
   }
 
-  const effectiveGitHubClient =
-    githubClient ?? createDefaultGitHubClient(configResult.config, rosterResult.students);
+  const effectiveGitHubClient = githubClient ?? createGitHubClient();
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,
