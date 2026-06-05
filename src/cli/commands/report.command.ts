@@ -173,7 +173,8 @@ export const runReportCommand = async ({
     students: rosterResult.students,
     manifest: manifestResult.manifest,
     githubClient: activeGitHubClient,
-    generatedAt: clock.now().toISOString()
+    generatedAt: clock.now().toISOString(),
+    includeArtifactFileKeys: options.verbose
   });
   const writeResult = writeReportFiles(
     createReportFiles(configResult.config.summary.repoRoot, collectResult.report)

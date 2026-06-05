@@ -1825,6 +1825,7 @@ import { inflateRawSync } from "zlib";
 import { Octokit } from "@octokit/rest";
 var HTTP_STATUS_UNAUTHORIZED = 401;
 var HTTP_STATUS_CREATED = 201;
+var HTTP_STATUS_FOUND = 302;
 var HTTP_STATUS_FORBIDDEN = 403;
 var HTTP_STATUS_NOT_FOUND = 404;
 var HTTP_STATUS_TOO_MANY_REQUESTS = 429;
@@ -1835,20 +1836,42 @@ var FIRST_PAGE_LIMIT = 1;
 var UNKNOWN_COMMIT_SHA = "unknown";
 var UNKNOWN_ID = 0;
 var EMPTY_LENGTH = 0;
+var SINGLE_BYTE_STEP = 1;
 var DECIMAL_RADIX = 10;
 var ZIP_LOCAL_FILE_HEADER_SIGNATURE = 67324752;
+var ZIP_CENTRAL_DIRECTORY_FILE_HEADER_SIGNATURE = 33639248;
+var ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 101010256;
 var ZIP_DEFLATE_COMPRESSION = 8;
 var ZIP_STORED_COMPRESSION = 0;
 var ZIP_GENERAL_PURPOSE_DATA_DESCRIPTOR_FLAG = 8;
 var ZIP_MIN_LOCAL_FILE_HEADER_BYTES = 30;
+var ZIP_MIN_CENTRAL_DIRECTORY_FILE_HEADER_BYTES = 46;
+var ZIP_MIN_END_OF_CENTRAL_DIRECTORY_BYTES = 22;
+var ZIP_MAX_COMMENT_BYTES = 65535;
 var ZIP_COMPRESSION_METHOD_OFFSET = 8;
 var ZIP_GENERAL_PURPOSE_FLAG_OFFSET = 6;
 var ZIP_COMPRESSED_SIZE_OFFSET = 18;
 var ZIP_FILE_NAME_LENGTH_OFFSET = 26;
 var ZIP_EXTRA_FIELD_LENGTH_OFFSET = 28;
 var ZIP_LOCAL_FILE_NAME_OFFSET = 30;
+var ZIP_CENTRAL_COMPRESSION_METHOD_OFFSET = 10;
+var ZIP_CENTRAL_COMPRESSED_SIZE_OFFSET = 20;
+var ZIP_CENTRAL_FILE_NAME_LENGTH_OFFSET = 28;
+var ZIP_CENTRAL_EXTRA_FIELD_LENGTH_OFFSET = 30;
+var ZIP_CENTRAL_FILE_COMMENT_LENGTH_OFFSET = 32;
+var ZIP_CENTRAL_LOCAL_HEADER_OFFSET = 42;
+var ZIP_CENTRAL_FILE_NAME_OFFSET = 46;
+var ZIP_END_CENTRAL_DIRECTORY_ENTRY_COUNT_OFFSET = 10;
+var ZIP_END_CENTRAL_DIRECTORY_SIZE_OFFSET = 12;
+var ZIP_END_CENTRAL_DIRECTORY_OFFSET = 16;
+var ZIP_END_CENTRAL_DIRECTORY_COMMENT_LENGTH_OFFSET = 20;
 var BASE64_ENCODING = "base64";
 var UTF8_ENCODING = "utf8";
+var WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
+var PARSE_SUCCESS_RESPONSE_BODY_DISABLED = false;
+var LOCATION_HEADER = "location";
+var LOCATION_HEADER_ALTERNATE = "Location";
+var GET_METHOD = "GET";
 var OctokitGitHubClient = class {
   octokit;
   token;
@@ -2041,11 +2064,11 @@ var OctokitGitHubClient = class {
   async dispatchWorkflow(input) {
     await this.run(
       () => this.octokit.rest.actions.createWorkflowDispatch({
-        inputs: input.inputs,
         owner: input.owner,
         ref: input.ref,
         repo: input.repo,
-        workflow_id: input.workflowPath
+        workflow_id: input.workflowPath,
+        ...input.inputs === void 0 ? {} : { inputs: input.inputs }
       })
     );
   }
@@ -2084,18 +2107,46 @@ var OctokitGitHubClient = class {
     if (artifactId === void 0) {
       return null;
     }
-    const archiveData = await this.run(
-      () => this.octokit.rest.actions.downloadArtifact({
-        archive_format: "zip",
-        artifact_id: artifactId,
-        owner: input.owner,
-        repo: input.repo
-      })
+    const archiveResponse = await this.resolveArtifactDownloadResponse(
+      await this.runResponse(
+        () => this.octokit.rest.actions.downloadArtifact({
+          archive_format: "zip",
+          artifact_id: artifactId,
+          owner: input.owner,
+          repo: input.repo,
+          request: {
+            parseSuccessResponseBody: PARSE_SUCCESS_RESPONSE_BODY_DISABLED
+          }
+        })
+      )
     );
+    const archiveBuffer = await toBuffer(archiveResponse.data);
+    const files = extractZipTextFiles(archiveBuffer);
+    if (Object.keys(files).length === EMPTY_LENGTH) {
+      throw createArtifactDecodeError();
+    }
     return {
-      files: extractZipTextFiles(archiveData),
+      files,
       name: input.artifactName
     };
+  }
+  async resolveArtifactDownloadResponse(response) {
+    if (response.status !== HTTP_STATUS_FOUND) {
+      return response;
+    }
+    const location = response.headers?.[LOCATION_HEADER] ?? response.headers?.[LOCATION_HEADER_ALTERNATE];
+    if (location === void 0 || location.length === EMPTY_LENGTH) {
+      throw createArtifactDecodeError();
+    }
+    return this.runResponse(
+      () => this.octokit.request({
+        method: GET_METHOD,
+        url: location,
+        request: {
+          parseSuccessResponseBody: PARSE_SUCCESS_RESPONSE_BODY_DISABLED
+        }
+      })
+    );
   }
   async archiveRepository(owner, repo) {
     await this.run(() => this.octokit.rest.repos.update({ archived: true, owner, repo }));
@@ -2230,6 +2281,9 @@ function normalizeOctokitError(error) {
   }
   return new GitHubClientError("network_error", "GitHub network request failed.");
 }
+function createArtifactDecodeError() {
+  return new GitHubClientError("api_error", "GitHub artifact download could not be decoded.");
+}
 function getErrorStatus(error) {
   const record = asRecord(error);
   return asNumber(record.status);
@@ -2340,8 +2394,60 @@ function noPermission() {
     permission: "none"
   };
 }
-function extractZipTextFiles(value) {
-  const buffer = toBuffer(value);
+function extractZipTextFiles(buffer) {
+  const centralDirectoryFiles = extractZipTextFilesFromCentralDirectory(buffer);
+  if (Object.keys(centralDirectoryFiles).length !== EMPTY_LENGTH) {
+    return centralDirectoryFiles;
+  }
+  return extractZipTextFilesFromLocalHeaders(buffer);
+}
+function extractZipTextFilesFromCentralDirectory(buffer) {
+  const files = {};
+  const directory = findZipCentralDirectory(buffer);
+  if (directory === void 0) {
+    return files;
+  }
+  const directoryEnd = Math.min(directory.offset + directory.size, buffer.length);
+  for (let offset = directory.offset, remainingEntries = directory.entries, scanning = true; scanning && remainingEntries > EMPTY_LENGTH && offset + ZIP_MIN_CENTRAL_DIRECTORY_FILE_HEADER_BYTES <= directoryEnd; remainingEntries -= SINGLE_BYTE_STEP) {
+    const signature = buffer.readUInt32LE(offset);
+    if (signature !== ZIP_CENTRAL_DIRECTORY_FILE_HEADER_SIGNATURE) {
+      scanning = false;
+    } else {
+      const fileNameLength = buffer.readUInt16LE(offset + ZIP_CENTRAL_FILE_NAME_LENGTH_OFFSET);
+      const extraFieldLength = buffer.readUInt16LE(offset + ZIP_CENTRAL_EXTRA_FIELD_LENGTH_OFFSET);
+      const fileCommentLength = buffer.readUInt16LE(
+        offset + ZIP_CENTRAL_FILE_COMMENT_LENGTH_OFFSET
+      );
+      const nameStart = offset + ZIP_CENTRAL_FILE_NAME_OFFSET;
+      const nameEnd = nameStart + fileNameLength;
+      const nextOffset = nameEnd + extraFieldLength + fileCommentLength;
+      if (nextOffset > directoryEnd) {
+        scanning = false;
+      } else {
+        const compressionMethod = buffer.readUInt16LE(
+          offset + ZIP_CENTRAL_COMPRESSION_METHOD_OFFSET
+        );
+        const compressedSize = buffer.readUInt32LE(offset + ZIP_CENTRAL_COMPRESSED_SIZE_OFFSET);
+        const localHeaderOffset = buffer.readUInt32LE(offset + ZIP_CENTRAL_LOCAL_HEADER_OFFSET);
+        const name = normalizeZipEntryPath(
+          buffer.subarray(nameStart, nameEnd).toString(UTF8_ENCODING)
+        );
+        const content = extractZipEntryContent(
+          buffer,
+          localHeaderOffset,
+          compressedSize,
+          compressionMethod
+        );
+        if (content !== void 0 && name.length > EMPTY_LENGTH && !name.endsWith("/")) {
+          files[name] = content.toString(UTF8_ENCODING);
+        }
+        offset = nextOffset;
+      }
+    }
+  }
+  return files;
+}
+function extractZipTextFilesFromLocalHeaders(buffer) {
   const files = {};
   for (let offset = 0, scanning = true; scanning && offset + ZIP_MIN_LOCAL_FILE_HEADER_BYTES <= buffer.length; ) {
     const signature = buffer.readUInt32LE(offset);
@@ -2360,7 +2466,9 @@ function extractZipTextFiles(value) {
       if ((flags & ZIP_GENERAL_PURPOSE_DATA_DESCRIPTOR_FLAG) !== 0 || dataEnd > buffer.length) {
         scanning = false;
       } else {
-        const name = buffer.subarray(nameStart, nameEnd).toString(UTF8_ENCODING);
+        const name = normalizeZipEntryPath(
+          buffer.subarray(nameStart, nameEnd).toString(UTF8_ENCODING)
+        );
         const compressed = buffer.subarray(dataStart, dataEnd);
         const content = compressionMethod === ZIP_DEFLATE_COMPRESSION ? inflateRawSync(compressed) : compressionMethod === ZIP_STORED_COMPRESSION ? compressed : void 0;
         if (content !== void 0 && name.length > EMPTY_LENGTH && !name.endsWith("/")) {
@@ -2372,7 +2480,71 @@ function extractZipTextFiles(value) {
   }
   return files;
 }
-function toBuffer(value) {
+function findZipCentralDirectory(buffer) {
+  const firstOffset = Math.max(
+    EMPTY_LENGTH,
+    buffer.length - ZIP_MIN_END_OF_CENTRAL_DIRECTORY_BYTES - ZIP_MAX_COMMENT_BYTES
+  );
+  let directory;
+  for (let offset = buffer.length - ZIP_MIN_END_OF_CENTRAL_DIRECTORY_BYTES; directory === void 0 && offset >= firstOffset; offset -= SINGLE_BYTE_STEP) {
+    const signature = buffer.readUInt32LE(offset);
+    if (signature === ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE) {
+      const commentLength = buffer.readUInt16LE(
+        offset + ZIP_END_CENTRAL_DIRECTORY_COMMENT_LENGTH_OFFSET
+      );
+      const expectedEnd = offset + ZIP_MIN_END_OF_CENTRAL_DIRECTORY_BYTES + commentLength;
+      if (expectedEnd <= buffer.length) {
+        directory = {
+          entries: buffer.readUInt16LE(offset + ZIP_END_CENTRAL_DIRECTORY_ENTRY_COUNT_OFFSET),
+          offset: buffer.readUInt32LE(offset + ZIP_END_CENTRAL_DIRECTORY_OFFSET),
+          size: buffer.readUInt32LE(offset + ZIP_END_CENTRAL_DIRECTORY_SIZE_OFFSET)
+        };
+      }
+    }
+  }
+  return directory;
+}
+function extractZipEntryContent(buffer, localHeaderOffset, compressedSize, compressionMethod) {
+  if (localHeaderOffset + ZIP_MIN_LOCAL_FILE_HEADER_BYTES > buffer.length || buffer.readUInt32LE(localHeaderOffset) !== ZIP_LOCAL_FILE_HEADER_SIGNATURE) {
+    return void 0;
+  }
+  const fileNameLength = buffer.readUInt16LE(localHeaderOffset + ZIP_FILE_NAME_LENGTH_OFFSET);
+  const extraFieldLength = buffer.readUInt16LE(localHeaderOffset + ZIP_EXTRA_FIELD_LENGTH_OFFSET);
+  const dataStart = localHeaderOffset + ZIP_LOCAL_FILE_NAME_OFFSET + fileNameLength + extraFieldLength;
+  const dataEnd = dataStart + compressedSize;
+  if (dataEnd > buffer.length) {
+    return void 0;
+  }
+  const compressed = buffer.subarray(dataStart, dataEnd);
+  return compressionMethod === ZIP_DEFLATE_COMPRESSION ? inflateRawSync(compressed) : compressionMethod === ZIP_STORED_COMPRESSION ? compressed : void 0;
+}
+function normalizeZipEntryPath(filePath) {
+  return filePath.replace(WINDOWS_PATH_SEPARATOR_PATTERN, "/");
+}
+async function toBuffer(value) {
+  const directBuffer = toDirectBuffer(value);
+  if (directBuffer !== void 0) {
+    if (directBuffer.length === EMPTY_LENGTH) {
+      throw createArtifactDecodeError();
+    }
+    return directBuffer;
+  }
+  if (isReadableStreamLike(value)) {
+    return readStreamToBuffer(value);
+  }
+  if (isAsyncIterableLike(value)) {
+    return readAsyncIterableToBuffer(value);
+  }
+  if (isBlobLike(value)) {
+    const blobBuffer = Buffer.from(await value.arrayBuffer());
+    if (blobBuffer.length === EMPTY_LENGTH) {
+      throw createArtifactDecodeError();
+    }
+    return blobBuffer;
+  }
+  throw createArtifactDecodeError();
+}
+function toDirectBuffer(value) {
   if (Buffer.isBuffer(value)) {
     return value;
   }
@@ -2382,7 +2554,61 @@ function toBuffer(value) {
   if (ArrayBuffer.isView(value)) {
     return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
   }
-  return Buffer.alloc(0);
+  if (typeof value === "string") {
+    return Buffer.from(value, UTF8_ENCODING);
+  }
+  return void 0;
+}
+async function readStreamToBuffer(stream) {
+  const reader = stream.getReader();
+  const chunks = [];
+  try {
+    for (let reading = true; reading; ) {
+      const result = await reader.read();
+      if (result.done) {
+        reading = false;
+      } else {
+        const chunk = toDirectBuffer(result.value);
+        if (chunk !== void 0) {
+          chunks.push(chunk);
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  const buffer = Buffer.concat(chunks);
+  if (buffer.length === EMPTY_LENGTH) {
+    throw createArtifactDecodeError();
+  }
+  return buffer;
+}
+async function readAsyncIterableToBuffer(iterable) {
+  const chunks = [];
+  for await (const value of iterable) {
+    const chunk = toDirectBuffer(value);
+    if (chunk === void 0) {
+      throw createArtifactDecodeError();
+    }
+    chunks.push(chunk);
+  }
+  const buffer = Buffer.concat(chunks);
+  if (buffer.length === EMPTY_LENGTH) {
+    throw createArtifactDecodeError();
+  }
+  return buffer;
+}
+function isReadableStreamLike(value) {
+  const candidate = asRecord(value);
+  return typeof candidate.getReader === "function";
+}
+function isAsyncIterableLike(value) {
+  const candidate = typeof value === "object" && value !== null ? value : {};
+  return typeof candidate[Symbol.asyncIterator] === "function";
+}
+function isBlobLike(value) {
+  const candidate = asRecord(value);
+  return typeof candidate.arrayBuffer === "function";
 }
 function asRecord(value) {
   return typeof value === "object" && value !== null ? value : {};
@@ -4321,12 +4547,6 @@ var recordSuccess = (state) => ({
   warnings: state.warnings,
   errors: state.errors
 });
-var createDispatchInputs = (config, student) => ({
-  student_id: student.studentId,
-  github_username: student.githubUsername,
-  section: student.section,
-  assignment_slug: config.summary.assignmentSlug
-});
 var dispatchForStudent = async (input, state, student, workflowPath) => {
   const repository = findManifestRecord3(input.manifest, student);
   if (repository === void 0) {
@@ -4359,8 +4579,7 @@ var dispatchForStudent = async (input, state, student, workflowPath) => {
         owner: repository.repository.owner,
         repo: repository.repository.name,
         workflowPath,
-        ref: input.config.assignment.template.branch,
-        inputs: createDispatchInputs(input.config, student)
+        ref: input.config.assignment.template.branch
       })
     );
     return recordSuccess(state);
@@ -5831,6 +6050,8 @@ var EMPTY_COUNT12 = 0;
 var FIRST_SORT_BEFORE_SECOND = -1;
 var FIRST_SORT_AFTER_SECOND = 1;
 var FIRST_WORKFLOW_RUN_INDEX = 0;
+var CURRENT_DIRECTORY_PREFIX = "./";
+var WINDOWS_PATH_SEPARATOR_PATTERN2 = /\\/g;
 var compareStudents = (left, right) => {
   const sectionComparison = left.section.localeCompare(right.section);
   if (sectionComparison !== EMPTY_COUNT12) {
@@ -5856,6 +6077,20 @@ var normalizeGitHubError5 = (error) => error instanceof GitHubClientError ? crea
 var getEffectiveGrading3 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getWorkflowRunStatus = (run) => run === void 0 ? void 0 : run.status;
 var getWorkflowRunConclusion = (run) => run === void 0 ? void 0 : run.conclusion;
+var normalizeArtifactPath = (filePath) => {
+  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN2, "/");
+  return normalizedPath.startsWith(CURRENT_DIRECTORY_PREFIX) ? normalizedPath.slice(CURRENT_DIRECTORY_PREFIX.length) : normalizedPath;
+};
+var findArtifactResultText = (artifact, resultFilePath) => {
+  if (artifact === null) {
+    return void 0;
+  }
+  const normalizedResultFilePath = normalizeArtifactPath(resultFilePath);
+  return Object.entries(artifact.files).find(
+    ([filePath]) => normalizeArtifactPath(filePath) === normalizedResultFilePath
+  )?.[1];
+};
+var getArtifactFileKeys = (artifact) => artifact === null ? [] : Object.keys(artifact.files).map(normalizeArtifactPath).sort((left, right) => left.localeCompare(right));
 var createDefaultGrading = () => ({
   workflowStatus: "unknown",
   resultStatus: "unknown",
@@ -5962,7 +6197,8 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
     artifactName: gradingConfig.artifact
   });
   const artifactStatus = artifact === null ? "missing" : "found";
-  const resultText = artifact?.files[gradingConfig.result_file];
+  const artifactFileKeys = getArtifactFileKeys(artifact);
+  const resultText = findArtifactResultText(artifact, gradingConfig.result_file);
   const resultFileStatus = artifact === null ? "not_checked" : resultText === void 0 ? "missing" : "valid";
   const validationResult = resultText === void 0 ? void 0 : parseGradingResultsJsonText(resultText);
   const finalResultFileStatus = validationResult === void 0 || validationResult.errors.length === EMPTY_COUNT12 ? resultFileStatus : "invalid";
@@ -5989,7 +6225,12 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
       ...validationResult?.result?.maxScore === void 0 ? {} : { maxScore: validationResult.result.maxScore },
       checks: validationResult?.result?.checks ?? [],
       workflowRunId: workflowRun.id,
-      commitSha: workflowRun.headSha
+      commitSha: workflowRun.headSha,
+      ...input.includeArtifactFileKeys ? {
+        artifactFileKeys,
+        configuredResultFile: gradingConfig.result_file,
+        normalizedResultFile: normalizeArtifactPath(gradingConfig.result_file)
+      } : {}
     },
     warnings: [...mapping.warnings, ...validationResult?.warnings ?? []],
     errors: [...mapping.errors, ...validationResult?.errors ?? []]
@@ -6170,6 +6411,9 @@ var mapStudent = (student) => ({
     ...student.grading.maxScore === void 0 ? {} : { max_score: student.grading.maxScore },
     ...student.grading.workflowRunId === void 0 ? {} : { workflow_run_id: student.grading.workflowRunId },
     ...student.grading.commitSha === void 0 ? {} : { commit_sha: student.grading.commitSha },
+    ...student.grading.artifactFileKeys === void 0 ? {} : { artifact_file_keys: student.grading.artifactFileKeys },
+    ...student.grading.configuredResultFile === void 0 ? {} : { configured_result_file: student.grading.configuredResultFile },
+    ...student.grading.normalizedResultFile === void 0 ? {} : { normalized_result_file: student.grading.normalizedResultFile },
     checks: student.grading.checks.map((check) => ({
       name: check.name,
       status: check.status,
@@ -6438,7 +6682,8 @@ var runReportCommand = async ({
     students: rosterResult.students,
     manifest: manifestResult.manifest,
     githubClient: activeGitHubClient,
-    generatedAt: clock.now().toISOString()
+    generatedAt: clock.now().toISOString(),
+    includeArtifactFileKeys: options.verbose
   });
   const writeResult = writeReportFiles(
     createReportFiles(configResult.config.summary.repoRoot, collectResult.report)

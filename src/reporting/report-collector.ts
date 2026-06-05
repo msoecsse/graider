@@ -2,7 +2,7 @@ import type { LoadedGraiderConfig } from "../config/config-models.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { createGitHubDiagnostic, GitHubClientError } from "../github/github-errors.js";
 import type { GitHubClient } from "../github/github-client.js";
-import type { GitHubWorkflowRun } from "../github/github-models.js";
+import type { DownloadedArtifact, GitHubWorkflowRun } from "../github/github-models.js";
 import { mapGradingStatus } from "../grading/grading-status-mapper.js";
 import { parseGradingResultsJsonText } from "../grading/grading-result-validator.js";
 import type {
@@ -27,6 +27,8 @@ const EMPTY_COUNT = 0;
 const FIRST_SORT_BEFORE_SECOND = -1;
 const FIRST_SORT_AFTER_SECOND = 1;
 const FIRST_WORKFLOW_RUN_INDEX = 0;
+const CURRENT_DIRECTORY_PREFIX = "./";
+const WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
 
 interface CollectReportInput {
   config: LoadedGraiderConfig;
@@ -35,6 +37,7 @@ interface CollectReportInput {
   manifest: Manifest;
   githubClient: GitHubClient;
   generatedAt: string;
+  includeArtifactFileKeys?: boolean;
 }
 
 export interface CollectReportResult {
@@ -87,6 +90,36 @@ const getWorkflowRunStatus = (run: GitHubWorkflowRun | undefined): WorkflowRunSt
 const getWorkflowRunConclusion = (
   run: GitHubWorkflowRun | undefined
 ): WorkflowRunConclusion | undefined => (run === undefined ? undefined : run.conclusion);
+
+const normalizeArtifactPath = (filePath: string): string => {
+  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN, "/");
+
+  return normalizedPath.startsWith(CURRENT_DIRECTORY_PREFIX)
+    ? normalizedPath.slice(CURRENT_DIRECTORY_PREFIX.length)
+    : normalizedPath;
+};
+
+const findArtifactResultText = (
+  artifact: DownloadedArtifact | null,
+  resultFilePath: string
+): string | undefined => {
+  if (artifact === null) {
+    return undefined;
+  }
+
+  const normalizedResultFilePath = normalizeArtifactPath(resultFilePath);
+
+  return Object.entries(artifact.files).find(
+    ([filePath]) => normalizeArtifactPath(filePath) === normalizedResultFilePath
+  )?.[1];
+};
+
+const getArtifactFileKeys = (artifact: DownloadedArtifact | null): string[] =>
+  artifact === null
+    ? []
+    : Object.keys(artifact.files)
+        .map(normalizeArtifactPath)
+        .sort((left, right) => left.localeCompare(right));
 
 const createDefaultGrading = (): StudentGradingSummary => ({
   workflowStatus: "unknown",
@@ -222,7 +255,8 @@ const collectStudentGrading = async (
     artifactName: gradingConfig.artifact
   });
   const artifactStatus: ArtifactStatus = artifact === null ? "missing" : "found";
-  const resultText = artifact?.files[gradingConfig.result_file];
+  const artifactFileKeys = getArtifactFileKeys(artifact);
+  const resultText = findArtifactResultText(artifact, gradingConfig.result_file);
   const resultFileStatus: ResultFileStatus =
     artifact === null ? "not_checked" : resultText === undefined ? "missing" : "valid";
   const validationResult =
@@ -259,7 +293,14 @@ const collectStudentGrading = async (
         : { maxScore: validationResult.result.maxScore }),
       checks: validationResult?.result?.checks ?? [],
       workflowRunId: workflowRun.id,
-      commitSha: workflowRun.headSha
+      commitSha: workflowRun.headSha,
+      ...(input.includeArtifactFileKeys
+        ? {
+            artifactFileKeys,
+            configuredResultFile: gradingConfig.result_file,
+            normalizedResultFile: normalizeArtifactPath(gradingConfig.result_file)
+          }
+        : {})
     },
     warnings: [...mapping.warnings, ...(validationResult?.warnings ?? [])],
     errors: [...mapping.errors, ...(validationResult?.errors ?? [])]

@@ -163,16 +163,6 @@ const recordSuccess = (state: GradeExecutionState): GradeExecutionState => ({
   errors: state.errors
 });
 
-const createDispatchInputs = (
-  config: LoadedGraiderConfig,
-  student: RosterStudent
-): Record<string, string> => ({
-  student_id: student.studentId,
-  github_username: student.githubUsername,
-  section: student.section,
-  assignment_slug: config.summary.assignmentSlug
-});
-
 const dispatchForStudent = async (
   input: GradeExecutionInput,
   state: GradeExecutionState,
@@ -213,8 +203,7 @@ const dispatchForStudent = async (
         owner: repository.repository.owner,
         repo: repository.repository.name,
         workflowPath,
-        ref: input.config.assignment.template.branch,
-        inputs: createDispatchInputs(input.config, student)
+        ref: input.config.assignment.template.branch
       })
     );
 

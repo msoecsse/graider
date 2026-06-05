@@ -1,3 +1,6 @@
+import { Buffer } from "node:buffer";
+import { Readable } from "node:stream";
+import { deflateRawSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import {
   OctokitGitHubClient,
@@ -13,6 +16,7 @@ enum OctokitTestNumber {
   WorkflowId = 405,
   WorkflowRunId = 505,
   ArtifactId = 606,
+  RedirectStatus = 302,
   EmptyBufferLength = 0,
   CreatedStatus = 201,
   NotFoundStatus = 404,
@@ -34,6 +38,67 @@ const FILE_CONTENT = "student report";
 const EXISTING_SHA = "existing-sha";
 const CREATED_SHA = "created-sha";
 const RETRY_AFTER_SECONDS = "12";
+const ARTIFACT_DOWNLOAD_URL = "https://artifact.example/download.zip";
+const GRADING_RESULTS_PATH = "grading-results.json";
+const GRADING_RESULTS_TEXT = JSON.stringify({
+  schema_version: 1,
+  status: "passed",
+  checks: []
+});
+const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
+const ZIP_CENTRAL_DIRECTORY_FILE_HEADER_SIGNATURE = 0x02014b50;
+const ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
+const ZIP_DATA_DESCRIPTOR_SIGNATURE = 0x08074b50;
+const ZIP_VERSION = 20;
+const ZIP_GENERAL_PURPOSE_DATA_DESCRIPTOR_FLAG = 0x08;
+const ZIP_DEFLATE_COMPRESSION = 8;
+const ZIP_MINIMUM_LOCAL_FILE_HEADER_BYTES = 30;
+const ZIP_CENTRAL_DIRECTORY_FILE_HEADER_BYTES = 46;
+const ZIP_END_OF_CENTRAL_DIRECTORY_BYTES = 22;
+const ZIP_DATA_DESCRIPTOR_BYTES = 16;
+const ZIP_EMPTY_FIELD_LENGTH = 0;
+const ZIP_EMPTY_CRC32 = 0;
+const ZIP_FIRST_DISK = 0;
+const ZIP_SINGLE_ENTRY_COUNT = 1;
+const ZIP_NO_EXTERNAL_ATTRIBUTES = 0;
+const ZIP_NO_INTERNAL_ATTRIBUTES = 0;
+const ZIP_LOCAL_HEADER_OFFSET = 0;
+const ZIP_VERSION_NEEDED_OFFSET = 4;
+const ZIP_GENERAL_PURPOSE_FLAG_OFFSET = 6;
+const ZIP_COMPRESSION_METHOD_OFFSET = 8;
+const ZIP_LAST_MODIFIED_TIME_OFFSET = 10;
+const ZIP_LAST_MODIFIED_DATE_OFFSET = 12;
+const ZIP_CRC32_OFFSET = 14;
+const ZIP_COMPRESSED_SIZE_OFFSET = 18;
+const ZIP_UNCOMPRESSED_SIZE_OFFSET = 22;
+const ZIP_FILE_NAME_LENGTH_OFFSET = 26;
+const ZIP_EXTRA_FIELD_LENGTH_OFFSET = 28;
+const ZIP_DATA_DESCRIPTOR_CRC32_OFFSET = 4;
+const ZIP_DATA_DESCRIPTOR_COMPRESSED_SIZE_OFFSET = 8;
+const ZIP_DATA_DESCRIPTOR_UNCOMPRESSED_SIZE_OFFSET = 12;
+const ZIP_CENTRAL_VERSION_MADE_BY_OFFSET = 4;
+const ZIP_CENTRAL_VERSION_NEEDED_OFFSET = 6;
+const ZIP_CENTRAL_GENERAL_PURPOSE_FLAG_OFFSET = 8;
+const ZIP_CENTRAL_COMPRESSION_METHOD_OFFSET = 10;
+const ZIP_CENTRAL_LAST_MODIFIED_TIME_OFFSET = 12;
+const ZIP_CENTRAL_LAST_MODIFIED_DATE_OFFSET = 14;
+const ZIP_CENTRAL_CRC32_OFFSET = 16;
+const ZIP_CENTRAL_COMPRESSED_SIZE_OFFSET = 20;
+const ZIP_CENTRAL_UNCOMPRESSED_SIZE_OFFSET = 24;
+const ZIP_CENTRAL_FILE_NAME_LENGTH_OFFSET = 28;
+const ZIP_CENTRAL_EXTRA_FIELD_LENGTH_OFFSET = 30;
+const ZIP_CENTRAL_FILE_COMMENT_LENGTH_OFFSET = 32;
+const ZIP_CENTRAL_DISK_START_OFFSET = 34;
+const ZIP_CENTRAL_INTERNAL_ATTRIBUTES_OFFSET = 36;
+const ZIP_CENTRAL_EXTERNAL_ATTRIBUTES_OFFSET = 38;
+const ZIP_CENTRAL_LOCAL_HEADER_OFFSET = 42;
+const ZIP_END_CENTRAL_DIRECTORY_DISK_OFFSET = 4;
+const ZIP_END_CENTRAL_DIRECTORY_START_DISK_OFFSET = 6;
+const ZIP_END_CENTRAL_DIRECTORY_DISK_ENTRIES_OFFSET = 8;
+const ZIP_END_CENTRAL_DIRECTORY_TOTAL_ENTRIES_OFFSET = 10;
+const ZIP_END_CENTRAL_DIRECTORY_SIZE_OFFSET = 12;
+const ZIP_END_CENTRAL_DIRECTORY_OFFSET = 16;
+const ZIP_END_CENTRAL_DIRECTORY_COMMENT_LENGTH_OFFSET = 20;
 
 interface RequestLikeErrorOptions {
   status?: number;
@@ -60,6 +125,223 @@ const resolvedResponse = (data: unknown, status?: number) =>
   });
 
 const rejectedResponse = (error: Error): Promise<never> => Promise.reject(error);
+
+const writeZipFileHeader = (
+  buffer: Buffer,
+  fileName: Buffer,
+  compressed: Buffer,
+  uncompressed: Buffer
+): void => {
+  buffer.writeUInt32LE(ZIP_LOCAL_FILE_HEADER_SIGNATURE);
+  buffer.writeUInt16LE(ZIP_VERSION, ZIP_VERSION_NEEDED_OFFSET);
+  buffer.writeUInt16LE(ZIP_GENERAL_PURPOSE_DATA_DESCRIPTOR_FLAG, ZIP_GENERAL_PURPOSE_FLAG_OFFSET);
+  buffer.writeUInt16LE(ZIP_DEFLATE_COMPRESSION, ZIP_COMPRESSION_METHOD_OFFSET);
+  buffer.writeUInt16LE(ZIP_EMPTY_FIELD_LENGTH, ZIP_LAST_MODIFIED_TIME_OFFSET);
+  buffer.writeUInt16LE(ZIP_EMPTY_FIELD_LENGTH, ZIP_LAST_MODIFIED_DATE_OFFSET);
+  buffer.writeUInt32LE(ZIP_EMPTY_CRC32, ZIP_CRC32_OFFSET);
+  buffer.writeUInt32LE(ZIP_EMPTY_FIELD_LENGTH, ZIP_COMPRESSED_SIZE_OFFSET);
+  buffer.writeUInt32LE(ZIP_EMPTY_FIELD_LENGTH, ZIP_UNCOMPRESSED_SIZE_OFFSET);
+  buffer.writeUInt16LE(fileName.length, ZIP_FILE_NAME_LENGTH_OFFSET);
+  buffer.writeUInt16LE(ZIP_EMPTY_FIELD_LENGTH, ZIP_EXTRA_FIELD_LENGTH_OFFSET);
+  fileName.copy(buffer, ZIP_MINIMUM_LOCAL_FILE_HEADER_BYTES);
+  compressed.copy(buffer, ZIP_MINIMUM_LOCAL_FILE_HEADER_BYTES + fileName.length);
+  const descriptorOffset =
+    ZIP_MINIMUM_LOCAL_FILE_HEADER_BYTES + fileName.length + compressed.length;
+  buffer.writeUInt32LE(ZIP_DATA_DESCRIPTOR_SIGNATURE, descriptorOffset);
+  buffer.writeUInt32LE(ZIP_EMPTY_CRC32, descriptorOffset + ZIP_DATA_DESCRIPTOR_CRC32_OFFSET);
+  buffer.writeUInt32LE(
+    compressed.length,
+    descriptorOffset + ZIP_DATA_DESCRIPTOR_COMPRESSED_SIZE_OFFSET
+  );
+  buffer.writeUInt32LE(
+    uncompressed.length,
+    descriptorOffset + ZIP_DATA_DESCRIPTOR_UNCOMPRESSED_SIZE_OFFSET
+  );
+};
+
+const writeZipCentralDirectory = (
+  buffer: Buffer,
+  fileName: Buffer,
+  compressed: Buffer,
+  uncompressed: Buffer,
+  centralDirectoryOffset: number
+): void => {
+  buffer.writeUInt32LE(ZIP_CENTRAL_DIRECTORY_FILE_HEADER_SIGNATURE, centralDirectoryOffset);
+  buffer.writeUInt16LE(ZIP_VERSION, centralDirectoryOffset + ZIP_CENTRAL_VERSION_MADE_BY_OFFSET);
+  buffer.writeUInt16LE(ZIP_VERSION, centralDirectoryOffset + ZIP_CENTRAL_VERSION_NEEDED_OFFSET);
+  buffer.writeUInt16LE(
+    ZIP_GENERAL_PURPOSE_DATA_DESCRIPTOR_FLAG,
+    centralDirectoryOffset + ZIP_CENTRAL_GENERAL_PURPOSE_FLAG_OFFSET
+  );
+  buffer.writeUInt16LE(
+    ZIP_DEFLATE_COMPRESSION,
+    centralDirectoryOffset + ZIP_CENTRAL_COMPRESSION_METHOD_OFFSET
+  );
+  buffer.writeUInt16LE(
+    ZIP_EMPTY_FIELD_LENGTH,
+    centralDirectoryOffset + ZIP_CENTRAL_LAST_MODIFIED_TIME_OFFSET
+  );
+  buffer.writeUInt16LE(
+    ZIP_EMPTY_FIELD_LENGTH,
+    centralDirectoryOffset + ZIP_CENTRAL_LAST_MODIFIED_DATE_OFFSET
+  );
+  buffer.writeUInt32LE(ZIP_EMPTY_CRC32, centralDirectoryOffset + ZIP_CENTRAL_CRC32_OFFSET);
+  buffer.writeUInt32LE(
+    compressed.length,
+    centralDirectoryOffset + ZIP_CENTRAL_COMPRESSED_SIZE_OFFSET
+  );
+  buffer.writeUInt32LE(
+    uncompressed.length,
+    centralDirectoryOffset + ZIP_CENTRAL_UNCOMPRESSED_SIZE_OFFSET
+  );
+  buffer.writeUInt16LE(
+    fileName.length,
+    centralDirectoryOffset + ZIP_CENTRAL_FILE_NAME_LENGTH_OFFSET
+  );
+  buffer.writeUInt16LE(
+    ZIP_EMPTY_FIELD_LENGTH,
+    centralDirectoryOffset + ZIP_CENTRAL_EXTRA_FIELD_LENGTH_OFFSET
+  );
+  buffer.writeUInt16LE(
+    ZIP_EMPTY_FIELD_LENGTH,
+    centralDirectoryOffset + ZIP_CENTRAL_FILE_COMMENT_LENGTH_OFFSET
+  );
+  buffer.writeUInt16LE(ZIP_FIRST_DISK, centralDirectoryOffset + ZIP_CENTRAL_DISK_START_OFFSET);
+  buffer.writeUInt16LE(
+    ZIP_NO_INTERNAL_ATTRIBUTES,
+    centralDirectoryOffset + ZIP_CENTRAL_INTERNAL_ATTRIBUTES_OFFSET
+  );
+  buffer.writeUInt32LE(
+    ZIP_NO_EXTERNAL_ATTRIBUTES,
+    centralDirectoryOffset + ZIP_CENTRAL_EXTERNAL_ATTRIBUTES_OFFSET
+  );
+  buffer.writeUInt32LE(
+    ZIP_LOCAL_HEADER_OFFSET,
+    centralDirectoryOffset + ZIP_CENTRAL_LOCAL_HEADER_OFFSET
+  );
+  fileName.copy(buffer, centralDirectoryOffset + ZIP_CENTRAL_DIRECTORY_FILE_HEADER_BYTES);
+};
+
+const writeZipEndOfCentralDirectory = (
+  buffer: Buffer,
+  centralDirectoryOffset: number,
+  centralDirectorySize: number,
+  endOfCentralDirectoryOffset: number
+): void => {
+  buffer.writeUInt32LE(ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE, endOfCentralDirectoryOffset);
+  buffer.writeUInt16LE(
+    ZIP_FIRST_DISK,
+    endOfCentralDirectoryOffset + ZIP_END_CENTRAL_DIRECTORY_DISK_OFFSET
+  );
+  buffer.writeUInt16LE(
+    ZIP_FIRST_DISK,
+    endOfCentralDirectoryOffset + ZIP_END_CENTRAL_DIRECTORY_START_DISK_OFFSET
+  );
+  buffer.writeUInt16LE(
+    ZIP_SINGLE_ENTRY_COUNT,
+    endOfCentralDirectoryOffset + ZIP_END_CENTRAL_DIRECTORY_DISK_ENTRIES_OFFSET
+  );
+  buffer.writeUInt16LE(
+    ZIP_SINGLE_ENTRY_COUNT,
+    endOfCentralDirectoryOffset + ZIP_END_CENTRAL_DIRECTORY_TOTAL_ENTRIES_OFFSET
+  );
+  buffer.writeUInt32LE(
+    centralDirectorySize,
+    endOfCentralDirectoryOffset + ZIP_END_CENTRAL_DIRECTORY_SIZE_OFFSET
+  );
+  buffer.writeUInt32LE(
+    centralDirectoryOffset,
+    endOfCentralDirectoryOffset + ZIP_END_CENTRAL_DIRECTORY_OFFSET
+  );
+  buffer.writeUInt16LE(
+    ZIP_EMPTY_FIELD_LENGTH,
+    endOfCentralDirectoryOffset + ZIP_END_CENTRAL_DIRECTORY_COMMENT_LENGTH_OFFSET
+  );
+};
+
+const createDataDescriptorZip = (entryName: string, entryText: string): Buffer => {
+  const fileName = Buffer.from(entryName, "utf8");
+  const uncompressed = Buffer.from(entryText, "utf8");
+  const compressed = deflateRawSync(uncompressed);
+  const localFileSize =
+    ZIP_MINIMUM_LOCAL_FILE_HEADER_BYTES +
+    fileName.length +
+    compressed.length +
+    ZIP_DATA_DESCRIPTOR_BYTES;
+  const centralDirectorySize = ZIP_CENTRAL_DIRECTORY_FILE_HEADER_BYTES + fileName.length;
+  const totalSize = localFileSize + centralDirectorySize + ZIP_END_OF_CENTRAL_DIRECTORY_BYTES;
+  const buffer = Buffer.alloc(totalSize);
+
+  writeZipFileHeader(buffer, fileName, compressed, uncompressed);
+  writeZipCentralDirectory(buffer, fileName, compressed, uncompressed, localFileSize);
+  writeZipEndOfCentralDirectory(
+    buffer,
+    localFileSize,
+    centralDirectorySize,
+    localFileSize + centralDirectorySize
+  );
+
+  return buffer;
+};
+
+const toExactArrayBuffer = (buffer: Buffer): ArrayBuffer => {
+  const arrayBuffer = new ArrayBuffer(buffer.byteLength);
+  const view = new Uint8Array(arrayBuffer);
+  view.set(buffer);
+
+  return arrayBuffer;
+};
+
+const createReadableArtifactStream = (content: Buffer) => {
+  let unread = true;
+
+  return {
+    getReader: () => ({
+      read: () => {
+        const result = unread ? { done: false, value: content } : { done: true };
+        unread = false;
+
+        return Promise.resolve(result);
+      }
+    })
+  };
+};
+
+const createArtifactBodyCases = (): Array<{ label: string; body: unknown }> => {
+  const archive = createDataDescriptorZip(GRADING_RESULTS_PATH, GRADING_RESULTS_TEXT);
+  const arrayBuffer = toExactArrayBuffer(archive);
+
+  return [
+    {
+      label: "ArrayBuffer",
+      body: arrayBuffer
+    },
+    {
+      label: "Uint8Array",
+      body: new Uint8Array(arrayBuffer)
+    },
+    {
+      label: "Node Readable stream",
+      body: Readable.from([archive])
+    },
+    {
+      label: "Web ReadableStream",
+      body: createReadableArtifactStream(archive)
+    },
+    {
+      label: "Response-like arrayBuffer body",
+      body: {
+        arrayBuffer: () => Promise.resolve(arrayBuffer)
+      }
+    },
+    {
+      label: "Blob-like arrayBuffer body",
+      body: {
+        arrayBuffer: () => Promise.resolve(arrayBuffer)
+      }
+    }
+  ];
+};
 
 const createRepositoryResponse = () =>
   resolvedResponse({
@@ -291,11 +573,11 @@ describe("OctokitGitHubClient", () => {
     expect(result).toEqual({ path: CONTENT_PATH, commitSha: CREATED_SHA });
   });
 
-  it("dispatchWorkflow calls the workflow dispatch endpoint", async () => {
+  it("dispatchWorkflow sends ref and omits inputs when none are provided", async () => {
     const octokit = createMockOctokit();
-    let observedWorkflowPath = "";
+    let observedDispatchInput: Record<string, unknown> = {};
     octokit.rest.actions.createWorkflowDispatch = (input = {}) => {
-      observedWorkflowPath = String(input.workflow_id);
+      observedDispatchInput = input;
 
       return resolvedResponse({});
     };
@@ -308,7 +590,13 @@ describe("OctokitGitHubClient", () => {
       ref: BRANCH
     });
 
-    expect(observedWorkflowPath).toBe(WORKFLOW_PATH);
+    expect(observedDispatchInput).toEqual({
+      owner: OWNER,
+      repo: REPO,
+      workflow_id: WORKFLOW_PATH,
+      ref: BRANCH
+    });
+    expect(Object.hasOwn(observedDispatchInput, "inputs")).toBe(false);
   });
 
   it("artifact missing returns null", async () => {
@@ -325,4 +613,124 @@ describe("OctokitGitHubClient", () => {
       })
     ).resolves.toBeNull();
   });
+
+  it("downloadArtifact extracts files from zip entries that use data descriptors", async () => {
+    const octokit = createMockOctokit();
+    let observedDownloadInput: Record<string, unknown> = {};
+    octokit.rest.actions.downloadArtifact = (input = {}) => {
+      observedDownloadInput = input;
+
+      return resolvedResponse(createDataDescriptorZip(GRADING_RESULTS_PATH, GRADING_RESULTS_TEXT));
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(
+      client.downloadArtifact({
+        owner: OWNER,
+        repo: REPO,
+        runId: OctokitTestNumber.WorkflowRunId,
+        artifactName: "grading-results"
+      })
+    ).resolves.toEqual({
+      name: "grading-results",
+      files: {
+        [GRADING_RESULTS_PATH]: GRADING_RESULTS_TEXT
+      }
+    });
+    expect(observedDownloadInput).toMatchObject({
+      request: {
+        parseSuccessResponseBody: false
+      }
+    });
+  });
+
+  it("downloadArtifact follows redirect responses before extracting files", async () => {
+    const octokit = createMockOctokit();
+    let observedRedirectRequest: Record<string, unknown> = {};
+    octokit.rest.actions.downloadArtifact = (input = {}) => {
+      expect(input).toMatchObject({
+        request: {
+          parseSuccessResponseBody: false
+        }
+      });
+
+      return Promise.resolve({
+        data: "",
+        headers: {
+          location: ARTIFACT_DOWNLOAD_URL
+        },
+        status: OctokitTestNumber.RedirectStatus
+      });
+    };
+    octokit.request = (input = {}) => {
+      observedRedirectRequest = input;
+
+      return resolvedResponse(createDataDescriptorZip(GRADING_RESULTS_PATH, GRADING_RESULTS_TEXT));
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(
+      client.downloadArtifact({
+        owner: OWNER,
+        repo: REPO,
+        runId: OctokitTestNumber.WorkflowRunId,
+        artifactName: "grading-results"
+      })
+    ).resolves.toEqual({
+      name: "grading-results",
+      files: {
+        [GRADING_RESULTS_PATH]: GRADING_RESULTS_TEXT
+      }
+    });
+    expect(observedRedirectRequest).toMatchObject({
+      method: "GET",
+      url: ARTIFACT_DOWNLOAD_URL,
+      request: {
+        parseSuccessResponseBody: false
+      }
+    });
+  });
+
+  it("downloadArtifact rejects unsupported artifact body shapes", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.actions.downloadArtifact = () =>
+      resolvedResponse({
+        archive_download_url: ARTIFACT_DOWNLOAD_URL
+      });
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expectGitHubError(
+      () =>
+        client.downloadArtifact({
+          owner: OWNER,
+          repo: REPO,
+          runId: OctokitTestNumber.WorkflowRunId,
+          artifactName: "grading-results"
+        }),
+      DiagnosticCode.GithubApiError
+    );
+  });
+
+  it.each(createArtifactBodyCases())(
+    "downloadArtifact extracts files from $label",
+    async ({ body }) => {
+      const octokit = createMockOctokit();
+      octokit.rest.actions.downloadArtifact = () => resolvedResponse(body);
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+      await expect(
+        client.downloadArtifact({
+          owner: OWNER,
+          repo: REPO,
+          runId: OctokitTestNumber.WorkflowRunId,
+          artifactName: "grading-results"
+        })
+      ).resolves.toEqual({
+        name: "grading-results",
+        files: {
+          [GRADING_RESULTS_PATH]: GRADING_RESULTS_TEXT
+        }
+      });
+    }
+  );
 });

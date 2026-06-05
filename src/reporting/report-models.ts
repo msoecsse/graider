@@ -49,6 +49,9 @@ export interface StudentGradingSummary {
   checks: GradingCheckResult[];
   workflowRunId?: number;
   commitSha?: string;
+  artifactFileKeys?: string[];
+  configuredResultFile?: string;
+  normalizedResultFile?: string;
 }
 
 export interface StudentReportSummary {

@@ -134,7 +134,8 @@ describe("graider grade command", () => {
     const [dispatch] = githubClient.mutations.workflowDispatches;
 
     expect(dispatch?.repo).toBe(JONES_REPOSITORY);
-    expect(dispatch?.inputs?.student_id).toBe("jones");
+    expect(dispatch?.ref).toBe("main");
+    expect(dispatch?.inputs).toBeUndefined();
   });
 
   it("TC-CLI-GRADE-006 --github-username targets expected student", async () => {

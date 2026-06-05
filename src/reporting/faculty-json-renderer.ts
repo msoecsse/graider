@@ -20,6 +20,15 @@ const mapStudent = (student: StudentReportSummary) => ({
       ? {}
       : { workflow_run_id: student.grading.workflowRunId }),
     ...(student.grading.commitSha === undefined ? {} : { commit_sha: student.grading.commitSha }),
+    ...(student.grading.artifactFileKeys === undefined
+      ? {}
+      : { artifact_file_keys: student.grading.artifactFileKeys }),
+    ...(student.grading.configuredResultFile === undefined
+      ? {}
+      : { configured_result_file: student.grading.configuredResultFile }),
+    ...(student.grading.normalizedResultFile === undefined
+      ? {}
+      : { normalized_result_file: student.grading.normalizedResultFile }),
     checks: student.grading.checks.map((check) => ({
       name: check.name,
       status: check.status,
