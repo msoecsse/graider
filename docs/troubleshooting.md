@@ -112,6 +112,64 @@ Diagnostics:
 - `workflow_dispatch_unsupported`
 - `workflow_dispatch_failed`
 
+## Reusable Grading Config Problems
+
+Enabled grading modes are `preset`, `custom-workflow`, and `contract-only`.
+Disabled grading may omit `mode` or use `mode: no-grading`. The only supported
+preset in this slice is `java-junit-checkstyle`.
+
+Common diagnostics:
+
+- `unsupported_grading_mode`
+- `missing_grading_workflow`
+- `missing_grading_artifact`
+- `missing_grading_result_file`
+- `missing_grading_preset`
+- `unsupported_grading_preset`
+
+Student report publishing modes are `graider-generated`, `faculty-provided`,
+`both`, and disabled `disabled`. This slice validates faculty-provided publishing
+configuration but does not publish faculty-provided report content yet.
+
+Common diagnostics:
+
+- `unsupported_student_publish_mode`
+- `missing_student_publish_destination`
+- `missing_student_publish_source_file`
+- `missing_student_publish_artifact`
+- `missing_graider_report_destination`
+- `missing_faculty_report_source`
+- `missing_faculty_report_destination`
+
+## Workflow Generation Problems
+
+`graider workflow generate` currently requires:
+
+```yaml
+grading:
+  enabled: true
+  mode: preset
+  preset: java-junit-checkstyle
+```
+
+The command writes a local workflow file, normally:
+
+```text
+terms/<term>/generated-workflows/<assignment>/grade.yml
+```
+
+It does not write to GitHub or mutate template repositories. Existing files are
+not overwritten unless `--force` is provided.
+
+Common diagnostics:
+
+- `workflow_generation_not_configured`
+- `workflow_generation_requires_preset_mode`
+- `missing_grading_preset`
+- `unsupported_grading_preset`
+- `generated_workflow_exists`
+- `workflow_generation_write_failed`
+
 ## Manifest Missing
 
 `report` and `grade` require a manifest because they target manifest-tracked repositories.

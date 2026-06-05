@@ -8,6 +8,7 @@ import { registerPlanCommand } from "./commands/plan.command.js";
 import { registerRemoveAccessCommand } from "./commands/remove-access.command.js";
 import { registerReportCommand } from "./commands/report.command.js";
 import { registerValidateCommand } from "./commands/validate.command.js";
+import { registerWorkflowCommand } from "./commands/workflow.command.js";
 
 export const buildProgram = (): Command => {
   const program = new Command();
@@ -22,6 +23,7 @@ export const buildProgram = (): Command => {
   registerApplyCommand(program);
   registerGradeCommand(program);
   registerReportCommand(program);
+  registerWorkflowCommand(program);
   registerArchiveCommand(program);
   registerRemoveAccessCommand(program);
 

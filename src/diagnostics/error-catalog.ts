@@ -13,6 +13,23 @@ export const DiagnosticCode = {
   InvalidRepositoryVisibility: "invalid_repository_visibility",
   InvalidPermission: "invalid_permission",
   InvalidGradingConfig: "invalid_grading_config",
+  UnsupportedGradingMode: "unsupported_grading_mode",
+  MissingGradingWorkflow: "missing_grading_workflow",
+  MissingGradingArtifact: "missing_grading_artifact",
+  MissingGradingResultFile: "missing_grading_result_file",
+  MissingGradingPreset: "missing_grading_preset",
+  UnsupportedGradingPreset: "unsupported_grading_preset",
+  UnsupportedStudentPublishMode: "unsupported_student_publish_mode",
+  MissingStudentPublishDestination: "missing_student_publish_destination",
+  MissingStudentPublishSourceFile: "missing_student_publish_source_file",
+  MissingStudentPublishArtifact: "missing_student_publish_artifact",
+  MissingGraiderReportDestination: "missing_graider_report_destination",
+  MissingFacultyReportSource: "missing_faculty_report_source",
+  MissingFacultyReportDestination: "missing_faculty_report_destination",
+  WorkflowGenerationNotConfigured: "workflow_generation_not_configured",
+  WorkflowGenerationRequiresPresetMode: "workflow_generation_requires_preset_mode",
+  GeneratedWorkflowExists: "generated_workflow_exists",
+  WorkflowGenerationWriteFailed: "workflow_generation_write_failed",
   MissingRequiredColumn: "missing_required_column",
   MissingRequiredValue: "missing_required_value",
   InvalidRosterStatus: "invalid_roster_status",
@@ -109,6 +126,29 @@ export const INVALID_ASSIGNMENT_STATUS_CODE = DiagnosticCode.InvalidAssignmentSt
 export const INVALID_REPOSITORY_VISIBILITY_CODE = DiagnosticCode.InvalidRepositoryVisibility;
 export const INVALID_PERMISSION_CODE = DiagnosticCode.InvalidPermission;
 export const INVALID_GRADING_CONFIG_CODE = DiagnosticCode.InvalidGradingConfig;
+export const UNSUPPORTED_GRADING_MODE_CODE = DiagnosticCode.UnsupportedGradingMode;
+export const MISSING_GRADING_WORKFLOW_CODE = DiagnosticCode.MissingGradingWorkflow;
+export const MISSING_GRADING_ARTIFACT_CODE = DiagnosticCode.MissingGradingArtifact;
+export const MISSING_GRADING_RESULT_FILE_CODE = DiagnosticCode.MissingGradingResultFile;
+export const MISSING_GRADING_PRESET_CODE = DiagnosticCode.MissingGradingPreset;
+export const UNSUPPORTED_GRADING_PRESET_CODE = DiagnosticCode.UnsupportedGradingPreset;
+export const UNSUPPORTED_STUDENT_PUBLISH_MODE_CODE = DiagnosticCode.UnsupportedStudentPublishMode;
+export const MISSING_STUDENT_PUBLISH_DESTINATION_CODE =
+  DiagnosticCode.MissingStudentPublishDestination;
+export const MISSING_STUDENT_PUBLISH_SOURCE_FILE_CODE =
+  DiagnosticCode.MissingStudentPublishSourceFile;
+export const MISSING_STUDENT_PUBLISH_ARTIFACT_CODE = DiagnosticCode.MissingStudentPublishArtifact;
+export const MISSING_GRAIDER_REPORT_DESTINATION_CODE =
+  DiagnosticCode.MissingGraiderReportDestination;
+export const MISSING_FACULTY_REPORT_SOURCE_CODE = DiagnosticCode.MissingFacultyReportSource;
+export const MISSING_FACULTY_REPORT_DESTINATION_CODE =
+  DiagnosticCode.MissingFacultyReportDestination;
+export const WORKFLOW_GENERATION_NOT_CONFIGURED_CODE =
+  DiagnosticCode.WorkflowGenerationNotConfigured;
+export const WORKFLOW_GENERATION_REQUIRES_PRESET_MODE_CODE =
+  DiagnosticCode.WorkflowGenerationRequiresPresetMode;
+export const GENERATED_WORKFLOW_EXISTS_CODE = DiagnosticCode.GeneratedWorkflowExists;
+export const WORKFLOW_GENERATION_WRITE_FAILED_CODE = DiagnosticCode.WorkflowGenerationWriteFailed;
 export const MISSING_REQUIRED_COLUMN_CODE = DiagnosticCode.MissingRequiredColumn;
 export const MISSING_REQUIRED_VALUE_CODE = DiagnosticCode.MissingRequiredValue;
 export const INVALID_ROSTER_STATUS_CODE = DiagnosticCode.InvalidRosterStatus;

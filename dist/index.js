@@ -19,12 +19,38 @@ var STUDENT_PERMISSION = "push";
 var FACULTY_PERMISSION = "admin";
 var GRADER_PERMISSION = "maintain";
 var VALID_ASSIGNMENT_STATUSES = ["draft", "active", "closed", "archived"];
+var ENABLED_GRADING_MODES = ["preset", "custom-workflow", "contract-only"];
+var DISABLED_GRADING_MODE = "no-grading";
+var SUPPORTED_GRADING_PRESETS = ["java-junit-checkstyle"];
+var ENABLED_STUDENT_PUBLISH_MODES = [
+  "graider-generated",
+  "faculty-provided",
+  "both"
+];
+var DISABLED_STUDENT_PUBLISH_MODE = "disabled";
 var TERM_CODE_PATTERN = /^\d{2}s[123]$/;
 var gradingSchema = z.object({
   enabled: z.boolean(),
+  mode: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  preset: z.string().min(MINIMUM_LIST_ITEMS).optional(),
   workflow: z.string().min(MINIMUM_LIST_ITEMS).optional(),
   artifact: z.string().min(MINIMUM_LIST_ITEMS).optional(),
   result_file: z.string().min(MINIMUM_LIST_ITEMS).optional()
+}).strict();
+var studentPublishSchema = z.object({
+  enabled: z.boolean(),
+  mode: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  source: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  artifact: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  source_file: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  destination_file: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  graider_report_destination: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  faculty_report_source: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  faculty_report_destination: z.string().min(MINIMUM_LIST_ITEMS).optional()
+}).strict();
+var reportsSchema = z.object({
+  formats: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS),
+  student_publish: studentPublishSchema.optional()
 }).strict();
 var rawCourseConfigSchema = z.object({
   schema_version: z.number(),
@@ -48,9 +74,7 @@ var rawCourseConfigSchema = z.object({
     assignment_type: z.string().min(MINIMUM_LIST_ITEMS)
   }).strict(),
   grading: gradingSchema,
-  reports: z.object({
-    formats: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS)
-  }).strict()
+  reports: reportsSchema
 }).strict();
 var rawTermConfigSchema = z.object({
   schema_version: z.number(),
@@ -107,6 +131,23 @@ var DiagnosticCode = {
   InvalidRepositoryVisibility: "invalid_repository_visibility",
   InvalidPermission: "invalid_permission",
   InvalidGradingConfig: "invalid_grading_config",
+  UnsupportedGradingMode: "unsupported_grading_mode",
+  MissingGradingWorkflow: "missing_grading_workflow",
+  MissingGradingArtifact: "missing_grading_artifact",
+  MissingGradingResultFile: "missing_grading_result_file",
+  MissingGradingPreset: "missing_grading_preset",
+  UnsupportedGradingPreset: "unsupported_grading_preset",
+  UnsupportedStudentPublishMode: "unsupported_student_publish_mode",
+  MissingStudentPublishDestination: "missing_student_publish_destination",
+  MissingStudentPublishSourceFile: "missing_student_publish_source_file",
+  MissingStudentPublishArtifact: "missing_student_publish_artifact",
+  MissingGraiderReportDestination: "missing_graider_report_destination",
+  MissingFacultyReportSource: "missing_faculty_report_source",
+  MissingFacultyReportDestination: "missing_faculty_report_destination",
+  WorkflowGenerationNotConfigured: "workflow_generation_not_configured",
+  WorkflowGenerationRequiresPresetMode: "workflow_generation_requires_preset_mode",
+  GeneratedWorkflowExists: "generated_workflow_exists",
+  WorkflowGenerationWriteFailed: "workflow_generation_write_failed",
   MissingRequiredColumn: "missing_required_column",
   MissingRequiredValue: "missing_required_value",
   InvalidRosterStatus: "invalid_roster_status",
@@ -200,6 +241,23 @@ var INVALID_ASSIGNMENT_STATUS_CODE = DiagnosticCode.InvalidAssignmentStatus;
 var INVALID_REPOSITORY_VISIBILITY_CODE = DiagnosticCode.InvalidRepositoryVisibility;
 var INVALID_PERMISSION_CODE = DiagnosticCode.InvalidPermission;
 var INVALID_GRADING_CONFIG_CODE = DiagnosticCode.InvalidGradingConfig;
+var UNSUPPORTED_GRADING_MODE_CODE = DiagnosticCode.UnsupportedGradingMode;
+var MISSING_GRADING_WORKFLOW_CODE = DiagnosticCode.MissingGradingWorkflow;
+var MISSING_GRADING_ARTIFACT_CODE = DiagnosticCode.MissingGradingArtifact;
+var MISSING_GRADING_RESULT_FILE_CODE = DiagnosticCode.MissingGradingResultFile;
+var MISSING_GRADING_PRESET_CODE = DiagnosticCode.MissingGradingPreset;
+var UNSUPPORTED_GRADING_PRESET_CODE = DiagnosticCode.UnsupportedGradingPreset;
+var UNSUPPORTED_STUDENT_PUBLISH_MODE_CODE = DiagnosticCode.UnsupportedStudentPublishMode;
+var MISSING_STUDENT_PUBLISH_DESTINATION_CODE = DiagnosticCode.MissingStudentPublishDestination;
+var MISSING_STUDENT_PUBLISH_SOURCE_FILE_CODE = DiagnosticCode.MissingStudentPublishSourceFile;
+var MISSING_STUDENT_PUBLISH_ARTIFACT_CODE = DiagnosticCode.MissingStudentPublishArtifact;
+var MISSING_GRAIDER_REPORT_DESTINATION_CODE = DiagnosticCode.MissingGraiderReportDestination;
+var MISSING_FACULTY_REPORT_SOURCE_CODE = DiagnosticCode.MissingFacultyReportSource;
+var MISSING_FACULTY_REPORT_DESTINATION_CODE = DiagnosticCode.MissingFacultyReportDestination;
+var WORKFLOW_GENERATION_NOT_CONFIGURED_CODE = DiagnosticCode.WorkflowGenerationNotConfigured;
+var WORKFLOW_GENERATION_REQUIRES_PRESET_MODE_CODE = DiagnosticCode.WorkflowGenerationRequiresPresetMode;
+var GENERATED_WORKFLOW_EXISTS_CODE = DiagnosticCode.GeneratedWorkflowExists;
+var WORKFLOW_GENERATION_WRITE_FAILED_CODE = DiagnosticCode.WorkflowGenerationWriteFailed;
 var MISSING_REQUIRED_COLUMN_CODE = DiagnosticCode.MissingRequiredColumn;
 var MISSING_REQUIRED_VALUE_CODE = DiagnosticCode.MissingRequiredValue;
 var INVALID_ROSTER_STATUS_CODE = DiagnosticCode.InvalidRosterStatus;
@@ -314,6 +372,10 @@ var createWarningDiagnostic = (code, message, context) => ({
 // src/config/config-validation.ts
 var PATH_SEPARATOR = ".";
 var WORKFLOW_GRADING_FIELDS = ["workflow", "artifact", "result_file"];
+var LEGACY_GRADING_MODE = "custom-workflow";
+var PRESET_GRADING_MODE = "preset";
+var GRAIDER_GENERATED_STUDENT_PUBLISH_MODE = "graider-generated";
+var FACULTY_PROVIDED_STUDENT_PUBLISH_MODE = "faculty-provided";
 var formatIssuePath = (issue) => issue.path.map((part) => String(part)).join(PATH_SEPARATOR);
 var mapZodIssueToDiagnostic = (filePath, issue) => {
   const field = formatIssuePath(issue);
@@ -353,8 +415,87 @@ var createInvalidSchemaVersionDiagnostic = (filePath, schemaVersion) => createCo
 var validateSchemaVersion = (filePath, schemaVersion) => schemaVersion === SUPPORTED_SCHEMA_VERSION ? [] : [createInvalidSchemaVersionDiagnostic(filePath, schemaVersion)];
 var hasAnyWorkflowField = (grading) => WORKFLOW_GRADING_FIELDS.some((field) => grading[field] !== void 0);
 var hasAllWorkflowFields = (grading) => WORKFLOW_GRADING_FIELDS.every((field) => grading[field] !== void 0);
-var validateGradingConfig = (filePath, grading, owner) => {
-  if (grading.enabled && !hasAllWorkflowFields(grading)) {
+var createMissingGradingFieldDiagnostic = (filePath, owner, code, field) => createConfigDiagnostic(code, `Enabled grading in ${filePath} must include ${field}.`, {
+  filePath,
+  owner,
+  field
+});
+var validateEnabledGradingFields = (filePath, grading, owner) => {
+  if (grading.workflow === void 0) {
+    return [
+      createMissingGradingFieldDiagnostic(
+        filePath,
+        owner,
+        MISSING_GRADING_WORKFLOW_CODE,
+        "workflow"
+      )
+    ];
+  }
+  if (grading.artifact === void 0) {
+    return [
+      createMissingGradingFieldDiagnostic(
+        filePath,
+        owner,
+        MISSING_GRADING_ARTIFACT_CODE,
+        "artifact"
+      )
+    ];
+  }
+  if (grading.result_file === void 0) {
+    return [
+      createMissingGradingFieldDiagnostic(
+        filePath,
+        owner,
+        MISSING_GRADING_RESULT_FILE_CODE,
+        "result_file"
+      )
+    ];
+  }
+  return [];
+};
+var validatePresetGrading = (filePath, grading, owner) => {
+  if (grading.preset === void 0) {
+    return [
+      createConfigDiagnostic(
+        MISSING_GRADING_PRESET_CODE,
+        `Preset grading in ${filePath} must include preset.`,
+        {
+          filePath,
+          owner
+        }
+      )
+    ];
+  }
+  return SUPPORTED_GRADING_PRESETS.some((preset) => preset === grading.preset) ? [] : [
+    createConfigDiagnostic(
+      UNSUPPORTED_GRADING_PRESET_CODE,
+      `Unsupported grading preset ${grading.preset} in ${filePath}.`,
+      {
+        filePath,
+        owner,
+        preset: grading.preset,
+        supportedPresets: SUPPORTED_GRADING_PRESETS
+      }
+    )
+  ];
+};
+var validateEnabledGradingConfig = (filePath, grading, owner) => {
+  const mode = grading.mode ?? LEGACY_GRADING_MODE;
+  if (!ENABLED_GRADING_MODES.some((supportedMode) => supportedMode === mode)) {
+    return [
+      createConfigDiagnostic(
+        UNSUPPORTED_GRADING_MODE_CODE,
+        `Unsupported grading mode ${mode} in ${filePath}.`,
+        {
+          filePath,
+          owner,
+          mode,
+          supportedModes: ENABLED_GRADING_MODES
+        }
+      )
+    ];
+  }
+  if (grading.mode === void 0 && !hasAllWorkflowFields(grading)) {
     return [
       createConfigDiagnostic(
         INVALID_GRADING_CONFIG_CODE,
@@ -366,7 +507,28 @@ var validateGradingConfig = (filePath, grading, owner) => {
       )
     ];
   }
-  if (!grading.enabled && hasAnyWorkflowField(grading)) {
+  const fieldDiagnostics = validateEnabledGradingFields(filePath, grading, owner);
+  if (fieldDiagnostics.length > 0) {
+    return fieldDiagnostics;
+  }
+  return mode === PRESET_GRADING_MODE ? validatePresetGrading(filePath, grading, owner) : [];
+};
+var validateDisabledGradingConfig = (filePath, grading, owner) => {
+  if (grading.mode !== void 0 && grading.mode !== DISABLED_GRADING_MODE) {
+    return [
+      createConfigDiagnostic(
+        UNSUPPORTED_GRADING_MODE_CODE,
+        `Disabled grading in ${filePath} must omit mode or use ${DISABLED_GRADING_MODE}.`,
+        {
+          filePath,
+          owner,
+          mode: grading.mode,
+          supportedModes: [DISABLED_GRADING_MODE]
+        }
+      )
+    ];
+  }
+  if (hasAnyWorkflowField(grading)) {
     return [
       createConfigDiagnostic(
         INVALID_GRADING_CONFIG_CODE,
@@ -379,6 +541,127 @@ var validateGradingConfig = (filePath, grading, owner) => {
     ];
   }
   return [];
+};
+var validateGradingConfig = (filePath, grading, owner) => grading.enabled ? validateEnabledGradingConfig(filePath, grading, owner) : validateDisabledGradingConfig(filePath, grading, owner);
+var createMissingStudentPublishFieldDiagnostic = (filePath, code, field) => createConfigDiagnostic(code, `Student report publishing in ${filePath} must include ${field}.`, {
+  filePath,
+  field
+});
+var validateGraiderGeneratedStudentPublish = (filePath, studentPublish) => studentPublish.destination_file === void 0 ? [
+  createMissingStudentPublishFieldDiagnostic(
+    filePath,
+    MISSING_STUDENT_PUBLISH_DESTINATION_CODE,
+    "destination_file"
+  )
+] : [];
+var validateFacultyProvidedStudentPublish = (filePath, studentPublish) => {
+  if (studentPublish.artifact === void 0) {
+    return [
+      createMissingStudentPublishFieldDiagnostic(
+        filePath,
+        MISSING_STUDENT_PUBLISH_ARTIFACT_CODE,
+        "artifact"
+      )
+    ];
+  }
+  if (studentPublish.source_file === void 0) {
+    return [
+      createMissingStudentPublishFieldDiagnostic(
+        filePath,
+        MISSING_STUDENT_PUBLISH_SOURCE_FILE_CODE,
+        "source_file"
+      )
+    ];
+  }
+  if (studentPublish.destination_file === void 0) {
+    return [
+      createMissingStudentPublishFieldDiagnostic(
+        filePath,
+        MISSING_STUDENT_PUBLISH_DESTINATION_CODE,
+        "destination_file"
+      )
+    ];
+  }
+  return [];
+};
+var validateBothStudentPublish = (filePath, studentPublish) => {
+  if (studentPublish.artifact === void 0) {
+    return [
+      createMissingStudentPublishFieldDiagnostic(
+        filePath,
+        MISSING_STUDENT_PUBLISH_ARTIFACT_CODE,
+        "artifact"
+      )
+    ];
+  }
+  if (studentPublish.graider_report_destination === void 0) {
+    return [
+      createMissingStudentPublishFieldDiagnostic(
+        filePath,
+        MISSING_GRAIDER_REPORT_DESTINATION_CODE,
+        "graider_report_destination"
+      )
+    ];
+  }
+  if (studentPublish.faculty_report_source === void 0) {
+    return [
+      createMissingStudentPublishFieldDiagnostic(
+        filePath,
+        MISSING_FACULTY_REPORT_SOURCE_CODE,
+        "faculty_report_source"
+      )
+    ];
+  }
+  if (studentPublish.faculty_report_destination === void 0) {
+    return [
+      createMissingStudentPublishFieldDiagnostic(
+        filePath,
+        MISSING_FACULTY_REPORT_DESTINATION_CODE,
+        "faculty_report_destination"
+      )
+    ];
+  }
+  return [];
+};
+var validateEnabledStudentPublishConfig = (filePath, studentPublish) => {
+  const mode = studentPublish.mode;
+  if (mode === void 0 || !ENABLED_STUDENT_PUBLISH_MODES.some((item) => item === mode)) {
+    return [
+      createConfigDiagnostic(
+        UNSUPPORTED_STUDENT_PUBLISH_MODE_CODE,
+        `Unsupported student report publishing mode ${String(mode)} in ${filePath}.`,
+        {
+          filePath,
+          mode,
+          supportedModes: ENABLED_STUDENT_PUBLISH_MODES
+        }
+      )
+    ];
+  }
+  if (mode === GRAIDER_GENERATED_STUDENT_PUBLISH_MODE) {
+    return validateGraiderGeneratedStudentPublish(filePath, studentPublish);
+  }
+  if (mode === FACULTY_PROVIDED_STUDENT_PUBLISH_MODE) {
+    return validateFacultyProvidedStudentPublish(filePath, studentPublish);
+  }
+  return validateBothStudentPublish(filePath, studentPublish);
+};
+var validateDisabledStudentPublishConfig = (filePath, studentPublish) => studentPublish.mode === void 0 || studentPublish.mode === DISABLED_STUDENT_PUBLISH_MODE ? [] : [
+  createConfigDiagnostic(
+    UNSUPPORTED_STUDENT_PUBLISH_MODE_CODE,
+    `Disabled student report publishing in ${filePath} must omit mode or use ${DISABLED_STUDENT_PUBLISH_MODE}.`,
+    {
+      filePath,
+      mode: studentPublish.mode,
+      supportedModes: [DISABLED_STUDENT_PUBLISH_MODE]
+    }
+  )
+];
+var validateStudentPublishConfig = (filePath, reports) => {
+  if (reports.student_publish === void 0) {
+    return [];
+  }
+  return reports.student_publish.enabled ? validateEnabledStudentPublishConfig(filePath, reports.student_publish) : validateDisabledStudentPublishConfig(filePath, reports.student_publish);
 };
 var validateCourseConfig = (filePath, config) => [
   ...validateSchemaVersion(filePath, config.schema_version),
@@ -414,7 +697,8 @@ var validateCourseConfig = (filePath, config) => [
       }
     )
   ],
-  ...validateGradingConfig(filePath, config.grading, "course")
+  ...validateGradingConfig(filePath, config.grading, "course"),
+  ...validateStudentPublishConfig(filePath, config.reports)
 ];
 var validateTermConfig = (filePath, config, expectedTermCode) => [
   ...validateSchemaVersion(filePath, config.schema_version),
@@ -2152,6 +2436,9 @@ var OctokitGitHubClient = class {
     await this.run(() => this.octokit.rest.repos.update({ archived: true, owner, repo }));
   }
   async writeRepositoryFile(input) {
+    return withGitHubRetry(() => this.writeRepositoryFileOnce(input));
+  }
+  async writeRepositoryFileOnce(input) {
     const existingSha = await this.getExistingFileSha(input);
     const response = await this.run(
       () => this.octokit.rest.repos.createOrUpdateFileContents({
@@ -2161,7 +2448,7 @@ var OctokitGitHubClient = class {
         owner: input.owner,
         path: input.path,
         repo: input.repo,
-        sha: existingSha
+        ...existingSha === void 0 ? {} : { sha: existingSha }
       })
     );
     const record = asRecord(response);
@@ -2973,17 +3260,17 @@ var normalizeDiagnostic = (diagnostic) => ({
 });
 var getIssueCode = (issue) => {
   const pathParts = issue.path.map(String);
-  const path13 = pathParts.join(".");
+  const path16 = pathParts.join(".");
   if (pathParts.length === MINIMUM_ITEMS) {
     return DiagnosticCode.MissingManifestSection;
   }
-  if (path13.endsWith("lifecycle.status")) {
+  if (path16.endsWith("lifecycle.status")) {
     return DiagnosticCode.InvalidManifestLifecycleStatus;
   }
-  if (path13.endsWith("permission")) {
+  if (path16.endsWith("permission")) {
     return DiagnosticCode.InvalidManifestPermission;
   }
-  if (path13.startsWith("repositories.")) {
+  if (path16.startsWith("repositories.")) {
     return DiagnosticCode.InvalidManifestRepositoryRecord;
   }
   return DiagnosticCode.InvalidManifest;
@@ -6883,6 +7170,377 @@ var registerValidateCommand = (program) => {
   });
 };
 
+// src/cli/commands/workflow.command.ts
+import path15 from "path";
+
+// src/workflows/java-junit-checkstyle-workflow.ts
+var JAVA_JUNIT_CHECKSTYLE_PRESET = "java-junit-checkstyle";
+var WORKFLOW_NAME = "AutoGrading Tests";
+var JAVA_VERSION = "25";
+var JAVA_DISTRIBUTION = "oracle";
+var CHECKSTYLE_VERSION = "13.4.1";
+var CHECKSTYLE_CONFIG_URL = "https://csse.msoe.us/csc1110/MSOE_checkStyle.xml";
+var JUNIT_PLATFORM_CONSOLE_VERSION = "6.1.0";
+var MOCKITO_VERSION = "5.18.0";
+var BYTE_BUDDY_VERSION = "1.17.5";
+var JAVAFX_VERSION = "25";
+var renderJavaJunitCheckstyleWorkflow = ({
+  grading
+}) => {
+  const artifactName = grading.artifact ?? "grading-results";
+  const resultFile = grading.result_file ?? "grading-results.json";
+  return [
+    `name: ${WORKFLOW_NAME}`,
+    "",
+    "on:",
+    "  - push",
+    "  - repository_dispatch",
+    "  - workflow_dispatch",
+    "",
+    "permissions:",
+    "  checks: write",
+    "  actions: read",
+    "  contents: read",
+    "",
+    "jobs:",
+    "  grade:",
+    "    runs-on: ubuntu-latest",
+    "    env:",
+    `      JAVA_VERSION: "${JAVA_VERSION}"`,
+    `      CHECKSTYLE_VERSION: "${CHECKSTYLE_VERSION}"`,
+    `      CHECKSTYLE_CONFIG_URL: "${CHECKSTYLE_CONFIG_URL}"`,
+    `      JUNIT_PLATFORM_CONSOLE_VERSION: "${JUNIT_PLATFORM_CONSOLE_VERSION}"`,
+    `      MOCKITO_VERSION: "${MOCKITO_VERSION}"`,
+    `      BYTE_BUDDY_VERSION: "${BYTE_BUDDY_VERSION}"`,
+    `      JAVAFX_VERSION: "${JAVAFX_VERSION}"`,
+    "      TOOLS_DIR: graider-tools",
+    "    steps:",
+    "      - name: Check out repository",
+    "        uses: actions/checkout@v4",
+    "",
+    "      - name: Set up Java",
+    "        uses: actions/setup-java@v4",
+    "        with:",
+    `          distribution: ${JAVA_DISTRIBUTION}`,
+    "          java-version: ${{ env.JAVA_VERSION }}",
+    "",
+    "      - name: Install JavaFX headless dependencies",
+    "        run: |",
+    "          sudo apt-get update",
+    "          sudo apt-get install -y unzip xvfb",
+    "",
+    "      - name: Download grading tools",
+    "        run: |",
+    '          mkdir -p "$TOOLS_DIR"',
+    '          curl -fsSL -o "$TOOLS_DIR/checkstyle.jar" "https://repo1.maven.org/maven2/com/puppycrawl/tools/checkstyle/${CHECKSTYLE_VERSION}/checkstyle-${CHECKSTYLE_VERSION}-all.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/junit-platform-console-standalone.jar" "https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/${JUNIT_PLATFORM_CONSOLE_VERSION}/junit-platform-console-standalone-${JUNIT_PLATFORM_CONSOLE_VERSION}.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/mockito-core.jar" "https://repo1.maven.org/maven2/org/mockito/mockito-core/${MOCKITO_VERSION}/mockito-core-${MOCKITO_VERSION}.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/byte-buddy.jar" "https://repo1.maven.org/maven2/net/bytebuddy/byte-buddy/${BYTE_BUDDY_VERSION}/byte-buddy-${BYTE_BUDDY_VERSION}.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/byte-buddy-agent.jar" "https://repo1.maven.org/maven2/net/bytebuddy/byte-buddy-agent/${BYTE_BUDDY_VERSION}/byte-buddy-agent-${BYTE_BUDDY_VERSION}.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/javafx.zip" "https://download2.gluonhq.com/openjfx/${JAVAFX_VERSION}/openjfx-${JAVAFX_VERSION}_linux-x64_bin-sdk.zip"',
+    '          unzip -q "$TOOLS_DIR/javafx.zip" -d "$TOOLS_DIR/javafx"',
+    "",
+    "      - name: Run CheckStyle",
+    "        id: checkstyle",
+    "        continue-on-error: true",
+    "        run: |",
+    `          java -jar "$TOOLS_DIR/checkstyle.jar" -c "$CHECKSTYLE_CONFIG_URL" $(find src test -name '*.java' -print)`,
+    "",
+    "      - name: Compile Java sources",
+    "        id: compile",
+    "        continue-on-error: true",
+    "        run: |",
+    "          mkdir -p build/classes",
+    `          JAVAFX_LIB=$(find "$TOOLS_DIR/javafx" -type d -path '*/lib' | head -n 1)`,
+    `          javac --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -cp "$TOOLS_DIR/junit-platform-console-standalone.jar:$TOOLS_DIR/mockito-core.jar:$TOOLS_DIR/byte-buddy.jar:$TOOLS_DIR/byte-buddy-agent.jar" -d build/classes $(find src test -name '*.java' -print)`,
+    "",
+    "      - name: Run Unit Tests",
+    "        id: unit-tests",
+    "        continue-on-error: true",
+    "        run: |",
+    `          JAVAFX_LIB=$(find "$TOOLS_DIR/javafx" -type d -path '*/lib' | head -n 1)`,
+    '          xvfb-run -a java --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -jar "$TOOLS_DIR/junit-platform-console-standalone.jar" execute --class-path build/classes --scan-class-path',
+    "",
+    "      - name: Run GitHub Classroom autograding reporter",
+    "        if: always()",
+    "        continue-on-error: true",
+    "        uses: education/autograding@v1",
+    "",
+    "      - name: Write Graider grading result",
+    "        if: always()",
+    "        uses: actions/github-script@v7",
+    "        env:",
+    `          GRAIDER_RESULT_FILE: ${resultFile}`,
+    "          CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}",
+    "          UNIT_TESTS_OUTCOME: ${{ steps.unit-tests.outcome }}",
+    "        with:",
+    "          script: |",
+    '            const fs = require("fs");',
+    '            const path = require("path");',
+    "            const outcomeMap = {",
+    '              success: "passed",',
+    '              failure: "failed",',
+    '              cancelled: "failed",',
+    '              skipped: "skipped"',
+    "            };",
+    '            const mapOutcome = (outcome) => outcomeMap[outcome] || "failed";',
+    "            const checks = [",
+    '              { name: "CheckStyle", status: mapOutcome(process.env.CHECKSTYLE_OUTCOME) },',
+    '              { name: "Unit Tests", status: mapOutcome(process.env.UNIT_TESTS_OUTCOME) }',
+    "            ];",
+    '            const status = checks.every((check) => check.status === "passed") ? "passed" : "failed";',
+    "            const result = { schema_version: 1, status, checks };",
+    '            const resultFile = process.env.GRAIDER_RESULT_FILE || "grading-results.json";',
+    "            fs.mkdirSync(path.dirname(resultFile), { recursive: true });",
+    "            fs.writeFileSync(resultFile, `${JSON.stringify(result, undefined, 2)}\\n`);",
+    "",
+    "      - name: Upload Graider grading result",
+    "        if: always()",
+    "        uses: actions/upload-artifact@v4",
+    "        with:",
+    `          name: ${artifactName}`,
+    `          path: ${resultFile}`,
+    ""
+  ].join("\n");
+};
+
+// src/workflows/workflow-paths.ts
+import path13 from "path";
+var TERMS_DIRECTORY5 = "terms";
+var GENERATED_WORKFLOWS_DIRECTORY = "generated-workflows";
+var WORKFLOW_FILE_NAME = "grade.yml";
+var createGeneratedWorkflowPath = (repoRoot, termCode, assignmentSlug) => {
+  const relativePath = [
+    TERMS_DIRECTORY5,
+    termCode,
+    GENERATED_WORKFLOWS_DIRECTORY,
+    assignmentSlug,
+    WORKFLOW_FILE_NAME
+  ].join("/");
+  return {
+    absolutePath: path13.join(repoRoot, relativePath),
+    relativePath
+  };
+};
+
+// src/workflows/workflow-writer.ts
+import fs9 from "fs";
+import path14 from "path";
+var writeWorkflowFile = ({
+  filePath,
+  content,
+  force
+}) => {
+  if (!force && fs9.existsSync(filePath)) {
+    return {
+      status: "failure",
+      diagnostic: createConfigDiagnostic(
+        GENERATED_WORKFLOW_EXISTS_CODE,
+        `Generated workflow already exists at ${filePath}.`,
+        {
+          filePath
+        }
+      )
+    };
+  }
+  try {
+    fs9.mkdirSync(path14.dirname(filePath), { recursive: true });
+    fs9.writeFileSync(filePath, content);
+    return {
+      status: "success"
+    };
+  } catch (error) {
+    return {
+      status: "failure",
+      diagnostic: createConfigDiagnostic(
+        WORKFLOW_GENERATION_WRITE_FAILED_CODE,
+        `Generated workflow could not be written to ${filePath}.`,
+        {
+          filePath,
+          reason: error instanceof Error ? error.message : String(error)
+        }
+      )
+    };
+  }
+};
+
+// src/cli/commands/workflow.command.ts
+var WORKFLOW_COMMAND_NAME = "workflow";
+var GENERATE_COMMAND_NAME = "generate";
+var COMMAND_NAME8 = "workflow generate";
+var PRESET_GRADING_MODE2 = "preset";
+var LEGACY_GRADING_MODE2 = "custom-workflow";
+var EMPTY_COUNT14 = 0;
+var getEffectiveGrading4 = (courseGrading, assignmentGrading) => assignmentGrading ?? courseGrading;
+var formatGeneratedFilePath = (repoRoot, absolutePath) => {
+  try {
+    return toRepositoryRelativePath(repoRoot, absolutePath);
+  } catch {
+    return toForwardSlashPath(path15.resolve(absolutePath));
+  }
+};
+var resolveOutputPath = (cwd, repoRoot, termCode, assignmentSlug, output) => {
+  if (output === void 0) {
+    const workflowPath = createGeneratedWorkflowPath(repoRoot, termCode, assignmentSlug);
+    return {
+      absolutePath: workflowPath.absolutePath,
+      reportPath: workflowPath.relativePath
+    };
+  }
+  const absolutePath = path15.isAbsolute(output) ? output : path15.resolve(cwd, output);
+  return {
+    absolutePath,
+    reportPath: formatGeneratedFilePath(repoRoot, absolutePath)
+  };
+};
+var runWorkflowGenerateCommand = ({
+  cwd,
+  assignmentFile,
+  options,
+  output,
+  force
+}) => {
+  const configResult = loadGraiderConfig({
+    cwd,
+    assignmentFile
+  });
+  if (configResult.status === "failure") {
+    return createCommandResult({
+      commandName: COMMAND_NAME8,
+      assignmentFile,
+      status: "failure",
+      warnings: [],
+      errors: configResult.diagnostics,
+      generatedFiles: [],
+      summary: {
+        options
+      }
+    });
+  }
+  const grading = getEffectiveGrading4(
+    configResult.config.course.grading,
+    configResult.config.assignment.grading
+  );
+  const assignmentConfigPath = configResult.config.summary.assignmentConfigPath;
+  if (!grading.enabled) {
+    return createCommandResult({
+      commandName: COMMAND_NAME8,
+      assignmentFile: assignmentConfigPath,
+      status: "failure",
+      warnings: [],
+      errors: [
+        createConfigDiagnostic(
+          WORKFLOW_GENERATION_NOT_CONFIGURED_CODE,
+          `Workflow generation requires enabled preset grading in ${assignmentConfigPath}.`,
+          {
+            assignmentFile: assignmentConfigPath
+          }
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary
+      }
+    });
+  }
+  const mode = grading.mode ?? LEGACY_GRADING_MODE2;
+  if (mode !== PRESET_GRADING_MODE2) {
+    return createCommandResult({
+      commandName: COMMAND_NAME8,
+      assignmentFile: assignmentConfigPath,
+      status: "failure",
+      warnings: [],
+      errors: [
+        createConfigDiagnostic(
+          WORKFLOW_GENERATION_REQUIRES_PRESET_MODE_CODE,
+          `Workflow generation requires grading.mode: ${PRESET_GRADING_MODE2}.`,
+          {
+            assignmentFile: assignmentConfigPath,
+            mode
+          }
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        gradingMode: mode
+      }
+    });
+  }
+  if (grading.preset !== JAVA_JUNIT_CHECKSTYLE_PRESET) {
+    return createCommandResult({
+      commandName: COMMAND_NAME8,
+      assignmentFile: assignmentConfigPath,
+      status: "failure",
+      warnings: [],
+      errors: [
+        createConfigDiagnostic(
+          UNSUPPORTED_GRADING_PRESET_CODE,
+          `Unsupported grading preset ${String(grading.preset)} for workflow generation.`,
+          {
+            assignmentFile: assignmentConfigPath,
+            preset: grading.preset,
+            supportedPreset: JAVA_JUNIT_CHECKSTYLE_PRESET
+          }
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        gradingMode: mode,
+        preset: grading.preset
+      }
+    });
+  }
+  const outputPath = resolveOutputPath(
+    cwd,
+    configResult.config.summary.repoRoot,
+    configResult.config.summary.termCode,
+    configResult.config.summary.assignmentSlug,
+    output
+  );
+  const writeResult = writeWorkflowFile({
+    filePath: outputPath.absolutePath,
+    content: renderJavaJunitCheckstyleWorkflow({ grading }),
+    force
+  });
+  const errors = writeResult.status === "failure" ? [writeResult.diagnostic] : [];
+  const generatedFiles = errors.length > EMPTY_COUNT14 ? [] : [outputPath.reportPath];
+  return createCommandResult({
+    commandName: COMMAND_NAME8,
+    assignmentFile: assignmentConfigPath,
+    status: errors.length > EMPTY_COUNT14 ? "failure" : "success",
+    warnings: [],
+    errors,
+    generatedFiles,
+    summary: {
+      options,
+      ...configResult.config.summary,
+      gradingMode: mode,
+      preset: grading.preset,
+      workflowFile: outputPath.reportPath
+    }
+  });
+};
+var registerWorkflowCommand = (program) => {
+  const workflowCommand = program.command(WORKFLOW_COMMAND_NAME).description("Generate and manage local grading workflow files.");
+  workflowCommand.command(GENERATE_COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--output <path>", "Write workflow to a local output path").option("--force", "Overwrite an existing generated workflow").description("Generate a local grading workflow file.").action((assignmentFile, rawOptions) => {
+    const options = normalizeCommonCommandOptions(rawOptions);
+    const result = runWorkflowGenerateCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options,
+      force: rawOptions.force === true,
+      ...rawOptions.output === void 0 ? {} : { output: rawOptions.output }
+    });
+    writeCommandResult(result, options.json);
+    process.exitCode = result.exitCode;
+  });
+};
+
 // src/cli/index.ts
 var buildProgram = () => {
   const program = new Command();
@@ -6892,6 +7550,7 @@ var buildProgram = () => {
   registerApplyCommand(program);
   registerGradeCommand(program);
   registerReportCommand(program);
+  registerWorkflowCommand(program);
   registerArchiveCommand(program);
   registerRemoveAccessCommand(program);
   return program;

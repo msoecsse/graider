@@ -5,6 +5,7 @@ import { Octokit } from "@octokit/rest";
 
 import { GitHubClient } from "./github-client.js";
 import { GitHubClientError } from "./github-errors.js";
+import { withGitHubRetry } from "./github-retry.js";
 import {
   AddCollaboratorInput,
   AddTeamPermissionInput,
@@ -512,6 +513,12 @@ export class OctokitGitHubClient implements GitHubClient {
   }
 
   async writeRepositoryFile(input: WriteRepositoryFileInput): Promise<GitHubFileWriteResult> {
+    return withGitHubRetry(() => this.writeRepositoryFileOnce(input));
+  }
+
+  private async writeRepositoryFileOnce(
+    input: WriteRepositoryFileInput
+  ): Promise<GitHubFileWriteResult> {
     const existingSha = await this.getExistingFileSha(input);
     const response = await this.run(() =>
       this.octokit.rest.repos.createOrUpdateFileContents({
@@ -521,7 +528,7 @@ export class OctokitGitHubClient implements GitHubClient {
         owner: input.owner,
         path: input.path,
         repo: input.repo,
-        sha: existingSha
+        ...(existingSha === undefined ? {} : { sha: existingSha })
       })
     );
     const record = asRecord(response);

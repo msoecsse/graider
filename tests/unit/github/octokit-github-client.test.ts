@@ -22,7 +22,10 @@ enum OctokitTestNumber {
   NotFoundStatus = 404,
   UnauthorizedStatus = 401,
   ForbiddenStatus = 403,
-  ServerErrorStatus = 500
+  ServerErrorStatus = 500,
+  BadGatewayStatus = 502,
+  ServiceUnavailableStatus = 503,
+  GatewayTimeoutStatus = 504
 }
 
 const TOKEN = "ghp_testtoken1234567890";
@@ -343,6 +346,13 @@ const createArtifactBodyCases = (): Array<{ label: string; body: unknown }> => {
   ];
 };
 
+const CONTENTS_LOOKUP_TRANSIENT_STATUSES = [
+  OctokitTestNumber.ServerErrorStatus,
+  OctokitTestNumber.BadGatewayStatus,
+  OctokitTestNumber.ServiceUnavailableStatus,
+  OctokitTestNumber.GatewayTimeoutStatus
+] as const;
+
 const createRepositoryResponse = () =>
   resolvedResponse({
     owner: { login: OWNER },
@@ -572,6 +582,122 @@ describe("OctokitGitHubClient", () => {
     expect(observedSha).toBe(EXISTING_SHA);
     expect(result).toEqual({ path: CONTENT_PATH, commitSha: CREATED_SHA });
   });
+
+  it("writeRepositoryFile creates missing files without sending SHA", async () => {
+    const octokit = createMockOctokit();
+    let observedWriteInput: Record<string, unknown> = {};
+    octokit.rest.repos.getContent = () =>
+      rejectedResponse(createRequestError({ status: OctokitTestNumber.NotFoundStatus }));
+    octokit.rest.repos.createOrUpdateFileContents = (input = {}) => {
+      observedWriteInput = input;
+
+      return resolvedResponse({ commit: { sha: CREATED_SHA }, content: { path: CONTENT_PATH } });
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    const result = await client.writeRepositoryFile({
+      owner: OWNER,
+      repo: REPO,
+      path: CONTENT_PATH,
+      content: FILE_CONTENT,
+      message: "Create report"
+    });
+
+    expect(result).toEqual({ path: CONTENT_PATH, commitSha: CREATED_SHA });
+    expect(Object.hasOwn(observedWriteInput, "sha")).toBe(false);
+  });
+
+  it("writeRepositoryFile retries transient contents lookup then creates missing file", async () => {
+    const octokit = createMockOctokit();
+    let contentsLookups = 0;
+    let observedWriteInput: Record<string, unknown> = {};
+    octokit.rest.repos.getContent = () => {
+      contentsLookups += 1;
+
+      return contentsLookups === 1
+        ? rejectedResponse(createRequestError({ status: OctokitTestNumber.GatewayTimeoutStatus }))
+        : rejectedResponse(createRequestError({ status: OctokitTestNumber.NotFoundStatus }));
+    };
+    octokit.rest.repos.createOrUpdateFileContents = (input = {}) => {
+      observedWriteInput = input;
+
+      return resolvedResponse({ commit: { sha: CREATED_SHA }, content: { path: CONTENT_PATH } });
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    const result = await client.writeRepositoryFile({
+      owner: OWNER,
+      repo: REPO,
+      path: CONTENT_PATH,
+      content: FILE_CONTENT,
+      message: "Create report"
+    });
+
+    expect(result).toEqual({ path: CONTENT_PATH, commitSha: CREATED_SHA });
+    expect(contentsLookups).toBe(2);
+    expect(Object.hasOwn(observedWriteInput, "sha")).toBe(false);
+  });
+
+  it("writeRepositoryFile retries transient contents write after refetching contents", async () => {
+    const octokit = createMockOctokit();
+    let contentsLookups = 0;
+    let writeAttempts = 0;
+    octokit.rest.repos.getContent = () => {
+      contentsLookups += 1;
+
+      return rejectedResponse(createRequestError({ status: OctokitTestNumber.NotFoundStatus }));
+    };
+    octokit.rest.repos.createOrUpdateFileContents = () => {
+      writeAttempts += 1;
+
+      return writeAttempts === 1
+        ? rejectedResponse(
+            createRequestError({ status: OctokitTestNumber.ServiceUnavailableStatus })
+          )
+        : resolvedResponse({ commit: { sha: CREATED_SHA }, content: { path: CONTENT_PATH } });
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    const result = await client.writeRepositoryFile({
+      owner: OWNER,
+      repo: REPO,
+      path: CONTENT_PATH,
+      content: FILE_CONTENT,
+      message: "Create report"
+    });
+
+    expect(result).toEqual({ path: CONTENT_PATH, commitSha: CREATED_SHA });
+    expect(contentsLookups).toBe(2);
+    expect(writeAttempts).toBe(2);
+  });
+
+  it.each(CONTENTS_LOOKUP_TRANSIENT_STATUSES)(
+    "writeRepositoryFile maps contents lookup HTTP %s to github_api_error",
+    async (status) => {
+      const octokit = createMockOctokit();
+      let writeAttempted = false;
+      octokit.rest.repos.getContent = () => rejectedResponse(createRequestError({ status }));
+      octokit.rest.repos.createOrUpdateFileContents = () => {
+        writeAttempted = true;
+
+        return resolvedResponse({ commit: { sha: CREATED_SHA }, content: { path: CONTENT_PATH } });
+      };
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+      await expectGitHubError(
+        () =>
+          client.writeRepositoryFile({
+            owner: OWNER,
+            repo: REPO,
+            path: CONTENT_PATH,
+            content: FILE_CONTENT,
+            message: "Publish report"
+          }),
+        DiagnosticCode.GithubApiError
+      );
+      expect(writeAttempted).toBe(false);
+    }
+  );
 
   it("dispatchWorkflow sends ref and omits inputs when none are provided", async () => {
     const octokit = createMockOctokit();

@@ -267,6 +267,11 @@ describe("graider report --publish-student-reports", () => {
         expect.objectContaining({ code: DiagnosticCode.StudentReportWriteFailed })
       ])
     );
+    expect(result.warnings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: DiagnosticCode.StudentReportRepositoryMissing })
+      ])
+    );
   });
 
   it("missing manifest-tracked repository skips that student with a diagnostic", async () => {

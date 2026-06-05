@@ -16,15 +16,16 @@ The MVP focuses on deterministic, auditable assignment administration:
 
 Implemented MVP commands:
 
-| Command         | Status                                                              |
-| --------------- | ------------------------------------------------------------------- |
-| `validate`      | Validate local config, rosters, and GitHub readiness.               |
-| `plan`          | Generate a timestamped JSON plan file.                              |
-| `apply`         | Execute safe additive provisioning and update the manifest.         |
-| `grade`         | Dispatch configured grading workflows for selected active students. |
-| `report`        | Generate local reports and optionally publish student reports.      |
-| `archive`       | Reserved command shell; not supported in MVP.                       |
-| `remove-access` | Reserved command shell; not supported in MVP.                       |
+| Command             | Status                                                              |
+| ------------------- | ------------------------------------------------------------------- |
+| `validate`          | Validate local config, rosters, and GitHub readiness.               |
+| `plan`              | Generate a timestamped JSON plan file.                              |
+| `apply`             | Execute safe additive provisioning and update the manifest.         |
+| `grade`             | Dispatch configured grading workflows for selected active students. |
+| `report`            | Generate local reports and optionally publish student reports.      |
+| `workflow generate` | Generate a local preset grading workflow file.                      |
+| `archive`           | Reserved command shell; not supported in MVP.                       |
+| `remove-access`     | Reserved command shell; not supported in MVP.                       |
 
 Known MVP exclusions:
 
@@ -135,6 +136,17 @@ graider report terms/27s1/assignments/lab04/assignment.yml
 graider report terms/27s1/assignments/lab04/assignment.yml --publish-student-reports
 ```
 
+Generate a local preset grading workflow:
+
+```bash
+graider workflow generate terms/27s1/assignments/lab04/assignment.yml
+graider workflow generate terms/27s1/assignments/lab04/assignment.yml --output /path/to/grade.yml
+```
+
+`workflow generate` currently supports `grading.mode: preset` with
+`grading.preset: java-junit-checkstyle`. It writes only to the local filesystem
+and does not overwrite existing files unless `--force` is provided.
+
 Unsupported MVP command shells:
 
 ```bash
@@ -178,6 +190,7 @@ See [live testing](docs/live-testing.md) before running live tests.
 
 - [Runtime and CI](docs/runtime.md)
 - [GitHub token permissions](docs/github-token-permissions.md)
+- [Grading result contract](docs/grading-result-contract.md)
 - [Generated files](docs/generated-files.md)
 - [Error and warning catalog](docs/error-warning-catalog.md)
 - [Troubleshooting](docs/troubleshooting.md)

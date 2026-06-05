@@ -105,7 +105,14 @@ describe("graider CLI shell", () => {
     expect(result.stdout).toContain("not_supported_in_mvp");
   });
 
-  it("TC-CLI-SHELL-007 command exists: remove-access", () => {
+  it("TC-CLI-SHELL-007 command exists: workflow generate", () => {
+    const output = runCliText(["workflow", "generate", "--help"]);
+
+    expect(output).toContain("generate");
+    expect(output).toContain("Generate a local grading workflow file");
+  });
+
+  it("TC-CLI-SHELL-008 command exists: remove-access", () => {
     const result = runCli(["remove-access", TEST_ASSIGNMENT_FILE]);
 
     expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
@@ -114,14 +121,14 @@ describe("graider CLI shell", () => {
     expect(result.stdout).toContain("not_supported_in_mvp");
   });
 
-  it("TC-CLI-SHELL-008 unknown command exits nonzero", () => {
+  it("TC-CLI-SHELL-009 unknown command exits nonzero", () => {
     const result = runCli(["unknown-command", TEST_ASSIGNMENT_FILE]);
 
     expect(result.status).not.toBe(SUCCESS_EXIT_CODE);
     expect(result.stderr).toContain("unknown command");
   });
 
-  it("TC-CLI-SHELL-009 --json emits valid JSON command output", () => {
+  it("TC-CLI-SHELL-010 --json emits valid JSON command output", () => {
     const result = runCli(
       ["validate", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"],
       VALID_REPO_ROOT
@@ -145,7 +152,7 @@ describe("graider CLI shell", () => {
     });
   });
 
-  it("TC-CLI-SHELL-010 archive returns not_supported_in_mvp", () => {
+  it("TC-CLI-SHELL-011 archive returns not_supported_in_mvp", () => {
     const result = runCli(["archive", TEST_ASSIGNMENT_FILE, "--json"]);
     const json = parseJsonResult(result.stdout);
 
@@ -160,7 +167,7 @@ describe("graider CLI shell", () => {
     ]);
   });
 
-  it("TC-CLI-SHELL-011 remove-access returns not_supported_in_mvp", () => {
+  it("TC-CLI-SHELL-012 remove-access returns not_supported_in_mvp", () => {
     const result = runCli(["remove-access", TEST_ASSIGNMENT_FILE, "--json"]);
     const json = parseJsonResult(result.stdout);
 

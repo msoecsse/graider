@@ -50,6 +50,22 @@ terms/<term-code>/reports/<assignment-slug>/students/<section>/<student_id>.md
 
 Each local student report contains only that student's data. It includes assignment identity, repository status, grading status, check results when available, and warning/error codes.
 
+## Generated Workflows
+
+Path:
+
+```text
+terms/<term-code>/generated-workflows/<assignment-slug>/grade.yml
+```
+
+Generated workflows are local starter GitHub Actions workflows produced by
+`graider workflow generate`. The first supported preset is
+`java-junit-checkstyle`. Generation is local-only: Graider does not commit the
+file, write to GitHub, or mutate template repositories.
+
+Generated workflows are safe to review and copy into a template repository. The
+command refuses to overwrite an existing workflow file unless `--force` is used.
+
 ## Published Student Repository Files
 
 Paths in each student repository:

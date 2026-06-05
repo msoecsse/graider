@@ -9,14 +9,46 @@ export const STUDENT_PERMISSION = "push";
 export const FACULTY_PERMISSION = "admin";
 export const GRADER_PERMISSION = "maintain";
 export const VALID_ASSIGNMENT_STATUSES = ["draft", "active", "closed", "archived"] as const;
+export const ENABLED_GRADING_MODES = ["preset", "custom-workflow", "contract-only"] as const;
+export const DISABLED_GRADING_MODE = "no-grading";
+export const SUPPORTED_GRADING_PRESETS = ["java-junit-checkstyle"] as const;
+export const ENABLED_STUDENT_PUBLISH_MODES = [
+  "graider-generated",
+  "faculty-provided",
+  "both"
+] as const;
+export const DISABLED_STUDENT_PUBLISH_MODE = "disabled";
 export const TERM_CODE_PATTERN = /^\d{2}s[123]$/;
 
 const gradingSchema = z
   .object({
     enabled: z.boolean(),
+    mode: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    preset: z.string().min(MINIMUM_LIST_ITEMS).optional(),
     workflow: z.string().min(MINIMUM_LIST_ITEMS).optional(),
     artifact: z.string().min(MINIMUM_LIST_ITEMS).optional(),
     result_file: z.string().min(MINIMUM_LIST_ITEMS).optional()
+  })
+  .strict();
+
+const studentPublishSchema = z
+  .object({
+    enabled: z.boolean(),
+    mode: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    source: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    artifact: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    source_file: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    destination_file: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    graider_report_destination: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    faculty_report_source: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    faculty_report_destination: z.string().min(MINIMUM_LIST_ITEMS).optional()
+  })
+  .strict();
+
+const reportsSchema = z
+  .object({
+    formats: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS),
+    student_publish: studentPublishSchema.optional()
   })
   .strict();
 
@@ -49,11 +81,7 @@ export const rawCourseConfigSchema = z
       })
       .strict(),
     grading: gradingSchema,
-    reports: z
-      .object({
-        formats: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS)
-      })
-      .strict()
+    reports: reportsSchema
   })
   .strict();
 
