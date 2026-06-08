@@ -126,17 +126,27 @@ describe("graider workflow generate command", () => {
     expect(text).toContain(`generated: ${DEFAULT_WORKFLOW_FILE}`);
     expect(workflow).toContain("name: AutoGrading Tests");
     expect(workflow).toContain("- workflow_dispatch");
+    expect(workflow).toContain(".graider/write-grading-result.py");
+    expect(workflow).toContain("python3 .graider/write-grading-result.py");
+    expect(workflow).toContain('--check "CheckStyle=$CHECKSTYLE_OUTCOME"');
+    expect(workflow).toContain('--check "Unit Tests=$UNIT_TESTS_OUTCOME"');
     expect(workflow).toContain("name: grading-results");
-    expect(workflow).toContain("path: grading-results.json");
+    expect(workflow).toContain("path: graider-output/grading-results.json");
     expect(workflow).toContain("schema_version");
     expect(workflow).toContain("steps.checkstyle.outcome");
     expect(workflow).toContain("steps.unit-tests.outcome");
-    expect(workflow).toContain('success: "passed"');
-    expect(workflow).toContain('failure: "failed"');
-    expect(workflow).toContain('cancelled: "failed"');
-    expect(workflow).toContain('skipped: "skipped"');
+    expect(workflow).toContain('STATUS_PASSED = "passed"');
+    expect(workflow).toContain('STATUS_FAILED = "failed"');
+    expect(workflow).toContain('STATUS_SKIPPED = "skipped"');
+    expect(workflow).toContain('"success": STATUS_PASSED');
+    expect(workflow).toContain('"failure": STATUS_FAILED');
+    expect(workflow).toContain('"cancelled": STATUS_FAILED');
+    expect(workflow).toContain('"skipped": STATUS_SKIPPED');
+    expect(workflow).not.toContain("actions/github-script");
     expect(workflow).not.toContain("steps.checkstyle.outputs.result");
     expect(workflow).not.toContain("steps.unit-tests.outputs.result");
+    expect(workflow).not.toContain("faculty-summary");
+    expect(workflow).not.toContain("GRAIDER_GITHUB_TOKEN");
   });
 
   it("emits JSON output with generated file path", () => {
@@ -196,6 +206,8 @@ describe("graider workflow generate command", () => {
     expect(result.errors).toEqual([
       expect.objectContaining({ code: "workflow_generation_not_configured" })
     ]);
+    expect(result.generatedFiles).toEqual([]);
+    expect(fs.existsSync(path.join(cwd, DEFAULT_WORKFLOW_FILE))).toBe(false);
   });
 
   it("fails clearly when grading mode is not preset", () => {

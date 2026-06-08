@@ -1,5 +1,9 @@
 import type { LoadedGraiderConfig } from "../config/config-models.js";
-import { DiagnosticCode, createConfigDiagnostic } from "../diagnostics/error-catalog.js";
+import {
+  DiagnosticCode,
+  createConfigDiagnostic,
+  createWarningDiagnostic
+} from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
 import { GitHubClientError } from "../github/github-errors.js";
@@ -136,6 +140,12 @@ const createWorkflowDispatchMissingDiagnostic = (
     }
   );
 
+const createGradingNotConfiguredWarning = (): Diagnostic =>
+  createWarningDiagnostic(
+    DiagnosticCode.GradingNotConfigured,
+    "Automated grading is not configured for this assignment."
+  );
+
 const runGitHubOperation = async <T>(
   input: GradeExecutionInput,
   operation: () => Promise<T>
@@ -237,6 +247,18 @@ export const executeGrade = async (input: GradeExecutionInput): Promise<GradeExe
     warnings: [],
     errors: []
   };
+
+  if (!grading.enabled) {
+    return {
+      summary: {
+        ...state.summary,
+        skipped: input.targetStudents.length,
+        warnings: SUCCESS_INCREMENT
+      },
+      warnings: [createGradingNotConfiguredWarning()],
+      errors: []
+    };
+  }
 
   if (workflowPath === undefined) {
     return {

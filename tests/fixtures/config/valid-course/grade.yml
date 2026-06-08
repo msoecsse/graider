@@ -1,0 +1,10 @@
+name: Grade
+on:
+  - push
+  - repository_dispatch
+  - workflow_dispatch
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "grade"

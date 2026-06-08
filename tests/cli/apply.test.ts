@@ -122,6 +122,12 @@ class NonPersistingCreateGitHubClient extends FakeGitHubClient {
   }
 }
 
+class NoWorkflowReadinessGitHubClient extends FakeGitHubClient {
+  override getWorkflow(): Promise<GitHubWorkflow | null> {
+    throw new Error("No-grading apply must not check grading workflows.");
+  }
+}
+
 const runApply = async (
   fixtureName: string,
   githubClient: FakeGitHubClient = createReadyClient(),
@@ -512,6 +518,35 @@ describe("graider apply command", () => {
     expect(result.exitCode).toBe(ExitCode.Success);
     expect(typeof result.summary.skipped).toBe("number");
     expect(result.summary.skipped).toBeGreaterThan(0);
+  });
+
+  it("grading disabled applies repository setup without workflow readiness checks", async () => {
+    const githubClient = new NoWorkflowReadinessGitHubClient({
+      templateRepositories: [templateRepository],
+      users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ]
+    });
+    const { cwd, result } = await runApply("grading-disabled", githubClient);
+    const manifestResult = loadWrittenManifest(cwd);
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(result.errors).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "grading_workflow_missing" }),
+        expect.objectContaining({ code: "workflow_dispatch_unsupported" })
+      ])
+    );
+    expect(
+      githubClient.mutations.createdRepositories.map((record) => record.repository.name)
+    ).toEqual([JONES_REPOSITORY]);
+    expect(manifestResult.status).toBe("loaded");
+    expect(manifestResult.manifest?.repositories[0]?.actions.gradingWorkflowFound).toBeUndefined();
+    expect(
+      manifestResult.manifest?.repositories[0]?.actions.workflowDispatchSupported
+    ).toBeUndefined();
   });
 
   it("missing workflow produces partial success", async () => {

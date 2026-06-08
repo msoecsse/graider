@@ -183,7 +183,8 @@ export const runReportCommand = async ({
     publishStudentReports && writeResult.errors.length === EMPTY_COUNT
       ? await publishReportsToStudentRepositories({
           report: collectResult.report,
-          githubClient: activeGitHubClient
+          githubClient: activeGitHubClient,
+          studentPublishConfig: configResult.config.course.reports.student_publish
         })
       : {
           publishedFiles: [],

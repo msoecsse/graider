@@ -1,4 +1,8 @@
 import type { RawCourseConfig } from "../config/config-models.js";
+import {
+  RESULT_WRITER_SCRIPT_PATH,
+  renderGradingResultWriterScript
+} from "./result-writer-template.js";
 
 export const JAVA_JUNIT_CHECKSTYLE_PRESET = "java-junit-checkstyle";
 
@@ -11,16 +15,26 @@ const JUNIT_PLATFORM_CONSOLE_VERSION = "6.1.0";
 const MOCKITO_VERSION = "5.18.0";
 const BYTE_BUDDY_VERSION = "1.17.5";
 const JAVAFX_VERSION = "25";
+const OUTPUT_DIRECTORY = "graider-output";
 
 export interface JavaJunitCheckstyleWorkflowInput {
   readonly grading: RawCourseConfig["grading"];
 }
+
+const indentWorkflowRunLine = (line: string): string => `          ${line}`;
+
+const renderResultWriterInstallLines = (): string[] =>
+  renderGradingResultWriterScript().trimEnd().split("\n").map(indentWorkflowRunLine);
+
+const createResultOutputPath = (resultFile: string): string =>
+  resultFile.includes("/") ? resultFile : `${OUTPUT_DIRECTORY}/${resultFile}`;
 
 export const renderJavaJunitCheckstyleWorkflow = ({
   grading
 }: JavaJunitCheckstyleWorkflowInput): string => {
   const artifactName = grading.artifact ?? "grading-results";
   const resultFile = grading.result_file ?? "grading-results.json";
+  const resultOutputPath = createResultOutputPath(resultFile);
 
   return [
     `name: ${WORKFLOW_NAME}`,
@@ -73,6 +87,14 @@ export const renderJavaJunitCheckstyleWorkflow = ({
     '          curl -fsSL -o "$TOOLS_DIR/javafx.zip" "https://download2.gluonhq.com/openjfx/${JAVAFX_VERSION}/openjfx-${JAVAFX_VERSION}_linux-x64_bin-sdk.zip"',
     '          unzip -q "$TOOLS_DIR/javafx.zip" -d "$TOOLS_DIR/javafx"',
     "",
+    "      - name: Install Graider result writer",
+    "        run: |",
+    "          mkdir -p .graider",
+    `          cat > ${RESULT_WRITER_SCRIPT_PATH} <<'PY'`,
+    ...renderResultWriterInstallLines(),
+    "          PY",
+    `          chmod +x ${RESULT_WRITER_SCRIPT_PATH}`,
+    "",
     "      - name: Run CheckStyle",
     "        id: checkstyle",
     "        continue-on-error: true",
@@ -101,38 +123,21 @@ export const renderJavaJunitCheckstyleWorkflow = ({
     "",
     "      - name: Write Graider grading result",
     "        if: always()",
-    "        uses: actions/github-script@v7",
     "        env:",
-    `          GRAIDER_RESULT_FILE: ${resultFile}`,
     "          CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}",
     "          UNIT_TESTS_OUTCOME: ${{ steps.unit-tests.outcome }}",
-    "        with:",
-    "          script: |",
-    '            const fs = require("fs");',
-    '            const path = require("path");',
-    "            const outcomeMap = {",
-    '              success: "passed",',
-    '              failure: "failed",',
-    '              cancelled: "failed",',
-    '              skipped: "skipped"',
-    "            };",
-    '            const mapOutcome = (outcome) => outcomeMap[outcome] || "failed";',
-    "            const checks = [",
-    '              { name: "CheckStyle", status: mapOutcome(process.env.CHECKSTYLE_OUTCOME) },',
-    '              { name: "Unit Tests", status: mapOutcome(process.env.UNIT_TESTS_OUTCOME) }',
-    "            ];",
-    '            const status = checks.every((check) => check.status === "passed") ? "passed" : "failed";',
-    "            const result = { schema_version: 1, status, checks };",
-    '            const resultFile = process.env.GRAIDER_RESULT_FILE || "grading-results.json";',
-    "            fs.mkdirSync(path.dirname(resultFile), { recursive: true });",
-    "            fs.writeFileSync(resultFile, `${JSON.stringify(result, undefined, 2)}\\n`);",
+    "        run: |",
+    `          python3 ${RESULT_WRITER_SCRIPT_PATH} \\`,
+    `            --output ${resultOutputPath} \\`,
+    '            --check "CheckStyle=$CHECKSTYLE_OUTCOME" \\',
+    '            --check "Unit Tests=$UNIT_TESTS_OUTCOME"',
     "",
     "      - name: Upload Graider grading result",
     "        if: always()",
     "        uses: actions/upload-artifact@v4",
     "        with:",
     `          name: ${artifactName}`,
-    `          path: ${resultFile}`,
+    `          path: ${resultOutputPath}`,
     ""
   ].join("\n");
 };

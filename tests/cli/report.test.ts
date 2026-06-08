@@ -231,6 +231,20 @@ class OctokitArtifactReportClient extends FakeGitHubClient {
   }
 }
 
+class NoGradingReportGitHubClient extends FakeGitHubClient {
+  override getWorkflow(): Promise<GitHubWorkflow | null> {
+    throw new Error("No-grading report must not inspect workflows.");
+  }
+
+  override listWorkflowRuns(): Promise<GitHubWorkflowRun[]> {
+    throw new Error("No-grading report must not list workflow runs.");
+  }
+
+  override downloadArtifact(): Promise<DownloadedArtifact | null> {
+    throw new Error("No-grading report must not download artifacts.");
+  }
+}
+
 const createReadableArtifactStream = (content: Buffer): ReadableArtifactStreamLike => {
   let unread = true;
 
@@ -405,9 +419,44 @@ describe("graider report command", () => {
     const { cwd } = await runReport("grading-disabled");
     const summary = JSON.parse(
       fs.readFileSync(reportPath(cwd, "terms/27s1/reports/lab04/faculty-summary.json"), "utf8")
-    ) as { students: Array<{ grading: { result_status: string } }> };
+    ) as {
+      summary: {
+        not_configured_count: number;
+        failed_count: number;
+      };
+      students: Array<{
+        grading: {
+          workflow_status: string;
+          artifact_status: string;
+          result_file_status: string;
+          result_status: string;
+          checks: unknown[];
+        };
+        errors: unknown[];
+        warnings: unknown[];
+      }>;
+    };
 
+    expect(summary.students[0]?.grading.workflow_status).toBe("not_configured");
+    expect(summary.students[0]?.grading.artifact_status).toBe("not_checked");
+    expect(summary.students[0]?.grading.result_file_status).toBe("not_checked");
     expect(summary.students[0]?.grading.result_status).toBe("not_configured");
+    expect(summary.students[0]?.grading.checks).toEqual([]);
+    expect(summary.students[0]?.errors).toEqual([]);
+    expect(summary.students[0]?.warnings).toEqual([]);
+    expect(summary.summary.not_configured_count).toBe(1);
+    expect(summary.summary.failed_count).toBe(0);
+  });
+
+  it("no-grading reports do not inspect workflows or artifacts", async () => {
+    const { result } = await runReport(
+      "grading-disabled",
+      new NoGradingReportGitHubClient({
+        repositories: [createRepository(JONES_REPOSITORY)]
+      })
+    );
+
+    expect(result.exitCode).toBe(ExitCode.Success);
   });
 
   it("TC-CLI-REPORT-005 missing artifact reports missing_artifact", async () => {

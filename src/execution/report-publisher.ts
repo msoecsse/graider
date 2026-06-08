@@ -1,3 +1,4 @@
+import type { RawCourseConfig } from "../config/config-models.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
 import type { FacultySummaryReport } from "../reporting/report-models.js";
@@ -8,6 +9,7 @@ const EMPTY_COUNT = 0;
 export interface ReportPublishInput {
   report: FacultySummaryReport;
   githubClient: GitHubClient;
+  studentPublishConfig?: RawCourseConfig["reports"]["student_publish"];
 }
 
 export interface ReportPublishResult {
@@ -22,7 +24,8 @@ export interface ReportPublishResult {
 
 export const publishStudentReports = async ({
   report,
-  githubClient
+  githubClient,
+  studentPublishConfig
 }: ReportPublishInput): Promise<ReportPublishResult> => {
   const publishedFiles: string[] = [];
   const warnings: Diagnostic[] = [];
@@ -36,7 +39,8 @@ export const publishStudentReports = async ({
       githubClient,
       assignment: report.assignment,
       student,
-      generatedAt: report.generatedAt
+      generatedAt: report.generatedAt,
+      studentPublishConfig
     });
 
     publishedFiles.push(...result.publishedFiles);

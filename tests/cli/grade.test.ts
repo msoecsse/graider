@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { runGradeCommand } from "../../src/cli/commands/grade.command.js";
+import { formatCommandResultAsText } from "../../src/cli/output.js";
 import { formatCommandResultAsJson } from "../../src/cli/output.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { ExitCode } from "../../src/core/exit-codes.js";
@@ -148,13 +149,29 @@ describe("graider grade command", () => {
     expect(githubClient.mutations.workflowDispatches[0]?.repo).toBe(KIM_REPOSITORY);
   });
 
-  it("TC-CLI-GRADE-007 grading disabled fails cleanly", async () => {
+  it("TC-CLI-GRADE-007 grading disabled succeeds as a no-op without dispatching workflows", async () => {
     const { result, githubClient } = await runGrade("grading-disabled", { all: true });
+    const json = JSON.parse(formatCommandResultAsJson(result)) as {
+      summary: {
+        gradingEnabled?: unknown;
+        workflowDispatchAttempted?: unknown;
+        resultStatus?: unknown;
+        dispatchAttempted?: unknown;
+      };
+    };
+    const text = formatCommandResultAsText(result);
 
-    expect(result.exitCode).toBe(ExitCode.CommandError);
-    expect(result.errors).toEqual([
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(result.status).toBe("success");
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([
       expect.objectContaining({ code: DiagnosticCode.GradingNotConfigured })
     ]);
+    expect(json.summary.gradingEnabled).toBe(false);
+    expect(json.summary.workflowDispatchAttempted).toBe(false);
+    expect(json.summary.resultStatus).toBe("not_configured");
+    expect(json.summary.dispatchAttempted).toBe(NO_MUTATIONS);
+    expect(text).toContain("grading_not_configured");
     expect(githubClient.mutations.workflowDispatches).toHaveLength(NO_MUTATIONS);
   });
 

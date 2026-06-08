@@ -136,6 +136,10 @@ graider report terms/27s1/assignments/lab04/assignment.yml
 graider report terms/27s1/assignments/lab04/assignment.yml --publish-student-reports
 ```
 
+`--publish-student-reports` supports Graider-generated reports and
+artifact-based faculty-provided reports configured under
+`reports.student_publish`.
+
 Generate a local preset grading workflow:
 
 ```bash
@@ -146,6 +150,10 @@ graider workflow generate terms/27s1/assignments/lab04/assignment.yml --output /
 `workflow generate` currently supports `grading.mode: preset` with
 `grading.preset: java-junit-checkstyle`. It writes only to the local filesystem
 and does not overwrite existing files unless `--force` is provided.
+
+Assignments with `grading.enabled: false` are supported for repository
+management and reporting. `grade` is a no-op success for those assignments, and
+`workflow generate` fails clearly instead of producing a workflow.
 
 Unsupported MVP command shells:
 
@@ -195,3 +203,4 @@ See [live testing](docs/live-testing.md) before running live tests.
 - [Error and warning catalog](docs/error-warning-catalog.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Examples](docs/examples/README.md)
+- [Reusable grading examples](examples/grading/README.md)

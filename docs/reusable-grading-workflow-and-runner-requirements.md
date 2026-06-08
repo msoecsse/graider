@@ -165,7 +165,7 @@ Expected behavior:
 
 validate -> succeeds without requiring workflow/artifact/result_file
 apply -> creates repos and permissions normally
-grade -> returns not_configured or no-op for that assignment
+grade -> no-op success with result_status not_configured and no workflow dispatch
 report -> generates reports with grading status not_configured
 publish -> may still publish Graider-generated or faculty-provided student reports if configured
 
@@ -244,6 +244,20 @@ grading-results.json
 
 even when grading checks fail.
 
+Current generated workflows embed a self-contained Python helper during the
+workflow run:
+
+.graider/write-grading-result.py
+
+The helper writes:
+
+graider-output/grading-results.json
+
+and the workflow uploads that file as the configured grading artifact. The
+student repository does not need Graider installed, does not need npm
+dependencies for Graider, and does not need access to the course-admin
+repository.
+
 Workflow generation should not be required for custom workflows or no-grading assignments.
 
 7. Custom Workflow Support Requirements
@@ -287,6 +301,12 @@ The preferred implementation should avoid fragile shell heredocs.
 
 A Python or Node-based result writer is acceptable inside GitHub Actions if it is generated or provided by Graider, even though Graider itself remains TypeScript/Node.
 
+Current generated workflows use a Python standard-library helper rather than a
+Graider CLI call inside student repositories. The helper accepts named
+`name=outcome` checks, creates the output directory, maps unknown or missing
+outcomes to `failed`, and writes the Graider result schema. This is an embedded
+workflow helper, not a reusable GitHub Action package.
+
 Long-term, the result writer could become:
 
 a checked-in script
@@ -299,7 +319,8 @@ a Graider CLI subcommand
 
 Graider must support publishing faculty-provided student report files without requiring Graider to generate or understand the report content.
 
-In this mode, Graider does not create the report content. It only:
+Artifact-based faculty-provided report publishing is implemented. In this mode,
+Graider does not create the report content. It only:
 
 finds the configured report file
 verifies that the file exists
@@ -349,6 +370,7 @@ student_publish:
 enabled: true
 mode: both
 graider_report_destination: grading/graider-report.md
+artifact: grading-results
 faculty_report_source: graider-output/student-report.md
 faculty_report_destination: grading/report.md
 
@@ -365,7 +387,7 @@ Graider must support these combinations:
 
 No automated grading, no student reports
 No automated grading, Graider-generated placeholder reports
-No automated grading, faculty-provided student reports
+No automated grading, faculty-provided student reports from a future local source
 Automated grading, Graider-generated reports
 Automated grading, faculty-provided reports
 Automated grading, both reports
@@ -382,6 +404,15 @@ mode: faculty-provided
 source: local
 source_file: terms/27s1/reports/lab01/students/{section}/{student_id}.md
 destination_file: grading/report.md
+
+Local-source faculty-provided reports are future work. Current runtime support
+copies faculty-provided student reports from the configured GitHub Actions
+artifact.
+
+Artifact-based faculty-provided reports require a workflow artifact source. For
+no-grading assignments without a workflow run, Graider reports the configured
+student report artifact as missing rather than attempting to synthesize report
+content.
 
 If no grading workflow exists, Graider should not require:
 
@@ -410,6 +441,18 @@ missing publish destination_file
 incompatible no-grading configuration
 
 It should not block custom workflows merely because Graider cannot understand every custom grading command.
+
+Current static validation is intentionally conservative. `graider validate`
+checks that grading-enabled assignments configure a workflow, artifact, and
+result file; that the workflow file is locally available; and that the workflow
+declares `workflow_dispatch`. For preset workflows, the generated local workflow
+path under `terms/<term>/generated-workflows/<assignment>/grade.yml` is accepted
+as a local validation source.
+
+Static validation does not fully prove that a custom workflow uploads the
+configured artifact, writes the configured result file, or produces semantically
+correct grades. Those cases remain runtime report diagnostics after a workflow
+run.
 
 Validation should distinguish between:
 
@@ -475,6 +518,7 @@ For faculty-provided reports, Graider should not modify the contents except for 
 Publishing diagnostics should distinguish:
 
 student_report_published
+student_report_artifact_missing
 student_report_source_missing
 student_report_repository_missing
 student_report_publish_failed
@@ -555,13 +599,20 @@ Slice 5 — Add reusable result writer
 Replace fragile per-workflow JSON generation snippets with a reusable Graider result writer.
 
 Slice 6 — Add faculty-provided student report publishing
-Support publishing configured faculty-provided report files from artifact or local source paths.
+Support publishing configured faculty-provided report files from artifact paths.
+Local source paths can be added in a later slice.
 
 Slice 7 — Add no-grading assignment support
 Ensure assignments with grading.enabled: false can validate, apply, report, and publish configured reports.
 
 Slice 8 — Add examples
-Provide examples for:
+Reusable grading examples live under:
+
+```text
+examples/grading/
+```
+
+They provide copyable faculty-facing examples for:
 
 Java/JUnit/CheckStyle
 custom shell command

@@ -224,6 +224,8 @@ var DiagnosticCode = {
   ReportWriteFailed: "report_write_failed",
   StudentReportPublishFailed: "student_report_publish_failed",
   StudentReportRepositoryMissing: "student_report_repository_missing",
+  StudentReportSourceMissing: "student_report_source_missing",
+  StudentReportArtifactMissing: "student_report_artifact_missing",
   StudentReportWriteFailed: "student_report_write_failed",
   StudentReportPublishPartial: "student_report_publish_partial",
   StudentReportPublishNotRequested: "student_report_publish_not_requested"
@@ -3260,17 +3262,17 @@ var normalizeDiagnostic = (diagnostic) => ({
 });
 var getIssueCode = (issue) => {
   const pathParts = issue.path.map(String);
-  const path16 = pathParts.join(".");
+  const path17 = pathParts.join(".");
   if (pathParts.length === MINIMUM_ITEMS) {
     return DiagnosticCode.MissingManifestSection;
   }
-  if (path16.endsWith("lifecycle.status")) {
+  if (path17.endsWith("lifecycle.status")) {
     return DiagnosticCode.InvalidManifestLifecycleStatus;
   }
-  if (path16.endsWith("permission")) {
+  if (path17.endsWith("permission")) {
     return DiagnosticCode.InvalidManifestPermission;
   }
-  if (path16.startsWith("repositories.")) {
+  if (path17.startsWith("repositories.")) {
     return DiagnosticCode.InvalidManifestRepositoryRecord;
   }
   return DiagnosticCode.InvalidManifest;
@@ -4816,6 +4818,10 @@ var createWorkflowDispatchMissingDiagnostic = (student, repository, workflowPath
     workflowPath
   }
 );
+var createGradingNotConfiguredWarning = () => createWarningDiagnostic(
+  DiagnosticCode.GradingNotConfigured,
+  "Automated grading is not configured for this assignment."
+);
 var runGitHubOperation2 = async (input, operation) => withGitHubRetry(operation, input.retryOptions);
 var recordFailure = (state, diagnostic) => ({
   summary: {
@@ -4893,6 +4899,17 @@ var executeGrade = async (input) => {
     warnings: [],
     errors: []
   };
+  if (!grading.enabled) {
+    return {
+      summary: {
+        ...state.summary,
+        skipped: input.targetStudents.length,
+        warnings: SUCCESS_INCREMENT
+      },
+      warnings: [createGradingNotConfiguredWarning()],
+      errors: []
+    };
+  }
   if (workflowPath === void 0) {
     return {
       summary: {
@@ -5285,6 +5302,7 @@ var FakeGitHubClient = class {
 // src/cli/commands/grade.command.ts
 var COMMAND_NAME3 = "grade";
 var EMPTY_COUNT9 = 0;
+var NOT_CONFIGURED_WARNING_COUNT = 1;
 var createDefaultGitHubClient = () => readGitHubToken() === void 0 ? new FakeGitHubClient() : createGitHubClient();
 var getEffectiveGrading2 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getCommandStatus = (result) => {
@@ -5297,6 +5315,10 @@ var createLifecycleDiagnostic2 = (status) => createConfigDiagnostic(
   DiagnosticCode.AssignmentStatusBlocksGrade,
   `Assignment status ${status} does not allow grade.`,
   { assignmentStatus: status }
+);
+var createGradingNotConfiguredWarning2 = () => createWarningDiagnostic(
+  DiagnosticCode.GradingNotConfigured,
+  "Automated grading is not configured for this assignment."
 );
 var runGradeCommand = async ({
   cwd,
@@ -5345,26 +5367,6 @@ var runGradeCommand = async ({
       }
     });
   }
-  const grading = getEffectiveGrading2(configResult.config);
-  if (!grading.enabled || grading.workflow === void 0) {
-    return createCommandResult({
-      commandName: COMMAND_NAME3,
-      assignmentFile: configResult.config.summary.assignmentConfigPath,
-      status: "failure",
-      warnings: [],
-      errors: [
-        createConfigDiagnostic(
-          DiagnosticCode.GradingNotConfigured,
-          "Grading workflow is not configured for this assignment."
-        )
-      ],
-      generatedFiles: [],
-      summary: {
-        options,
-        ...configResult.config.summary
-      }
-    });
-  }
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > EMPTY_COUNT9) {
     return createCommandResult({
@@ -5395,6 +5397,37 @@ var runGradeCommand = async ({
         ...configResult.config.summary,
         ...rosterResult.summary,
         ...selectionResult.summary
+      }
+    });
+  }
+  const grading = getEffectiveGrading2(configResult.config);
+  if (!grading.enabled || grading.workflow === void 0) {
+    return createCommandResult({
+      commandName: COMMAND_NAME3,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "success",
+      warnings: [
+        ...rosterResult.warnings,
+        ...selectionResult.warnings,
+        createGradingNotConfiguredWarning2()
+      ],
+      errors: [],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        ...selectionResult.summary,
+        gradingEnabled: false,
+        workflowDispatchAttempted: false,
+        resultStatus: "not_configured",
+        targetsSelected: selectionResult.students.length,
+        dispatchAttempted: EMPTY_COUNT9,
+        dispatchSucceeded: EMPTY_COUNT9,
+        dispatchFailed: EMPTY_COUNT9,
+        skipped: selectionResult.students.length,
+        warnings: rosterResult.warnings.length + selectionResult.warnings.length + NOT_CONFIGURED_WARNING_COUNT,
+        errors: EMPTY_COUNT9
       }
     });
   }
@@ -5862,8 +5895,15 @@ var renderStudentResultsJson = (assignment, student, generatedAt) => `${stringif
 var PUBLISHED_STUDENT_REPORT_PATH = "grading/report.md";
 var PUBLISHED_STUDENT_RESULTS_PATH = "grading/results.json";
 var PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE = "Update Graider student report";
+var EMPTY_COUNT11 = 0;
 var PUBLISHED_FILE_COUNT_PER_STUDENT = 2;
 var FIRST_PUBLISHED_FILE_COUNT = 1;
+var STUDENT_PUBLISH_MODE_GRAIDER_GENERATED = "graider-generated";
+var STUDENT_PUBLISH_MODE_FACULTY_PROVIDED = "faculty-provided";
+var STUDENT_PUBLISH_MODE_BOTH = "both";
+var STUDENT_PUBLISH_MODE_DISABLED = "disabled";
+var CURRENT_DIRECTORY_PREFIX = "./";
+var WINDOWS_PATH_SEPARATOR_PATTERN2 = /\\/g;
 var createPublishedFileReference = (owner, repo, filePath) => `${owner}/${repo}:${filePath}`;
 var createRepositoryMissingWarning = (student) => createWarningDiagnostic(
   DiagnosticCode.StudentReportRepositoryMissing,
@@ -5890,12 +5930,193 @@ var createWriteDiagnostic = (student, filePath, error) => createConfigDiagnostic
     } : {}
   }
 );
+var createArtifactMissingDiagnostic = (student, artifactName) => createConfigDiagnostic(
+  DiagnosticCode.StudentReportArtifactMissing,
+  "Student report source artifact was not found.",
+  {
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    repositoryName: student.repositoryName,
+    artifact: artifactName,
+    workflowRunId: student.grading.workflowRunId
+  }
+);
+var createSourceMissingDiagnostic = (student, artifactName, sourceFile) => createConfigDiagnostic(
+  DiagnosticCode.StudentReportSourceMissing,
+  "Student report source file was not found in the configured artifact.",
+  {
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    repositoryName: student.repositoryName,
+    artifact: artifactName,
+    sourceFile
+  }
+);
+var normalizeArtifactPath = (filePath) => {
+  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN2, "/");
+  return normalizedPath.startsWith(CURRENT_DIRECTORY_PREFIX) ? normalizedPath.slice(CURRENT_DIRECTORY_PREFIX.length) : normalizedPath;
+};
+var findArtifactText = (artifact, sourceFile) => {
+  const normalizedSourceFile = normalizeArtifactPath(sourceFile);
+  return Object.entries(artifact.files).find(
+    ([filePath]) => normalizeArtifactPath(filePath) === normalizedSourceFile
+  )?.[1];
+};
+var getStudentPublishMode = (studentPublishConfig) => {
+  if (studentPublishConfig?.enabled === false) {
+    return STUDENT_PUBLISH_MODE_DISABLED;
+  }
+  if (studentPublishConfig?.mode === STUDENT_PUBLISH_MODE_FACULTY_PROVIDED) {
+    return STUDENT_PUBLISH_MODE_FACULTY_PROVIDED;
+  }
+  if (studentPublishConfig?.mode === STUDENT_PUBLISH_MODE_BOTH) {
+    return STUDENT_PUBLISH_MODE_BOTH;
+  }
+  return STUDENT_PUBLISH_MODE_GRAIDER_GENERATED;
+};
+var createGraiderGeneratedFiles = (assignment, student, generatedAt, studentPublishConfig) => [
+  {
+    path: studentPublishConfig?.destination_file ?? PUBLISHED_STUDENT_REPORT_PATH,
+    content: renderStudentMarkdownReport(assignment, student)
+  },
+  {
+    path: PUBLISHED_STUDENT_RESULTS_PATH,
+    content: renderStudentResultsJson(assignment, student, generatedAt)
+  }
+];
+var createBothGraiderGeneratedFile = (assignment, student, studentPublishConfig) => ({
+  path: studentPublishConfig.graider_report_destination ?? PUBLISHED_STUDENT_REPORT_PATH,
+  content: renderStudentMarkdownReport(assignment, student)
+});
+var downloadFacultyProvidedArtifact = async (githubClient, student, artifactName) => {
+  if (student.repositoryOwner === void 0 || student.repositoryName === void 0 || student.grading.workflowRunId === void 0) {
+    return null;
+  }
+  return githubClient.downloadArtifact({
+    owner: student.repositoryOwner,
+    repo: student.repositoryName,
+    runId: student.grading.workflowRunId,
+    artifactName
+  });
+};
+var createFacultyProvidedFile = async (githubClient, student, artifactName, sourceFile, destinationFile) => {
+  const artifact = await downloadFacultyProvidedArtifact(githubClient, student, artifactName);
+  if (artifact === null) {
+    return {
+      errors: [createArtifactMissingDiagnostic(student, artifactName)]
+    };
+  }
+  const content = findArtifactText(artifact, sourceFile);
+  if (content === void 0) {
+    return {
+      errors: [createSourceMissingDiagnostic(student, artifactName, sourceFile)]
+    };
+  }
+  return {
+    file: {
+      path: destinationFile,
+      content
+    },
+    errors: []
+  };
+};
+var createPublishFiles = async (input) => {
+  const mode = getStudentPublishMode(input.studentPublishConfig);
+  if (mode === STUDENT_PUBLISH_MODE_DISABLED) {
+    return {
+      files: [],
+      errors: [],
+      skipped: true
+    };
+  }
+  if (mode === STUDENT_PUBLISH_MODE_GRAIDER_GENERATED) {
+    return {
+      files: createGraiderGeneratedFiles(
+        input.assignment,
+        input.student,
+        input.generatedAt,
+        input.studentPublishConfig
+      ),
+      errors: [],
+      skipped: false
+    };
+  }
+  if (mode === STUDENT_PUBLISH_MODE_FACULTY_PROVIDED) {
+    const studentPublishConfig2 = input.studentPublishConfig;
+    const artifactName2 = studentPublishConfig2?.artifact ?? "";
+    const sourceFile2 = studentPublishConfig2?.source_file ?? "";
+    const destinationFile2 = studentPublishConfig2?.destination_file ?? PUBLISHED_STUDENT_REPORT_PATH;
+    const facultyFile2 = await createFacultyProvidedFile(
+      input.githubClient,
+      input.student,
+      artifactName2,
+      sourceFile2,
+      destinationFile2
+    );
+    return {
+      files: facultyFile2.file === void 0 ? [] : [facultyFile2.file],
+      errors: facultyFile2.errors,
+      skipped: false
+    };
+  }
+  const studentPublishConfig = input.studentPublishConfig;
+  const artifactName = studentPublishConfig?.artifact ?? "";
+  const sourceFile = studentPublishConfig?.faculty_report_source ?? "";
+  const destinationFile = studentPublishConfig?.faculty_report_destination ?? PUBLISHED_STUDENT_REPORT_PATH;
+  const facultyFile = await createFacultyProvidedFile(
+    input.githubClient,
+    input.student,
+    artifactName,
+    sourceFile,
+    destinationFile
+  );
+  const files = [
+    createBothGraiderGeneratedFile(
+      input.assignment,
+      input.student,
+      studentPublishConfig ?? {
+        enabled: true,
+        mode: STUDENT_PUBLISH_MODE_BOTH
+      }
+    ),
+    ...facultyFile.file === void 0 ? [] : [facultyFile.file]
+  ];
+  return {
+    files,
+    errors: facultyFile.errors,
+    skipped: false
+  };
+};
+var publishFile = async (githubClient, student, file) => {
+  if (student.repositoryOwner === void 0 || student.repositoryName === void 0) {
+    return "";
+  }
+  await githubClient.writeRepositoryFile({
+    owner: student.repositoryOwner,
+    repo: student.repositoryName,
+    path: file.path,
+    content: file.content,
+    message: PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE
+  });
+  return createPublishedFileReference(student.repositoryOwner, student.repositoryName, file.path);
+};
 var publishStudentReport = async ({
   githubClient,
   assignment,
   student,
-  generatedAt
+  generatedAt,
+  studentPublishConfig
 }) => {
+  if (getStudentPublishMode(studentPublishConfig) === STUDENT_PUBLISH_MODE_DISABLED) {
+    return {
+      studentId: student.studentId,
+      githubUsername: student.githubUsername,
+      publishedFiles: [],
+      warnings: [],
+      errors: [],
+      skipped: true
+    };
+  }
   if (student.repositoryOwner === void 0 || student.repositoryName === void 0 || student.repositoryStatus !== "available") {
     return {
       studentId: student.studentId,
@@ -5907,35 +6128,39 @@ var publishStudentReport = async ({
     };
   }
   const publishedFiles = [];
+  let publishPlan;
   try {
-    await githubClient.writeRepositoryFile({
-      owner: student.repositoryOwner,
-      repo: student.repositoryName,
-      path: PUBLISHED_STUDENT_REPORT_PATH,
-      content: renderStudentMarkdownReport(assignment, student),
-      message: PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE
+    publishPlan = await createPublishFiles({
+      githubClient,
+      assignment,
+      student,
+      generatedAt,
+      studentPublishConfig
     });
-    publishedFiles.push(
-      createPublishedFileReference(
-        student.repositoryOwner,
-        student.repositoryName,
-        PUBLISHED_STUDENT_REPORT_PATH
-      )
-    );
-    await githubClient.writeRepositoryFile({
-      owner: student.repositoryOwner,
-      repo: student.repositoryName,
-      path: PUBLISHED_STUDENT_RESULTS_PATH,
-      content: renderStudentResultsJson(assignment, student, generatedAt),
-      message: PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE
-    });
-    publishedFiles.push(
-      createPublishedFileReference(
-        student.repositoryOwner,
-        student.repositoryName,
-        PUBLISHED_STUDENT_RESULTS_PATH
-      )
-    );
+  } catch (error) {
+    return {
+      studentId: student.studentId,
+      githubUsername: student.githubUsername,
+      publishedFiles,
+      warnings: [],
+      errors: [createWriteDiagnostic(student, studentPublishConfig?.source_file ?? "", error)],
+      skipped: false
+    };
+  }
+  if (publishPlan.errors.length > EMPTY_COUNT11) {
+    return {
+      studentId: student.studentId,
+      githubUsername: student.githubUsername,
+      publishedFiles,
+      warnings: [],
+      errors: publishPlan.errors,
+      skipped: false
+    };
+  }
+  try {
+    for (const file of publishPlan.files) {
+      publishedFiles.push(await publishFile(githubClient, student, file));
+    }
     return {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
@@ -5945,7 +6170,7 @@ var publishStudentReport = async ({
       skipped: false
     };
   } catch (error) {
-    const attemptedPath = publishedFiles.length === PUBLISHED_FILE_COUNT_PER_STUDENT - FIRST_PUBLISHED_FILE_COUNT ? PUBLISHED_STUDENT_RESULTS_PATH : PUBLISHED_STUDENT_REPORT_PATH;
+    const attemptedPath = publishPlan.files[publishedFiles.length]?.path ?? (publishedFiles.length === PUBLISHED_FILE_COUNT_PER_STUDENT - FIRST_PUBLISHED_FILE_COUNT ? PUBLISHED_STUDENT_RESULTS_PATH : PUBLISHED_STUDENT_REPORT_PATH);
     return {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
@@ -5958,30 +6183,32 @@ var publishStudentReport = async ({
 };
 
 // src/execution/report-publisher.ts
-var EMPTY_COUNT11 = 0;
+var EMPTY_COUNT12 = 0;
 var publishStudentReports = async ({
   report,
-  githubClient
+  githubClient,
+  studentPublishConfig
 }) => {
   const publishedFiles = [];
   const warnings = [];
   const errors = [];
-  let studentsPublished = EMPTY_COUNT11;
-  let publishFailed = EMPTY_COUNT11;
-  let publishSkipped = EMPTY_COUNT11;
+  let studentsPublished = EMPTY_COUNT12;
+  let publishFailed = EMPTY_COUNT12;
+  let publishSkipped = EMPTY_COUNT12;
   for (const student of report.students) {
     const result = await publishStudentReport({
       githubClient,
       assignment: report.assignment,
       student,
-      generatedAt: report.generatedAt
+      generatedAt: report.generatedAt,
+      studentPublishConfig
     });
     publishedFiles.push(...result.publishedFiles);
     warnings.push(...result.warnings);
     errors.push(...result.errors);
     if (result.skipped) {
       publishSkipped += 1;
-    } else if (result.errors.length > EMPTY_COUNT11) {
+    } else if (result.errors.length > EMPTY_COUNT12) {
       publishFailed += 1;
     } else {
       studentsPublished += 1;
@@ -6333,22 +6560,22 @@ var parseGradingResultsJsonText = (jsonText) => {
 var REPORT_SCHEMA_VERSION = 1;
 
 // src/reporting/report-collector.ts
-var EMPTY_COUNT12 = 0;
+var EMPTY_COUNT13 = 0;
 var FIRST_SORT_BEFORE_SECOND = -1;
 var FIRST_SORT_AFTER_SECOND = 1;
 var FIRST_WORKFLOW_RUN_INDEX = 0;
-var CURRENT_DIRECTORY_PREFIX = "./";
-var WINDOWS_PATH_SEPARATOR_PATTERN2 = /\\/g;
+var CURRENT_DIRECTORY_PREFIX2 = "./";
+var WINDOWS_PATH_SEPARATOR_PATTERN3 = /\\/g;
 var compareStudents = (left, right) => {
   const sectionComparison = left.section.localeCompare(right.section);
-  if (sectionComparison !== EMPTY_COUNT12) {
+  if (sectionComparison !== EMPTY_COUNT13) {
     return sectionComparison;
   }
   return left.studentId.localeCompare(right.studentId);
 };
 var compareRuns = (left, right) => {
   const updatedComparison = right.updatedAt.localeCompare(left.updatedAt);
-  if (updatedComparison !== EMPTY_COUNT12) {
+  if (updatedComparison !== EMPTY_COUNT13) {
     return updatedComparison;
   }
   return left.id < right.id ? FIRST_SORT_BEFORE_SECOND : FIRST_SORT_AFTER_SECOND;
@@ -6364,20 +6591,20 @@ var normalizeGitHubError5 = (error) => error instanceof GitHubClientError ? crea
 var getEffectiveGrading3 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getWorkflowRunStatus = (run) => run === void 0 ? void 0 : run.status;
 var getWorkflowRunConclusion = (run) => run === void 0 ? void 0 : run.conclusion;
-var normalizeArtifactPath = (filePath) => {
-  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN2, "/");
-  return normalizedPath.startsWith(CURRENT_DIRECTORY_PREFIX) ? normalizedPath.slice(CURRENT_DIRECTORY_PREFIX.length) : normalizedPath;
+var normalizeArtifactPath2 = (filePath) => {
+  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN3, "/");
+  return normalizedPath.startsWith(CURRENT_DIRECTORY_PREFIX2) ? normalizedPath.slice(CURRENT_DIRECTORY_PREFIX2.length) : normalizedPath;
 };
 var findArtifactResultText = (artifact, resultFilePath) => {
   if (artifact === null) {
     return void 0;
   }
-  const normalizedResultFilePath = normalizeArtifactPath(resultFilePath);
+  const normalizedResultFilePath = normalizeArtifactPath2(resultFilePath);
   return Object.entries(artifact.files).find(
-    ([filePath]) => normalizeArtifactPath(filePath) === normalizedResultFilePath
+    ([filePath]) => normalizeArtifactPath2(filePath) === normalizedResultFilePath
   )?.[1];
 };
-var getArtifactFileKeys = (artifact) => artifact === null ? [] : Object.keys(artifact.files).map(normalizeArtifactPath).sort((left, right) => left.localeCompare(right));
+var getArtifactFileKeys = (artifact) => artifact === null ? [] : Object.keys(artifact.files).map(normalizeArtifactPath2).sort((left, right) => left.localeCompare(right));
 var createDefaultGrading = () => ({
   workflowStatus: "unknown",
   resultStatus: "unknown",
@@ -6488,7 +6715,7 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
   const resultText = findArtifactResultText(artifact, gradingConfig.result_file);
   const resultFileStatus = artifact === null ? "not_checked" : resultText === void 0 ? "missing" : "valid";
   const validationResult = resultText === void 0 ? void 0 : parseGradingResultsJsonText(resultText);
-  const finalResultFileStatus = validationResult === void 0 || validationResult.errors.length === EMPTY_COUNT12 ? resultFileStatus : "invalid";
+  const finalResultFileStatus = validationResult === void 0 || validationResult.errors.length === EMPTY_COUNT13 ? resultFileStatus : "invalid";
   const parsedResultStatus = validationResult?.result?.status;
   const workflowRunStatus = getWorkflowRunStatus(workflowRun);
   const workflowRunConclusion = getWorkflowRunConclusion(workflowRun);
@@ -6516,7 +6743,7 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
       ...input.includeArtifactFileKeys ? {
         artifactFileKeys,
         configuredResultFile: gradingConfig.result_file,
-        normalizedResultFile: normalizeArtifactPath(gradingConfig.result_file)
+        normalizedResultFile: normalizeArtifactPath2(gradingConfig.result_file)
       } : {}
     },
     warnings: [...mapping.warnings, ...validationResult?.warnings ?? []],
@@ -6585,7 +6812,7 @@ var collectStudent = async (input, student) => {
   }
 };
 var countResultStatus = (students, status) => students.filter((student) => student.grading.resultStatus === status).length;
-var countDiagnostics = (students, fieldName) => students.reduce((total, student) => total + student[fieldName].length, EMPTY_COUNT12);
+var countDiagnostics = (students, fieldName) => students.reduce((total, student) => total + student[fieldName].length, EMPTY_COUNT13);
 var createSummary3 = (rosterSummary, students) => ({
   studentCount: rosterSummary.studentCount,
   activeStudentCount: rosterSummary.activeStudentCount,
@@ -6858,12 +7085,12 @@ var writeReportFiles = (files) => {
 
 // src/cli/commands/report.command.ts
 var COMMAND_NAME6 = "report";
-var EMPTY_COUNT13 = 0;
+var EMPTY_COUNT14 = 0;
 var getCommandStatus2 = (errorCount, generatedFileCount) => {
-  if (errorCount === EMPTY_COUNT13) {
+  if (errorCount === EMPTY_COUNT14) {
     return "success";
   }
-  return generatedFileCount > EMPTY_COUNT13 ? "partial_success" : "failure";
+  return generatedFileCount > EMPTY_COUNT14 ? "partial_success" : "failure";
 };
 var createDefaultGitHubClient3 = () => readGitHubToken() === void 0 ? new FakeGitHubClient() : createGitHubClient();
 var createReportFiles = (repoRoot, report) => {
@@ -6925,7 +7152,7 @@ var runReportCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > EMPTY_COUNT13) {
+  if (rosterResult.errors.length > EMPTY_COUNT14) {
     return createCommandResult({
       commandName: COMMAND_NAME6,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
@@ -6975,19 +7202,20 @@ var runReportCommand = async ({
   const writeResult = writeReportFiles(
     createReportFiles(configResult.config.summary.repoRoot, collectResult.report)
   );
-  const publishResult = publishStudentReports2 && writeResult.errors.length === EMPTY_COUNT13 ? await publishStudentReports({
+  const publishResult = publishStudentReports2 && writeResult.errors.length === EMPTY_COUNT14 ? await publishStudentReports({
     report: collectResult.report,
-    githubClient: activeGitHubClient
+    githubClient: activeGitHubClient,
+    studentPublishConfig: configResult.config.course.reports.student_publish
   }) : {
     publishedFiles: [],
     warnings: [],
     errors: [],
     studentsReported: collectResult.report.students.length,
-    studentsPublished: EMPTY_COUNT13,
-    publishFailed: EMPTY_COUNT13,
-    publishSkipped: EMPTY_COUNT13
+    studentsPublished: EMPTY_COUNT14,
+    publishFailed: EMPTY_COUNT14,
+    publishSkipped: EMPTY_COUNT14
   };
-  const commandStatus = publishResult.errors.length > EMPTY_COUNT13 ? getCommandStatus2(publishResult.errors.length, publishResult.studentsPublished) : getCommandStatus2(writeResult.errors.length, writeResult.generatedFiles.length);
+  const commandStatus = publishResult.errors.length > EMPTY_COUNT14 ? getCommandStatus2(publishResult.errors.length, publishResult.studentsPublished) : getCommandStatus2(writeResult.errors.length, writeResult.generatedFiles.length);
   return createCommandResult({
     commandName: COMMAND_NAME6,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
@@ -7028,6 +7256,117 @@ var registerReportCommand = (program) => {
     writeCommandResult(result, options.json);
     process.exitCode = result.exitCode;
   });
+};
+
+// src/workflows/workflow-compatibility-validation.ts
+import fs9 from "fs";
+import path14 from "path";
+
+// src/workflows/workflow-paths.ts
+import path13 from "path";
+var TERMS_DIRECTORY5 = "terms";
+var GENERATED_WORKFLOWS_DIRECTORY = "generated-workflows";
+var WORKFLOW_FILE_NAME = "grade.yml";
+var createGeneratedWorkflowPath = (repoRoot, termCode, assignmentSlug) => {
+  const relativePath = [
+    TERMS_DIRECTORY5,
+    termCode,
+    GENERATED_WORKFLOWS_DIRECTORY,
+    assignmentSlug,
+    WORKFLOW_FILE_NAME
+  ].join("/");
+  return {
+    absolutePath: path13.join(repoRoot, relativePath),
+    relativePath
+  };
+};
+
+// src/workflows/workflow-compatibility-validation.ts
+var WORKFLOW_DISPATCH_TRIGGER = "workflow_dispatch";
+var PRESET_GRADING_MODE2 = "preset";
+var getEffectiveGrading4 = (config) => config.assignment.grading ?? config.course.grading;
+var normalizeWorkflowPath = (workflowPath) => workflowPath.replace(/\\/g, "/");
+var createConfiguredWorkflowCandidate = (repoRoot, workflowPath) => {
+  const relativePath = normalizeWorkflowPath(workflowPath);
+  return {
+    absolutePath: path14.join(repoRoot, relativePath),
+    relativePath
+  };
+};
+var createWorkflowCandidates = (config, grading) => {
+  if (grading.workflow === void 0) {
+    return [];
+  }
+  const configuredCandidate = createConfiguredWorkflowCandidate(
+    config.summary.repoRoot,
+    grading.workflow
+  );
+  const generatedCandidate = createGeneratedWorkflowPath(
+    config.summary.repoRoot,
+    config.summary.termCode,
+    config.summary.assignmentSlug
+  );
+  return grading.mode === PRESET_GRADING_MODE2 ? [configuredCandidate, generatedCandidate] : [configuredCandidate];
+};
+var findExistingWorkflowCandidate = (candidates) => candidates.find((candidate) => fs9.existsSync(candidate.absolutePath));
+var createWorkflowMissingDiagnostic3 = (grading, candidates) => createConfigDiagnostic(
+  GRADING_WORKFLOW_MISSING_CODE,
+  `Configured grading workflow ${String(grading.workflow)} was not found locally.`,
+  {
+    workflow: grading.workflow,
+    checkedPaths: candidates.map((candidate) => candidate.relativePath)
+  }
+);
+var createWorkflowDispatchUnsupportedDiagnostic = (workflowPath) => createConfigDiagnostic(
+  WORKFLOW_DISPATCH_UNSUPPORTED_CODE,
+  `Configured grading workflow ${workflowPath} does not include workflow_dispatch.`,
+  {
+    workflow: workflowPath,
+    requiredTrigger: WORKFLOW_DISPATCH_TRIGGER
+  }
+);
+var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var hasWorkflowDispatchString = (value) => typeof value === "string" && value === WORKFLOW_DISPATCH_TRIGGER;
+var hasWorkflowDispatchArray = (value) => Array.isArray(value) && value.some((item) => hasWorkflowDispatchString(item));
+var hasWorkflowDispatchObject = (value) => isRecord2(value) && Object.hasOwn(value, WORKFLOW_DISPATCH_TRIGGER);
+var hasWorkflowDispatchTrigger = (workflowDocument) => {
+  if (!isRecord2(workflowDocument)) {
+    return false;
+  }
+  const triggers = workflowDocument.on;
+  return hasWorkflowDispatchString(triggers) || hasWorkflowDispatchArray(triggers) || hasWorkflowDispatchObject(triggers);
+};
+var validateWorkflowCompatibility = (config) => {
+  const grading = getEffectiveGrading4(config);
+  if (!grading.enabled || grading.workflow === void 0) {
+    return {
+      warnings: [],
+      errors: []
+    };
+  }
+  const candidates = createWorkflowCandidates(config, grading);
+  const workflowCandidate = findExistingWorkflowCandidate(candidates);
+  if (workflowCandidate === void 0) {
+    return {
+      warnings: [],
+      errors: [createWorkflowMissingDiagnostic3(grading, candidates)]
+    };
+  }
+  const content = fs9.readFileSync(workflowCandidate.absolutePath, "utf8");
+  const parseResult = parseYaml(content, workflowCandidate.relativePath);
+  if (parseResult.status === "failure") {
+    return {
+      warnings: [],
+      errors: [parseResult.diagnostic]
+    };
+  }
+  return hasWorkflowDispatchTrigger(parseResult.value) ? {
+    warnings: [],
+    errors: []
+  } : {
+    warnings: [],
+    errors: [createWorkflowDispatchUnsupportedDiagnostic(workflowCandidate.relativePath)]
+  };
 };
 
 // src/cli/commands/validate.command.ts
@@ -7119,6 +7458,23 @@ var runValidateCommand = async ({
       }
     });
   }
+  const workflowCompatibilityResult = validateWorkflowCompatibility(configResult.config);
+  if (workflowCompatibilityResult.errors.length > 0) {
+    return createCommandResult({
+      commandName: COMMAND_NAME7,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...workflowCompatibilityResult.warnings],
+      errors: workflowCompatibilityResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        workflowCompatibilityChecked: true
+      }
+    });
+  }
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,
@@ -7131,13 +7487,18 @@ var runValidateCommand = async ({
       commandName: COMMAND_NAME7,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
-      warnings: [...rosterResult.warnings, ...readinessResult.warnings],
+      warnings: [
+        ...rosterResult.warnings,
+        ...workflowCompatibilityResult.warnings,
+        ...readinessResult.warnings
+      ],
       errors: readinessResult.errors,
       generatedFiles: [],
       summary: {
         options,
         ...configResult.config.summary,
         ...rosterResult.summary,
+        workflowCompatibilityChecked: true,
         githubReadinessChecked: true
       }
     });
@@ -7146,13 +7507,18 @@ var runValidateCommand = async ({
     commandName: COMMAND_NAME7,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
-    warnings: [...rosterResult.warnings, ...readinessResult.warnings],
+    warnings: [
+      ...rosterResult.warnings,
+      ...workflowCompatibilityResult.warnings,
+      ...readinessResult.warnings
+    ],
     errors: [],
     generatedFiles: [],
     summary: {
       options,
       ...configResult.config.summary,
       ...rosterResult.summary,
+      workflowCompatibilityChecked: true,
       githubReadinessChecked: true
     }
   });
@@ -7171,7 +7537,90 @@ var registerValidateCommand = (program) => {
 };
 
 // src/cli/commands/workflow.command.ts
-import path15 from "path";
+import path16 from "path";
+
+// src/workflows/result-writer-template.ts
+var RESULT_SCHEMA_VERSION = 1;
+var RESULT_SCHEMA_VERSION_TEXT = String(RESULT_SCHEMA_VERSION);
+var RESULT_WRITER_SCRIPT_PATH = ".graider/write-grading-result.py";
+var renderGradingResultWriterScript = () => `#!/usr/bin/env python3
+import argparse
+import json
+import os
+import sys
+
+SCHEMA_VERSION = ${RESULT_SCHEMA_VERSION_TEXT}
+STATUS_PASSED = "passed"
+STATUS_FAILED = "failed"
+STATUS_SKIPPED = "skipped"
+OUTCOME_MAP = {
+    "success": STATUS_PASSED,
+    "failure": STATUS_FAILED,
+    "cancelled": STATUS_FAILED,
+    "skipped": STATUS_SKIPPED,
+}
+
+
+def map_outcome(outcome):
+    normalized = (outcome or "").strip().lower()
+    return OUTCOME_MAP.get(normalized, STATUS_FAILED)
+
+
+def parse_check(raw_check):
+    name, separator, outcome = raw_check.partition("=")
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("check name must not be empty")
+    normalized_outcome = outcome if separator else ""
+    return {
+        "name": normalized_name,
+        "status": map_outcome(normalized_outcome),
+    }
+
+
+def compute_overall_status(checks):
+    if not checks:
+        return STATUS_SKIPPED
+    statuses = [check["status"] for check in checks]
+    if STATUS_FAILED in statuses:
+        return STATUS_FAILED
+    if all(status == STATUS_SKIPPED for status in statuses):
+        return STATUS_SKIPPED
+    return STATUS_PASSED
+
+
+def write_result(output_path, checks):
+    parent = os.path.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    result = {
+        "schema_version": SCHEMA_VERSION,
+        "status": compute_overall_status(checks),
+        "checks": checks,
+    }
+    with open(output_path, "w", encoding="utf-8") as output_file:
+        json.dump(result, output_file, indent=2)
+        output_file.write("\\n")
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(description="Write Graider grading result JSON.")
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--check", action="append", default=[])
+    args = parser.parse_args(argv)
+
+    try:
+        checks = [parse_check(raw_check) for raw_check in args.check]
+        write_result(args.output, checks)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
+`;
 
 // src/workflows/java-junit-checkstyle-workflow.ts
 var JAVA_JUNIT_CHECKSTYLE_PRESET = "java-junit-checkstyle";
@@ -7184,11 +7633,16 @@ var JUNIT_PLATFORM_CONSOLE_VERSION = "6.1.0";
 var MOCKITO_VERSION = "5.18.0";
 var BYTE_BUDDY_VERSION = "1.17.5";
 var JAVAFX_VERSION = "25";
+var OUTPUT_DIRECTORY = "graider-output";
+var indentWorkflowRunLine = (line) => `          ${line}`;
+var renderResultWriterInstallLines = () => renderGradingResultWriterScript().trimEnd().split("\n").map(indentWorkflowRunLine);
+var createResultOutputPath = (resultFile) => resultFile.includes("/") ? resultFile : `${OUTPUT_DIRECTORY}/${resultFile}`;
 var renderJavaJunitCheckstyleWorkflow = ({
   grading
 }) => {
   const artifactName = grading.artifact ?? "grading-results";
   const resultFile = grading.result_file ?? "grading-results.json";
+  const resultOutputPath = createResultOutputPath(resultFile);
   return [
     `name: ${WORKFLOW_NAME}`,
     "",
@@ -7240,6 +7694,14 @@ var renderJavaJunitCheckstyleWorkflow = ({
     '          curl -fsSL -o "$TOOLS_DIR/javafx.zip" "https://download2.gluonhq.com/openjfx/${JAVAFX_VERSION}/openjfx-${JAVAFX_VERSION}_linux-x64_bin-sdk.zip"',
     '          unzip -q "$TOOLS_DIR/javafx.zip" -d "$TOOLS_DIR/javafx"',
     "",
+    "      - name: Install Graider result writer",
+    "        run: |",
+    "          mkdir -p .graider",
+    `          cat > ${RESULT_WRITER_SCRIPT_PATH} <<'PY'`,
+    ...renderResultWriterInstallLines(),
+    "          PY",
+    `          chmod +x ${RESULT_WRITER_SCRIPT_PATH}`,
+    "",
     "      - name: Run CheckStyle",
     "        id: checkstyle",
     "        continue-on-error: true",
@@ -7268,70 +7730,34 @@ var renderJavaJunitCheckstyleWorkflow = ({
     "",
     "      - name: Write Graider grading result",
     "        if: always()",
-    "        uses: actions/github-script@v7",
     "        env:",
-    `          GRAIDER_RESULT_FILE: ${resultFile}`,
     "          CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}",
     "          UNIT_TESTS_OUTCOME: ${{ steps.unit-tests.outcome }}",
-    "        with:",
-    "          script: |",
-    '            const fs = require("fs");',
-    '            const path = require("path");',
-    "            const outcomeMap = {",
-    '              success: "passed",',
-    '              failure: "failed",',
-    '              cancelled: "failed",',
-    '              skipped: "skipped"',
-    "            };",
-    '            const mapOutcome = (outcome) => outcomeMap[outcome] || "failed";',
-    "            const checks = [",
-    '              { name: "CheckStyle", status: mapOutcome(process.env.CHECKSTYLE_OUTCOME) },',
-    '              { name: "Unit Tests", status: mapOutcome(process.env.UNIT_TESTS_OUTCOME) }',
-    "            ];",
-    '            const status = checks.every((check) => check.status === "passed") ? "passed" : "failed";',
-    "            const result = { schema_version: 1, status, checks };",
-    '            const resultFile = process.env.GRAIDER_RESULT_FILE || "grading-results.json";',
-    "            fs.mkdirSync(path.dirname(resultFile), { recursive: true });",
-    "            fs.writeFileSync(resultFile, `${JSON.stringify(result, undefined, 2)}\\n`);",
+    "        run: |",
+    `          python3 ${RESULT_WRITER_SCRIPT_PATH} \\`,
+    `            --output ${resultOutputPath} \\`,
+    '            --check "CheckStyle=$CHECKSTYLE_OUTCOME" \\',
+    '            --check "Unit Tests=$UNIT_TESTS_OUTCOME"',
     "",
     "      - name: Upload Graider grading result",
     "        if: always()",
     "        uses: actions/upload-artifact@v4",
     "        with:",
     `          name: ${artifactName}`,
-    `          path: ${resultFile}`,
+    `          path: ${resultOutputPath}`,
     ""
   ].join("\n");
 };
 
-// src/workflows/workflow-paths.ts
-import path13 from "path";
-var TERMS_DIRECTORY5 = "terms";
-var GENERATED_WORKFLOWS_DIRECTORY = "generated-workflows";
-var WORKFLOW_FILE_NAME = "grade.yml";
-var createGeneratedWorkflowPath = (repoRoot, termCode, assignmentSlug) => {
-  const relativePath = [
-    TERMS_DIRECTORY5,
-    termCode,
-    GENERATED_WORKFLOWS_DIRECTORY,
-    assignmentSlug,
-    WORKFLOW_FILE_NAME
-  ].join("/");
-  return {
-    absolutePath: path13.join(repoRoot, relativePath),
-    relativePath
-  };
-};
-
 // src/workflows/workflow-writer.ts
-import fs9 from "fs";
-import path14 from "path";
+import fs10 from "fs";
+import path15 from "path";
 var writeWorkflowFile = ({
   filePath,
   content,
   force
 }) => {
-  if (!force && fs9.existsSync(filePath)) {
+  if (!force && fs10.existsSync(filePath)) {
     return {
       status: "failure",
       diagnostic: createConfigDiagnostic(
@@ -7344,8 +7770,8 @@ var writeWorkflowFile = ({
     };
   }
   try {
-    fs9.mkdirSync(path14.dirname(filePath), { recursive: true });
-    fs9.writeFileSync(filePath, content);
+    fs10.mkdirSync(path15.dirname(filePath), { recursive: true });
+    fs10.writeFileSync(filePath, content);
     return {
       status: "success"
     };
@@ -7368,15 +7794,15 @@ var writeWorkflowFile = ({
 var WORKFLOW_COMMAND_NAME = "workflow";
 var GENERATE_COMMAND_NAME = "generate";
 var COMMAND_NAME8 = "workflow generate";
-var PRESET_GRADING_MODE2 = "preset";
+var PRESET_GRADING_MODE3 = "preset";
 var LEGACY_GRADING_MODE2 = "custom-workflow";
-var EMPTY_COUNT14 = 0;
-var getEffectiveGrading4 = (courseGrading, assignmentGrading) => assignmentGrading ?? courseGrading;
+var EMPTY_COUNT15 = 0;
+var getEffectiveGrading5 = (courseGrading, assignmentGrading) => assignmentGrading ?? courseGrading;
 var formatGeneratedFilePath = (repoRoot, absolutePath) => {
   try {
     return toRepositoryRelativePath(repoRoot, absolutePath);
   } catch {
-    return toForwardSlashPath(path15.resolve(absolutePath));
+    return toForwardSlashPath(path16.resolve(absolutePath));
   }
 };
 var resolveOutputPath = (cwd, repoRoot, termCode, assignmentSlug, output) => {
@@ -7387,7 +7813,7 @@ var resolveOutputPath = (cwd, repoRoot, termCode, assignmentSlug, output) => {
       reportPath: workflowPath.relativePath
     };
   }
-  const absolutePath = path15.isAbsolute(output) ? output : path15.resolve(cwd, output);
+  const absolutePath = path16.isAbsolute(output) ? output : path16.resolve(cwd, output);
   return {
     absolutePath,
     reportPath: formatGeneratedFilePath(repoRoot, absolutePath)
@@ -7417,7 +7843,7 @@ var runWorkflowGenerateCommand = ({
       }
     });
   }
-  const grading = getEffectiveGrading4(
+  const grading = getEffectiveGrading5(
     configResult.config.course.grading,
     configResult.config.assignment.grading
   );
@@ -7445,7 +7871,7 @@ var runWorkflowGenerateCommand = ({
     });
   }
   const mode = grading.mode ?? LEGACY_GRADING_MODE2;
-  if (mode !== PRESET_GRADING_MODE2) {
+  if (mode !== PRESET_GRADING_MODE3) {
     return createCommandResult({
       commandName: COMMAND_NAME8,
       assignmentFile: assignmentConfigPath,
@@ -7454,7 +7880,7 @@ var runWorkflowGenerateCommand = ({
       errors: [
         createConfigDiagnostic(
           WORKFLOW_GENERATION_REQUIRES_PRESET_MODE_CODE,
-          `Workflow generation requires grading.mode: ${PRESET_GRADING_MODE2}.`,
+          `Workflow generation requires grading.mode: ${PRESET_GRADING_MODE3}.`,
           {
             assignmentFile: assignmentConfigPath,
             mode
@@ -7508,11 +7934,11 @@ var runWorkflowGenerateCommand = ({
     force
   });
   const errors = writeResult.status === "failure" ? [writeResult.diagnostic] : [];
-  const generatedFiles = errors.length > EMPTY_COUNT14 ? [] : [outputPath.reportPath];
+  const generatedFiles = errors.length > EMPTY_COUNT15 ? [] : [outputPath.reportPath];
   return createCommandResult({
     commandName: COMMAND_NAME8,
     assignmentFile: assignmentConfigPath,
-    status: errors.length > EMPTY_COUNT14 ? "failure" : "success",
+    status: errors.length > EMPTY_COUNT15 ? "failure" : "success",
     warnings: [],
     errors,
     generatedFiles,

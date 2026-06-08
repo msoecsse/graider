@@ -66,6 +66,27 @@ file, write to GitHub, or mutate template repositories.
 Generated workflows are safe to review and copy into a template repository. The
 command refuses to overwrite an existing workflow file unless `--force` is used.
 
+Copyable workflow and assignment examples are maintained under
+[`examples/grading/`](../examples/grading/README.md). Those files are
+documentation examples, not generated command output.
+
+Generated preset workflows are self-contained. During a workflow run, the
+workflow writes a helper script at:
+
+```text
+.graider/write-grading-result.py
+```
+
+The helper uses only the Python standard library, maps GitHub Actions step
+outcomes to Graider result statuses, and writes:
+
+```text
+graider-output/grading-results.json
+```
+
+The workflow uploads that file as the configured grading artifact. Student
+repositories do not need Graider or Graider npm dependencies installed.
+
 ## Published Student Repository Files
 
 Paths in each student repository:
@@ -76,6 +97,10 @@ grading/results.json
 ```
 
 Publishing occurs only when `graider report --publish-student-reports` is used. Published files contain only the target student's report/result data. Faculty summaries and other students' data must not be published to student repositories.
+
+For no-grading assignments, Graider-generated student reports still include
+assignment and repository metadata and state that automated grading is not
+configured. They do not include fake scores or checks.
 
 ## Logs
 

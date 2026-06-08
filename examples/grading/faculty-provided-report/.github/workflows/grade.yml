@@ -1,0 +1,62 @@
+name: Grading With Faculty Feedback
+
+on:
+  - push
+  - repository_dispatch
+  - workflow_dispatch
+
+permissions:
+  checks: write
+  actions: read
+  contents: read
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run grading command
+        id: grading-command
+        continue-on-error: true
+        run: |
+          echo "Replace this placeholder with the real grading command."
+
+      - name: Write Graider results and student feedback
+        if: always()
+        env:
+          GRADING_OUTCOME: ${{ steps.grading-command.outcome }}
+        run: |
+          mkdir -p graider-output
+          python3 - <<'PY'
+          import json
+          import os
+
+          status = {
+              "success": "passed",
+              "failure": "failed",
+              "cancelled": "failed",
+              "skipped": "skipped",
+          }.get(os.environ.get("GRADING_OUTCOME", "").strip().lower(), "failed")
+          result = {
+              "schema_version": 1,
+              "status": status,
+              "checks": [{"name": "Faculty Grading Command", "status": status}],
+          }
+          with open("graider-output/grading-results.json", "w", encoding="utf-8") as result_file:
+              json.dump(result, result_file, indent=2)
+              result_file.write("\n")
+          with open("graider-output/student-report.md", "w", encoding="utf-8") as report_file:
+              report_file.write("# Lab Feedback\n\n")
+              report_file.write("Your instructor-generated feedback goes here.\n")
+          PY
+
+      - name: Upload Graider result and student report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grading-results
+          path: |
+            graider-output/grading-results.json
+            graider-output/student-report.md

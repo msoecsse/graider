@@ -106,6 +106,8 @@ export const DiagnosticCode = {
   ReportWriteFailed: "report_write_failed",
   StudentReportPublishFailed: "student_report_publish_failed",
   StudentReportRepositoryMissing: "student_report_repository_missing",
+  StudentReportSourceMissing: "student_report_source_missing",
+  StudentReportArtifactMissing: "student_report_artifact_missing",
   StudentReportWriteFailed: "student_report_write_failed",
   StudentReportPublishPartial: "student_report_publish_partial",
   StudentReportPublishNotRequested: "student_report_publish_not_requested"

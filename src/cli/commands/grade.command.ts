@@ -16,7 +16,11 @@ import {
   validateTargetSelector,
   type RawTargetSelector
 } from "../../core/target-selector.js";
-import { DiagnosticCode, createConfigDiagnostic } from "../../diagnostics/error-catalog.js";
+import {
+  DiagnosticCode,
+  createConfigDiagnostic,
+  createWarningDiagnostic
+} from "../../diagnostics/error-catalog.js";
 import {
   executeGrade,
   getGradeGitHubDiagnostics,
@@ -33,6 +37,7 @@ import { writeCommandResult } from "../output.js";
 
 const COMMAND_NAME = "grade";
 const EMPTY_COUNT = 0;
+const NOT_CONFIGURED_WARNING_COUNT = 1;
 
 export interface GradeCommandRequest {
   cwd: string;
@@ -69,6 +74,12 @@ const createLifecycleDiagnostic = (status: string) =>
     DiagnosticCode.AssignmentStatusBlocksGrade,
     `Assignment status ${status} does not allow grade.`,
     { assignmentStatus: status }
+  );
+
+const createGradingNotConfiguredWarning = () =>
+  createWarningDiagnostic(
+    DiagnosticCode.GradingNotConfigured,
+    "Automated grading is not configured for this assignment."
   );
 
 export const runGradeCommand = async ({
@@ -124,28 +135,6 @@ export const runGradeCommand = async ({
     });
   }
 
-  const grading = getEffectiveGrading(configResult.config);
-
-  if (!grading.enabled || grading.workflow === undefined) {
-    return createCommandResult({
-      commandName: COMMAND_NAME,
-      assignmentFile: configResult.config.summary.assignmentConfigPath,
-      status: "failure",
-      warnings: [],
-      errors: [
-        createConfigDiagnostic(
-          DiagnosticCode.GradingNotConfigured,
-          "Grading workflow is not configured for this assignment."
-        )
-      ],
-      generatedFiles: [],
-      summary: {
-        options,
-        ...configResult.config.summary
-      }
-    });
-  }
-
   const rosterResult = loadAssignmentRosters(configResult.config);
 
   if (rosterResult.errors.length > EMPTY_COUNT) {
@@ -179,6 +168,42 @@ export const runGradeCommand = async ({
         ...configResult.config.summary,
         ...rosterResult.summary,
         ...selectionResult.summary
+      }
+    });
+  }
+
+  const grading = getEffectiveGrading(configResult.config);
+
+  if (!grading.enabled || grading.workflow === undefined) {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "success",
+      warnings: [
+        ...rosterResult.warnings,
+        ...selectionResult.warnings,
+        createGradingNotConfiguredWarning()
+      ],
+      errors: [],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        ...selectionResult.summary,
+        gradingEnabled: false,
+        workflowDispatchAttempted: false,
+        resultStatus: "not_configured",
+        targetsSelected: selectionResult.students.length,
+        dispatchAttempted: EMPTY_COUNT,
+        dispatchSucceeded: EMPTY_COUNT,
+        dispatchFailed: EMPTY_COUNT,
+        skipped: selectionResult.students.length,
+        warnings:
+          rosterResult.warnings.length +
+          selectionResult.warnings.length +
+          NOT_CONFIGURED_WARNING_COUNT,
+        errors: EMPTY_COUNT
       }
     });
   }

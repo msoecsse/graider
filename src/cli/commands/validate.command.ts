@@ -15,6 +15,7 @@ import { validateGitHubReadiness } from "../../github/github-readiness-validatio
 import type { GitHubTemplateRepository } from "../../github/github-models.js";
 import type { RosterStudent } from "../../roster/roster-models.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
+import { validateWorkflowCompatibility } from "../../workflows/workflow-compatibility-validation.js";
 import { writeCommandResult } from "../output.js";
 
 const COMMAND_NAME = "validate";
@@ -135,6 +136,25 @@ export const runValidateCommand = async ({
     });
   }
 
+  const workflowCompatibilityResult = validateWorkflowCompatibility(configResult.config);
+
+  if (workflowCompatibilityResult.errors.length > 0) {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...workflowCompatibilityResult.warnings],
+      errors: workflowCompatibilityResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        workflowCompatibilityChecked: true
+      }
+    });
+  }
+
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,
@@ -149,13 +169,18 @@ export const runValidateCommand = async ({
       commandName: COMMAND_NAME,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
-      warnings: [...rosterResult.warnings, ...readinessResult.warnings],
+      warnings: [
+        ...rosterResult.warnings,
+        ...workflowCompatibilityResult.warnings,
+        ...readinessResult.warnings
+      ],
       errors: readinessResult.errors,
       generatedFiles: [],
       summary: {
         options,
         ...configResult.config.summary,
         ...rosterResult.summary,
+        workflowCompatibilityChecked: true,
         githubReadinessChecked: true
       }
     });
@@ -165,13 +190,18 @@ export const runValidateCommand = async ({
     commandName: COMMAND_NAME,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
-    warnings: [...rosterResult.warnings, ...readinessResult.warnings],
+    warnings: [
+      ...rosterResult.warnings,
+      ...workflowCompatibilityResult.warnings,
+      ...readinessResult.warnings
+    ],
     errors: [],
     generatedFiles: [],
     summary: {
       options,
       ...configResult.config.summary,
       ...rosterResult.summary,
+      workflowCompatibilityChecked: true,
       githubReadinessChecked: true
     }
   });

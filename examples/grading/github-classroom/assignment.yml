@@ -1,0 +1,25 @@
+schema_version: 1
+assignment:
+  slug: lab-classroom
+  title: Classroom Autograder Lab
+  type: individual
+  status: active
+template:
+  repository: example-org/lab-classroom-template
+  branch: main
+sections:
+  - "001"
+deadline:
+  due_at: "2027-03-01T23:59:00-06:00"
+  late_policy: none
+metadata:
+  faculty_owner: faculty@example.edu
+  lms_assignment_id: null
+  grading_category: labs
+  points: 10
+grading:
+  enabled: true
+  mode: custom-workflow
+  workflow: .github/workflows/classroom.yml
+  artifact: grading-results
+  result_file: grading-results.json
