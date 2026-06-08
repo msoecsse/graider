@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "commandName": "validate",
+  "assignmentFile": "terms/27s1/assignments/lab01/assignment.yml",
+  "status": "failure",
+  "exitCode": 5,
+  "diagnostics": [
+    {
+      "code": "workflow_dispatch_unsupported",
+      "severity": "error",
+      "message": "The configured grading workflow does not support workflow_dispatch.",
+      "context": {
+        "path": ".github/workflows/grade.yml",
+        "assignmentSlug": "lab01"
+      }
+    }
+  ],
+  "warnings": [],
+  "errors": [
+    {
+      "code": "workflow_dispatch_unsupported",
+      "severity": "error",
+      "message": "The configured grading workflow does not support workflow_dispatch.",
+      "context": {
+        "path": ".github/workflows/grade.yml",
+        "assignmentSlug": "lab01"
+      }
+    }
+  ],
+  "generatedFiles": [],
+  "summary": {
+    "assignmentSlug": "lab01",
+    "termCode": "27s1",
+    "courseCode": "csc1120",
+    "gradingEnabled": true,
+    "gradingMode": "custom-workflow",
+    "workflowCompatibilityChecked": true,
+    "warningCount": 0,
+    "errorCount": 1
+  }
+}

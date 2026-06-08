@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "commandName": "apply",
+  "assignmentFile": "terms/27s1/assignments/lab01/assignment.yml",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "warnings": [],
+  "errors": [],
+  "generatedFiles": ["terms/27s1/manifests/lab01/manifest.yml"],
+  "summary": {
+    "assignmentSlug": "lab01",
+    "manifestFile": "terms/27s1/manifests/lab01/manifest.yml",
+    "studentsProcessed": 2,
+    "created": 2,
+    "existing": 0,
+    "verified": 0,
+    "noop": 0,
+    "skipped": 0,
+    "retryCount": 0
+  }
+}

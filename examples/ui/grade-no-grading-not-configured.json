@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "commandName": "grade",
+  "assignmentFile": "terms/27s1/assignments/manual-lab/assignment.yml",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [
+    {
+      "code": "grading_not_configured",
+      "severity": "warning",
+      "message": "Automated grading is not configured for this assignment."
+    }
+  ],
+  "warnings": [
+    {
+      "code": "grading_not_configured",
+      "severity": "warning",
+      "message": "Automated grading is not configured for this assignment."
+    }
+  ],
+  "errors": [],
+  "generatedFiles": [],
+  "summary": {
+    "assignmentSlug": "manual-lab",
+    "gradingEnabled": false,
+    "workflowDispatchAttempted": false,
+    "resultStatus": "not_configured",
+    "targetsSelected": 2,
+    "dispatchAttempted": 0,
+    "dispatchSucceeded": 0,
+    "dispatchFailed": 0,
+    "skipped": 2
+  }
+}

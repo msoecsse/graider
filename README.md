@@ -98,6 +98,10 @@ User-authored files are `course.yml`, `term.yml`, assignment YAML files, and ros
 
 ## Commands
 
+For UI integrations and automation, use `--json` output instead of scraping
+human-readable command text. See the
+[CLI JSON contract](docs/cli-json-contract.md).
+
 Validate:
 
 ```bash
@@ -198,6 +202,7 @@ See [live testing](docs/live-testing.md) before running live tests.
 
 - [Runtime and CI](docs/runtime.md)
 - [GitHub token permissions](docs/github-token-permissions.md)
+- [CLI JSON contract](docs/cli-json-contract.md)
 - [Grading result contract](docs/grading-result-contract.md)
 - [Generated files](docs/generated-files.md)
 - [Error and warning catalog](docs/error-warning-catalog.md)

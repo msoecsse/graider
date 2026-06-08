@@ -47,6 +47,16 @@ Diagnostic: `invalid_yaml`
 
 All `.json` files under `tests/fixtures` must parse with `JSON.parse`. Intentionally malformed JSON should use a non-`.json` extension such as `.invalid-json`.
 
+## UI or Automation Output Parsing
+
+Use command `--json` output for UI integrations and automation. Do not scrape
+human-readable command text. JSON output includes `schemaVersion`,
+`commandName`, `status`, `exitCode`, `diagnostics`, `warnings`, `errors`,
+`generatedFiles`, and `summary`.
+
+See [CLI JSON contract](cli-json-contract.md) and the fake UI fixtures under
+`examples/ui/`.
+
 ## Missing Roster Columns
 
 Roster CSV files must include:

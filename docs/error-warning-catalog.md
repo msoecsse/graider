@@ -9,6 +9,10 @@ message
 context
 ```
 
+CLI JSON output exposes diagnostics in `warnings`, `errors`, and the combined
+`diagnostics` array. UI integrations should branch on diagnostic `code`; message
+wording is safe for display but may evolve.
+
 Exit-code precedence is centralized. Warnings alone exit `0`.
 
 | Exit code | Meaning                                             |

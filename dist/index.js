@@ -4382,9 +4382,18 @@ var loadAssignmentRosters = (config) => {
 };
 
 // src/cli/output.ts
+var CLI_JSON_SCHEMA_VERSION = 1;
 var JSON_INDENT_SPACES = 2;
 var EMPTY_COLLECTION_LENGTH = 0;
-var formatCommandResultAsJson = (result) => JSON.stringify(redactCommandResult(result), void 0, JSON_INDENT_SPACES);
+var createCliJsonOutput = (result) => {
+  const redactedResult = redactCommandResult(result);
+  return {
+    schemaVersion: CLI_JSON_SCHEMA_VERSION,
+    ...redactedResult,
+    diagnostics: [...redactedResult.warnings, ...redactedResult.errors]
+  };
+};
+var formatCommandResultAsJson = (result) => JSON.stringify(createCliJsonOutput(result), void 0, JSON_INDENT_SPACES);
 var formatDiagnostic = (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`;
 var formatCommandResultAsText = (result) => {
   const redactedResult = redactCommandResult(result);

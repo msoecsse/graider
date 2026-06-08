@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "commandName": "workflow generate",
+  "assignmentFile": "terms/27s1/assignments/manual-lab/assignment.yml",
+  "status": "failure",
+  "exitCode": 1,
+  "diagnostics": [
+    {
+      "code": "workflow_generation_not_configured",
+      "severity": "error",
+      "message": "Workflow generation requires enabled preset grading.",
+      "context": {
+        "assignmentSlug": "manual-lab"
+      }
+    }
+  ],
+  "warnings": [],
+  "errors": [
+    {
+      "code": "workflow_generation_not_configured",
+      "severity": "error",
+      "message": "Workflow generation requires enabled preset grading.",
+      "context": {
+        "assignmentSlug": "manual-lab"
+      }
+    }
+  ],
+  "generatedFiles": [],
+  "summary": {
+    "assignmentSlug": "manual-lab",
+    "gradingEnabled": false
+  }
+}

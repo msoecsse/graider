@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "commandName": "workflow generate",
+  "assignmentFile": "terms/27s1/assignments/lab01/assignment.yml",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "warnings": [],
+  "errors": [],
+  "generatedFiles": ["terms/27s1/generated-workflows/lab01/grade.yml"],
+  "summary": {
+    "assignmentSlug": "lab01",
+    "gradingMode": "preset",
+    "preset": "java-junit-checkstyle",
+    "workflowFile": "terms/27s1/generated-workflows/lab01/grade.yml"
+  }
+}

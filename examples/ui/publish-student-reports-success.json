@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "commandName": "report",
+  "assignmentFile": "terms/27s1/assignments/lab01/assignment.yml",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "warnings": [],
+  "errors": [],
+  "generatedFiles": ["terms/27s1/reports/lab01/faculty-summary.json"],
+  "summary": {
+    "assignmentSlug": "lab01",
+    "publishStudentReports": true,
+    "studentsReported": 2,
+    "studentsPublished": 2,
+    "publishFailed": 0,
+    "publishSkipped": 0,
+    "publishedFiles": [
+      {
+        "studentId": "student01",
+        "repository": "27s1-csc1120-lab01-student01",
+        "status": "published",
+        "destinationFile": "grading/report.md",
+        "mode": "graider-generated"
+      },
+      {
+        "studentId": "student02",
+        "repository": "27s1-csc1120-lab01-student02",
+        "status": "published",
+        "destinationFile": "grading/report.md",
+        "mode": "graider-generated"
+      }
+    ]
+  }
+}
