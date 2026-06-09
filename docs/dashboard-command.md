@@ -278,8 +278,22 @@ template repository exists
 template branch exists
 required grading workflow exists for grading-enabled assignments
 workflow_dispatch is present when the workflow can be read
-student repositories exist when local manifest/roster state indicates they should
-basic repository availability
+Dashboard V1 should not inspect every student repository by default.
+
+Student repository state belongs primarily on assignment detail pages, not the main dashboard. The dashboard may include 
+a lightweight assignment state such as `not_applied` when no manifest/apply state exists, but it should not perform 
+per-student repository checks during normal dashboard loading.
+
+Use:
+not_applied
+
+when an assignment has no local manifest or apply state indicating that student repositories have been created.
+
+Do not mark missing student repositories as needsAttention for assignments that have not been applied yet.
+
+Only treat missing student repositories as dashboard attention items if existing local apply/manifest state indicates 
+the repos should already exist and the check can be performed cheaply without scanning every student repo.
+
 ```
 
 ### Do not perform expensive scans
@@ -527,6 +541,35 @@ Include optional fields if they are already easily available from parsed config.
 
 ---
 
+### Assignment apply state
+
+Assignments may include a lightweight apply state for dashboard display.
+
+Recommended values:
+
+```text
+not_applied
+applied
+partially_applied
+unknown
+```
+For V1, not_applied is sufficient when no local manifest/apply state exists.
+
+Example:
+```json
+{
+  "slug": "hw01",
+  "title": "HW 01",
+  "status": "active",
+  "gradingEnabled": false,
+  "assignmentFile": "terms/27s1/assignments/hw01/assignment.yml",
+  "applyState": "not_applied",
+  "needsAttention": false,
+  "diagnostics": []
+}
+```
+not_applied is not an error and should not set needsAttention by itself.
+
 ## Term Filter
 
 Support:
@@ -626,7 +669,7 @@ GitHub workflow checks
 workflow_dispatch parsing
 ```
 
-This keeps the command fast, predictable, and side-effect free.
+This keeps the command fast, predictable, and side effect free.
 
 ---
 
@@ -656,7 +699,27 @@ dashboard should remain responsive.
 
 Do not add strict timing tests unless the repo already has stable performance test conventions.
 
+### GitHub check containment
+
+Dashboard GitHub checks should be bounded and card-oriented.
+
+For V1, check course/term/assignment-level GitHub dependencies such as:
+
+```text
+template repository
+template branch
+configured grading workflow
+workflow_dispatch support
+```
+
+Do not check every student repository on the main dashboard. Student-level repository checks should be handled in 
+assignment detail views or explicit apply/report workflows.
+
+A failed GitHub check should become a diagnostic for the affected card or assignment. One failed check should not 
+prevent unrelated cards from rendering unless the failure is global, such as a missing token.
+
 ---
+
 
 ## Test Strategy
 
@@ -820,6 +883,12 @@ This slice is complete when:
 - [ ] missing template repo/branch/workflow/workflow_dispatch produces diagnostics
 - [ ] needsAttention and attentionCount are diagnostic-driven
 - [ ] broken assignment files produce partial_success, not total failure, when other data can be shown
+- [ ] dashboard fails clearly when `GRAIDER_GITHUB_TOKEN` is missing
+- [ ] dashboard does not silently return local-only data when GitHub auth is unavailable
+- [ ] dashboard does not inspect every student repository by default
+- [ ] dashboard uses `not_applied` for assignments with no manifest/apply state
+- [ ] `not_applied` does not set `needsAttention` by itself
+- [ ] student repository checks are deferred to assignment detail or explicit workflows
 - [ ] dashboard performs no mutations
 - [ ] tests use fake GitHub, not live credentials
 - [ ] docs describe the dashboard command and JSON contract
