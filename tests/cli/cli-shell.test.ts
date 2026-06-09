@@ -112,6 +112,14 @@ describe("graider CLI shell", () => {
     expect(output).toContain("Generate a local grading workflow file");
   });
 
+  it("command exists: dashboard", () => {
+    const output = runCliText(["dashboard", "--help"]);
+
+    expect(output).toContain("dashboard");
+    expect(output).toContain("Build a UI-ready dashboard model");
+    expect(output).toContain("--term");
+  });
+
   it("TC-CLI-SHELL-008 command exists: remove-access", () => {
     const result = runCli(["remove-access", TEST_ASSIGNMENT_FILE]);
 

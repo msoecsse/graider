@@ -3,6 +3,7 @@
 import { Command } from "commander";
 import { registerApplyCommand } from "./commands/apply.command.js";
 import { registerArchiveCommand } from "./commands/archive.command.js";
+import { registerDashboardCommand } from "./commands/dashboard.command.js";
 import { registerGradeCommand } from "./commands/grade.command.js";
 import { registerPlanCommand } from "./commands/plan.command.js";
 import { registerRemoveAccessCommand } from "./commands/remove-access.command.js";
@@ -19,6 +20,7 @@ export const buildProgram = (): Command => {
     .version("0.1.0");
 
   registerValidateCommand(program);
+  registerDashboardCommand(program);
   registerPlanCommand(program);
   registerApplyCommand(program);
   registerGradeCommand(program);

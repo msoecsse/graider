@@ -110,7 +110,18 @@ export const DiagnosticCode = {
   StudentReportArtifactMissing: "student_report_artifact_missing",
   StudentReportWriteFailed: "student_report_write_failed",
   StudentReportPublishPartial: "student_report_publish_partial",
-  StudentReportPublishNotRequested: "student_report_publish_not_requested"
+  StudentReportPublishNotRequested: "student_report_publish_not_requested",
+  DashboardJsonRequired: "dashboard_json_required",
+  DashboardTermNotFound: "dashboard_term_not_found",
+  DashboardTemplateRepositoryMissing: "dashboard_template_repository_missing",
+  DashboardTemplateBranchMissing: "dashboard_template_branch_missing",
+  DashboardGradingWorkflowMissing: "dashboard_grading_workflow_missing",
+  DashboardWorkflowDispatchMissing: "dashboard_workflow_dispatch_missing",
+  DashboardGithubAuthFailed: "dashboard_github_auth_failed",
+  DashboardGithubPermissionDenied: "dashboard_github_permission_denied",
+  DashboardGithubRateLimited: "dashboard_github_rate_limited",
+  DashboardGithubRequestFailed: "dashboard_github_request_failed",
+  GithubTokenMissing: "github_token_missing"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -230,6 +241,21 @@ export const STUDENT_REPORT_WRITE_FAILED_CODE = DiagnosticCode.StudentReportWrit
 export const STUDENT_REPORT_PUBLISH_PARTIAL_CODE = DiagnosticCode.StudentReportPublishPartial;
 export const STUDENT_REPORT_PUBLISH_NOT_REQUESTED_CODE =
   DiagnosticCode.StudentReportPublishNotRequested;
+export const DASHBOARD_JSON_REQUIRED_CODE = DiagnosticCode.DashboardJsonRequired;
+export const DASHBOARD_TERM_NOT_FOUND_CODE = DiagnosticCode.DashboardTermNotFound;
+export const DASHBOARD_TEMPLATE_REPOSITORY_MISSING_CODE =
+  DiagnosticCode.DashboardTemplateRepositoryMissing;
+export const DASHBOARD_TEMPLATE_BRANCH_MISSING_CODE = DiagnosticCode.DashboardTemplateBranchMissing;
+export const DASHBOARD_GRADING_WORKFLOW_MISSING_CODE =
+  DiagnosticCode.DashboardGradingWorkflowMissing;
+export const DASHBOARD_WORKFLOW_DISPATCH_MISSING_CODE =
+  DiagnosticCode.DashboardWorkflowDispatchMissing;
+export const DASHBOARD_GITHUB_AUTH_FAILED_CODE = DiagnosticCode.DashboardGithubAuthFailed;
+export const DASHBOARD_GITHUB_PERMISSION_DENIED_CODE =
+  DiagnosticCode.DashboardGithubPermissionDenied;
+export const DASHBOARD_GITHUB_RATE_LIMITED_CODE = DiagnosticCode.DashboardGithubRateLimited;
+export const DASHBOARD_GITHUB_REQUEST_FAILED_CODE = DiagnosticCode.DashboardGithubRequestFailed;
+export const GITHUB_TOKEN_MISSING_CODE = DiagnosticCode.GithubTokenMissing;
 
 export const createNotSupportedInMvpDiagnostic = (
   commandName: string,

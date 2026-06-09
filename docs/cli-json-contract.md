@@ -47,6 +47,30 @@ Stable top-level fields:
 `diagnostics` is additive. Existing consumers that read `warnings` and `errors`
 can continue to do so.
 
+`dashboard --json` is a UI-focused command and adds a top-level `cards` array to
+this JSON surface:
+
+```json
+{
+  "schemaVersion": 1,
+  "commandName": "dashboard",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "summary": {
+    "cardCount": 1,
+    "courseCount": 1,
+    "termCount": 1,
+    "assignmentCount": 4,
+    "needsAttentionCount": 0
+  },
+  "cards": []
+}
+```
+
+The dashboard command is JSON-only. Running it without `--json` returns a JSON
+failure with `dashboard_json_required`.
+
 ## Command Status Values
 
 Current command status values:
@@ -146,6 +170,61 @@ Useful fields include:
 
 Validation failures still use the same top-level shape with `status: "failure"`
 and diagnostic entries in `diagnostics` and `errors`.
+
+### `dashboard --json`
+
+`dashboard --json` summarizes the current course-admin repository into UI-ready
+course/term cards. It is read-only and does not create repositories, dispatch
+workflows, publish reports, generate workflow files, inspect workflow runs, or
+download artifacts.
+
+Each card represents one course plus one term:
+
+```json
+{
+  "kind": "course-term",
+  "displayName": "27s1-csc1120",
+  "courseSlug": "csc1120",
+  "courseTitle": "CSC1120",
+  "coursePath": ".",
+  "termSlug": "27s1",
+  "termTitle": "Spring 2027",
+  "status": "active",
+  "needsAttention": false,
+  "attentionCount": 0,
+  "roster": {
+    "sectionCount": 1,
+    "activeStudentCount": 3,
+    "totalStudentCount": 3
+  },
+  "assignmentCount": 4,
+  "recentAssignments": [],
+  "diagnostics": []
+}
+```
+
+`--term <termSlug>` filters to one term. Recent assignments include active and
+completed assignments, exclude inactive assignments, and use `not_applied` when
+no local manifest exists. The dashboard requires `GRAIDER_GITHUB_TOKEN` and does
+not silently degrade to local-only data when the token is missing.
+
+Assignment summaries may include bounded GitHub readiness fields:
+
+```json
+{
+  "github": {
+    "templateRepository": "available",
+    "templateBranch": "available",
+    "gradingWorkflow": "available",
+    "workflowDispatch": "available"
+  }
+}
+```
+
+The dashboard checks template repository existence, template branch existence,
+the configured grading workflow path, and `workflow_dispatch` for
+grading-enabled assignments. It does not inspect student repositories, workflow
+runs, artifacts, report contents, or per-student grading results.
 
 ### `apply --json`
 

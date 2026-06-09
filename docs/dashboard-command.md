@@ -36,7 +36,7 @@ Recommended response:
 {
   "schemaVersion": 1,
   "commandName": "dashboard",
-  "status": "failed",
+  "status": "failure",
   "exitCode": 1,
   "diagnostics": [
     {
@@ -203,7 +203,7 @@ Recommended statuses:
 ```text
 success
 partial_success
-failed
+failure
 ```
 
 Suggested usage:
@@ -211,7 +211,7 @@ Suggested usage:
 ```text
 success          all dashboard data was loaded and no error-level diagnostics exist
 partial_success some cards/assignments loaded, but one or more local/GitHub checks failed
-failed           the command could not build any meaningful dashboard response
+failure          the command could not build any meaningful dashboard response
 ```
 
 ---
@@ -280,8 +280,8 @@ required grading workflow exists for grading-enabled assignments
 workflow_dispatch is present when the workflow can be read
 Dashboard V1 should not inspect every student repository by default.
 
-Student repository state belongs primarily on assignment detail pages, not the main dashboard. The dashboard may include 
-a lightweight assignment state such as `not_applied` when no manifest/apply state exists, but it should not perform 
+Student repository state belongs primarily on assignment detail pages, not the main dashboard. The dashboard may include
+a lightweight assignment state such as `not_applied` when no manifest/apply state exists, but it should not perform
 per-student repository checks during normal dashboard loading.
 
 Use:
@@ -291,7 +291,7 @@ when an assignment has no local manifest or apply state indicating that student 
 
 Do not mark missing student repositories as needsAttention for assignments that have not been applied yet.
 
-Only treat missing student repositories as dashboard attention items if existing local apply/manifest state indicates 
+Only treat missing student repositories as dashboard attention items if existing local apply/manifest state indicates
 the repos should already exist and the check can be performed cheaply without scanning every student repo.
 
 ```
@@ -322,6 +322,9 @@ Do not crash the entire dashboard if local data can still be shown.
 
 Because the dashboard is intended to show current GitHub-backed status, `graider dashboard --json` requires GitHub authentication.
 
+The dashboard performs bounded GitHub checks for template repositories, template
+branches, configured grading workflows, and `workflow_dispatch`.
+
 If `GRAIDER_GITHUB_TOKEN` is missing or empty, the command must fail clearly instead of returning a local-only dashboard. Returning local-only data would make the UI appear functional while hiding the fact that GitHub status could not be checked.
 
 Recommended response:
@@ -330,7 +333,7 @@ Recommended response:
 {
   "schemaVersion": 1,
   "commandName": "dashboard",
-  "status": "failed",
+  "status": "failure",
   "exitCode": 1,
   "diagnostics": [
     {
@@ -535,9 +538,42 @@ sections
 templateRepository
 templateBranch
 workflow
+github
 ```
 
 Include optional fields if they are already easily available from parsed config.
+
+### Assignment GitHub status
+
+When GitHub checks are available, assignment summaries include:
+
+```json
+{
+  "github": {
+    "templateRepository": "available",
+    "templateBranch": "available",
+    "gradingWorkflow": "available",
+    "workflowDispatch": "available"
+  }
+}
+```
+
+Status values are:
+
+```text
+available
+missing
+not_required
+not_checked
+unknown
+error
+```
+
+No-grading assignments still check template repository and branch readiness, but
+`gradingWorkflow` and `workflowDispatch` are `not_required`. Dashboard checks
+the configured workflow path as a repository path, for example
+`.github/workflows/grade.yml`; it does not reduce that path to `grade.yml` for
+file existence checks.
 
 ---
 
@@ -553,9 +589,11 @@ applied
 partially_applied
 unknown
 ```
+
 For V1, not_applied is sufficient when no local manifest/apply state exists.
 
 Example:
+
 ```json
 {
   "slug": "hw01",
@@ -568,6 +606,7 @@ Example:
   "diagnostics": []
 }
 ```
+
 not_applied is not an error and should not set needsAttention by itself.
 
 ## Term Filter
@@ -712,14 +751,13 @@ configured grading workflow
 workflow_dispatch support
 ```
 
-Do not check every student repository on the main dashboard. Student-level repository checks should be handled in 
+Do not check every student repository on the main dashboard. Student-level repository checks should be handled in
 assignment detail views or explicit apply/report workflows.
 
-A failed GitHub check should become a diagnostic for the affected card or assignment. One failed check should not 
+A failed GitHub check should become a diagnostic for the affected card or assignment. One failed check should not
 prevent unrelated cards from rendering unless the failure is global, such as a missing token.
 
 ---
-
 
 ## Test Strategy
 
