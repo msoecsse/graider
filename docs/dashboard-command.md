@@ -304,7 +304,37 @@ If GitHub status checks fail due to authentication, permissions, rate limiting, 
 
 Do not crash the entire dashboard if local data can still be shown.
 
----
+### GitHub token requirement
+
+Because the dashboard is intended to show current GitHub-backed status, `graider dashboard --json` requires GitHub authentication.
+
+If `GRAIDER_GITHUB_TOKEN` is missing or empty, the command must fail clearly instead of returning a local-only dashboard. Returning local-only data would make the UI appear functional while hiding the fact that GitHub status could not be checked.
+
+Recommended response:
+
+```json
+{
+  "schemaVersion": 1,
+  "commandName": "dashboard",
+  "status": "failed",
+  "exitCode": 1,
+  "diagnostics": [
+    {
+      "code": "github_token_missing",
+      "severity": "error",
+      "message": "The dashboard command requires GRAIDER_GITHUB_TOKEN so it can check current GitHub status."
+    }
+  ],
+  "summary": {
+    "cardCount": 0,
+    "courseCount": 0,
+    "termCount": 0,
+    "assignmentCount": 0,
+    "needsAttentionCount": 0
+  },
+  "cards": []
+}
+```
 
 ## Needs Attention
 
