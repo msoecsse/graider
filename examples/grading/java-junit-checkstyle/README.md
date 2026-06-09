@@ -31,6 +31,11 @@ The generated workflow includes `workflow_dispatch`, writes
 `grading-results` artifact. `validate` checks that the configured workflow exists
 locally and supports `workflow_dispatch`.
 
+The generated result writer is GitHub Classroom-aware. It decodes Classroom
+`outputs.result` payloads when present, maps the internal Classroom status to
+`passed`, `failed`, or `skipped`, and falls back to the GitHub Actions step
+outcome only when the Classroom payload is unavailable.
+
 Student report publishing is a course-level setting. See
 `course-reports-snippet.yml` for the matching `graider-generated` publishing
 configuration.

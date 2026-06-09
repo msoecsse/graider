@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 import { runValidateCommand } from "../../src/cli/commands/validate.command.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { ExitCode } from "../../src/core/exit-codes.js";
-import { FakeGitHubClient } from "../../src/github/fake-github-client.js";
+import {
+  FakeGitHubClient,
+  type FakeRepositoryFileRecord
+} from "../../src/github/fake-github-client.js";
 import type { GitHubTemplateRepository } from "../../src/github/github-models.js";
 
 enum TestNumber {
@@ -27,6 +30,7 @@ const README_FILE = "README.md";
 const FACULTY_TEAM = "faculty";
 const GRADER_TEAM = "graders";
 const STUDENT_USERNAMES = ["seanjones", "janesmith", "alexlee", "mayapatel"] as const;
+const TEMPLATE_WORKFLOW_COMMIT_SHA = "template-workflow-sha";
 const LEGACY_COURSE_GRADING_BLOCK = `grading:
   enabled: true
   workflow: grade.yml
@@ -137,14 +141,15 @@ const templateRepository: GitHubTemplateRepository = {
   latestCommitSha: "template-sha"
 };
 
-const createReadyClient = (): FakeGitHubClient =>
+const createReadyClient = (repositoryFiles: FakeRepositoryFileRecord[] = []): FakeGitHubClient =>
   new FakeGitHubClient({
     templateRepositories: [templateRepository],
     users: STUDENT_USERNAMES.map((username) => ({ username })),
     teams: [
       { org: ORGANIZATION, slug: FACULTY_TEAM, name: "Faculty" },
       { org: ORGANIZATION, slug: GRADER_TEAM, name: "Graders" }
-    ]
+    ],
+    repositoryFiles
   });
 
 const copyFixtureToTemp = (): string => {
@@ -187,12 +192,34 @@ const writeWorkflow = (cwd: string, workflowPath: string, content: string): void
   fs.writeFileSync(absolutePath, content);
 };
 
+const removeWorkflow = (cwd: string, workflowPath: string): void => {
+  fs.rmSync(path.join(cwd, workflowPath), { force: true });
+};
+
+const createTemplateWorkflowFile = (content: string) => ({
+  owner: ORGANIZATION,
+  repo: TEMPLATE_REPO,
+  path: CONFIGURED_WORKFLOW_FILE,
+  content,
+  message: "Seed template workflow",
+  commitSha: TEMPLATE_WORKFLOW_COMMIT_SHA,
+  branch: TEMPLATE_BRANCH
+});
+
 const runValidate = (cwd: string) =>
   runValidateCommand({
     cwd,
     assignmentFile: ASSIGNMENT_FILE,
     options,
     githubClient: createReadyClient()
+  });
+
+const runValidateWithClient = (cwd: string, githubClient: FakeGitHubClient) =>
+  runValidateCommand({
+    cwd,
+    assignmentFile: ASSIGNMENT_FILE,
+    options,
+    githubClient
   });
 
 describe("validate workflow compatibility", () => {
@@ -235,6 +262,16 @@ describe("validate workflow compatibility", () => {
     expect(result.errors).toEqual([]);
   });
 
+  it("supports legacy grade.yml config when the workflow exists under .github/workflows", async () => {
+    const cwd = copyFixtureToTemp();
+    removeWorkflow(cwd, LEGACY_WORKFLOW_FILE);
+    writeWorkflow(cwd, CONFIGURED_WORKFLOW_FILE, LIST_STYLE_DISPATCH_WORKFLOW);
+    const result = await runValidate(cwd);
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(result.errors).toEqual([]);
+  });
+
   it("does not require workflow, artifact, or result_file for no-grading assignments", async () => {
     const cwd = copyFixtureToTemp();
     appendAssignmentGrading(cwd, DISABLED_ASSIGNMENT_GRADING_BLOCK);
@@ -269,7 +306,71 @@ describe("validate workflow compatibility", () => {
     const result = await runValidate(cwd);
 
     expect(result.exitCode).toBe(ExitCode.CommandError);
-    expect(result.errors).toEqual([expect.objectContaining({ code: "grading_workflow_missing" })]);
+    expect(result.errors[0]?.code).toBe("grading_workflow_missing");
+    expect(result.errors[0]?.context).toEqual(
+      expect.objectContaining({
+        workflow: CONFIGURED_WORKFLOW_FILE,
+        checkedPaths: [CONFIGURED_WORKFLOW_FILE]
+      })
+    );
+    expect(result.errors[0]?.context?.checkedPaths).not.toEqual([LEGACY_WORKFLOW_FILE]);
+  });
+
+  it("validates repository template workflows through the full contents path", async () => {
+    const cwd = copyFixtureToTemp();
+    replaceCourseGrading(cwd, CUSTOM_WORKFLOW_GRADING_BLOCK);
+    const githubClient = createReadyClient([
+      createTemplateWorkflowFile(LIST_STYLE_DISPATCH_WORKFLOW)
+    ]);
+    const result = await runValidateWithClient(cwd, githubClient);
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(result.errors).toEqual([]);
+    expect(githubClient.fileReads).toEqual([
+      {
+        owner: ORGANIZATION,
+        repo: TEMPLATE_REPO,
+        path: CONFIGURED_WORKFLOW_FILE,
+        ref: TEMPLATE_BRANCH
+      }
+    ]);
+  });
+
+  it("reports missing repository template workflows with the full configured path", async () => {
+    const cwd = copyFixtureToTemp();
+    replaceCourseGrading(cwd, CUSTOM_WORKFLOW_GRADING_BLOCK);
+    const githubClient = createReadyClient();
+    const result = await runValidateWithClient(cwd, githubClient);
+
+    expect(result.exitCode).toBe(ExitCode.CommandError);
+    expect(result.errors[0]?.code).toBe("grading_workflow_missing");
+    expect(result.errors[0]?.context).toEqual(
+      expect.objectContaining({
+        workflow: CONFIGURED_WORKFLOW_FILE,
+        checkedPaths: [CONFIGURED_WORKFLOW_FILE],
+        templateRepository: `${ORGANIZATION}/${TEMPLATE_REPO}`,
+        templateBranch: TEMPLATE_BRANCH
+      })
+    );
+    expect(result.errors[0]?.context?.checkedPaths).not.toEqual([LEGACY_WORKFLOW_FILE]);
+    expect(githubClient.fileReads.map((read) => read.path)).toEqual([CONFIGURED_WORKFLOW_FILE]);
+  });
+
+  it("checks workflow_dispatch for repository template workflow content", async () => {
+    const cwd = copyFixtureToTemp();
+    replaceCourseGrading(cwd, CUSTOM_WORKFLOW_GRADING_BLOCK);
+    const result = await runValidateWithClient(
+      cwd,
+      createReadyClient([createTemplateWorkflowFile(NO_DISPATCH_WORKFLOW)])
+    );
+
+    expect(result.exitCode).toBe(ExitCode.CommandError);
+    expect(result.errors[0]?.code).toBe("workflow_dispatch_unsupported");
+    expect(result.errors[0]?.context).toEqual(
+      expect.objectContaining({
+        workflow: CONFIGURED_WORKFLOW_FILE
+      })
+    );
   });
 
   it("fails when the configured workflow lacks workflow_dispatch", async () => {

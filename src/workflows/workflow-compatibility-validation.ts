@@ -8,9 +8,15 @@ import {
 } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { parseYaml } from "../io/stable-yaml.js";
-import { createGeneratedWorkflowPath } from "./workflow-paths.js";
+import {
+  createGeneratedWorkflowPath,
+  createLocalWorkflowPathCandidates
+} from "./workflow-paths.js";
+import {
+  WORKFLOW_DISPATCH_TRIGGER,
+  hasWorkflowDispatchTrigger
+} from "./workflow-dispatch-validation.js";
 
-const WORKFLOW_DISPATCH_TRIGGER = "workflow_dispatch";
 const PRESET_GRADING_MODE = "preset";
 
 type GradingConfig = RawCourseConfig["grading"];
@@ -23,22 +29,19 @@ interface WorkflowCandidate {
 export interface WorkflowCompatibilityValidationResult {
   readonly warnings: Diagnostic[];
   readonly errors: Diagnostic[];
+  readonly workflowStatus: "not_required" | "found" | "missing" | "invalid";
 }
 
 const getEffectiveGrading = (config: LoadedGraiderConfig): GradingConfig =>
   config.assignment.grading ?? config.course.grading;
 
-const normalizeWorkflowPath = (workflowPath: string): string => workflowPath.replace(/\\/g, "/");
-
 const createConfiguredWorkflowCandidate = (
   repoRoot: string,
   workflowPath: string
 ): WorkflowCandidate => {
-  const relativePath = normalizeWorkflowPath(workflowPath);
-
   return {
-    absolutePath: path.join(repoRoot, relativePath),
-    relativePath
+    absolutePath: path.join(repoRoot, workflowPath),
+    relativePath: workflowPath
   };
 };
 
@@ -50,9 +53,8 @@ const createWorkflowCandidates = (
     return [];
   }
 
-  const configuredCandidate = createConfiguredWorkflowCandidate(
-    config.summary.repoRoot,
-    grading.workflow
+  const configuredCandidates = createLocalWorkflowPathCandidates(grading.workflow).map(
+    (workflowPath) => createConfiguredWorkflowCandidate(config.summary.repoRoot, workflowPath)
   );
   const generatedCandidate = createGeneratedWorkflowPath(
     config.summary.repoRoot,
@@ -61,8 +63,8 @@ const createWorkflowCandidates = (
   );
 
   return grading.mode === PRESET_GRADING_MODE
-    ? [configuredCandidate, generatedCandidate]
-    : [configuredCandidate];
+    ? [...configuredCandidates, generatedCandidate]
+    : configuredCandidates;
 };
 
 const findExistingWorkflowCandidate = (
@@ -93,32 +95,6 @@ const createWorkflowDispatchUnsupportedDiagnostic = (workflowPath: string): Diag
     }
   );
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const hasWorkflowDispatchString = (value: unknown): boolean =>
-  typeof value === "string" && value === WORKFLOW_DISPATCH_TRIGGER;
-
-const hasWorkflowDispatchArray = (value: unknown): boolean =>
-  Array.isArray(value) && value.some((item) => hasWorkflowDispatchString(item));
-
-const hasWorkflowDispatchObject = (value: unknown): boolean =>
-  isRecord(value) && Object.hasOwn(value, WORKFLOW_DISPATCH_TRIGGER);
-
-const hasWorkflowDispatchTrigger = (workflowDocument: unknown): boolean => {
-  if (!isRecord(workflowDocument)) {
-    return false;
-  }
-
-  const triggers = workflowDocument.on;
-
-  return (
-    hasWorkflowDispatchString(triggers) ||
-    hasWorkflowDispatchArray(triggers) ||
-    hasWorkflowDispatchObject(triggers)
-  );
-};
-
 export const validateWorkflowCompatibility = (
   config: LoadedGraiderConfig
 ): WorkflowCompatibilityValidationResult => {
@@ -127,7 +103,8 @@ export const validateWorkflowCompatibility = (
   if (!grading.enabled || grading.workflow === undefined) {
     return {
       warnings: [],
-      errors: []
+      errors: [],
+      workflowStatus: "not_required"
     };
   }
 
@@ -137,7 +114,8 @@ export const validateWorkflowCompatibility = (
   if (workflowCandidate === undefined) {
     return {
       warnings: [],
-      errors: [createWorkflowMissingDiagnostic(grading, candidates)]
+      errors: [createWorkflowMissingDiagnostic(grading, candidates)],
+      workflowStatus: "missing"
     };
   }
 
@@ -147,17 +125,20 @@ export const validateWorkflowCompatibility = (
   if (parseResult.status === "failure") {
     return {
       warnings: [],
-      errors: [parseResult.diagnostic]
+      errors: [parseResult.diagnostic],
+      workflowStatus: "invalid"
     };
   }
 
   return hasWorkflowDispatchTrigger(parseResult.value)
     ? {
         warnings: [],
-        errors: []
+        errors: [],
+        workflowStatus: "found"
       }
     : {
         warnings: [],
-        errors: [createWorkflowDispatchUnsupportedDiagnostic(workflowCandidate.relativePath)]
+        errors: [createWorkflowDispatchUnsupportedDiagnostic(workflowCandidate.relativePath)],
+        workflowStatus: "invalid"
       };
 };

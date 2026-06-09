@@ -135,6 +135,15 @@ steps, then calls the helper to write `graider-output/grading-results.json`.
 Student repositories do not need Graider, npm packages, or course-admin
 repository access installed for this result-writing step.
 
+For GitHub Classroom grader steps, `outputs.result` is a base64-encoded
+Classroom JSON payload. Generated Graider workflows pass that payload and the
+GitHub Actions step outcome into the helper. The helper decodes the Classroom
+payload, prefers its internal status, maps it to `passed`, `failed`, or
+`skipped`, and uses the step outcome only when the Classroom payload is missing
+or cannot be parsed. Custom workflows should not write `outputs.result`,
+`success`, `failure`, `cancelled`, `pass`, or `fail` directly into
+`checks[].status`.
+
 ### `custom-workflow`
 
 Faculty provide the workflow, and Graider provides or documents compatible
@@ -302,13 +311,21 @@ diagnostics remain responsible for missing artifacts, missing result files, and
 invalid grading result JSON.
 
 Generated workflows use the same helper pattern that custom workflows may copy
-or adapt. The helper maps GitHub Actions step outcomes to Graider's closed
-status vocabulary:
+or adapt. The helper maps GitHub Classroom and GitHub Actions statuses to
+Graider's closed status vocabulary:
 
 ```text
+pass -> passed
+passed -> passed
 success -> passed
+fail -> failed
+failed -> failed
 failure -> failed
+error -> failed
 cancelled -> failed
+timed_out -> failed
+timed-out -> failed
+skip -> skipped
 skipped -> skipped
 unknown or missing -> failed
 ```

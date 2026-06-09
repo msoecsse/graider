@@ -182,9 +182,12 @@ describe("grading examples", () => {
     const classroomWorkflow = workflowText("github-classroom", ".github/workflows/classroom.yml");
     const classroomReadme = readText(examplePath("github-classroom", "README.md"));
 
-    expect(classroomWorkflow).not.toContain("outputs.result");
+    expect(classroomWorkflow).toContain("steps.classroom-autograder.outputs.result");
+    expect(classroomWorkflow).toContain("decode_classroom_result");
+    expect(classroomWorkflow).toContain("status_from_classroom_or_outcome");
     expect(classroomReadme).toContain("outputs.result");
-    expect(classroomReadme).toContain("step outcome");
+    expect(classroomReadme).toContain("base64");
+    expect(classroomReadme).toContain("falls back");
 
     const facultyAssignment = readAssignment("faculty-provided-report");
     const facultyReadme = readText(examplePath("faculty-provided-report", "README.md"));

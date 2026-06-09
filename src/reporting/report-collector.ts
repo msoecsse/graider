@@ -14,6 +14,7 @@ import type {
 } from "../grading/grading-result-models.js";
 import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import type { RosterStudent, RosterSummary } from "../roster/roster-models.js";
+import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
 import type {
   FacultyReportSummaryCounts,
   FacultySummaryReport,
@@ -190,10 +191,11 @@ const collectStudentGrading = async (
     };
   }
 
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(gradingConfig.workflow);
   const workflow = await input.githubClient.getWorkflow(
     record.repository.owner,
     record.repository.name,
-    gradingConfig.workflow
+    workflowDispatchIdentifier
   );
 
   if (workflow === null) {
@@ -222,7 +224,7 @@ const collectStudentGrading = async (
     await input.githubClient.listWorkflowRuns({
       owner: record.repository.owner,
       repo: record.repository.name,
-      workflowPath: gradingConfig.workflow
+      workflowPath: workflowDispatchIdentifier
     })
   ).sort(compareRuns);
   const workflowRun = workflowRuns[FIRST_WORKFLOW_RUN_INDEX];

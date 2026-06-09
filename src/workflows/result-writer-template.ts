@@ -5,6 +5,7 @@ export const RESULT_WRITER_SCRIPT_PATH = ".graider/write-grading-result.py";
 
 export const renderGradingResultWriterScript = (): string => `#!/usr/bin/env python3
 import argparse
+import base64
 import json
 import os
 import sys
@@ -13,17 +14,65 @@ SCHEMA_VERSION = ${RESULT_SCHEMA_VERSION_TEXT}
 STATUS_PASSED = "passed"
 STATUS_FAILED = "failed"
 STATUS_SKIPPED = "skipped"
-OUTCOME_MAP = {
+STATUS_MAP = {
+    "pass": STATUS_PASSED,
+    "passed": STATUS_PASSED,
     "success": STATUS_PASSED,
+    "fail": STATUS_FAILED,
+    "failed": STATUS_FAILED,
     "failure": STATUS_FAILED,
+    "error": STATUS_FAILED,
     "cancelled": STATUS_FAILED,
+    "timed_out": STATUS_FAILED,
+    "timed-out": STATUS_FAILED,
+    "skip": STATUS_SKIPPED,
     "skipped": STATUS_SKIPPED,
 }
 
 
-def map_outcome(outcome):
-    normalized = (outcome or "").strip().lower()
-    return OUTCOME_MAP.get(normalized, STATUS_FAILED)
+def map_status(value):
+    normalized = (value or "").strip().lower()
+    return STATUS_MAP.get(normalized, STATUS_FAILED)
+
+
+def decode_classroom_result(encoded):
+    if not encoded:
+        return None
+
+    try:
+        decoded_bytes = base64.b64decode(encoded)
+        decoded_text = decoded_bytes.decode("utf-8")
+        return json.loads(decoded_text)
+    except Exception:
+        return None
+
+
+def status_from_classroom_or_outcome(classroom_env_name, outcome_env_name):
+    classroom_result = decode_classroom_result(os.environ.get(classroom_env_name))
+
+    if isinstance(classroom_result, dict):
+        top_level_status = classroom_result.get("status")
+        if top_level_status:
+            return map_status(top_level_status)
+
+        tests = classroom_result.get("tests")
+        if isinstance(tests, list) and tests:
+            test_statuses = [
+                map_status(test.get("status"))
+                for test in tests
+                if isinstance(test, dict)
+            ]
+
+            if STATUS_FAILED in test_statuses:
+                return STATUS_FAILED
+
+            if test_statuses and all(status == STATUS_SKIPPED for status in test_statuses):
+                return STATUS_SKIPPED
+
+            if test_statuses:
+                return STATUS_PASSED
+
+    return map_status(os.environ.get(outcome_env_name))
 
 
 def parse_check(raw_check):
@@ -34,7 +83,26 @@ def parse_check(raw_check):
     normalized_outcome = outcome if separator else ""
     return {
         "name": normalized_name,
-        "status": map_outcome(normalized_outcome),
+        "status": map_status(normalized_outcome),
+    }
+
+
+def parse_classroom_check(raw_check):
+    name, separator, env_names = raw_check.partition("=")
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("check name must not be empty")
+    if not separator:
+        raise ValueError("classroom check must include environment variable names")
+    classroom_env_name, env_separator, outcome_env_name = env_names.partition(":")
+    if not env_separator or not classroom_env_name.strip() or not outcome_env_name.strip():
+        raise ValueError("classroom check must include classroom and outcome environment names")
+    return {
+        "name": normalized_name,
+        "status": status_from_classroom_or_outcome(
+            classroom_env_name.strip(),
+            outcome_env_name.strip(),
+        ),
     }
 
 
@@ -67,10 +135,14 @@ def main(argv):
     parser = argparse.ArgumentParser(description="Write Graider grading result JSON.")
     parser.add_argument("--output", required=True)
     parser.add_argument("--check", action="append", default=[])
+    parser.add_argument("--classroom-check", action="append", default=[])
     args = parser.parse_args(argv)
 
     try:
-        checks = [parse_check(raw_check) for raw_check in args.check]
+        checks = [
+            *[parse_check(raw_check) for raw_check in args.check],
+            *[parse_classroom_check(raw_check) for raw_check in args.classroom_check],
+        ]
         write_result(args.output, checks)
     except ValueError as error:
         print(str(error), file=sys.stderr)

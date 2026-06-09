@@ -128,8 +128,20 @@ describe("graider workflow generate command", () => {
     expect(workflow).toContain("- workflow_dispatch");
     expect(workflow).toContain(".graider/write-grading-result.py");
     expect(workflow).toContain("python3 .graider/write-grading-result.py");
-    expect(workflow).toContain('--check "CheckStyle=$CHECKSTYLE_OUTCOME"');
-    expect(workflow).toContain('--check "Unit Tests=$UNIT_TESTS_OUTCOME"');
+    expect(workflow).toContain(
+      "CHECKSTYLE_CLASSROOM_RESULT: ${{ steps.checkstyle.outputs.result }}"
+    );
+    expect(workflow).toContain(
+      "UNIT_TESTS_CLASSROOM_RESULT: ${{ steps.unit-tests.outputs.result }}"
+    );
+    expect(workflow).toContain("CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}");
+    expect(workflow).toContain("UNIT_TESTS_OUTCOME: ${{ steps.unit-tests.outcome }}");
+    expect(workflow).toContain(
+      '--classroom-check "CheckStyle=CHECKSTYLE_CLASSROOM_RESULT:CHECKSTYLE_OUTCOME"'
+    );
+    expect(workflow).toContain(
+      '--classroom-check "Unit Tests=UNIT_TESTS_CLASSROOM_RESULT:UNIT_TESTS_OUTCOME"'
+    );
     expect(workflow).toContain("name: grading-results");
     expect(workflow).toContain("path: graider-output/grading-results.json");
     expect(workflow).toContain("schema_version");
@@ -142,9 +154,17 @@ describe("graider workflow generate command", () => {
     expect(workflow).toContain('"failure": STATUS_FAILED');
     expect(workflow).toContain('"cancelled": STATUS_FAILED');
     expect(workflow).toContain('"skipped": STATUS_SKIPPED');
+    expect(workflow).toContain("decode_classroom_result");
+    expect(workflow).toContain("status_from_classroom_or_outcome");
     expect(workflow).not.toContain("actions/github-script");
-    expect(workflow).not.toContain("steps.checkstyle.outputs.result");
-    expect(workflow).not.toContain("steps.unit-tests.outputs.result");
+    expect(workflow).not.toContain('--check "CheckStyle=${{ steps.checkstyle.outputs.result }}"');
+    expect(workflow).not.toContain('--check "Unit Tests=${{ steps.unit-tests.outputs.result }}"');
+    expect(workflow).not.toContain('--check "CheckStyle=${{ steps.checkstyle.outcome }}"');
+    expect(workflow).not.toContain('--check "Unit Tests=${{ steps.unit-tests.outcome }}"');
+    expect(workflow).not.toContain('"status": "${{ steps.checkstyle.outputs.result }}"');
+    expect(workflow).not.toContain('"status": "${{ steps.unit-tests.outputs.result }}"');
+    expect(workflow).not.toContain('"status": "${{ steps.checkstyle.outcome }}"');
+    expect(workflow).not.toContain('"status": "${{ steps.unit-tests.outcome }}"');
     expect(workflow).not.toContain("faculty-summary");
     expect(workflow).not.toContain("GRAIDER_GITHUB_TOKEN");
   });

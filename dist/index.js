@@ -1472,6 +1472,43 @@ var writeManifest = (manifestPath, manifest) => {
   }
 };
 
+// src/workflows/workflow-paths.ts
+import path5 from "path";
+var TERMS_DIRECTORY2 = "terms";
+var GENERATED_WORKFLOWS_DIRECTORY = "generated-workflows";
+var WORKFLOW_FILE_NAME = "grade.yml";
+var GITHUB_WORKFLOWS_DIRECTORY = ".github/workflows";
+var WORKFLOW_PATH_SEPARATOR = "/";
+var WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
+var createGeneratedWorkflowPath = (repoRoot, termCode, assignmentSlug) => {
+  const relativePath = [
+    TERMS_DIRECTORY2,
+    termCode,
+    GENERATED_WORKFLOWS_DIRECTORY,
+    assignmentSlug,
+    WORKFLOW_FILE_NAME
+  ].join("/");
+  return {
+    absolutePath: path5.join(repoRoot, relativePath),
+    relativePath
+  };
+};
+var normalizeWorkflowPath = (workflowPath) => workflowPath.replace(WINDOWS_PATH_SEPARATOR_PATTERN, WORKFLOW_PATH_SEPARATOR);
+var getWorkflowRepositoryPath = (configuredWorkflow) => {
+  const normalizedWorkflow = normalizeWorkflowPath(configuredWorkflow);
+  return normalizedWorkflow.includes(WORKFLOW_PATH_SEPARATOR) ? normalizedWorkflow : [GITHUB_WORKFLOWS_DIRECTORY, normalizedWorkflow].join(WORKFLOW_PATH_SEPARATOR);
+};
+var getWorkflowDispatchIdentifier = (configuredWorkflow) => path5.posix.basename(normalizeWorkflowPath(configuredWorkflow));
+var uniqueWorkflowPaths = (paths) => [...new Set(paths)];
+var createLocalWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkflowPaths([
+  normalizeWorkflowPath(configuredWorkflow),
+  getWorkflowRepositoryPath(configuredWorkflow)
+]);
+var createRepositoryWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkflowPaths([
+  getWorkflowRepositoryPath(configuredWorkflow),
+  normalizeWorkflowPath(configuredWorkflow)
+]);
+
 // src/execution/apply-executor.ts
 var EMPTY_COUNT = 0;
 var PRIVATE_REPOSITORY = true;
@@ -1903,6 +1940,7 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
   }
   const repositoryName = operation.repository_name;
   const workflowPath = input.config.course.grading.workflow;
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
   if (findManifestRecord(state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
@@ -1912,7 +1950,7 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
       () => input.githubClient.getWorkflow(
         input.config.course.github.organization,
         repositoryName,
-        workflowPath
+        workflowDispatchIdentifier
       )
     );
     if (workflow === null) {
@@ -1962,6 +2000,7 @@ var executeVerifyDispatch = async (input, state, operation, observedAt) => {
   }
   const repositoryName = operation.repository_name;
   const workflowPath = input.config.course.grading.workflow;
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
   if (findManifestRecord(state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
@@ -1971,7 +2010,7 @@ var executeVerifyDispatch = async (input, state, operation, observedAt) => {
       () => input.githubClient.getWorkflow(
         input.config.course.github.organization,
         repositoryName,
-        workflowPath
+        workflowDispatchIdentifier
       )
     );
     if (workflow === null || !workflow.supportsDispatch) {
@@ -2153,7 +2192,7 @@ var ZIP_END_CENTRAL_DIRECTORY_OFFSET = 16;
 var ZIP_END_CENTRAL_DIRECTORY_COMMENT_LENGTH_OFFSET = 20;
 var BASE64_ENCODING = "base64";
 var UTF8_ENCODING = "utf8";
-var WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
+var WINDOWS_PATH_SEPARATOR_PATTERN2 = /\\/g;
 var PARSE_SUCCESS_RESPONSE_BODY_DISABLED = false;
 var LOCATION_HEADER = "location";
 var LOCATION_HEADER_ALTERNATE = "Location";
@@ -2327,6 +2366,22 @@ var OctokitGitHubClient = class {
         repo
       })
     );
+  }
+  async getRepositoryFileContent(owner, repo, filePath, ref) {
+    const data = await this.runNullable(
+      () => this.octokit.rest.repos.getContent({
+        owner,
+        path: filePath,
+        ref,
+        repo
+      })
+    );
+    if (data === null || Array.isArray(data)) {
+      return null;
+    }
+    const record = asRecord(data);
+    const content = asString(record.content);
+    return content === void 0 ? null : Buffer.from(content, BASE64_ENCODING).toString(UTF8_ENCODING);
   }
   async getWorkflow(owner, repo, workflowPath) {
     const data = await this.runNullable(
@@ -2808,7 +2863,7 @@ function extractZipEntryContent(buffer, localHeaderOffset, compressedSize, compr
   return compressionMethod === ZIP_DEFLATE_COMPRESSION ? inflateRawSync(compressed) : compressionMethod === ZIP_STORED_COMPRESSION ? compressed : void 0;
 }
 function normalizeZipEntryPath(filePath) {
-  return filePath.replace(WINDOWS_PATH_SEPARATOR_PATTERN, "/");
+  return filePath.replace(WINDOWS_PATH_SEPARATOR_PATTERN2, "/");
 }
 async function toBuffer(value) {
   const directBuffer = toDirectBuffer(value);
@@ -2935,6 +2990,20 @@ function normalizeToken2(token) {
   return normalized === void 0 || normalized.length === EMPTY_LENGTH2 ? void 0 : normalized;
 }
 
+// src/workflows/workflow-dispatch-validation.ts
+var WORKFLOW_DISPATCH_TRIGGER = "workflow_dispatch";
+var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var hasWorkflowDispatchString = (value) => typeof value === "string" && value === WORKFLOW_DISPATCH_TRIGGER;
+var hasWorkflowDispatchArray = (value) => Array.isArray(value) && value.some((item) => hasWorkflowDispatchString(item));
+var hasWorkflowDispatchObject = (value) => isRecord2(value) && Object.hasOwn(value, WORKFLOW_DISPATCH_TRIGGER);
+var hasWorkflowDispatchTrigger = (workflowDocument) => {
+  if (!isRecord2(workflowDocument)) {
+    return false;
+  }
+  const triggers = workflowDocument.on;
+  return hasWorkflowDispatchString(triggers) || hasWorkflowDispatchArray(triggers) || hasWorkflowDispatchObject(triggers);
+};
+
 // src/github/github-readiness-validation.ts
 var README_FILE = "README.md";
 var EMPTY_COUNT3 = 0;
@@ -3038,6 +3107,81 @@ var validateTemplateRepository = async (courseConfig, assignmentConfig, githubCl
     return [normalizeGitHubError2(error)];
   }
 };
+var getEffectiveGrading = (courseConfig, assignmentConfig) => assignmentConfig.grading ?? courseConfig.grading;
+var createTemplateWorkflowMissingDiagnostic = (reference, workflow, checkedPaths) => createConfigDiagnostic(
+  DiagnosticCode.GradingWorkflowMissing,
+  `Configured grading workflow ${workflow} was not found in template repository ${reference.fullName}.`,
+  {
+    workflow,
+    checkedPaths,
+    templateRepository: reference.fullName,
+    templateBranch: reference.branch
+  }
+);
+var createTemplateWorkflowDispatchUnsupportedDiagnostic = (reference, workflowPath) => createConfigDiagnostic(
+  DiagnosticCode.WorkflowDispatchUnsupported,
+  `Configured grading workflow ${workflowPath} does not include ${WORKFLOW_DISPATCH_TRIGGER}.`,
+  {
+    workflow: workflowPath,
+    templateRepository: reference.fullName,
+    templateBranch: reference.branch,
+    requiredTrigger: WORKFLOW_DISPATCH_TRIGGER
+  }
+);
+var validateTemplateWorkflowContent = (reference, workflowPath, content) => {
+  const parseResult = parseYaml(content, workflowPath);
+  if (parseResult.status === "failure") {
+    return [parseResult.diagnostic];
+  }
+  return hasWorkflowDispatchTrigger(parseResult.value) ? [] : [createTemplateWorkflowDispatchUnsupportedDiagnostic(reference, workflowPath)];
+};
+var validateTemplateWorkflow = async (courseConfig, assignmentConfig, githubClient) => {
+  const grading = getEffectiveGrading(courseConfig, assignmentConfig);
+  if (!grading.enabled || grading.workflow === void 0) {
+    return [];
+  }
+  const parsedRepository = parseTemplateRepository(
+    courseConfig.github.organization,
+    assignmentConfig.template.repository
+  );
+  if (parsedRepository.status === "failure") {
+    return [];
+  }
+  const reference = {
+    ...parsedRepository.repository,
+    branch: assignmentConfig.template.branch,
+    organization: courseConfig.github.organization
+  };
+  const checkedPaths = createRepositoryWorkflowPathCandidates(grading.workflow);
+  try {
+    const templateRepository = await githubClient.getTemplateRepository(
+      reference.owner,
+      reference.repo
+    );
+    if (templateRepository === null || templateRepository.owner !== reference.organization) {
+      return [];
+    }
+    let workflowContent;
+    let workflowPath;
+    for (const checkedPath of checkedPaths) {
+      if (workflowContent === void 0) {
+        const content = await githubClient.getRepositoryFileContent(
+          reference.owner,
+          reference.repo,
+          checkedPath,
+          reference.branch
+        );
+        if (content !== null) {
+          workflowContent = content;
+          workflowPath = checkedPath;
+        }
+      }
+    }
+    return workflowContent === void 0 || workflowPath === void 0 ? [createTemplateWorkflowMissingDiagnostic(reference, grading.workflow, checkedPaths)] : validateTemplateWorkflowContent(reference, workflowPath, workflowContent);
+  } catch (error) {
+    return [normalizeGitHubError2(error)];
+  }
+};
 var createTeamMissingDiagnostic = (code, label, organization, teamSlug) => createConfigDiagnostic(code, `${label} team ${teamSlug} was not found in ${organization}.`, {
   organization,
   teamSlug
@@ -3099,7 +3243,8 @@ var validateGitHubReadiness = async ({
   courseConfig,
   assignmentConfig,
   students,
-  githubClient
+  githubClient,
+  validateTemplateWorkflow: shouldValidateTemplateWorkflow = false
 }) => {
   const authenticationErrors = await validateAuthentication(githubClient);
   if (authenticationErrors.length > EMPTY_COUNT3) {
@@ -3110,6 +3255,7 @@ var validateGitHubReadiness = async ({
   }
   const errors = [
     ...await validateTemplateRepository(courseConfig, assignmentConfig, githubClient),
+    ...shouldValidateTemplateWorkflow ? await validateTemplateWorkflow(courseConfig, assignmentConfig, githubClient) : [],
     ...await validateTeams(courseConfig, githubClient),
     ...await validateGithubUsers(githubClient, students)
   ];
@@ -3411,27 +3557,27 @@ var loadManifest = (manifestPath, options = {}) => {
 };
 
 // src/manifest/manifest-paths.ts
-import path5 from "path";
-var TERMS_DIRECTORY2 = "terms";
+import path6 from "path";
+var TERMS_DIRECTORY3 = "terms";
 var MANIFESTS_DIRECTORY = "manifests";
 var MANIFEST_FILE_NAME = "manifest.yml";
 var createManifestPath = (repoRoot, termCode, assignmentSlug) => {
-  const relativeDirectory = path5.posix.join(
-    TERMS_DIRECTORY2,
+  const relativeDirectory = path6.posix.join(
+    TERMS_DIRECTORY3,
     termCode,
     MANIFESTS_DIRECTORY,
     assignmentSlug
   );
-  const relativePath = path5.posix.join(relativeDirectory, MANIFEST_FILE_NAME);
+  const relativePath = path6.posix.join(relativeDirectory, MANIFEST_FILE_NAME);
   return {
     relativeDirectory,
     relativePath,
-    absolutePath: path5.join(repoRoot, relativePath)
+    absolutePath: path6.join(repoRoot, relativePath)
   };
 };
 
 // src/config/source-fingerprint.ts
-import path6 from "path";
+import path7 from "path";
 
 // src/core/hash.ts
 import { createHash } from "crypto";
@@ -3485,7 +3631,7 @@ var createSourceOutsideRepoDiagnostic = (repoRoot, sourceFilePath) => createConf
   }
 );
 var resolveSourcePath = (repoRoot, sourceFilePath) => {
-  const absolutePath = path6.isAbsolute(sourceFilePath) ? path6.resolve(sourceFilePath) : path6.resolve(repoRoot, sourceFilePath);
+  const absolutePath = path7.isAbsolute(sourceFilePath) ? path7.resolve(sourceFilePath) : path7.resolve(repoRoot, sourceFilePath);
   try {
     return {
       absolutePath,
@@ -4045,7 +4191,7 @@ var buildPlan = async ({
 };
 
 // src/roster/roster-loader.ts
-import path7 from "path";
+import path8 from "path";
 
 // src/io/csv.ts
 var HEADER_ROW_NUMBER = 1;
@@ -4268,7 +4414,7 @@ var getSectionSources = (config) => {
   const sectionsById = new Map(
     config.term.sections.map((section) => [
       section.id,
-      toForwardSlashPath(path7.posix.join(termDirectory, section.roster))
+      toForwardSlashPath(path8.posix.join(termDirectory, section.roster))
     ])
   );
   return config.assignment.sections.map((sectionId) => ({
@@ -4289,7 +4435,7 @@ var createContext = (rosterPath, rowNumber, expectedSection) => ({
   expectedSection
 });
 var loadSectionRoster = (repoRoot, source) => {
-  const fileResult = readTextFile(path7.join(repoRoot, source.rosterPath));
+  const fileResult = readTextFile(path8.join(repoRoot, source.rosterPath));
   if (fileResult.status === "failure") {
     return {
       students: [],
@@ -4771,7 +4917,7 @@ var createInitialSummary = (targetsSelected) => ({
   warnings: EMPTY_COUNT8,
   errors: EMPTY_COUNT8
 });
-var getEffectiveGrading = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
+var getEffectiveGrading2 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var findManifestRecord3 = (manifest, student) => manifest.repositories.find(
   (record) => record.studentId === student.studentId && record.section === student.section
 );
@@ -4849,8 +4995,9 @@ var recordSuccess = (state) => ({
   warnings: state.warnings,
   errors: state.errors
 });
-var dispatchForStudent = async (input, state, student, workflowPath) => {
+var dispatchForStudent = async (input, state, student, configuredWorkflowPath) => {
   const repository = findManifestRecord3(input.manifest, student);
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(configuredWorkflowPath);
   if (repository === void 0) {
     return recordFailure(state, createStudentRepositoryMissingDiagnostic(student));
   }
@@ -4860,19 +5007,19 @@ var dispatchForStudent = async (input, state, student, workflowPath) => {
       () => input.githubClient.getWorkflow(
         repository.repository.owner,
         repository.repository.name,
-        workflowPath
+        workflowDispatchIdentifier
       )
     );
     if (workflow === null) {
       return recordFailure(
         state,
-        createWorkflowMissingDiagnostic2(student, repository, workflowPath)
+        createWorkflowMissingDiagnostic2(student, repository, configuredWorkflowPath)
       );
     }
     if (!workflow.supportsDispatch) {
       return recordFailure(
         state,
-        createWorkflowDispatchMissingDiagnostic(student, repository, workflowPath)
+        createWorkflowDispatchMissingDiagnostic(student, repository, configuredWorkflowPath)
       );
     }
     await runGitHubOperation2(
@@ -4880,7 +5027,7 @@ var dispatchForStudent = async (input, state, student, workflowPath) => {
       () => input.githubClient.dispatchWorkflow({
         owner: repository.repository.owner,
         repo: repository.repository.name,
-        workflowPath,
+        workflowPath: workflowDispatchIdentifier,
         ref: input.config.assignment.template.branch
       })
     );
@@ -4901,7 +5048,7 @@ var getGradeGitHubDiagnostics = (errors) => errors.flatMap((error) => {
   ] : [];
 });
 var executeGrade = async (input) => {
-  const grading = getEffectiveGrading(input.config);
+  const grading = getEffectiveGrading2(input.config);
   const workflowPath = grading.workflow;
   let state = {
     summary: createInitialSummary(input.targetStudents.length),
@@ -4982,6 +5129,7 @@ var FakeGitHubClient = class {
     archivedRepositories: [],
     fileWrites: []
   };
+  fileReads = [];
   authenticatedUser;
   users;
   teams;
@@ -5201,6 +5349,19 @@ var FakeGitHubClient = class {
       this.mutations.enabledActions.push({ owner, repo });
     });
   }
+  getRepositoryFileContent(owner, repo, filePath, ref) {
+    return this.run("getRepositoryFileContent", () => {
+      this.fileReads.push({
+        owner,
+        repo,
+        path: filePath,
+        ref
+      });
+      return this.repositoryFiles.find(
+        (file) => repositoryKey(file.owner, file.repo) === repositoryKey(owner, repo) && file.path === filePath && (file.branch === ref || file.branch === void 0)
+      )?.content ?? null;
+    });
+  }
   getWorkflow(owner, repo, workflowPath) {
     return this.run(
       "getWorkflow",
@@ -5313,7 +5474,7 @@ var COMMAND_NAME3 = "grade";
 var EMPTY_COUNT9 = 0;
 var NOT_CONFIGURED_WARNING_COUNT = 1;
 var createDefaultGitHubClient = () => readGitHubToken() === void 0 ? new FakeGitHubClient() : createGitHubClient();
-var getEffectiveGrading2 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
+var getEffectiveGrading3 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getCommandStatus = (result) => {
   if (result.errors.length === EMPTY_COUNT9) {
     return "success";
@@ -5409,7 +5570,7 @@ var runGradeCommand = async ({
       }
     });
   }
-  const grading = getEffectiveGrading2(configResult.config);
+  const grading = getEffectiveGrading3(configResult.config);
   if (!grading.enabled || grading.workflow === void 0) {
     return createCommandResult({
       commandName: COMMAND_NAME3,
@@ -5509,30 +5670,30 @@ var registerGradeCommand = (program) => {
 };
 
 // src/planning/plan-paths.ts
-import path8 from "path";
-var TERMS_DIRECTORY3 = "terms";
+import path9 from "path";
+var TERMS_DIRECTORY4 = "terms";
 var PLANS_DIRECTORY = "plans";
 var PLAN_FILE_PREFIX = "plan";
 var PLAN_FILE_EXTENSION = "json";
 var createPlanPath = (repoRoot, termCode, assignmentSlug, clock) => {
-  const relativeDirectory = path8.posix.join(
-    TERMS_DIRECTORY3,
+  const relativeDirectory = path9.posix.join(
+    TERMS_DIRECTORY4,
     termCode,
     PLANS_DIRECTORY,
     assignmentSlug
   );
   const fileName = `${PLAN_FILE_PREFIX}-${formatFilesystemTimestamp(clock.now())}.${PLAN_FILE_EXTENSION}`;
-  const relativePath = path8.posix.join(relativeDirectory, fileName);
+  const relativePath = path9.posix.join(relativeDirectory, fileName);
   return {
     relativeDirectory,
     relativePath,
-    absolutePath: path8.join(repoRoot, relativePath)
+    absolutePath: path9.join(repoRoot, relativePath)
   };
 };
 
 // src/planning/plan-renderer.ts
 import fs7 from "fs";
-import path9 from "path";
+import path10 from "path";
 
 // src/io/stable-json.ts
 var JSON_INDENT_SPACES2 = 2;
@@ -5554,7 +5715,7 @@ var stringifyStableJson = (value) => JSON.stringify(orderValue(value), void 0, J
 var renderPlanJson = (plan) => stringifyStableJson(plan);
 var writePlanJsonFile = (plan, absolutePath) => {
   try {
-    fs7.mkdirSync(path9.dirname(absolutePath), {
+    fs7.mkdirSync(path10.dirname(absolutePath), {
       recursive: true
     });
     fs7.writeFileSync(absolutePath, `${renderPlanJson(plan)}
@@ -5786,7 +5947,7 @@ var registerRemoveAccessCommand = (program) => {
 };
 
 // src/cli/commands/report.command.ts
-import path12 from "path";
+import path13 from "path";
 
 // src/reporting/student-markdown-renderer.ts
 var NEWLINE = "\n";
@@ -5912,7 +6073,7 @@ var STUDENT_PUBLISH_MODE_FACULTY_PROVIDED = "faculty-provided";
 var STUDENT_PUBLISH_MODE_BOTH = "both";
 var STUDENT_PUBLISH_MODE_DISABLED = "disabled";
 var CURRENT_DIRECTORY_PREFIX = "./";
-var WINDOWS_PATH_SEPARATOR_PATTERN2 = /\\/g;
+var WINDOWS_PATH_SEPARATOR_PATTERN3 = /\\/g;
 var createPublishedFileReference = (owner, repo, filePath) => `${owner}/${repo}:${filePath}`;
 var createRepositoryMissingWarning = (student) => createWarningDiagnostic(
   DiagnosticCode.StudentReportRepositoryMissing,
@@ -5962,7 +6123,7 @@ var createSourceMissingDiagnostic = (student, artifactName, sourceFile) => creat
   }
 );
 var normalizeArtifactPath = (filePath) => {
-  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN2, "/");
+  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN3, "/");
   return normalizedPath.startsWith(CURRENT_DIRECTORY_PREFIX) ? normalizedPath.slice(CURRENT_DIRECTORY_PREFIX.length) : normalizedPath;
 };
 var findArtifactText = (artifact, sourceFile) => {
@@ -6574,7 +6735,7 @@ var FIRST_SORT_BEFORE_SECOND = -1;
 var FIRST_SORT_AFTER_SECOND = 1;
 var FIRST_WORKFLOW_RUN_INDEX = 0;
 var CURRENT_DIRECTORY_PREFIX2 = "./";
-var WINDOWS_PATH_SEPARATOR_PATTERN3 = /\\/g;
+var WINDOWS_PATH_SEPARATOR_PATTERN4 = /\\/g;
 var compareStudents = (left, right) => {
   const sectionComparison = left.section.localeCompare(right.section);
   if (sectionComparison !== EMPTY_COUNT13) {
@@ -6597,11 +6758,11 @@ var normalizeGitHubError5 = (error) => error instanceof GitHubClientError ? crea
   severity: "error",
   message: "Unexpected GitHub client failure during report collection."
 };
-var getEffectiveGrading3 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
+var getEffectiveGrading4 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getWorkflowRunStatus = (run) => run === void 0 ? void 0 : run.status;
 var getWorkflowRunConclusion = (run) => run === void 0 ? void 0 : run.conclusion;
 var normalizeArtifactPath2 = (filePath) => {
-  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN3, "/");
+  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN4, "/");
   return normalizedPath.startsWith(CURRENT_DIRECTORY_PREFIX2) ? normalizedPath.slice(CURRENT_DIRECTORY_PREFIX2.length) : normalizedPath;
 };
 var findArtifactResultText = (artifact, resultFilePath) => {
@@ -6622,7 +6783,7 @@ var createDefaultGrading = () => ({
   checks: []
 });
 var collectStudentGrading = async (input, record, repositoryStatus) => {
-  const gradingConfig = getEffectiveGrading3(input.config);
+  const gradingConfig = getEffectiveGrading4(input.config);
   if (!gradingConfig.enabled) {
     const mapping2 = mapGradingStatus({
       gradingEnabled: false,
@@ -6663,10 +6824,11 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
       errors: mapping2.errors
     };
   }
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(gradingConfig.workflow);
   const workflow = await input.githubClient.getWorkflow(
     record.repository.owner,
     record.repository.name,
-    gradingConfig.workflow
+    workflowDispatchIdentifier
   );
   if (workflow === null) {
     const mapping2 = mapGradingStatus({
@@ -6691,7 +6853,7 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
   const workflowRuns = (await input.githubClient.listWorkflowRuns({
     owner: record.repository.owner,
     repo: record.repository.name,
-    workflowPath: gradingConfig.workflow
+    workflowPath: workflowDispatchIdentifier
   })).sort(compareRuns);
   const workflowRun = workflowRuns[FIRST_WORKFLOW_RUN_INDEX];
   if (workflowRun === void 0) {
@@ -7035,29 +7197,29 @@ var renderFacultyMarkdownReport = (report) => [
 ].join(NEWLINE3);
 
 // src/reporting/report-paths.ts
-import path10 from "path";
-var TERMS_DIRECTORY4 = "terms";
+import path11 from "path";
+var TERMS_DIRECTORY5 = "terms";
 var REPORTS_DIRECTORY = "reports";
 var FACULTY_JSON_FILE = "faculty-summary.json";
 var FACULTY_CSV_FILE = "faculty-summary.csv";
 var FACULTY_MARKDOWN_FILE = "faculty-summary.md";
 var STUDENTS_DIRECTORY = "students";
-var createRelativeReportDirectory = (termCode, assignmentSlug) => toForwardSlashPath(path10.join(TERMS_DIRECTORY4, termCode, REPORTS_DIRECTORY, assignmentSlug));
+var createRelativeReportDirectory = (termCode, assignmentSlug) => toForwardSlashPath(path11.join(TERMS_DIRECTORY5, termCode, REPORTS_DIRECTORY, assignmentSlug));
 var createPathPair = (repoRoot, relativePath) => ({
-  absolutePath: path10.join(repoRoot, relativePath),
+  absolutePath: path11.join(repoRoot, relativePath),
   relativePath: toForwardSlashPath(relativePath)
 });
 var createReportPaths = (repoRoot, termCode, assignmentSlug) => {
   const reportDirectory = createRelativeReportDirectory(termCode, assignmentSlug);
   return {
     reportDirectory: createPathPair(repoRoot, reportDirectory),
-    facultyJson: createPathPair(repoRoot, path10.join(reportDirectory, FACULTY_JSON_FILE)),
-    facultyCsv: createPathPair(repoRoot, path10.join(reportDirectory, FACULTY_CSV_FILE)),
-    facultyMarkdown: createPathPair(repoRoot, path10.join(reportDirectory, FACULTY_MARKDOWN_FILE))
+    facultyJson: createPathPair(repoRoot, path11.join(reportDirectory, FACULTY_JSON_FILE)),
+    facultyCsv: createPathPair(repoRoot, path11.join(reportDirectory, FACULTY_CSV_FILE)),
+    facultyMarkdown: createPathPair(repoRoot, path11.join(reportDirectory, FACULTY_MARKDOWN_FILE))
   };
 };
 var createStudentReportRelativePath = (termCode, assignmentSlug, section, studentId) => toForwardSlashPath(
-  path10.join(
+  path11.join(
     createRelativeReportDirectory(termCode, assignmentSlug),
     STUDENTS_DIRECTORY,
     section,
@@ -7067,13 +7229,13 @@ var createStudentReportRelativePath = (termCode, assignmentSlug, section, studen
 
 // src/reporting/report-writer.ts
 import fs8 from "fs";
-import path11 from "path";
+import path12 from "path";
 var writeReportFiles = (files) => {
   const generatedFiles = [];
   const errors = [];
   for (const file of files) {
     try {
-      fs8.mkdirSync(path11.dirname(file.absolutePath), { recursive: true });
+      fs8.mkdirSync(path12.dirname(file.absolutePath), { recursive: true });
       fs8.writeFileSync(file.absolutePath, file.content, "utf8");
       generatedFiles.push(file.relativePath);
     } catch (error) {
@@ -7116,7 +7278,7 @@ var createReportFiles = (repoRoot, report) => {
       student.studentId
     );
     return {
-      absolutePath: path12.join(repoRoot, relativePath),
+      absolutePath: path13.join(repoRoot, relativePath),
       relativePath,
       content: renderStudentMarkdownReport(report.assignment, student)
     };
@@ -7270,52 +7432,27 @@ var registerReportCommand = (program) => {
 // src/workflows/workflow-compatibility-validation.ts
 import fs9 from "fs";
 import path14 from "path";
-
-// src/workflows/workflow-paths.ts
-import path13 from "path";
-var TERMS_DIRECTORY5 = "terms";
-var GENERATED_WORKFLOWS_DIRECTORY = "generated-workflows";
-var WORKFLOW_FILE_NAME = "grade.yml";
-var createGeneratedWorkflowPath = (repoRoot, termCode, assignmentSlug) => {
-  const relativePath = [
-    TERMS_DIRECTORY5,
-    termCode,
-    GENERATED_WORKFLOWS_DIRECTORY,
-    assignmentSlug,
-    WORKFLOW_FILE_NAME
-  ].join("/");
-  return {
-    absolutePath: path13.join(repoRoot, relativePath),
-    relativePath
-  };
-};
-
-// src/workflows/workflow-compatibility-validation.ts
-var WORKFLOW_DISPATCH_TRIGGER = "workflow_dispatch";
 var PRESET_GRADING_MODE2 = "preset";
-var getEffectiveGrading4 = (config) => config.assignment.grading ?? config.course.grading;
-var normalizeWorkflowPath = (workflowPath) => workflowPath.replace(/\\/g, "/");
+var getEffectiveGrading5 = (config) => config.assignment.grading ?? config.course.grading;
 var createConfiguredWorkflowCandidate = (repoRoot, workflowPath) => {
-  const relativePath = normalizeWorkflowPath(workflowPath);
   return {
-    absolutePath: path14.join(repoRoot, relativePath),
-    relativePath
+    absolutePath: path14.join(repoRoot, workflowPath),
+    relativePath: workflowPath
   };
 };
 var createWorkflowCandidates = (config, grading) => {
   if (grading.workflow === void 0) {
     return [];
   }
-  const configuredCandidate = createConfiguredWorkflowCandidate(
-    config.summary.repoRoot,
-    grading.workflow
+  const configuredCandidates = createLocalWorkflowPathCandidates(grading.workflow).map(
+    (workflowPath) => createConfiguredWorkflowCandidate(config.summary.repoRoot, workflowPath)
   );
   const generatedCandidate = createGeneratedWorkflowPath(
     config.summary.repoRoot,
     config.summary.termCode,
     config.summary.assignmentSlug
   );
-  return grading.mode === PRESET_GRADING_MODE2 ? [configuredCandidate, generatedCandidate] : [configuredCandidate];
+  return grading.mode === PRESET_GRADING_MODE2 ? [...configuredCandidates, generatedCandidate] : configuredCandidates;
 };
 var findExistingWorkflowCandidate = (candidates) => candidates.find((candidate) => fs9.existsSync(candidate.absolutePath));
 var createWorkflowMissingDiagnostic3 = (grading, candidates) => createConfigDiagnostic(
@@ -7334,23 +7471,13 @@ var createWorkflowDispatchUnsupportedDiagnostic = (workflowPath) => createConfig
     requiredTrigger: WORKFLOW_DISPATCH_TRIGGER
   }
 );
-var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var hasWorkflowDispatchString = (value) => typeof value === "string" && value === WORKFLOW_DISPATCH_TRIGGER;
-var hasWorkflowDispatchArray = (value) => Array.isArray(value) && value.some((item) => hasWorkflowDispatchString(item));
-var hasWorkflowDispatchObject = (value) => isRecord2(value) && Object.hasOwn(value, WORKFLOW_DISPATCH_TRIGGER);
-var hasWorkflowDispatchTrigger = (workflowDocument) => {
-  if (!isRecord2(workflowDocument)) {
-    return false;
-  }
-  const triggers = workflowDocument.on;
-  return hasWorkflowDispatchString(triggers) || hasWorkflowDispatchArray(triggers) || hasWorkflowDispatchObject(triggers);
-};
 var validateWorkflowCompatibility = (config) => {
-  const grading = getEffectiveGrading4(config);
+  const grading = getEffectiveGrading5(config);
   if (!grading.enabled || grading.workflow === void 0) {
     return {
       warnings: [],
-      errors: []
+      errors: [],
+      workflowStatus: "not_required"
     };
   }
   const candidates = createWorkflowCandidates(config, grading);
@@ -7358,7 +7485,8 @@ var validateWorkflowCompatibility = (config) => {
   if (workflowCandidate === void 0) {
     return {
       warnings: [],
-      errors: [createWorkflowMissingDiagnostic3(grading, candidates)]
+      errors: [createWorkflowMissingDiagnostic3(grading, candidates)],
+      workflowStatus: "missing"
     };
   }
   const content = fs9.readFileSync(workflowCandidate.absolutePath, "utf8");
@@ -7366,15 +7494,18 @@ var validateWorkflowCompatibility = (config) => {
   if (parseResult.status === "failure") {
     return {
       warnings: [],
-      errors: [parseResult.diagnostic]
+      errors: [parseResult.diagnostic],
+      workflowStatus: "invalid"
     };
   }
   return hasWorkflowDispatchTrigger(parseResult.value) ? {
     warnings: [],
-    errors: []
+    errors: [],
+    workflowStatus: "found"
   } : {
     warnings: [],
-    errors: [createWorkflowDispatchUnsupportedDiagnostic(workflowCandidate.relativePath)]
+    errors: [createWorkflowDispatchUnsupportedDiagnostic(workflowCandidate.relativePath)],
+    workflowStatus: "invalid"
   };
 };
 
@@ -7468,7 +7599,7 @@ var runValidateCommand = async ({
     });
   }
   const workflowCompatibilityResult = validateWorkflowCompatibility(configResult.config);
-  if (workflowCompatibilityResult.errors.length > 0) {
+  if (workflowCompatibilityResult.errors.length > 0 && workflowCompatibilityResult.workflowStatus !== "missing") {
     return createCommandResult({
       commandName: COMMAND_NAME7,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
@@ -7489,7 +7620,8 @@ var runValidateCommand = async ({
     termConfig: configResult.config.term,
     assignmentConfig: configResult.config.assignment,
     students: rosterResult.students,
-    githubClient: githubClient ?? createDefaultGitHubClient4(configResult.config, rosterResult.students)
+    githubClient: githubClient ?? createDefaultGitHubClient4(configResult.config, rosterResult.students),
+    validateTemplateWorkflow: workflowCompatibilityResult.workflowStatus === "missing"
   });
   if (readinessResult.errors.length > 0) {
     return createCommandResult({
@@ -7554,6 +7686,7 @@ var RESULT_SCHEMA_VERSION_TEXT = String(RESULT_SCHEMA_VERSION);
 var RESULT_WRITER_SCRIPT_PATH = ".graider/write-grading-result.py";
 var renderGradingResultWriterScript = () => `#!/usr/bin/env python3
 import argparse
+import base64
 import json
 import os
 import sys
@@ -7562,17 +7695,65 @@ SCHEMA_VERSION = ${RESULT_SCHEMA_VERSION_TEXT}
 STATUS_PASSED = "passed"
 STATUS_FAILED = "failed"
 STATUS_SKIPPED = "skipped"
-OUTCOME_MAP = {
+STATUS_MAP = {
+    "pass": STATUS_PASSED,
+    "passed": STATUS_PASSED,
     "success": STATUS_PASSED,
+    "fail": STATUS_FAILED,
+    "failed": STATUS_FAILED,
     "failure": STATUS_FAILED,
+    "error": STATUS_FAILED,
     "cancelled": STATUS_FAILED,
+    "timed_out": STATUS_FAILED,
+    "timed-out": STATUS_FAILED,
+    "skip": STATUS_SKIPPED,
     "skipped": STATUS_SKIPPED,
 }
 
 
-def map_outcome(outcome):
-    normalized = (outcome or "").strip().lower()
-    return OUTCOME_MAP.get(normalized, STATUS_FAILED)
+def map_status(value):
+    normalized = (value or "").strip().lower()
+    return STATUS_MAP.get(normalized, STATUS_FAILED)
+
+
+def decode_classroom_result(encoded):
+    if not encoded:
+        return None
+
+    try:
+        decoded_bytes = base64.b64decode(encoded)
+        decoded_text = decoded_bytes.decode("utf-8")
+        return json.loads(decoded_text)
+    except Exception:
+        return None
+
+
+def status_from_classroom_or_outcome(classroom_env_name, outcome_env_name):
+    classroom_result = decode_classroom_result(os.environ.get(classroom_env_name))
+
+    if isinstance(classroom_result, dict):
+        top_level_status = classroom_result.get("status")
+        if top_level_status:
+            return map_status(top_level_status)
+
+        tests = classroom_result.get("tests")
+        if isinstance(tests, list) and tests:
+            test_statuses = [
+                map_status(test.get("status"))
+                for test in tests
+                if isinstance(test, dict)
+            ]
+
+            if STATUS_FAILED in test_statuses:
+                return STATUS_FAILED
+
+            if test_statuses and all(status == STATUS_SKIPPED for status in test_statuses):
+                return STATUS_SKIPPED
+
+            if test_statuses:
+                return STATUS_PASSED
+
+    return map_status(os.environ.get(outcome_env_name))
 
 
 def parse_check(raw_check):
@@ -7583,7 +7764,26 @@ def parse_check(raw_check):
     normalized_outcome = outcome if separator else ""
     return {
         "name": normalized_name,
-        "status": map_outcome(normalized_outcome),
+        "status": map_status(normalized_outcome),
+    }
+
+
+def parse_classroom_check(raw_check):
+    name, separator, env_names = raw_check.partition("=")
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("check name must not be empty")
+    if not separator:
+        raise ValueError("classroom check must include environment variable names")
+    classroom_env_name, env_separator, outcome_env_name = env_names.partition(":")
+    if not env_separator or not classroom_env_name.strip() or not outcome_env_name.strip():
+        raise ValueError("classroom check must include classroom and outcome environment names")
+    return {
+        "name": normalized_name,
+        "status": status_from_classroom_or_outcome(
+            classroom_env_name.strip(),
+            outcome_env_name.strip(),
+        ),
     }
 
 
@@ -7616,10 +7816,14 @@ def main(argv):
     parser = argparse.ArgumentParser(description="Write Graider grading result JSON.")
     parser.add_argument("--output", required=True)
     parser.add_argument("--check", action="append", default=[])
+    parser.add_argument("--classroom-check", action="append", default=[])
     args = parser.parse_args(argv)
 
     try:
-        checks = [parse_check(raw_check) for raw_check in args.check]
+        checks = [
+            *[parse_check(raw_check) for raw_check in args.check],
+            *[parse_classroom_check(raw_check) for raw_check in args.classroom_check],
+        ]
         write_result(args.output, checks)
     except ValueError as error:
         print(str(error), file=sys.stderr)
@@ -7740,13 +7944,15 @@ var renderJavaJunitCheckstyleWorkflow = ({
     "      - name: Write Graider grading result",
     "        if: always()",
     "        env:",
+    "          CHECKSTYLE_CLASSROOM_RESULT: ${{ steps.checkstyle.outputs.result }}",
+    "          UNIT_TESTS_CLASSROOM_RESULT: ${{ steps.unit-tests.outputs.result }}",
     "          CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}",
     "          UNIT_TESTS_OUTCOME: ${{ steps.unit-tests.outcome }}",
     "        run: |",
     `          python3 ${RESULT_WRITER_SCRIPT_PATH} \\`,
     `            --output ${resultOutputPath} \\`,
-    '            --check "CheckStyle=$CHECKSTYLE_OUTCOME" \\',
-    '            --check "Unit Tests=$UNIT_TESTS_OUTCOME"',
+    '            --classroom-check "CheckStyle=CHECKSTYLE_CLASSROOM_RESULT:CHECKSTYLE_OUTCOME" \\',
+    '            --classroom-check "Unit Tests=UNIT_TESTS_CLASSROOM_RESULT:UNIT_TESTS_OUTCOME"',
     "",
     "      - name: Upload Graider grading result",
     "        if: always()",
@@ -7806,7 +8012,7 @@ var COMMAND_NAME8 = "workflow generate";
 var PRESET_GRADING_MODE3 = "preset";
 var LEGACY_GRADING_MODE2 = "custom-workflow";
 var EMPTY_COUNT15 = 0;
-var getEffectiveGrading5 = (courseGrading, assignmentGrading) => assignmentGrading ?? courseGrading;
+var getEffectiveGrading6 = (courseGrading, assignmentGrading) => assignmentGrading ?? courseGrading;
 var formatGeneratedFilePath = (repoRoot, absolutePath) => {
   try {
     return toRepositoryRelativePath(repoRoot, absolutePath);
@@ -7852,7 +8058,7 @@ var runWorkflowGenerateCommand = ({
       }
     });
   }
-  const grading = getEffectiveGrading5(
+  const grading = getEffectiveGrading6(
     configResult.config.course.grading,
     configResult.config.assignment.grading
   );

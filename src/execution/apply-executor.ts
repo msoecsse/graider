@@ -22,6 +22,7 @@ import {
 import type { PlanOperation } from "../planning/operation-models.js";
 import type { Plan } from "../planning/plan-models.js";
 import type { RosterStudent } from "../roster/roster-models.js";
+import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
 
 const EMPTY_COUNT = 0;
 const PRIVATE_REPOSITORY = true;
@@ -632,6 +633,7 @@ const executeVerifyWorkflow = async (
 
   const repositoryName = operation.repository_name;
   const workflowPath = input.config.course.grading.workflow;
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
 
   if (findManifestRecord(state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
@@ -642,7 +644,7 @@ const executeVerifyWorkflow = async (
       input.githubClient.getWorkflow(
         input.config.course.github.organization,
         repositoryName,
-        workflowPath
+        workflowDispatchIdentifier
       )
     );
 
@@ -705,6 +707,7 @@ const executeVerifyDispatch = async (
 
   const repositoryName = operation.repository_name;
   const workflowPath = input.config.course.grading.workflow;
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
 
   if (findManifestRecord(state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
@@ -715,7 +718,7 @@ const executeVerifyDispatch = async (
       input.githubClient.getWorkflow(
         input.config.course.github.organization,
         repositoryName,
-        workflowPath
+        workflowDispatchIdentifier
       )
     );
 

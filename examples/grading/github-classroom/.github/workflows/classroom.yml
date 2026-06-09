@@ -22,25 +22,68 @@ jobs:
         continue-on-error: true
         run: |
           echo "Replace this placeholder with the course Classroom autograder step."
-          echo "The final step maps this step outcome into Graider status vocabulary."
+          echo "The final step prefers this step's Classroom outputs.result when available."
 
       - name: Write Graider grading result
         if: always()
         env:
+          CLASSROOM_RESULT: ${{ steps.classroom-autograder.outputs.result }}
           CLASSROOM_OUTCOME: ${{ steps.classroom-autograder.outcome }}
         run: |
           mkdir -p graider-output
           python3 - <<'PY'
+          import base64
           import json
           import os
 
-          outcome = os.environ.get("CLASSROOM_OUTCOME", "")
-          status = {
+          STATUS_MAP = {
+              "pass": "passed",
+              "passed": "passed",
               "success": "passed",
+              "fail": "failed",
+              "failed": "failed",
               "failure": "failed",
+              "error": "failed",
               "cancelled": "failed",
+              "timed_out": "failed",
+              "timed-out": "failed",
+              "skip": "skipped",
               "skipped": "skipped",
-          }.get(outcome.strip().lower(), "failed")
+          }
+
+          def map_status(value):
+              return STATUS_MAP.get((value or "").strip().lower(), "failed")
+
+          def decode_classroom_result(encoded):
+              if not encoded:
+                  return None
+              try:
+                  return json.loads(base64.b64decode(encoded).decode("utf-8"))
+              except Exception:
+                  return None
+
+          def status_from_classroom_or_outcome():
+              classroom_result = decode_classroom_result(os.environ.get("CLASSROOM_RESULT"))
+              if isinstance(classroom_result, dict):
+                  top_level_status = classroom_result.get("status")
+                  if top_level_status:
+                      return map_status(top_level_status)
+                  tests = classroom_result.get("tests")
+                  if isinstance(tests, list) and tests:
+                      statuses = [
+                          map_status(test.get("status"))
+                          for test in tests
+                          if isinstance(test, dict)
+                      ]
+                      if "failed" in statuses:
+                          return "failed"
+                      if statuses and all(status == "skipped" for status in statuses):
+                          return "skipped"
+                      if statuses:
+                          return "passed"
+              return map_status(os.environ.get("CLASSROOM_OUTCOME"))
+
+          status = status_from_classroom_or_outcome()
           result = {
               "schema_version": 1,
               "status": status,

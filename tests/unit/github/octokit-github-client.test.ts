@@ -35,9 +35,11 @@ const TEMPLATE_REPO = "template-repo";
 const USERNAME = "seanjones";
 const TEAM_SLUG = "faculty";
 const WORKFLOW_PATH = "grade.yml";
+const TEMPLATE_WORKFLOW_PATH = ".github/workflows/grade.yml";
 const BRANCH = "main";
 const CONTENT_PATH = "grading/report.md";
 const FILE_CONTENT = "student report";
+const WORKFLOW_CONTENT = "name: Grade\non:\n  - workflow_dispatch\n";
 const EXISTING_SHA = "existing-sha";
 const CREATED_SHA = "created-sha";
 const RETRY_AFTER_SECONDS = "12";
@@ -581,6 +583,42 @@ describe("OctokitGitHubClient", () => {
     expect(Buffer.from(observedContent, "base64").toString("utf8")).toBe(FILE_CONTENT);
     expect(observedSha).toBe(EXISTING_SHA);
     expect(result).toEqual({ path: CONTENT_PATH, commitSha: CREATED_SHA });
+  });
+
+  it("getRepositoryFileContent requests path and ref then decodes base64 content", async () => {
+    const octokit = createMockOctokit();
+    let observedInput: Record<string, unknown> = {};
+    octokit.rest.repos.getContent = (input = {}) => {
+      observedInput = input;
+
+      return resolvedResponse({
+        type: "file",
+        content: Buffer.from(WORKFLOW_CONTENT, "utf8").toString("base64"),
+        encoding: "base64"
+      });
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(
+      client.getRepositoryFileContent(OWNER, TEMPLATE_REPO, TEMPLATE_WORKFLOW_PATH, BRANCH)
+    ).resolves.toBe(WORKFLOW_CONTENT);
+    expect(observedInput).toEqual({
+      owner: OWNER,
+      repo: TEMPLATE_REPO,
+      path: TEMPLATE_WORKFLOW_PATH,
+      ref: BRANCH
+    });
+  });
+
+  it("getRepositoryFileContent returns null for missing contents", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.getContent = () =>
+      rejectedResponse(createRequestError({ status: OctokitTestNumber.NotFoundStatus }));
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(
+      client.getRepositoryFileContent(OWNER, TEMPLATE_REPO, TEMPLATE_WORKFLOW_PATH, BRANCH)
+    ).resolves.toBeNull();
   });
 
   it("writeRepositoryFile creates missing files without sending SHA", async () => {

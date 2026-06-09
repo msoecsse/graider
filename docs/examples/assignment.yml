@@ -19,6 +19,6 @@ metadata:
   points: 100
 grading:
   enabled: true
-  workflow: grade.yml
+  workflow: .github/workflows/grade.yml
   artifact: grading-results
   result_file: grading-results.json

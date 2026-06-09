@@ -304,8 +304,12 @@ A Python or Node-based result writer is acceptable inside GitHub Actions if it i
 Current generated workflows use a Python standard-library helper rather than a
 Graider CLI call inside student repositories. The helper accepts named
 `name=outcome` checks, creates the output directory, maps unknown or missing
-outcomes to `failed`, and writes the Graider result schema. This is an embedded
-workflow helper, not a reusable GitHub Action package.
+outcomes to `failed`, and writes the Graider result schema. For GitHub Classroom
+grader steps, the helper can also accept a base64 `outputs.result` payload plus
+the step outcome, decode the Classroom JSON, prefer the internal Classroom
+status, and fall back to the step outcome only when the payload is unavailable
+or unparseable. This is an embedded workflow helper, not a reusable GitHub
+Action package.
 
 Long-term, the result writer could become:
 

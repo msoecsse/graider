@@ -138,7 +138,10 @@ export const runValidateCommand = async ({
 
   const workflowCompatibilityResult = validateWorkflowCompatibility(configResult.config);
 
-  if (workflowCompatibilityResult.errors.length > 0) {
+  if (
+    workflowCompatibilityResult.errors.length > 0 &&
+    workflowCompatibilityResult.workflowStatus !== "missing"
+  ) {
     return createCommandResult({
       commandName: COMMAND_NAME,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
@@ -161,7 +164,8 @@ export const runValidateCommand = async ({
     assignmentConfig: configResult.config.assignment,
     students: rosterResult.students,
     githubClient:
-      githubClient ?? createDefaultGitHubClient(configResult.config, rosterResult.students)
+      githubClient ?? createDefaultGitHubClient(configResult.config, rosterResult.students),
+    validateTemplateWorkflow: workflowCompatibilityResult.workflowStatus === "missing"
   });
 
   if (readinessResult.errors.length > 0) {

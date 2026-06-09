@@ -78,7 +78,8 @@ workflow writes a helper script at:
 ```
 
 The helper uses only the Python standard library, maps GitHub Actions step
-outcomes to Graider result statuses, and writes:
+outcomes to Graider result statuses, decodes GitHub Classroom base64
+`outputs.result` payloads when present, and writes:
 
 ```text
 graider-output/grading-results.json

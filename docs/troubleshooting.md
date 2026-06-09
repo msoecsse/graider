@@ -199,8 +199,14 @@ terms/<term>/generated-workflows/<assignment>/grade.yml
 
 Generated workflows create and run `.graider/write-grading-result.py` during the
 GitHub Actions run. The helper writes `graider-output/grading-results.json` and
-maps step outcomes to `passed`, `failed`, or `skipped`. Student repositories do
-not need Graider installed for this step.
+maps step outcomes to `passed`, `failed`, or `skipped`. For GitHub Classroom
+grader steps, the helper decodes base64 `outputs.result` Classroom JSON and
+uses the internal Classroom status before falling back to the step outcome.
+Student repositories do not need Graider installed for this step.
+
+Do not write Classroom `outputs.result` directly into `checks[].status`; it is a
+payload, not a Graider status. Report parsing intentionally rejects invalid
+statuses instead of decoding Classroom payloads after the artifact is produced.
 
 It does not write to GitHub or mutate template repositories. Existing files are
 not overwritten unless `--force` is provided.

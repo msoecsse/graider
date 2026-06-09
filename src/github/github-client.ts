@@ -57,6 +57,13 @@ export interface GitHubClient {
 
   enableActions(owner: string, repo: string): Promise<void>;
 
+  getRepositoryFileContent(
+    owner: string,
+    repo: string,
+    filePath: string,
+    ref: string
+  ): Promise<string | null>;
+
   getWorkflow(owner: string, repo: string, workflowPath: string): Promise<GitHubWorkflow | null>;
 
   dispatchWorkflow(input: DispatchWorkflowInput): Promise<void>;

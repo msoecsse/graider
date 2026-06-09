@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { Buffer } from "node:buffer";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,6 +37,8 @@ const runWriter = (
   options: {
     readonly cwd?: string;
     readonly output?: string;
+    readonly env?: Record<string, string | undefined>;
+    readonly classroomChecks?: readonly string[];
   } = {}
 ): {
   readonly result: ReturnType<typeof spawnSync>;
@@ -49,11 +52,16 @@ const runWriter = (
     scriptPath,
     "--output",
     outputPath,
-    ...checks.flatMap((check) => ["--check", check])
+    ...checks.flatMap((check) => ["--check", check]),
+    ...(options.classroomChecks ?? []).flatMap((check) => ["--classroom-check", check])
   ];
   const result = spawnSync("python3", args, {
     cwd,
-    encoding: "utf8"
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ...options.env
+    }
   });
 
   return {
@@ -71,9 +79,13 @@ const expectWriterOutput = (
   expected: {
     readonly status: string;
     readonly checks: Array<{ readonly name: string; readonly status: string }>;
-  }
+  },
+  options: {
+    readonly env?: Record<string, string | undefined>;
+    readonly classroomChecks?: readonly string[];
+  } = {}
 ): void => {
-  const { result, cwd, outputPath } = runWriter(checks);
+  const { result, cwd, outputPath } = runWriter(checks, options);
   const gradingResult = readResult(cwd, outputPath);
 
   expect(result.status).toBe(SUCCESS_EXIT_CODE);
@@ -85,6 +97,26 @@ const expectWriterOutput = (
       VALID_STATUSES.some((validStatus) => validStatus === status)
     )
   ).toBe(true);
+};
+
+const encodeClassroomResult = (result: unknown): string =>
+  Buffer.from(JSON.stringify(result), "utf8").toString("base64");
+
+const expectClassroomWriterOutput = (
+  env: Record<string, string | undefined>,
+  expectedStatus: string
+): void => {
+  expectWriterOutput(
+    [],
+    {
+      status: expectedStatus,
+      checks: [{ name: "Classroom Check", status: expectedStatus }]
+    },
+    {
+      env,
+      classroomChecks: ["Classroom Check=CLASSROOM_RESULT:CLASSROOM_OUTCOME"]
+    }
+  );
 };
 
 describe("Graider grading result writer template", () => {
@@ -146,6 +178,124 @@ describe("Graider grading result writer template", () => {
         { name: "Unit Tests", status: "failed" }
       ]
     });
+  });
+
+  it("maps Classroom base64 top-level status pass to passed", () => {
+    expectClassroomWriterOutput(
+      {
+        CLASSROOM_RESULT: encodeClassroomResult({
+          version: 1,
+          status: "pass",
+          max_score: 0,
+          tests: [{ name: "CheckStyle", status: "pass", score: 0 }]
+        }),
+        CLASSROOM_OUTCOME: "failure"
+      },
+      "passed"
+    );
+  });
+
+  it("maps Classroom base64 top-level status fail to failed", () => {
+    expectClassroomWriterOutput(
+      {
+        CLASSROOM_RESULT: encodeClassroomResult({
+          version: 1,
+          status: "fail",
+          max_score: 0,
+          tests: [{ name: "Unit Tests", status: "fail", score: 0 }]
+        }),
+        CLASSROOM_OUTCOME: "success"
+      },
+      "failed"
+    );
+  });
+
+  it("maps Classroom base64 top-level status skip to skipped", () => {
+    expectClassroomWriterOutput(
+      {
+        CLASSROOM_RESULT: encodeClassroomResult({
+          version: 1,
+          status: "skip",
+          tests: [{ name: "Optional Check", status: "skip" }]
+        }),
+        CLASSROOM_OUTCOME: "success"
+      },
+      "skipped"
+    );
+  });
+
+  it("maps Classroom tests containing fail to failed when top-level status is absent", () => {
+    expectClassroomWriterOutput(
+      {
+        CLASSROOM_RESULT: encodeClassroomResult({
+          version: 1,
+          tests: [
+            { name: "One", status: "pass" },
+            { name: "Two", status: "fail" }
+          ]
+        }),
+        CLASSROOM_OUTCOME: "success"
+      },
+      "failed"
+    );
+  });
+
+  it("maps Classroom tests all pass to passed when top-level status is absent", () => {
+    expectClassroomWriterOutput(
+      {
+        CLASSROOM_RESULT: encodeClassroomResult({
+          version: 1,
+          tests: [
+            { name: "One", status: "pass" },
+            { name: "Two", status: "passed" }
+          ]
+        }),
+        CLASSROOM_OUTCOME: "failure"
+      },
+      "passed"
+    );
+  });
+
+  it("maps Classroom tests all skipped to skipped when top-level status is absent", () => {
+    expectClassroomWriterOutput(
+      {
+        CLASSROOM_RESULT: encodeClassroomResult({
+          version: 1,
+          tests: [
+            { name: "One", status: "skip" },
+            { name: "Two", status: "skipped" }
+          ]
+        }),
+        CLASSROOM_OUTCOME: "success"
+      },
+      "skipped"
+    );
+  });
+
+  it("falls back from missing Classroom output to step outcome success", () => {
+    expectClassroomWriterOutput({ CLASSROOM_OUTCOME: "success" }, "passed");
+  });
+
+  it("falls back from missing Classroom output to step outcome failure", () => {
+    expectClassroomWriterOutput({ CLASSROOM_OUTCOME: "failure" }, "failed");
+  });
+
+  it("falls back from missing Classroom output to step outcome skipped", () => {
+    expectClassroomWriterOutput({ CLASSROOM_OUTCOME: "skipped" }, "skipped");
+  });
+
+  it("falls back from unparseable Classroom output to step outcome success", () => {
+    expectClassroomWriterOutput(
+      {
+        CLASSROOM_RESULT: "not-base64-json",
+        CLASSROOM_OUTCOME: "success"
+      },
+      "passed"
+    );
+  });
+
+  it("falls back from unparseable Classroom output and missing outcome to failed", () => {
+    expectClassroomWriterOutput({ CLASSROOM_RESULT: "not-base64-json" }, "failed");
   });
 
   it("maps missing outcomes to failed and preserves check names with spaces", () => {

@@ -23,6 +23,9 @@ const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
 const ORGANIZATION = "example-org";
 const JONES_REPOSITORY = "27s1-se2030-lab04-seanjones";
 const KIM_REPOSITORY = "27s1-se2030-lab04-kimstudent";
+const COURSE_FILE = "course.yml";
+const LEGACY_WORKFLOW_PATH = "grade.yml";
+const CONFIGURED_WORKFLOW_PATH = ".github/workflows/grade.yml";
 const NO_MUTATIONS = 0;
 const jsonOptions = normalizeCommonCommandOptions({ json: true });
 const noSleep = async () => {};
@@ -41,6 +44,16 @@ const copyFixtureToTemp = (fixtureName: string): string => {
   fs.cpSync(sourceRoot, destinationRoot, { recursive: true });
 
   return destinationRoot;
+};
+
+const replaceCourseWorkflow = (cwd: string, workflowPath: string): void => {
+  const coursePath = path.join(cwd, COURSE_FILE);
+  const content = fs.readFileSync(coursePath, "utf8");
+
+  fs.writeFileSync(
+    coursePath,
+    content.replace(`workflow: ${LEGACY_WORKFLOW_PATH}`, `workflow: ${workflowPath}`)
+  );
 };
 
 const createRepository = (
@@ -199,6 +212,27 @@ describe("graider grade command", () => {
         repo: JONES_REPOSITORY,
         workflowPath: "grade.yml",
         ref: "main"
+      })
+    ]);
+  });
+
+  it("derives the dispatch workflow identifier from a repository-relative workflow path", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    replaceCourseWorkflow(cwd, CONFIGURED_WORKFLOW_PATH);
+    const githubClient = createReadyClient();
+    const result = await runGradeCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: jsonOptions,
+      targetSelector: { studentId: "jones" },
+      githubClient,
+      retryOptions: { sleep: noSleep }
+    });
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.workflowDispatches).toEqual([
+      expect.objectContaining({
+        workflowPath: LEGACY_WORKFLOW_PATH
       })
     ]);
   });

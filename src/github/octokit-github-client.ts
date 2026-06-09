@@ -374,6 +374,33 @@ export class OctokitGitHubClient implements GitHubClient {
     );
   }
 
+  async getRepositoryFileContent(
+    owner: string,
+    repo: string,
+    filePath: string,
+    ref: string
+  ): Promise<string | null> {
+    const data = await this.runNullable(() =>
+      this.octokit.rest.repos.getContent({
+        owner,
+        path: filePath,
+        ref,
+        repo
+      })
+    );
+
+    if (data === null || Array.isArray(data)) {
+      return null;
+    }
+
+    const record = asRecord(data);
+    const content = asString(record.content);
+
+    return content === undefined
+      ? null
+      : Buffer.from(content, BASE64_ENCODING).toString(UTF8_ENCODING);
+  }
+
   async getWorkflow(
     owner: string,
     repo: string,

@@ -10,6 +10,7 @@ import { GitHubClientError } from "../github/github-errors.js";
 import { type RetryOptions, withGitHubRetry } from "../github/github-retry.js";
 import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import type { RosterStudent } from "../roster/roster-models.js";
+import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
 
 const EMPTY_COUNT = 0;
 const SUCCESS_INCREMENT = 1;
@@ -177,9 +178,10 @@ const dispatchForStudent = async (
   input: GradeExecutionInput,
   state: GradeExecutionState,
   student: RosterStudent,
-  workflowPath: string
+  configuredWorkflowPath: string
 ): Promise<GradeExecutionState> => {
   const repository = findManifestRecord(input.manifest, student);
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(configuredWorkflowPath);
 
   if (repository === undefined) {
     return recordFailure(state, createStudentRepositoryMissingDiagnostic(student));
@@ -190,21 +192,21 @@ const dispatchForStudent = async (
       input.githubClient.getWorkflow(
         repository.repository.owner,
         repository.repository.name,
-        workflowPath
+        workflowDispatchIdentifier
       )
     );
 
     if (workflow === null) {
       return recordFailure(
         state,
-        createWorkflowMissingDiagnostic(student, repository, workflowPath)
+        createWorkflowMissingDiagnostic(student, repository, configuredWorkflowPath)
       );
     }
 
     if (!workflow.supportsDispatch) {
       return recordFailure(
         state,
-        createWorkflowDispatchMissingDiagnostic(student, repository, workflowPath)
+        createWorkflowDispatchMissingDiagnostic(student, repository, configuredWorkflowPath)
       );
     }
 
@@ -212,7 +214,7 @@ const dispatchForStudent = async (
       input.githubClient.dispatchWorkflow({
         owner: repository.repository.owner,
         repo: repository.repository.name,
-        workflowPath,
+        workflowPath: workflowDispatchIdentifier,
         ref: input.config.assignment.template.branch
       })
     );
