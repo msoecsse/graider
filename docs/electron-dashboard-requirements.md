@@ -1,5 +1,8 @@
 # Graider UI Requirements — Slice UI-1: Electron Course Dashboard
 
+Developer-facing operational notes for the completed UI-1 implementation live in
+[Electron Dashboard Developer Guide](electron-dashboard-dev.md).
+
 ## Purpose
 
 Build the first Graider UI slice: a desktop dashboard that looks and behaves similarly to the original GitHub Classroom dashboard while using Graider CLI commands as the source of truth.

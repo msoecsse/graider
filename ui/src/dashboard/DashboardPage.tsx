@@ -6,8 +6,15 @@ import type {
 } from "../../electron/ipc";
 import { CourseCardGrid } from "./CourseCardGrid";
 import { CourseFolderList } from "./CourseFolderList";
+import { DashboardToolbar } from "./DashboardToolbar";
 import { FolderErrorPanel } from "./FolderErrorPanel";
 import { aggregateDashboardResults } from "./dashboardAggregation";
+import {
+  filterAndSortDashboardCards,
+  filterFolderErrors,
+  type DashboardSortOption,
+  type DashboardViewFilter
+} from "./dashboardFilters";
 
 const getSafeErrorMessage = (error: unknown): string =>
   error instanceof Error && error.message.trim().length > 0
@@ -25,6 +32,9 @@ export const DashboardPage = (): ReactElement => {
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [viewFilter, setViewFilter] = useState<DashboardViewFilter>("active");
+  const [sortOption, setSortOption] = useState<DashboardSortOption>("newest-first");
 
   useEffect(() => {
     let isMounted = true;
@@ -174,6 +184,18 @@ export const DashboardPage = (): ReactElement => {
   const isRefreshing = isRefreshingAll || refreshingId !== null;
   const aggregatedDashboard = aggregateDashboardResults(refreshResults);
   const hasCourseFolders = courseFolders.length > 0;
+  const visibleCards = filterAndSortDashboardCards(
+    aggregatedDashboard.cards,
+    searchQuery,
+    viewFilter,
+    sortOption
+  );
+  const visibleFolderErrors = filterFolderErrors(
+    aggregatedDashboard.folderErrors,
+    searchQuery,
+    viewFilter
+  );
+  const hasFilteredOutCards = aggregatedDashboard.cards.length > 0 && visibleCards.length === 0;
 
   return (
     <main className="dashboard-shell" aria-labelledby="dashboard-title">
@@ -183,48 +205,29 @@ export const DashboardPage = (): ReactElement => {
             <p className="app-header__eyebrow">Graider</p>
             <h1 id="dashboard-title">Your Courses</h1>
           </div>
-          <button
-            className="primary-action"
-            type="button"
-            disabled={isSelectingFolder}
-            onClick={() => {
-              void handleOpenCourseFolder();
-            }}
-          >
-            Open course folder
-          </button>
         </div>
       </header>
 
       <section className="dashboard-content" aria-label="Course dashboard">
-        <div className="toolbar" aria-label="Dashboard controls">
-          <label className="search-field">
-            <span>Search</span>
-            <input type="search" placeholder="Search for a course or assignment" disabled />
-          </label>
-          <label className="select-field">
-            <span>View</span>
-            <select disabled>
-              <option>Active</option>
-            </select>
-          </label>
-          <label className="select-field">
-            <span>Sort</span>
-            <select disabled>
-              <option>Newest first</option>
-            </select>
-          </label>
-          <button
-            className="secondary-action"
-            type="button"
-            disabled={!hasCourseFolders || isRefreshing}
-            onClick={() => {
-              void handleRefreshDashboard();
-            }}
-          >
-            {isRefreshingAll ? "Refreshing..." : "Refresh"}
-          </button>
-        </div>
+        <DashboardToolbar
+          searchQuery={searchQuery}
+          viewFilter={viewFilter}
+          sortOption={sortOption}
+          isRefreshing={isRefreshingAll}
+          isSelectingFolder={isSelectingFolder}
+          hasCourseFolders={hasCourseFolders}
+          visibleCardCount={visibleCards.length}
+          totalCardCount={aggregatedDashboard.cards.length}
+          onSearchQueryChange={setSearchQuery}
+          onViewFilterChange={setViewFilter}
+          onSortOptionChange={setSortOption}
+          onRefreshDashboard={() => {
+            void handleRefreshDashboard();
+          }}
+          onOpenCourseFolder={() => {
+            void handleOpenCourseFolder();
+          }}
+        />
 
         {errorMessage === null ? null : (
           <p className="error-message" role="alert">
@@ -255,8 +258,8 @@ export const DashboardPage = (): ReactElement => {
 
         {!isLoadingFolders && hasCourseFolders ? (
           <>
-            <FolderErrorPanel folderErrors={aggregatedDashboard.folderErrors} />
-            <CourseCardGrid cards={aggregatedDashboard.cards} />
+            <FolderErrorPanel folderErrors={visibleFolderErrors} />
+            <CourseCardGrid cards={visibleCards} />
 
             {isRefreshingAll ? <p className="loading-state">Loading dashboard...</p> : null}
 
@@ -271,6 +274,13 @@ export const DashboardPage = (): ReactElement => {
               <section className="dashboard-placeholder" aria-label="No course cards">
                 <h2>No course-term cards found.</h2>
                 <p>Review the registered folder status or diagnostics, then refresh again.</p>
+              </section>
+            ) : null}
+
+            {hasFilteredOutCards ? (
+              <section className="dashboard-placeholder" aria-label="No matching courses">
+                <h2>No matching courses found.</h2>
+                <p>Try a different search or change the view filter.</p>
               </section>
             ) : null}
 

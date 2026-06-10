@@ -129,6 +129,12 @@ const getFirstOpenCourseFolderButton = async (): Promise<HTMLElement> => {
   return openButton;
 };
 
+const getCourseCardHeadingNames = (): string[] =>
+  screen
+    .getAllByRole("heading", { level: 2 })
+    .map((heading) => heading.textContent ?? "")
+    .filter((text) => text.startsWith("27"));
+
 describe("DashboardPage", () => {
   it("renders the empty course state", async () => {
     render(<DashboardPage />);
@@ -141,13 +147,15 @@ describe("DashboardPage", () => {
     expect(screen.getAllByRole("button", { name: "Open course folder" })).toHaveLength(2);
   });
 
-  it("keeps non-implemented dashboard controls disabled", async () => {
+  it("renders accessible toolbar controls", async () => {
     render(<DashboardPage />);
 
     await screen.findByRole("heading", { level: 2, name: "No courses added yet." });
 
     expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
-    expect(screen.getByRole("searchbox", { name: "Search" })).toBeDisabled();
+    expect(screen.getByRole("searchbox", { name: "Search" })).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: "View" })).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: "Sort" })).toBeEnabled();
   });
 
   it("renders registered folder records", async () => {
@@ -295,6 +303,193 @@ describe("DashboardPage", () => {
     expect(screen.getAllByText(SECOND_COURSE_FOLDER.path).length).toBeGreaterThan(0);
   });
 
+  it("filters cards with local search and shows a filtered empty state", async () => {
+    const refreshDashboard = vi.fn().mockResolvedValue(
+      createCombinedDashboardResult([
+        createDashboardResult({}, [COURSE_TERM_CARD]),
+        createDashboardResult(
+          {
+            courseFolderId: SECOND_COURSE_FOLDER.id,
+            courseFolderPath: SECOND_COURSE_FOLDER.path
+          },
+          [SECOND_COURSE_TERM_CARD]
+        )
+      ])
+    );
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER, SECOND_COURSE_FOLDER]),
+      refreshDashboard
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" })
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), {
+      target: { value: "  csc4641  " }
+    });
+
+    expect(screen.queryByRole("heading", { level: 2, name: "27s1-csc1120" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "27s1-csc4641" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), {
+      target: { value: "lab 02" }
+    });
+
+    expect(screen.getByRole("heading", { level: 2, name: "27s1-csc1120" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "27s1-csc4641" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search" }), {
+      target: { value: "no-match" }
+    });
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "No matching courses found." })
+    ).toBeInTheDocument();
+  });
+
+  it("filters by active, needs attention, and all views", async () => {
+    const inactiveCard = {
+      ...SECOND_COURSE_TERM_CARD,
+      displayName: "27s1-csc4641",
+      status: "inactive"
+    };
+    const attentionCard = {
+      ...COURSE_TERM_CARD,
+      displayName: "27s1-csc1120",
+      needsAttention: true,
+      attentionCount: 1
+    };
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER, SECOND_COURSE_FOLDER]),
+      refreshDashboard: vi.fn().mockResolvedValue(
+        createCombinedDashboardResult([
+          createDashboardResult({}, [attentionCard]),
+          createDashboardResult(
+            {
+              courseFolderId: SECOND_COURSE_FOLDER.id,
+              courseFolderPath: SECOND_COURSE_FOLDER.path
+            },
+            [inactiveCard]
+          )
+        ])
+      )
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "27s1-csc4641" })).toBeNull();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "View" }), {
+      target: { value: "all" }
+    });
+    expect(screen.getByRole("heading", { level: 2, name: "27s1-csc4641" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "View" }), {
+      target: { value: "needs-attention" }
+    });
+    expect(screen.getByRole("heading", { level: 2, name: "27s1-csc1120" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "27s1-csc4641" })).toBeNull();
+  });
+
+  it("sorts cards from the toolbar", async () => {
+    const alphaCard = {
+      ...COURSE_TERM_CARD,
+      displayName: "27s1-alpha",
+      courseSlug: "alpha",
+      courseTitle: "Alpha",
+      termSlug: "27s2",
+      needsAttention: true,
+      attentionCount: 3,
+      recentAssignments: [
+        {
+          slug: "new",
+          title: "New",
+          status: "active",
+          assignmentFile: "new.yml",
+          dueAt: "2027-06-01T00:00:00.000Z",
+          needsAttention: false,
+          diagnostics: []
+        }
+      ]
+    };
+    const zetaCard = {
+      ...SECOND_COURSE_TERM_CARD,
+      displayName: "27s2-zeta",
+      courseSlug: "zeta",
+      courseTitle: "Zeta",
+      termSlug: "27s1",
+      needsAttention: true,
+      attentionCount: 1,
+      recentAssignments: [
+        {
+          slug: "old",
+          title: "Old",
+          status: "active",
+          assignmentFile: "old.yml",
+          dueAt: "2027-01-01T00:00:00.000Z",
+          needsAttention: false,
+          diagnostics: []
+        }
+      ]
+    };
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER, SECOND_COURSE_FOLDER]),
+      refreshDashboard: vi.fn().mockResolvedValue(
+        createCombinedDashboardResult([
+          createDashboardResult(
+            {
+              refreshedAt: "2026-06-09T12:00:00.000Z"
+            },
+            [zetaCard]
+          ),
+          createDashboardResult(
+            {
+              courseFolderId: SECOND_COURSE_FOLDER.id,
+              courseFolderPath: SECOND_COURSE_FOLDER.path,
+              refreshedAt: "2026-06-10T12:00:00.000Z"
+            },
+            [alphaCard]
+          )
+        ])
+      )
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-alpha" })
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort" }), {
+      target: { value: "course" }
+    });
+    expect(getCourseCardHeadingNames()).toEqual(["27s1-alpha", "27s2-zeta"]);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort" }), {
+      target: { value: "term" }
+    });
+    expect(getCourseCardHeadingNames()).toEqual(["27s2-zeta", "27s1-alpha"]);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort" }), {
+      target: { value: "needs-attention" }
+    });
+    expect(getCourseCardHeadingNames()).toEqual(["27s1-alpha", "27s2-zeta"]);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort" }), {
+      target: { value: "recently-refreshed" }
+    });
+    expect(getCourseCardHeadingNames()).toEqual(["27s1-alpha", "27s2-zeta"]);
+  });
+
   it("renders course card content and recent assignments in returned order", async () => {
     const card = {
       ...COURSE_TERM_CARD,
@@ -411,8 +606,7 @@ describe("DashboardPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
 
-    expect(await screen.findByText("Needs attention")).toBeInTheDocument();
-    expect(screen.getByLabelText("27s1-csc1120 needs attention")).toBeInTheDocument();
+    expect(await screen.findByLabelText("27s1-csc1120 needs attention")).toBeInTheDocument();
   });
 
   it("shows card and assignment diagnostics safely", async () => {

@@ -89,7 +89,7 @@ h1 {
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 140px 170px auto;
+  grid-template-columns: minmax(240px, 1fr) 150px 190px auto auto auto;
   gap: 12px;
   align-items: end;
   margin-bottom: 22px;
@@ -112,6 +112,15 @@ h1 {
   background: #ffffff;
   color: #24292f;
   padding: 10px 12px;
+}
+
+.toolbar__count {
+  color: #57606a;
+  font-size: 0.875rem;
+  font-weight: 700;
+  min-height: 42px;
+  padding-top: 12px;
+  white-space: nowrap;
 }
 
 .primary-action,
@@ -367,6 +376,17 @@ h1 {
   font-size: 0.82rem;
 }
 
+.assignment-list__status {
+  border: 1px solid #d0d7de;
+  border-radius: 999px;
+  color: #57606a;
+  display: inline-block;
+  font-size: 0.76rem;
+  font-weight: 700;
+  margin-top: 4px;
+  padding: 2px 7px;
+}
+
 .assignment-list__attention {
   color: #9a3412;
   font-size: 0.78rem;
@@ -416,6 +436,7 @@ h1 {
   border: 1px solid #d8dee4;
   border-radius: 8px;
   background: #ffffff;
+  margin-top: 24px;
   overflow: hidden;
 }
 
@@ -501,6 +522,11 @@ h1 {
 
   .toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .toolbar__count {
+    min-height: auto;
+    padding-top: 0;
   }
 
   .course-card-section__header {
