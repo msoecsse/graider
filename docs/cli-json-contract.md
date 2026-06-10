@@ -47,8 +47,9 @@ Stable top-level fields:
 `diagnostics` is additive. Existing consumers that read `warnings` and `errors`
 can continue to do so.
 
-`dashboard --json` is a UI-focused command and adds a top-level `cards` array to
-this JSON surface:
+`dashboard --json` and `assignment detail --json` are UI-focused commands that
+add command-specific top-level fields to this JSON surface. `dashboard --json`
+adds a top-level `cards` array:
 
 ```json
 {
@@ -70,6 +71,10 @@ this JSON surface:
 
 The dashboard command is JSON-only. Running it without `--json` returns a JSON
 failure with `dashboard_json_required`.
+
+`assignment detail <assignment.yml> --json` is also JSON-only. Running it
+without `--json` returns a JSON failure with
+`assignment_detail_json_required`.
 
 ## Command Status Values
 
@@ -225,6 +230,79 @@ The dashboard checks template repository existence, template branch existence,
 the configured grading workflow path, and `workflow_dispatch` for
 grading-enabled assignments. It does not inspect student repositories, workflow
 runs, artifacts, report contents, or per-student grading results.
+
+### `assignment detail <assignment.yml> --json`
+
+`assignment detail --json` builds the read-only local backend model for the
+future Electron assignment detail page. It does not require
+`GRAIDER_GITHUB_TOKEN` in Slice 11A and does not call GitHub.
+
+Useful top-level fields include:
+
+```json
+{
+  "schemaVersion": 1,
+  "commandName": "assignment detail",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "course": {
+    "slug": "csc1120",
+    "title": "CSC1120",
+    "file": "course.yml"
+  },
+  "term": {
+    "slug": "27s1",
+    "title": "Spring 2027",
+    "file": "terms/27s1/term.yml"
+  },
+  "assignment": {
+    "slug": "lab02",
+    "title": "Lab 02",
+    "type": "individual",
+    "status": "active",
+    "file": "terms/27s1/assignments/lab02/assignment.yml"
+  },
+  "metadata": {
+    "facultyOwner": "professor",
+    "lmsAssignmentId": null,
+    "gradingCategory": "labs",
+    "points": 100
+  },
+  "deadline": {
+    "dueAt": "2027-06-15T23:59:00+09:00",
+    "latePolicy": "standard"
+  },
+  "sections": ["001"],
+  "template": {
+    "repository": "graider-sandbox/csc1120L2Template",
+    "branch": "main",
+    "status": "not_checked"
+  },
+  "grading": {
+    "enabled": true,
+    "mode": "custom-workflow",
+    "workflow": ".github/workflows/grade.yml",
+    "artifact": "grading-results",
+    "resultFile": "grading-results.json",
+    "workflowStatus": "not_checked",
+    "workflowDispatch": "not_checked"
+  },
+  "applyState": {
+    "status": "not_applied"
+  },
+  "actions": {}
+}
+```
+
+The command loads course, term, assignment, roster summary, student report
+publishing config, and lightweight local apply state. In Slice 11A, GitHub
+readiness fields use `not_checked` or `not_required`; template repository,
+branch, workflow, and `workflow_dispatch` checks are deferred to Slice 11B.
+
+The command is read-only. It does not create repositories, dispatch grading,
+generate workflows, publish reports, inspect workflow runs, download artifacts,
+or parse grading result artifacts.
 
 ### `apply --json`
 

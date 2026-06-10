@@ -121,6 +121,7 @@ export const DiagnosticCode = {
   DashboardGithubPermissionDenied: "dashboard_github_permission_denied",
   DashboardGithubRateLimited: "dashboard_github_rate_limited",
   DashboardGithubRequestFailed: "dashboard_github_request_failed",
+  AssignmentDetailJsonRequired: "assignment_detail_json_required",
   GithubTokenMissing: "github_token_missing"
 } as const;
 
@@ -255,6 +256,7 @@ export const DASHBOARD_GITHUB_PERMISSION_DENIED_CODE =
   DiagnosticCode.DashboardGithubPermissionDenied;
 export const DASHBOARD_GITHUB_RATE_LIMITED_CODE = DiagnosticCode.DashboardGithubRateLimited;
 export const DASHBOARD_GITHUB_REQUEST_FAILED_CODE = DiagnosticCode.DashboardGithubRequestFailed;
+export const ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE = DiagnosticCode.AssignmentDetailJsonRequired;
 export const GITHUB_TOKEN_MISSING_CODE = DiagnosticCode.GithubTokenMissing;
 
 export const createNotSupportedInMvpDiagnostic = (

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { registerAssignmentCommand } from "./commands/assignment.command.js";
 import { registerApplyCommand } from "./commands/apply.command.js";
 import { registerArchiveCommand } from "./commands/archive.command.js";
 import { registerDashboardCommand } from "./commands/dashboard.command.js";
@@ -20,6 +21,7 @@ export const buildProgram = (): Command => {
     .version("0.1.0");
 
   registerValidateCommand(program);
+  registerAssignmentCommand(program);
   registerDashboardCommand(program);
   registerPlanCommand(program);
   registerApplyCommand(program);

@@ -3,8 +3,8 @@
 // src/cli/index.ts
 import { Command } from "commander";
 
-// src/cli/commands/apply.command.ts
-import fs6 from "fs";
+// src/assignment-detail/assignment-detail-builder.ts
+import fs3 from "fs";
 
 // src/config/config-loader.ts
 import path3 from "path";
@@ -239,6 +239,7 @@ var DiagnosticCode = {
   DashboardGithubPermissionDenied: "dashboard_github_permission_denied",
   DashboardGithubRateLimited: "dashboard_github_rate_limited",
   DashboardGithubRequestFailed: "dashboard_github_request_failed",
+  AssignmentDetailJsonRequired: "assignment_detail_json_required",
   GithubTokenMissing: "github_token_missing"
 };
 var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
@@ -352,6 +353,7 @@ var DASHBOARD_GITHUB_AUTH_FAILED_CODE = DiagnosticCode.DashboardGithubAuthFailed
 var DASHBOARD_GITHUB_PERMISSION_DENIED_CODE = DiagnosticCode.DashboardGithubPermissionDenied;
 var DASHBOARD_GITHUB_RATE_LIMITED_CODE = DiagnosticCode.DashboardGithubRateLimited;
 var DASHBOARD_GITHUB_REQUEST_FAILED_CODE = DiagnosticCode.DashboardGithubRequestFailed;
+var ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE = DiagnosticCode.AssignmentDetailJsonRequired;
 var GITHUB_TOKEN_MISSING_CODE = DiagnosticCode.GithubTokenMissing;
 var createNotSupportedInMvpDiagnostic = (commandName, assignmentFile) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
@@ -1030,6 +1032,606 @@ var loadGraiderConfig = (request) => {
   };
 };
 
+// src/manifest/manifest-paths.ts
+import path4 from "path";
+var TERMS_DIRECTORY2 = "terms";
+var MANIFESTS_DIRECTORY = "manifests";
+var MANIFEST_FILE_NAME = "manifest.yml";
+var createManifestPath = (repoRoot, termCode, assignmentSlug) => {
+  const relativeDirectory = path4.posix.join(
+    TERMS_DIRECTORY2,
+    termCode,
+    MANIFESTS_DIRECTORY,
+    assignmentSlug
+  );
+  const relativePath = path4.posix.join(relativeDirectory, MANIFEST_FILE_NAME);
+  return {
+    relativeDirectory,
+    relativePath,
+    absolutePath: path4.join(repoRoot, relativePath)
+  };
+};
+
+// src/roster/roster-loader.ts
+import path5 from "path";
+
+// src/io/csv.ts
+var HEADER_ROW_NUMBER = 1;
+var FIRST_DATA_ROW_NUMBER = 2;
+var EMPTY_LINE_COUNT = 0;
+var EMPTY_FIELD = "";
+var COMMA = ",";
+var QUOTE = '"';
+var DOUBLE_QUOTE = '""';
+var CARRIAGE_RETURN = "\r";
+var NEWLINE_PATTERN = /\n/;
+var stripCarriageReturn = (line) => line.endsWith(CARRIAGE_RETURN) ? line.slice(0, -CARRIAGE_RETURN.length) : line;
+var parseCsvLine = (line) => {
+  const fields = [];
+  let current = EMPTY_FIELD;
+  let inQuotes = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? EMPTY_FIELD;
+    const nextTwoCharacters = line.slice(index, index + DOUBLE_QUOTE.length);
+    if (nextTwoCharacters === DOUBLE_QUOTE && inQuotes) {
+      current += QUOTE;
+      index += QUOTE.length;
+    } else if (character === QUOTE) {
+      inQuotes = !inQuotes;
+    } else if (character === COMMA && !inQuotes) {
+      fields.push(current.trim());
+      current = EMPTY_FIELD;
+    } else {
+      current += character;
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+};
+var parseCsv = (content) => {
+  const lines = content.split(NEWLINE_PATTERN).map(stripCarriageReturn);
+  const nonEmptyLines = lines.filter((line) => line.trim().length > EMPTY_LINE_COUNT);
+  const headerLine = nonEmptyLines[HEADER_ROW_NUMBER - HEADER_ROW_NUMBER] ?? EMPTY_FIELD;
+  const dataLines = nonEmptyLines.slice(FIRST_DATA_ROW_NUMBER - HEADER_ROW_NUMBER);
+  return {
+    headers: parseCsvLine(headerLine),
+    rows: dataLines.map((line, index) => ({
+      rowNumber: index + FIRST_DATA_ROW_NUMBER,
+      values: parseCsvLine(line)
+    }))
+  };
+};
+
+// src/roster/roster-normalization.ts
+var normalizeLowercaseValue = (value, code, message, context) => {
+  const normalized = value.toLowerCase();
+  if (normalized === value) {
+    return {
+      value
+    };
+  }
+  return {
+    value: normalized,
+    warning: createWarningDiagnostic(code, message, {
+      ...context,
+      originalValue: value,
+      normalizedValue: normalized
+    })
+  };
+};
+var normalizeStudentId = (value, context) => normalizeLowercaseValue(
+  value,
+  STUDENT_ID_NORMALIZED_CODE,
+  "student_id was normalized to lowercase.",
+  context
+);
+var normalizeGithubUsername = (value, context) => normalizeLowercaseValue(
+  value,
+  GITHUB_USERNAME_NORMALIZED_CODE,
+  "github_username was normalized to lowercase.",
+  context
+);
+var normalizeRosterStatus = (value, context) => normalizeLowercaseValue(
+  value,
+  ROSTER_STATUS_NORMALIZED_CODE,
+  "Roster status was normalized to lowercase.",
+  context
+);
+
+// src/roster/roster-models.ts
+var ROSTER_STATUS_ACTIVE = "active";
+var ROSTER_STATUS_DROPPED = "dropped";
+var ROSTER_STATUS_HOLD = "hold";
+
+// src/roster/roster-validation.ts
+var STUDENT_ID_COLUMN = "student_id";
+var GITHUB_USERNAME_COLUMN = "github_username";
+var SECTION_COLUMN = "section";
+var STATUS_COLUMN = "status";
+var REQUIRED_ROSTER_COLUMNS = [
+  STUDENT_ID_COLUMN,
+  GITHUB_USERNAME_COLUMN,
+  SECTION_COLUMN,
+  STATUS_COLUMN
+];
+var GITHUB_USERNAME_MAX_LENGTH = 39;
+var FIRST_MATCH_INDEX = 0;
+var SECOND_MATCH_INDEX = 1;
+var VALID_ROSTER_STATUSES = [
+  ROSTER_STATUS_ACTIVE,
+  ROSTER_STATUS_DROPPED,
+  ROSTER_STATUS_HOLD
+];
+var GITHUB_USERNAME_PATTERN = /^[a-z0-9-]+$/;
+var CONSECUTIVE_HYPHENS = "--";
+var HYPHEN = "-";
+var isRosterStatus = (value) => VALID_ROSTER_STATUSES.some((status) => status === value);
+var validateRequiredColumns = (rosterPath, headers) => REQUIRED_ROSTER_COLUMNS.filter((column) => !headers.includes(column)).map(
+  (column) => createConfigDiagnostic(
+    MISSING_REQUIRED_COLUMN_CODE,
+    `Roster is missing required column ${column}.`,
+    {
+      rosterPath,
+      columnName: column
+    }
+  )
+);
+var createMissingRequiredValueDiagnostic = (rosterPath, rowNumber, columnName) => createConfigDiagnostic(
+  MISSING_REQUIRED_VALUE_CODE,
+  `Roster row ${String(rowNumber)} is missing required value ${columnName}.`,
+  {
+    rosterPath,
+    rowNumber,
+    columnName
+  }
+);
+var validateRosterStatus = (rosterPath, rowNumber, status) => isRosterStatus(status) ? [] : [
+  createConfigDiagnostic(
+    INVALID_ROSTER_STATUS_CODE,
+    `Roster row ${String(rowNumber)} has invalid status ${status}.`,
+    {
+      rosterPath,
+      rowNumber,
+      status
+    }
+  )
+];
+var validateRosterSection = (rosterPath, rowNumber, expectedSection, actualSection) => actualSection === expectedSection ? [] : [
+  createConfigDiagnostic(
+    SECTION_MISMATCH_CODE,
+    `Roster row ${String(rowNumber)} has section ${actualSection}; expected ${expectedSection}.`,
+    {
+      rosterPath,
+      rowNumber,
+      expectedSection,
+      actualSection
+    }
+  )
+];
+var validateGithubUsername = (rosterPath, rowNumber, githubUsername) => {
+  const isValid = githubUsername.length > 0 && githubUsername.length <= GITHUB_USERNAME_MAX_LENGTH && GITHUB_USERNAME_PATTERN.test(githubUsername) && !githubUsername.startsWith(HYPHEN) && !githubUsername.endsWith(HYPHEN) && !githubUsername.includes(CONSECUTIVE_HYPHENS);
+  return isValid ? [] : [
+    createConfigDiagnostic(
+      INVALID_GITHUB_USERNAME_CODE,
+      `Roster row ${String(rowNumber)} has invalid GitHub username ${githubUsername}.`,
+      {
+        rosterPath,
+        rowNumber,
+        githubUsername
+      }
+    )
+  ];
+};
+var createDuplicateDiagnostic = (code, message, valueKey, matches) => {
+  const firstMatch = matches[FIRST_MATCH_INDEX];
+  const secondMatch = matches[SECOND_MATCH_INDEX];
+  return createConfigDiagnostic(code, message, {
+    [valueKey]: firstMatch?.[valueKey === STUDENT_ID_COLUMN ? "studentId" : "githubUsername"],
+    firstRosterPath: firstMatch?.rosterPath,
+    firstRowNumber: firstMatch?.rowNumber,
+    secondRosterPath: secondMatch?.rosterPath,
+    secondRowNumber: secondMatch?.rowNumber
+  });
+};
+var findDuplicateDiagnostics = (students, getValue3, code, message, valueKey) => {
+  const grouped = /* @__PURE__ */ new Map();
+  for (const student of students) {
+    grouped.set(getValue3(student), [...grouped.get(getValue3(student)) ?? [], student]);
+  }
+  return [...grouped.values()].filter((matches) => matches.length > SECOND_MATCH_INDEX).map((matches) => createDuplicateDiagnostic(code, message, valueKey, matches));
+};
+var validateRosterDuplicates = (students) => [
+  ...findDuplicateDiagnostics(
+    students,
+    (student) => student.studentId,
+    DUPLICATE_STUDENT_ID_CODE,
+    "Duplicate student_id found in rosters.",
+    STUDENT_ID_COLUMN
+  ),
+  ...findDuplicateDiagnostics(
+    students,
+    (student) => student.githubUsername,
+    DUPLICATE_GITHUB_USERNAME_CODE,
+    "Duplicate github_username found in rosters.",
+    GITHUB_USERNAME_COLUMN
+  )
+];
+
+// src/roster/roster-loader.ts
+var EMPTY_COUNT = 0;
+var TERM_DIRECTORY_DEPTH = 2;
+var MISSING_COLUMN_INDEX = -1;
+var createEmptySummary = (rosterFiles) => ({
+  rosterFiles,
+  studentCount: EMPTY_COUNT,
+  activeStudentCount: EMPTY_COUNT,
+  droppedStudentCount: EMPTY_COUNT,
+  holdStudentCount: EMPTY_COUNT
+});
+var createSummary2 = (rosterFiles, students) => ({
+  rosterFiles,
+  studentCount: students.length,
+  activeStudentCount: students.filter((student) => student.status === ROSTER_STATUS_ACTIVE).length,
+  droppedStudentCount: students.filter((student) => student.status === ROSTER_STATUS_DROPPED).length,
+  holdStudentCount: students.filter((student) => student.status === ROSTER_STATUS_HOLD).length
+});
+var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT, TERM_DIRECTORY_DEPTH).join("/");
+var getSectionSources = (config) => {
+  const termDirectory = getTermDirectory(config.summary.termConfigPath);
+  const sectionsById = new Map(
+    config.term.sections.map((section) => [
+      section.id,
+      toForwardSlashPath(path5.posix.join(termDirectory, section.roster))
+    ])
+  );
+  return config.assignment.sections.map((sectionId) => ({
+    sectionId,
+    rosterPath: sectionsById.get(sectionId) ?? ""
+  }));
+};
+var getColumnIndexes = (headers) => ({
+  studentId: headers.indexOf(STUDENT_ID_COLUMN),
+  githubUsername: headers.indexOf(GITHUB_USERNAME_COLUMN),
+  section: headers.indexOf(SECTION_COLUMN),
+  status: headers.indexOf(STATUS_COLUMN)
+});
+var getValue = (values, index) => index === MISSING_COLUMN_INDEX ? "" : (values[index] ?? "").trim();
+var createContext = (rosterPath, rowNumber, expectedSection) => ({
+  rosterPath,
+  rowNumber,
+  expectedSection
+});
+var loadSectionRoster = (repoRoot, source) => {
+  const fileResult = readTextFile(path5.join(repoRoot, source.rosterPath));
+  if (fileResult.status === "failure") {
+    return {
+      students: [],
+      warnings: [],
+      errors: [fileResult.diagnostic]
+    };
+  }
+  const document = parseCsv(fileResult.content);
+  const missingColumnErrors = validateRequiredColumns(source.rosterPath, document.headers);
+  if (missingColumnErrors.length > EMPTY_COUNT) {
+    return {
+      students: [],
+      warnings: [],
+      errors: missingColumnErrors
+    };
+  }
+  const indexes = getColumnIndexes(document.headers);
+  const students = [];
+  const warnings = [];
+  const errors = [];
+  for (const row of document.rows) {
+    const rawStudentId = getValue(row.values, indexes.studentId);
+    const rawGithubUsername = getValue(row.values, indexes.githubUsername);
+    const rawSection = getValue(row.values, indexes.section);
+    const rawStatus = getValue(row.values, indexes.status);
+    const rowContext = createContext(source.rosterPath, row.rowNumber, source.sectionId);
+    const missingValueErrors = REQUIRED_ROSTER_COLUMNS.flatMap((column) => {
+      const valueByColumn = {
+        [STUDENT_ID_COLUMN]: rawStudentId,
+        [GITHUB_USERNAME_COLUMN]: rawGithubUsername,
+        [SECTION_COLUMN]: rawSection,
+        [STATUS_COLUMN]: rawStatus
+      };
+      return valueByColumn[column].length === EMPTY_COUNT ? [createMissingRequiredValueDiagnostic(source.rosterPath, row.rowNumber, column)] : [];
+    });
+    if (missingValueErrors.length > EMPTY_COUNT) {
+      errors.push(...missingValueErrors);
+    } else {
+      const normalizedStudentId = normalizeStudentId(rawStudentId, rowContext);
+      const normalizedGithubUsername = normalizeGithubUsername(rawGithubUsername, rowContext);
+      const normalizedStatus = normalizeRosterStatus(rawStatus, rowContext);
+      const rowWarnings = [
+        normalizedStudentId.warning,
+        normalizedGithubUsername.warning,
+        normalizedStatus.warning
+      ].filter((warning) => warning !== void 0);
+      const rowErrors = [
+        ...validateRosterStatus(source.rosterPath, row.rowNumber, normalizedStatus.value),
+        ...validateRosterSection(source.rosterPath, row.rowNumber, source.sectionId, rawSection),
+        ...validateGithubUsername(source.rosterPath, row.rowNumber, normalizedGithubUsername.value)
+      ];
+      warnings.push(...rowWarnings);
+      errors.push(...rowErrors);
+      if (rowErrors.length === EMPTY_COUNT && isRosterStatus(normalizedStatus.value)) {
+        students.push({
+          studentId: normalizedStudentId.value,
+          githubUsername: normalizedGithubUsername.value,
+          section: rawSection,
+          status: normalizedStatus.value,
+          rosterPath: source.rosterPath,
+          rowNumber: row.rowNumber
+        });
+      }
+    }
+  }
+  return {
+    students,
+    warnings,
+    errors
+  };
+};
+var loadAssignmentRosters = (config) => {
+  const sources = getSectionSources(config);
+  const rosterFiles = sources.map((source) => source.rosterPath);
+  const loadedSections = sources.map(
+    (source) => loadSectionRoster(config.summary.repoRoot, source)
+  );
+  const students = loadedSections.flatMap((section) => section.students);
+  const warnings = loadedSections.flatMap((section) => section.warnings);
+  const errors = [
+    ...loadedSections.flatMap((section) => section.errors),
+    ...validateRosterDuplicates(students)
+  ];
+  return {
+    students,
+    warnings,
+    errors,
+    summary: errors.length > EMPTY_COUNT ? createEmptySummary(rosterFiles) : createSummary2(rosterFiles, students)
+  };
+};
+
+// src/assignment-detail/assignment-detail-models.ts
+var ASSIGNMENT_DETAIL_SCHEMA_VERSION = 1;
+
+// src/assignment-detail/assignment-detail-builder.ts
+var COMMAND_NAME = "assignment detail";
+var EMPTY_COUNT2 = 0;
+var EXIT_CODE_SUCCESS = 0;
+var EXIT_CODE_FAILURE = 1;
+var EXIT_CODE_PARTIAL_SUCCESS = 2;
+var LEGACY_GRADING_MODE2 = "custom-workflow";
+var PRESET_GRADING_MODE2 = "preset";
+var ACTIVE_ASSIGNMENT_STATUS = "active";
+var CLOSED_ASSIGNMENT_STATUS = "closed";
+var DRAFT_ASSIGNMENT_STATUS = "draft";
+var ARCHIVED_ASSIGNMENT_STATUS = "archived";
+var NOT_CHECKED_STATUS = "not_checked";
+var NOT_REQUIRED_STATUS = "not_required";
+var APPLY_STATE_APPLIED = "applied";
+var APPLY_STATE_NOT_APPLIED = "not_applied";
+var resolveExitCode = (status) => {
+  if (status === "success") {
+    return EXIT_CODE_SUCCESS;
+  }
+  return status === "partial_success" ? EXIT_CODE_PARTIAL_SUCCESS : EXIT_CODE_FAILURE;
+};
+var createEmptyAssignmentDetailResult = (status, diagnostics) => ({
+  schemaVersion: ASSIGNMENT_DETAIL_SCHEMA_VERSION,
+  commandName: COMMAND_NAME,
+  status,
+  exitCode: resolveExitCode(status),
+  diagnostics,
+  course: null,
+  term: null,
+  assignment: null,
+  metadata: null,
+  deadline: null,
+  sections: [],
+  roster: null,
+  template: null,
+  grading: null,
+  studentReports: null,
+  applyState: null,
+  actions: null
+});
+var hasErrorDiagnostics = (diagnostics) => diagnostics.some((diagnostic) => diagnostic.severity === "error");
+var getEffectiveGrading = (config) => config.assignment.grading ?? config.course.grading;
+var createRosterSummary = (config) => {
+  const rosterResult = loadAssignmentRosters(config);
+  return {
+    roster: {
+      sectionCount: config.assignment.sections.length,
+      activeStudentCount: rosterResult.summary.activeStudentCount,
+      totalStudentCount: rosterResult.summary.studentCount
+    },
+    diagnostics: [...rosterResult.warnings, ...rosterResult.errors]
+  };
+};
+var isFile2 = (filePath) => {
+  try {
+    return fs3.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+};
+var getApplyState = (config) => {
+  const manifestPath = createManifestPath(
+    config.summary.repoRoot,
+    config.summary.termCode,
+    config.summary.assignmentSlug
+  );
+  return isFile2(manifestPath.absolutePath) ? APPLY_STATE_APPLIED : APPLY_STATE_NOT_APPLIED;
+};
+var createGradingDetail = (config) => {
+  const grading = getEffectiveGrading(config);
+  if (!grading.enabled) {
+    return {
+      enabled: false,
+      mode: grading.mode ?? DISABLED_GRADING_MODE,
+      workflow: null,
+      artifact: null,
+      resultFile: null,
+      workflowStatus: NOT_REQUIRED_STATUS,
+      workflowDispatch: NOT_REQUIRED_STATUS
+    };
+  }
+  return {
+    enabled: true,
+    mode: grading.mode ?? LEGACY_GRADING_MODE2,
+    workflow: grading.workflow ?? null,
+    artifact: grading.artifact ?? null,
+    resultFile: grading.result_file ?? null,
+    workflowStatus: NOT_CHECKED_STATUS,
+    workflowDispatch: NOT_CHECKED_STATUS
+  };
+};
+var nullable = (value) => value ?? null;
+var createStudentReports = (config) => {
+  const studentPublish = config.course.reports.student_publish;
+  if (studentPublish === void 0) {
+    return {
+      enabled: false,
+      mode: DISABLED_STUDENT_PUBLISH_MODE,
+      artifact: null,
+      sourceFile: null,
+      destinationFile: null,
+      graiderReportDestination: null,
+      facultyReportSource: null,
+      facultyReportDestination: null
+    };
+  }
+  return {
+    enabled: studentPublish.enabled,
+    mode: studentPublish.mode ?? DISABLED_STUDENT_PUBLISH_MODE,
+    artifact: nullable(studentPublish.artifact),
+    sourceFile: nullable(studentPublish.source_file),
+    destinationFile: nullable(studentPublish.destination_file),
+    graiderReportDestination: nullable(studentPublish.graider_report_destination),
+    facultyReportSource: nullable(studentPublish.faculty_report_source),
+    facultyReportDestination: nullable(studentPublish.faculty_report_destination)
+  };
+};
+var action = (available, implemented) => ({
+  available,
+  implemented
+});
+var createActions = (config, grading, studentReports) => {
+  const assignmentStatus = config.assignment.assignment.status;
+  const applyAvailable = assignmentStatus === ACTIVE_ASSIGNMENT_STATUS || assignmentStatus === CLOSED_ASSIGNMENT_STATUS;
+  const lifecycleAllowsGrading = assignmentStatus !== DRAFT_ASSIGNMENT_STATUS && assignmentStatus !== ARCHIVED_ASSIGNMENT_STATUS;
+  return {
+    validate: action(true, true),
+    apply: action(applyAvailable, false),
+    grade: action(grading.enabled && lifecycleAllowsGrading, false),
+    report: action(true, false),
+    publishStudentReports: action(studentReports.enabled, false),
+    generateWorkflow: action(grading.enabled && grading.mode === PRESET_GRADING_MODE2, false)
+  };
+};
+var buildAssignmentDetail = ({
+  cwd,
+  assignmentFile
+}) => {
+  const configResult = loadGraiderConfig({ cwd, assignmentFile });
+  if (configResult.status === "failure") {
+    return createEmptyAssignmentDetailResult("failure", configResult.diagnostics);
+  }
+  const { config } = configResult;
+  const rosterResult = createRosterSummary(config);
+  const diagnostics = [...configResult.diagnostics, ...rosterResult.diagnostics];
+  const status = diagnostics.length === EMPTY_COUNT2 ? "success" : hasErrorDiagnostics(diagnostics) ? "partial_success" : "success";
+  const grading = createGradingDetail(config);
+  const studentReports = createStudentReports(config);
+  return {
+    schemaVersion: ASSIGNMENT_DETAIL_SCHEMA_VERSION,
+    commandName: COMMAND_NAME,
+    status,
+    exitCode: resolveExitCode(status),
+    diagnostics,
+    course: {
+      slug: config.course.course.code,
+      title: config.course.course.title,
+      file: config.summary.courseConfigPath
+    },
+    term: {
+      slug: config.term.term.code,
+      title: config.term.term.display_name,
+      file: config.summary.termConfigPath
+    },
+    assignment: {
+      slug: config.assignment.assignment.slug,
+      title: config.assignment.assignment.title,
+      type: config.assignment.assignment.type,
+      status: config.assignment.assignment.status,
+      file: config.summary.assignmentConfigPath
+    },
+    metadata: {
+      facultyOwner: config.assignment.metadata.faculty_owner,
+      lmsAssignmentId: config.assignment.metadata.lms_assignment_id,
+      gradingCategory: config.assignment.metadata.grading_category,
+      points: config.assignment.metadata.points
+    },
+    deadline: {
+      dueAt: config.assignment.deadline.due_at,
+      latePolicy: config.assignment.deadline.late_policy
+    },
+    sections: config.assignment.sections,
+    roster: rosterResult.roster,
+    template: {
+      repository: config.assignment.template.repository,
+      branch: config.assignment.template.branch,
+      status: NOT_CHECKED_STATUS
+    },
+    grading,
+    studentReports,
+    applyState: {
+      status: getApplyState(config)
+    },
+    actions: createActions(config, grading, studentReports)
+  };
+};
+
+// src/cli/commands/assignment.command.ts
+var COMMAND_NAME2 = "assignment";
+var DETAIL_COMMAND_NAME = "detail";
+var JSON_INDENT_SPACES = 2;
+var createJsonRequiredResult = () => createEmptyAssignmentDetailResult("failure", [
+  createConfigDiagnostic(
+    ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE,
+    "The assignment detail command only supports JSON output. Run with --json."
+  )
+]);
+var runAssignmentDetailCommand = ({
+  cwd,
+  assignmentFile,
+  options
+}) => {
+  if (options.json !== true) {
+    return createJsonRequiredResult();
+  }
+  return buildAssignmentDetail({ cwd, assignmentFile });
+};
+var formatAssignmentDetailResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES);
+var registerAssignmentCommand = (program) => {
+  const assignment = program.command(COMMAND_NAME2).description("Inspect assignment configuration and local detail data.");
+  assignment.command(DETAIL_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit assignment detail JSON").description("Build a UI-ready read-only assignment detail model.").action((assignmentFile, options) => {
+    const result = runAssignmentDetailCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options
+    });
+    console.log(formatAssignmentDetailResultAsJson(result));
+    process.exitCode = result.exitCode;
+  });
+};
+
+// src/cli/commands/apply.command.ts
+import fs7 from "fs";
+
 // src/core/clock.ts
 var COLON_PATTERN = /:/gu;
 var PERIOD_PATTERN = /\./gu;
@@ -1081,7 +1683,7 @@ var GITHUB_ERROR_CODES = /* @__PURE__ */ new Set([
   DiagnosticCode.GithubTimeout
 ]);
 var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic) => codes.has(diagnostic.code));
-var resolveExitCode = ({ status, errors }) => {
+var resolveExitCode2 = ({ status, errors }) => {
   if (hasCodeInSet(errors, AUTHORIZATION_ERROR_CODES)) {
     return 3 /* AuthenticationOrAuthorizationFailure */;
   }
@@ -1103,7 +1705,7 @@ var resolveExitCode = ({ status, errors }) => {
 // src/core/command-result.ts
 var createCommandResult = (input) => ({
   ...input,
-  exitCode: resolveExitCode(input)
+  exitCode: resolveExitCode2(input)
 });
 
 // src/config/github-config-validation.ts
@@ -1264,8 +1866,8 @@ var withGitHubRetry = async (operation, options) => {
 };
 
 // src/manifest/manifest-renderer.ts
-import fs3 from "fs";
-import path4 from "path";
+import fs4 from "fs";
+import path6 from "path";
 import { stringify } from "yaml";
 
 // src/manifest/manifest-models.ts
@@ -1472,10 +2074,10 @@ var renderManifestYaml = (manifest) => stringify(toRawManifest(manifest), {
 });
 var writeManifest = (manifestPath, manifest) => {
   try {
-    fs3.mkdirSync(path4.dirname(manifestPath), {
+    fs4.mkdirSync(path6.dirname(manifestPath), {
       recursive: true
     });
-    fs3.writeFileSync(manifestPath, renderManifestYaml(manifest), "utf8");
+    fs4.writeFileSync(manifestPath, renderManifestYaml(manifest), "utf8");
     return {
       status: "success"
     };
@@ -1495,8 +2097,8 @@ var writeManifest = (manifestPath, manifest) => {
 };
 
 // src/workflows/workflow-paths.ts
-import path5 from "path";
-var TERMS_DIRECTORY2 = "terms";
+import path7 from "path";
+var TERMS_DIRECTORY3 = "terms";
 var GENERATED_WORKFLOWS_DIRECTORY = "generated-workflows";
 var WORKFLOW_FILE_NAME = "grade.yml";
 var GITHUB_WORKFLOWS_DIRECTORY = ".github/workflows";
@@ -1504,14 +2106,14 @@ var WORKFLOW_PATH_SEPARATOR = "/";
 var WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
 var createGeneratedWorkflowPath = (repoRoot, termCode, assignmentSlug) => {
   const relativePath = [
-    TERMS_DIRECTORY2,
+    TERMS_DIRECTORY3,
     termCode,
     GENERATED_WORKFLOWS_DIRECTORY,
     assignmentSlug,
     WORKFLOW_FILE_NAME
   ].join("/");
   return {
-    absolutePath: path5.join(repoRoot, relativePath),
+    absolutePath: path7.join(repoRoot, relativePath),
     relativePath
   };
 };
@@ -1520,7 +2122,7 @@ var getWorkflowRepositoryPath = (configuredWorkflow) => {
   const normalizedWorkflow = normalizeWorkflowPath(configuredWorkflow);
   return normalizedWorkflow.includes(WORKFLOW_PATH_SEPARATOR) ? normalizedWorkflow : [GITHUB_WORKFLOWS_DIRECTORY, normalizedWorkflow].join(WORKFLOW_PATH_SEPARATOR);
 };
-var getWorkflowDispatchIdentifier = (configuredWorkflow) => path5.posix.basename(normalizeWorkflowPath(configuredWorkflow));
+var getWorkflowDispatchIdentifier = (configuredWorkflow) => path7.posix.basename(normalizeWorkflowPath(configuredWorkflow));
 var uniqueWorkflowPaths = (paths) => [...new Set(paths)];
 var createLocalWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkflowPaths([
   normalizeWorkflowPath(configuredWorkflow),
@@ -1532,7 +2134,7 @@ var createRepositoryWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkf
 ]);
 
 // src/execution/apply-executor.ts
-var EMPTY_COUNT = 0;
+var EMPTY_COUNT3 = 0;
 var PRIVATE_REPOSITORY = true;
 var DEFAULT_ACTIONS_ENABLED = true;
 var STUDENT_PERMISSION2 = "push";
@@ -1547,16 +2149,16 @@ var PERMISSION_RANK = {
   maintain: 4,
   admin: 5
 };
-var createEmptySummary = () => ({
-  created: EMPTY_COUNT,
-  existing: EMPTY_COUNT,
-  verified: EMPTY_COUNT,
-  noop: EMPTY_COUNT,
-  skipped: EMPTY_COUNT,
-  blocked: EMPTY_COUNT,
-  failed: EMPTY_COUNT,
-  warnings: EMPTY_COUNT,
-  errors: EMPTY_COUNT
+var createEmptySummary2 = () => ({
+  created: EMPTY_COUNT3,
+  existing: EMPTY_COUNT3,
+  verified: EMPTY_COUNT3,
+  noop: EMPTY_COUNT3,
+  skipped: EMPTY_COUNT3,
+  blocked: EMPTY_COUNT3,
+  failed: EMPTY_COUNT3,
+  warnings: EMPTY_COUNT3,
+  errors: EMPTY_COUNT3
 });
 var normalizeGitHubError = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createConfigDiagnostic(
   DiagnosticCode.GithubApiError,
@@ -2122,7 +2724,7 @@ var executeApplyPlan = async (input) => {
   const initialManifest = input.manifest ?? await createInitialManifest(input.config, input.plan, input.githubClient);
   let state = {
     manifest: initialManifest,
-    summary: createEmptySummary(),
+    summary: createEmptySummary2(),
     warnings: [],
     errors: []
   };
@@ -2134,7 +2736,7 @@ var executeApplyPlan = async (input) => {
 };
 
 // src/execution/mutation-guard.ts
-var EMPTY_COUNT2 = 0;
+var EMPTY_COUNT4 = 0;
 var createMutationBlockedDiagnostic = () => createConfigDiagnostic(
   DiagnosticCode.MutationBlocked,
   "Apply is blocked because the computed plan contains blocked operations or errors."
@@ -2148,7 +2750,7 @@ var evaluateMutationGuard = ({
   options
 }) => {
   const hasBlockedOperations = plan.operations.some((operation) => operation.status === "blocked");
-  if (hasBlockedOperations || plan.errors.length > EMPTY_COUNT2) {
+  if (hasBlockedOperations || plan.errors.length > EMPTY_COUNT4) {
     return {
       allowed: false,
       errors: [createMutationBlockedDiagnostic(), ...plan.errors]
@@ -3028,7 +3630,7 @@ var hasWorkflowDispatchTrigger = (workflowDocument) => {
 
 // src/github/github-readiness-validation.ts
 var README_FILE = "README.md";
-var EMPTY_COUNT3 = 0;
+var EMPTY_COUNT5 = 0;
 var createUnexpectedGitHubDiagnostic = () => createConfigDiagnostic(
   DiagnosticCode.GithubApiError,
   "Unexpected GitHub client failure during readiness validation."
@@ -3129,7 +3731,7 @@ var validateTemplateRepository = async (courseConfig, assignmentConfig, githubCl
     return [normalizeGitHubError2(error)];
   }
 };
-var getEffectiveGrading = (courseConfig, assignmentConfig) => assignmentConfig.grading ?? courseConfig.grading;
+var getEffectiveGrading2 = (courseConfig, assignmentConfig) => assignmentConfig.grading ?? courseConfig.grading;
 var createTemplateWorkflowMissingDiagnostic = (reference, workflow, checkedPaths) => createConfigDiagnostic(
   DiagnosticCode.GradingWorkflowMissing,
   `Configured grading workflow ${workflow} was not found in template repository ${reference.fullName}.`,
@@ -3158,7 +3760,7 @@ var validateTemplateWorkflowContent = (reference, workflowPath, content) => {
   return hasWorkflowDispatchTrigger(parseResult.value) ? [] : [createTemplateWorkflowDispatchUnsupportedDiagnostic(reference, workflowPath)];
 };
 var validateTemplateWorkflow = async (courseConfig, assignmentConfig, githubClient) => {
-  const grading = getEffectiveGrading(courseConfig, assignmentConfig);
+  const grading = getEffectiveGrading2(courseConfig, assignmentConfig);
   if (!grading.enabled || grading.workflow === void 0) {
     return [];
   }
@@ -3269,7 +3871,7 @@ var validateGitHubReadiness = async ({
   validateTemplateWorkflow: shouldValidateTemplateWorkflow = false
 }) => {
   const authenticationErrors = await validateAuthentication(githubClient);
-  if (authenticationErrors.length > EMPTY_COUNT3) {
+  if (authenticationErrors.length > EMPTY_COUNT5) {
     return {
       warnings: [],
       errors: authenticationErrors
@@ -3288,7 +3890,7 @@ var validateGitHubReadiness = async ({
 };
 
 // src/manifest/manifest-loader.ts
-import fs4 from "fs";
+import fs5 from "fs";
 import { z as z2 } from "zod";
 var MINIMUM_ITEMS = 1;
 var EMPTY_INDEX = 0;
@@ -3560,7 +4162,7 @@ var normalizeManifest = (manifest) => ({
   errors: manifest.errors.map(normalizeDiagnostic)
 });
 var loadManifest = (manifestPath, options = {}) => {
-  if (!fs4.existsSync(manifestPath)) {
+  if (!fs5.existsSync(manifestPath)) {
     return options.required === true ? createFailure2([createManifestMissingDiagnostic(manifestPath)]) : {
       status: "missing",
       warnings: [],
@@ -3578,38 +4180,18 @@ var loadManifest = (manifestPath, options = {}) => {
   return validateRawManifest(manifestPath, yamlResult.value);
 };
 
-// src/manifest/manifest-paths.ts
-import path6 from "path";
-var TERMS_DIRECTORY3 = "terms";
-var MANIFESTS_DIRECTORY = "manifests";
-var MANIFEST_FILE_NAME = "manifest.yml";
-var createManifestPath = (repoRoot, termCode, assignmentSlug) => {
-  const relativeDirectory = path6.posix.join(
-    TERMS_DIRECTORY3,
-    termCode,
-    MANIFESTS_DIRECTORY,
-    assignmentSlug
-  );
-  const relativePath = path6.posix.join(relativeDirectory, MANIFEST_FILE_NAME);
-  return {
-    relativeDirectory,
-    relativePath,
-    absolutePath: path6.join(repoRoot, relativePath)
-  };
-};
-
 // src/config/source-fingerprint.ts
-import path7 from "path";
+import path8 from "path";
 
 // src/core/hash.ts
 import { createHash } from "crypto";
-import fs5 from "fs";
+import fs6 from "fs";
 var SHA_256_ALGORITHM = "sha256";
 var HEX_ENCODING = "hex";
 var hashStringSha256 = (value) => createHash(SHA_256_ALGORITHM).update(value).digest(HEX_ENCODING);
 var hashBufferSha256 = (value) => createHash(SHA_256_ALGORITHM).update(value).digest(HEX_ENCODING);
 var hashFileSha256 = (filePath) => {
-  if (!fs5.existsSync(filePath)) {
+  if (!fs6.existsSync(filePath)) {
     return {
       status: "failure",
       diagnostic: createConfigDiagnostic(
@@ -3621,7 +4203,7 @@ var hashFileSha256 = (filePath) => {
       )
     };
   }
-  const fileStats = fs5.statSync(filePath);
+  const fileStats = fs6.statSync(filePath);
   if (!fileStats.isFile()) {
     return {
       status: "failure",
@@ -3636,7 +4218,7 @@ var hashFileSha256 = (filePath) => {
   }
   return {
     status: "success",
-    sha256: hashBufferSha256(fs5.readFileSync(filePath))
+    sha256: hashBufferSha256(fs6.readFileSync(filePath))
   };
 };
 
@@ -3653,7 +4235,7 @@ var createSourceOutsideRepoDiagnostic = (repoRoot, sourceFilePath) => createConf
   }
 );
 var resolveSourcePath = (repoRoot, sourceFilePath) => {
-  const absolutePath = path7.isAbsolute(sourceFilePath) ? path7.resolve(sourceFilePath) : path7.resolve(repoRoot, sourceFilePath);
+  const absolutePath = path8.isAbsolute(sourceFilePath) ? path8.resolve(sourceFilePath) : path8.resolve(repoRoot, sourceFilePath);
   try {
     return {
       absolutePath,
@@ -3706,11 +4288,6 @@ var getSourceFingerprintPaths = ({
   ...rosterFiles
 ];
 
-// src/roster/roster-models.ts
-var ROSTER_STATUS_ACTIVE = "active";
-var ROSTER_STATUS_DROPPED = "dropped";
-var ROSTER_STATUS_HOLD = "hold";
-
 // src/planning/operation-models.ts
 var PLAN_OPERATION_TYPES = [
   "create_repository_from_template",
@@ -3738,8 +4315,8 @@ var PLAN_SCHEMA_VERSION = 1;
 // src/planning/repo-name.ts
 var PLACEHOLDER_PATTERN = /\{([a-z_]+)\}/gu;
 var REPOSITORY_NAME_PATTERN = /^[a-z0-9-]+$/u;
-var HYPHEN = "-";
-var CONSECUTIVE_HYPHENS = "--";
+var HYPHEN2 = "-";
+var CONSECUTIVE_HYPHENS2 = "--";
 var EMPTY_LENGTH4 = 0;
 var getMaxRepositoryNameLength = () => 100 /* MaxLength */;
 var REQUIRED_PLACEHOLDERS = ["term", "course", "assignment", "github_username"];
@@ -3811,9 +4388,9 @@ var validateRepositoryName = (repositoryName) => {
         "repository name may contain only lowercase letters, digits, and hyphens"
       )
     ],
-    ...repositoryName.startsWith(HYPHEN) ? [createRepositoryNameError(repositoryName, "repository name must not start with a hyphen")] : [],
-    ...repositoryName.endsWith(HYPHEN) ? [createRepositoryNameError(repositoryName, "repository name must not end with a hyphen")] : [],
-    ...repositoryName.includes(CONSECUTIVE_HYPHENS) ? [
+    ...repositoryName.startsWith(HYPHEN2) ? [createRepositoryNameError(repositoryName, "repository name must not start with a hyphen")] : [],
+    ...repositoryName.endsWith(HYPHEN2) ? [createRepositoryNameError(repositoryName, "repository name must not end with a hyphen")] : [],
+    ...repositoryName.includes(CONSECUTIVE_HYPHENS2) ? [
       createRepositoryNameError(
         repositoryName,
         "repository name must not contain consecutive hyphens"
@@ -3850,12 +4427,12 @@ var generateRepositoryName = (input) => {
 };
 
 // src/planning/plan-builder.ts
-var EMPTY_COUNT4 = 0;
+var EMPTY_COUNT6 = 0;
 var NO_REPOSITORY_NAME = "";
-var ACTIVE_ASSIGNMENT_STATUS = "active";
-var DRAFT_ASSIGNMENT_STATUS = "draft";
-var CLOSED_ASSIGNMENT_STATUS = "closed";
-var ARCHIVED_ASSIGNMENT_STATUS = "archived";
+var ACTIVE_ASSIGNMENT_STATUS2 = "active";
+var DRAFT_ASSIGNMENT_STATUS2 = "draft";
+var CLOSED_ASSIGNMENT_STATUS2 = "closed";
+var ARCHIVED_ASSIGNMENT_STATUS2 = "archived";
 var STUDENT_STATUS_REASON_PREFIX = "student_status";
 var GRADING_DISABLED_REASON = "grading_disabled";
 var createUnexpectedGitHubDiagnostic2 = () => createConfigDiagnostic(
@@ -3932,7 +4509,7 @@ var buildSkippedStudentOperation = (student) => createOperation(student, "create
 });
 var buildLifecycleOperations = (config, student, repositoryName) => {
   const assignmentStatus = config.assignment.assignment.status;
-  if (assignmentStatus === DRAFT_ASSIGNMENT_STATUS) {
+  if (assignmentStatus === DRAFT_ASSIGNMENT_STATUS2) {
     return [
       createLifecycleBlockedOperation(
         config,
@@ -3947,7 +4524,7 @@ var buildLifecycleOperations = (config, student, repositoryName) => {
       )
     ];
   }
-  if (assignmentStatus === CLOSED_ASSIGNMENT_STATUS) {
+  if (assignmentStatus === CLOSED_ASSIGNMENT_STATUS2) {
     return [
       createLifecycleBlockedOperation(
         config,
@@ -3962,7 +4539,7 @@ var buildLifecycleOperations = (config, student, repositoryName) => {
       )
     ];
   }
-  if (assignmentStatus === ARCHIVED_ASSIGNMENT_STATUS) {
+  if (assignmentStatus === ARCHIVED_ASSIGNMENT_STATUS2) {
     return [
       createLifecycleBlockedOperation(
         config,
@@ -4077,7 +4654,7 @@ var buildTrackedRepositoryOperations = (config, student, repositoryName) => {
 var findManifestRecord2 = (manifest, student) => manifest?.repositories.find((record) => record.studentId === student.studentId);
 var buildActiveStudentOperations = async (config, student, githubClient, manifest) => {
   const repositoryNameResult = generateStudentRepositoryName(config, student);
-  if (repositoryNameResult.errors.length > EMPTY_COUNT4) {
+  if (repositoryNameResult.errors.length > EMPTY_COUNT6) {
     return [
       createOperation(student, "create_repository_from_template", "blocked", {
         errors: repositoryNameResult.errors,
@@ -4087,7 +4664,7 @@ var buildActiveStudentOperations = async (config, student, githubClient, manifes
   }
   const manifestRecord = findManifestRecord2(manifest, student);
   const repositoryName = manifestRecord?.repository.name ?? repositoryNameResult.repositoryName;
-  if (config.assignment.assignment.status === DRAFT_ASSIGNMENT_STATUS || config.assignment.assignment.status === ARCHIVED_ASSIGNMENT_STATUS) {
+  if (config.assignment.assignment.status === DRAFT_ASSIGNMENT_STATUS2 || config.assignment.assignment.status === ARCHIVED_ASSIGNMENT_STATUS2) {
     return buildLifecycleOperations(config, student, repositoryName);
   }
   if (manifestRecord !== void 0) {
@@ -4121,10 +4698,10 @@ var buildActiveStudentOperations = async (config, student, githubClient, manifes
     }
   }
   const lifecycleOperations = buildLifecycleOperations(config, student, repositoryName);
-  if (lifecycleOperations.length > EMPTY_COUNT4) {
+  if (lifecycleOperations.length > EMPTY_COUNT6) {
     return lifecycleOperations;
   }
-  if (config.assignment.assignment.status !== ACTIVE_ASSIGNMENT_STATUS) {
+  if (config.assignment.assignment.status !== ACTIVE_ASSIGNMENT_STATUS2) {
     return [];
   }
   try {
@@ -4187,7 +4764,7 @@ var buildPlan = async ({
   }
   const operations = operationGroups.flat().sort(comparePlanOperations);
   const summary = createPlanSummary(rosterSummary, operations);
-  const blockedPlanErrors = summary.blocked_operations > EMPTY_COUNT4 ? [createPlanBlockedDiagnostic(summary.blocked_operations)] : [];
+  const blockedPlanErrors = summary.blocked_operations > EMPTY_COUNT6 ? [createPlanBlockedDiagnostic(summary.blocked_operations)] : [];
   return {
     schema_version: PLAN_SCHEMA_VERSION,
     created_at: createdAt,
@@ -4212,346 +4789,9 @@ var buildPlan = async ({
   };
 };
 
-// src/roster/roster-loader.ts
-import path8 from "path";
-
-// src/io/csv.ts
-var HEADER_ROW_NUMBER = 1;
-var FIRST_DATA_ROW_NUMBER = 2;
-var EMPTY_LINE_COUNT = 0;
-var EMPTY_FIELD = "";
-var COMMA = ",";
-var QUOTE = '"';
-var DOUBLE_QUOTE = '""';
-var CARRIAGE_RETURN = "\r";
-var NEWLINE_PATTERN = /\n/;
-var stripCarriageReturn = (line) => line.endsWith(CARRIAGE_RETURN) ? line.slice(0, -CARRIAGE_RETURN.length) : line;
-var parseCsvLine = (line) => {
-  const fields = [];
-  let current = EMPTY_FIELD;
-  let inQuotes = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index] ?? EMPTY_FIELD;
-    const nextTwoCharacters = line.slice(index, index + DOUBLE_QUOTE.length);
-    if (nextTwoCharacters === DOUBLE_QUOTE && inQuotes) {
-      current += QUOTE;
-      index += QUOTE.length;
-    } else if (character === QUOTE) {
-      inQuotes = !inQuotes;
-    } else if (character === COMMA && !inQuotes) {
-      fields.push(current.trim());
-      current = EMPTY_FIELD;
-    } else {
-      current += character;
-    }
-  }
-  fields.push(current.trim());
-  return fields;
-};
-var parseCsv = (content) => {
-  const lines = content.split(NEWLINE_PATTERN).map(stripCarriageReturn);
-  const nonEmptyLines = lines.filter((line) => line.trim().length > EMPTY_LINE_COUNT);
-  const headerLine = nonEmptyLines[HEADER_ROW_NUMBER - HEADER_ROW_NUMBER] ?? EMPTY_FIELD;
-  const dataLines = nonEmptyLines.slice(FIRST_DATA_ROW_NUMBER - HEADER_ROW_NUMBER);
-  return {
-    headers: parseCsvLine(headerLine),
-    rows: dataLines.map((line, index) => ({
-      rowNumber: index + FIRST_DATA_ROW_NUMBER,
-      values: parseCsvLine(line)
-    }))
-  };
-};
-
-// src/roster/roster-normalization.ts
-var normalizeLowercaseValue = (value, code, message, context) => {
-  const normalized = value.toLowerCase();
-  if (normalized === value) {
-    return {
-      value
-    };
-  }
-  return {
-    value: normalized,
-    warning: createWarningDiagnostic(code, message, {
-      ...context,
-      originalValue: value,
-      normalizedValue: normalized
-    })
-  };
-};
-var normalizeStudentId = (value, context) => normalizeLowercaseValue(
-  value,
-  STUDENT_ID_NORMALIZED_CODE,
-  "student_id was normalized to lowercase.",
-  context
-);
-var normalizeGithubUsername = (value, context) => normalizeLowercaseValue(
-  value,
-  GITHUB_USERNAME_NORMALIZED_CODE,
-  "github_username was normalized to lowercase.",
-  context
-);
-var normalizeRosterStatus = (value, context) => normalizeLowercaseValue(
-  value,
-  ROSTER_STATUS_NORMALIZED_CODE,
-  "Roster status was normalized to lowercase.",
-  context
-);
-
-// src/roster/roster-validation.ts
-var STUDENT_ID_COLUMN = "student_id";
-var GITHUB_USERNAME_COLUMN = "github_username";
-var SECTION_COLUMN = "section";
-var STATUS_COLUMN = "status";
-var REQUIRED_ROSTER_COLUMNS = [
-  STUDENT_ID_COLUMN,
-  GITHUB_USERNAME_COLUMN,
-  SECTION_COLUMN,
-  STATUS_COLUMN
-];
-var GITHUB_USERNAME_MAX_LENGTH = 39;
-var FIRST_MATCH_INDEX = 0;
-var SECOND_MATCH_INDEX = 1;
-var VALID_ROSTER_STATUSES = [
-  ROSTER_STATUS_ACTIVE,
-  ROSTER_STATUS_DROPPED,
-  ROSTER_STATUS_HOLD
-];
-var GITHUB_USERNAME_PATTERN = /^[a-z0-9-]+$/;
-var CONSECUTIVE_HYPHENS2 = "--";
-var HYPHEN2 = "-";
-var isRosterStatus = (value) => VALID_ROSTER_STATUSES.some((status) => status === value);
-var validateRequiredColumns = (rosterPath, headers) => REQUIRED_ROSTER_COLUMNS.filter((column) => !headers.includes(column)).map(
-  (column) => createConfigDiagnostic(
-    MISSING_REQUIRED_COLUMN_CODE,
-    `Roster is missing required column ${column}.`,
-    {
-      rosterPath,
-      columnName: column
-    }
-  )
-);
-var createMissingRequiredValueDiagnostic = (rosterPath, rowNumber, columnName) => createConfigDiagnostic(
-  MISSING_REQUIRED_VALUE_CODE,
-  `Roster row ${String(rowNumber)} is missing required value ${columnName}.`,
-  {
-    rosterPath,
-    rowNumber,
-    columnName
-  }
-);
-var validateRosterStatus = (rosterPath, rowNumber, status) => isRosterStatus(status) ? [] : [
-  createConfigDiagnostic(
-    INVALID_ROSTER_STATUS_CODE,
-    `Roster row ${String(rowNumber)} has invalid status ${status}.`,
-    {
-      rosterPath,
-      rowNumber,
-      status
-    }
-  )
-];
-var validateRosterSection = (rosterPath, rowNumber, expectedSection, actualSection) => actualSection === expectedSection ? [] : [
-  createConfigDiagnostic(
-    SECTION_MISMATCH_CODE,
-    `Roster row ${String(rowNumber)} has section ${actualSection}; expected ${expectedSection}.`,
-    {
-      rosterPath,
-      rowNumber,
-      expectedSection,
-      actualSection
-    }
-  )
-];
-var validateGithubUsername = (rosterPath, rowNumber, githubUsername) => {
-  const isValid = githubUsername.length > 0 && githubUsername.length <= GITHUB_USERNAME_MAX_LENGTH && GITHUB_USERNAME_PATTERN.test(githubUsername) && !githubUsername.startsWith(HYPHEN2) && !githubUsername.endsWith(HYPHEN2) && !githubUsername.includes(CONSECUTIVE_HYPHENS2);
-  return isValid ? [] : [
-    createConfigDiagnostic(
-      INVALID_GITHUB_USERNAME_CODE,
-      `Roster row ${String(rowNumber)} has invalid GitHub username ${githubUsername}.`,
-      {
-        rosterPath,
-        rowNumber,
-        githubUsername
-      }
-    )
-  ];
-};
-var createDuplicateDiagnostic = (code, message, valueKey, matches) => {
-  const firstMatch = matches[FIRST_MATCH_INDEX];
-  const secondMatch = matches[SECOND_MATCH_INDEX];
-  return createConfigDiagnostic(code, message, {
-    [valueKey]: firstMatch?.[valueKey === STUDENT_ID_COLUMN ? "studentId" : "githubUsername"],
-    firstRosterPath: firstMatch?.rosterPath,
-    firstRowNumber: firstMatch?.rowNumber,
-    secondRosterPath: secondMatch?.rosterPath,
-    secondRowNumber: secondMatch?.rowNumber
-  });
-};
-var findDuplicateDiagnostics = (students, getValue3, code, message, valueKey) => {
-  const grouped = /* @__PURE__ */ new Map();
-  for (const student of students) {
-    grouped.set(getValue3(student), [...grouped.get(getValue3(student)) ?? [], student]);
-  }
-  return [...grouped.values()].filter((matches) => matches.length > SECOND_MATCH_INDEX).map((matches) => createDuplicateDiagnostic(code, message, valueKey, matches));
-};
-var validateRosterDuplicates = (students) => [
-  ...findDuplicateDiagnostics(
-    students,
-    (student) => student.studentId,
-    DUPLICATE_STUDENT_ID_CODE,
-    "Duplicate student_id found in rosters.",
-    STUDENT_ID_COLUMN
-  ),
-  ...findDuplicateDiagnostics(
-    students,
-    (student) => student.githubUsername,
-    DUPLICATE_GITHUB_USERNAME_CODE,
-    "Duplicate github_username found in rosters.",
-    GITHUB_USERNAME_COLUMN
-  )
-];
-
-// src/roster/roster-loader.ts
-var EMPTY_COUNT5 = 0;
-var TERM_DIRECTORY_DEPTH = 2;
-var MISSING_COLUMN_INDEX = -1;
-var createEmptySummary2 = (rosterFiles) => ({
-  rosterFiles,
-  studentCount: EMPTY_COUNT5,
-  activeStudentCount: EMPTY_COUNT5,
-  droppedStudentCount: EMPTY_COUNT5,
-  holdStudentCount: EMPTY_COUNT5
-});
-var createSummary2 = (rosterFiles, students) => ({
-  rosterFiles,
-  studentCount: students.length,
-  activeStudentCount: students.filter((student) => student.status === ROSTER_STATUS_ACTIVE).length,
-  droppedStudentCount: students.filter((student) => student.status === ROSTER_STATUS_DROPPED).length,
-  holdStudentCount: students.filter((student) => student.status === ROSTER_STATUS_HOLD).length
-});
-var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT5, TERM_DIRECTORY_DEPTH).join("/");
-var getSectionSources = (config) => {
-  const termDirectory = getTermDirectory(config.summary.termConfigPath);
-  const sectionsById = new Map(
-    config.term.sections.map((section) => [
-      section.id,
-      toForwardSlashPath(path8.posix.join(termDirectory, section.roster))
-    ])
-  );
-  return config.assignment.sections.map((sectionId) => ({
-    sectionId,
-    rosterPath: sectionsById.get(sectionId) ?? ""
-  }));
-};
-var getColumnIndexes = (headers) => ({
-  studentId: headers.indexOf(STUDENT_ID_COLUMN),
-  githubUsername: headers.indexOf(GITHUB_USERNAME_COLUMN),
-  section: headers.indexOf(SECTION_COLUMN),
-  status: headers.indexOf(STATUS_COLUMN)
-});
-var getValue = (values, index) => index === MISSING_COLUMN_INDEX ? "" : (values[index] ?? "").trim();
-var createContext = (rosterPath, rowNumber, expectedSection) => ({
-  rosterPath,
-  rowNumber,
-  expectedSection
-});
-var loadSectionRoster = (repoRoot, source) => {
-  const fileResult = readTextFile(path8.join(repoRoot, source.rosterPath));
-  if (fileResult.status === "failure") {
-    return {
-      students: [],
-      warnings: [],
-      errors: [fileResult.diagnostic]
-    };
-  }
-  const document = parseCsv(fileResult.content);
-  const missingColumnErrors = validateRequiredColumns(source.rosterPath, document.headers);
-  if (missingColumnErrors.length > EMPTY_COUNT5) {
-    return {
-      students: [],
-      warnings: [],
-      errors: missingColumnErrors
-    };
-  }
-  const indexes = getColumnIndexes(document.headers);
-  const students = [];
-  const warnings = [];
-  const errors = [];
-  for (const row of document.rows) {
-    const rawStudentId = getValue(row.values, indexes.studentId);
-    const rawGithubUsername = getValue(row.values, indexes.githubUsername);
-    const rawSection = getValue(row.values, indexes.section);
-    const rawStatus = getValue(row.values, indexes.status);
-    const rowContext = createContext(source.rosterPath, row.rowNumber, source.sectionId);
-    const missingValueErrors = REQUIRED_ROSTER_COLUMNS.flatMap((column) => {
-      const valueByColumn = {
-        [STUDENT_ID_COLUMN]: rawStudentId,
-        [GITHUB_USERNAME_COLUMN]: rawGithubUsername,
-        [SECTION_COLUMN]: rawSection,
-        [STATUS_COLUMN]: rawStatus
-      };
-      return valueByColumn[column].length === EMPTY_COUNT5 ? [createMissingRequiredValueDiagnostic(source.rosterPath, row.rowNumber, column)] : [];
-    });
-    if (missingValueErrors.length > EMPTY_COUNT5) {
-      errors.push(...missingValueErrors);
-    } else {
-      const normalizedStudentId = normalizeStudentId(rawStudentId, rowContext);
-      const normalizedGithubUsername = normalizeGithubUsername(rawGithubUsername, rowContext);
-      const normalizedStatus = normalizeRosterStatus(rawStatus, rowContext);
-      const rowWarnings = [
-        normalizedStudentId.warning,
-        normalizedGithubUsername.warning,
-        normalizedStatus.warning
-      ].filter((warning) => warning !== void 0);
-      const rowErrors = [
-        ...validateRosterStatus(source.rosterPath, row.rowNumber, normalizedStatus.value),
-        ...validateRosterSection(source.rosterPath, row.rowNumber, source.sectionId, rawSection),
-        ...validateGithubUsername(source.rosterPath, row.rowNumber, normalizedGithubUsername.value)
-      ];
-      warnings.push(...rowWarnings);
-      errors.push(...rowErrors);
-      if (rowErrors.length === EMPTY_COUNT5 && isRosterStatus(normalizedStatus.value)) {
-        students.push({
-          studentId: normalizedStudentId.value,
-          githubUsername: normalizedGithubUsername.value,
-          section: rawSection,
-          status: normalizedStatus.value,
-          rosterPath: source.rosterPath,
-          rowNumber: row.rowNumber
-        });
-      }
-    }
-  }
-  return {
-    students,
-    warnings,
-    errors
-  };
-};
-var loadAssignmentRosters = (config) => {
-  const sources = getSectionSources(config);
-  const rosterFiles = sources.map((source) => source.rosterPath);
-  const loadedSections = sources.map(
-    (source) => loadSectionRoster(config.summary.repoRoot, source)
-  );
-  const students = loadedSections.flatMap((section) => section.students);
-  const warnings = loadedSections.flatMap((section) => section.warnings);
-  const errors = [
-    ...loadedSections.flatMap((section) => section.errors),
-    ...validateRosterDuplicates(students)
-  ];
-  return {
-    students,
-    warnings,
-    errors,
-    summary: errors.length > EMPTY_COUNT5 ? createEmptySummary2(rosterFiles) : createSummary2(rosterFiles, students)
-  };
-};
-
 // src/cli/output.ts
 var CLI_JSON_SCHEMA_VERSION = 1;
-var JSON_INDENT_SPACES = 2;
+var JSON_INDENT_SPACES2 = 2;
 var EMPTY_COLLECTION_LENGTH = 0;
 var createCliJsonOutput = (result) => {
   const redactedResult = redactCommandResult(result);
@@ -4561,7 +4801,7 @@ var createCliJsonOutput = (result) => {
     diagnostics: [...redactedResult.warnings, ...redactedResult.errors]
   };
 };
-var formatCommandResultAsJson = (result) => JSON.stringify(createCliJsonOutput(result), void 0, JSON_INDENT_SPACES);
+var formatCommandResultAsJson = (result) => JSON.stringify(createCliJsonOutput(result), void 0, JSON_INDENT_SPACES2);
 var formatDiagnostic = (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`;
 var formatCommandResultAsText = (result) => {
   const redactedResult = redactCommandResult(result);
@@ -4584,14 +4824,14 @@ var writeCommandResult = (result, json) => {
 };
 
 // src/cli/commands/apply.command.ts
-var COMMAND_NAME = "apply";
-var EMPTY_COUNT6 = 0;
+var COMMAND_NAME3 = "apply";
+var EMPTY_COUNT7 = 0;
 var getExecutionStatus = (errorsLength, summary) => {
-  if (errorsLength === EMPTY_COUNT6) {
+  if (errorsLength === EMPTY_COUNT7) {
     return "success";
   }
   const successfulWorkCount = summary.created + summary.existing + summary.verified + summary.noop + summary.skipped;
-  return successfulWorkCount > EMPTY_COUNT6 ? "partial_success" : "failure";
+  return successfulWorkCount > EMPTY_COUNT7 ? "partial_success" : "failure";
 };
 var runApplyCommand = async ({
   cwd,
@@ -4615,7 +4855,7 @@ var runApplyCommand = async ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName: COMMAND_NAME3,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -4625,9 +4865,9 @@ var runApplyCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > EMPTY_COUNT6) {
+  if (rosterResult.errors.length > EMPTY_COUNT7) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName: COMMAND_NAME3,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -4648,9 +4888,9 @@ var runApplyCommand = async ({
     students: rosterResult.students,
     githubClient: effectiveGitHubClient
   });
-  if (readinessResult.errors.length > EMPTY_COUNT6) {
+  if (readinessResult.errors.length > EMPTY_COUNT7) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName: COMMAND_NAME3,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -4672,7 +4912,7 @@ var runApplyCommand = async ({
   const manifestResult = loadManifest(manifestPath.absolutePath);
   if (manifestResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName: COMMAND_NAME3,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -4697,7 +4937,7 @@ var runApplyCommand = async ({
   const guardResult = evaluateMutationGuard({ plan, options });
   if (!guardResult.allowed) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName: COMMAND_NAME3,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...plan.warnings],
@@ -4723,9 +4963,9 @@ var runApplyCommand = async ({
     clock,
     retryOptions: effectiveRetryOptions
   });
-  const generatedFiles = fs6.existsSync(manifestPath.absolutePath) ? [manifestPath.relativePath] : [];
+  const generatedFiles = fs7.existsSync(manifestPath.absolutePath) ? [manifestPath.relativePath] : [];
   return createCommandResult({
-    commandName: COMMAND_NAME,
+    commandName: COMMAND_NAME3,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: getExecutionStatus(executionResult.errors.length, executionResult.summary),
     warnings: [...rosterResult.warnings, ...plan.warnings, ...executionResult.warnings],
@@ -4744,7 +4984,7 @@ var runApplyCommand = async ({
   });
 };
 var registerApplyCommand = (program) => {
-  program.command(COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Apply assignment repository changes.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME3).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Apply assignment repository changes.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runApplyCommand({
       cwd: process.cwd(),
@@ -4757,7 +4997,7 @@ var registerApplyCommand = (program) => {
 };
 
 // src/cli/commands/archive.command.ts
-var COMMAND_NAME2 = "archive";
+var COMMAND_NAME4 = "archive";
 var normalizeArchiveTargetSelector = (rawOptions) => ({
   ...rawOptions.all === void 0 ? {} : { all: rawOptions.all },
   ...rawOptions.section === void 0 ? {} : { section: rawOptions.section },
@@ -4771,11 +5011,11 @@ var runArchiveCommand = ({
   options,
   targetSelector
 }) => createCommandResult({
-  commandName: COMMAND_NAME2,
+  commandName: COMMAND_NAME4,
   assignmentFile,
   status: "failure",
   warnings: [],
-  errors: [createNotSupportedInMvpDiagnostic(COMMAND_NAME2, assignmentFile)],
+  errors: [createNotSupportedInMvpDiagnostic(COMMAND_NAME4, assignmentFile)],
   generatedFiles: [],
   summary: {
     unsupported: true,
@@ -4786,7 +5026,7 @@ var runArchiveCommand = ({
   }
 });
 var registerArchiveCommand = (program) => {
-  program.command(COMMAND_NAME2).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Reserved for future archive targeting").option("--section <section-id>", "Reserved for future archive targeting").option("--student-id <student-id>", "Reserved for future archive targeting").option("--github-username <github-username>", "Reserved for future archive targeting").option("--remove-student-access", "Reserved for future archive access removal").description("Archive assignment repositories.").action((assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME4).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Reserved for future archive targeting").option("--section <section-id>", "Reserved for future archive targeting").option("--student-id <student-id>", "Reserved for future archive targeting").option("--github-username <github-username>", "Reserved for future archive targeting").option("--remove-student-access", "Reserved for future archive access removal").description("Archive assignment repositories.").action((assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = runArchiveCommand({
       cwd: process.cwd(),
@@ -4800,21 +5040,21 @@ var registerArchiveCommand = (program) => {
 };
 
 // src/dashboard/dashboard-builder.ts
-import fs7 from "fs";
+import fs8 from "fs";
 import path9 from "path";
 
 // src/dashboard/dashboard-models.ts
 var DASHBOARD_SCHEMA_VERSION = 1;
 
 // src/dashboard/dashboard-builder.ts
-var COMMAND_NAME3 = "dashboard";
+var COMMAND_NAME5 = "dashboard";
 var COURSE_CONFIG_PATH2 = "course.yml";
 var TERMS_DIRECTORY4 = "terms";
 var TERM_CONFIG_FILE_NAME2 = "term.yml";
 var ASSIGNMENTS_DIRECTORY = "assignments";
 var ASSIGNMENT_CONFIG_FILE_NAME = "assignment.yml";
 var COURSE_PATH = ".";
-var EMPTY_COUNT7 = 0;
+var EMPTY_COUNT8 = 0;
 var DEFAULT_RECENT_ASSIGNMENT_LIMIT = 5;
 var FIRST_SORT_BEFORE_SECOND = -1;
 var FIRST_SORT_AFTER_SECOND = 1;
@@ -4825,9 +5065,9 @@ var STATUS_ACTIVE = "active";
 var STATUS_COMPLETED = "completed";
 var STATUS_INACTIVE = "inactive";
 var STATUS_UNKNOWN = "unknown";
-var LEGACY_GRADING_MODE2 = "custom-workflow";
-var APPLY_STATE_APPLIED = "applied";
-var APPLY_STATE_NOT_APPLIED = "not_applied";
+var LEGACY_GRADING_MODE3 = "custom-workflow";
+var APPLY_STATE_APPLIED2 = "applied";
+var APPLY_STATE_NOT_APPLIED2 = "not_applied";
 var APPLY_STATE_UNKNOWN = "unknown";
 var GITHUB_STATUS_AVAILABLE = "available";
 var GITHUB_STATUS_MISSING = "missing";
@@ -4840,17 +5080,17 @@ var RECENT_ASSIGNMENT_STATUS_WEIGHT = {
   [STATUS_UNKNOWN]: 2
 };
 var emptySummary = () => ({
-  cardCount: EMPTY_COUNT7,
-  courseCount: EMPTY_COUNT7,
-  termCount: EMPTY_COUNT7,
-  assignmentCount: EMPTY_COUNT7,
-  needsAttentionCount: EMPTY_COUNT7
+  cardCount: EMPTY_COUNT8,
+  courseCount: EMPTY_COUNT8,
+  termCount: EMPTY_COUNT8,
+  assignmentCount: EMPTY_COUNT8,
+  needsAttentionCount: EMPTY_COUNT8
 });
 var createDashboardResult = (status, diagnostics, cards) => {
   const summary = createSummary3(cards);
   return {
     schemaVersion: DASHBOARD_SCHEMA_VERSION,
-    commandName: COMMAND_NAME3,
+    commandName: COMMAND_NAME5,
     status,
     exitCode: status === "success" ? 0 : status === "partial_success" ? 2 : 1,
     diagnostics,
@@ -4860,7 +5100,7 @@ var createDashboardResult = (status, diagnostics, cards) => {
 };
 var createEmptyDashboardResult = (status, diagnostics) => ({
   schemaVersion: DASHBOARD_SCHEMA_VERSION,
-  commandName: COMMAND_NAME3,
+  commandName: COMMAND_NAME5,
   status,
   exitCode: status === "success" ? 0 : status === "partial_success" ? 2 : 1,
   diagnostics,
@@ -4869,23 +5109,23 @@ var createEmptyDashboardResult = (status, diagnostics) => ({
 });
 var createSummary3 = (cards) => ({
   cardCount: cards.length,
-  courseCount: cards.length > EMPTY_COUNT7 ? 1 : EMPTY_COUNT7,
+  courseCount: cards.length > EMPTY_COUNT8 ? 1 : EMPTY_COUNT8,
   termCount: cards.length,
-  assignmentCount: cards.reduce((count, card) => count + card.assignmentCount, EMPTY_COUNT7),
+  assignmentCount: cards.reduce((count, card) => count + card.assignmentCount, EMPTY_COUNT8),
   needsAttentionCount: cards.filter((card) => card.needsAttention).length
 });
 var diagnosticRequiresAttention = (diagnostic) => diagnostic.severity === "error";
 var getAttentionCount = (diagnostics) => diagnostics.filter(diagnosticRequiresAttention).length;
 var listDirectoryNames = (directoryPath) => {
   try {
-    return fs7.readdirSync(directoryPath, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort((left, right) => left.localeCompare(right));
+    return fs8.readdirSync(directoryPath, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort((left, right) => left.localeCompare(right));
   } catch {
     return [];
   }
 };
-var isFile2 = (filePath) => {
+var isFile3 = (filePath) => {
   try {
-    return fs7.statSync(filePath).isFile();
+    return fs8.statSync(filePath).isFile();
   } catch {
     return false;
   }
@@ -5072,13 +5312,13 @@ var compareRecentAssignments = (left, right) => {
   const titleComparison = left.title.localeCompare(right.title);
   return titleComparison === SORT_EQUAL ? left.slug.localeCompare(right.slug) : titleComparison;
 };
-var getEffectiveGrading2 = (courseConfig, assignmentConfig) => assignmentConfig.grading ?? courseConfig.grading;
+var getEffectiveGrading3 = (courseConfig, assignmentConfig) => assignmentConfig.grading ?? courseConfig.grading;
 var getAssignmentApplyState = (repoRoot, termSlug, assignmentSlug) => {
   const manifestPath = createManifestPath(repoRoot, termSlug, assignmentSlug);
-  return isFile2(manifestPath.absolutePath) ? APPLY_STATE_APPLIED : APPLY_STATE_NOT_APPLIED;
+  return isFile3(manifestPath.absolutePath) ? APPLY_STATE_APPLIED2 : APPLY_STATE_NOT_APPLIED2;
 };
 var createAssignmentSummary = (repoRoot, courseConfig, assignmentConfig, assignmentFile, expectedSlug, diagnostics) => {
-  const grading = getEffectiveGrading2(courseConfig, assignmentConfig);
+  const grading = getEffectiveGrading3(courseConfig, assignmentConfig);
   const assignmentStatus = mapAssignmentStatus(assignmentConfig.assignment.status);
   return {
     slug: assignmentConfig.assignment.slug,
@@ -5087,9 +5327,9 @@ var createAssignmentSummary = (repoRoot, courseConfig, assignmentConfig, assignm
     gradingEnabled: grading.enabled,
     assignmentFile,
     applyState: getAssignmentApplyState(repoRoot, assignmentFile.split("/")[1] ?? "", expectedSlug),
-    needsAttention: getAttentionCount(diagnostics) > EMPTY_COUNT7,
+    needsAttention: getAttentionCount(diagnostics) > EMPTY_COUNT8,
     diagnostics,
-    ...grading.enabled ? { gradingMode: grading.mode ?? LEGACY_GRADING_MODE2 } : grading.mode === void 0 ? {} : { gradingMode: grading.mode },
+    ...grading.enabled ? { gradingMode: grading.mode ?? LEGACY_GRADING_MODE3 } : grading.mode === void 0 ? {} : { gradingMode: grading.mode },
     ...courseConfig.reports.student_publish === void 0 ? {} : { studentPublishEnabled: courseConfig.reports.student_publish.enabled },
     dueAt: assignmentConfig.deadline.due_at,
     points: assignmentConfig.metadata.points,
@@ -5112,7 +5352,7 @@ var createBrokenAssignmentSummary = (assignmentSlug, assignmentFile, diagnostics
 var withAssignmentGithubResult = (assignment, diagnostics, github) => ({
   ...assignment,
   diagnostics: [...diagnostics],
-  needsAttention: getAttentionCount(diagnostics) > EMPTY_COUNT7,
+  needsAttention: getAttentionCount(diagnostics) > EMPTY_COUNT8,
   github
 });
 var inspectWorkflowDispatch = (assignment, workflowPath, workflowContent) => {
@@ -5326,8 +5566,8 @@ var loadAssignmentSummaries = (repoRoot, courseConfig, termSlug) => {
 };
 var createEmptyRosterSummary = (sectionCount) => ({
   sectionCount,
-  activeStudentCount: EMPTY_COUNT7,
-  totalStudentCount: EMPTY_COUNT7
+  activeStudentCount: EMPTY_COUNT8,
+  totalStudentCount: EMPTY_COUNT8
 });
 var getColumnIndexes2 = (headers) => ({
   studentId: headers.indexOf(STUDENT_ID_COLUMN),
@@ -5351,7 +5591,7 @@ var loadRosterStudents = (repoRoot, rosterPath, expectedSection) => {
   }
   const document = parseCsv(fileResult.content);
   const missingColumnErrors = validateRequiredColumns(rosterPath, document.headers);
-  if (missingColumnErrors.length > EMPTY_COUNT7) {
+  if (missingColumnErrors.length > EMPTY_COUNT8) {
     return {
       students: [],
       diagnostics: missingColumnErrors
@@ -5372,9 +5612,9 @@ var loadRosterStudents = (repoRoot, rosterPath, expectedSection) => {
       [STATUS_COLUMN]: rawStatus
     };
     const missingValueErrors = REQUIRED_ROSTER_COLUMNS.flatMap(
-      (column) => valueByColumn[column].length === EMPTY_COUNT7 ? [createMissingRequiredValueDiagnostic(rosterPath, row.rowNumber, column)] : []
+      (column) => valueByColumn[column].length === EMPTY_COUNT8 ? [createMissingRequiredValueDiagnostic(rosterPath, row.rowNumber, column)] : []
     );
-    if (missingValueErrors.length > EMPTY_COUNT7) {
+    if (missingValueErrors.length > EMPTY_COUNT8) {
       diagnostics.push(...missingValueErrors);
     } else {
       const rowContext = createRosterContext(rosterPath, row.rowNumber, expectedSection);
@@ -5391,7 +5631,7 @@ var loadRosterStudents = (repoRoot, rosterPath, expectedSection) => {
       ].filter((diagnostic) => diagnostic !== void 0);
       const rowErrors = rowDiagnostics.filter(diagnosticRequiresAttention);
       diagnostics.push(...rowDiagnostics);
-      if (rowErrors.length === EMPTY_COUNT7 && isRosterStatus(normalizedStatus.value)) {
+      if (rowErrors.length === EMPTY_COUNT8 && isRosterStatus(normalizedStatus.value)) {
         students.push({
           studentId: normalizedStudentId.value,
           githubUsername: normalizedGithubUsername.value,
@@ -5411,7 +5651,7 @@ var loadRosterStudents = (repoRoot, rosterPath, expectedSection) => {
 var loadRosterSummary = (repoRoot, termSlug, termConfig) => {
   if (termConfig === void 0) {
     return {
-      roster: createEmptyRosterSummary(EMPTY_COUNT7),
+      roster: createEmptyRosterSummary(EMPTY_COUNT8),
       diagnostics: []
     };
   }
@@ -5450,7 +5690,7 @@ var buildCard = async (repoRoot, githubClient, githubCache, courseConfig, course
     )
   );
   const assignments = checkedAssignments.map((loadedAssignment) => loadedAssignment.summary);
-  const recentAssignments = assignments.filter(shouldIncludeAssignment).sort(compareRecentAssignments).slice(EMPTY_COUNT7, DEFAULT_RECENT_ASSIGNMENT_LIMIT);
+  const recentAssignments = assignments.filter(shouldIncludeAssignment).sort(compareRecentAssignments).slice(EMPTY_COUNT8, DEFAULT_RECENT_ASSIGNMENT_LIMIT);
   const rosterResult = loadRosterSummary(repoRoot, term.termSlug, term.config);
   const assignmentDiagnostics = assignments.flatMap((assignment) => assignment.diagnostics);
   const diagnostics = [
@@ -5470,7 +5710,7 @@ var buildCard = async (repoRoot, githubClient, githubCache, courseConfig, course
     termSlug: term.termSlug,
     termTitle: getTermTitle(term),
     status: getCardStatus(assignments),
-    needsAttention: attentionCount > EMPTY_COUNT7,
+    needsAttention: attentionCount > EMPTY_COUNT8,
     attentionCount,
     roster: rosterResult.roster,
     assignmentCount: assignments.length,
@@ -5480,7 +5720,7 @@ var buildCard = async (repoRoot, githubClient, githubCache, courseConfig, course
 };
 var determineStatus = (diagnostics, cards) => {
   const hasErrors = diagnostics.some(diagnosticRequiresAttention);
-  if (cards.length === EMPTY_COUNT7 && hasErrors) {
+  if (cards.length === EMPTY_COUNT8 && hasErrors) {
     return "failure";
   }
   return hasErrors ? "partial_success" : "success";
@@ -5495,7 +5735,7 @@ var buildDashboard = async ({
     return createEmptyDashboardResult("failure", courseResult.diagnostics);
   }
   const discoveredTermSlugs = discoverTermSlugs(courseResult.repoRoot, term);
-  if (term !== void 0 && discoveredTermSlugs.length === EMPTY_COUNT7) {
+  if (term !== void 0 && discoveredTermSlugs.length === EMPTY_COUNT8) {
     return createEmptyDashboardResult("failure", [createTermNotFoundDiagnostic(term)]);
   }
   const terms = discoveredTermSlugs.map((termSlug) => loadTerm(courseResult.repoRoot, termSlug));
@@ -5518,14 +5758,14 @@ var buildDashboard = async ({
 };
 
 // src/cli/commands/dashboard.command.ts
-var COMMAND_NAME4 = "dashboard";
+var COMMAND_NAME6 = "dashboard";
 var EMPTY_LENGTH5 = 0;
-var JSON_INDENT_SPACES2 = 2;
+var JSON_INDENT_SPACES3 = 2;
 var readGraiderToken = (env) => {
   const token = env[GRAIDER_GITHUB_TOKEN_ENV]?.trim();
   return token === void 0 || token.length === EMPTY_LENGTH5 ? void 0 : token;
 };
-var createJsonRequiredResult = () => createEmptyDashboardResult("failure", [
+var createJsonRequiredResult2 = () => createEmptyDashboardResult("failure", [
   createConfigDiagnostic(
     DASHBOARD_JSON_REQUIRED_CODE,
     "The dashboard command only supports JSON output. Run with --json."
@@ -5544,7 +5784,7 @@ var runDashboardCommand = ({
   githubClient
 }) => {
   if (options.json !== true) {
-    return Promise.resolve(createJsonRequiredResult());
+    return Promise.resolve(createJsonRequiredResult2());
   }
   const token = readGraiderToken(env);
   if (token === void 0) {
@@ -5556,9 +5796,9 @@ var runDashboardCommand = ({
     ...options.term === void 0 ? {} : { term: options.term }
   });
 };
-var formatDashboardResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
+var formatDashboardResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES3);
 var registerDashboardCommand = (program) => {
-  program.command(COMMAND_NAME4).option("--json", "Required. Emit dashboard JSON").option("--term <termSlug>", "Include only one term").description("Build a UI-ready dashboard model for the current course admin repository.").action(async (options) => {
+  program.command(COMMAND_NAME6).option("--json", "Required. Emit dashboard JSON").option("--term <termSlug>", "Include only one term").description("Build a UI-ready dashboard model for the current course admin repository.").action(async (options) => {
     const result = await runDashboardCommand({
       cwd: process.cwd(),
       options
@@ -5569,7 +5809,7 @@ var registerDashboardCommand = (program) => {
 };
 
 // src/core/target-selector.ts
-var EMPTY_COUNT8 = 0;
+var EMPTY_COUNT9 = 0;
 var SINGLE_SELECTOR_COUNT = 1;
 var normalizeIdentity = (value) => value.trim().toLowerCase();
 var createSelectorDiagnostic = (code, message, context) => createConfigDiagnostic(code, message, context);
@@ -5602,7 +5842,7 @@ var validateTargetSelector = (rawSelector) => {
       githubUsername: normalizeIdentity(rawSelector.githubUsername)
     });
   }
-  if (selectors.length === EMPTY_COUNT8) {
+  if (selectors.length === EMPTY_COUNT9) {
     return {
       warnings: [],
       errors: [
@@ -5624,7 +5864,7 @@ var validateTargetSelector = (rawSelector) => {
       ]
     };
   }
-  const selector = selectors[EMPTY_COUNT8];
+  const selector = selectors[EMPTY_COUNT9];
   return selector === void 0 ? {
     warnings: [],
     errors: [
@@ -5672,7 +5912,7 @@ var selectTargetStudents = (students, selector) => {
   const activeStudents = matchingStudents.filter(
     (student) => student.status === ROSTER_STATUS_ACTIVE
   );
-  if (activeStudents.length > EMPTY_COUNT8) {
+  if (activeStudents.length > EMPTY_COUNT9) {
     return {
       students: activeStudents,
       warnings: [],
@@ -5683,32 +5923,32 @@ var selectTargetStudents = (students, selector) => {
       }
     };
   }
-  const directInactiveMatch = (selector.kind === "student_id" || selector.kind === "github_username") && matchingStudents.length > EMPTY_COUNT8 ? matchingStudents[EMPTY_COUNT8] : void 0;
+  const directInactiveMatch = (selector.kind === "student_id" || selector.kind === "github_username") && matchingStudents.length > EMPTY_COUNT9 ? matchingStudents[EMPTY_COUNT9] : void 0;
   return {
     students: [],
     warnings: [],
     errors: directInactiveMatch === void 0 ? [createNoMatchesDiagnostic(selector)] : [createInactiveDiagnostic(selector, directInactiveMatch)],
     summary: {
-      targetsSelected: EMPTY_COUNT8,
+      targetsSelected: EMPTY_COUNT9,
       targetSelector: describeSelector(selector)
     }
   };
 };
 
 // src/execution/grade-executor.ts
-var EMPTY_COUNT9 = 0;
+var EMPTY_COUNT10 = 0;
 var SUCCESS_INCREMENT = 1;
 var FAILED_INCREMENT = 1;
 var createInitialSummary = (targetsSelected) => ({
   targetsSelected,
-  dispatchAttempted: EMPTY_COUNT9,
-  dispatchSucceeded: EMPTY_COUNT9,
-  dispatchFailed: EMPTY_COUNT9,
-  skipped: EMPTY_COUNT9,
-  warnings: EMPTY_COUNT9,
-  errors: EMPTY_COUNT9
+  dispatchAttempted: EMPTY_COUNT10,
+  dispatchSucceeded: EMPTY_COUNT10,
+  dispatchFailed: EMPTY_COUNT10,
+  skipped: EMPTY_COUNT10,
+  warnings: EMPTY_COUNT10,
+  errors: EMPTY_COUNT10
 });
-var getEffectiveGrading3 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
+var getEffectiveGrading4 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var findManifestRecord3 = (manifest, student) => manifest.repositories.find(
   (record) => record.studentId === student.studentId && record.section === student.section
 );
@@ -5839,7 +6079,7 @@ var getGradeGitHubDiagnostics = (errors) => errors.flatMap((error) => {
   ] : [];
 });
 var executeGrade = async (input) => {
-  const grading = getEffectiveGrading3(input.config);
+  const grading = getEffectiveGrading4(input.config);
   const workflowPath = grading.workflow;
   let state = {
     summary: createInitialSummary(input.targetStudents.length),
@@ -6228,12 +6468,12 @@ var FakeGitHubClient = class {
       };
     });
   }
-  run(method, action) {
+  run(method, action2) {
     const failure = this.consumeFailure(method);
     if (failure !== void 0) {
       return Promise.reject(createGitHubClientError(failure));
     }
-    return Promise.resolve(action());
+    return Promise.resolve(action2());
   }
   consumeFailure(method) {
     const failureIndex = this.failures.findIndex(
@@ -6261,16 +6501,16 @@ var FakeGitHubClient = class {
 };
 
 // src/cli/commands/grade.command.ts
-var COMMAND_NAME5 = "grade";
-var EMPTY_COUNT10 = 0;
+var COMMAND_NAME7 = "grade";
+var EMPTY_COUNT11 = 0;
 var NOT_CONFIGURED_WARNING_COUNT = 1;
 var createDefaultGitHubClient = () => readGitHubToken() === void 0 ? new FakeGitHubClient() : createGitHubClient();
-var getEffectiveGrading4 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
+var getEffectiveGrading5 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getCommandStatus = (result) => {
-  if (result.errors.length === EMPTY_COUNT10) {
+  if (result.errors.length === EMPTY_COUNT11) {
     return "success";
   }
-  return result.summary.dispatchSucceeded > EMPTY_COUNT10 ? "partial_success" : "failure";
+  return result.summary.dispatchSucceeded > EMPTY_COUNT11 ? "partial_success" : "failure";
 };
 var createLifecycleDiagnostic2 = (status) => createConfigDiagnostic(
   DiagnosticCode.AssignmentStatusBlocksGrade,
@@ -6290,9 +6530,9 @@ var runGradeCommand = async ({
   retryOptions
 }) => {
   const selectorResult = validateTargetSelector(targetSelector);
-  if (selectorResult.errors.length > EMPTY_COUNT10 || selectorResult.selector === void 0) {
+  if (selectorResult.errors.length > EMPTY_COUNT11 || selectorResult.selector === void 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME7,
       assignmentFile,
       status: "failure",
       warnings: selectorResult.warnings,
@@ -6304,7 +6544,7 @@ var runGradeCommand = async ({
   const configResult = loadGraiderConfig({ cwd, assignmentFile });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME7,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -6316,7 +6556,7 @@ var runGradeCommand = async ({
   const assignmentStatus = configResult.config.assignment.assignment.status;
   if (assignmentStatus === "draft" || assignmentStatus === "archived") {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME7,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [],
@@ -6329,9 +6569,9 @@ var runGradeCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > EMPTY_COUNT10) {
+  if (rosterResult.errors.length > EMPTY_COUNT11) {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME7,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -6345,9 +6585,9 @@ var runGradeCommand = async ({
     });
   }
   const selectionResult = selectTargetStudents(rosterResult.students, selectorResult.selector);
-  if (selectionResult.errors.length > EMPTY_COUNT10) {
+  if (selectionResult.errors.length > EMPTY_COUNT11) {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME7,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...selectionResult.warnings],
@@ -6361,10 +6601,10 @@ var runGradeCommand = async ({
       }
     });
   }
-  const grading = getEffectiveGrading4(configResult.config);
+  const grading = getEffectiveGrading5(configResult.config);
   if (!grading.enabled || grading.workflow === void 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME7,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "success",
       warnings: [
@@ -6383,12 +6623,12 @@ var runGradeCommand = async ({
         workflowDispatchAttempted: false,
         resultStatus: "not_configured",
         targetsSelected: selectionResult.students.length,
-        dispatchAttempted: EMPTY_COUNT10,
-        dispatchSucceeded: EMPTY_COUNT10,
-        dispatchFailed: EMPTY_COUNT10,
+        dispatchAttempted: EMPTY_COUNT11,
+        dispatchSucceeded: EMPTY_COUNT11,
+        dispatchFailed: EMPTY_COUNT11,
         skipped: selectionResult.students.length,
         warnings: rosterResult.warnings.length + selectionResult.warnings.length + NOT_CONFIGURED_WARNING_COUNT,
-        errors: EMPTY_COUNT10
+        errors: EMPTY_COUNT11
       }
     });
   }
@@ -6400,7 +6640,7 @@ var runGradeCommand = async ({
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: true });
   if (manifestResult.status !== "loaded") {
     return createCommandResult({
-      commandName: COMMAND_NAME5,
+      commandName: COMMAND_NAME7,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -6425,7 +6665,7 @@ var runGradeCommand = async ({
   const status = getCommandStatus(executionResult);
   const executionErrors = status === "failure" ? [...executionResult.errors, ...getGradeGitHubDiagnostics(executionResult.errors)] : executionResult.errors;
   return createCommandResult({
-    commandName: COMMAND_NAME5,
+    commandName: COMMAND_NAME7,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status,
     warnings: [...rosterResult.warnings, ...selectionResult.warnings, ...executionResult.warnings],
@@ -6442,7 +6682,7 @@ var runGradeCommand = async ({
   });
 };
 var registerGradeCommand = (program) => {
-  program.command(COMMAND_NAME5).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Target all active students").option("--section <section-id>", "Target active students in a section").option("--student-id <student-id>", "Target one active student by student ID").option("--github-username <github-username>", "Target one active student by GitHub username").description("Run assignment grading.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME7).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Target all active students").option("--section <section-id>", "Target active students in a section").option("--student-id <student-id>", "Target one active student by student ID").option("--github-username <github-username>", "Target one active student by GitHub username").description("Run assignment grading.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runGradeCommand({
       cwd: process.cwd(),
@@ -6483,11 +6723,11 @@ var createPlanPath = (repoRoot, termCode, assignmentSlug, clock) => {
 };
 
 // src/planning/plan-renderer.ts
-import fs8 from "fs";
+import fs9 from "fs";
 import path11 from "path";
 
 // src/io/stable-json.ts
-var JSON_INDENT_SPACES3 = 2;
+var JSON_INDENT_SPACES4 = 2;
 var isPlainObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var orderValue = (value) => {
   if (Array.isArray(value)) {
@@ -6500,16 +6740,16 @@ var orderValue = (value) => {
   }
   return value;
 };
-var stringifyStableJson = (value) => JSON.stringify(orderValue(value), void 0, JSON_INDENT_SPACES3);
+var stringifyStableJson = (value) => JSON.stringify(orderValue(value), void 0, JSON_INDENT_SPACES4);
 
 // src/planning/plan-renderer.ts
 var renderPlanJson = (plan) => stringifyStableJson(plan);
 var writePlanJsonFile = (plan, absolutePath) => {
   try {
-    fs8.mkdirSync(path11.dirname(absolutePath), {
+    fs9.mkdirSync(path11.dirname(absolutePath), {
       recursive: true
     });
-    fs8.writeFileSync(absolutePath, `${renderPlanJson(plan)}
+    fs9.writeFileSync(absolutePath, `${renderPlanJson(plan)}
 `, "utf8");
     return {
       status: "success"
@@ -6530,10 +6770,10 @@ var writePlanJsonFile = (plan, absolutePath) => {
 };
 
 // src/cli/commands/plan.command.ts
-var COMMAND_NAME6 = "plan";
+var COMMAND_NAME8 = "plan";
 var DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
 var README_FILE2 = "README.md";
-var EMPTY_COUNT11 = 0;
+var EMPTY_COUNT12 = 0;
 var createDefaultTemplateRepository = (owner, repo, branch) => ({
   owner,
   name: repo,
@@ -6590,7 +6830,7 @@ var runPlanCommand = async ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME6,
+      commandName: COMMAND_NAME8,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -6602,9 +6842,9 @@ var runPlanCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > EMPTY_COUNT11) {
+  if (rosterResult.errors.length > EMPTY_COUNT12) {
     return createCommandResult({
-      commandName: COMMAND_NAME6,
+      commandName: COMMAND_NAME8,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -6625,9 +6865,9 @@ var runPlanCommand = async ({
     students: rosterResult.students,
     githubClient: effectiveGitHubClient
   });
-  if (readinessResult.errors.length > EMPTY_COUNT11) {
+  if (readinessResult.errors.length > EMPTY_COUNT12) {
     return createCommandResult({
-      commandName: COMMAND_NAME6,
+      commandName: COMMAND_NAME8,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -6662,9 +6902,9 @@ var runPlanCommand = async ({
   const errors = [...plan.errors, ...writeErrors];
   const generatedFiles = writeResult.status === "success" ? [planPath.relativePath] : [];
   return createCommandResult({
-    commandName: COMMAND_NAME6,
+    commandName: COMMAND_NAME8,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
-    status: errors.length > EMPTY_COUNT11 ? "failure" : "success",
+    status: errors.length > EMPTY_COUNT12 ? "failure" : "success",
     warnings: [...rosterResult.warnings, ...readinessResult.warnings, ...plan.warnings],
     errors,
     generatedFiles,
@@ -6683,7 +6923,7 @@ var runPlanCommand = async ({
   });
 };
 var registerPlanCommand = (program) => {
-  program.command(COMMAND_NAME6).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Plan assignment provisioning.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME8).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Plan assignment provisioning.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runPlanCommand({
       cwd: process.cwd(),
@@ -6696,7 +6936,7 @@ var registerPlanCommand = (program) => {
 };
 
 // src/cli/commands/remove-access.command.ts
-var COMMAND_NAME7 = "remove-access";
+var COMMAND_NAME9 = "remove-access";
 var normalizeRemoveAccessTargetSelector = (rawOptions) => ({
   ...rawOptions.all === void 0 ? {} : { all: rawOptions.all },
   ...rawOptions.section === void 0 ? {} : { section: rawOptions.section },
@@ -6709,11 +6949,11 @@ var runRemoveAccessCommand = ({
   options,
   targetSelector
 }) => createCommandResult({
-  commandName: COMMAND_NAME7,
+  commandName: COMMAND_NAME9,
   assignmentFile,
   status: "failure",
   warnings: [],
-  errors: [createNotSupportedInMvpDiagnostic(COMMAND_NAME7, assignmentFile)],
+  errors: [createNotSupportedInMvpDiagnostic(COMMAND_NAME9, assignmentFile)],
   generatedFiles: [],
   summary: {
     unsupported: true,
@@ -6724,7 +6964,7 @@ var runRemoveAccessCommand = ({
   }
 });
 var registerRemoveAccessCommand = (program) => {
-  program.command(COMMAND_NAME7).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Reserved for future remove-access targeting").option("--section <section-id>", "Reserved for future remove-access targeting").option("--student-id <student-id>", "Reserved for future remove-access targeting").option("--github-username <github-username>", "Reserved for future remove-access targeting").description("Remove student access from assignment repositories.").action((assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME9).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Reserved for future remove-access targeting").option("--section <section-id>", "Reserved for future remove-access targeting").option("--student-id <student-id>", "Reserved for future remove-access targeting").option("--github-username <github-username>", "Reserved for future remove-access targeting").description("Remove student access from assignment repositories.").action((assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = runRemoveAccessCommand({
       cwd: process.cwd(),
@@ -6856,7 +7096,7 @@ var renderStudentResultsJson = (assignment, student, generatedAt) => `${stringif
 var PUBLISHED_STUDENT_REPORT_PATH = "grading/report.md";
 var PUBLISHED_STUDENT_RESULTS_PATH = "grading/results.json";
 var PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE = "Update Graider student report";
-var EMPTY_COUNT12 = 0;
+var EMPTY_COUNT13 = 0;
 var PUBLISHED_FILE_COUNT_PER_STUDENT = 2;
 var FIRST_PUBLISHED_FILE_COUNT = 1;
 var STUDENT_PUBLISH_MODE_GRAIDER_GENERATED = "graider-generated";
@@ -7108,7 +7348,7 @@ var publishStudentReport = async ({
       skipped: false
     };
   }
-  if (publishPlan.errors.length > EMPTY_COUNT12) {
+  if (publishPlan.errors.length > EMPTY_COUNT13) {
     return {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
@@ -7144,7 +7384,7 @@ var publishStudentReport = async ({
 };
 
 // src/execution/report-publisher.ts
-var EMPTY_COUNT13 = 0;
+var EMPTY_COUNT14 = 0;
 var publishStudentReports = async ({
   report,
   githubClient,
@@ -7153,9 +7393,9 @@ var publishStudentReports = async ({
   const publishedFiles = [];
   const warnings = [];
   const errors = [];
-  let studentsPublished = EMPTY_COUNT13;
-  let publishFailed = EMPTY_COUNT13;
-  let publishSkipped = EMPTY_COUNT13;
+  let studentsPublished = EMPTY_COUNT14;
+  let publishFailed = EMPTY_COUNT14;
+  let publishSkipped = EMPTY_COUNT14;
   for (const student of report.students) {
     const result = await publishStudentReport({
       githubClient,
@@ -7169,7 +7409,7 @@ var publishStudentReports = async ({
     errors.push(...result.errors);
     if (result.skipped) {
       publishSkipped += 1;
-    } else if (result.errors.length > EMPTY_COUNT13) {
+    } else if (result.errors.length > EMPTY_COUNT14) {
       publishFailed += 1;
     } else {
       studentsPublished += 1;
@@ -7521,7 +7761,7 @@ var parseGradingResultsJsonText = (jsonText) => {
 var REPORT_SCHEMA_VERSION = 1;
 
 // src/reporting/report-collector.ts
-var EMPTY_COUNT14 = 0;
+var EMPTY_COUNT15 = 0;
 var FIRST_SORT_BEFORE_SECOND2 = -1;
 var FIRST_SORT_AFTER_SECOND2 = 1;
 var FIRST_WORKFLOW_RUN_INDEX = 0;
@@ -7529,14 +7769,14 @@ var CURRENT_DIRECTORY_PREFIX2 = "./";
 var WINDOWS_PATH_SEPARATOR_PATTERN4 = /\\/g;
 var compareStudents = (left, right) => {
   const sectionComparison = left.section.localeCompare(right.section);
-  if (sectionComparison !== EMPTY_COUNT14) {
+  if (sectionComparison !== EMPTY_COUNT15) {
     return sectionComparison;
   }
   return left.studentId.localeCompare(right.studentId);
 };
 var compareRuns = (left, right) => {
   const updatedComparison = right.updatedAt.localeCompare(left.updatedAt);
-  if (updatedComparison !== EMPTY_COUNT14) {
+  if (updatedComparison !== EMPTY_COUNT15) {
     return updatedComparison;
   }
   return left.id < right.id ? FIRST_SORT_BEFORE_SECOND2 : FIRST_SORT_AFTER_SECOND2;
@@ -7549,7 +7789,7 @@ var normalizeGitHubError5 = (error) => error instanceof GitHubClientError ? crea
   severity: "error",
   message: "Unexpected GitHub client failure during report collection."
 };
-var getEffectiveGrading5 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
+var getEffectiveGrading6 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getWorkflowRunStatus = (run) => run === void 0 ? void 0 : run.status;
 var getWorkflowRunConclusion = (run) => run === void 0 ? void 0 : run.conclusion;
 var normalizeArtifactPath2 = (filePath) => {
@@ -7574,7 +7814,7 @@ var createDefaultGrading = () => ({
   checks: []
 });
 var collectStudentGrading = async (input, record, repositoryStatus) => {
-  const gradingConfig = getEffectiveGrading5(input.config);
+  const gradingConfig = getEffectiveGrading6(input.config);
   if (!gradingConfig.enabled) {
     const mapping2 = mapGradingStatus({
       gradingEnabled: false,
@@ -7677,7 +7917,7 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
   const resultText = findArtifactResultText(artifact, gradingConfig.result_file);
   const resultFileStatus = artifact === null ? "not_checked" : resultText === void 0 ? "missing" : "valid";
   const validationResult = resultText === void 0 ? void 0 : parseGradingResultsJsonText(resultText);
-  const finalResultFileStatus = validationResult === void 0 || validationResult.errors.length === EMPTY_COUNT14 ? resultFileStatus : "invalid";
+  const finalResultFileStatus = validationResult === void 0 || validationResult.errors.length === EMPTY_COUNT15 ? resultFileStatus : "invalid";
   const parsedResultStatus = validationResult?.result?.status;
   const workflowRunStatus = getWorkflowRunStatus(workflowRun);
   const workflowRunConclusion = getWorkflowRunConclusion(workflowRun);
@@ -7774,7 +8014,7 @@ var collectStudent = async (input, student) => {
   }
 };
 var countResultStatus = (students, status) => students.filter((student) => student.grading.resultStatus === status).length;
-var countDiagnostics = (students, fieldName) => students.reduce((total, student) => total + student[fieldName].length, EMPTY_COUNT14);
+var countDiagnostics = (students, fieldName) => students.reduce((total, student) => total + student[fieldName].length, EMPTY_COUNT15);
 var createSummary4 = (rosterSummary, students) => ({
   studentCount: rosterSummary.studentCount,
   activeStudentCount: rosterSummary.activeStudentCount,
@@ -8019,15 +8259,15 @@ var createStudentReportRelativePath = (termCode, assignmentSlug, section, studen
 );
 
 // src/reporting/report-writer.ts
-import fs9 from "fs";
+import fs10 from "fs";
 import path13 from "path";
 var writeReportFiles = (files) => {
   const generatedFiles = [];
   const errors = [];
   for (const file of files) {
     try {
-      fs9.mkdirSync(path13.dirname(file.absolutePath), { recursive: true });
-      fs9.writeFileSync(file.absolutePath, file.content, "utf8");
+      fs10.mkdirSync(path13.dirname(file.absolutePath), { recursive: true });
+      fs10.writeFileSync(file.absolutePath, file.content, "utf8");
       generatedFiles.push(file.relativePath);
     } catch (error) {
       errors.push(
@@ -8046,13 +8286,13 @@ var writeReportFiles = (files) => {
 };
 
 // src/cli/commands/report.command.ts
-var COMMAND_NAME8 = "report";
-var EMPTY_COUNT15 = 0;
+var COMMAND_NAME10 = "report";
+var EMPTY_COUNT16 = 0;
 var getCommandStatus2 = (errorCount, generatedFileCount) => {
-  if (errorCount === EMPTY_COUNT15) {
+  if (errorCount === EMPTY_COUNT16) {
     return "success";
   }
-  return generatedFileCount > EMPTY_COUNT15 ? "partial_success" : "failure";
+  return generatedFileCount > EMPTY_COUNT16 ? "partial_success" : "failure";
 };
 var createDefaultGitHubClient3 = () => readGitHubToken() === void 0 ? new FakeGitHubClient() : createGitHubClient();
 var createReportFiles = (repoRoot, report) => {
@@ -8104,7 +8344,7 @@ var runReportCommand = async ({
   const configResult = loadGraiderConfig({ cwd, assignmentFile });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME8,
+      commandName: COMMAND_NAME10,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -8114,9 +8354,9 @@ var runReportCommand = async ({
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
-  if (rosterResult.errors.length > EMPTY_COUNT15) {
+  if (rosterResult.errors.length > EMPTY_COUNT16) {
     return createCommandResult({
-      commandName: COMMAND_NAME8,
+      commandName: COMMAND_NAME10,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -8137,7 +8377,7 @@ var runReportCommand = async ({
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: true });
   if (manifestResult.status !== "loaded") {
     return createCommandResult({
-      commandName: COMMAND_NAME8,
+      commandName: COMMAND_NAME10,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -8164,7 +8404,7 @@ var runReportCommand = async ({
   const writeResult = writeReportFiles(
     createReportFiles(configResult.config.summary.repoRoot, collectResult.report)
   );
-  const publishResult = publishStudentReports2 && writeResult.errors.length === EMPTY_COUNT15 ? await publishStudentReports({
+  const publishResult = publishStudentReports2 && writeResult.errors.length === EMPTY_COUNT16 ? await publishStudentReports({
     report: collectResult.report,
     githubClient: activeGitHubClient,
     studentPublishConfig: configResult.config.course.reports.student_publish
@@ -8173,13 +8413,13 @@ var runReportCommand = async ({
     warnings: [],
     errors: [],
     studentsReported: collectResult.report.students.length,
-    studentsPublished: EMPTY_COUNT15,
-    publishFailed: EMPTY_COUNT15,
-    publishSkipped: EMPTY_COUNT15
+    studentsPublished: EMPTY_COUNT16,
+    publishFailed: EMPTY_COUNT16,
+    publishSkipped: EMPTY_COUNT16
   };
-  const commandStatus = publishResult.errors.length > EMPTY_COUNT15 ? getCommandStatus2(publishResult.errors.length, publishResult.studentsPublished) : getCommandStatus2(writeResult.errors.length, writeResult.generatedFiles.length);
+  const commandStatus = publishResult.errors.length > EMPTY_COUNT16 ? getCommandStatus2(publishResult.errors.length, publishResult.studentsPublished) : getCommandStatus2(writeResult.errors.length, writeResult.generatedFiles.length);
   return createCommandResult({
-    commandName: COMMAND_NAME8,
+    commandName: COMMAND_NAME10,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: commandStatus,
     warnings: [
@@ -8207,7 +8447,7 @@ var runReportCommand = async ({
   });
 };
 var registerReportCommand = (program) => {
-  program.command(COMMAND_NAME8).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--publish-student-reports", "Publish per-student reports to student repositories").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME10).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--publish-student-reports", "Publish per-student reports to student repositories").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runReportCommand({
       cwd: process.cwd(),
@@ -8221,10 +8461,10 @@ var registerReportCommand = (program) => {
 };
 
 // src/workflows/workflow-compatibility-validation.ts
-import fs10 from "fs";
+import fs11 from "fs";
 import path15 from "path";
-var PRESET_GRADING_MODE2 = "preset";
-var getEffectiveGrading6 = (config) => config.assignment.grading ?? config.course.grading;
+var PRESET_GRADING_MODE3 = "preset";
+var getEffectiveGrading7 = (config) => config.assignment.grading ?? config.course.grading;
 var createConfiguredWorkflowCandidate = (repoRoot, workflowPath) => {
   return {
     absolutePath: path15.join(repoRoot, workflowPath),
@@ -8243,9 +8483,9 @@ var createWorkflowCandidates = (config, grading) => {
     config.summary.termCode,
     config.summary.assignmentSlug
   );
-  return grading.mode === PRESET_GRADING_MODE2 ? [...configuredCandidates, generatedCandidate] : configuredCandidates;
+  return grading.mode === PRESET_GRADING_MODE3 ? [...configuredCandidates, generatedCandidate] : configuredCandidates;
 };
-var findExistingWorkflowCandidate = (candidates) => candidates.find((candidate) => fs10.existsSync(candidate.absolutePath));
+var findExistingWorkflowCandidate = (candidates) => candidates.find((candidate) => fs11.existsSync(candidate.absolutePath));
 var createWorkflowMissingDiagnostic3 = (grading, candidates) => createConfigDiagnostic(
   GRADING_WORKFLOW_MISSING_CODE,
   `Configured grading workflow ${String(grading.workflow)} was not found locally.`,
@@ -8263,7 +8503,7 @@ var createWorkflowDispatchUnsupportedDiagnostic = (workflowPath) => createConfig
   }
 );
 var validateWorkflowCompatibility = (config) => {
-  const grading = getEffectiveGrading6(config);
+  const grading = getEffectiveGrading7(config);
   if (!grading.enabled || grading.workflow === void 0) {
     return {
       warnings: [],
@@ -8280,7 +8520,7 @@ var validateWorkflowCompatibility = (config) => {
       workflowStatus: "missing"
     };
   }
-  const content = fs10.readFileSync(workflowCandidate.absolutePath, "utf8");
+  const content = fs11.readFileSync(workflowCandidate.absolutePath, "utf8");
   const parseResult = parseYaml(content, workflowCandidate.relativePath);
   if (parseResult.status === "failure") {
     return {
@@ -8301,7 +8541,7 @@ var validateWorkflowCompatibility = (config) => {
 };
 
 // src/cli/commands/validate.command.ts
-var COMMAND_NAME9 = "validate";
+var COMMAND_NAME11 = "validate";
 var DEFAULT_TEMPLATE_COMMIT_SHA2 = "fake-template-sha";
 var README_FILE3 = "README.md";
 var createDefaultTemplateRepository2 = (owner, repo, branch) => ({
@@ -8362,7 +8602,7 @@ var runValidateCommand = async ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME9,
+      commandName: COMMAND_NAME11,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -8376,7 +8616,7 @@ var runValidateCommand = async ({
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME9,
+      commandName: COMMAND_NAME11,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -8392,7 +8632,7 @@ var runValidateCommand = async ({
   const workflowCompatibilityResult = validateWorkflowCompatibility(configResult.config);
   if (workflowCompatibilityResult.errors.length > 0 && workflowCompatibilityResult.workflowStatus !== "missing") {
     return createCommandResult({
-      commandName: COMMAND_NAME9,
+      commandName: COMMAND_NAME11,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...workflowCompatibilityResult.warnings],
@@ -8416,7 +8656,7 @@ var runValidateCommand = async ({
   });
   if (readinessResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME9,
+      commandName: COMMAND_NAME11,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [
@@ -8436,7 +8676,7 @@ var runValidateCommand = async ({
     });
   }
   return createCommandResult({
-    commandName: COMMAND_NAME9,
+    commandName: COMMAND_NAME11,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
     warnings: [
@@ -8456,7 +8696,7 @@ var runValidateCommand = async ({
   });
 };
 var registerValidateCommand = (program) => {
-  program.command(COMMAND_NAME9).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME11).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runValidateCommand({
       cwd: process.cwd(),
@@ -8756,14 +8996,14 @@ var renderJavaJunitCheckstyleWorkflow = ({
 };
 
 // src/workflows/workflow-writer.ts
-import fs11 from "fs";
+import fs12 from "fs";
 import path16 from "path";
 var writeWorkflowFile = ({
   filePath,
   content,
   force
 }) => {
-  if (!force && fs11.existsSync(filePath)) {
+  if (!force && fs12.existsSync(filePath)) {
     return {
       status: "failure",
       diagnostic: createConfigDiagnostic(
@@ -8776,8 +9016,8 @@ var writeWorkflowFile = ({
     };
   }
   try {
-    fs11.mkdirSync(path16.dirname(filePath), { recursive: true });
-    fs11.writeFileSync(filePath, content);
+    fs12.mkdirSync(path16.dirname(filePath), { recursive: true });
+    fs12.writeFileSync(filePath, content);
     return {
       status: "success"
     };
@@ -8799,11 +9039,11 @@ var writeWorkflowFile = ({
 // src/cli/commands/workflow.command.ts
 var WORKFLOW_COMMAND_NAME = "workflow";
 var GENERATE_COMMAND_NAME = "generate";
-var COMMAND_NAME10 = "workflow generate";
-var PRESET_GRADING_MODE3 = "preset";
-var LEGACY_GRADING_MODE3 = "custom-workflow";
-var EMPTY_COUNT16 = 0;
-var getEffectiveGrading7 = (courseGrading, assignmentGrading) => assignmentGrading ?? courseGrading;
+var COMMAND_NAME12 = "workflow generate";
+var PRESET_GRADING_MODE4 = "preset";
+var LEGACY_GRADING_MODE4 = "custom-workflow";
+var EMPTY_COUNT17 = 0;
+var getEffectiveGrading8 = (courseGrading, assignmentGrading) => assignmentGrading ?? courseGrading;
 var formatGeneratedFilePath = (repoRoot, absolutePath) => {
   try {
     return toRepositoryRelativePath(repoRoot, absolutePath);
@@ -8838,7 +9078,7 @@ var runWorkflowGenerateCommand = ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME10,
+      commandName: COMMAND_NAME12,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -8849,14 +9089,14 @@ var runWorkflowGenerateCommand = ({
       }
     });
   }
-  const grading = getEffectiveGrading7(
+  const grading = getEffectiveGrading8(
     configResult.config.course.grading,
     configResult.config.assignment.grading
   );
   const assignmentConfigPath = configResult.config.summary.assignmentConfigPath;
   if (!grading.enabled) {
     return createCommandResult({
-      commandName: COMMAND_NAME10,
+      commandName: COMMAND_NAME12,
       assignmentFile: assignmentConfigPath,
       status: "failure",
       warnings: [],
@@ -8876,17 +9116,17 @@ var runWorkflowGenerateCommand = ({
       }
     });
   }
-  const mode = grading.mode ?? LEGACY_GRADING_MODE3;
-  if (mode !== PRESET_GRADING_MODE3) {
+  const mode = grading.mode ?? LEGACY_GRADING_MODE4;
+  if (mode !== PRESET_GRADING_MODE4) {
     return createCommandResult({
-      commandName: COMMAND_NAME10,
+      commandName: COMMAND_NAME12,
       assignmentFile: assignmentConfigPath,
       status: "failure",
       warnings: [],
       errors: [
         createConfigDiagnostic(
           WORKFLOW_GENERATION_REQUIRES_PRESET_MODE_CODE,
-          `Workflow generation requires grading.mode: ${PRESET_GRADING_MODE3}.`,
+          `Workflow generation requires grading.mode: ${PRESET_GRADING_MODE4}.`,
           {
             assignmentFile: assignmentConfigPath,
             mode
@@ -8903,7 +9143,7 @@ var runWorkflowGenerateCommand = ({
   }
   if (grading.preset !== JAVA_JUNIT_CHECKSTYLE_PRESET) {
     return createCommandResult({
-      commandName: COMMAND_NAME10,
+      commandName: COMMAND_NAME12,
       assignmentFile: assignmentConfigPath,
       status: "failure",
       warnings: [],
@@ -8940,11 +9180,11 @@ var runWorkflowGenerateCommand = ({
     force
   });
   const errors = writeResult.status === "failure" ? [writeResult.diagnostic] : [];
-  const generatedFiles = errors.length > EMPTY_COUNT16 ? [] : [outputPath.reportPath];
+  const generatedFiles = errors.length > EMPTY_COUNT17 ? [] : [outputPath.reportPath];
   return createCommandResult({
-    commandName: COMMAND_NAME10,
+    commandName: COMMAND_NAME12,
     assignmentFile: assignmentConfigPath,
-    status: errors.length > EMPTY_COUNT16 ? "failure" : "success",
+    status: errors.length > EMPTY_COUNT17 ? "failure" : "success",
     warnings: [],
     errors,
     generatedFiles,
@@ -8978,6 +9218,7 @@ var buildProgram = () => {
   const program = new Command();
   program.name("graider").description("CLI-based GitHub assignment management for course repositories.").version("0.1.0");
   registerValidateCommand(program);
+  registerAssignmentCommand(program);
   registerDashboardCommand(program);
   registerPlanCommand(program);
   registerApplyCommand(program);
