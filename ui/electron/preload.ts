@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type CombinedDashboardResult,
+  type CourseFolderDashboardResult,
   type CourseFolderRecord,
   type GraiderUIApi,
   type SelectCourseFolderResult
@@ -18,7 +20,11 @@ const graiderUI: GraiderUIApi = {
     await invoke<CourseFolderRecord[]>(IPC_CHANNELS.listCourseFolders),
   removeCourseFolder: async (id: string): Promise<void> => {
     await invoke<void>(IPC_CHANNELS.removeCourseFolder, id);
-  }
+  },
+  refreshCourseFolder: async (id: string): Promise<CourseFolderDashboardResult> =>
+    await invoke<CourseFolderDashboardResult>(IPC_CHANNELS.refreshCourseFolder, id),
+  refreshDashboard: async (): Promise<CombinedDashboardResult> =>
+    await invoke<CombinedDashboardResult>(IPC_CHANNELS.refreshDashboard)
 };
 
 contextBridge.exposeInMainWorld("graiderUI", graiderUI);

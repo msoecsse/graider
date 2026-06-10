@@ -1,6 +1,13 @@
 import { useEffect, useState, type ReactElement } from "react";
-import type { CourseFolderRecord } from "../../electron/ipc";
+import type {
+  CombinedDashboardResult,
+  CourseFolderDashboardResult,
+  CourseFolderRecord
+} from "../../electron/ipc";
+import { CourseCardGrid } from "./CourseCardGrid";
 import { CourseFolderList } from "./CourseFolderList";
+import { FolderErrorPanel } from "./FolderErrorPanel";
+import { aggregateDashboardResults } from "./dashboardAggregation";
 
 const getSafeErrorMessage = (error: unknown): string =>
   error instanceof Error && error.message.trim().length > 0
@@ -9,8 +16,13 @@ const getSafeErrorMessage = (error: unknown): string =>
 
 export const DashboardPage = (): ReactElement => {
   const [courseFolders, setCourseFolders] = useState<CourseFolderRecord[]>([]);
+  const [refreshResults, setRefreshResults] = useState<
+    Readonly<Record<string, CourseFolderDashboardResult>>
+  >({});
   const [isLoadingFolders, setIsLoadingFolders] = useState(true);
   const [isSelectingFolder, setIsSelectingFolder] = useState(false);
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -80,12 +92,88 @@ export const DashboardPage = (): ReactElement => {
       setCourseFolders((currentFolders) =>
         currentFolders.filter((courseFolder) => courseFolder.id !== id)
       );
+      setRefreshResults((currentResults) => {
+        const { [id]: _removedResult, ...remainingResults } = currentResults;
+
+        return remainingResults;
+      });
     } catch (error) {
       setErrorMessage(getSafeErrorMessage(error));
     } finally {
       setRemovingId(null);
     }
   };
+
+  const applyRefreshResultMetadata = (result: CourseFolderDashboardResult): void => {
+    if (result.refreshedAt !== null) {
+      setCourseFolders((currentFolders) =>
+        currentFolders.map((courseFolder) =>
+          courseFolder.id === result.courseFolderId
+            ? {
+                ...courseFolder,
+                lastRefreshedAt: result.refreshedAt,
+                lastDashboardStatus: result.dashboard?.status ?? result.status
+              }
+            : courseFolder
+        )
+      );
+    }
+  };
+
+  const rememberRefreshResult = (result: CourseFolderDashboardResult): void => {
+    setRefreshResults((currentResults) => ({
+      ...currentResults,
+      [result.courseFolderId]: result
+    }));
+    applyRefreshResultMetadata(result);
+  };
+
+  const handleRefreshCourseFolder = async (id: string): Promise<void> => {
+    setRefreshingId(id);
+    setErrorMessage(null);
+
+    try {
+      rememberRefreshResult(await window.graiderUI.refreshCourseFolder(id));
+    } catch (error) {
+      setErrorMessage(getSafeErrorMessage(error));
+    } finally {
+      setRefreshingId(null);
+    }
+  };
+
+  const handleRefreshDashboard = async (): Promise<void> => {
+    setIsRefreshingAll(true);
+    setErrorMessage(null);
+
+    try {
+      const combinedResult: CombinedDashboardResult = await window.graiderUI.refreshDashboard();
+      const nextResults = combinedResult.results.reduce<
+        Record<string, CourseFolderDashboardResult>
+      >(
+        (results, result) => ({
+          ...results,
+          [result.courseFolderId]: result
+        }),
+        {}
+      );
+
+      setRefreshResults((currentResults) => ({
+        ...currentResults,
+        ...nextResults
+      }));
+      for (const result of combinedResult.results) {
+        applyRefreshResultMetadata(result);
+      }
+    } catch (error) {
+      setErrorMessage(getSafeErrorMessage(error));
+    } finally {
+      setIsRefreshingAll(false);
+    }
+  };
+
+  const isRefreshing = isRefreshingAll || refreshingId !== null;
+  const aggregatedDashboard = aggregateDashboardResults(refreshResults);
+  const hasCourseFolders = courseFolders.length > 0;
 
   return (
     <main className="dashboard-shell" aria-labelledby="dashboard-title">
@@ -126,8 +214,15 @@ export const DashboardPage = (): ReactElement => {
               <option>Newest first</option>
             </select>
           </label>
-          <button className="secondary-action" type="button" disabled>
-            Refresh
+          <button
+            className="secondary-action"
+            type="button"
+            disabled={!hasCourseFolders || isRefreshing}
+            onClick={() => {
+              void handleRefreshDashboard();
+            }}
+          >
+            {isRefreshingAll ? "Refreshing..." : "Refresh"}
           </button>
         </div>
 
@@ -139,7 +234,7 @@ export const DashboardPage = (): ReactElement => {
 
         {isLoadingFolders ? <p className="loading-state">Loading course folders...</p> : null}
 
-        {!isLoadingFolders && courseFolders.length === 0 ? (
+        {!isLoadingFolders && !hasCourseFolders ? (
           <section className="empty-state" aria-labelledby="empty-state-title">
             <div className="empty-state__marker" aria-hidden="true" />
             <h2 id="empty-state-title">No courses added yet.</h2>
@@ -154,18 +249,44 @@ export const DashboardPage = (): ReactElement => {
             >
               Open course folder
             </button>
-            <p className="empty-state__note">Dashboard loading arrives in UI-1C.</p>
+            <p className="empty-state__note">Dashboard cards arrive in UI-1D.</p>
           </section>
         ) : null}
 
-        {!isLoadingFolders && courseFolders.length > 0 ? (
-          <CourseFolderList
-            courseFolders={courseFolders}
-            removingId={removingId}
-            onRemove={(id) => {
-              void handleRemoveCourseFolder(id);
-            }}
-          />
+        {!isLoadingFolders && hasCourseFolders ? (
+          <>
+            <FolderErrorPanel folderErrors={aggregatedDashboard.folderErrors} />
+            <CourseCardGrid cards={aggregatedDashboard.cards} />
+
+            {isRefreshingAll ? <p className="loading-state">Loading dashboard...</p> : null}
+
+            {!aggregatedDashboard.hasRefreshResults ? (
+              <section className="dashboard-placeholder" aria-label="Dashboard loading prompt">
+                <h2>Refresh to load course cards.</h2>
+                <p>Graider will run dashboard checks for each registered course folder.</p>
+              </section>
+            ) : null}
+
+            {aggregatedDashboard.hasRefreshResults && aggregatedDashboard.cards.length === 0 ? (
+              <section className="dashboard-placeholder" aria-label="No course cards">
+                <h2>No course-term cards found.</h2>
+                <p>Review the registered folder status or diagnostics, then refresh again.</p>
+              </section>
+            ) : null}
+
+            <CourseFolderList
+              courseFolders={courseFolders}
+              refreshResults={refreshResults}
+              refreshingId={refreshingId}
+              removingId={removingId}
+              onRefresh={(id) => {
+                void handleRefreshCourseFolder(id);
+              }}
+              onRemove={(id) => {
+                void handleRemoveCourseFolder(id);
+              }}
+            />
+          </>
         ) : null}
       </section>
     </main>

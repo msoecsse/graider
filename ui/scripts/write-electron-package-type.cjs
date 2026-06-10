@@ -1,3 +1,5 @@
+/* global process */
+
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -9,8 +11,4 @@ const packagePath = path.join(outputDirectory, PACKAGE_FILE_NAME);
 
 fs.mkdirSync(outputDirectory, { recursive: true });
 
-fs.writeFileSync(
-    packagePath,
-    `${JSON.stringify({ type: "commonjs" }, null, 2)}\n`,
-    "utf8"
-);
+fs.writeFileSync(packagePath, `${JSON.stringify({ type: "commonjs" }, null, 2)}\n`, "utf8");

@@ -39,10 +39,14 @@ describe("UI security boundary", () => {
       "graider-ui:get-app-info",
       "graider-ui:course-registry:list",
       "graider-ui:course-registry:select-folder",
-      "graider-ui:course-registry:remove"
+      "graider-ui:course-registry:remove",
+      "graider-ui:dashboard:refresh-course-folder",
+      "graider-ui:dashboard:refresh-all"
     ]);
     expect(channelNames).not.toContain("runCommand");
     expect(channelNames).not.toContain("shell");
+    expect(channelNames).not.toContain("execute");
+    expect(channelNames).not.toContain("spawn");
     expect(channelNames).not.toContain("readFile");
     expect(channelNames).not.toContain("writeFile");
   });

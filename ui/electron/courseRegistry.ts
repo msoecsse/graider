@@ -181,6 +181,23 @@ export const removeCourseFolder = (registry: CourseRegistry, id: string): Course
   courseFolders: registry.courseFolders.filter((courseFolder) => courseFolder.id !== id)
 });
 
+export const updateCourseFolderRefreshState = (
+  registry: CourseRegistry,
+  id: string,
+  refreshState: Pick<CourseFolderRecord, "lastRefreshedAt" | "lastDashboardStatus">
+): CourseRegistry => ({
+  ...registry,
+  courseFolders: registry.courseFolders.map((courseFolder) =>
+    courseFolder.id === id
+      ? {
+          ...courseFolder,
+          lastRefreshedAt: refreshState.lastRefreshedAt,
+          lastDashboardStatus: refreshState.lastDashboardStatus
+        }
+      : courseFolder
+  )
+});
+
 export const listCourseFolders = (registryPath: string): CourseFolderRecord[] =>
   loadCourseRegistry(registryPath).courseFolders;
 

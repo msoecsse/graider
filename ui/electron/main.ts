@@ -1,5 +1,6 @@
 import path from "node:path";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
+import { createNodeProcessRunner } from "./commandRunner.js";
 import {
   addCourseFolderToRegistry,
   getCourseRegistryPath,
@@ -7,6 +8,7 @@ import {
   listCourseFolders,
   removeCourseFolderFromRegistry
 } from "./courseRegistry.js";
+import { refreshCourseFolder, refreshDashboard } from "./dashboardRunner.js";
 import { IPC_CHANNELS, type AppInfo } from "./ipc.js";
 
 const DEFAULT_WINDOW_WIDTH = 1180;
@@ -22,11 +24,10 @@ export const getAppInfo = (): AppInfo => ({
 
 export const getPreloadPath = (): string => path.join(__dirname, "preload.js");
 
-export const getRendererEntry = (): string =>
-    path.join(__dirname, "..", "dist", "index.html");
+export const getRendererEntry = (): string => path.join(__dirname, "..", "dist", "index.html");
 
 export const getRendererDevServerUrl = (
-    env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env
 ): string | undefined => {
   const configuredUrl = env[VITE_DEV_SERVER_URL_ENV]?.trim();
 
@@ -34,10 +35,12 @@ export const getRendererDevServerUrl = (
 };
 
 export const registerIpcHandlers = (): void => {
+  const processRunner = createNodeProcessRunner();
+
   ipcMain.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
 
   ipcMain.handle(IPC_CHANNELS.listCourseFolders, () =>
-      listCourseFolders(getCourseRegistryPath(app.getPath("userData")))
+    listCourseFolders(getCourseRegistryPath(app.getPath("userData")))
   );
 
   ipcMain.handle(IPC_CHANNELS.removeCourseFolder, (_event, id: unknown) => {
@@ -65,11 +68,31 @@ export const registerIpcHandlers = (): void => {
     return {
       canceled: false,
       courseFolder: addCourseFolderToRegistry(
-          getCourseRegistryPath(app.getPath("userData")),
-          selectedFolder
+        getCourseRegistryPath(app.getPath("userData")),
+        selectedFolder
       )
     };
   });
+
+  ipcMain.handle(IPC_CHANNELS.refreshCourseFolder, async (_event, id: unknown) => {
+    if (typeof id !== "string") {
+      throw new Error("Course folder id is required.");
+    }
+
+    return await refreshCourseFolder(getCourseRegistryPath(app.getPath("userData")), id, {
+      runner: processRunner,
+      env: process.env
+    });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.refreshDashboard,
+    async () =>
+      await refreshDashboard(getCourseRegistryPath(app.getPath("userData")), {
+        runner: processRunner,
+        env: process.env
+      })
+  );
 };
 
 export const createMainWindow = (): BrowserWindow => {
