@@ -3,7 +3,15 @@ import type { CommandStatus } from "../core/command-result.js";
 
 export const ASSIGNMENT_DETAIL_SCHEMA_VERSION = 1;
 
-export type AssignmentDetailCheckStatus = "not_checked" | "not_required";
+export type AssignmentDetailCheckStatus =
+  | "available"
+  | "missing"
+  | "inaccessible"
+  | "branch_missing"
+  | "token_required"
+  | "not_checked"
+  | "not_required"
+  | "error";
 export type AssignmentDetailApplyState =
   | "not_applied"
   | "applied"
@@ -52,6 +60,8 @@ export interface AssignmentDetailTemplate {
   readonly repository: string;
   readonly branch: string;
   readonly status: AssignmentDetailCheckStatus;
+  readonly repositoryStatus: AssignmentDetailCheckStatus;
+  readonly branchStatus: AssignmentDetailCheckStatus;
 }
 
 export interface AssignmentDetailGrading {

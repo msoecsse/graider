@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
+  AssignmentDetailJsonResponse,
+  AssignmentDetailResult,
   CombinedDashboardResult,
   CourseFolderDashboardResult,
   CourseFolderRecord,
@@ -99,6 +101,75 @@ const createCombinedDashboardResult = (
   results
 });
 
+const createAssignmentDetailJson = (
+  overrides: Partial<AssignmentDetailJsonResponse> = {}
+): AssignmentDetailJsonResponse => ({
+  schemaVersion: 1,
+  commandName: "assignment detail",
+  status: "success",
+  exitCode: 0,
+  diagnostics: [],
+  course: { slug: "csc1120", title: "CSC1120", file: "course.yml" },
+  term: { slug: "27s1", title: "Spring 2027", file: "terms/27s1/term.yml" },
+  assignment: {
+    slug: "lab02",
+    title: "Lab 02",
+    type: "individual",
+    status: "active",
+    file: "terms/27s1/assignments/lab02/assignment.yml"
+  },
+  metadata: {
+    facultyOwner: "professor",
+    lmsAssignmentId: null,
+    gradingCategory: "labs",
+    points: 100
+  },
+  deadline: { dueAt: "2027-06-15T23:59:00+09:00", latePolicy: "standard" },
+  sections: ["001"],
+  roster: { sectionCount: 1, activeStudentCount: 3, totalStudentCount: 3 },
+  template: {
+    repository: "graider-sandbox/csc1120L2Template",
+    branch: "main",
+    status: "available",
+    repositoryStatus: "available",
+    branchStatus: "available"
+  },
+  grading: {
+    enabled: true,
+    mode: "custom-workflow",
+    workflow: ".github/workflows/grade.yml",
+    artifact: "grading-results",
+    resultFile: "grading-results.json",
+    workflowStatus: "available",
+    workflowDispatch: "available"
+  },
+  studentReports: { enabled: false, mode: "disabled" },
+  applyState: { status: "not_applied" },
+  actions: {
+    validate: { available: true, implemented: true },
+    apply: { available: true, implemented: false },
+    grade: { available: true, implemented: false },
+    report: { available: true, implemented: false },
+    publishStudentReports: { available: false, implemented: false },
+    generateWorkflow: { available: true, implemented: false }
+  },
+  ...overrides
+});
+
+const createAssignmentDetailResult = (
+  overrides: Partial<AssignmentDetailResult> = {},
+  detail: AssignmentDetailJsonResponse | null = createAssignmentDetailJson()
+): AssignmentDetailResult => ({
+  courseFolderId: COURSE_FOLDER.id,
+  courseFolderPath: COURSE_FOLDER.path,
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+  status: detail === null ? "failure" : "success",
+  detail,
+  error: null,
+  refreshedAt: "2026-06-10T13:00:00.000Z",
+  ...overrides
+});
+
 const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   const graiderUI = {
     getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),
@@ -107,6 +178,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     removeCourseFolder: vi.fn().mockResolvedValue(undefined),
     refreshCourseFolder: vi.fn().mockResolvedValue(createDashboardResult()),
     refreshDashboard: vi.fn().mockResolvedValue(createCombinedDashboardResult([])),
+    getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
     ...api
   };
 
@@ -850,6 +922,277 @@ describe("DashboardPage", () => {
     expect(
       (await screen.findAllByText("Graider dashboard returned invalid JSON.")).length
     ).toBeGreaterThan(0);
+    expect(screen.queryByText(/Unexpected token/u)).toBeNull();
+  });
+
+  it("opens assignment detail from a dashboard assignment row", async () => {
+    const getAssignmentDetail = vi.fn().mockResolvedValue(createAssignmentDetailResult());
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getAssignmentDetail
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+    expect(getAssignmentDetail).toHaveBeenCalledWith({
+      courseFolderId: COURSE_FOLDER.id,
+      courseFolderPath: COURSE_FOLDER.path,
+      assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+    });
+    expect(screen.getByText("terms/27s1/assignments/lab02/assignment.yml")).toBeInTheDocument();
+  });
+
+  it("returns to the preserved dashboard from assignment detail", async () => {
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()]))
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+    expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to dashboard" }));
+
+    expect(screen.getByRole("heading", { level: 2, name: "27s1-csc1120" })).toBeInTheDocument();
+  });
+
+  it("renders assignment detail panels and disabled future actions", async () => {
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()]))
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+
+    expect(await screen.findByText("100")).toBeInTheDocument();
+    expect(screen.getByText("2027-06-15T23:59:00+09:00")).toBeInTheDocument();
+    expect(screen.getByText("graider-sandbox/csc1120L2Template")).toBeInTheDocument();
+    expect(screen.getByText(".github/workflows/grade.yml")).toBeInTheDocument();
+    expect(screen.getByText("workflow_dispatch status")).toBeInTheDocument();
+    expect(screen.getByText("disabled")).toBeInTheDocument();
+    expect(screen.getAllByText("3").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("No diagnostics.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply assignment" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Grade submissions" })).toBeDisabled();
+    expect(screen.getAllByText("Coming in a future slice").length).toBeGreaterThan(0);
+  });
+
+  it("refreshes assignment detail while preserving prior detail", async () => {
+    let resolveSecondRefresh: (value: AssignmentDetailResult) => void = () => undefined;
+    const getAssignmentDetail = vi
+      .fn()
+      .mockResolvedValueOnce(createAssignmentDetailResult())
+      .mockImplementationOnce(
+        async () =>
+          await new Promise<AssignmentDetailResult>((resolve) => {
+            resolveSecondRefresh = resolve;
+          })
+      );
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getAssignmentDetail
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+    expect(await screen.findByText("100")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh detail" }));
+
+    expect(await screen.findByText("Loading assignment detail...")).toBeInTheDocument();
+    expect(screen.getByText("100")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refreshing detail..." })).toBeDisabled();
+
+    resolveSecondRefresh(
+      createAssignmentDetailResult(
+        {},
+        createAssignmentDetailJson({
+          metadata: {
+            facultyOwner: "professor",
+            lmsAssignmentId: null,
+            gradingCategory: "labs",
+            points: 90
+          }
+        })
+      )
+    );
+
+    expect(await screen.findByText("90")).toBeInTheDocument();
+  });
+
+  it("renders no-grading assignment detail cleanly", async () => {
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          {},
+          createAssignmentDetailJson({
+            grading: {
+              enabled: false,
+              mode: "no-grading",
+              workflow: null,
+              artifact: null,
+              resultFile: null,
+              workflowStatus: "not_required",
+              workflowDispatch: "not_required"
+            }
+          })
+        )
+      )
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+
+    expect(await screen.findByText("No grading configured.")).toBeInTheDocument();
+    expect(screen.queryByText("No grading configured.")).toBeInTheDocument();
+  });
+
+  it("renders partial assignment detail diagnostics and token guidance safely", async () => {
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          {},
+          createAssignmentDetailJson({
+            status: "partial_success",
+            diagnostics: [
+              {
+                code: "github_token_required",
+                severity: "warning",
+                message: "GitHub token required.",
+                context: { assignmentFile: "terms/27s1/assignments/lab02/assignment.yml" }
+              }
+            ],
+            template: {
+              repository: "graider-sandbox/csc1120L2Template",
+              branch: "main",
+              status: "token_required",
+              repositoryStatus: "token_required",
+              branchStatus: "token_required"
+            }
+          })
+        )
+      )
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+
+    expect(
+      await screen.findByText("GitHub token required for readiness checks.")
+    ).toBeInTheDocument();
+    expect(screen.getByText(/gh auth login/u)).toBeInTheDocument();
+    expect(screen.getByText("github_token_required")).toBeInTheDocument();
+    expect(screen.getByText("warning")).toBeInTheDocument();
+    expect(screen.queryByText(/secret-token-value/u)).toBeNull();
+  });
+
+  it("shows safe assignment detail command errors", async () => {
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          {
+            status: "failure",
+            error: {
+              code: "graider_cli_not_found",
+              message: "missing secret-token-value",
+              exitCode: null,
+              stdoutSnippet: null,
+              stderrSnippet: null
+            }
+          },
+          null
+        )
+      )
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+
+    expect((await screen.findAllByText(/Graider CLI not found/u)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/secret-token-value/u)).toBeNull();
+  });
+
+  it("shows invalid assignment detail JSON safely", async () => {
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          {
+            status: "failure",
+            error: {
+              code: "invalid_assignment_detail_json",
+              message: "Unexpected token stack",
+              exitCode: 0,
+              stdoutSnippet: "not json",
+              stderrSnippet: null
+            }
+          },
+          null
+        )
+      )
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+
+    expect(
+      await screen.findByText("Graider returned invalid assignment detail JSON.")
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Unexpected token/u)).toBeNull();
   });
 

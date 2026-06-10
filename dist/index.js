@@ -240,6 +240,15 @@ var DiagnosticCode = {
   DashboardGithubRateLimited: "dashboard_github_rate_limited",
   DashboardGithubRequestFailed: "dashboard_github_request_failed",
   AssignmentDetailJsonRequired: "assignment_detail_json_required",
+  GithubTokenRequired: "github_token_required",
+  AssignmentDetailTemplateRepositoryMissing: "assignment_detail_template_repository_missing",
+  AssignmentDetailTemplateBranchMissing: "assignment_detail_template_branch_missing",
+  AssignmentDetailGradingWorkflowMissing: "assignment_detail_grading_workflow_missing",
+  AssignmentDetailWorkflowDispatchMissing: "assignment_detail_workflow_dispatch_missing",
+  AssignmentDetailGithubAuthFailed: "assignment_detail_github_auth_failed",
+  AssignmentDetailGithubPermissionDenied: "assignment_detail_github_permission_denied",
+  AssignmentDetailGithubRateLimited: "assignment_detail_github_rate_limited",
+  AssignmentDetailGithubRequestFailed: "assignment_detail_github_request_failed",
   GithubTokenMissing: "github_token_missing"
 };
 var NOT_SUPPORTED_IN_MVP_CODE = DiagnosticCode.NotSupportedInMvp;
@@ -354,6 +363,15 @@ var DASHBOARD_GITHUB_PERMISSION_DENIED_CODE = DiagnosticCode.DashboardGithubPerm
 var DASHBOARD_GITHUB_RATE_LIMITED_CODE = DiagnosticCode.DashboardGithubRateLimited;
 var DASHBOARD_GITHUB_REQUEST_FAILED_CODE = DiagnosticCode.DashboardGithubRequestFailed;
 var ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE = DiagnosticCode.AssignmentDetailJsonRequired;
+var GITHUB_TOKEN_REQUIRED_CODE = DiagnosticCode.GithubTokenRequired;
+var ASSIGNMENT_DETAIL_TEMPLATE_REPOSITORY_MISSING_CODE = DiagnosticCode.AssignmentDetailTemplateRepositoryMissing;
+var ASSIGNMENT_DETAIL_TEMPLATE_BRANCH_MISSING_CODE = DiagnosticCode.AssignmentDetailTemplateBranchMissing;
+var ASSIGNMENT_DETAIL_GRADING_WORKFLOW_MISSING_CODE = DiagnosticCode.AssignmentDetailGradingWorkflowMissing;
+var ASSIGNMENT_DETAIL_WORKFLOW_DISPATCH_MISSING_CODE = DiagnosticCode.AssignmentDetailWorkflowDispatchMissing;
+var ASSIGNMENT_DETAIL_GITHUB_AUTH_FAILED_CODE = DiagnosticCode.AssignmentDetailGithubAuthFailed;
+var ASSIGNMENT_DETAIL_GITHUB_PERMISSION_DENIED_CODE = DiagnosticCode.AssignmentDetailGithubPermissionDenied;
+var ASSIGNMENT_DETAIL_GITHUB_RATE_LIMITED_CODE = DiagnosticCode.AssignmentDetailGithubRateLimited;
+var ASSIGNMENT_DETAIL_GITHUB_REQUEST_FAILED_CODE = DiagnosticCode.AssignmentDetailGithubRequestFailed;
 var GITHUB_TOKEN_MISSING_CODE = DiagnosticCode.GithubTokenMissing;
 var createNotSupportedInMvpDiagnostic = (commandName, assignmentFile) => ({
   code: NOT_SUPPORTED_IN_MVP_CODE,
@@ -1397,6 +1415,385 @@ var loadAssignmentRosters = (config) => {
 // src/assignment-detail/assignment-detail-models.ts
 var ASSIGNMENT_DETAIL_SCHEMA_VERSION = 1;
 
+// src/config/github-config-validation.ts
+var TEMPLATE_REPOSITORY_SEGMENTS = 2;
+var hasBlankSegment = (segments) => segments.some((segment) => segment.trim().length === 0);
+var parseTemplateRepository = (configuredOrganization, repository) => {
+  const segments = repository.split("/");
+  if (segments.length === TEMPLATE_REPOSITORY_SEGMENTS && !hasBlankSegment(segments)) {
+    const [owner, repo] = segments;
+    return {
+      status: "success",
+      repository: {
+        owner,
+        repo,
+        fullName: `${owner}/${repo}`
+      }
+    };
+  }
+  return {
+    status: "failure",
+    diagnostic: createConfigDiagnostic(
+      DiagnosticCode.InvalidTemplateRepository,
+      `Template repository ${repository} must be specified as owner/repo.`,
+      {
+        repository,
+        organization: configuredOrganization
+      }
+    )
+  };
+};
+
+// src/diagnostics/redaction.ts
+var REDACTED_VALUE = "[REDACTED]";
+var GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,})\b/g;
+var SENSITIVE_KEY_PARTS = ["token", "authorization", "password", "secret", "apikey"];
+var KEY_SEPARATOR_PATTERN = /[-_]/g;
+var redactString = (value) => value.replace(GITHUB_TOKEN_PATTERN, REDACTED_VALUE);
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var isSensitiveKey = (key) => {
+  const normalizedKey = key.replace(KEY_SEPARATOR_PATTERN, "").toLowerCase();
+  return SENSITIVE_KEY_PARTS.some((keyPart) => normalizedKey.includes(keyPart));
+};
+var redactValue = (value) => {
+  if (typeof value === "string") {
+    return redactString(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactValue(item));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entryValue]) => [
+        key,
+        isSensitiveKey(key) ? REDACTED_VALUE : redactValue(entryValue)
+      ])
+    );
+  }
+  return value;
+};
+var redactCommandResult = (result) => redactValue(result);
+
+// src/github/github-errors.ts
+var DIAGNOSTIC_CODE_BY_KIND = {
+  auth_missing: DiagnosticCode.GithubAuthMissing,
+  auth_failed: DiagnosticCode.GithubAuthFailed,
+  permission_denied: DiagnosticCode.GithubPermissionDenied,
+  rate_limited: DiagnosticCode.GithubRateLimited,
+  network_error: DiagnosticCode.GithubNetworkError,
+  api_error: DiagnosticCode.GithubApiError,
+  timeout: DiagnosticCode.GithubNetworkError
+};
+var RETRYABLE_ERROR_KINDS = /* @__PURE__ */ new Set([
+  "rate_limited",
+  "network_error",
+  "api_error",
+  "timeout"
+]);
+var GitHubClientError = class extends Error {
+  kind;
+  diagnosticCode;
+  retryAfterSeconds;
+  retryable;
+  constructor(kind, message, options) {
+    super(redactString(message));
+    this.name = "GitHubClientError";
+    this.kind = kind;
+    this.diagnosticCode = DIAGNOSTIC_CODE_BY_KIND[kind];
+    this.retryable = RETRYABLE_ERROR_KINDS.has(kind);
+    if (options?.retryAfterSeconds !== void 0) {
+      this.retryAfterSeconds = options.retryAfterSeconds;
+    }
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+};
+var isRetryableGitHubError = (error) => error.retryable;
+var createGitHubDiagnostic = (error) => ({
+  code: error.diagnosticCode,
+  severity: "error",
+  message: error.message,
+  context: {
+    kind: error.kind,
+    retryable: error.retryable,
+    ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds }
+  }
+});
+
+// src/workflows/workflow-dispatch-validation.ts
+var WORKFLOW_DISPATCH_TRIGGER = "workflow_dispatch";
+var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var hasWorkflowDispatchString = (value) => typeof value === "string" && value === WORKFLOW_DISPATCH_TRIGGER;
+var hasWorkflowDispatchArray = (value) => Array.isArray(value) && value.some((item) => hasWorkflowDispatchString(item));
+var hasWorkflowDispatchObject = (value) => isRecord2(value) && Object.hasOwn(value, WORKFLOW_DISPATCH_TRIGGER);
+var hasWorkflowDispatchTrigger = (workflowDocument) => {
+  if (!isRecord2(workflowDocument)) {
+    return false;
+  }
+  const triggers = workflowDocument.on;
+  return hasWorkflowDispatchString(triggers) || hasWorkflowDispatchArray(triggers) || hasWorkflowDispatchObject(triggers);
+};
+
+// src/assignment-detail/assignment-detail-github-readiness.ts
+var STATUS_AVAILABLE = "available";
+var STATUS_MISSING = "missing";
+var STATUS_INACCESSIBLE = "inaccessible";
+var STATUS_BRANCH_MISSING = "branch_missing";
+var STATUS_TOKEN_REQUIRED = "token_required";
+var STATUS_NOT_CHECKED = "not_checked";
+var STATUS_NOT_REQUIRED = "not_required";
+var STATUS_ERROR = "error";
+var createTokenRequiredDiagnostic = (config) => createConfigDiagnostic(
+  GITHUB_TOKEN_REQUIRED_CODE,
+  "GRAIDER_GITHUB_TOKEN is required to check assignment GitHub readiness.",
+  {
+    assignmentFile: config.summary.assignmentConfigPath,
+    templateRepository: config.assignment.template.repository,
+    templateBranch: config.assignment.template.branch,
+    ...config.assignment.grading?.workflow === void 0 ? {} : { workflow: config.assignment.grading.workflow }
+  }
+);
+var mapGitHubErrorCode = (error) => {
+  if (error.kind === "auth_missing" || error.kind === "auth_failed") {
+    return ASSIGNMENT_DETAIL_GITHUB_AUTH_FAILED_CODE;
+  }
+  if (error.kind === "permission_denied") {
+    return ASSIGNMENT_DETAIL_GITHUB_PERMISSION_DENIED_CODE;
+  }
+  if (error.kind === "rate_limited") {
+    return ASSIGNMENT_DETAIL_GITHUB_RATE_LIMITED_CODE;
+  }
+  return ASSIGNMENT_DETAIL_GITHUB_REQUEST_FAILED_CODE;
+};
+var mapGitHubErrorStatus = (error) => {
+  if (error.kind === "auth_missing" || error.kind === "auth_failed" || error.kind === "permission_denied") {
+    return STATUS_INACCESSIBLE;
+  }
+  return STATUS_ERROR;
+};
+var createGitHubDiagnostic2 = (error, message, context) => {
+  if (error instanceof GitHubClientError) {
+    return createConfigDiagnostic(mapGitHubErrorCode(error), `${message}: ${error.message}`, {
+      ...context,
+      kind: error.kind,
+      retryable: error.retryable,
+      ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds }
+    });
+  }
+  return createConfigDiagnostic(ASSIGNMENT_DETAIL_GITHUB_REQUEST_FAILED_CODE, message, context);
+};
+var createTemplateRepositoryMissingDiagnostic = (config) => createConfigDiagnostic(
+  ASSIGNMENT_DETAIL_TEMPLATE_REPOSITORY_MISSING_CODE,
+  `Template repository ${config.assignment.template.repository} was not found.`,
+  {
+    assignmentFile: config.summary.assignmentConfigPath,
+    templateRepository: config.assignment.template.repository
+  }
+);
+var createTemplateBranchMissingDiagnostic = (config) => createConfigDiagnostic(
+  ASSIGNMENT_DETAIL_TEMPLATE_BRANCH_MISSING_CODE,
+  `Template branch ${config.assignment.template.branch} was not found.`,
+  {
+    assignmentFile: config.summary.assignmentConfigPath,
+    templateRepository: config.assignment.template.repository,
+    templateBranch: config.assignment.template.branch
+  }
+);
+var createGradingWorkflowMissingDiagnostic = (config, workflowPath) => createConfigDiagnostic(
+  ASSIGNMENT_DETAIL_GRADING_WORKFLOW_MISSING_CODE,
+  `Configured grading workflow ${workflowPath} was not found in the template repository.`,
+  {
+    assignmentFile: config.summary.assignmentConfigPath,
+    templateRepository: config.assignment.template.repository,
+    templateBranch: config.assignment.template.branch,
+    workflow: workflowPath,
+    checkedPath: workflowPath
+  }
+);
+var createWorkflowDispatchMissingDiagnostic = (config, workflowPath) => createConfigDiagnostic(
+  ASSIGNMENT_DETAIL_WORKFLOW_DISPATCH_MISSING_CODE,
+  `Configured grading workflow ${workflowPath} does not define workflow_dispatch.`,
+  {
+    assignmentFile: config.summary.assignmentConfigPath,
+    templateRepository: config.assignment.template.repository,
+    templateBranch: config.assignment.template.branch,
+    workflow: workflowPath,
+    checkedPath: workflowPath
+  }
+);
+var createTokenRequiredResult = (config, template, grading) => ({
+  template: {
+    ...template,
+    status: STATUS_TOKEN_REQUIRED,
+    repositoryStatus: STATUS_TOKEN_REQUIRED,
+    branchStatus: STATUS_TOKEN_REQUIRED
+  },
+  grading: {
+    ...grading,
+    workflowStatus: grading.enabled ? STATUS_TOKEN_REQUIRED : STATUS_NOT_REQUIRED,
+    workflowDispatch: grading.enabled ? STATUS_TOKEN_REQUIRED : STATUS_NOT_REQUIRED
+  },
+  diagnostics: [createTokenRequiredDiagnostic(config)]
+});
+var withTemplateStatus = (template, repositoryStatus, branchStatus) => ({
+  ...template,
+  repositoryStatus,
+  branchStatus,
+  status: repositoryStatus === STATUS_AVAILABLE ? branchStatus === STATUS_AVAILABLE ? STATUS_AVAILABLE : branchStatus : repositoryStatus
+});
+var withWorkflowStatus = (grading, workflowStatus, workflowDispatch) => ({
+  ...grading,
+  workflowStatus,
+  workflowDispatch
+});
+var inspectWorkflowDispatch = (config, workflowPath, workflowContent) => {
+  const parseResult = parseYaml(workflowContent, workflowPath);
+  if (parseResult.status === "failure") {
+    return {
+      dispatchStatus: STATUS_ERROR,
+      diagnostics: [
+        {
+          ...parseResult.diagnostic,
+          context: {
+            ...parseResult.diagnostic.context ?? {},
+            assignmentFile: config.summary.assignmentConfigPath,
+            templateRepository: config.assignment.template.repository,
+            templateBranch: config.assignment.template.branch,
+            workflow: workflowPath
+          }
+        }
+      ]
+    };
+  }
+  if (!hasWorkflowDispatchTrigger(parseResult.value)) {
+    return {
+      dispatchStatus: STATUS_MISSING,
+      diagnostics: [createWorkflowDispatchMissingDiagnostic(config, workflowPath)]
+    };
+  }
+  return {
+    dispatchStatus: STATUS_AVAILABLE,
+    diagnostics: []
+  };
+};
+var checkWorkflow = async (config, grading, githubClient, owner, repo, branch) => {
+  if (!grading.enabled || grading.workflow === null) {
+    return {
+      grading: withWorkflowStatus(grading, STATUS_NOT_REQUIRED, STATUS_NOT_REQUIRED),
+      diagnostics: []
+    };
+  }
+  try {
+    const workflowContent = await githubClient.getRepositoryFileContent(
+      owner,
+      repo,
+      grading.workflow,
+      branch
+    );
+    if (workflowContent === null) {
+      return {
+        grading: withWorkflowStatus(grading, STATUS_MISSING, STATUS_NOT_CHECKED),
+        diagnostics: [createGradingWorkflowMissingDiagnostic(config, grading.workflow)]
+      };
+    }
+    const dispatchResult = inspectWorkflowDispatch(config, grading.workflow, workflowContent);
+    return {
+      grading: withWorkflowStatus(grading, STATUS_AVAILABLE, dispatchResult.dispatchStatus),
+      diagnostics: dispatchResult.diagnostics
+    };
+  } catch (error) {
+    const status = error instanceof GitHubClientError ? mapGitHubErrorStatus(error) : STATUS_ERROR;
+    return {
+      grading: withWorkflowStatus(grading, status, status),
+      diagnostics: [
+        createGitHubDiagnostic2(error, `Could not check grading workflow ${grading.workflow}.`, {
+          assignmentFile: config.summary.assignmentConfigPath,
+          templateRepository: config.assignment.template.repository,
+          templateBranch: config.assignment.template.branch,
+          workflow: grading.workflow,
+          checkedPath: grading.workflow
+        })
+      ]
+    };
+  }
+};
+var checkAssignmentDetailGithubReadiness = async ({
+  config,
+  template,
+  grading,
+  githubClient
+}) => {
+  if (githubClient === void 0) {
+    return createTokenRequiredResult(config, template, grading);
+  }
+  const parsedRepository = parseTemplateRepository(
+    config.course.github.organization,
+    config.assignment.template.repository
+  );
+  if (parsedRepository.status === "failure") {
+    return {
+      template: withTemplateStatus(template, STATUS_ERROR, STATUS_ERROR),
+      grading: withWorkflowStatus(grading, STATUS_ERROR, STATUS_ERROR),
+      diagnostics: [parsedRepository.diagnostic]
+    };
+  }
+  const { owner, repo } = parsedRepository.repository;
+  try {
+    const templateRepository = await githubClient.getTemplateRepository(owner, repo);
+    if (templateRepository === null) {
+      return {
+        template: withTemplateStatus(template, STATUS_MISSING, STATUS_NOT_CHECKED),
+        grading: withWorkflowStatus(
+          grading,
+          grading.enabled ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED,
+          grading.enabled ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED
+        ),
+        diagnostics: [createTemplateRepositoryMissingDiagnostic(config)]
+      };
+    }
+    if (!templateRepository.branches.some((branch) => branch === config.assignment.template.branch)) {
+      return {
+        template: withTemplateStatus(template, STATUS_AVAILABLE, STATUS_BRANCH_MISSING),
+        grading: withWorkflowStatus(
+          grading,
+          grading.enabled ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED,
+          grading.enabled ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED
+        ),
+        diagnostics: [createTemplateBranchMissingDiagnostic(config)]
+      };
+    }
+    const workflowResult = await checkWorkflow(
+      config,
+      grading,
+      githubClient,
+      owner,
+      repo,
+      config.assignment.template.branch
+    );
+    return {
+      template: withTemplateStatus(template, STATUS_AVAILABLE, STATUS_AVAILABLE),
+      grading: workflowResult.grading,
+      diagnostics: workflowResult.diagnostics
+    };
+  } catch (error) {
+    const status = error instanceof GitHubClientError ? mapGitHubErrorStatus(error) : STATUS_ERROR;
+    return {
+      template: withTemplateStatus(template, status, status),
+      grading: withWorkflowStatus(
+        grading,
+        grading.enabled ? status : STATUS_NOT_REQUIRED,
+        grading.enabled ? status : STATUS_NOT_REQUIRED
+      ),
+      diagnostics: [
+        createGitHubDiagnostic2(error, "Could not check template repository readiness.", {
+          assignmentFile: config.summary.assignmentConfigPath,
+          templateRepository: config.assignment.template.repository,
+          templateBranch: config.assignment.template.branch
+        })
+      ]
+    };
+  }
+};
+
 // src/assignment-detail/assignment-detail-builder.ts
 var COMMAND_NAME = "assignment detail";
 var EMPTY_COUNT2 = 0;
@@ -1411,6 +1808,7 @@ var DRAFT_ASSIGNMENT_STATUS = "draft";
 var ARCHIVED_ASSIGNMENT_STATUS = "archived";
 var NOT_CHECKED_STATUS = "not_checked";
 var NOT_REQUIRED_STATUS = "not_required";
+var AVAILABLE_STATUS = "available";
 var APPLY_STATE_APPLIED = "applied";
 var APPLY_STATE_NOT_APPLIED = "not_applied";
 var resolveExitCode = (status) => {
@@ -1526,7 +1924,10 @@ var createActions = (config, grading, studentReports) => {
   return {
     validate: action(true, true),
     apply: action(applyAvailable, false),
-    grade: action(grading.enabled && lifecycleAllowsGrading, false),
+    grade: action(
+      grading.enabled && lifecycleAllowsGrading && grading.workflowStatus === AVAILABLE_STATUS && grading.workflowDispatch === AVAILABLE_STATUS,
+      false
+    ),
     report: action(true, false),
     publishStudentReports: action(studentReports.enabled, false),
     generateWorkflow: action(grading.enabled && grading.mode === PRESET_GRADING_MODE2, false)
@@ -1534,283 +1935,83 @@ var createActions = (config, grading, studentReports) => {
 };
 var buildAssignmentDetail = ({
   cwd,
-  assignmentFile
+  assignmentFile,
+  githubClient
 }) => {
   const configResult = loadGraiderConfig({ cwd, assignmentFile });
   if (configResult.status === "failure") {
-    return createEmptyAssignmentDetailResult("failure", configResult.diagnostics);
+    return Promise.resolve(createEmptyAssignmentDetailResult("failure", configResult.diagnostics));
   }
   const { config } = configResult;
   const rosterResult = createRosterSummary(config);
-  const diagnostics = [...configResult.diagnostics, ...rosterResult.diagnostics];
-  const status = diagnostics.length === EMPTY_COUNT2 ? "success" : hasErrorDiagnostics(diagnostics) ? "partial_success" : "success";
-  const grading = createGradingDetail(config);
+  const localDiagnostics = [...configResult.diagnostics, ...rosterResult.diagnostics];
+  const localGrading = createGradingDetail(config);
   const studentReports = createStudentReports(config);
-  return {
-    schemaVersion: ASSIGNMENT_DETAIL_SCHEMA_VERSION,
-    commandName: COMMAND_NAME,
-    status,
-    exitCode: resolveExitCode(status),
-    diagnostics,
-    course: {
-      slug: config.course.course.code,
-      title: config.course.course.title,
-      file: config.summary.courseConfigPath
-    },
-    term: {
-      slug: config.term.term.code,
-      title: config.term.term.display_name,
-      file: config.summary.termConfigPath
-    },
-    assignment: {
-      slug: config.assignment.assignment.slug,
-      title: config.assignment.assignment.title,
-      type: config.assignment.assignment.type,
-      status: config.assignment.assignment.status,
-      file: config.summary.assignmentConfigPath
-    },
-    metadata: {
-      facultyOwner: config.assignment.metadata.faculty_owner,
-      lmsAssignmentId: config.assignment.metadata.lms_assignment_id,
-      gradingCategory: config.assignment.metadata.grading_category,
-      points: config.assignment.metadata.points
-    },
-    deadline: {
-      dueAt: config.assignment.deadline.due_at,
-      latePolicy: config.assignment.deadline.late_policy
-    },
-    sections: config.assignment.sections,
-    roster: rosterResult.roster,
-    template: {
-      repository: config.assignment.template.repository,
-      branch: config.assignment.template.branch,
-      status: NOT_CHECKED_STATUS
-    },
-    grading,
-    studentReports,
-    applyState: {
-      status: getApplyState(config)
-    },
-    actions: createActions(config, grading, studentReports)
+  const template = {
+    repository: config.assignment.template.repository,
+    branch: config.assignment.template.branch,
+    status: NOT_CHECKED_STATUS,
+    repositoryStatus: NOT_CHECKED_STATUS,
+    branchStatus: NOT_CHECKED_STATUS
   };
-};
-
-// src/cli/commands/assignment.command.ts
-var COMMAND_NAME2 = "assignment";
-var DETAIL_COMMAND_NAME = "detail";
-var JSON_INDENT_SPACES = 2;
-var createJsonRequiredResult = () => createEmptyAssignmentDetailResult("failure", [
-  createConfigDiagnostic(
-    ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE,
-    "The assignment detail command only supports JSON output. Run with --json."
-  )
-]);
-var runAssignmentDetailCommand = ({
-  cwd,
-  assignmentFile,
-  options
-}) => {
-  if (options.json !== true) {
-    return createJsonRequiredResult();
-  }
-  return buildAssignmentDetail({ cwd, assignmentFile });
-};
-var formatAssignmentDetailResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES);
-var registerAssignmentCommand = (program) => {
-  const assignment = program.command(COMMAND_NAME2).description("Inspect assignment configuration and local detail data.");
-  assignment.command(DETAIL_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit assignment detail JSON").description("Build a UI-ready read-only assignment detail model.").action((assignmentFile, options) => {
-    const result = runAssignmentDetailCommand({
-      cwd: process.cwd(),
-      assignmentFile,
-      options
-    });
-    console.log(formatAssignmentDetailResultAsJson(result));
-    process.exitCode = result.exitCode;
+  return checkAssignmentDetailGithubReadiness({
+    config,
+    template,
+    grading: localGrading,
+    ...githubClient === void 0 ? {} : { githubClient }
+  }).then((githubReadiness) => {
+    const diagnostics = [...localDiagnostics, ...githubReadiness.diagnostics];
+    const status = diagnostics.length === EMPTY_COUNT2 ? "success" : hasErrorDiagnostics(diagnostics) ? "partial_success" : "success";
+    return {
+      schemaVersion: ASSIGNMENT_DETAIL_SCHEMA_VERSION,
+      commandName: COMMAND_NAME,
+      status,
+      exitCode: resolveExitCode(status),
+      diagnostics,
+      course: {
+        slug: config.course.course.code,
+        title: config.course.course.title,
+        file: config.summary.courseConfigPath
+      },
+      term: {
+        slug: config.term.term.code,
+        title: config.term.term.display_name,
+        file: config.summary.termConfigPath
+      },
+      assignment: {
+        slug: config.assignment.assignment.slug,
+        title: config.assignment.assignment.title,
+        type: config.assignment.assignment.type,
+        status: config.assignment.assignment.status,
+        file: config.summary.assignmentConfigPath
+      },
+      metadata: {
+        facultyOwner: config.assignment.metadata.faculty_owner,
+        lmsAssignmentId: config.assignment.metadata.lms_assignment_id,
+        gradingCategory: config.assignment.metadata.grading_category,
+        points: config.assignment.metadata.points
+      },
+      deadline: {
+        dueAt: config.assignment.deadline.due_at,
+        latePolicy: config.assignment.deadline.late_policy
+      },
+      sections: config.assignment.sections,
+      roster: rosterResult.roster,
+      template: githubReadiness.template,
+      grading: githubReadiness.grading,
+      studentReports,
+      applyState: {
+        status: getApplyState(config)
+      },
+      actions: createActions(config, githubReadiness.grading, studentReports)
+    };
   });
 };
 
-// src/cli/commands/apply.command.ts
-import fs7 from "fs";
-
-// src/core/clock.ts
-var COLON_PATTERN = /:/gu;
-var PERIOD_PATTERN = /\./gu;
-var FILESYSTEM_TIMESTAMP_SEPARATOR = "-";
-var systemClock = {
-  now: () => /* @__PURE__ */ new Date()
-};
-var formatPlanCreatedAt = (date) => date.toISOString();
-var formatFilesystemTimestamp = (date) => date.toISOString().replace(COLON_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR).replace(PERIOD_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR);
-
-// src/core/command-context.ts
-var normalizeCommonCommandOptions = (options) => ({
-  json: options.json === true,
-  verbose: options.verbose === true,
-  yes: options.yes === true
-});
-
-// src/core/exit-codes.ts
-var AUTHORIZATION_ERROR_CODES = /* @__PURE__ */ new Set([
-  DiagnosticCode.GithubAuthMissing,
-  DiagnosticCode.GithubAuthFailed,
-  DiagnosticCode.GithubPermissionDenied
-]);
-var CONFIGURATION_ERROR_CODES = /* @__PURE__ */ new Set([
-  DiagnosticCode.MissingRequiredFile,
-  DiagnosticCode.InvalidYaml,
-  DiagnosticCode.InvalidSchemaVersion,
-  DiagnosticCode.MissingRequiredField,
-  DiagnosticCode.InvalidTermCode,
-  DiagnosticCode.AssignmentSlugMismatch,
-  DiagnosticCode.TermCodeMismatch,
-  DiagnosticCode.InvalidAssignmentType,
-  DiagnosticCode.InvalidAssignmentStatus,
-  DiagnosticCode.InvalidRepositoryVisibility,
-  DiagnosticCode.InvalidPermission,
-  DiagnosticCode.InvalidGradingConfig,
-  DiagnosticCode.ManifestMissing,
-  DiagnosticCode.InvalidManifest,
-  DiagnosticCode.InvalidManifestSchemaVersion,
-  DiagnosticCode.MissingManifestSection,
-  DiagnosticCode.InvalidManifestRepositoryRecord,
-  DiagnosticCode.InvalidManifestLifecycleStatus,
-  DiagnosticCode.InvalidManifestPermission
-]);
-var GITHUB_ERROR_CODES = /* @__PURE__ */ new Set([
-  DiagnosticCode.GithubApiError,
-  DiagnosticCode.GithubNetworkError,
-  DiagnosticCode.GithubRateLimited,
-  DiagnosticCode.GithubTimeout
-]);
-var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic) => codes.has(diagnostic.code));
-var resolveExitCode2 = ({ status, errors }) => {
-  if (hasCodeInSet(errors, AUTHORIZATION_ERROR_CODES)) {
-    return 3 /* AuthenticationOrAuthorizationFailure */;
-  }
-  if (hasCodeInSet(errors, CONFIGURATION_ERROR_CODES)) {
-    return 5 /* ConfigurationOrSchemaError */;
-  }
-  if (hasCodeInSet(errors, GITHUB_ERROR_CODES)) {
-    return 4 /* GitHubOrNetworkFailure */;
-  }
-  if (status === "partial_success") {
-    return 2 /* PartialSuccess */;
-  }
-  if (errors.length > 0 || status === "failure") {
-    return 1 /* CommandError */;
-  }
-  return 0 /* Success */;
-};
-
-// src/core/command-result.ts
-var createCommandResult = (input) => ({
-  ...input,
-  exitCode: resolveExitCode2(input)
-});
-
-// src/config/github-config-validation.ts
-var TEMPLATE_REPOSITORY_SEGMENTS = 2;
-var hasBlankSegment = (segments) => segments.some((segment) => segment.trim().length === 0);
-var parseTemplateRepository = (configuredOrganization, repository) => {
-  const segments = repository.split("/");
-  if (segments.length === TEMPLATE_REPOSITORY_SEGMENTS && !hasBlankSegment(segments)) {
-    const [owner, repo] = segments;
-    return {
-      status: "success",
-      repository: {
-        owner,
-        repo,
-        fullName: `${owner}/${repo}`
-      }
-    };
-  }
-  return {
-    status: "failure",
-    diagnostic: createConfigDiagnostic(
-      DiagnosticCode.InvalidTemplateRepository,
-      `Template repository ${repository} must be specified as owner/repo.`,
-      {
-        repository,
-        organization: configuredOrganization
-      }
-    )
-  };
-};
-
-// src/diagnostics/redaction.ts
-var REDACTED_VALUE = "[REDACTED]";
-var GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,})\b/g;
-var SENSITIVE_KEY_PARTS = ["token", "authorization", "password", "secret", "apikey"];
-var KEY_SEPARATOR_PATTERN = /[-_]/g;
-var redactString = (value) => value.replace(GITHUB_TOKEN_PATTERN, REDACTED_VALUE);
-var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var isSensitiveKey = (key) => {
-  const normalizedKey = key.replace(KEY_SEPARATOR_PATTERN, "").toLowerCase();
-  return SENSITIVE_KEY_PARTS.some((keyPart) => normalizedKey.includes(keyPart));
-};
-var redactValue = (value) => {
-  if (typeof value === "string") {
-    return redactString(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => redactValue(item));
-  }
-  if (isRecord(value)) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entryValue]) => [
-        key,
-        isSensitiveKey(key) ? REDACTED_VALUE : redactValue(entryValue)
-      ])
-    );
-  }
-  return value;
-};
-var redactCommandResult = (result) => redactValue(result);
-
-// src/github/github-errors.ts
-var DIAGNOSTIC_CODE_BY_KIND = {
-  auth_missing: DiagnosticCode.GithubAuthMissing,
-  auth_failed: DiagnosticCode.GithubAuthFailed,
-  permission_denied: DiagnosticCode.GithubPermissionDenied,
-  rate_limited: DiagnosticCode.GithubRateLimited,
-  network_error: DiagnosticCode.GithubNetworkError,
-  api_error: DiagnosticCode.GithubApiError,
-  timeout: DiagnosticCode.GithubNetworkError
-};
-var RETRYABLE_ERROR_KINDS = /* @__PURE__ */ new Set([
-  "rate_limited",
-  "network_error",
-  "api_error",
-  "timeout"
-]);
-var GitHubClientError = class extends Error {
-  kind;
-  diagnosticCode;
-  retryAfterSeconds;
-  retryable;
-  constructor(kind, message, options) {
-    super(redactString(message));
-    this.name = "GitHubClientError";
-    this.kind = kind;
-    this.diagnosticCode = DIAGNOSTIC_CODE_BY_KIND[kind];
-    this.retryable = RETRYABLE_ERROR_KINDS.has(kind);
-    if (options?.retryAfterSeconds !== void 0) {
-      this.retryAfterSeconds = options.retryAfterSeconds;
-    }
-    Object.setPrototypeOf(this, new.target.prototype);
-  }
-};
-var isRetryableGitHubError = (error) => error.retryable;
-var createGitHubDiagnostic = (error) => ({
-  code: error.diagnosticCode,
-  severity: "error",
-  message: error.message,
-  context: {
-    kind: error.kind,
-    retryable: error.retryable,
-    ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds }
-  }
-});
+// src/github/octokit-github-client.ts
+import { Buffer } from "buffer";
+import { inflateRawSync } from "zlib";
+import { Octokit } from "@octokit/rest";
 
 // src/github/github-rate-limit.ts
 var MILLISECONDS_PER_SECOND = 1e3;
@@ -1865,913 +2066,7 @@ var withGitHubRetry = async (operation, options) => {
   throw lastError;
 };
 
-// src/manifest/manifest-renderer.ts
-import fs4 from "fs";
-import path6 from "path";
-import { stringify } from "yaml";
-
-// src/manifest/manifest-models.ts
-var MANIFEST_SCHEMA_VERSION = 1;
-var MANIFEST_LIFECYCLE_STATUSES = [
-  "created",
-  "active",
-  "archived",
-  "access_removed",
-  "missing",
-  "error"
-];
-
-// src/manifest/manifest-updater.ts
-var MISSING_INDEX = -1;
-var EMPTY_DIAGNOSTICS = [];
-var compareManifestRepositoryRecords = (left, right) => left.section.localeCompare(right.section) || left.studentId.localeCompare(right.studentId) || left.repository.name.localeCompare(right.repository.name);
-var sortManifestRepositories = (repositories) => [...repositories].sort(compareManifestRepositoryRecords);
-var createEmptyManifest = ({
-  assignment,
-  source,
-  template,
-  warnings = EMPTY_DIAGNOSTICS,
-  errors = EMPTY_DIAGNOSTICS
-}) => ({
-  schemaVersion: MANIFEST_SCHEMA_VERSION,
-  assignment,
-  source,
-  template,
-  repositories: [],
-  operationHistory: [],
-  warnings: [...warnings],
-  errors: [...errors]
-});
-var repositoryRecordIndex = (manifest, studentId) => manifest.repositories.findIndex((record) => record.studentId === studentId);
-var mergeRepositoryRecord = (existing, incoming) => ({
-  ...existing,
-  ...incoming,
-  repository: {
-    ...existing.repository,
-    ...incoming.repository
-  },
-  permissions: {
-    ...existing.permissions,
-    ...incoming.permissions
-  },
-  actions: {
-    ...existing.actions,
-    ...incoming.actions
-  },
-  lifecycle: {
-    ...existing.lifecycle,
-    ...incoming.lifecycle
-  },
-  warnings: incoming.warnings,
-  errors: incoming.errors
-});
-var updateRepositoryRecord = (manifest, studentId, updater) => ({
-  ...manifest,
-  repositories: sortManifestRepositories(
-    manifest.repositories.map(
-      (record) => record.studentId === studentId ? updater(record) : record
-    )
-  )
-});
-var upsertRepositoryRecord = (manifest, record) => {
-  const existingIndex = repositoryRecordIndex(manifest, record.studentId);
-  const repositories = existingIndex === MISSING_INDEX ? [...manifest.repositories, record] : manifest.repositories.map(
-    (existingRecord, index) => index === existingIndex ? mergeRepositoryRecord(existingRecord, record) : existingRecord
-  );
-  return {
-    ...manifest,
-    repositories: sortManifestRepositories(repositories)
-  };
-};
-var updatePermissionState = (manifest, input) => updateRepositoryRecord(manifest, input.studentId, (record) => ({
-  ...record,
-  permissions: {
-    ...record.permissions,
-    ...input.permissions
-  }
-}));
-var updateActionsState = (manifest, input) => updateRepositoryRecord(manifest, input.studentId, (record) => ({
-  ...record,
-  actions: {
-    ...record.actions,
-    ...input.actions
-  }
-}));
-
-// src/manifest/manifest-renderer.ts
-var YAML_INDENT_SPACES = 2;
-var LINE_WIDTH_DISABLED = 0;
-var optionalEntries = (entries) => Object.fromEntries(
-  Object.entries(entries).filter(([, value]) => value !== void 0)
-);
-var toRawRepositoryIdentity = (repository) => ({
-  owner: repository.owner,
-  name: repository.name,
-  full_name: repository.fullName,
-  ...optionalEntries({
-    id: repository.id,
-    html_url: repository.htmlUrl
-  }),
-  created_from_template: repository.createdFromTemplate,
-  template_repository: repository.templateRepository,
-  ...optionalEntries({
-    template_commit_sha: repository.templateCommitSha,
-    created_at: repository.createdAt,
-    last_observed_at: repository.lastObservedAt
-  })
-});
-var toRawCollaboratorPermission = (permission) => ({
-  username: permission.username,
-  permission: permission.permission,
-  pending_invite: permission.pendingInvite,
-  ...optionalEntries({
-    last_applied_at: permission.lastAppliedAt,
-    last_observed_at: permission.lastObservedAt
-  })
-});
-var toRawTeamPermission = (permission) => ({
-  team_slug: permission.teamSlug,
-  permission: permission.permission,
-  ...optionalEntries({
-    last_applied_at: permission.lastAppliedAt,
-    last_observed_at: permission.lastObservedAt
-  })
-});
-var toRawPermissionState = (permissions) => ({
-  ...optionalEntries({
-    student: permissions.student === void 0 ? void 0 : toRawCollaboratorPermission(permissions.student),
-    faculty_team: permissions.facultyTeam === void 0 ? void 0 : toRawTeamPermission(permissions.facultyTeam),
-    grader_team: permissions.graderTeam === void 0 ? void 0 : toRawTeamPermission(permissions.graderTeam)
-  })
-});
-var toRawActionsState = (actions) => ({
-  enabled: actions.enabled,
-  ...optionalEntries({
-    grading_workflow_path: actions.gradingWorkflowPath,
-    grading_workflow_found: actions.gradingWorkflowFound,
-    workflow_dispatch_supported: actions.workflowDispatchSupported,
-    last_observed_at: actions.lastObservedAt
-  })
-});
-var toRawLifecycleState = (lifecycle) => ({
-  repository_archived: lifecycle.repositoryArchived,
-  student_access_removed: lifecycle.studentAccessRemoved,
-  status: lifecycle.status,
-  ...optionalEntries({
-    last_changed_at: lifecycle.lastChangedAt
-  })
-});
-var toRawRepositoryRecord = (record) => ({
-  student_id: record.studentId,
-  github_username: record.githubUsername,
-  section: record.section,
-  roster_status: record.rosterStatus,
-  repository: toRawRepositoryIdentity(record.repository),
-  permissions: toRawPermissionState(record.permissions),
-  actions: toRawActionsState(record.actions),
-  lifecycle: toRawLifecycleState(record.lifecycle),
-  warnings: record.warnings,
-  errors: record.errors
-});
-var toRawOperationHistory = (operation) => ({
-  command: operation.command,
-  started_at: operation.startedAt,
-  ...optionalEntries({
-    completed_at: operation.completedAt
-  }),
-  status: operation.status,
-  summary: operation.summary,
-  warnings: operation.warnings,
-  errors: operation.errors
-});
-var toRawManifest = (manifest) => ({
-  schema_version: manifest.schemaVersion,
-  assignment: {
-    term_code: manifest.assignment.termCode,
-    course_code: manifest.assignment.courseCode,
-    assignment_slug: manifest.assignment.assignmentSlug,
-    assignment_title: manifest.assignment.assignmentTitle
-  },
-  source: {
-    source_files: manifest.source.sourceFiles,
-    input_fingerprint: manifest.source.inputFingerprint
-  },
-  template: {
-    repository: manifest.template.repository,
-    branch: manifest.template.branch,
-    ...optionalEntries({
-      commit_sha: manifest.template.commitSha
-    })
-  },
-  repositories: sortManifestRepositories(manifest.repositories).map(toRawRepositoryRecord),
-  operation_history: manifest.operationHistory.map(toRawOperationHistory),
-  warnings: manifest.warnings,
-  errors: manifest.errors
-});
-var renderManifestYaml = (manifest) => stringify(toRawManifest(manifest), {
-  indent: YAML_INDENT_SPACES,
-  lineWidth: LINE_WIDTH_DISABLED
-});
-var writeManifest = (manifestPath, manifest) => {
-  try {
-    fs4.mkdirSync(path6.dirname(manifestPath), {
-      recursive: true
-    });
-    fs4.writeFileSync(manifestPath, renderManifestYaml(manifest), "utf8");
-    return {
-      status: "success"
-    };
-  } catch (error) {
-    return {
-      status: "failure",
-      diagnostic: createConfigDiagnostic(
-        DiagnosticCode.ManifestWriteFailed,
-        "Failed to write manifest.",
-        {
-          manifestPath,
-          reason: error instanceof Error ? error.message : "unknown"
-        }
-      )
-    };
-  }
-};
-
-// src/workflows/workflow-paths.ts
-import path7 from "path";
-var TERMS_DIRECTORY3 = "terms";
-var GENERATED_WORKFLOWS_DIRECTORY = "generated-workflows";
-var WORKFLOW_FILE_NAME = "grade.yml";
-var GITHUB_WORKFLOWS_DIRECTORY = ".github/workflows";
-var WORKFLOW_PATH_SEPARATOR = "/";
-var WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
-var createGeneratedWorkflowPath = (repoRoot, termCode, assignmentSlug) => {
-  const relativePath = [
-    TERMS_DIRECTORY3,
-    termCode,
-    GENERATED_WORKFLOWS_DIRECTORY,
-    assignmentSlug,
-    WORKFLOW_FILE_NAME
-  ].join("/");
-  return {
-    absolutePath: path7.join(repoRoot, relativePath),
-    relativePath
-  };
-};
-var normalizeWorkflowPath = (workflowPath) => workflowPath.replace(WINDOWS_PATH_SEPARATOR_PATTERN, WORKFLOW_PATH_SEPARATOR);
-var getWorkflowRepositoryPath = (configuredWorkflow) => {
-  const normalizedWorkflow = normalizeWorkflowPath(configuredWorkflow);
-  return normalizedWorkflow.includes(WORKFLOW_PATH_SEPARATOR) ? normalizedWorkflow : [GITHUB_WORKFLOWS_DIRECTORY, normalizedWorkflow].join(WORKFLOW_PATH_SEPARATOR);
-};
-var getWorkflowDispatchIdentifier = (configuredWorkflow) => path7.posix.basename(normalizeWorkflowPath(configuredWorkflow));
-var uniqueWorkflowPaths = (paths) => [...new Set(paths)];
-var createLocalWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkflowPaths([
-  normalizeWorkflowPath(configuredWorkflow),
-  getWorkflowRepositoryPath(configuredWorkflow)
-]);
-var createRepositoryWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkflowPaths([
-  getWorkflowRepositoryPath(configuredWorkflow),
-  normalizeWorkflowPath(configuredWorkflow)
-]);
-
-// src/execution/apply-executor.ts
-var EMPTY_COUNT3 = 0;
-var PRIVATE_REPOSITORY = true;
-var DEFAULT_ACTIONS_ENABLED = true;
-var STUDENT_PERMISSION2 = "push";
-var FACULTY_PERMISSION2 = "admin";
-var GRADER_PERMISSION2 = "maintain";
-var CREATE_REPOSITORY_OPERATION = "createRepositoryFromTemplate";
-var PERMISSION_RANK = {
-  none: 0,
-  pull: 1,
-  triage: 2,
-  push: 3,
-  maintain: 4,
-  admin: 5
-};
-var createEmptySummary2 = () => ({
-  created: EMPTY_COUNT3,
-  existing: EMPTY_COUNT3,
-  verified: EMPTY_COUNT3,
-  noop: EMPTY_COUNT3,
-  skipped: EMPTY_COUNT3,
-  blocked: EMPTY_COUNT3,
-  failed: EMPTY_COUNT3,
-  warnings: EMPTY_COUNT3,
-  errors: EMPTY_COUNT3
-});
-var normalizeGitHubError = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createConfigDiagnostic(
-  DiagnosticCode.GithubApiError,
-  "Unexpected GitHub client failure during apply."
-);
-var runGitHubOperation = async (input, operation) => withGitHubRetry(operation, input.retryOptions);
-var createWorkflowMissingDiagnostic = (operation) => createConfigDiagnostic(
-  DiagnosticCode.GradingWorkflowMissing,
-  `Grading workflow was not found for ${operation.repository_name ?? "repository"}.`,
-  {
-    repositoryName: operation.repository_name,
-    student_id: operation.student_id,
-    github_username: operation.github_username,
-    section: operation.section
-  }
-);
-var createWorkflowDispatchDiagnostic = (operation) => createConfigDiagnostic(
-  DiagnosticCode.WorkflowDispatchUnsupported,
-  `Workflow dispatch is not supported for ${operation.repository_name ?? "repository"}.`,
-  {
-    repositoryName: operation.repository_name,
-    student_id: operation.student_id,
-    github_username: operation.github_username,
-    section: operation.section
-  }
-);
-var createPermissionWarning = (operation, currentPermission, expectedPermission) => createWarningDiagnostic(
-  DiagnosticCode.PermissionNotDowngraded,
-  `Existing permission ${currentPermission} is higher than requested ${expectedPermission}; leaving it unchanged.`,
-  {
-    repositoryName: operation.repository_name,
-    student_id: operation.student_id,
-    github_username: operation.github_username,
-    section: operation.section,
-    currentPermission,
-    expectedPermission
-  }
-);
-var createUnexpectedCollaboratorWarning = (operation, username, permission) => createWarningDiagnostic(
-  DiagnosticCode.UnexpectedCollaboratorPreserved,
-  `Unexpected collaborator ${username} is present and was left unchanged.`,
-  {
-    repositoryName: operation.repository_name,
-    student_id: operation.student_id,
-    github_username: operation.github_username,
-    section: operation.section,
-    unexpectedUsername: username,
-    permission
-  }
-);
-var createRepositoryCreationNotObservedDiagnostic = (operation, owner, repositoryName) => createConfigDiagnostic(
-  DiagnosticCode.GithubApiError,
-  `Repository creation did not produce an observable repository for ${owner}/${repositoryName}.`,
-  {
-    operation: CREATE_REPOSITORY_OPERATION,
-    owner,
-    repositoryName,
-    student_id: operation.student_id,
-    github_username: operation.github_username,
-    section: operation.section
-  }
-);
-var findStudent = (students, operation) => students.find((student) => student.studentId === operation.student_id);
-var findManifestRecord = (manifest, operation) => manifest.repositories.find((record) => record.studentId === operation.student_id);
-var createManifestRecord = (config, student, repository, observedAt, templateCommitSha) => ({
-  studentId: student.studentId,
-  githubUsername: student.githubUsername,
-  section: student.section,
-  rosterStatus: student.status,
-  repository: {
-    owner: repository.owner,
-    name: repository.name,
-    fullName: repository.fullName,
-    id: repository.id,
-    htmlUrl: repository.htmlUrl,
-    createdFromTemplate: true,
-    templateRepository: config.assignment.template.repository,
-    ...templateCommitSha === void 0 ? {} : { templateCommitSha },
-    createdAt: observedAt,
-    lastObservedAt: observedAt
-  },
-  permissions: {},
-  actions: {
-    enabled: false
-  },
-  lifecycle: {
-    repositoryArchived: false,
-    studentAccessRemoved: false,
-    status: "created",
-    lastChangedAt: observedAt
-  },
-  warnings: [],
-  errors: []
-});
-var createInitialManifest = async (config, plan, githubClient) => {
-  const parsedTemplate = parseTemplateRepository(
-    config.course.github.organization,
-    config.assignment.template.repository
-  );
-  const templateRepository = parsedTemplate.status === "success" ? await githubClient.getTemplateRepository(parsedTemplate.repository.owner, parsedTemplate.repository.repo).catch(() => null) : null;
-  return createEmptyManifest({
-    assignment: {
-      termCode: config.summary.termCode,
-      courseCode: config.course.course.code,
-      assignmentSlug: config.summary.assignmentSlug,
-      assignmentTitle: config.assignment.assignment.title
-    },
-    source: {
-      sourceFiles: plan.source.source_files,
-      inputFingerprint: plan.source.input_fingerprint
-    },
-    template: {
-      repository: config.assignment.template.repository,
-      branch: config.assignment.template.branch,
-      ...templateRepository?.latestCommitSha === void 0 ? {} : { commitSha: templateRepository.latestCommitSha }
-    }
-  });
-};
-var persistManifest = (state, manifestPath) => {
-  const writeResult = writeManifest(manifestPath, state.manifest);
-  if (writeResult.status === "failure" && writeResult.diagnostic !== void 0) {
-    return recordError(state, writeResult.diagnostic);
-  }
-  return state;
-};
-var recordWarning = (state, diagnostic) => ({
-  ...state,
-  warnings: [...state.warnings, diagnostic],
-  summary: {
-    ...state.summary,
-    warnings: state.summary.warnings + 1
-  }
-});
-var recordError = (state, diagnostic) => ({
-  ...state,
-  errors: [...state.errors, diagnostic],
-  summary: {
-    ...state.summary,
-    failed: state.summary.failed + 1,
-    errors: state.summary.errors + 1
-  }
-});
-var incrementSummary = (state, key) => ({
-  ...state,
-  summary: {
-    ...state.summary,
-    [key]: state.summary[key] + 1
-  }
-});
-var hasAtLeastPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] >= PERMISSION_RANK[expectedPermission];
-var hasHigherPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] > PERMISSION_RANK[expectedPermission];
-var executeCreateRepository = async (input, state, operation, observedAt) => {
-  const student = findStudent(input.students, operation);
-  if (student === void 0 || operation.repository_name === void 0) {
-    return state;
-  }
-  const repositoryName = operation.repository_name;
-  try {
-    const parsedTemplate = parseTemplateRepository(
-      input.config.course.github.organization,
-      input.config.assignment.template.repository
-    );
-    if (parsedTemplate.status === "failure") {
-      return recordError(state, parsedTemplate.diagnostic);
-    }
-    await runGitHubOperation(
-      input,
-      () => input.githubClient.createRepositoryFromTemplate({
-        templateOwner: parsedTemplate.repository.owner,
-        templateRepo: parsedTemplate.repository.repo,
-        owner: input.config.course.github.organization,
-        name: repositoryName,
-        private: PRIVATE_REPOSITORY
-      })
-    );
-    const repository = await runGitHubOperation(
-      input,
-      () => input.githubClient.getRepository(input.config.course.github.organization, repositoryName)
-    );
-    if (repository === null) {
-      return recordError(
-        state,
-        createRepositoryCreationNotObservedDiagnostic(
-          operation,
-          input.config.course.github.organization,
-          repositoryName
-        )
-      );
-    }
-    const manifest = upsertRepositoryRecord(
-      state.manifest,
-      createManifestRecord(
-        input.config,
-        student,
-        repository,
-        observedAt,
-        state.manifest.template.commitSha
-      )
-    );
-    return persistManifest(
-      incrementSummary(
-        {
-          ...state,
-          manifest
-        },
-        "created"
-      ),
-      input.manifestPath
-    );
-  } catch (error) {
-    return recordError(state, normalizeGitHubError(error));
-  }
-};
-var executeStudentCollaborator = async (input, state, operation, observedAt) => {
-  if (operation.repository_name === void 0 || operation.github_username === void 0) {
-    return state;
-  }
-  const repositoryName = operation.repository_name;
-  const githubUsername = operation.github_username;
-  if (findManifestRecord(state.manifest, operation) === void 0) {
-    return incrementSummary(state, "skipped");
-  }
-  try {
-    const currentPermission = await runGitHubOperation(
-      input,
-      () => input.githubClient.getCollaboratorPermission(
-        input.config.course.github.organization,
-        repositoryName,
-        githubUsername
-      )
-    );
-    let nextState = state;
-    if (hasAtLeastPermission(currentPermission.permission, STUDENT_PERMISSION2)) {
-      nextState = incrementSummary(nextState, "noop");
-      if (hasHigherPermission(currentPermission.permission, STUDENT_PERMISSION2)) {
-        nextState = recordWarning(
-          nextState,
-          createPermissionWarning(operation, currentPermission.permission, STUDENT_PERMISSION2)
-        );
-      }
-    } else {
-      await runGitHubOperation(
-        input,
-        () => input.githubClient.addCollaborator({
-          owner: input.config.course.github.organization,
-          repo: repositoryName,
-          username: githubUsername,
-          permission: STUDENT_PERMISSION2
-        })
-      );
-      nextState = incrementSummary(nextState, "verified");
-    }
-    const collaborators = await runGitHubOperation(
-      input,
-      () => input.githubClient.listCollaboratorPermissions(
-        input.config.course.github.organization,
-        repositoryName
-      )
-    );
-    for (const collaborator of collaborators) {
-      if (collaborator.username !== githubUsername) {
-        nextState = recordWarning(
-          nextState,
-          createUnexpectedCollaboratorWarning(
-            operation,
-            collaborator.username,
-            collaborator.permission
-          )
-        );
-      }
-    }
-    return persistManifest(
-      {
-        ...nextState,
-        manifest: updatePermissionState(nextState.manifest, {
-          studentId: operation.student_id ?? "",
-          permissions: {
-            student: {
-              username: githubUsername,
-              permission: currentPermission.permission === "none" ? STUDENT_PERMISSION2 : currentPermission.permission,
-              pendingInvite: currentPermission.pendingInvite,
-              lastObservedAt: observedAt,
-              lastAppliedAt: observedAt
-            }
-          }
-        })
-      },
-      input.manifestPath
-    );
-  } catch (error) {
-    return recordError(state, normalizeGitHubError(error));
-  }
-};
-var executeTeamPermission = async (input, state, operation, teamSlug, expectedPermission, observedAt) => {
-  if (operation.repository_name === void 0) {
-    return state;
-  }
-  const repositoryName = operation.repository_name;
-  if (findManifestRecord(state.manifest, operation) === void 0) {
-    return incrementSummary(state, "skipped");
-  }
-  try {
-    const currentPermission = await runGitHubOperation(
-      input,
-      () => input.githubClient.getTeamPermission(
-        input.config.course.github.organization,
-        repositoryName,
-        teamSlug
-      )
-    );
-    let nextState = state;
-    if (hasAtLeastPermission(currentPermission.permission, expectedPermission)) {
-      nextState = incrementSummary(nextState, "noop");
-      if (hasHigherPermission(currentPermission.permission, expectedPermission)) {
-        nextState = recordWarning(
-          nextState,
-          createPermissionWarning(operation, currentPermission.permission, expectedPermission)
-        );
-      }
-    } else {
-      await runGitHubOperation(
-        input,
-        () => input.githubClient.addTeamPermission({
-          owner: input.config.course.github.organization,
-          repo: repositoryName,
-          teamSlug,
-          permission: expectedPermission
-        })
-      );
-      nextState = incrementSummary(nextState, "verified");
-    }
-    return persistManifest(
-      {
-        ...nextState,
-        manifest: updatePermissionState(nextState.manifest, {
-          studentId: operation.student_id ?? "",
-          permissions: operation.type === "add_faculty_team_permission" ? {
-            facultyTeam: {
-              teamSlug,
-              permission: currentPermission.permission === "none" ? expectedPermission : currentPermission.permission,
-              lastObservedAt: observedAt,
-              lastAppliedAt: observedAt
-            }
-          } : {
-            graderTeam: {
-              teamSlug,
-              permission: currentPermission.permission === "none" ? expectedPermission : currentPermission.permission,
-              lastObservedAt: observedAt,
-              lastAppliedAt: observedAt
-            }
-          }
-        })
-      },
-      input.manifestPath
-    );
-  } catch (error) {
-    return recordError(state, normalizeGitHubError(error));
-  }
-};
-var executeEnableActions = async (input, state, operation, observedAt) => {
-  if (operation.repository_name === void 0) {
-    return state;
-  }
-  const repositoryName = operation.repository_name;
-  if (findManifestRecord(state.manifest, operation) === void 0) {
-    return incrementSummary(state, "skipped");
-  }
-  try {
-    const actionsState = await runGitHubOperation(
-      input,
-      () => input.githubClient.getActionsState(input.config.course.github.organization, repositoryName)
-    );
-    let nextState = state;
-    if (actionsState === "enabled") {
-      nextState = incrementSummary(nextState, "noop");
-    } else {
-      await runGitHubOperation(
-        input,
-        () => input.githubClient.enableActions(input.config.course.github.organization, repositoryName)
-      );
-      nextState = incrementSummary(nextState, "verified");
-    }
-    return persistManifest(
-      {
-        ...nextState,
-        manifest: updateActionsState(nextState.manifest, {
-          studentId: operation.student_id ?? "",
-          actions: {
-            enabled: DEFAULT_ACTIONS_ENABLED,
-            lastObservedAt: observedAt
-          }
-        })
-      },
-      input.manifestPath
-    );
-  } catch (error) {
-    return recordError(state, normalizeGitHubError(error));
-  }
-};
-var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
-  if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
-    return state;
-  }
-  const repositoryName = operation.repository_name;
-  const workflowPath = input.config.course.grading.workflow;
-  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
-  if (findManifestRecord(state.manifest, operation) === void 0) {
-    return incrementSummary(state, "skipped");
-  }
-  try {
-    const workflow = await runGitHubOperation(
-      input,
-      () => input.githubClient.getWorkflow(
-        input.config.course.github.organization,
-        repositoryName,
-        workflowDispatchIdentifier
-      )
-    );
-    if (workflow === null) {
-      const diagnostic = createWorkflowMissingDiagnostic(operation);
-      return persistManifest(
-        recordError(
-          {
-            ...state,
-            manifest: updateActionsState(state.manifest, {
-              studentId: operation.student_id ?? "",
-              actions: {
-                gradingWorkflowPath: workflowPath,
-                gradingWorkflowFound: false,
-                lastObservedAt: observedAt
-              }
-            })
-          },
-          diagnostic
-        ),
-        input.manifestPath
-      );
-    }
-    return persistManifest(
-      incrementSummary(
-        {
-          ...state,
-          manifest: updateActionsState(state.manifest, {
-            studentId: operation.student_id ?? "",
-            actions: {
-              gradingWorkflowPath: workflow.path,
-              gradingWorkflowFound: true,
-              lastObservedAt: observedAt
-            }
-          })
-        },
-        "verified"
-      ),
-      input.manifestPath
-    );
-  } catch (error) {
-    return recordError(state, normalizeGitHubError(error));
-  }
-};
-var executeVerifyDispatch = async (input, state, operation, observedAt) => {
-  if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
-    return state;
-  }
-  const repositoryName = operation.repository_name;
-  const workflowPath = input.config.course.grading.workflow;
-  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
-  if (findManifestRecord(state.manifest, operation) === void 0) {
-    return incrementSummary(state, "skipped");
-  }
-  try {
-    const workflow = await runGitHubOperation(
-      input,
-      () => input.githubClient.getWorkflow(
-        input.config.course.github.organization,
-        repositoryName,
-        workflowDispatchIdentifier
-      )
-    );
-    if (workflow === null || !workflow.supportsDispatch) {
-      const diagnostic = createWorkflowDispatchDiagnostic(operation);
-      return persistManifest(
-        recordError(
-          {
-            ...state,
-            manifest: updateActionsState(state.manifest, {
-              studentId: operation.student_id ?? "",
-              actions: {
-                workflowDispatchSupported: false,
-                lastObservedAt: observedAt
-              }
-            })
-          },
-          diagnostic
-        ),
-        input.manifestPath
-      );
-    }
-    return persistManifest(
-      incrementSummary(
-        {
-          ...state,
-          manifest: updateActionsState(state.manifest, {
-            studentId: operation.student_id ?? "",
-            actions: {
-              workflowDispatchSupported: true,
-              lastObservedAt: observedAt
-            }
-          })
-        },
-        "verified"
-      ),
-      input.manifestPath
-    );
-  } catch (error) {
-    return recordError(state, normalizeGitHubError(error));
-  }
-};
-var executeOperation = async (input, state, operation, observedAt) => {
-  if (operation.status === "skipped") {
-    return incrementSummary(state, "skipped");
-  }
-  if (operation.status === "noop") {
-    return incrementSummary(state, "existing");
-  }
-  if (operation.status !== "planned") {
-    return state;
-  }
-  if (operation.type === "create_repository_from_template") {
-    return executeCreateRepository(input, state, operation, observedAt);
-  }
-  if (operation.type === "add_student_collaborator") {
-    return executeStudentCollaborator(input, state, operation, observedAt);
-  }
-  if (operation.type === "add_faculty_team_permission") {
-    return executeTeamPermission(
-      input,
-      state,
-      operation,
-      input.config.course.github.faculty_team,
-      FACULTY_PERMISSION2,
-      observedAt
-    );
-  }
-  if (operation.type === "add_grader_team_permission") {
-    return executeTeamPermission(
-      input,
-      state,
-      operation,
-      input.config.course.github.grader_team,
-      GRADER_PERMISSION2,
-      observedAt
-    );
-  }
-  if (operation.type === "enable_actions") {
-    return executeEnableActions(input, state, operation, observedAt);
-  }
-  if (operation.type === "verify_grading_workflow") {
-    return executeVerifyWorkflow(input, state, operation, observedAt);
-  }
-  return executeVerifyDispatch(input, state, operation, observedAt);
-};
-var executeApplyPlan = async (input) => {
-  const initialManifest = input.manifest ?? await createInitialManifest(input.config, input.plan, input.githubClient);
-  let state = {
-    manifest: initialManifest,
-    summary: createEmptySummary2(),
-    warnings: [],
-    errors: []
-  };
-  const observedAt = input.clock.now().toISOString();
-  for (const operation of input.plan.operations) {
-    state = await executeOperation(input, state, operation, observedAt);
-  }
-  return state;
-};
-
-// src/execution/mutation-guard.ts
-var EMPTY_COUNT4 = 0;
-var createMutationBlockedDiagnostic = () => createConfigDiagnostic(
-  DiagnosticCode.MutationBlocked,
-  "Apply is blocked because the computed plan contains blocked operations or errors."
-);
-var createConfirmationRequiredDiagnostic = () => createConfigDiagnostic(
-  DiagnosticCode.ConfirmationRequired,
-  "Apply requires --yes in non-interactive execution before making GitHub mutations."
-);
-var evaluateMutationGuard = ({
-  plan,
-  options
-}) => {
-  const hasBlockedOperations = plan.operations.some((operation) => operation.status === "blocked");
-  if (hasBlockedOperations || plan.errors.length > EMPTY_COUNT4) {
-    return {
-      allowed: false,
-      errors: [createMutationBlockedDiagnostic(), ...plan.errors]
-    };
-  }
-  if (!options.yes) {
-    return {
-      allowed: false,
-      errors: [createConfirmationRequiredDiagnostic()]
-    };
-  }
-  return {
-    allowed: true,
-    errors: []
-  };
-};
-
 // src/github/octokit-github-client.ts
-import { Buffer } from "buffer";
-import { inflateRawSync } from "zlib";
-import { Octokit } from "@octokit/rest";
 var HTTP_STATUS_UNAUTHORIZED = 401;
 var HTTP_STATUS_CREATED = 201;
 var HTTP_STATUS_FOUND = 302;
@@ -2816,7 +2111,7 @@ var ZIP_END_CENTRAL_DIRECTORY_OFFSET = 16;
 var ZIP_END_CENTRAL_DIRECTORY_COMMENT_LENGTH_OFFSET = 20;
 var BASE64_ENCODING = "base64";
 var UTF8_ENCODING = "utf8";
-var WINDOWS_PATH_SEPARATOR_PATTERN2 = /\\/g;
+var WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
 var PARSE_SUCCESS_RESPONSE_BODY_DISABLED = false;
 var LOCATION_HEADER = "location";
 var LOCATION_HEADER_ALTERNATE = "Location";
@@ -3487,7 +2782,7 @@ function extractZipEntryContent(buffer, localHeaderOffset, compressedSize, compr
   return compressionMethod === ZIP_DEFLATE_COMPRESSION ? inflateRawSync(compressed) : compressionMethod === ZIP_STORED_COMPRESSION ? compressed : void 0;
 }
 function normalizeZipEntryPath(filePath) {
-  return filePath.replace(WINDOWS_PATH_SEPARATOR_PATTERN2, "/");
+  return filePath.replace(WINDOWS_PATH_SEPARATOR_PATTERN, "/");
 }
 async function toBuffer(value) {
   const directBuffer = toDirectBuffer(value);
@@ -3614,18 +2909,1034 @@ function normalizeToken2(token) {
   return normalized === void 0 || normalized.length === EMPTY_LENGTH2 ? void 0 : normalized;
 }
 
-// src/workflows/workflow-dispatch-validation.ts
-var WORKFLOW_DISPATCH_TRIGGER = "workflow_dispatch";
-var isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var hasWorkflowDispatchString = (value) => typeof value === "string" && value === WORKFLOW_DISPATCH_TRIGGER;
-var hasWorkflowDispatchArray = (value) => Array.isArray(value) && value.some((item) => hasWorkflowDispatchString(item));
-var hasWorkflowDispatchObject = (value) => isRecord2(value) && Object.hasOwn(value, WORKFLOW_DISPATCH_TRIGGER);
-var hasWorkflowDispatchTrigger = (workflowDocument) => {
-  if (!isRecord2(workflowDocument)) {
-    return false;
+// src/cli/commands/assignment.command.ts
+var COMMAND_NAME2 = "assignment";
+var DETAIL_COMMAND_NAME = "detail";
+var JSON_INDENT_SPACES = 2;
+var createJsonRequiredResult = () => createEmptyAssignmentDetailResult("failure", [
+  createConfigDiagnostic(
+    ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE,
+    "The assignment detail command only supports JSON output. Run with --json."
+  )
+]);
+var resolveGitHubClient = (githubClient, token) => {
+  if (githubClient !== void 0) {
+    return githubClient;
   }
-  const triggers = workflowDocument.on;
-  return hasWorkflowDispatchString(triggers) || hasWorkflowDispatchArray(triggers) || hasWorkflowDispatchObject(triggers);
+  return token === void 0 ? void 0 : createGitHubClient({ token });
+};
+var runAssignmentDetailCommand = ({
+  cwd,
+  assignmentFile,
+  options,
+  env = process.env,
+  githubClient
+}) => {
+  if (options.json !== true) {
+    return Promise.resolve(createJsonRequiredResult());
+  }
+  const token = readGitHubToken(env);
+  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
+  return buildAssignmentDetail({
+    cwd,
+    assignmentFile,
+    ...resolvedGitHubClient === void 0 ? {} : { githubClient: resolvedGitHubClient }
+  });
+};
+var formatAssignmentDetailResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES);
+var registerAssignmentCommand = (program) => {
+  const assignment = program.command(COMMAND_NAME2).description("Inspect assignment configuration and local detail data.");
+  assignment.command(DETAIL_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit assignment detail JSON").description("Build a UI-ready read-only assignment detail model.").action(async (assignmentFile, options) => {
+    const result = await runAssignmentDetailCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options
+    });
+    console.log(formatAssignmentDetailResultAsJson(result));
+    process.exitCode = result.exitCode;
+  });
+};
+
+// src/cli/commands/apply.command.ts
+import fs7 from "fs";
+
+// src/core/clock.ts
+var COLON_PATTERN = /:/gu;
+var PERIOD_PATTERN = /\./gu;
+var FILESYSTEM_TIMESTAMP_SEPARATOR = "-";
+var systemClock = {
+  now: () => /* @__PURE__ */ new Date()
+};
+var formatPlanCreatedAt = (date) => date.toISOString();
+var formatFilesystemTimestamp = (date) => date.toISOString().replace(COLON_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR).replace(PERIOD_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR);
+
+// src/core/command-context.ts
+var normalizeCommonCommandOptions = (options) => ({
+  json: options.json === true,
+  verbose: options.verbose === true,
+  yes: options.yes === true
+});
+
+// src/core/exit-codes.ts
+var AUTHORIZATION_ERROR_CODES = /* @__PURE__ */ new Set([
+  DiagnosticCode.GithubAuthMissing,
+  DiagnosticCode.GithubAuthFailed,
+  DiagnosticCode.GithubPermissionDenied
+]);
+var CONFIGURATION_ERROR_CODES = /* @__PURE__ */ new Set([
+  DiagnosticCode.MissingRequiredFile,
+  DiagnosticCode.InvalidYaml,
+  DiagnosticCode.InvalidSchemaVersion,
+  DiagnosticCode.MissingRequiredField,
+  DiagnosticCode.InvalidTermCode,
+  DiagnosticCode.AssignmentSlugMismatch,
+  DiagnosticCode.TermCodeMismatch,
+  DiagnosticCode.InvalidAssignmentType,
+  DiagnosticCode.InvalidAssignmentStatus,
+  DiagnosticCode.InvalidRepositoryVisibility,
+  DiagnosticCode.InvalidPermission,
+  DiagnosticCode.InvalidGradingConfig,
+  DiagnosticCode.ManifestMissing,
+  DiagnosticCode.InvalidManifest,
+  DiagnosticCode.InvalidManifestSchemaVersion,
+  DiagnosticCode.MissingManifestSection,
+  DiagnosticCode.InvalidManifestRepositoryRecord,
+  DiagnosticCode.InvalidManifestLifecycleStatus,
+  DiagnosticCode.InvalidManifestPermission
+]);
+var GITHUB_ERROR_CODES = /* @__PURE__ */ new Set([
+  DiagnosticCode.GithubApiError,
+  DiagnosticCode.GithubNetworkError,
+  DiagnosticCode.GithubRateLimited,
+  DiagnosticCode.GithubTimeout
+]);
+var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic) => codes.has(diagnostic.code));
+var resolveExitCode2 = ({ status, errors }) => {
+  if (hasCodeInSet(errors, AUTHORIZATION_ERROR_CODES)) {
+    return 3 /* AuthenticationOrAuthorizationFailure */;
+  }
+  if (hasCodeInSet(errors, CONFIGURATION_ERROR_CODES)) {
+    return 5 /* ConfigurationOrSchemaError */;
+  }
+  if (hasCodeInSet(errors, GITHUB_ERROR_CODES)) {
+    return 4 /* GitHubOrNetworkFailure */;
+  }
+  if (status === "partial_success") {
+    return 2 /* PartialSuccess */;
+  }
+  if (errors.length > 0 || status === "failure") {
+    return 1 /* CommandError */;
+  }
+  return 0 /* Success */;
+};
+
+// src/core/command-result.ts
+var createCommandResult = (input) => ({
+  ...input,
+  exitCode: resolveExitCode2(input)
+});
+
+// src/manifest/manifest-renderer.ts
+import fs4 from "fs";
+import path6 from "path";
+import { stringify } from "yaml";
+
+// src/manifest/manifest-models.ts
+var MANIFEST_SCHEMA_VERSION = 1;
+var MANIFEST_LIFECYCLE_STATUSES = [
+  "created",
+  "active",
+  "archived",
+  "access_removed",
+  "missing",
+  "error"
+];
+
+// src/manifest/manifest-updater.ts
+var MISSING_INDEX = -1;
+var EMPTY_DIAGNOSTICS = [];
+var compareManifestRepositoryRecords = (left, right) => left.section.localeCompare(right.section) || left.studentId.localeCompare(right.studentId) || left.repository.name.localeCompare(right.repository.name);
+var sortManifestRepositories = (repositories) => [...repositories].sort(compareManifestRepositoryRecords);
+var createEmptyManifest = ({
+  assignment,
+  source,
+  template,
+  warnings = EMPTY_DIAGNOSTICS,
+  errors = EMPTY_DIAGNOSTICS
+}) => ({
+  schemaVersion: MANIFEST_SCHEMA_VERSION,
+  assignment,
+  source,
+  template,
+  repositories: [],
+  operationHistory: [],
+  warnings: [...warnings],
+  errors: [...errors]
+});
+var repositoryRecordIndex = (manifest, studentId) => manifest.repositories.findIndex((record) => record.studentId === studentId);
+var mergeRepositoryRecord = (existing, incoming) => ({
+  ...existing,
+  ...incoming,
+  repository: {
+    ...existing.repository,
+    ...incoming.repository
+  },
+  permissions: {
+    ...existing.permissions,
+    ...incoming.permissions
+  },
+  actions: {
+    ...existing.actions,
+    ...incoming.actions
+  },
+  lifecycle: {
+    ...existing.lifecycle,
+    ...incoming.lifecycle
+  },
+  warnings: incoming.warnings,
+  errors: incoming.errors
+});
+var updateRepositoryRecord = (manifest, studentId, updater) => ({
+  ...manifest,
+  repositories: sortManifestRepositories(
+    manifest.repositories.map(
+      (record) => record.studentId === studentId ? updater(record) : record
+    )
+  )
+});
+var upsertRepositoryRecord = (manifest, record) => {
+  const existingIndex = repositoryRecordIndex(manifest, record.studentId);
+  const repositories = existingIndex === MISSING_INDEX ? [...manifest.repositories, record] : manifest.repositories.map(
+    (existingRecord, index) => index === existingIndex ? mergeRepositoryRecord(existingRecord, record) : existingRecord
+  );
+  return {
+    ...manifest,
+    repositories: sortManifestRepositories(repositories)
+  };
+};
+var updatePermissionState = (manifest, input) => updateRepositoryRecord(manifest, input.studentId, (record) => ({
+  ...record,
+  permissions: {
+    ...record.permissions,
+    ...input.permissions
+  }
+}));
+var updateActionsState = (manifest, input) => updateRepositoryRecord(manifest, input.studentId, (record) => ({
+  ...record,
+  actions: {
+    ...record.actions,
+    ...input.actions
+  }
+}));
+
+// src/manifest/manifest-renderer.ts
+var YAML_INDENT_SPACES = 2;
+var LINE_WIDTH_DISABLED = 0;
+var optionalEntries = (entries) => Object.fromEntries(
+  Object.entries(entries).filter(([, value]) => value !== void 0)
+);
+var toRawRepositoryIdentity = (repository) => ({
+  owner: repository.owner,
+  name: repository.name,
+  full_name: repository.fullName,
+  ...optionalEntries({
+    id: repository.id,
+    html_url: repository.htmlUrl
+  }),
+  created_from_template: repository.createdFromTemplate,
+  template_repository: repository.templateRepository,
+  ...optionalEntries({
+    template_commit_sha: repository.templateCommitSha,
+    created_at: repository.createdAt,
+    last_observed_at: repository.lastObservedAt
+  })
+});
+var toRawCollaboratorPermission = (permission) => ({
+  username: permission.username,
+  permission: permission.permission,
+  pending_invite: permission.pendingInvite,
+  ...optionalEntries({
+    last_applied_at: permission.lastAppliedAt,
+    last_observed_at: permission.lastObservedAt
+  })
+});
+var toRawTeamPermission = (permission) => ({
+  team_slug: permission.teamSlug,
+  permission: permission.permission,
+  ...optionalEntries({
+    last_applied_at: permission.lastAppliedAt,
+    last_observed_at: permission.lastObservedAt
+  })
+});
+var toRawPermissionState = (permissions) => ({
+  ...optionalEntries({
+    student: permissions.student === void 0 ? void 0 : toRawCollaboratorPermission(permissions.student),
+    faculty_team: permissions.facultyTeam === void 0 ? void 0 : toRawTeamPermission(permissions.facultyTeam),
+    grader_team: permissions.graderTeam === void 0 ? void 0 : toRawTeamPermission(permissions.graderTeam)
+  })
+});
+var toRawActionsState = (actions) => ({
+  enabled: actions.enabled,
+  ...optionalEntries({
+    grading_workflow_path: actions.gradingWorkflowPath,
+    grading_workflow_found: actions.gradingWorkflowFound,
+    workflow_dispatch_supported: actions.workflowDispatchSupported,
+    last_observed_at: actions.lastObservedAt
+  })
+});
+var toRawLifecycleState = (lifecycle) => ({
+  repository_archived: lifecycle.repositoryArchived,
+  student_access_removed: lifecycle.studentAccessRemoved,
+  status: lifecycle.status,
+  ...optionalEntries({
+    last_changed_at: lifecycle.lastChangedAt
+  })
+});
+var toRawRepositoryRecord = (record) => ({
+  student_id: record.studentId,
+  github_username: record.githubUsername,
+  section: record.section,
+  roster_status: record.rosterStatus,
+  repository: toRawRepositoryIdentity(record.repository),
+  permissions: toRawPermissionState(record.permissions),
+  actions: toRawActionsState(record.actions),
+  lifecycle: toRawLifecycleState(record.lifecycle),
+  warnings: record.warnings,
+  errors: record.errors
+});
+var toRawOperationHistory = (operation) => ({
+  command: operation.command,
+  started_at: operation.startedAt,
+  ...optionalEntries({
+    completed_at: operation.completedAt
+  }),
+  status: operation.status,
+  summary: operation.summary,
+  warnings: operation.warnings,
+  errors: operation.errors
+});
+var toRawManifest = (manifest) => ({
+  schema_version: manifest.schemaVersion,
+  assignment: {
+    term_code: manifest.assignment.termCode,
+    course_code: manifest.assignment.courseCode,
+    assignment_slug: manifest.assignment.assignmentSlug,
+    assignment_title: manifest.assignment.assignmentTitle
+  },
+  source: {
+    source_files: manifest.source.sourceFiles,
+    input_fingerprint: manifest.source.inputFingerprint
+  },
+  template: {
+    repository: manifest.template.repository,
+    branch: manifest.template.branch,
+    ...optionalEntries({
+      commit_sha: manifest.template.commitSha
+    })
+  },
+  repositories: sortManifestRepositories(manifest.repositories).map(toRawRepositoryRecord),
+  operation_history: manifest.operationHistory.map(toRawOperationHistory),
+  warnings: manifest.warnings,
+  errors: manifest.errors
+});
+var renderManifestYaml = (manifest) => stringify(toRawManifest(manifest), {
+  indent: YAML_INDENT_SPACES,
+  lineWidth: LINE_WIDTH_DISABLED
+});
+var writeManifest = (manifestPath, manifest) => {
+  try {
+    fs4.mkdirSync(path6.dirname(manifestPath), {
+      recursive: true
+    });
+    fs4.writeFileSync(manifestPath, renderManifestYaml(manifest), "utf8");
+    return {
+      status: "success"
+    };
+  } catch (error) {
+    return {
+      status: "failure",
+      diagnostic: createConfigDiagnostic(
+        DiagnosticCode.ManifestWriteFailed,
+        "Failed to write manifest.",
+        {
+          manifestPath,
+          reason: error instanceof Error ? error.message : "unknown"
+        }
+      )
+    };
+  }
+};
+
+// src/workflows/workflow-paths.ts
+import path7 from "path";
+var TERMS_DIRECTORY3 = "terms";
+var GENERATED_WORKFLOWS_DIRECTORY = "generated-workflows";
+var WORKFLOW_FILE_NAME = "grade.yml";
+var GITHUB_WORKFLOWS_DIRECTORY = ".github/workflows";
+var WORKFLOW_PATH_SEPARATOR = "/";
+var WINDOWS_PATH_SEPARATOR_PATTERN2 = /\\/g;
+var createGeneratedWorkflowPath = (repoRoot, termCode, assignmentSlug) => {
+  const relativePath = [
+    TERMS_DIRECTORY3,
+    termCode,
+    GENERATED_WORKFLOWS_DIRECTORY,
+    assignmentSlug,
+    WORKFLOW_FILE_NAME
+  ].join("/");
+  return {
+    absolutePath: path7.join(repoRoot, relativePath),
+    relativePath
+  };
+};
+var normalizeWorkflowPath = (workflowPath) => workflowPath.replace(WINDOWS_PATH_SEPARATOR_PATTERN2, WORKFLOW_PATH_SEPARATOR);
+var getWorkflowRepositoryPath = (configuredWorkflow) => {
+  const normalizedWorkflow = normalizeWorkflowPath(configuredWorkflow);
+  return normalizedWorkflow.includes(WORKFLOW_PATH_SEPARATOR) ? normalizedWorkflow : [GITHUB_WORKFLOWS_DIRECTORY, normalizedWorkflow].join(WORKFLOW_PATH_SEPARATOR);
+};
+var getWorkflowDispatchIdentifier = (configuredWorkflow) => path7.posix.basename(normalizeWorkflowPath(configuredWorkflow));
+var uniqueWorkflowPaths = (paths) => [...new Set(paths)];
+var createLocalWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkflowPaths([
+  normalizeWorkflowPath(configuredWorkflow),
+  getWorkflowRepositoryPath(configuredWorkflow)
+]);
+var createRepositoryWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkflowPaths([
+  getWorkflowRepositoryPath(configuredWorkflow),
+  normalizeWorkflowPath(configuredWorkflow)
+]);
+
+// src/execution/apply-executor.ts
+var EMPTY_COUNT3 = 0;
+var PRIVATE_REPOSITORY = true;
+var DEFAULT_ACTIONS_ENABLED = true;
+var STUDENT_PERMISSION2 = "push";
+var FACULTY_PERMISSION2 = "admin";
+var GRADER_PERMISSION2 = "maintain";
+var CREATE_REPOSITORY_OPERATION = "createRepositoryFromTemplate";
+var PERMISSION_RANK = {
+  none: 0,
+  pull: 1,
+  triage: 2,
+  push: 3,
+  maintain: 4,
+  admin: 5
+};
+var createEmptySummary2 = () => ({
+  created: EMPTY_COUNT3,
+  existing: EMPTY_COUNT3,
+  verified: EMPTY_COUNT3,
+  noop: EMPTY_COUNT3,
+  skipped: EMPTY_COUNT3,
+  blocked: EMPTY_COUNT3,
+  failed: EMPTY_COUNT3,
+  warnings: EMPTY_COUNT3,
+  errors: EMPTY_COUNT3
+});
+var normalizeGitHubError = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : createConfigDiagnostic(
+  DiagnosticCode.GithubApiError,
+  "Unexpected GitHub client failure during apply."
+);
+var runGitHubOperation = async (input, operation) => withGitHubRetry(operation, input.retryOptions);
+var createWorkflowMissingDiagnostic = (operation) => createConfigDiagnostic(
+  DiagnosticCode.GradingWorkflowMissing,
+  `Grading workflow was not found for ${operation.repository_name ?? "repository"}.`,
+  {
+    repositoryName: operation.repository_name,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section
+  }
+);
+var createWorkflowDispatchDiagnostic = (operation) => createConfigDiagnostic(
+  DiagnosticCode.WorkflowDispatchUnsupported,
+  `Workflow dispatch is not supported for ${operation.repository_name ?? "repository"}.`,
+  {
+    repositoryName: operation.repository_name,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section
+  }
+);
+var createPermissionWarning = (operation, currentPermission, expectedPermission) => createWarningDiagnostic(
+  DiagnosticCode.PermissionNotDowngraded,
+  `Existing permission ${currentPermission} is higher than requested ${expectedPermission}; leaving it unchanged.`,
+  {
+    repositoryName: operation.repository_name,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section,
+    currentPermission,
+    expectedPermission
+  }
+);
+var createUnexpectedCollaboratorWarning = (operation, username, permission) => createWarningDiagnostic(
+  DiagnosticCode.UnexpectedCollaboratorPreserved,
+  `Unexpected collaborator ${username} is present and was left unchanged.`,
+  {
+    repositoryName: operation.repository_name,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section,
+    unexpectedUsername: username,
+    permission
+  }
+);
+var createRepositoryCreationNotObservedDiagnostic = (operation, owner, repositoryName) => createConfigDiagnostic(
+  DiagnosticCode.GithubApiError,
+  `Repository creation did not produce an observable repository for ${owner}/${repositoryName}.`,
+  {
+    operation: CREATE_REPOSITORY_OPERATION,
+    owner,
+    repositoryName,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section
+  }
+);
+var findStudent = (students, operation) => students.find((student) => student.studentId === operation.student_id);
+var findManifestRecord = (manifest, operation) => manifest.repositories.find((record) => record.studentId === operation.student_id);
+var createManifestRecord = (config, student, repository, observedAt, templateCommitSha) => ({
+  studentId: student.studentId,
+  githubUsername: student.githubUsername,
+  section: student.section,
+  rosterStatus: student.status,
+  repository: {
+    owner: repository.owner,
+    name: repository.name,
+    fullName: repository.fullName,
+    id: repository.id,
+    htmlUrl: repository.htmlUrl,
+    createdFromTemplate: true,
+    templateRepository: config.assignment.template.repository,
+    ...templateCommitSha === void 0 ? {} : { templateCommitSha },
+    createdAt: observedAt,
+    lastObservedAt: observedAt
+  },
+  permissions: {},
+  actions: {
+    enabled: false
+  },
+  lifecycle: {
+    repositoryArchived: false,
+    studentAccessRemoved: false,
+    status: "created",
+    lastChangedAt: observedAt
+  },
+  warnings: [],
+  errors: []
+});
+var createInitialManifest = async (config, plan, githubClient) => {
+  const parsedTemplate = parseTemplateRepository(
+    config.course.github.organization,
+    config.assignment.template.repository
+  );
+  const templateRepository = parsedTemplate.status === "success" ? await githubClient.getTemplateRepository(parsedTemplate.repository.owner, parsedTemplate.repository.repo).catch(() => null) : null;
+  return createEmptyManifest({
+    assignment: {
+      termCode: config.summary.termCode,
+      courseCode: config.course.course.code,
+      assignmentSlug: config.summary.assignmentSlug,
+      assignmentTitle: config.assignment.assignment.title
+    },
+    source: {
+      sourceFiles: plan.source.source_files,
+      inputFingerprint: plan.source.input_fingerprint
+    },
+    template: {
+      repository: config.assignment.template.repository,
+      branch: config.assignment.template.branch,
+      ...templateRepository?.latestCommitSha === void 0 ? {} : { commitSha: templateRepository.latestCommitSha }
+    }
+  });
+};
+var persistManifest = (state, manifestPath) => {
+  const writeResult = writeManifest(manifestPath, state.manifest);
+  if (writeResult.status === "failure" && writeResult.diagnostic !== void 0) {
+    return recordError(state, writeResult.diagnostic);
+  }
+  return state;
+};
+var recordWarning = (state, diagnostic) => ({
+  ...state,
+  warnings: [...state.warnings, diagnostic],
+  summary: {
+    ...state.summary,
+    warnings: state.summary.warnings + 1
+  }
+});
+var recordError = (state, diagnostic) => ({
+  ...state,
+  errors: [...state.errors, diagnostic],
+  summary: {
+    ...state.summary,
+    failed: state.summary.failed + 1,
+    errors: state.summary.errors + 1
+  }
+});
+var incrementSummary = (state, key) => ({
+  ...state,
+  summary: {
+    ...state.summary,
+    [key]: state.summary[key] + 1
+  }
+});
+var hasAtLeastPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] >= PERMISSION_RANK[expectedPermission];
+var hasHigherPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] > PERMISSION_RANK[expectedPermission];
+var executeCreateRepository = async (input, state, operation, observedAt) => {
+  const student = findStudent(input.students, operation);
+  if (student === void 0 || operation.repository_name === void 0) {
+    return state;
+  }
+  const repositoryName = operation.repository_name;
+  try {
+    const parsedTemplate = parseTemplateRepository(
+      input.config.course.github.organization,
+      input.config.assignment.template.repository
+    );
+    if (parsedTemplate.status === "failure") {
+      return recordError(state, parsedTemplate.diagnostic);
+    }
+    await runGitHubOperation(
+      input,
+      () => input.githubClient.createRepositoryFromTemplate({
+        templateOwner: parsedTemplate.repository.owner,
+        templateRepo: parsedTemplate.repository.repo,
+        owner: input.config.course.github.organization,
+        name: repositoryName,
+        private: PRIVATE_REPOSITORY
+      })
+    );
+    const repository = await runGitHubOperation(
+      input,
+      () => input.githubClient.getRepository(input.config.course.github.organization, repositoryName)
+    );
+    if (repository === null) {
+      return recordError(
+        state,
+        createRepositoryCreationNotObservedDiagnostic(
+          operation,
+          input.config.course.github.organization,
+          repositoryName
+        )
+      );
+    }
+    const manifest = upsertRepositoryRecord(
+      state.manifest,
+      createManifestRecord(
+        input.config,
+        student,
+        repository,
+        observedAt,
+        state.manifest.template.commitSha
+      )
+    );
+    return persistManifest(
+      incrementSummary(
+        {
+          ...state,
+          manifest
+        },
+        "created"
+      ),
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeStudentCollaborator = async (input, state, operation, observedAt) => {
+  if (operation.repository_name === void 0 || operation.github_username === void 0) {
+    return state;
+  }
+  const repositoryName = operation.repository_name;
+  const githubUsername = operation.github_username;
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const currentPermission = await runGitHubOperation(
+      input,
+      () => input.githubClient.getCollaboratorPermission(
+        input.config.course.github.organization,
+        repositoryName,
+        githubUsername
+      )
+    );
+    let nextState = state;
+    if (hasAtLeastPermission(currentPermission.permission, STUDENT_PERMISSION2)) {
+      nextState = incrementSummary(nextState, "noop");
+      if (hasHigherPermission(currentPermission.permission, STUDENT_PERMISSION2)) {
+        nextState = recordWarning(
+          nextState,
+          createPermissionWarning(operation, currentPermission.permission, STUDENT_PERMISSION2)
+        );
+      }
+    } else {
+      await runGitHubOperation(
+        input,
+        () => input.githubClient.addCollaborator({
+          owner: input.config.course.github.organization,
+          repo: repositoryName,
+          username: githubUsername,
+          permission: STUDENT_PERMISSION2
+        })
+      );
+      nextState = incrementSummary(nextState, "verified");
+    }
+    const collaborators = await runGitHubOperation(
+      input,
+      () => input.githubClient.listCollaboratorPermissions(
+        input.config.course.github.organization,
+        repositoryName
+      )
+    );
+    for (const collaborator of collaborators) {
+      if (collaborator.username !== githubUsername) {
+        nextState = recordWarning(
+          nextState,
+          createUnexpectedCollaboratorWarning(
+            operation,
+            collaborator.username,
+            collaborator.permission
+          )
+        );
+      }
+    }
+    return persistManifest(
+      {
+        ...nextState,
+        manifest: updatePermissionState(nextState.manifest, {
+          studentId: operation.student_id ?? "",
+          permissions: {
+            student: {
+              username: githubUsername,
+              permission: currentPermission.permission === "none" ? STUDENT_PERMISSION2 : currentPermission.permission,
+              pendingInvite: currentPermission.pendingInvite,
+              lastObservedAt: observedAt,
+              lastAppliedAt: observedAt
+            }
+          }
+        })
+      },
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeTeamPermission = async (input, state, operation, teamSlug, expectedPermission, observedAt) => {
+  if (operation.repository_name === void 0) {
+    return state;
+  }
+  const repositoryName = operation.repository_name;
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const currentPermission = await runGitHubOperation(
+      input,
+      () => input.githubClient.getTeamPermission(
+        input.config.course.github.organization,
+        repositoryName,
+        teamSlug
+      )
+    );
+    let nextState = state;
+    if (hasAtLeastPermission(currentPermission.permission, expectedPermission)) {
+      nextState = incrementSummary(nextState, "noop");
+      if (hasHigherPermission(currentPermission.permission, expectedPermission)) {
+        nextState = recordWarning(
+          nextState,
+          createPermissionWarning(operation, currentPermission.permission, expectedPermission)
+        );
+      }
+    } else {
+      await runGitHubOperation(
+        input,
+        () => input.githubClient.addTeamPermission({
+          owner: input.config.course.github.organization,
+          repo: repositoryName,
+          teamSlug,
+          permission: expectedPermission
+        })
+      );
+      nextState = incrementSummary(nextState, "verified");
+    }
+    return persistManifest(
+      {
+        ...nextState,
+        manifest: updatePermissionState(nextState.manifest, {
+          studentId: operation.student_id ?? "",
+          permissions: operation.type === "add_faculty_team_permission" ? {
+            facultyTeam: {
+              teamSlug,
+              permission: currentPermission.permission === "none" ? expectedPermission : currentPermission.permission,
+              lastObservedAt: observedAt,
+              lastAppliedAt: observedAt
+            }
+          } : {
+            graderTeam: {
+              teamSlug,
+              permission: currentPermission.permission === "none" ? expectedPermission : currentPermission.permission,
+              lastObservedAt: observedAt,
+              lastAppliedAt: observedAt
+            }
+          }
+        })
+      },
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeEnableActions = async (input, state, operation, observedAt) => {
+  if (operation.repository_name === void 0) {
+    return state;
+  }
+  const repositoryName = operation.repository_name;
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const actionsState = await runGitHubOperation(
+      input,
+      () => input.githubClient.getActionsState(input.config.course.github.organization, repositoryName)
+    );
+    let nextState = state;
+    if (actionsState === "enabled") {
+      nextState = incrementSummary(nextState, "noop");
+    } else {
+      await runGitHubOperation(
+        input,
+        () => input.githubClient.enableActions(input.config.course.github.organization, repositoryName)
+      );
+      nextState = incrementSummary(nextState, "verified");
+    }
+    return persistManifest(
+      {
+        ...nextState,
+        manifest: updateActionsState(nextState.manifest, {
+          studentId: operation.student_id ?? "",
+          actions: {
+            enabled: DEFAULT_ACTIONS_ENABLED,
+            lastObservedAt: observedAt
+          }
+        })
+      },
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
+  if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
+    return state;
+  }
+  const repositoryName = operation.repository_name;
+  const workflowPath = input.config.course.grading.workflow;
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const workflow = await runGitHubOperation(
+      input,
+      () => input.githubClient.getWorkflow(
+        input.config.course.github.organization,
+        repositoryName,
+        workflowDispatchIdentifier
+      )
+    );
+    if (workflow === null) {
+      const diagnostic = createWorkflowMissingDiagnostic(operation);
+      return persistManifest(
+        recordError(
+          {
+            ...state,
+            manifest: updateActionsState(state.manifest, {
+              studentId: operation.student_id ?? "",
+              actions: {
+                gradingWorkflowPath: workflowPath,
+                gradingWorkflowFound: false,
+                lastObservedAt: observedAt
+              }
+            })
+          },
+          diagnostic
+        ),
+        input.manifestPath
+      );
+    }
+    return persistManifest(
+      incrementSummary(
+        {
+          ...state,
+          manifest: updateActionsState(state.manifest, {
+            studentId: operation.student_id ?? "",
+            actions: {
+              gradingWorkflowPath: workflow.path,
+              gradingWorkflowFound: true,
+              lastObservedAt: observedAt
+            }
+          })
+        },
+        "verified"
+      ),
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeVerifyDispatch = async (input, state, operation, observedAt) => {
+  if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
+    return state;
+  }
+  const repositoryName = operation.repository_name;
+  const workflowPath = input.config.course.grading.workflow;
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
+  if (findManifestRecord(state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  try {
+    const workflow = await runGitHubOperation(
+      input,
+      () => input.githubClient.getWorkflow(
+        input.config.course.github.organization,
+        repositoryName,
+        workflowDispatchIdentifier
+      )
+    );
+    if (workflow === null || !workflow.supportsDispatch) {
+      const diagnostic = createWorkflowDispatchDiagnostic(operation);
+      return persistManifest(
+        recordError(
+          {
+            ...state,
+            manifest: updateActionsState(state.manifest, {
+              studentId: operation.student_id ?? "",
+              actions: {
+                workflowDispatchSupported: false,
+                lastObservedAt: observedAt
+              }
+            })
+          },
+          diagnostic
+        ),
+        input.manifestPath
+      );
+    }
+    return persistManifest(
+      incrementSummary(
+        {
+          ...state,
+          manifest: updateActionsState(state.manifest, {
+            studentId: operation.student_id ?? "",
+            actions: {
+              workflowDispatchSupported: true,
+              lastObservedAt: observedAt
+            }
+          })
+        },
+        "verified"
+      ),
+      input.manifestPath
+    );
+  } catch (error) {
+    return recordError(state, normalizeGitHubError(error));
+  }
+};
+var executeOperation = async (input, state, operation, observedAt) => {
+  if (operation.status === "skipped") {
+    return incrementSummary(state, "skipped");
+  }
+  if (operation.status === "noop") {
+    return incrementSummary(state, "existing");
+  }
+  if (operation.status !== "planned") {
+    return state;
+  }
+  if (operation.type === "create_repository_from_template") {
+    return executeCreateRepository(input, state, operation, observedAt);
+  }
+  if (operation.type === "add_student_collaborator") {
+    return executeStudentCollaborator(input, state, operation, observedAt);
+  }
+  if (operation.type === "add_faculty_team_permission") {
+    return executeTeamPermission(
+      input,
+      state,
+      operation,
+      input.config.course.github.faculty_team,
+      FACULTY_PERMISSION2,
+      observedAt
+    );
+  }
+  if (operation.type === "add_grader_team_permission") {
+    return executeTeamPermission(
+      input,
+      state,
+      operation,
+      input.config.course.github.grader_team,
+      GRADER_PERMISSION2,
+      observedAt
+    );
+  }
+  if (operation.type === "enable_actions") {
+    return executeEnableActions(input, state, operation, observedAt);
+  }
+  if (operation.type === "verify_grading_workflow") {
+    return executeVerifyWorkflow(input, state, operation, observedAt);
+  }
+  return executeVerifyDispatch(input, state, operation, observedAt);
+};
+var executeApplyPlan = async (input) => {
+  const initialManifest = input.manifest ?? await createInitialManifest(input.config, input.plan, input.githubClient);
+  let state = {
+    manifest: initialManifest,
+    summary: createEmptySummary2(),
+    warnings: [],
+    errors: []
+  };
+  const observedAt = input.clock.now().toISOString();
+  for (const operation of input.plan.operations) {
+    state = await executeOperation(input, state, operation, observedAt);
+  }
+  return state;
+};
+
+// src/execution/mutation-guard.ts
+var EMPTY_COUNT4 = 0;
+var createMutationBlockedDiagnostic = () => createConfigDiagnostic(
+  DiagnosticCode.MutationBlocked,
+  "Apply is blocked because the computed plan contains blocked operations or errors."
+);
+var createConfirmationRequiredDiagnostic = () => createConfigDiagnostic(
+  DiagnosticCode.ConfirmationRequired,
+  "Apply requires --yes in non-interactive execution before making GitHub mutations."
+);
+var evaluateMutationGuard = ({
+  plan,
+  options
+}) => {
+  const hasBlockedOperations = plan.operations.some((operation) => operation.status === "blocked");
+  if (hasBlockedOperations || plan.errors.length > EMPTY_COUNT4) {
+    return {
+      allowed: false,
+      errors: [createMutationBlockedDiagnostic(), ...plan.errors]
+    };
+  }
+  if (!options.yes) {
+    return {
+      allowed: false,
+      errors: [createConfirmationRequiredDiagnostic()]
+    };
+  }
+  return {
+    allowed: true,
+    errors: []
+  };
 };
 
 // src/github/github-readiness-validation.ts
@@ -3667,7 +3978,7 @@ var createTemplateNotTemplateDiagnostic = (reference) => createConfigDiagnostic(
     repository: reference.fullName
   }
 );
-var createTemplateBranchMissingDiagnostic = (reference) => createConfigDiagnostic(
+var createTemplateBranchMissingDiagnostic2 = (reference) => createConfigDiagnostic(
   DiagnosticCode.TemplateBranchMissing,
   `Template repository ${reference.fullName} does not contain branch ${reference.branch}.`,
   {
@@ -3695,7 +4006,7 @@ var createTemplateReadmeMissingDiagnostic = (reference) => createConfigDiagnosti
 );
 var validateTemplateRepositoryFields = (reference, templateRepository) => [
   ...templateRepository.isTemplate ? [] : [createTemplateNotTemplateDiagnostic(reference)],
-  ...templateRepository.branches.includes(reference.branch) ? [] : [createTemplateBranchMissingDiagnostic(reference)],
+  ...templateRepository.branches.includes(reference.branch) ? [] : [createTemplateBranchMissingDiagnostic2(reference)],
   ...templateRepository.defaultBranch === reference.branch ? [] : [createTemplateBranchNotDefaultDiagnostic(reference, templateRepository)],
   ...templateRepository.files.includes(README_FILE) ? [] : [createTemplateReadmeMissingDiagnostic(reference)]
 ];
@@ -5221,17 +5532,17 @@ var createDashboardGithubRequestDiagnostic = (error, message, context) => {
   }
   return createConfigDiagnostic(DASHBOARD_GITHUB_REQUEST_FAILED_CODE, message, context);
 };
-var createTemplateRepositoryMissingDiagnostic = (assignment) => createConfigDiagnostic(
+var createTemplateRepositoryMissingDiagnostic2 = (assignment) => createConfigDiagnostic(
   DASHBOARD_TEMPLATE_REPOSITORY_MISSING_CODE,
   `Template repository ${assignment.templateRepository ?? ""} was not found.`,
   createAssignmentDiagnosticContext(assignment)
 );
-var createTemplateBranchMissingDiagnostic2 = (assignment) => createConfigDiagnostic(
+var createTemplateBranchMissingDiagnostic3 = (assignment) => createConfigDiagnostic(
   DASHBOARD_TEMPLATE_BRANCH_MISSING_CODE,
   `Template branch ${assignment.templateBranch ?? ""} was not found.`,
   createAssignmentDiagnosticContext(assignment)
 );
-var createGradingWorkflowMissingDiagnostic = (assignment, workflowPath) => createConfigDiagnostic(
+var createGradingWorkflowMissingDiagnostic2 = (assignment, workflowPath) => createConfigDiagnostic(
   DASHBOARD_GRADING_WORKFLOW_MISSING_CODE,
   `Configured grading workflow ${workflowPath} was not found in the template repository.`,
   {
@@ -5239,7 +5550,7 @@ var createGradingWorkflowMissingDiagnostic = (assignment, workflowPath) => creat
     checkedPath: workflowPath
   }
 );
-var createWorkflowDispatchMissingDiagnostic = (assignment, workflowPath) => createConfigDiagnostic(
+var createWorkflowDispatchMissingDiagnostic2 = (assignment, workflowPath) => createConfigDiagnostic(
   DASHBOARD_WORKFLOW_DISPATCH_MISSING_CODE,
   `Configured grading workflow ${workflowPath} does not define workflow_dispatch.`,
   {
@@ -5355,7 +5666,7 @@ var withAssignmentGithubResult = (assignment, diagnostics, github) => ({
   needsAttention: getAttentionCount(diagnostics) > EMPTY_COUNT8,
   github
 });
-var inspectWorkflowDispatch = (assignment, workflowPath, workflowContent) => {
+var inspectWorkflowDispatch2 = (assignment, workflowPath, workflowContent) => {
   const parseResult = parseYaml(workflowContent, workflowPath);
   if (parseResult.status === "failure") {
     return {
@@ -5368,7 +5679,7 @@ var inspectWorkflowDispatch = (assignment, workflowPath, workflowContent) => {
   if (!hasWorkflowDispatchTrigger(parseResult.value)) {
     return {
       status: GITHUB_STATUS_MISSING,
-      diagnostics: [createWorkflowDispatchMissingDiagnostic(assignment, workflowPath)]
+      diagnostics: [createWorkflowDispatchMissingDiagnostic2(assignment, workflowPath)]
     };
   }
   return {
@@ -5397,7 +5708,7 @@ var checkWorkflowReadiness = async (cache, githubClient, assignment, owner, repo
     if (workflowContent === null) {
       const workflowDiagnostics2 = [
         ...diagnostics,
-        createGradingWorkflowMissingDiagnostic(assignment, workflowPath)
+        createGradingWorkflowMissingDiagnostic2(assignment, workflowPath)
       ];
       return withAssignmentGithubResult(assignment, workflowDiagnostics2, {
         ...currentGithub,
@@ -5405,7 +5716,7 @@ var checkWorkflowReadiness = async (cache, githubClient, assignment, owner, repo
         workflowDispatch: GITHUB_STATUS_NOT_CHECKED
       });
     }
-    const dispatchResult = inspectWorkflowDispatch(assignment, workflowPath, workflowContent);
+    const dispatchResult = inspectWorkflowDispatch2(assignment, workflowPath, workflowContent);
     const workflowDiagnostics = [...diagnostics, ...dispatchResult.diagnostics];
     return withAssignmentGithubResult(assignment, workflowDiagnostics, {
       ...currentGithub,
@@ -5468,7 +5779,7 @@ var checkAssignmentGithubReadiness = async (cache, githubClient, courseConfig, l
     if (templateRepository === null) {
       const diagnostics = [
         ...assignment.diagnostics,
-        createTemplateRepositoryMissingDiagnostic(assignment)
+        createTemplateRepositoryMissingDiagnostic2(assignment)
       ];
       return {
         ...loadedAssignment,
@@ -5481,7 +5792,7 @@ var checkAssignmentGithubReadiness = async (cache, githubClient, courseConfig, l
     if (!hasTemplateBranch(templateRepository, branch)) {
       const diagnostics = [
         ...assignment.diagnostics,
-        createTemplateBranchMissingDiagnostic2(assignment)
+        createTemplateBranchMissingDiagnostic3(assignment)
       ];
       return {
         ...loadedAssignment,
@@ -5993,7 +6304,7 @@ var createWorkflowMissingDiagnostic2 = (student, repository, workflowPath) => cr
     workflowPath
   }
 );
-var createWorkflowDispatchMissingDiagnostic2 = (student, repository, workflowPath) => createConfigDiagnostic(
+var createWorkflowDispatchMissingDiagnostic3 = (student, repository, workflowPath) => createConfigDiagnostic(
   DiagnosticCode.WorkflowDispatchMissing,
   "Configured grading workflow does not support manual dispatch.",
   {
@@ -6050,7 +6361,7 @@ var dispatchForStudent = async (input, state, student, configuredWorkflowPath) =
     if (!workflow.supportsDispatch) {
       return recordFailure(
         state,
-        createWorkflowDispatchMissingDiagnostic2(student, repository, configuredWorkflowPath)
+        createWorkflowDispatchMissingDiagnostic3(student, repository, configuredWorkflowPath)
       );
     }
     await runGitHubOperation2(

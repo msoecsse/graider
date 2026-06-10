@@ -7,15 +7,131 @@ import {
   runAssignmentDetailCommand
 } from "../../src/cli/commands/assignment.command.js";
 import type { AssignmentDetailResult } from "../../src/assignment-detail/assignment-detail-models.js";
+import {
+  FakeGitHubClient,
+  type FakeRepositoryFileRecord
+} from "../../src/github/fake-github-client.js";
+import type { GitHubClient } from "../../src/github/github-client.js";
+import type { GitHubTemplateRepository } from "../../src/github/github-models.js";
 
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
+const ORGANIZATION = "example-org";
+const TEMPLATE_REPOSITORY_NAME = "lab04-template";
+const TEMPLATE_BRANCH = "main";
+const WORKFLOW_PATH = "grade.yml";
+const FAKE_TOKEN = "ghp_fake_assignment_detail_token";
 const VALID_CONFIG_ROOT = path.resolve("tests/fixtures/config/valid-course");
 const GRADING_DISABLED_ROOT = path.resolve("tests/fixtures/config/grading-disabled");
 const VALID_ROSTER_ROOT = path.resolve("tests/fixtures/roster/valid-course");
 const INVALID_ASSIGNMENT_ROOT = path.resolve("tests/fixtures/config/missing-assignment-field");
 const REPORT_FIXTURE_ROOT = path.resolve("tests/fixtures/report/publish-success");
 const TEMP_FIXTURE_PREFIX = "graider-assignment-detail-";
-const EMPTY_COUNT = 0;
+const NO_CALLS = 0;
+
+const assignmentDetailEnv = {
+  GRAIDER_GITHUB_TOKEN: FAKE_TOKEN
+};
+
+const WORKFLOW_WITH_DISPATCH = `name: Grade
+on:
+  workflow_dispatch:
+`;
+const WORKFLOW_WITH_LIST_DISPATCH = `name: Grade
+on:
+  - push
+  - workflow_dispatch
+`;
+const WORKFLOW_WITH_QUOTED_DISPATCH = `name: Grade
+"on":
+  workflow_dispatch:
+`;
+const WORKFLOW_WITHOUT_DISPATCH = `name: Grade
+on:
+  push:
+`;
+
+const templateRepository = (
+  branches: readonly string[] = [TEMPLATE_BRANCH]
+): GitHubTemplateRepository => ({
+  owner: ORGANIZATION,
+  name: TEMPLATE_REPOSITORY_NAME,
+  fullName: `${ORGANIZATION}/${TEMPLATE_REPOSITORY_NAME}`,
+  id: TEMPLATE_REPOSITORY_NAME.length,
+  private: true,
+  archived: false,
+  defaultBranch: TEMPLATE_BRANCH,
+  htmlUrl: `https://github.com/${ORGANIZATION}/${TEMPLATE_REPOSITORY_NAME}`,
+  isTemplate: true,
+  branches: [...branches],
+  files: ["README.md"],
+  latestCommitSha: "template-sha"
+});
+
+const workflowFile = (
+  content: string = WORKFLOW_WITH_DISPATCH,
+  branch: string = TEMPLATE_BRANCH
+): FakeRepositoryFileRecord => ({
+  owner: ORGANIZATION,
+  repo: TEMPLATE_REPOSITORY_NAME,
+  path: WORKFLOW_PATH,
+  content,
+  message: "Seed workflow",
+  commitSha: "workflow-sha",
+  branch
+});
+
+const createReadyClient = (
+  options: {
+    readonly templateRepositories?: GitHubTemplateRepository[];
+    readonly repositoryFiles?: FakeRepositoryFileRecord[];
+  } = {}
+): FakeGitHubClient =>
+  new FakeGitHubClient({
+    templateRepositories: options.templateRepositories ?? [templateRepository()],
+    repositoryFiles: options.repositoryFiles ?? [workflowFile()]
+  });
+
+class CountingAssignmentDetailGitHubClient extends FakeGitHubClient {
+  templateRepositoryReads = 0;
+  workflowRunReads = 0;
+  artifactReads = 0;
+
+  override getTemplateRepository(
+    owner: string,
+    repo: string
+  ): ReturnType<FakeGitHubClient["getTemplateRepository"]> {
+    this.templateRepositoryReads += 1;
+
+    return super.getTemplateRepository(owner, repo);
+  }
+
+  override listWorkflowRuns(
+    input: Parameters<FakeGitHubClient["listWorkflowRuns"]>[0]
+  ): ReturnType<FakeGitHubClient["listWorkflowRuns"]> {
+    this.workflowRunReads += 1;
+
+    return super.listWorkflowRuns(input);
+  }
+
+  override downloadArtifact(
+    input: Parameters<FakeGitHubClient["downloadArtifact"]>[0]
+  ): ReturnType<FakeGitHubClient["downloadArtifact"]> {
+    this.artifactReads += 1;
+
+    return super.downloadArtifact(input);
+  }
+}
+
+const expectNoMutations = (githubClient: FakeGitHubClient): void => {
+  expect(githubClient.mutations.createdRepositories).toEqual([]);
+  expect(githubClient.mutations.addedCollaborators).toEqual([]);
+  expect(githubClient.mutations.removedCollaborators).toEqual([]);
+  expect(githubClient.mutations.teamPermissions).toEqual([]);
+  expect(githubClient.mutations.enabledActions).toEqual([]);
+  expect(githubClient.mutations.workflowDispatches).toEqual([]);
+  expect(githubClient.mutations.archivedRepositories).toEqual([]);
+  expect(githubClient.mutations.fileWrites).toEqual([]);
+};
 
 const copyFixtureToTemp = (fixtureRoot: string): string => {
   const destinationRoot = fs.mkdtempSync(path.join(os.tmpdir(), TEMP_FIXTURE_PREFIX));
@@ -27,12 +143,15 @@ const copyFixtureToTemp = (fixtureRoot: string): string => {
 const runDetail = (
   cwd: string,
   options: Parameters<typeof runAssignmentDetailCommand>[0]["options"] = { json: true },
-  assignmentFile = ASSIGNMENT_FILE
-): AssignmentDetailResult =>
+  assignmentFile = ASSIGNMENT_FILE,
+  githubClient: GitHubClient = createReadyClient()
+): Promise<AssignmentDetailResult> =>
   runAssignmentDetailCommand({
     cwd,
     assignmentFile,
-    options
+    options,
+    env: assignmentDetailEnv,
+    githubClient
   });
 
 const appendAssignmentYaml = (cwd: string, yaml: string): void => {
@@ -51,8 +170,8 @@ const listFiles = (cwd: string): string[] =>
     .sort((left, right) => left.localeCompare(right));
 
 describe("graider assignment detail command", () => {
-  it("requires JSON output and returns a JSON failure shape", () => {
-    const result = runDetail(VALID_CONFIG_ROOT, {});
+  it("requires JSON output and returns a JSON failure shape", async () => {
+    const result = await runDetail(VALID_CONFIG_ROOT, {});
     const json = JSON.parse(formatAssignmentDetailResultAsJson(result)) as AssignmentDetailResult;
 
     expect(json.schemaVersion).toBe(1);
@@ -66,8 +185,8 @@ describe("graider assignment detail command", () => {
     expect(json.sections).toEqual([]);
   });
 
-  it("returns the assignment detail JSON contract for a valid assignment", () => {
-    const result = runDetail(VALID_CONFIG_ROOT);
+  it("returns the assignment detail JSON contract for a valid assignment", async () => {
+    const result = await runDetail(VALID_CONFIG_ROOT);
 
     expect(result).toMatchObject({
       schemaVersion: 1,
@@ -105,7 +224,9 @@ describe("graider assignment detail command", () => {
       template: {
         repository: "example-org/lab04-template",
         branch: "main",
-        status: "not_checked"
+        status: "available",
+        repositoryStatus: "available",
+        branchStatus: "available"
       },
       grading: {
         enabled: true,
@@ -113,8 +234,8 @@ describe("graider assignment detail command", () => {
         workflow: "grade.yml",
         artifact: "grading-results",
         resultFile: "results.json",
-        workflowStatus: "not_checked",
-        workflowDispatch: "not_checked"
+        workflowStatus: "available",
+        workflowDispatch: "available"
       },
       studentReports: {
         enabled: false,
@@ -135,8 +256,163 @@ describe("graider assignment detail command", () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  it("includes roster section, active student, and total student counts", () => {
-    const result = runDetail(VALID_ROSTER_ROOT);
+  it("marks a missing template repository as partial success", async () => {
+    const result = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      new FakeGitHubClient()
+    );
+
+    expect(result.status).toBe("partial_success");
+    expect(result.template).toMatchObject({
+      status: "missing",
+      repositoryStatus: "missing",
+      branchStatus: "not_checked"
+    });
+    expect(result.grading).toMatchObject({
+      workflowStatus: "not_checked",
+      workflowDispatch: "not_checked"
+    });
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "assignment_detail_template_repository_missing" })
+    ]);
+  });
+
+  it("marks a missing template branch as partial success", async () => {
+    const result = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      createReadyClient({ templateRepositories: [templateRepository(["develop"])] })
+    );
+
+    expect(result.status).toBe("partial_success");
+    expect(result.template).toMatchObject({
+      status: "branch_missing",
+      repositoryStatus: "available",
+      branchStatus: "branch_missing"
+    });
+    expect(result.grading).toMatchObject({
+      workflowStatus: "not_checked",
+      workflowDispatch: "not_checked"
+    });
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "assignment_detail_template_branch_missing" })
+    ]);
+  });
+
+  it("marks a missing grading workflow as partial success", async () => {
+    const result = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      createReadyClient({ repositoryFiles: [] })
+    );
+
+    expect(result.status).toBe("partial_success");
+    expect(result.grading).toMatchObject({
+      workflowStatus: "missing",
+      workflowDispatch: "not_checked"
+    });
+    expect(result.actions?.grade.available).toBe(false);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "assignment_detail_grading_workflow_missing" })
+    ]);
+  });
+
+  it("detects missing workflow_dispatch and supports list and quoted workflow triggers", async () => {
+    const missingDispatch = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      createReadyClient({ repositoryFiles: [workflowFile(WORKFLOW_WITHOUT_DISPATCH)] })
+    );
+    const listDispatch = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      createReadyClient({ repositoryFiles: [workflowFile(WORKFLOW_WITH_LIST_DISPATCH)] })
+    );
+    const quotedDispatch = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      createReadyClient({ repositoryFiles: [workflowFile(WORKFLOW_WITH_QUOTED_DISPATCH)] })
+    );
+
+    expect(missingDispatch.status).toBe("partial_success");
+    expect(missingDispatch.grading).toMatchObject({
+      workflowStatus: "available",
+      workflowDispatch: "missing"
+    });
+    expect(missingDispatch.diagnostics).toEqual([
+      expect.objectContaining({ code: "assignment_detail_workflow_dispatch_missing" })
+    ]);
+    expect(listDispatch.grading).toMatchObject({
+      workflowStatus: "available",
+      workflowDispatch: "available"
+    });
+    expect(quotedDispatch.grading).toMatchObject({
+      workflowStatus: "available",
+      workflowDispatch: "available"
+    });
+  });
+
+  it("maps GitHub permission, rate limit, and request failures to safe diagnostics", async () => {
+    const inaccessibleClient = createReadyClient();
+    inaccessibleClient.failNext("getTemplateRepository", "permission_denied");
+    const rateLimitedClient = createReadyClient();
+    rateLimitedClient.failNext("getRepositoryFileContent", "rate_limited", {
+      retryAfterSeconds: 60
+    });
+    const requestFailedClient = createReadyClient();
+    requestFailedClient.failNext("getRepositoryFileContent", "network_error");
+
+    const inaccessible = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      inaccessibleClient
+    );
+    const rateLimited = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      rateLimitedClient
+    );
+    const requestFailed = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      requestFailedClient
+    );
+    const output = formatAssignmentDetailResultAsJson(rateLimited);
+
+    expect(inaccessible.template).toMatchObject({
+      status: "inaccessible",
+      repositoryStatus: "inaccessible",
+      branchStatus: "inaccessible"
+    });
+    expect(inaccessible.diagnostics).toEqual([
+      expect.objectContaining({ code: "assignment_detail_github_permission_denied" })
+    ]);
+    expect(rateLimited.grading).toMatchObject({
+      workflowStatus: "error",
+      workflowDispatch: "error"
+    });
+    expect(rateLimited.diagnostics).toEqual([
+      expect.objectContaining({ code: "assignment_detail_github_rate_limited" })
+    ]);
+    expect(requestFailed.diagnostics).toEqual([
+      expect.objectContaining({ code: "assignment_detail_github_request_failed" })
+    ]);
+    expect(output).not.toContain(FAKE_TOKEN);
+    expect(output).not.toContain("Authorization");
+  });
+
+  it("includes roster section, active student, and total student counts", async () => {
+    const result = await runDetail(VALID_ROSTER_ROOT);
 
     expect(result.status).toBe("success");
     expect(result.roster).toEqual({
@@ -147,8 +423,12 @@ describe("graider assignment detail command", () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  it("reports missing assignment files as failure JSON", () => {
-    const result = runDetail(VALID_CONFIG_ROOT, { json: true }, "terms/27s1/assignments/nope.yml");
+  it("reports missing assignment files as failure JSON", async () => {
+    const result = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      "terms/27s1/assignments/nope.yml"
+    );
 
     expect(result.status).toBe("failure");
     expect(result.exitCode).toBe(1);
@@ -158,8 +438,8 @@ describe("graider assignment detail command", () => {
     expect(result.assignment).toBeNull();
   });
 
-  it("reports invalid assignment config as failure JSON diagnostics", () => {
-    const result = runDetail(INVALID_ASSIGNMENT_ROOT);
+  it("reports invalid assignment config as failure JSON diagnostics", async () => {
+    const result = await runDetail(INVALID_ASSIGNMENT_ROOT);
 
     expect(result.status).toBe("failure");
     expect(result.diagnostics).toEqual([
@@ -168,8 +448,8 @@ describe("graider assignment detail command", () => {
     expect(result.assignment).toBeNull();
   });
 
-  it("keeps assignment detail available when roster files are missing", () => {
-    const result = runDetail(GRADING_DISABLED_ROOT);
+  it("keeps assignment detail available when roster files are missing", async () => {
+    const result = await runDetail(GRADING_DISABLED_ROOT);
 
     expect(result.status).toBe("partial_success");
     expect(result.assignment?.slug).toBe("lab04");
@@ -183,8 +463,9 @@ describe("graider assignment detail command", () => {
     ]);
   });
 
-  it("represents no-grading assignments without requiring workflow fields", () => {
+  it("represents no-grading assignments without requiring workflow checks", async () => {
     const cwd = copyFixtureToTemp(VALID_ROSTER_ROOT);
+    const githubClient = createReadyClient();
 
     appendAssignmentYaml(
       cwd,
@@ -193,7 +474,7 @@ describe("graider assignment detail command", () => {
 `
     );
 
-    const result = runDetail(cwd);
+    const result = await runDetail(cwd, { json: true }, ASSIGNMENT_FILE, githubClient);
 
     expect(result.status).toBe("success");
     expect(result.grading).toEqual({
@@ -207,9 +488,38 @@ describe("graider assignment detail command", () => {
     });
     expect(result.actions?.grade.available).toBe(false);
     expect(result.actions?.generateWorkflow.available).toBe(false);
+    expect(githubClient.fileReads).toHaveLength(NO_CALLS);
   });
 
-  it("includes student report publishing configuration and action availability", () => {
+  it("keeps readiness checks bounded and performs no GitHub mutations or scans", async () => {
+    const githubClient = new CountingAssignmentDetailGitHubClient({
+      templateRepositories: [templateRepository()],
+      repositoryFiles: [workflowFile()]
+    });
+
+    const result = await runDetail(
+      VALID_CONFIG_ROOT,
+      { json: true },
+      ASSIGNMENT_FILE,
+      githubClient
+    );
+
+    expect(result.status).toBe("success");
+    expect(githubClient.templateRepositoryReads).toBe(1);
+    expect(githubClient.fileReads).toEqual([
+      {
+        owner: ORGANIZATION,
+        repo: TEMPLATE_REPOSITORY_NAME,
+        path: WORKFLOW_PATH,
+        ref: TEMPLATE_BRANCH
+      }
+    ]);
+    expect(githubClient.workflowRunReads).toBe(NO_CALLS);
+    expect(githubClient.artifactReads).toBe(NO_CALLS);
+    expectNoMutations(githubClient);
+  });
+
+  it("includes student report publishing configuration and action availability", async () => {
     const cwd = copyFixtureToTemp(VALID_ROSTER_ROOT);
 
     appendCourseYaml(
@@ -223,7 +533,7 @@ describe("graider assignment detail command", () => {
 `
     );
 
-    const result = runDetail(cwd);
+    const result = await runDetail(cwd);
 
     expect(result.studentReports).toMatchObject({
       enabled: true,
@@ -235,23 +545,39 @@ describe("graider assignment detail command", () => {
     expect(result.actions?.publishStudentReports.available).toBe(true);
   });
 
-  it("reports applied state when a local manifest exists", () => {
-    const result = runDetail(REPORT_FIXTURE_ROOT);
+  it("reports applied state when a local manifest exists", async () => {
+    const result = await runDetail(REPORT_FIXTURE_ROOT);
 
     expect(result.applyState).toEqual({ status: "applied" });
   });
 
-  it("does not require GRAIDER_GITHUB_TOKEN and does not mutate local files", () => {
+  it("returns local detail plus token_required readiness when token is missing", async () => {
     const cwd = copyFixtureToTemp(VALID_ROSTER_ROOT);
     const before = listFiles(cwd);
     const originalToken = process.env.GRAIDER_GITHUB_TOKEN;
 
     try {
       Reflect.deleteProperty(process.env, "GRAIDER_GITHUB_TOKEN");
-      const result = runDetail(cwd);
+      const result = await runAssignmentDetailCommand({
+        cwd,
+        assignmentFile: ASSIGNMENT_FILE,
+        options: { json: true },
+        env: {}
+      });
 
-      expect(result.status).toBe("success");
-      expect(result.diagnostics).toHaveLength(EMPTY_COUNT);
+      expect(result.status).toBe("partial_success");
+      expect(result.template).toMatchObject({
+        status: "token_required",
+        repositoryStatus: "token_required",
+        branchStatus: "token_required"
+      });
+      expect(result.grading).toMatchObject({
+        workflowStatus: "token_required",
+        workflowDispatch: "token_required"
+      });
+      expect(result.diagnostics).toEqual([
+        expect.objectContaining({ code: "github_token_required" })
+      ]);
       expect(listFiles(cwd)).toEqual(before);
     } finally {
       if (originalToken !== undefined) {

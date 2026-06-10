@@ -233,9 +233,9 @@ runs, artifacts, report contents, or per-student grading results.
 
 ### `assignment detail <assignment.yml> --json`
 
-`assignment detail --json` builds the read-only local backend model for the
-future Electron assignment detail page. It does not require
-`GRAIDER_GITHUB_TOKEN` in Slice 11A and does not call GitHub.
+`assignment detail --json` builds the read-only backend model for the future
+Electron assignment detail page. It returns local detail and bounded GitHub
+readiness when a token is available.
 
 Useful top-level fields include:
 
@@ -277,7 +277,9 @@ Useful top-level fields include:
   "template": {
     "repository": "graider-sandbox/csc1120L2Template",
     "branch": "main",
-    "status": "not_checked"
+    "status": "available",
+    "repositoryStatus": "available",
+    "branchStatus": "available"
   },
   "grading": {
     "enabled": true,
@@ -285,8 +287,8 @@ Useful top-level fields include:
     "workflow": ".github/workflows/grade.yml",
     "artifact": "grading-results",
     "resultFile": "grading-results.json",
-    "workflowStatus": "not_checked",
-    "workflowDispatch": "not_checked"
+    "workflowStatus": "available",
+    "workflowDispatch": "available"
   },
   "applyState": {
     "status": "not_applied"
@@ -296,13 +298,15 @@ Useful top-level fields include:
 ```
 
 The command loads course, term, assignment, roster summary, student report
-publishing config, and lightweight local apply state. In Slice 11A, GitHub
-readiness fields use `not_checked` or `not_required`; template repository,
-branch, workflow, and `workflow_dispatch` checks are deferred to Slice 11B.
+publishing config, and lightweight local apply state. With a token, it checks
+template repository availability, template branch availability, the configured
+grading workflow file, and `workflow_dispatch` support. Without a token, local
+detail still returns with `partial_success` and `token_required` readiness
+statuses.
 
 The command is read-only. It does not create repositories, dispatch grading,
 generate workflows, publish reports, inspect workflow runs, download artifacts,
-or parse grading result artifacts.
+parse grading result artifacts, or scan student repositories.
 
 ### `apply --json`
 

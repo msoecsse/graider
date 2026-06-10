@@ -1,12 +1,19 @@
 import type { ReactElement } from "react";
 import { CourseTermCard } from "./CourseTermCard";
-import type { CombinedDashboardCard } from "./dashboardTypes";
+import type { CombinedDashboardCard, RecentAssignmentSummary } from "./dashboardTypes";
 
 interface CourseCardGridProps {
   readonly cards: readonly CombinedDashboardCard[];
+  readonly onOpenAssignment: (
+    combinedCard: CombinedDashboardCard,
+    assignment: RecentAssignmentSummary
+  ) => void;
 }
 
-export const CourseCardGrid = ({ cards }: CourseCardGridProps): ReactElement | null => {
+export const CourseCardGrid = ({
+  cards,
+  onOpenAssignment
+}: CourseCardGridProps): ReactElement | null => {
   if (cards.length === 0) {
     return null;
   }
@@ -19,7 +26,7 @@ export const CourseCardGrid = ({ cards }: CourseCardGridProps): ReactElement | n
       </div>
       <div className="course-card-grid">
         {cards.map((card) => (
-          <CourseTermCard combinedCard={card} key={card.id} />
+          <CourseTermCard combinedCard={card} key={card.id} onOpenAssignment={onOpenAssignment} />
         ))}
       </div>
     </section>

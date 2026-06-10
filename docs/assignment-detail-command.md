@@ -15,9 +15,14 @@ with `assignment_detail_json_required`.
 
 ## Scope
 
-Slice 11A is local-only and read-only. It loads course, term, assignment, roster,
-and lightweight local apply-state data. It does not require
-`GRAIDER_GITHUB_TOKEN` and does not call GitHub.
+The command is read-only. It loads course, term, assignment, roster, lightweight
+local apply-state data, and bounded GitHub readiness when a token is available.
+
+If `GRAIDER_GITHUB_TOKEN` or another project-supported token source is present,
+the command checks the configured template repository, template branch, grading
+workflow file, and `workflow_dispatch` trigger. If no token is available, the
+command still returns local detail with `partial_success` and
+`token_required` readiness statuses.
 
 The command does not:
 
@@ -29,6 +34,7 @@ The command does not:
 - download artifacts
 - inspect workflow runs
 - parse grading artifacts
+- scan student repositories
 
 ## JSON Shape
 
@@ -77,7 +83,9 @@ Successful responses use command name `assignment detail` and schema version `1`
   "template": {
     "repository": "graider-sandbox/csc1120L2Template",
     "branch": "main",
-    "status": "not_checked"
+    "status": "available",
+    "repositoryStatus": "available",
+    "branchStatus": "available"
   },
   "grading": {
     "enabled": true,
@@ -85,8 +93,8 @@ Successful responses use command name `assignment detail` and schema version `1`
     "workflow": ".github/workflows/grade.yml",
     "artifact": "grading-results",
     "resultFile": "grading-results.json",
-    "workflowStatus": "not_checked",
-    "workflowDispatch": "not_checked"
+    "workflowStatus": "available",
+    "workflowDispatch": "available"
   },
   "studentReports": {
     "enabled": false,
@@ -130,14 +138,34 @@ Successful responses use command name `assignment detail` and schema version `1`
 }
 ```
 
-## Local-Only Status Fields
+## GitHub Readiness Fields
 
-GitHub-backed readiness is deferred to Slice 11B. In 11A:
+GitHub-backed readiness uses a bounded set of checks:
 
-- `template.status` is `not_checked`.
-- `grading.workflowStatus` is `not_checked` for grading-enabled assignments.
-- `grading.workflowDispatch` is `not_checked` for grading-enabled assignments.
-- no-grading assignments use `not_required` for workflow fields.
+- template repository existence/accessibility
+- configured template branch existence
+- configured grading workflow file content in the template repository branch
+- `workflow_dispatch` support in that workflow file
+
+The command does not list repositories, inspect workflow runs, download
+artifacts, or inspect student repositories.
+
+Readiness status values include:
+
+```text
+available
+missing
+inaccessible
+branch_missing
+token_required
+not_checked
+not_required
+error
+```
+
+When the token is missing, local detail still returns and GitHub-dependent fields
+use `token_required`. No-grading assignments use `not_required` for workflow
+fields and do not fetch workflow content.
 
 No-grading assignments are represented as:
 
@@ -158,7 +186,22 @@ No-grading assignments are represented as:
 The command reuses existing local config and roster diagnostics. Missing or
 invalid assignment config returns `status: "failure"` with safe diagnostics.
 Roster problems return `status: "partial_success"` when the assignment detail
-model can still be built.
+model can still be built. GitHub readiness problems also return
+`partial_success` when local assignment detail can still be rendered.
+
+GitHub readiness diagnostics include:
+
+```text
+github_token_required
+assignment_detail_template_repository_missing
+assignment_detail_template_branch_missing
+assignment_detail_grading_workflow_missing
+assignment_detail_workflow_dispatch_missing
+assignment_detail_github_auth_failed
+assignment_detail_github_permission_denied
+assignment_detail_github_rate_limited
+assignment_detail_github_request_failed
+```
 
 Diagnostics must not include tokens, authorization headers, raw environments,
 artifact contents, or raw stack traces.
@@ -169,5 +212,6 @@ The Electron UI should use this command as the backend source for the future
 read-only assignment detail page. UI code should not parse `assignment.yml`
 directly.
 
-Slice 11B may add GitHub-backed template repository, branch, workflow, and
-`workflow_dispatch` checks.
+The UI can show local detail even when readiness is `token_required`, `missing`,
+`inaccessible`, or `error`, and should present diagnostics instead of blocking
+the entire page.

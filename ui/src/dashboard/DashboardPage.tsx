@@ -4,6 +4,8 @@ import type {
   CourseFolderDashboardResult,
   CourseFolderRecord
 } from "../../electron/ipc";
+import { AssignmentDetailPage } from "../assignment-detail/AssignmentDetailPage";
+import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
 import { CourseCardGrid } from "./CourseCardGrid";
 import { CourseFolderList } from "./CourseFolderList";
 import { DashboardToolbar } from "./DashboardToolbar";
@@ -15,6 +17,7 @@ import {
   type DashboardSortOption,
   type DashboardViewFilter
 } from "./dashboardFilters";
+import type { CombinedDashboardCard, RecentAssignmentSummary } from "./dashboardTypes";
 
 const getSafeErrorMessage = (error: unknown): string =>
   error instanceof Error && error.message.trim().length > 0
@@ -35,6 +38,9 @@ export const DashboardPage = (): ReactElement => {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewFilter, setViewFilter] = useState<DashboardViewFilter>("active");
   const [sortOption, setSortOption] = useState<DashboardSortOption>("newest-first");
+  const [selectedAssignment, setSelectedAssignment] = useState<AssignmentDetailSelection | null>(
+    null
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -181,6 +187,28 @@ export const DashboardPage = (): ReactElement => {
     }
   };
 
+  const handleOpenAssignmentDetail = (
+    combinedCard: CombinedDashboardCard,
+    assignment: RecentAssignmentSummary
+  ): void => {
+    if (assignment.assignmentFile === null) {
+      setErrorMessage("Assignment file path is unavailable for this dashboard row.");
+    } else {
+      setSelectedAssignment({
+        courseFolderId: combinedCard.sourceFolderId,
+        courseFolderPath: combinedCard.sourceFolderPath,
+        assignmentFile: assignment.assignmentFile,
+        assignmentTitle: assignment.title,
+        assignmentSlug: assignment.slug,
+        assignmentStatus: assignment.status,
+        courseTitle: combinedCard.card.courseTitle,
+        courseSlug: combinedCard.card.courseSlug,
+        termTitle: combinedCard.card.termTitle,
+        termSlug: combinedCard.card.termSlug
+      });
+    }
+  };
+
   const isRefreshing = isRefreshingAll || refreshingId !== null;
   const aggregatedDashboard = aggregateDashboardResults(refreshResults);
   const hasCourseFolders = courseFolders.length > 0;
@@ -196,6 +224,17 @@ export const DashboardPage = (): ReactElement => {
     viewFilter
   );
   const hasFilteredOutCards = aggregatedDashboard.cards.length > 0 && visibleCards.length === 0;
+
+  if (selectedAssignment !== null) {
+    return (
+      <AssignmentDetailPage
+        selection={selectedAssignment}
+        onBack={() => {
+          setSelectedAssignment(null);
+        }}
+      />
+    );
+  }
 
   return (
     <main className="dashboard-shell" aria-labelledby="dashboard-title">
@@ -259,7 +298,7 @@ export const DashboardPage = (): ReactElement => {
         {!isLoadingFolders && hasCourseFolders ? (
           <>
             <FolderErrorPanel folderErrors={visibleFolderErrors} />
-            <CourseCardGrid cards={visibleCards} />
+            <CourseCardGrid cards={visibleCards} onOpenAssignment={handleOpenAssignmentDetail} />
 
             {isRefreshingAll ? <p className="loading-state">Loading dashboard...</p> : null}
 

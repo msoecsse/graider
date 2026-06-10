@@ -1,6 +1,6 @@
 # Electron Dashboard Developer Guide
 
-This guide documents the Electron dashboard implementation completed in UI-1A through UI-1E. It is operational documentation for developers changing the desktop UI before UI-2.
+This guide documents the Electron dashboard implementation completed in UI-1A through UI-1E and the read-only assignment detail page added in UI-2A. It is operational documentation for developers changing the desktop UI before mutation workflows are added.
 
 ## Overview
 
@@ -11,8 +11,10 @@ The UI is an Electron desktop dashboard with a React/TypeScript/Vite renderer. U
 - Combines returned course-term cards from all refreshed folders.
 - Renders a GitHub Classroom-inspired dashboard with recent assignments, needs-attention badges, diagnostics, and folder-level errors.
 - Provides local-only search, view filtering, and sorting over already-loaded dashboard cards.
+- Opens a read-only assignment detail page from recent assignment rows.
+- Runs `graider assignment detail <assignment.yml> --json` for assignment detail data.
 
-UI-1 does not mutate course repositories, GitHub repositories, workflows, reports, or student data.
+The current UI is read-only. It does not mutate course repositories, GitHub repositories, workflows, reports, or student data.
 
 ## Run Locally
 
@@ -102,6 +104,7 @@ graider-ui:course-registry:select-folder
 graider-ui:course-registry:remove
 graider-ui:dashboard:refresh-course-folder
 graider-ui:dashboard:refresh-all
+graider-ui:assignment-detail:get
 ```
 
 There is no generic `runCommand`, `execute`, `shell`, `readFile`, or `writeFile` IPC. Preserve that boundary.
@@ -158,7 +161,7 @@ The command runner uses `spawn(command, args, ...)` with argument arrays and `sh
 
 Dashboard stdout is parsed in the main process. If stdout is valid dashboard JSON, the UI receives the parsed response even when the command exits nonzero. If stdout is not valid dashboard JSON, the main process returns a structured error with bounded sanitized snippets.
 
-UI-1 does not run these commands:
+The dashboard and detail views do not run these mutation or report commands:
 
 ```text
 apply
@@ -168,7 +171,7 @@ publish
 workflow generate
 ```
 
-UI-2 assignment detail should use the read-only backend command:
+Assignment detail uses the read-only backend command:
 
 ```bash
 graider assignment detail <assignment.yml> --json
@@ -176,8 +179,64 @@ graider assignment detail <assignment.yml> --json
 
 That command returns local assignment, course, term, roster, grading, student
 report, apply-state, action availability, and diagnostics data for one
-assignment. UI code should not parse `assignment.yml` directly and should not
-import Graider backend modules.
+assignment. With a token, it also performs bounded read-only checks for the
+template repository, template branch, configured grading workflow file, and
+`workflow_dispatch`. If no token is available, it still returns local detail
+with `partial_success` and `token_required` readiness fields.
+
+UI code should not parse `assignment.yml` directly and should not import Graider
+backend modules. Assignment detail refresh must not run apply, grade, report,
+publish, workflow generation, workflow run scans, artifact downloads, or student
+repository scans.
+
+## Assignment Detail Page
+
+Assignment rows with a stable `assignmentFile` open the read-only assignment detail page. The renderer passes the source folder id/path and dashboard-provided assignment file path through:
+
+```text
+window.graiderUI.getAssignmentDetail(...)
+```
+
+The main process runs:
+
+```bash
+graider assignment detail <assignment.yml> --json
+```
+
+with:
+
+```text
+cwd = registered course folder path
+```
+
+Token resolution follows the same precedence used by dashboard refresh. The assignment detail page renders returned JSON only; it does not parse `assignment.yml` directly.
+
+The page renders:
+
+```text
+assignment header
+summary metadata
+template readiness
+grading readiness
+student report publishing mode
+roster and sections
+diagnostics
+future action placeholders
+```
+
+`partial_success` responses still render available local detail and diagnostics. Token-required readiness statuses show setup guidance without hiding local assignment data.
+
+Mutation actions remain placeholders:
+
+```text
+Apply assignment
+Grade submissions
+Generate report
+Publish student reports
+Generate/update workflow
+```
+
+Those buttons must stay disabled until their dedicated slices add safe preview/confirmation flows. The detail page's refresh/validate affordance only reruns the assignment detail command.
 
 ## GitHub Token Resolution
 
@@ -258,7 +317,7 @@ Recently refreshed
 
 Newest first uses the most recent assignment `dueAt`, then source folder refresh time, then display title. Other sorts use simple deterministic lexicographic or count-based rules.
 
-Assignment rows are read-only in UI-1. They do not run commands or navigate to details.
+Assignment rows with an assignment file path open the read-only detail page. Search/filter/sort remain local-only and do not run detail commands. Detail loading happens only after a user opens an assignment row or refreshes the detail page.
 
 ## Diagnostics And Errors
 
@@ -268,9 +327,11 @@ User-visible error states include:
 GitHub token required
 Graider CLI not found
 invalid dashboard JSON
+invalid assignment detail JSON
 folder not found
 folder refresh failed
 partial folder failure
+assignment detail load failure
 ```
 
 Diagnostics display safe code/severity/message fields and safe path context when supplied by the CLI. Diagnostics and command errors must not include tokens, authorization headers, raw environments, or raw stack traces by default.
@@ -294,18 +355,22 @@ Before handing off dashboard UI changes:
 - Confirm the Needs attention filter shows attention cards or folder errors.
 - Confirm All shows inactive/archived cards if loaded.
 - Confirm sort options reorder cards.
+- Click a recent assignment row and confirm the assignment detail page opens.
+- Confirm summary, template, grading, roster, diagnostics, and action panels render.
+- Confirm Refresh detail reruns detail loading without mutating anything.
+- Confirm Back to dashboard preserves loaded dashboard cards.
+- Confirm action buttons for Apply, Grade, Report, Publish, and Generate workflow are disabled/placeholders.
 - Confirm folder-level failures do not hide successful cards.
 - Remove a folder from the dashboard.
 - Confirm the folder is not deleted from disk.
 - Launch without `GRAIDER_GITHUB_TOKEN` and confirm `gh auth token` fallback works when GitHub CLI is authenticated.
 - Confirm no token is rendered or logged.
 
-## UI-1 Non-Goals
+## Current Non-Goals
 
-UI-1 intentionally does not implement:
+The current read-only UI intentionally does not implement:
 
 ```text
-assignment detail page
 apply workflow
 grade dispatch
 report generation
@@ -324,7 +389,7 @@ persistent token storage
 Likely future work:
 
 ```text
-UI-2: Assignment Detail Read-Only View
+UI-2B: Assignment Detail Follow-Up / Validation Diagnostics
 UI-3: Validation Diagnostics View
 UI-4: Apply Preview and Confirm
 UI-5: Grade Dispatch View

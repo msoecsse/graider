@@ -9,6 +9,10 @@ import type {
 
 interface CourseTermCardProps {
   readonly combinedCard: CombinedDashboardCard;
+  readonly onOpenAssignment: (
+    combinedCard: CombinedDashboardCard,
+    assignment: RecentAssignmentSummary
+  ) => void;
 }
 
 const getSubtitle = (card: DashboardCard): string => {
@@ -63,7 +67,10 @@ const getAssignmentTitle = (assignment: RecentAssignmentSummary): string =>
 const getAssignmentMeta = (assignment: RecentAssignmentSummary): string | null =>
   assignment.status ?? assignment.slug ?? null;
 
-export const CourseTermCard = ({ combinedCard }: CourseTermCardProps): ReactElement => {
+export const CourseTermCard = ({
+  combinedCard,
+  onOpenAssignment
+}: CourseTermCardProps): ReactElement => {
   const { card } = combinedCard;
   const title = getCardTitle(card);
   const summaryParts = getSummaryParts(card);
@@ -105,24 +112,36 @@ export const CourseTermCard = ({ combinedCard }: CourseTermCardProps): ReactElem
                     assignment.slug ?? assignment.assignmentFile ?? getAssignmentTitle(assignment)
                   }
                 >
-                  <div>
-                    <span className="assignment-list__title">{getAssignmentTitle(assignment)}</span>
-                    {getAssignmentMeta(assignment) === null ? null : (
-                      <span className="assignment-list__meta">
-                        <span className="assignment-list__status">
-                          {getAssignmentMeta(assignment)}
-                        </span>
+                  <button
+                    className="assignment-list__button"
+                    type="button"
+                    disabled={assignment.assignmentFile === null}
+                    aria-label={`Open assignment detail for ${getAssignmentTitle(assignment)}`}
+                    onClick={() => {
+                      onOpenAssignment(combinedCard, assignment);
+                    }}
+                  >
+                    <span>
+                      <span className="assignment-list__title">
+                        {getAssignmentTitle(assignment)}
                       </span>
-                    )}
-                  </div>
-                  {assignment.needsAttention ? (
-                    <span
-                      className="assignment-list__attention"
-                      aria-label={`${getAssignmentTitle(assignment)} needs attention`}
-                    >
-                      Needs attention
+                      {getAssignmentMeta(assignment) === null ? null : (
+                        <span className="assignment-list__meta">
+                          <span className="assignment-list__status">
+                            {getAssignmentMeta(assignment)}
+                          </span>
+                        </span>
+                      )}
                     </span>
-                  ) : null}
+                    {assignment.needsAttention ? (
+                      <span
+                        className="assignment-list__attention"
+                        aria-label={`${getAssignmentTitle(assignment)} needs attention`}
+                      >
+                        Needs attention
+                      </span>
+                    ) : null}
+                  </button>
                 </li>
               ))}
             </ul>

@@ -8,6 +8,8 @@ import {
   ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE,
   createConfigDiagnostic
 } from "../../diagnostics/error-catalog.js";
+import type { GitHubClient } from "../../github/github-client.js";
+import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
 
 const COMMAND_NAME = "assignment";
 const DETAIL_COMMAND_NAME = "detail";
@@ -21,6 +23,8 @@ export interface AssignmentDetailCommandRequest {
   readonly cwd: string;
   readonly assignmentFile: string;
   readonly options: AssignmentDetailCommandOptions;
+  readonly env?: Record<string, string | undefined>;
+  readonly githubClient?: GitHubClient;
 }
 
 const createJsonRequiredResult = (): AssignmentDetailResult =>
@@ -31,16 +35,36 @@ const createJsonRequiredResult = (): AssignmentDetailResult =>
     )
   ]);
 
+const resolveGitHubClient = (
+  githubClient: GitHubClient | undefined,
+  token: string | undefined
+): GitHubClient | undefined => {
+  if (githubClient !== undefined) {
+    return githubClient;
+  }
+
+  return token === undefined ? undefined : createGitHubClient({ token });
+};
+
 export const runAssignmentDetailCommand = ({
   cwd,
   assignmentFile,
-  options
-}: AssignmentDetailCommandRequest): AssignmentDetailResult => {
+  options,
+  env = process.env,
+  githubClient
+}: AssignmentDetailCommandRequest): Promise<AssignmentDetailResult> => {
   if (options.json !== true) {
-    return createJsonRequiredResult();
+    return Promise.resolve(createJsonRequiredResult());
   }
 
-  return buildAssignmentDetail({ cwd, assignmentFile });
+  const token = readGitHubToken(env);
+  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
+
+  return buildAssignmentDetail({
+    cwd,
+    assignmentFile,
+    ...(resolvedGitHubClient === undefined ? {} : { githubClient: resolvedGitHubClient })
+  });
 };
 
 export const formatAssignmentDetailResultAsJson = (result: AssignmentDetailResult): string =>
@@ -56,8 +80,8 @@ export const registerAssignmentCommand = (program: Command): void => {
     .argument("<assignment-file>")
     .option("--json", "Required. Emit assignment detail JSON")
     .description("Build a UI-ready read-only assignment detail model.")
-    .action((assignmentFile: string, options: AssignmentDetailCommandOptions) => {
-      const result = runAssignmentDetailCommand({
+    .action(async (assignmentFile: string, options: AssignmentDetailCommandOptions) => {
+      const result = await runAssignmentDetailCommand({
         cwd: process.cwd(),
         assignmentFile,
         options

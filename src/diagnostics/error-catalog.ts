@@ -122,6 +122,15 @@ export const DiagnosticCode = {
   DashboardGithubRateLimited: "dashboard_github_rate_limited",
   DashboardGithubRequestFailed: "dashboard_github_request_failed",
   AssignmentDetailJsonRequired: "assignment_detail_json_required",
+  GithubTokenRequired: "github_token_required",
+  AssignmentDetailTemplateRepositoryMissing: "assignment_detail_template_repository_missing",
+  AssignmentDetailTemplateBranchMissing: "assignment_detail_template_branch_missing",
+  AssignmentDetailGradingWorkflowMissing: "assignment_detail_grading_workflow_missing",
+  AssignmentDetailWorkflowDispatchMissing: "assignment_detail_workflow_dispatch_missing",
+  AssignmentDetailGithubAuthFailed: "assignment_detail_github_auth_failed",
+  AssignmentDetailGithubPermissionDenied: "assignment_detail_github_permission_denied",
+  AssignmentDetailGithubRateLimited: "assignment_detail_github_rate_limited",
+  AssignmentDetailGithubRequestFailed: "assignment_detail_github_request_failed",
   GithubTokenMissing: "github_token_missing"
 } as const;
 
@@ -257,6 +266,23 @@ export const DASHBOARD_GITHUB_PERMISSION_DENIED_CODE =
 export const DASHBOARD_GITHUB_RATE_LIMITED_CODE = DiagnosticCode.DashboardGithubRateLimited;
 export const DASHBOARD_GITHUB_REQUEST_FAILED_CODE = DiagnosticCode.DashboardGithubRequestFailed;
 export const ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE = DiagnosticCode.AssignmentDetailJsonRequired;
+export const GITHUB_TOKEN_REQUIRED_CODE = DiagnosticCode.GithubTokenRequired;
+export const ASSIGNMENT_DETAIL_TEMPLATE_REPOSITORY_MISSING_CODE =
+  DiagnosticCode.AssignmentDetailTemplateRepositoryMissing;
+export const ASSIGNMENT_DETAIL_TEMPLATE_BRANCH_MISSING_CODE =
+  DiagnosticCode.AssignmentDetailTemplateBranchMissing;
+export const ASSIGNMENT_DETAIL_GRADING_WORKFLOW_MISSING_CODE =
+  DiagnosticCode.AssignmentDetailGradingWorkflowMissing;
+export const ASSIGNMENT_DETAIL_WORKFLOW_DISPATCH_MISSING_CODE =
+  DiagnosticCode.AssignmentDetailWorkflowDispatchMissing;
+export const ASSIGNMENT_DETAIL_GITHUB_AUTH_FAILED_CODE =
+  DiagnosticCode.AssignmentDetailGithubAuthFailed;
+export const ASSIGNMENT_DETAIL_GITHUB_PERMISSION_DENIED_CODE =
+  DiagnosticCode.AssignmentDetailGithubPermissionDenied;
+export const ASSIGNMENT_DETAIL_GITHUB_RATE_LIMITED_CODE =
+  DiagnosticCode.AssignmentDetailGithubRateLimited;
+export const ASSIGNMENT_DETAIL_GITHUB_REQUEST_FAILED_CODE =
+  DiagnosticCode.AssignmentDetailGithubRequestFailed;
 export const GITHUB_TOKEN_MISSING_CODE = DiagnosticCode.GithubTokenMissing;
 
 export const createNotSupportedInMvpDiagnostic = (

@@ -4,7 +4,8 @@ export const IPC_CHANNELS = {
   selectCourseFolder: "graider-ui:course-registry:select-folder",
   removeCourseFolder: "graider-ui:course-registry:remove",
   refreshCourseFolder: "graider-ui:dashboard:refresh-course-folder",
-  refreshDashboard: "graider-ui:dashboard:refresh-all"
+  refreshDashboard: "graider-ui:dashboard:refresh-all",
+  getAssignmentDetail: "graider-ui:assignment-detail:get"
 } as const;
 
 export interface AppInfo {
@@ -44,6 +45,42 @@ export interface DashboardCommandError {
   readonly stdoutSnippet: string | null;
 }
 
+export interface AssignmentDetailRequest {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly assignmentFile: string;
+}
+
+export interface AssignmentDetailJsonResponse {
+  readonly schemaVersion: 1;
+  readonly commandName: "assignment detail";
+  readonly status: string;
+  readonly exitCode: number;
+  readonly diagnostics: readonly unknown[];
+  readonly course: unknown;
+  readonly term: unknown;
+  readonly assignment: unknown;
+  readonly metadata: unknown;
+  readonly deadline: unknown;
+  readonly sections: readonly unknown[];
+  readonly roster: unknown;
+  readonly template: unknown;
+  readonly grading: unknown;
+  readonly studentReports: unknown;
+  readonly applyState: unknown;
+  readonly actions: unknown;
+}
+
+export interface AssignmentDetailResult {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly assignmentFile: string;
+  readonly status: "success" | "failure";
+  readonly detail: AssignmentDetailJsonResponse | null;
+  readonly error: DashboardCommandError | null;
+  readonly refreshedAt: string | null;
+}
+
 export interface CourseFolderDashboardResult {
   readonly courseFolderId: string;
   readonly courseFolderPath: string;
@@ -65,4 +102,7 @@ export interface GraiderUIApi {
   readonly removeCourseFolder: (id: string) => Promise<void>;
   readonly refreshCourseFolder: (id: string) => Promise<CourseFolderDashboardResult>;
   readonly refreshDashboard: () => Promise<CombinedDashboardResult>;
+  readonly getAssignmentDetail: (
+    request: AssignmentDetailRequest
+  ) => Promise<AssignmentDetailResult>;
 }

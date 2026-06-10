@@ -1,6 +1,7 @@
 import path from "node:path";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
 import { createNodeProcessRunner } from "./commandRunner.js";
+import { getAssignmentDetail } from "./assignmentDetailRunner.js";
 import {
   addCourseFolderToRegistry,
   getCourseRegistryPath,
@@ -9,7 +10,7 @@ import {
   removeCourseFolderFromRegistry
 } from "./courseRegistry.js";
 import { refreshCourseFolder, refreshDashboard } from "./dashboardRunner.js";
-import { IPC_CHANNELS, type AppInfo } from "./ipc.js";
+import { IPC_CHANNELS, type AppInfo, type AssignmentDetailRequest } from "./ipc.js";
 
 const DEFAULT_WINDOW_WIDTH = 1180;
 const DEFAULT_WINDOW_HEIGHT = 760;
@@ -32,6 +33,20 @@ export const getRendererDevServerUrl = (
   const configuredUrl = env[VITE_DEV_SERVER_URL_ENV]?.trim();
 
   return configuredUrl === undefined || configuredUrl.length === 0 ? undefined : configuredUrl;
+};
+
+const isAssignmentDetailRequest = (value: unknown): value is AssignmentDetailRequest => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const request = value as Record<string, unknown>;
+
+  return (
+    typeof request.courseFolderId === "string" &&
+    typeof request.courseFolderPath === "string" &&
+    typeof request.assignmentFile === "string"
+  );
 };
 
 export const registerIpcHandlers = (): void => {
@@ -93,6 +108,17 @@ export const registerIpcHandlers = (): void => {
         env: process.env
       })
   );
+
+  ipcMain.handle(IPC_CHANNELS.getAssignmentDetail, async (_event, request: unknown) => {
+    if (!isAssignmentDetailRequest(request)) {
+      throw new Error("Assignment detail request is required.");
+    }
+
+    return await getAssignmentDetail(request, {
+      runner: processRunner,
+      env: process.env
+    });
+  });
 };
 
 export const createMainWindow = (): BrowserWindow => {
