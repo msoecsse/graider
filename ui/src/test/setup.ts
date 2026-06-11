@@ -42,6 +42,15 @@ beforeEach(() => {
         detail: null,
         error: null,
         refreshedAt: null
+      }),
+      getAssignmentApplyPreview: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        preview: null,
+        error: null,
+        refreshedAt: null
       })
     }
   });

@@ -1,11 +1,16 @@
 import { useEffect, useState, type ReactElement } from "react";
 import type {
+  AssignmentDetailResult,
   CombinedDashboardResult,
   CourseFolderDashboardResult,
   CourseFolderRecord
 } from "../../electron/ipc";
+import { ApplyPreviewPage } from "../apply-preview/ApplyPreviewPage";
 import { AssignmentDetailPage } from "../assignment-detail/AssignmentDetailPage";
-import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
+import type {
+  AssignmentDetailSelection,
+  NormalizedAssignmentDetail
+} from "../assignment-detail/assignmentDetailTypes";
 import { CourseCardGrid } from "./CourseCardGrid";
 import { CourseFolderList } from "./CourseFolderList";
 import { DashboardToolbar } from "./DashboardToolbar";
@@ -41,6 +46,12 @@ export const DashboardPage = (): ReactElement => {
   const [selectedAssignment, setSelectedAssignment] = useState<AssignmentDetailSelection | null>(
     null
   );
+  const [selectedAssignmentDetailResult, setSelectedAssignmentDetailResult] =
+    useState<AssignmentDetailResult | null>(null);
+  const [selectedApplyPreview, setSelectedApplyPreview] = useState<{
+    readonly selection: AssignmentDetailSelection;
+    readonly detail: NormalizedAssignmentDetail | null;
+  } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -206,10 +217,11 @@ export const DashboardPage = (): ReactElement => {
         termTitle: combinedCard.card.termTitle,
         termSlug: combinedCard.card.termSlug
       });
+      setSelectedAssignmentDetailResult(null);
+      setSelectedApplyPreview(null);
     }
   };
 
-  const isRefreshing = isRefreshingAll || refreshingId !== null;
   const aggregatedDashboard = aggregateDashboardResults(refreshResults);
   const hasCourseFolders = courseFolders.length > 0;
   const visibleCards = filterAndSortDashboardCards(
@@ -225,12 +237,33 @@ export const DashboardPage = (): ReactElement => {
   );
   const hasFilteredOutCards = aggregatedDashboard.cards.length > 0 && visibleCards.length === 0;
 
+  if (selectedApplyPreview !== null) {
+    return (
+      <ApplyPreviewPage
+        selection={selectedApplyPreview.selection}
+        assignmentDetail={selectedApplyPreview.detail}
+        onBack={() => {
+          setSelectedApplyPreview(null);
+        }}
+      />
+    );
+  }
+
   if (selectedAssignment !== null) {
     return (
       <AssignmentDetailPage
         selection={selectedAssignment}
+        initialLoadResult={selectedAssignmentDetailResult}
+        onDetailLoaded={setSelectedAssignmentDetailResult}
         onBack={() => {
           setSelectedAssignment(null);
+          setSelectedAssignmentDetailResult(null);
+          setSelectedApplyPreview(null);
+        }}
+        onPreviewApply={(selection, detail, loadResult) => {
+          setSelectedAssignment(selection);
+          setSelectedAssignmentDetailResult(loadResult);
+          setSelectedApplyPreview({ selection, detail });
         }}
       />
     );

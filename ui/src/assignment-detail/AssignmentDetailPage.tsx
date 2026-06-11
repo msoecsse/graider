@@ -22,7 +22,7 @@ import type {
 
 const ACTION_LABELS = {
   validate: "Validate / Refresh detail",
-  apply: "Apply assignment",
+  apply: "Preview apply",
   grade: "Grade submissions",
   report: "Generate report",
   publishStudentReports: "Publish student reports",
@@ -469,6 +469,10 @@ const getActionDescription = (action: AssignmentDetailAction, actionKey: ActionK
     return action.reason ?? "Unavailable for this assignment";
   }
 
+  if (actionKey === "apply") {
+    return "Preview what apply would do. No changes are made.";
+  }
+
   if (!action.implemented) {
     return "Coming in a future slice";
   }
@@ -479,11 +483,13 @@ const getActionDescription = (action: AssignmentDetailAction, actionKey: ActionK
 const ActionsPanel = ({
   detail,
   isLoading,
-  onRefresh
+  onRefresh,
+  onPreviewApply
 }: {
   readonly detail: NormalizedAssignmentDetail;
   readonly isLoading: boolean;
   readonly onRefresh: () => void;
+  readonly onPreviewApply: () => void;
 }): ReactElement => (
   <section className="detail-panel" aria-labelledby="assignment-actions-title">
     <h2 id="assignment-actions-title">Available actions</h2>
@@ -491,6 +497,7 @@ const ActionsPanel = ({
       {ACTION_ORDER.map((actionKey) => {
         const action = detail.actions[actionKey];
         const isValidate = actionKey === "validate";
+        const isApplyPreview = actionKey === "apply";
 
         return (
           <div className="assignment-action" key={actionKey}>
@@ -499,8 +506,8 @@ const ActionsPanel = ({
                 isValidate ? "secondary-action" : "secondary-action assignment-action__button"
               }
               type="button"
-              disabled={!isValidate || isLoading || !action.available}
-              onClick={isValidate ? onRefresh : undefined}
+              disabled={(!isValidate && !isApplyPreview) || isLoading || !action.available}
+              onClick={isValidate ? onRefresh : isApplyPreview ? onPreviewApply : undefined}
               aria-describedby={`assignment-action-${actionKey}-description`}
             >
               {ACTION_LABELS[actionKey]}
@@ -517,9 +524,14 @@ const ActionsPanel = ({
 
 export const AssignmentDetailPage = ({
   selection,
-  onBack
+  initialLoadResult = null,
+  onBack,
+  onPreviewApply,
+  onDetailLoaded
 }: AssignmentDetailPageProps): ReactElement => {
-  const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(null);
+  const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(
+    initialLoadResult
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
@@ -536,19 +548,20 @@ export const AssignmentDetailPage = ({
     setIsLoading(true);
 
     try {
-      setLoadResult(
-        await window.graiderUI.getAssignmentDetail({
-          courseFolderId: selection.courseFolderId,
-          courseFolderPath: selection.courseFolderPath,
-          assignmentFile: selection.assignmentFile
-        })
-      );
+      const nextResult = await window.graiderUI.getAssignmentDetail({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        assignmentFile: selection.assignmentFile
+      });
+
+      setLoadResult(nextResult);
+      onDetailLoaded?.(nextResult);
     } catch {
-      setLoadResult({
+      const failureResult = {
         courseFolderId: selection.courseFolderId,
         courseFolderPath: selection.courseFolderPath,
         assignmentFile: selection.assignmentFile,
-        status: "failure",
+        status: "failure" as const,
         detail: null,
         error: {
           code: "assignment_detail_failed",
@@ -558,11 +571,27 @@ export const AssignmentDetailPage = ({
           stderrSnippet: null
         },
         refreshedAt: null
-      });
+      };
+
+      setLoadResult(failureResult);
+      onDetailLoaded?.(failureResult);
     } finally {
       setIsLoading(false);
     }
   };
+
+  const hasInitialResultForSelection =
+    initialLoadResult?.courseFolderId === selection.courseFolderId &&
+    initialLoadResult.assignmentFile === selection.assignmentFile;
+
+  useEffect(() => {
+    if (hasInitialResultForSelection) {
+      setLoadResult(initialLoadResult);
+      onDetailLoaded?.(initialLoadResult);
+    } else {
+      void loadDetail();
+    }
+  }, [selection.assignmentFile, selection.courseFolderId]);
 
   const handleCopy = (copyKey: CopyKey, value: string): void => {
     if (copyFeedbackTimeoutRef.current !== null) {
@@ -580,10 +609,6 @@ export const AssignmentDetailPage = ({
       }, COPY_FEEDBACK_TIMEOUT_MS);
     });
   };
-
-  useEffect(() => {
-    void loadDetail();
-  }, [selection.assignmentFile, selection.courseFolderId]);
 
   useEffect(
     () => () => {
@@ -611,6 +636,16 @@ export const AssignmentDetailPage = ({
           <div className="assignment-detail__header-actions">
             <button className="secondary-action" type="button" onClick={onBack}>
               Back to dashboard
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={detail === null}
+              onClick={() => {
+                onPreviewApply(selection, detail, loadResult);
+              }}
+            >
+              Preview apply
             </button>
             <button
               className="primary-action"
@@ -680,6 +715,9 @@ export const AssignmentDetailPage = ({
                 isLoading={isLoading}
                 onRefresh={() => {
                   void loadDetail();
+                }}
+                onPreviewApply={() => {
+                  onPreviewApply(selection, detail, loadResult);
                 }}
               />
             </div>

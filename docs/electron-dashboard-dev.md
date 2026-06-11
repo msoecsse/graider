@@ -1,8 +1,13 @@
 # Electron Dashboard Developer Guide
 
-This guide documents the Electron dashboard implementation completed in UI-1A through UI-1E and the read-only assignment detail page added and polished in UI-2A/UI-2C. It is operational documentation for developers changing the desktop UI before mutation workflows are added.
+This guide documents the Electron dashboard implementation completed in UI-1A
+through UI-1E, the read-only assignment detail page added and polished in
+UI-2A/UI-2C, and the preview-only Apply Preview page added in UI-3A. It is
+operational documentation for developers changing the desktop UI before
+confirmed mutation workflows are added.
 
-Assignment-detail-specific behavior, smoke tests, and UI-2/UI-3 boundaries live
+Assignment-detail and apply-preview behavior, smoke tests, and UI-2/UI-3
+boundaries live
 in the [Electron Assignment Detail Developer Guide](electron-assignment-detail-dev.md).
 
 ## Overview
@@ -17,9 +22,13 @@ The UI is an Electron desktop dashboard with a React/TypeScript/Vite renderer. U
 - Opens a read-only assignment detail page from recent assignment rows.
 - Runs `graider assignment detail <assignment.yml> --json` for assignment detail data.
 - Derives assignment-detail readiness summaries, needs-attention callouts, and grouped diagnostics in the renderer from the assignment detail JSON.
+- Opens a preview-only Apply Preview page from assignment detail.
+- Runs `graider assignment apply-preview <assignment.yml> --json` for
+  non-mutating apply planning data.
 - Provides renderer-only copy buttons for assignment path, course folder path, template repository, and grading workflow path.
 
-The current UI is read-only. It does not mutate course repositories, GitHub repositories, workflows, reports, or student data.
+The current UI is read-only or preview-only. It does not mutate course
+repositories, GitHub repositories, workflows, reports, or student data.
 
 ## Run Locally
 
@@ -110,6 +119,7 @@ graider-ui:course-registry:remove
 graider-ui:dashboard:refresh-course-folder
 graider-ui:dashboard:refresh-all
 graider-ui:assignment-detail:get
+graider-ui:assignment-apply-preview:get
 ```
 
 There is no generic `runCommand`, `execute`, `shell`, `readFile`, or `writeFile` IPC. Preserve that boundary.
@@ -168,7 +178,8 @@ The command runner uses `spawn(command, args, ...)` with argument arrays and `sh
 
 Dashboard stdout is parsed in the main process. If stdout is valid dashboard JSON, the UI receives the parsed response even when the command exits nonzero. If stdout is not valid dashboard JSON, the main process returns a structured error with bounded sanitized snippets.
 
-The dashboard and detail views do not run these mutation or report commands:
+The dashboard, detail, and apply-preview views do not run these mutation or
+report commands:
 
 ```text
 apply
@@ -195,6 +206,34 @@ UI code should not parse `assignment.yml` directly and should not import Graider
 backend modules. Assignment detail refresh must not run apply, grade, report,
 publish, workflow generation, workflow run scans, artifact downloads, or student
 repository scans.
+
+Apply Preview uses the preview-only backend command:
+
+```bash
+graider assignment apply-preview <assignment.yml> --json
+```
+
+with:
+
+```text
+cwd = registered course folder path
+```
+
+The main process invokes it with an argv array:
+
+```ts
+["assignment", "apply-preview", assignmentFile, "--json"];
+```
+
+Token resolution follows the same precedence used by dashboard refresh and
+assignment detail. The Apply Preview page renders returned JSON only; it does
+not parse `assignment.yml` directly and does not inspect student repositories
+itself.
+
+The UI-3A preview command may report what would be created, updated, skipped,
+blocked, or unknown. It must not run actual apply execution, write manifests,
+generate workflow files, dispatch workflows, create repositories, push commits,
+or publish reports.
 
 ## Assignment Detail Page
 
@@ -262,17 +301,55 @@ Copy workflow path
 
 Copy feedback is temporary and not persisted. Clipboard failures should show a safe `Unable to copy.` message. Copy buttons must not write files or store copied values.
 
-Mutation actions remain placeholders:
+Apply preview and mutation actions:
 
 ```text
-Apply assignment
+Preview apply
 Grade submissions
 Generate report
 Publish student reports
 Generate/update workflow
 ```
 
-Those buttons must stay disabled until their dedicated slices add safe preview/confirmation flows. Disabled buttons should explain that the action is coming in a future slice or unavailable for the assignment. The detail page's refresh/validate affordance only reruns the assignment detail command.
+`Preview apply` opens the UI-3A Apply Preview page and only runs
+`graider assignment apply-preview <assignment.yml> --json`. Grade, report,
+publish, and workflow generation buttons must stay disabled until their
+dedicated slices add safe preview/confirmation flows. Disabled buttons should
+explain that the action is coming in a future slice or unavailable for the
+assignment. The detail page's refresh/validate affordance only reruns the
+assignment detail command.
+
+The Apply Preview page has a disabled final action:
+
+```text
+Apply changes — coming in UI-3B
+```
+
+No confirmed apply command is wired in UI-3A.
+
+## Apply Preview Page
+
+Detailed guidance lives in
+[Electron Assignment Detail Developer Guide](electron-assignment-detail-dev.md).
+
+The Apply Preview page opens from Assignment Detail, auto-runs the preview
+command, and shows:
+
+```text
+assignment/course/term context
+preview-only notice
+target sections and student count
+template readiness
+grading readiness
+repository plan summary counts
+per-student repository preview rows
+grouped diagnostics and blockers
+disabled Apply changes placeholder
+```
+
+Refresh preview reruns only `getAssignmentApplyPreview`, keeps prior preview
+data visible while loading, and preserves the prior preview if a later refresh
+fails with a safe command error.
 
 UI-2B must not wire any of these commands:
 
@@ -374,10 +451,12 @@ GitHub token required
 Graider CLI not found
 invalid dashboard JSON
 invalid assignment detail JSON
+invalid assignment apply preview JSON
 folder not found
 folder refresh failed
 partial folder failure
 assignment detail load failure
+assignment apply preview load failure
 ```
 
 Diagnostics display safe code/severity/message fields and safe path context when supplied by the CLI. Diagnostics and command errors must not include tokens, authorization headers, raw environments, or raw stack traces by default.
@@ -404,8 +483,16 @@ Before handing off dashboard UI changes:
 - Click a recent assignment row and confirm the assignment detail page opens.
 - Confirm summary, template, grading, roster, diagnostics, and action panels render.
 - Confirm Refresh detail reruns detail loading without mutating anything.
+- Click Preview apply and confirm the Apply Preview page opens.
+- Confirm the preview auto-loads and shows the preview-only notice.
+- Confirm target sections/student count, template readiness, grading readiness,
+  repository summary counts, repository rows, and diagnostics render.
+- Confirm Refresh preview reruns apply preview without mutating anything.
+- Confirm the disabled `Apply changes — coming in UI-3B` button is visible.
+- Confirm Back returns to assignment detail.
 - Confirm Back to dashboard preserves loaded dashboard cards.
-- Confirm action buttons for Apply, Grade, Report, Publish, and Generate workflow are disabled/placeholders.
+- Confirm action buttons for Grade, Report, Publish, Generate workflow, and
+  confirmed Apply are disabled/placeholders.
 - Confirm folder-level failures do not hide successful cards.
 - Remove a folder from the dashboard.
 - Confirm the folder is not deleted from disk.
@@ -418,6 +505,7 @@ The current read-only UI intentionally does not implement:
 
 ```text
 apply workflow
+apply confirm/execute workflow
 grade dispatch
 report generation
 student report publishing
@@ -435,12 +523,10 @@ persistent token storage
 Likely future work:
 
 ```text
-UI-2B: Assignment Detail Follow-Up / Validation Diagnostics
-UI-3: Validation Diagnostics View
-UI-4: Apply Preview and Confirm
-UI-5: Grade Dispatch View
-UI-6: Report Summary View
-UI-7: Student Report Publishing View
-UI-8: Workflow Generation View
-UI-9: Packaging and Faculty Install Flow
+UI-3B: Apply Assignment Confirm and Execute
+UI-4: Grade Dispatch View
+UI-5: Report Summary View
+UI-6: Student Report Publishing View
+UI-7: Workflow Generation View
+UI-8: Packaging and Faculty Install Flow
 ```

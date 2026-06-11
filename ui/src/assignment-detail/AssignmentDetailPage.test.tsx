@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AssignmentDetailJsonResponse,
@@ -102,6 +103,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshCourseFolder: vi.fn(),
     refreshDashboard: vi.fn(),
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
+    getAssignmentApplyPreview: vi.fn(),
     ...api
   };
 
@@ -120,6 +122,28 @@ const mockClipboard = (writeText: ReturnType<typeof vi.fn>): void => {
       writeText
     }
   });
+};
+
+const renderAssignmentDetailPage = (
+  props: Partial<ComponentProps<typeof AssignmentDetailPage>> = {}
+) =>
+  render(
+    <AssignmentDetailPage
+      selection={SELECTION}
+      onBack={vi.fn()}
+      onPreviewApply={vi.fn()}
+      {...props}
+    />
+  );
+
+const getFirstPreviewApplyButton = (): HTMLElement => {
+  const button = screen.getAllByRole("button", { name: "Preview apply" })[0];
+
+  if (button === undefined) {
+    throw new Error("Expected a Preview apply button.");
+  }
+
+  return button;
 };
 
 describe("AssignmentDetailPage", () => {
@@ -153,7 +177,7 @@ describe("AssignmentDetailPage", () => {
       )
     });
 
-    render(<AssignmentDetailPage selection={SELECTION} onBack={vi.fn()} />);
+    renderAssignmentDetailPage();
 
     expect(await screen.findByRole("heading", { level: 2, name: "Readiness" })).toBeInTheDocument();
     expect(screen.getAllByText("Needs attention").length).toBeGreaterThan(0);
@@ -170,7 +194,7 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByText("assignment_detail_template_repository_missing")).toBeInTheDocument();
     expect(screen.getAllByText("Template").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Validate / Refresh detail" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Apply assignment" })).toBeDisabled();
+    expect(getFirstPreviewApplyButton()).toBeEnabled();
     expect(screen.getByRole("button", { name: "Grade submissions" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Generate report" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Publish student reports" })).toBeDisabled();
@@ -207,7 +231,7 @@ describe("AssignmentDetailPage", () => {
       )
     });
 
-    render(<AssignmentDetailPage selection={SELECTION} onBack={vi.fn()} />);
+    renderAssignmentDetailPage();
 
     expect(await screen.findByText("No grading configured.")).toBeInTheDocument();
     expect(screen.getByText("Roster summary unavailable.")).toBeInTheDocument();
@@ -225,7 +249,7 @@ describe("AssignmentDetailPage", () => {
       getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
     });
 
-    render(<AssignmentDetailPage selection={SELECTION} onBack={vi.fn()} />);
+    renderAssignmentDetailPage();
 
     await screen.findByRole("button", { name: "Copy assignment path" });
 
@@ -259,7 +283,7 @@ describe("AssignmentDetailPage", () => {
       getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
     });
 
-    render(<AssignmentDetailPage selection={SELECTION} onBack={vi.fn()} />);
+    renderAssignmentDetailPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "Copy assignment path" }));
 
@@ -279,7 +303,7 @@ describe("AssignmentDetailPage", () => {
       );
 
     mockGraiderUI({ getAssignmentDetail });
-    render(<AssignmentDetailPage selection={SELECTION} onBack={vi.fn()} />);
+    renderAssignmentDetailPage();
 
     expect(await screen.findByText("100")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh detail" }));
@@ -321,7 +345,7 @@ describe("AssignmentDetailPage", () => {
       )
     });
 
-    render(<AssignmentDetailPage selection={SELECTION} onBack={vi.fn()} />);
+    renderAssignmentDetailPage();
 
     expect(
       await screen.findByText("Graider returned invalid assignment detail JSON.")

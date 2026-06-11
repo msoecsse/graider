@@ -5,7 +5,8 @@ export const IPC_CHANNELS = {
   removeCourseFolder: "graider-ui:course-registry:remove",
   refreshCourseFolder: "graider-ui:dashboard:refresh-course-folder",
   refreshDashboard: "graider-ui:dashboard:refresh-all",
-  getAssignmentDetail: "graider-ui:assignment-detail:get"
+  getAssignmentDetail: "graider-ui:assignment-detail:get",
+  getAssignmentApplyPreview: "graider-ui:assignment-apply-preview:get"
 } as const;
 
 export interface AppInfo {
@@ -51,6 +52,8 @@ export interface AssignmentDetailRequest {
   readonly assignmentFile: string;
 }
 
+export type AssignmentApplyPreviewRequest = AssignmentDetailRequest;
+
 export interface AssignmentDetailJsonResponse {
   readonly schemaVersion: 1;
   readonly commandName: "assignment detail";
@@ -81,6 +84,33 @@ export interface AssignmentDetailResult {
   readonly refreshedAt: string | null;
 }
 
+export interface AssignmentApplyPreviewJsonResponse {
+  readonly schemaVersion: 1;
+  readonly commandName: "assignment apply-preview";
+  readonly status: string;
+  readonly exitCode: number;
+  readonly diagnostics: readonly unknown[];
+  readonly assignment: unknown;
+  readonly course: unknown;
+  readonly term: unknown;
+  readonly target: unknown;
+  readonly template: unknown;
+  readonly grading: unknown;
+  readonly plan: unknown;
+  readonly files: unknown;
+  readonly actions: unknown;
+}
+
+export interface AssignmentApplyPreviewResult {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly assignmentFile: string;
+  readonly status: "success" | "failure";
+  readonly preview: AssignmentApplyPreviewJsonResponse | null;
+  readonly error: DashboardCommandError | null;
+  readonly refreshedAt: string | null;
+}
+
 export interface CourseFolderDashboardResult {
   readonly courseFolderId: string;
   readonly courseFolderPath: string;
@@ -105,4 +135,7 @@ export interface GraiderUIApi {
   readonly getAssignmentDetail: (
     request: AssignmentDetailRequest
   ) => Promise<AssignmentDetailResult>;
+  readonly getAssignmentApplyPreview: (
+    request: AssignmentApplyPreviewRequest
+  ) => Promise<AssignmentApplyPreviewResult>;
 }

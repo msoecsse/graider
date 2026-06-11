@@ -843,6 +843,124 @@ h1 {
   width: fit-content;
 }
 
+.preview-only-notice {
+  border: 1px solid #d8dee4;
+  border-left: 5px solid #0969da;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #24292f;
+  font-weight: 800;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.apply-preview-grid .apply-preview-summary,
+.apply-preview-grid .apply-preview-repositories,
+.apply-preview-grid .apply-preview-final-action {
+  grid-column: 1 / -1;
+}
+
+.apply-preview-counts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.apply-preview-counts div {
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  background: #f6f8fa;
+  padding: 14px;
+}
+
+.apply-preview-counts dt {
+  color: #57606a;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.apply-preview-counts dd {
+  color: #24292f;
+  font-size: 1.55rem;
+  font-weight: 800;
+  margin: 4px 0 0;
+}
+
+.apply-preview-table {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+}
+
+.apply-preview-table__header,
+.apply-preview-table__row {
+  display: grid;
+  grid-template-columns:
+    minmax(130px, 0.8fr) minmax(72px, 0.35fr) minmax(220px, 1.35fr) minmax(130px, 0.65fr)
+    minmax(160px, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+}
+
+.apply-preview-table__header {
+  background: #f6f8fa;
+  color: #57606a;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.apply-preview-table__row {
+  border-top: 1px solid #d8dee4;
+}
+
+.apply-preview-table__repository,
+.apply-preview-table__row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.apply-preview-row-diagnostics {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.apply-preview-row-diagnostics li {
+  display: grid;
+  gap: 2px;
+  border-left: 3px solid #bf8700;
+  color: #57606a;
+  padding-left: 8px;
+}
+
+.apply-preview-row-diagnostics strong {
+  color: #24292f;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.apply-preview-row-diagnostics code {
+  color: #57606a;
+  overflow-wrap: anywhere;
+}
+
+.apply-preview-final-action {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.apply-preview-final-action p {
+  color: #57606a;
+  margin-bottom: 0;
+}
+
 @media (max-width: 780px) {
   .app-header__inner {
     align-items: flex-start;
@@ -885,6 +1003,18 @@ h1 {
   }
 
   .assignment-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .apply-preview-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .apply-preview-table__header {
+    display: none;
+  }
+
+  .apply-preview-table__row {
     grid-template-columns: 1fr;
   }
 

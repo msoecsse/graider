@@ -1,10 +1,12 @@
 # Electron Assignment Detail Developer Guide
 
 This guide documents the read-only Electron assignment detail flow delivered in
-UI-2A through UI-2C. It is the reference for preserving the current inspection
-boundary before UI-3 adds preview and confirmed mutation workflows.
+UI-2A through UI-2C and the preview-only UI-3A apply preview page. It is the
+reference for preserving the current inspection and planning boundary before
+UI-3B adds confirmed mutation workflows.
 
 UI-2 is read-only.
+UI-3A is preview-only and still non-mutating.
 
 ## Overview
 
@@ -22,11 +24,12 @@ and renders:
 - template, grading, student report, roster, and section details
 - grouped diagnostics
 - safe copy affordances for useful strings
-- disabled placeholders for future workflow actions
+- a preview-only apply entry point
+- disabled placeholders for future mutation workflow actions
 
-The page does not apply assignments, dispatch grading, generate reports, publish
-reports, generate workflows, edit `assignment.yml`, inspect artifacts, inspect
-workflow runs, scan student repositories, or mutate GitHub.
+The detail page does not apply assignments, dispatch grading, generate reports,
+publish reports, generate workflows, edit `assignment.yml`, inspect artifacts,
+inspect workflow runs, scan student repositories, or mutate GitHub.
 
 ## Navigation Flow
 
@@ -57,6 +60,20 @@ loaded dashboard cards, search, filters, sort, or folder results.
 `Refresh detail` reruns the assignment detail command for the same
 `courseFolderPath` and `assignmentFile`. During refresh, the prior detail result
 remains visible and the refresh button is disabled.
+
+The apply preview path added in UI-3A is:
+
+```text
+Assignment detail page -> Preview apply -> Apply Preview page
+```
+
+The renderer passes the original `courseFolderId`, `courseFolderPath`, and
+`assignmentFile` into the preview page. It may also pass the loaded assignment
+detail JSON as display context. The preview page must not derive the assignment
+file from visible text.
+
+`Back to assignment` returns from Apply Preview to the existing assignment
+detail page state. The loaded detail result is preserved when available.
 
 ## Backend Command Boundary
 
@@ -90,6 +107,25 @@ The renderer:
 - does not access `process.env`
 - does not read raw local files directly
 
+UI-3A adds a second read-only command boundary:
+
+```bash
+graider assignment apply-preview terms/27s1/assignments/lab02/assignment.yml --json
+```
+
+The Electron main process runs it with the same command-runner and token
+resolution boundary:
+
+- `cwd = registered course folder path`
+- an argv array, not a shell-interpolated command string
+- `shell: false`
+- `GRAIDER_GITHUB_TOKEN` supplied from the existing environment token or
+  `gh auth token` fallback when available
+
+The main process parses stdout as apply-preview JSON and returns structured
+success, partial-success, or safe error results to the renderer. It does not
+call apply execution code.
+
 ## IPC Boundary
 
 The assignment detail preload API is:
@@ -108,9 +144,25 @@ The corresponding IPC channel is:
 graider-ui:assignment-detail:get
 ```
 
+The UI-3A apply preview preload API is:
+
+```ts
+window.graiderUI.getAssignmentApplyPreview({
+  courseFolderId: "course-folder-csc1120",
+  courseFolderPath: "/Users/sean/dev/csc1120",
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+});
+```
+
+The corresponding IPC channel is:
+
+```text
+graider-ui:assignment-apply-preview:get
+```
+
 The main process validates that the request shape contains string
 `courseFolderId`, `courseFolderPath`, and `assignmentFile` fields before running
-the command.
+either command.
 
 Current assignment-detail UI copy affordances use the browser clipboard API in
 the renderer. There are no preload APIs for copy.
@@ -132,14 +184,17 @@ results. It must not expose generic shell command execution.
 
 ## Assignment Detail Non-Mutation Guarantees
 
-The assignment detail flow is an inspection surface only:
+The assignment detail and UI-3A apply-preview flows are inspection/planning
+surfaces only:
 
 - Refresh detail only reruns `graider assignment detail <assignment.yml> --json`.
+- Refresh preview only reruns
+  `graider assignment apply-preview <assignment.yml> --json`.
 - Copy buttons only copy strings to the clipboard.
 - Current UI-2C has no open folder or reveal file API.
 - Future open/reveal APIs must only use local OS shell APIs for validated paths
   under registered course folders.
-- Future action buttons are disabled placeholders.
+- The UI-3A `Apply changes — coming in UI-3B` button is disabled.
 - No `apply` command is invoked.
 - No `grade` command is invoked.
 - No `report` command is invoked.
@@ -242,8 +297,62 @@ Shows grouped diagnostics or `No diagnostics.`
 
 ### Available Actions
 
-Shows the action area even though mutation actions are disabled. This keeps the
-faculty workflow visible while preserving the UI-2 read-only boundary.
+Shows the action area. `Validate / Refresh detail` reruns assignment detail.
+`Preview apply` opens the UI-3A Apply Preview page and runs only the preview
+command. Grade, report, publish, and workflow generation actions remain disabled
+placeholders.
+
+## Apply Preview Page
+
+UI-3A adds a separate full-page Apply Preview view. It opens from the assignment
+detail page and auto-runs:
+
+```bash
+graider assignment apply-preview <assignment.yml> --json
+```
+
+The page is preview-only. It shows visible text:
+
+```text
+Preview only — no repositories or files will be changed.
+```
+
+The page renders:
+
+- assignment, course, term, and assignment-file context
+- preview status and a renderer-derived readiness summary
+- target sections, section count, and student count
+- template repository, branch, and readiness status
+- grading enabled/mode, workflow path, workflow file status, and
+  `workflow_dispatch` status
+- repository plan summary counts
+- per-student repository preview rows
+- grouped diagnostics and blockers
+- a disabled final action button:
+  `Apply changes — coming in UI-3B`
+
+Repository row labels must use preview wording:
+
+```text
+Would create
+Would update
+Would skip
+Blocked
+Unknown
+Token required
+```
+
+They must not use past-tense labels such as `Created` or `Updated` for preview
+rows.
+
+`Refresh preview` reruns only the apply-preview command, keeps the prior preview
+visible while loading, and replaces it when the latest result arrives. If a safe
+command error occurs during refresh, the previous preview remains visible when
+available.
+
+Missing-token previews can still render local target rows when the backend
+returns them. The UI shows guidance to authenticate with GitHub CLI and refresh.
+No actual apply command is wired in UI-3A.
 
 ## Diagnostics Behavior
 
@@ -322,6 +431,19 @@ Safe command error messages:
 
 Raw command snippets and token-looking values are not shown in the renderer.
 
+For Apply Preview:
+
+- opening the page shows assignment context immediately when available
+- the page auto-runs `getAssignmentApplyPreview`
+- refresh keeps the prior preview visible
+- `partial_success` still renders available target, readiness, and repository
+  plan data
+- token-required rows render with GitHub token guidance
+- missing CLI renders Graider CLI setup guidance
+- missing assignment file renders `Assignment file not found.`
+- invalid JSON renders `Graider returned invalid apply preview JSON.`
+- fallback failures render `Unable to load apply preview.`
+
 ## Safe Copy/Open Affordances
 
 Current UI-2C copy buttons:
@@ -334,6 +456,9 @@ Current UI-2C copy buttons:
 Copy uses `navigator.clipboard.writeText` in the renderer. It does not write
 files and does not store copied values. Success feedback shows `Copied`.
 Failure feedback shows `Unable to copy.`
+
+The UI-3A Apply Preview page reuses the renderer clipboard pattern for
+`Copy template repository` when a template repository is present.
 
 Local open/reveal is deferred. There is currently no Open course folder or
 Reveal assignment file button on the assignment detail page.
@@ -351,7 +476,7 @@ When local open/reveal is implemented later, required safety rules are:
 Visible actions:
 
 - Validate / Refresh detail
-- Apply assignment
+- Preview apply
 - Grade submissions
 - Generate report
 - Publish student reports
@@ -360,10 +485,19 @@ Visible actions:
 `Validate / Refresh detail` is functional and read-only. It reruns assignment
 detail.
 
-All mutation actions are disabled. Disabled actions show either `Coming in a
-future slice` or `Unavailable for this assignment`, based on the action
-availability returned by the assignment detail JSON. They do not call mutation
-commands.
+`Preview apply` is functional in UI-3A and opens the preview-only Apply Preview
+page. It does not call actual apply execution.
+
+The final apply action lives on the Apply Preview page and is disabled with:
+
+```text
+Apply changes — coming in UI-3B
+```
+
+Grade, report, publish, workflow generation, and confirmed apply remain
+disabled placeholders. Disabled actions show either `Coming in a future slice`
+or `Unavailable for this assignment`, based on the action availability returned
+by the assignment detail JSON. They do not call mutation commands.
 
 ## Manual Smoke-Test Checklist
 
@@ -398,6 +532,20 @@ Checklist:
 - [ ] Copy course folder path works.
 - [ ] Copy template repository works when present.
 - [ ] Copy workflow path works when present.
+- [ ] Click Preview apply.
+- [ ] Apply Preview page opens.
+- [ ] Preview auto-loads.
+- [ ] Preview-only notice appears.
+- [ ] Target panel shows sections and student count.
+- [ ] Template and grading readiness render.
+- [ ] Repository summary counts render.
+- [ ] Repository rows show Would create, Would update, Would skip, Blocked,
+      Unknown, or Token required as applicable.
+- [ ] Diagnostics and blockers render.
+- [ ] Copy template repository works when present on the preview page.
+- [ ] Refresh preview keeps prior preview visible.
+- [ ] Back returns to the assignment detail page.
+- [ ] `Apply changes — coming in UI-3B` is visible and disabled.
 - [ ] Open/reveal local affordance works if implemented. For UI-2C this is
       deferred, so verify no unsafe partial open/reveal API exists.
 - [ ] Refresh detail keeps prior detail visible.
@@ -412,12 +560,14 @@ Edge cases to smoke when fixtures are available:
 - [ ] Missing workflow_dispatch.
 - [ ] Missing roster summary.
 - [ ] Null points, deadline, and LMS assignment ID.
+- [ ] Apply preview repository rows with unknown or token-required status.
+- [ ] Apply preview with no target students if a fixture exists.
 
 ## Future Slice Boundary
 
 Planned boundaries:
 
-- UI-3A: Apply Assignment Preview
+- UI-3A: Apply Assignment Preview, implemented as preview-only UI
 - UI-3B: Apply Assignment Confirm and Execute
 - UI-4: Grade Dispatch View
 - UI-5: Report Summary View

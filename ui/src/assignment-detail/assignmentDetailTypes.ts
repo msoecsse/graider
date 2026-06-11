@@ -146,7 +146,14 @@ export interface NormalizedAssignmentDetail {
 
 export interface AssignmentDetailPageProps {
   readonly selection: AssignmentDetailSelection;
+  readonly initialLoadResult?: AssignmentDetailLoadResult | null;
   readonly onBack: () => void;
+  readonly onPreviewApply: (
+    selection: AssignmentDetailSelection,
+    detail: NormalizedAssignmentDetail | null,
+    loadResult: AssignmentDetailLoadResult | null
+  ) => void;
+  readonly onDetailLoaded?: (loadResult: AssignmentDetailLoadResult | null) => void;
 }
 
 export type AssignmentDetailLoadResult = AssignmentDetailResult;

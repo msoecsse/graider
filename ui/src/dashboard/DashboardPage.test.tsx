@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AssignmentDetailJsonResponse,
+  AssignmentApplyPreviewJsonResponse,
+  AssignmentApplyPreviewResult,
   AssignmentDetailResult,
   CombinedDashboardResult,
   CourseFolderDashboardResult,
@@ -170,6 +172,84 @@ const createAssignmentDetailResult = (
   ...overrides
 });
 
+const createAssignmentApplyPreviewJson = (
+  overrides: Partial<AssignmentApplyPreviewJsonResponse> = {}
+): AssignmentApplyPreviewJsonResponse => ({
+  schemaVersion: 1,
+  commandName: "assignment apply-preview",
+  status: "success",
+  exitCode: 0,
+  diagnostics: [],
+  assignment: {
+    slug: "lab02",
+    title: "Lab 02",
+    file: "terms/27s1/assignments/lab02/assignment.yml",
+    status: "active"
+  },
+  course: { slug: "csc1120", title: "CSC1120" },
+  term: { slug: "27s1", title: "Spring 2027" },
+  target: { sections: ["001"], sectionCount: 1, studentCount: 2 },
+  template: {
+    repository: "graider-sandbox/csc1120L2Template",
+    branch: "main",
+    status: "available",
+    repositoryStatus: "available",
+    branchStatus: "available"
+  },
+  grading: {
+    enabled: true,
+    mode: "custom-workflow",
+    workflow: ".github/workflows/grade.yml",
+    artifact: "grading-results",
+    resultFile: "results.json",
+    workflowStatus: "available",
+    workflowDispatch: "available"
+  },
+  plan: {
+    summary: {
+      wouldCreateRepositories: 1,
+      wouldUpdateRepositories: 1,
+      wouldSkipRepositories: 0,
+      blockedRepositories: 0,
+      unknownRepositories: 0
+    },
+    repositories: [
+      {
+        studentId: "s001",
+        githubUsername: "ada",
+        section: "001",
+        repository: "graider-sandbox/csc1120-lab02-ada",
+        status: "would_create",
+        reason: "student_repository_missing",
+        diagnostics: []
+      }
+    ]
+  },
+  files: {
+    assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+    workflowFile: ".github/workflows/grade.yml",
+    templateSource: "graider-sandbox/csc1120L2Template@main"
+  },
+  actions: {
+    apply: { available: true, implemented: false, previewOnly: true }
+  },
+  ...overrides
+});
+
+const createAssignmentApplyPreviewResult = (
+  overrides: Partial<AssignmentApplyPreviewResult> = {},
+  preview: AssignmentApplyPreviewJsonResponse | null = createAssignmentApplyPreviewJson()
+): AssignmentApplyPreviewResult => ({
+  courseFolderId: COURSE_FOLDER.id,
+  courseFolderPath: COURSE_FOLDER.path,
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+  status: preview === null ? "failure" : "success",
+  preview,
+  error: null,
+  refreshedAt: "2026-06-10T14:00:00.000Z",
+  ...overrides
+});
+
 const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   const graiderUI = {
     getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),
@@ -179,6 +259,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshCourseFolder: vi.fn().mockResolvedValue(createDashboardResult()),
     refreshDashboard: vi.fn().mockResolvedValue(createCombinedDashboardResult([])),
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
+    getAssignmentApplyPreview: vi.fn().mockResolvedValue(createAssignmentApplyPreviewResult()),
     ...api
   };
 
@@ -206,6 +287,16 @@ const getCourseCardHeadingNames = (): string[] =>
     .getAllByRole("heading", { level: 2 })
     .map((heading) => heading.textContent ?? "")
     .filter((text) => text.startsWith("27"));
+
+const getFirstPreviewApplyButton = (): HTMLElement => {
+  const button = screen.getAllByRole("button", { name: "Preview apply" })[0];
+
+  if (button === undefined) {
+    throw new Error("Expected a Preview apply button.");
+  }
+
+  return button;
+};
 
 describe("DashboardPage", () => {
   it("renders the empty course state", async () => {
@@ -993,9 +1084,51 @@ describe("DashboardPage", () => {
     expect(screen.getByText("disabled")).toBeInTheDocument();
     expect(screen.getAllByText("3").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("No diagnostics.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply assignment" })).toBeDisabled();
+    expect(getFirstPreviewApplyButton()).toBeEnabled();
     expect(screen.getByRole("button", { name: "Grade submissions" })).toBeDisabled();
     expect(screen.getAllByText("Coming in a future slice").length).toBeGreaterThan(0);
+  });
+
+  it("opens apply preview from assignment detail and returns to assignment detail", async () => {
+    const getAssignmentDetail = vi.fn().mockResolvedValue(createAssignmentDetailResult());
+    const getAssignmentApplyPreview = vi
+      .fn()
+      .mockResolvedValue(createAssignmentApplyPreviewResult());
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getAssignmentDetail,
+      getAssignmentApplyPreview
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+    expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+
+    fireEvent.click(getFirstPreviewApplyButton());
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Apply Preview" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Preview only — no repositories or files will be changed.")
+    ).toBeInTheDocument();
+    expect(getAssignmentApplyPreview).toHaveBeenCalledWith({
+      courseFolderId: COURSE_FOLDER.id,
+      courseFolderPath: COURSE_FOLDER.path,
+      assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to assignment" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+    expect(getAssignmentDetail).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes assignment detail while preserving prior detail", async () => {

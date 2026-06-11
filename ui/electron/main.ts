@@ -1,5 +1,6 @@
 import path from "node:path";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
+import { getAssignmentApplyPreview } from "./assignmentApplyPreviewRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
 import {
@@ -10,7 +11,12 @@ import {
   removeCourseFolderFromRegistry
 } from "./courseRegistry.js";
 import { refreshCourseFolder, refreshDashboard } from "./dashboardRunner.js";
-import { IPC_CHANNELS, type AppInfo, type AssignmentDetailRequest } from "./ipc.js";
+import {
+  IPC_CHANNELS,
+  type AppInfo,
+  type AssignmentApplyPreviewRequest,
+  type AssignmentDetailRequest
+} from "./ipc.js";
 
 const DEFAULT_WINDOW_WIDTH = 1180;
 const DEFAULT_WINDOW_HEIGHT = 760;
@@ -48,6 +54,9 @@ const isAssignmentDetailRequest = (value: unknown): value is AssignmentDetailReq
     typeof request.assignmentFile === "string"
   );
 };
+
+const isAssignmentApplyPreviewRequest = (value: unknown): value is AssignmentApplyPreviewRequest =>
+  isAssignmentDetailRequest(value);
 
 export const registerIpcHandlers = (): void => {
   const processRunner = createNodeProcessRunner();
@@ -115,6 +124,17 @@ export const registerIpcHandlers = (): void => {
     }
 
     return await getAssignmentDetail(request, {
+      runner: processRunner,
+      env: process.env
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getAssignmentApplyPreview, async (_event, request: unknown) => {
+    if (!isAssignmentApplyPreviewRequest(request)) {
+      throw new Error("Assignment apply preview request is required.");
+    }
+
+    return await getAssignmentApplyPreview(request, {
       runner: processRunner,
       env: process.env
     });
