@@ -1,19 +1,27 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { copyTextToClipboard } from "./assignmentDetailClipboard";
+import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
 import {
+  collectNeedsAttentionItems,
+  deriveAssignmentReadiness,
+  formatNullableValue,
+  formatStatusLabel,
+  getDiagnosticCategory,
+  groupDiagnostics,
   hasAttentionStatus,
-  hasTokenRequiredReadiness,
-  normalizeAssignmentDetail
-} from "./assignmentDetailNormalization";
+  hasTokenRequiredReadiness
+} from "./assignmentDetailReadiness";
 import type {
   AssignmentDetailAction,
   AssignmentDetailDiagnostic,
   AssignmentDetailLoadResult,
   AssignmentDetailPageProps,
+  AssignmentNeedsAttentionItem,
   NormalizedAssignmentDetail
 } from "./assignmentDetailTypes";
 
 const ACTION_LABELS = {
-  validate: "Validate / Refresh validation",
+  validate: "Validate / Refresh detail",
   apply: "Apply assignment",
   grade: "Grade submissions",
   report: "Generate report",
@@ -32,10 +40,22 @@ const ACTION_ORDER: readonly ActionKey[] = [
   "generateWorkflow"
 ];
 
-const MISSING_VALUE = "Not configured";
+const COPY_FEEDBACK_TIMEOUT_MS = 2200;
 
-const displayValue = (value: string | number | null | undefined): string =>
-  value === null || value === undefined || value === "" ? MISSING_VALUE : String(value);
+type CopyKey = "assignment-path" | "course-folder-path" | "template-repository" | "workflow-path";
+
+interface CopyState {
+  readonly key: CopyKey;
+  readonly status: "copied" | "failed";
+}
+
+const getCopyStateText = (copyState: CopyState | null, copyKey: CopyKey): string | null => {
+  if (copyState?.key !== copyKey) {
+    return null;
+  }
+
+  return copyState.status === "copied" ? "Copied" : "Unable to copy.";
+};
 
 const displayBoolean = (value: boolean): string => (value ? "Enabled" : "Disabled");
 
@@ -111,12 +131,22 @@ const getStatusBadges = (detail: NormalizedAssignmentDetail | null): readonly st
 interface DetailItemProps {
   readonly label: string;
   readonly value: string | number | null | undefined;
+  readonly valueClassName?: string;
+  readonly action?: ReactElement | null;
 }
 
-const DetailItem = ({ label, value }: DetailItemProps): ReactElement => (
+const DetailItem = ({
+  label,
+  value,
+  valueClassName,
+  action = null
+}: DetailItemProps): ReactElement => (
   <div className="detail-item">
     <dt>{label}</dt>
-    <dd>{displayValue(value)}</dd>
+    <dd className={valueClassName}>
+      <span>{formatNullableValue(value)}</span>
+      {action}
+    </dd>
   </div>
 );
 
@@ -133,17 +163,98 @@ const StatusItem = ({ label, value }: StatusItemProps): ReactElement => {
       <dt>{label}</dt>
       <dd>
         <span className={hasAttention ? "status-chip status-chip--attention" : "status-chip"}>
-          {displayValue(value)}
+          {formatStatusLabel(value)}
         </span>
       </dd>
     </div>
   );
 };
 
-const SummaryPanel = ({
-  detail
+interface CopyButtonProps {
+  readonly label: string;
+  readonly value: string | null;
+  readonly copyKey: CopyKey;
+  readonly copyState: CopyState | null;
+  readonly onCopy: (copyKey: CopyKey, value: string) => void;
+}
+
+const CopyButton = ({
+  label,
+  value,
+  copyKey,
+  copyState,
+  onCopy
+}: CopyButtonProps): ReactElement | null => {
+  if (value === null) {
+    return null;
+  }
+
+  return (
+    <span className="copy-affordance">
+      <button
+        className="copy-button"
+        type="button"
+        aria-label={label}
+        onClick={() => {
+          onCopy(copyKey, value);
+        }}
+      >
+        Copy
+      </button>
+      <span className="copy-feedback" aria-live="polite">
+        {getCopyStateText(copyState, copyKey)}
+      </span>
+    </span>
+  );
+};
+
+const ReadinessPanel = ({
+  detail,
+  needsAttentionItems
 }: {
   readonly detail: NormalizedAssignmentDetail;
+  readonly needsAttentionItems: readonly AssignmentNeedsAttentionItem[];
+}): ReactElement => {
+  const readiness = deriveAssignmentReadiness(detail);
+
+  return (
+    <section
+      className={`readiness-summary readiness-summary--${readiness.status}`}
+      aria-labelledby="assignment-readiness-title"
+    >
+      <div className="readiness-summary__header">
+        <div>
+          <h2 id="assignment-readiness-title">Readiness</h2>
+          <p className="readiness-summary__status">{readiness.label}</p>
+        </div>
+        <span className="status-chip">{formatStatusLabel(detail.status)}</span>
+      </div>
+      <p>{readiness.description}</p>
+      {needsAttentionItems.length === 0 ? null : (
+        <ul className="needs-attention-list" aria-label="Readiness items needing attention">
+          {needsAttentionItems.map((item) => (
+            <li key={item.id}>
+              <strong>{item.title}</strong>
+              <span>{item.description}</span>
+              <em>{item.category}</em>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+};
+
+const SummaryPanel = ({
+  detail,
+  courseFolderPath,
+  copyState,
+  onCopy
+}: {
+  readonly detail: NormalizedAssignmentDetail;
+  readonly courseFolderPath: string;
+  readonly copyState: CopyState | null;
+  readonly onCopy: (copyKey: CopyKey, value: string) => void;
 }): ReactElement => (
   <section className="detail-panel" aria-labelledby="assignment-summary-title">
     <h2 id="assignment-summary-title">Summary</h2>
@@ -159,19 +270,64 @@ const SummaryPanel = ({
       <DetailItem label="Faculty owner" value={detail.metadata.facultyOwner} />
       <DetailItem label="LMS assignment ID" value={detail.metadata.lmsAssignmentId} />
       <DetailItem label="Grading category" value={detail.metadata.gradingCategory} />
+      <DetailItem
+        label="Assignment file path"
+        value={detail.assignment.file}
+        valueClassName="copyable-value"
+        action={
+          <CopyButton
+            label="Copy assignment path"
+            value={detail.assignment.file}
+            copyKey="assignment-path"
+            copyState={copyState}
+            onCopy={onCopy}
+          />
+        }
+      />
+      <DetailItem
+        label="Course folder path"
+        value={courseFolderPath}
+        valueClassName="copyable-value"
+        action={
+          <CopyButton
+            label="Copy course folder path"
+            value={courseFolderPath}
+            copyKey="course-folder-path"
+            copyState={copyState}
+            onCopy={onCopy}
+          />
+        }
+      />
     </dl>
   </section>
 );
 
 const TemplatePanel = ({
-  detail
+  detail,
+  copyState,
+  onCopy
 }: {
   readonly detail: NormalizedAssignmentDetail;
+  readonly copyState: CopyState | null;
+  readonly onCopy: (copyKey: CopyKey, value: string) => void;
 }): ReactElement => (
   <section className="detail-panel" aria-labelledby="template-readiness-title">
     <h2 id="template-readiness-title">Template</h2>
     <dl className="detail-grid">
-      <DetailItem label="Repository" value={detail.template.repository} />
+      <DetailItem
+        label="Repository"
+        value={detail.template.repository}
+        valueClassName="copyable-value"
+        action={
+          <CopyButton
+            label="Copy template repository"
+            value={detail.template.repository}
+            copyKey="template-repository"
+            copyState={copyState}
+            onCopy={onCopy}
+          />
+        }
+      />
       <DetailItem label="Branch" value={detail.template.branch} />
       <StatusItem label="Overall status" value={detail.template.status} />
       <StatusItem label="Repository status" value={detail.template.repositoryStatus} />
@@ -181,9 +337,13 @@ const TemplatePanel = ({
 );
 
 const GradingPanel = ({
-  detail
+  detail,
+  copyState,
+  onCopy
 }: {
   readonly detail: NormalizedAssignmentDetail;
+  readonly copyState: CopyState | null;
+  readonly onCopy: (copyKey: CopyKey, value: string) => void;
 }): ReactElement => (
   <section className="detail-panel" aria-labelledby="grading-readiness-title">
     <h2 id="grading-readiness-title">Grading</h2>
@@ -193,7 +353,20 @@ const GradingPanel = ({
       <dl className="detail-grid">
         <DetailItem label="Enabled" value={displayBoolean(detail.grading.enabled)} />
         <DetailItem label="Mode" value={detail.grading.mode} />
-        <DetailItem label="Workflow path" value={detail.grading.workflow} />
+        <DetailItem
+          label="Workflow path"
+          value={detail.grading.workflow}
+          valueClassName="copyable-value"
+          action={
+            <CopyButton
+              label="Copy workflow path"
+              value={detail.grading.workflow}
+              copyKey="workflow-path"
+              copyState={copyState}
+              onCopy={onCopy}
+            />
+          }
+        />
         <DetailItem label="Artifact name" value={detail.grading.artifact} />
         <DetailItem label="Result file" value={detail.grading.resultFile} />
         <StatusItem label="Workflow status" value={detail.grading.workflowStatus} />
@@ -241,7 +414,8 @@ const DiagnosticEntry = ({
   readonly diagnostic: AssignmentDetailDiagnostic;
 }): ReactElement => (
   <li>
-    <strong>{displayValue(diagnostic.severity)}</strong>
+    <strong>{formatStatusLabel(diagnostic.severity)}</strong>
+    <span className="diagnostic-category">{getDiagnosticCategory(diagnostic)}</span>
     <span>{diagnostic.message}</span>
     {diagnostic.code === null ? null : <code>{diagnostic.code}</code>}
     {Object.keys(diagnostic.context).length === 0 ? null : (
@@ -267,14 +441,21 @@ const DiagnosticsPanel = ({
     {diagnostics.length === 0 ? (
       <p className="detail-panel__note">No diagnostics.</p>
     ) : (
-      <ul className="assignment-detail-diagnostics">
-        {diagnostics.map((diagnostic, index) => (
-          <DiagnosticEntry
-            diagnostic={diagnostic}
-            key={`${diagnostic.code ?? "diagnostic"}-${index}`}
-          />
+      <div className="diagnostic-groups">
+        {groupDiagnostics(diagnostics).map((group) => (
+          <section className="diagnostic-group" aria-label={group.label} key={group.key}>
+            <h3>{group.label}</h3>
+            <ul className="assignment-detail-diagnostics">
+              {group.diagnostics.map((diagnostic, index) => (
+                <DiagnosticEntry
+                  diagnostic={diagnostic}
+                  key={`${diagnostic.code ?? "diagnostic"}-${index}`}
+                />
+              ))}
+            </ul>
+          </section>
         ))}
-      </ul>
+      </div>
     )}
   </section>
 );
@@ -320,10 +501,13 @@ const ActionsPanel = ({
               type="button"
               disabled={!isValidate || isLoading || !action.available}
               onClick={isValidate ? onRefresh : undefined}
+              aria-describedby={`assignment-action-${actionKey}-description`}
             >
               {ACTION_LABELS[actionKey]}
             </button>
-            <p>{getActionDescription(action, actionKey)}</p>
+            <p id={`assignment-action-${actionKey}-description`}>
+              {getActionDescription(action, actionKey)}
+            </p>
           </div>
         );
       })}
@@ -337,6 +521,8 @@ export const AssignmentDetailPage = ({
 }: AssignmentDetailPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState | null>(null);
+  const copyFeedbackTimeoutRef = useRef<number | null>(null);
 
   const detail = useMemo(
     () =>
@@ -378,13 +564,40 @@ export const AssignmentDetailPage = ({
     }
   };
 
+  const handleCopy = (copyKey: CopyKey, value: string): void => {
+    if (copyFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(copyFeedbackTimeoutRef.current);
+    }
+
+    void copyTextToClipboard(value).then((result) => {
+      setCopyState({
+        key: copyKey,
+        status: result === "success" ? "copied" : "failed"
+      });
+      copyFeedbackTimeoutRef.current = window.setTimeout(() => {
+        setCopyState(null);
+        copyFeedbackTimeoutRef.current = null;
+      }, COPY_FEEDBACK_TIMEOUT_MS);
+    });
+  };
+
   useEffect(() => {
     void loadDetail();
   }, [selection.assignmentFile, selection.courseFolderId]);
 
+  useEffect(
+    () => () => {
+      if (copyFeedbackTimeoutRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+    },
+    []
+  );
+
   const title = getAssignmentTitle(detail, selection.assignmentTitle, selection.assignmentSlug);
   const commandErrorMessage = getCommandErrorMessage(loadResult);
   const showTokenGuidance = detail !== null && hasTokenRequiredReadiness(detail);
+  const needsAttentionItems = detail === null ? [] : collectNeedsAttentionItems(detail);
 
   return (
     <main className="dashboard-shell" aria-labelledby="assignment-detail-title">
@@ -415,7 +628,7 @@ export const AssignmentDetailPage = ({
 
       <section className="dashboard-content assignment-detail" aria-label="Assignment detail">
         <p className="assignment-detail__path">
-          {detail?.assignment.file ?? selection.assignmentFile}
+          Assignment file: {detail?.assignment.file ?? selection.assignmentFile}
         </p>
 
         {isLoading ? <p className="loading-state">Loading assignment detail...</p> : null}
@@ -440,6 +653,8 @@ export const AssignmentDetailPage = ({
           </section>
         ) : (
           <>
+            <ReadinessPanel detail={detail} needsAttentionItems={needsAttentionItems} />
+
             <div className="assignment-detail__badges" aria-label="Assignment status">
               {getStatusBadges(detail).map((badge) => (
                 <span className="status-chip" key={badge}>
@@ -449,9 +664,14 @@ export const AssignmentDetailPage = ({
             </div>
 
             <div className="assignment-detail-grid">
-              <SummaryPanel detail={detail} />
-              <TemplatePanel detail={detail} />
-              <GradingPanel detail={detail} />
+              <SummaryPanel
+                detail={detail}
+                courseFolderPath={selection.courseFolderPath}
+                copyState={copyState}
+                onCopy={handleCopy}
+              />
+              <TemplatePanel detail={detail} copyState={copyState} onCopy={handleCopy} />
+              <GradingPanel detail={detail} copyState={copyState} onCopy={handleCopy} />
               <StudentReportsPanel detail={detail} />
               <RosterPanel detail={detail} />
               <DiagnosticsPanel diagnostics={detail.diagnostics} />

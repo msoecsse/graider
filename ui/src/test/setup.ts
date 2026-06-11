@@ -33,6 +33,15 @@ beforeEach(() => {
       refreshDashboard: vi.fn().mockResolvedValue({
         status: "success",
         results: []
+      }),
+      getAssignmentDetail: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        detail: null,
+        error: null,
+        refreshedAt: null
       })
     }
   });

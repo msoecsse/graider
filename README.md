@@ -203,6 +203,8 @@ See [live testing](docs/live-testing.md) before running live tests.
 - [Runtime and CI](docs/runtime.md)
 - [GitHub token permissions](docs/github-token-permissions.md)
 - [CLI JSON contract](docs/cli-json-contract.md)
+- [Electron assignment detail developer guide](docs/electron-assignment-detail-dev.md)
+- [Assignment apply preview command](docs/apply-preview-command.md)
 - [Grading result contract](docs/grading-result-contract.md)
 - [Generated files](docs/generated-files.md)
 - [Error and warning catalog](docs/error-warning-catalog.md)

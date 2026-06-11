@@ -593,6 +593,87 @@ h1 {
   margin-bottom: 0;
 }
 
+.readiness-summary {
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  background: #ffffff;
+  margin-bottom: 18px;
+  padding: 18px;
+}
+
+.readiness-summary--ready {
+  border-left: 5px solid #1f883d;
+}
+
+.readiness-summary--needs_attention {
+  border-left: 5px solid #bf8700;
+}
+
+.readiness-summary--partial,
+.readiness-summary--unknown,
+.readiness-summary--not_required {
+  border-left: 5px solid #0969da;
+}
+
+.readiness-summary__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.readiness-summary h2 {
+  font-size: 1.05rem;
+  margin-bottom: 4px;
+}
+
+.readiness-summary p {
+  color: #57606a;
+  margin-bottom: 0;
+}
+
+.readiness-summary__status {
+  color: #24292f;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.needs-attention-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.needs-attention-list li {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid #d8dee4;
+  padding-top: 10px;
+}
+
+.needs-attention-list li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.needs-attention-list strong {
+  color: #24292f;
+}
+
+.needs-attention-list span {
+  color: #57606a;
+}
+
+.needs-attention-list em {
+  color: #57606a;
+  font-size: 0.82rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .assignment-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -640,6 +721,48 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.copyable-value {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.copy-affordance {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.copy-button {
+  min-height: 30px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #24292f;
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 0 10px;
+}
+
+.copy-feedback {
+  color: #1a7f37;
+  font-size: 0.82rem;
+  font-weight: 700;
+  min-width: 72px;
+}
+
+.diagnostic-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.diagnostic-group h3 {
+  font-size: 0.95rem;
+  margin: 0 0 10px;
+}
+
 .assignment-detail-diagnostics {
   display: grid;
   gap: 12px;
@@ -659,6 +782,12 @@ h1 {
 .assignment-detail-diagnostics strong {
   color: #24292f;
   text-transform: uppercase;
+}
+
+.diagnostic-category {
+  color: #57606a;
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
 .assignment-detail-diagnostics code {
@@ -749,6 +878,10 @@ h1 {
 
   .assignment-detail__header-actions {
     justify-content: flex-start;
+  }
+
+  .readiness-summary__header {
+    flex-direction: column;
   }
 
   .assignment-detail-grid {

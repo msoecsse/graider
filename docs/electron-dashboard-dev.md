@@ -1,6 +1,9 @@
 # Electron Dashboard Developer Guide
 
-This guide documents the Electron dashboard implementation completed in UI-1A through UI-1E and the read-only assignment detail page added in UI-2A. It is operational documentation for developers changing the desktop UI before mutation workflows are added.
+This guide documents the Electron dashboard implementation completed in UI-1A through UI-1E and the read-only assignment detail page added and polished in UI-2A/UI-2C. It is operational documentation for developers changing the desktop UI before mutation workflows are added.
+
+Assignment-detail-specific behavior, smoke tests, and UI-2/UI-3 boundaries live
+in the [Electron Assignment Detail Developer Guide](electron-assignment-detail-dev.md).
 
 ## Overview
 
@@ -13,6 +16,8 @@ The UI is an Electron desktop dashboard with a React/TypeScript/Vite renderer. U
 - Provides local-only search, view filtering, and sorting over already-loaded dashboard cards.
 - Opens a read-only assignment detail page from recent assignment rows.
 - Runs `graider assignment detail <assignment.yml> --json` for assignment detail data.
+- Derives assignment-detail readiness summaries, needs-attention callouts, and grouped diagnostics in the renderer from the assignment detail JSON.
+- Provides renderer-only copy buttons for assignment path, course folder path, template repository, and grading workflow path.
 
 The current UI is read-only. It does not mutate course repositories, GitHub repositories, workflows, reports, or student data.
 
@@ -109,6 +114,8 @@ graider-ui:assignment-detail:get
 
 There is no generic `runCommand`, `execute`, `shell`, `readFile`, or `writeFile` IPC. Preserve that boundary.
 
+UI-2B does not add local open/reveal IPC. Local folder opening and assignment-file reveal are deferred until a narrow main-process API can validate that requested paths remain under a registered course folder and return structured success/error results. Do not add generic `openPath(anyPath)`, `shell(command)`, or command execution IPC for that purpose.
+
 ## Course Folder Registry
 
 The course folder registry is stored under Electron `app.getPath("userData")` as:
@@ -191,6 +198,9 @@ repository scans.
 
 ## Assignment Detail Page
 
+Detailed assignment detail guidance lives in
+[Electron Assignment Detail Developer Guide](electron-assignment-detail-dev.md).
+
 Assignment rows with a stable `assignmentFile` open the read-only assignment detail page. The renderer passes the source folder id/path and dashboard-provided assignment file path through:
 
 ```text
@@ -215,16 +225,42 @@ The page renders:
 
 ```text
 assignment header
+top readiness summary
+needs-attention callouts
 summary metadata
 template readiness
 grading readiness
 student report publishing mode
 roster and sections
-diagnostics
+grouped diagnostics
 future action placeholders
 ```
 
 `partial_success` responses still render available local detail and diagnostics. Token-required readiness statuses show setup guidance without hiding local assignment data.
+
+Readiness is renderer-derived only. It maps existing assignment-detail JSON fields such as top-level `status`, diagnostics, template readiness, grading workflow readiness, student-report config, and roster summary into faculty-facing labels:
+
+```text
+Ready
+Needs attention
+Partially checked
+Not required
+Not checked
+Unavailable
+```
+
+The renderer must not introduce backend contract changes for readiness. Raw statuses may appear as secondary status chips, but faculty-facing labels should be visible.
+
+Useful copy affordances are renderer-only and use `navigator.clipboard.writeText`:
+
+```text
+Copy assignment path
+Copy course folder path
+Copy template repository
+Copy workflow path
+```
+
+Copy feedback is temporary and not persisted. Clipboard failures should show a safe `Unable to copy.` message. Copy buttons must not write files or store copied values.
 
 Mutation actions remain placeholders:
 
@@ -236,7 +272,17 @@ Publish student reports
 Generate/update workflow
 ```
 
-Those buttons must stay disabled until their dedicated slices add safe preview/confirmation flows. The detail page's refresh/validate affordance only reruns the assignment detail command.
+Those buttons must stay disabled until their dedicated slices add safe preview/confirmation flows. Disabled buttons should explain that the action is coming in a future slice or unavailable for the assignment. The detail page's refresh/validate affordance only reruns the assignment detail command.
+
+UI-2B must not wire any of these commands:
+
+```text
+apply
+grade
+report
+publish
+workflow generate
+```
 
 ## GitHub Token Resolution
 

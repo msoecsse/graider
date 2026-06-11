@@ -215,3 +215,13 @@ directly.
 The UI can show local detail even when readiness is `token_required`, `missing`,
 `inaccessible`, or `error`, and should present diagnostics instead of blocking
 the entire page.
+
+Electron assignment detail behavior, IPC boundaries, non-mutation guarantees,
+and manual smoke-test guidance are documented in the
+[Electron Assignment Detail Developer Guide](electron-assignment-detail-dev.md).
+
+The future UI-3A apply preview flow uses
+[`graider assignment apply-preview <assignment.yml> --json`](apply-preview-command.md).
+That command is also non-mutating, but it answers planning questions about
+target students and repository preview statuses rather than rendering the
+assignment detail inspection page.

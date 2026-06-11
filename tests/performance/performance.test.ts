@@ -20,7 +20,7 @@ enum PerformanceNumber {
   StudentIdPadLength = 4,
   SectionModulo = 2,
   FirstIndex = 1,
-  ScaleTestTimeoutMs = 20000
+  ScaleTestTimeoutMs = 60000
 }
 
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";

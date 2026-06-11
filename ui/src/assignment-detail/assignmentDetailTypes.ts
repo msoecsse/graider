@@ -20,6 +20,32 @@ export interface AssignmentDetailDiagnostic {
   readonly context: Readonly<Record<string, string>>;
 }
 
+export interface AssignmentDetailDiagnosticGroup {
+  readonly key: "needs_attention" | "warnings" | "info";
+  readonly label: string;
+  readonly diagnostics: readonly AssignmentDetailDiagnostic[];
+}
+
+export interface AssignmentNeedsAttentionItem {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly category: string;
+}
+
+export type AssignmentReadinessStatus =
+  | "ready"
+  | "needs_attention"
+  | "partial"
+  | "not_required"
+  | "unknown";
+
+export interface AssignmentReadinessSummary {
+  readonly status: AssignmentReadinessStatus;
+  readonly label: string;
+  readonly description: string;
+}
+
 export interface AssignmentDetailCourse {
   readonly slug: string | null;
   readonly title: string | null;

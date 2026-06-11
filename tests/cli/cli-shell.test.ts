@@ -127,6 +127,13 @@ describe("graider CLI shell", () => {
     expect(output).toContain("Build a UI-ready read-only assignment detail model");
   });
 
+  it("command exists: assignment apply-preview", () => {
+    const output = runCliText(["assignment", "apply-preview", "--help"]);
+
+    expect(output).toContain("apply-preview");
+    expect(output).toContain("Build a UI-ready read-only assignment apply preview model");
+  });
+
   it("TC-CLI-SHELL-008 command exists: remove-access", () => {
     const result = runCli(["remove-access", TEST_ASSIGNMENT_FILE]);
 

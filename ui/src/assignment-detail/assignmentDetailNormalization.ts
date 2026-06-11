@@ -13,6 +13,11 @@ const DEFAULT_UNIMPLEMENTED_ACTION: AssignmentDetailAction = {
   reason: null
 };
 
+const SENSITIVE_VALUE_REPLACEMENT = "[redacted]";
+const SENSITIVE_DIAGNOSTIC_MESSAGE = "Sensitive diagnostic details were redacted.";
+const SECRET_TOKEN_PATTERN =
+  /secret-token-value|authorization:\s*\S+|bearer\s+\S+|GRAIDER_GITHUB_TOKEN=\S+|gh[pousr]_[A-Za-z0-9_]+/iu;
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -46,6 +51,14 @@ const stringifyContextValue = (value: unknown): string | null => {
   return null;
 };
 
+const containsSensitiveValue = (value: string): boolean => SECRET_TOKEN_PATTERN.test(value);
+
+const sanitizeDiagnosticMessage = (message: string): string =>
+  containsSensitiveValue(message) ? SENSITIVE_DIAGNOSTIC_MESSAGE : message;
+
+const sanitizeContextValue = (value: string): string =>
+  containsSensitiveValue(value) ? SENSITIVE_VALUE_REPLACEMENT : value;
+
 export const normalizeAssignmentDetailDiagnostics = (
   diagnostics: readonly unknown[]
 ): readonly AssignmentDetailDiagnostic[] =>
@@ -64,13 +77,14 @@ export const normalizeAssignmentDetailDiagnostics = (
           Object.entries(diagnostic.context)
             .map(([key, value]) => [key, stringifyContextValue(value)] as const)
             .filter((entry): entry is readonly [string, string] => entry[1] !== null)
+            .map(([key, value]) => [key, sanitizeContextValue(value)] as const)
         )
       : {};
 
     return {
       code: getString(diagnostic, "code"),
       severity: getString(diagnostic, "severity"),
-      message: getString(diagnostic, "message") ?? "Unknown diagnostic.",
+      message: sanitizeDiagnosticMessage(getString(diagnostic, "message") ?? "Unknown diagnostic."),
       context
     };
   });
@@ -185,19 +199,3 @@ export const normalizeAssignmentDetail = (
     actions: normalizeActions(detail.actions)
   };
 };
-
-export const hasTokenRequiredReadiness = (detail: NormalizedAssignmentDetail): boolean =>
-  detail.diagnostics.some((diagnostic) =>
-    ["github_token_required", "github_token_missing"].includes(diagnostic.code ?? "")
-  ) ||
-  [
-    detail.template.status,
-    detail.template.repositoryStatus,
-    detail.template.branchStatus,
-    detail.grading.workflowStatus,
-    detail.grading.workflowDispatch
-  ].some((status) => status === "token_required");
-
-export const hasAttentionStatus = (status: string | null): boolean =>
-  status !== null &&
-  !["available", "not_required", "not_checked", "not_configured", "disabled"].includes(status);

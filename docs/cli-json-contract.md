@@ -47,9 +47,10 @@ Stable top-level fields:
 `diagnostics` is additive. Existing consumers that read `warnings` and `errors`
 can continue to do so.
 
-`dashboard --json` and `assignment detail --json` are UI-focused commands that
-add command-specific top-level fields to this JSON surface. `dashboard --json`
-adds a top-level `cards` array:
+`dashboard --json`, `assignment detail --json`, and
+`assignment apply-preview --json` are UI-focused commands that add
+command-specific top-level fields to this JSON surface. `dashboard --json` adds
+a top-level `cards` array:
 
 ```json
 {
@@ -75,6 +76,10 @@ failure with `dashboard_json_required`.
 `assignment detail <assignment.yml> --json` is also JSON-only. Running it
 without `--json` returns a JSON failure with
 `assignment_detail_json_required`.
+
+`assignment apply-preview <assignment.yml> --json` is also JSON-only. Running it
+without `--json` returns a JSON failure with
+`assignment_apply_preview_json_required`.
 
 ## Command Status Values
 
@@ -307,6 +312,96 @@ statuses.
 The command is read-only. It does not create repositories, dispatch grading,
 generate workflows, publish reports, inspect workflow runs, download artifacts,
 parse grading result artifacts, or scan student repositories.
+
+### `assignment apply-preview <assignment.yml> --json`
+
+`assignment apply-preview --json` calculates what would happen if the
+assignment were applied right now. It is the backend contract for UI-3A and is
+preview-only.
+
+Useful top-level fields include:
+
+```json
+{
+  "schemaVersion": 1,
+  "commandName": "assignment apply-preview",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "assignment": {
+    "slug": "lab02",
+    "title": "Lab 02",
+    "file": "terms/27s1/assignments/lab02/assignment.yml",
+    "status": "active"
+  },
+  "course": {
+    "slug": "csc1120",
+    "title": "CSC1120"
+  },
+  "term": {
+    "slug": "27s1",
+    "title": "Spring 2027"
+  },
+  "target": {
+    "sections": ["001"],
+    "sectionCount": 1,
+    "studentCount": 3
+  },
+  "template": {
+    "repository": "graider-sandbox/csc1120L2Template",
+    "branch": "main",
+    "status": "available",
+    "repositoryStatus": "available",
+    "branchStatus": "available"
+  },
+  "grading": {
+    "enabled": true,
+    "workflow": ".github/workflows/grade.yml",
+    "workflowStatus": "available",
+    "workflowDispatch": "available"
+  },
+  "plan": {
+    "summary": {
+      "wouldCreateRepositories": 2,
+      "wouldUpdateRepositories": 1,
+      "wouldSkipRepositories": 0,
+      "blockedRepositories": 0,
+      "unknownRepositories": 0
+    },
+    "repositories": []
+  },
+  "files": {
+    "assignmentFile": "terms/27s1/assignments/lab02/assignment.yml",
+    "workflowFile": ".github/workflows/grade.yml",
+    "templateSource": "graider-sandbox/csc1120L2Template@main"
+  },
+  "actions": {
+    "apply": {
+      "available": true,
+      "implemented": false,
+      "previewOnly": true
+    }
+  }
+}
+```
+
+Repository preview row statuses are:
+
+- `would_create`
+- `would_update`
+- `would_skip`
+- `blocked`
+- `unknown`
+
+The command loads local config, roster data, optional existing manifest state,
+template/grading readiness, and per-target repository existence. Missing tokens
+return local target rows when possible with `partial_success`,
+`github_token_required`, and `unknown` repository rows.
+
+The command is read-only. It does not create or update repositories, push files,
+write manifests, write plan files, generate workflows, dispatch workflows,
+publish reports, inspect workflow runs, download artifacts, or scan unrelated
+repositories.
 
 ### `apply --json`
 
