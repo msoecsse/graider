@@ -2,7 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProcessRunResult, ProcessRunner } from "./commandRunner.js";
+import {
+  BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE,
+  type ProcessRunResult,
+  type ProcessRunner
+} from "./commandRunner.js";
 import {
   addCourseFolderToRegistry,
   getCourseRegistryPath,
@@ -149,6 +153,31 @@ describe("dashboardRunner", () => {
 
     expect(result.status).toBe("failure");
     expect(result.error?.code).toBe("graider_cli_not_found");
+  });
+
+  it("handles missing bundled graider CLI safely", async () => {
+    const runner = createRunner([
+      createProcessResult({
+        stdout: "",
+        exitCode: null,
+        error: {
+          code: BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE,
+          message: "Bundled Graider CLI could not be started."
+        }
+      })
+    ]);
+
+    const result = await runDashboardCommand({
+      courseFolder: COURSE_FOLDER,
+      token: "secret-token",
+      runner
+    });
+
+    expect(result.status).toBe("failure");
+    expect(result.error?.code).toBe("bundled_graider_cli_not_found");
+    expect(result.error?.message).toBe(
+      "Bundled Graider CLI could not be started. Rebuild or reinstall the Graider app."
+    );
   });
 
   it("redacts tokens and truncates command snippets", async () => {

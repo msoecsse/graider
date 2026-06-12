@@ -209,6 +209,7 @@ See [live testing](docs/live-testing.md) before running live tests.
 - [CLI JSON contract](docs/cli-json-contract.md)
 - [Faculty UI user guide](docs/faculty-ui-user-guide.md)
 - [Electron assignment detail developer guide](docs/electron-assignment-detail-dev.md)
+- [Electron packaging guide](docs/electron-packaging.md)
 - [Electron release readiness guide](docs/electron-release-readiness.md)
 - [Assignment apply preview command](docs/apply-preview-command.md)
 - [Grading result contract](docs/grading-result-contract.md)

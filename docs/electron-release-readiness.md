@@ -9,6 +9,7 @@ workflow details live in:
 - [Electron Grade Dispatch Developer Guide](electron-grade-dispatch-dev.md)
 - [Electron Grade Status Developer Guide](electron-grade-status-dev.md)
 - [Electron Faculty Report Developer Guide](electron-faculty-report-dev.md)
+- [Electron Packaging Guide](electron-packaging.md)
 
 This guide is the UI-7A runbook for validating the current faculty workflow
 without adding student report publishing or other deferred features.
@@ -31,8 +32,9 @@ tests only against a safe sandbox course.
 
 ## Developer Startup
 
-Install and build the root CLI first when the local `graider` package binary is
-not already available on `PATH`:
+Development mode uses the local workspace or PATH `graider` command. Install
+and build the root CLI first when the local package binary is not already
+available on `PATH`:
 
 ```bash
 npm install
@@ -57,11 +59,32 @@ npm run dev:electron
 Electron main/preload code, writes the Electron package type marker, and starts
 Electron with `VITE_DEV_SERVER_URL=http://127.0.0.1:5173`.
 
+## Packaged App Build
+
+For a standalone local app build:
+
+```bash
+cd ui
+npm install
+npm run package
+```
+
+The macOS unpacked app is written under `ui/release/`, usually:
+
+```text
+ui/release/mac-arm64/Graider.app
+```
+
+The packaged app bundles the Graider CLI and should not require external
+`graider` on `PATH`. See [Electron Packaging Guide](electron-packaging.md) for
+unsigned app notes, bundled CLI details, and packaged smoke-test steps.
+
 ## Required Local Tools
 
 - Node.js and npm. Root Graider currently targets Node `>=24 <25`.
-- The `graider` CLI on `PATH`, normally through `npm run build` and `npm link`
-  during local UI testing.
+- The `graider` CLI on `PATH` only for development-mode UI testing, normally
+  through `npm run build` and `npm link`.
+- The packaged app uses its bundled CLI instead of PATH `graider`.
 - GitHub CLI (`gh`) when relying on the token fallback.
 - `GRAIDER_GITHUB_TOKEN` when launching the app with an explicit token.
 - Git, because Graider operates from course-admin repositories.
@@ -116,11 +139,37 @@ Actions workflow runs.
 - [ ] Confirm student publishing and workflow generation actions are absent or
       disabled/deferred.
 
+## Packaged App Smoke Test Checklist
+
+Use only a safe sandbox course. Confirmed apply and confirmed grade dispatch can
+mutate GitHub/course state or start GitHub Actions workflows.
+
+- [ ] Build/package the app with `cd ui && npm run package`.
+- [ ] Launch the packaged app from `ui/release/`.
+- [ ] Register or open a course folder.
+- [ ] Confirm Dashboard loads.
+- [ ] Confirm Assignment Detail loads.
+- [ ] Confirm Apply Preview loads.
+- [ ] Confirm Grade Dispatch Preview loads.
+- [ ] Confirm Grade Status loads.
+- [ ] Confirm Faculty Report loads.
+- [ ] Temporarily hide external `graider` from `PATH` and confirm the packaged
+      app still loads dashboard data through the bundled CLI.
+- [ ] Confirm a missing/broken bundled CLI resource shows a clear bundled-CLI
+      error instead of a blank page or raw stack trace.
+- [ ] Confirm missing token shows a safe diagnostic when GitHub checks/actions
+      need authentication.
+- [ ] Confirm external links open in the browser.
+- [ ] Restart the packaged app and confirm the course folder registry persists.
+
 ## Error-State Checklist
 
 Verify these states with mocked tests or a sandbox setup:
 
-- [ ] Missing Graider CLI returns a safe `graider_cli_not_found` style message.
+- [ ] Missing development CLI returns a safe `graider_cli_not_found` style
+      message.
+- [ ] Missing packaged bundled CLI returns a safe `bundled_graider_cli_not_found`
+      style message.
 - [ ] Missing GitHub token shows token guidance and does not render token-like
       values.
 - [ ] `gh auth token` unavailable returns safe token guidance.

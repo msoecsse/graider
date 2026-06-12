@@ -173,6 +173,10 @@ const getSafeFolderErrorMessage = (result: CourseFolderDashboardResult): string 
     return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
   }
 
+  if (errorCode === "bundled_graider_cli_not_found") {
+    return "Bundled Graider CLI could not be started. Rebuild or reinstall the Graider app.";
+  }
+
   if (errorCode === "invalid_dashboard_json") {
     return "Graider dashboard returned invalid JSON.";
   }

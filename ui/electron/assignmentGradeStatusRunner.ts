@@ -1,4 +1,4 @@
-import type { ProcessRunner } from "./commandRunner.js";
+import { getGraiderCliStartError, type ProcessRunner } from "./commandRunner.js";
 import type {
   AssignmentGradeStatusJsonResponse,
   AssignmentGradeStatusRequest,
@@ -148,12 +148,10 @@ export const runAssignmentGradeStatusCommand = async ({
   });
 
   if (result.error !== null) {
-    const code =
-      result.error.code === "ENOENT" ? "graider_cli_not_found" : "assignment_grade_status_failed";
+    const cliStartError = getGraiderCliStartError(result.error.code);
+    const code = cliStartError?.code ?? "assignment_grade_status_failed";
     const message =
-      code === "graider_cli_not_found"
-        ? "Graider CLI not found. Install Graider or make sure graider is available on PATH."
-        : "Graider assignment grade status could not be started.";
+      cliStartError?.message ?? "Graider assignment grade status could not be started.";
 
     return {
       ...request,

@@ -9,6 +9,7 @@ export default tseslint.config(
       "coverage/**",
       "ui/dist/**",
       "ui/dist-electron/**",
+      "ui/dist-graider-cli/**",
       "ui/node_modules/**"
     ]
   },

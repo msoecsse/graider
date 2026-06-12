@@ -1,4 +1,4 @@
-import type { ProcessRunner } from "./commandRunner.js";
+import { getGraiderCliStartError, type ProcessRunner } from "./commandRunner.js";
 import type {
   AssignmentApplyJsonResponse,
   AssignmentApplyRequest,
@@ -120,12 +120,9 @@ export const runAssignmentApplyCommand = async ({
   });
 
   if (result.error !== null) {
-    const code =
-      result.error.code === "ENOENT" ? "graider_cli_not_found" : "assignment_apply_failed";
-    const message =
-      code === "graider_cli_not_found"
-        ? "Graider CLI not found. Install Graider or make sure graider is available on PATH."
-        : "Graider assignment apply could not be started.";
+    const cliStartError = getGraiderCliStartError(result.error.code);
+    const code = cliStartError?.code ?? "assignment_apply_failed";
+    const message = cliStartError?.message ?? "Graider assignment apply could not be started.";
 
     return {
       ...request,

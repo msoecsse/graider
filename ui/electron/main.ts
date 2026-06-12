@@ -1,4 +1,3 @@
-import path from "node:path";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
 import { applyAssignment } from "./assignmentApplyRunner.js";
 import { gradeAssignment } from "./assignmentGradeRunner.js";
@@ -16,6 +15,7 @@ import {
   removeCourseFolderFromRegistry
 } from "./courseRegistry.js";
 import { refreshCourseFolder, refreshDashboard } from "./dashboardRunner.js";
+import { getPreloadPath, getRendererDevServerUrl, getRendererEntry } from "./rendererPaths.js";
 import {
   IPC_CHANNELS,
   type AppInfo,
@@ -32,23 +32,51 @@ const DEFAULT_WINDOW_WIDTH = 1180;
 const DEFAULT_WINDOW_HEIGHT = 760;
 const MIN_WINDOW_WIDTH = 860;
 const MIN_WINDOW_HEIGHT = 620;
-const VITE_DEV_SERVER_URL_ENV = "VITE_DEV_SERVER_URL";
+const DEBUG_ENV_NAME = "GRAIDER_UI_DEBUG";
+const DEBUG_ENABLED_VALUE = "1";
 
 export const getAppInfo = (): AppInfo => ({
   name: app.getName(),
   version: app.getVersion()
 });
 
-export const getPreloadPath = (): string => path.join(__dirname, "preload.js");
+const isDebugEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
+  env[DEBUG_ENV_NAME]?.trim() === DEBUG_ENABLED_VALUE;
 
-export const getRendererEntry = (): string => path.join(__dirname, "..", "dist", "index.html");
+const logRendererDiagnostic = (message: string): void => {
+  console.error(`[graider-ui] ${message}`);
+};
 
-export const getRendererDevServerUrl = (
-  env: NodeJS.ProcessEnv = process.env
-): string | undefined => {
-  const configuredUrl = env[VITE_DEV_SERVER_URL_ENV]?.trim();
+const registerRendererDiagnostics = (window: BrowserWindow): void => {
+  window.webContents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+      logRendererDiagnostic(
+        `Renderer failed to load: code=${String(errorCode)} description=${errorDescription} mainFrame=${String(isMainFrame)} url=${validatedUrl}`
+      );
+    }
+  );
 
-  return configuredUrl === undefined || configuredUrl.length === 0 ? undefined : configuredUrl;
+  window.webContents.on("render-process-gone", (_event, details) => {
+    logRendererDiagnostic(
+      `Renderer process exited: reason=${details.reason} exitCode=${String(details.exitCode)}`
+    );
+  });
+
+  window.on("unresponsive", () => {
+    logRendererDiagnostic("Renderer window became unresponsive.");
+  });
+};
+
+const loadRenderer = (window: BrowserWindow): void => {
+  const devServerUrl = getRendererDevServerUrl();
+  const loadPromise =
+    devServerUrl === undefined ? window.loadFile(getRendererEntry()) : window.loadURL(devServerUrl);
+
+  loadPromise.catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    logRendererDiagnostic(`Renderer load failed: ${message}`);
+  });
 };
 
 const isAssignmentDetailRequest = (value: unknown): value is AssignmentDetailRequest => {
@@ -95,7 +123,17 @@ const isAssignmentGradeRequest = (value: unknown): value is AssignmentGradeReque
   isAssignmentDetailRequest(value);
 
 export const registerIpcHandlers = (): void => {
-  const processRunner = createNodeProcessRunner();
+  const processRunner = createNodeProcessRunner({
+    graiderCli: app.isPackaged
+      ? {
+          mode: "bundled",
+          appPath: app.getAppPath(),
+          execPath: process.execPath
+        }
+      : {
+          mode: "external"
+        }
+  });
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
 
@@ -248,13 +286,13 @@ export const createMainWindow = (): BrowserWindow => {
     }
   });
 
-  const devServerUrl = getRendererDevServerUrl();
+  registerRendererDiagnostics(window);
 
-  if (devServerUrl === undefined) {
-    void window.loadFile(getRendererEntry());
-  } else {
-    void window.loadURL(devServerUrl);
+  if (isDebugEnabled()) {
+    window.webContents.openDevTools({ mode: "detach" });
   }
+
+  loadRenderer(window);
 
   return window;
 };

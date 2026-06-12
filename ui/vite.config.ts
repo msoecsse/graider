@@ -1,7 +1,10 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+export const PRODUCTION_ASSET_BASE = "./";
+
 export default defineConfig({
+  base: PRODUCTION_ASSET_BASE,
   plugins: [react()],
   build: {
     outDir: "dist",

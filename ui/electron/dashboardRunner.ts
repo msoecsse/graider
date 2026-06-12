@@ -1,4 +1,4 @@
-import type { ProcessRunner } from "./commandRunner.js";
+import { getGraiderCliStartError, type ProcessRunner } from "./commandRunner.js";
 import {
   loadCourseRegistry,
   saveCourseRegistry,
@@ -152,12 +152,9 @@ export const runDashboardCommand = async ({
   });
 
   if (result.error !== null) {
-    const code =
-      result.error.code === "ENOENT" ? "graider_cli_not_found" : "dashboard_command_failed";
-    const message =
-      code === "graider_cli_not_found"
-        ? "Graider CLI not found. Install Graider or make sure graider is available on PATH."
-        : "Graider dashboard could not be started.";
+    const cliStartError = getGraiderCliStartError(result.error.code);
+    const code = cliStartError?.code ?? "dashboard_command_failed";
+    const message = cliStartError?.message ?? "Graider dashboard could not be started.";
 
     return createCommandFailureResult(
       courseFolder.id,

@@ -29,19 +29,23 @@ Deferred in the UI:
 - student report publish preview/confirmation
 - student-facing report preview
 - workflow generation UI
-- packaged app installation, if your team is running from source
 
 ## Required Local Setup
 
-- The Graider CLI must be installed or available on `PATH`.
-- The Electron UI must be opened or run locally.
+- The packaged Graider app includes the Graider CLI. Faculty do not need to
+  install or link the CLI separately for packaged app use.
+- If your team runs the UI from source, follow the developer startup guide.
 - GitHub-backed checks and actions need a GitHub token.
 - The UI checks `GRAIDER_GITHUB_TOKEN` first, then falls back to `gh auth token`
   when GitHub CLI authentication is available.
 - Do not put tokens in YAML, roster files, reports, manifests, or screenshots.
+- A valid course repository/folder must exist on disk.
 
 For local development from this repository, see the startup commands in
 [Electron Release Readiness Guide](electron-release-readiness.md).
+
+For packaged app builds and unsigned macOS app notes, see
+[Electron Packaging Guide](electron-packaging.md).
 
 ## Course Folder Structure
 

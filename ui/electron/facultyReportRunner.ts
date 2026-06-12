@@ -1,4 +1,4 @@
-import type { ProcessRunner } from "./commandRunner.js";
+import { getGraiderCliStartError, type ProcessRunner } from "./commandRunner.js";
 import type {
   DashboardCommandError,
   FacultyReportJsonResponse,
@@ -116,11 +116,9 @@ export const runFacultyReportCommand = async ({
   });
 
   if (result.error !== null) {
-    const code = result.error.code === "ENOENT" ? "graider_cli_not_found" : "faculty_report_failed";
-    const message =
-      code === "graider_cli_not_found"
-        ? "Graider CLI not found. Install Graider or make sure graider is available on PATH."
-        : "Graider report could not be started.";
+    const cliStartError = getGraiderCliStartError(result.error.code);
+    const code = cliStartError?.code ?? "faculty_report_failed";
+    const message = cliStartError?.message ?? "Graider report could not be started.";
 
     return {
       ...request,

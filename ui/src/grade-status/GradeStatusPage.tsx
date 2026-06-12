@@ -34,6 +34,10 @@ const getCommandErrorMessage = (result: GradeStatusLoadResult | null): string | 
     return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
   }
 
+  if (errorCode === "bundled_graider_cli_not_found") {
+    return "Bundled Graider CLI could not be started. Rebuild or reinstall the Graider app.";
+  }
+
   if (errorCode === "invalid_assignment_grade_status_json") {
     return "Graider returned invalid grade status JSON.";
   }

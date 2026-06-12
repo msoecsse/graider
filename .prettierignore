@@ -14,4 +14,6 @@ tests/fixtures/manifest/malformed-yaml/manifest.yml
 ui/node_modules/
 ui/dist/
 ui/dist-electron/
+ui/dist-graider-cli/
+ui/release/
 tests/fixtures/**/malformed-yaml/*.yml
