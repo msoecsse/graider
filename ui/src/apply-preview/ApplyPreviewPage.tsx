@@ -8,16 +8,23 @@ import {
   hasAttentionStatus
 } from "../assignment-detail/assignmentDetailReadiness";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
+import { normalizeApplyResult } from "./applyResultNormalization";
 import { normalizeApplyPreview } from "./applyPreviewNormalization";
 import {
+  canApplyPreview,
   deriveApplyPreviewReadiness,
-  formatApplyPreviewRepositoryStatus
+  formatApplyPreviewRepositoryStatus,
+  formatApplyResultRepositoryStatus,
+  getApplyBlockerReasons
 } from "./applyPreviewReadiness";
 import type {
+  ApplyExecutionLoadResult,
   ApplyPreviewLoadResult,
   ApplyPreviewPageProps,
   ApplyPreviewRepositoryRow,
-  NormalizedApplyPreview
+  ApplyResultRepositoryRow,
+  NormalizedApplyPreview,
+  NormalizedApplyResult
 } from "./applyPreviewTypes";
 
 const COPY_FEEDBACK_TIMEOUT_MS = 2200;
@@ -59,6 +66,28 @@ const getCommandErrorMessage = (result: ApplyPreviewLoadResult | null): string |
   }
 
   return "Unable to load apply preview.";
+};
+
+const getApplyCommandErrorMessage = (result: ApplyExecutionLoadResult | null): string | null => {
+  const errorCode = result?.error?.code;
+
+  if (errorCode === undefined) {
+    return null;
+  }
+
+  if (errorCode === "graider_cli_not_found") {
+    return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
+  }
+
+  if (errorCode === "invalid_assignment_apply_json") {
+    return "Graider returned invalid apply JSON.";
+  }
+
+  if (errorCode === "assignment_file_not_found") {
+    return "Assignment file not found.";
+  }
+
+  return "Unable to apply assignment.";
 };
 
 const getAssignmentTitle = (
@@ -368,6 +397,99 @@ const RepositoryRowsPanel = ({
   </section>
 );
 
+const ApplyResultSummaryPanel = ({
+  result
+}: {
+  readonly result: NormalizedApplyResult;
+}): ReactElement => (
+  <section className="detail-panel apply-preview-summary" aria-labelledby="apply-result-title">
+    <h2 id="apply-result-title">Apply Result Summary</h2>
+    <div className="apply-result-meta">
+      <span className="status-chip">{formatStatusLabel(result.status)}</span>
+      <span>Exit code {result.exitCode}</span>
+      {result.appliedAt === null ? null : <span>Applied at {result.appliedAt}</span>}
+    </div>
+    <dl className="apply-preview-counts">
+      <div>
+        <dt>Created</dt>
+        <dd>{result.summary.createdRepositories}</dd>
+      </div>
+      <div>
+        <dt>Updated</dt>
+        <dd>{result.summary.updatedRepositories}</dd>
+      </div>
+      <div>
+        <dt>Skipped</dt>
+        <dd>{result.summary.skippedRepositories}</dd>
+      </div>
+      <div>
+        <dt>Failed</dt>
+        <dd>{result.summary.failedRepositories}</dd>
+      </div>
+      <div>
+        <dt>Blocked</dt>
+        <dd>{result.summary.blockedRepositories}</dd>
+      </div>
+    </dl>
+    <dl className="detail-grid apply-result-files">
+      <DetailItem label="Assignment file" value={result.assignmentFile} />
+      <DetailItem label="Manifest file" value={result.manifestFile} />
+      <DetailItem label="Generated files" value={result.generatedFiles.join(", ") || null} />
+    </dl>
+  </section>
+);
+
+const ApplyResultRowsPanel = ({
+  result
+}: {
+  readonly result: NormalizedApplyResult;
+}): ReactElement => (
+  <section className="detail-panel apply-preview-repositories" aria-labelledby="apply-result-rows">
+    <h2 id="apply-result-rows">Repository result rows</h2>
+    {result.rows.length === 0 ? (
+      <p className="detail-panel__note">No per-student apply result rows were returned.</p>
+    ) : (
+      <div className="apply-preview-table" role="table" aria-label="Repository apply result rows">
+        <div className="apply-preview-table__header" role="row">
+          <span role="columnheader">Student</span>
+          <span role="columnheader">Section</span>
+          <span role="columnheader">Repository</span>
+          <span role="columnheader">Result status</span>
+          <span role="columnheader">Reason</span>
+        </div>
+        {result.rows.map((row) => (
+          <div
+            className="apply-preview-table__row"
+            role="row"
+            key={`${row.studentId ?? row.githubUsername ?? row.repository ?? "row"}-${row.section ?? "section"}`}
+          >
+            <span role="cell">{getApplyResultStudentLabel(row)}</span>
+            <span role="cell">{formatNullableValue(row.section)}</span>
+            <span role="cell" className="apply-preview-table__repository">
+              {formatNullableValue(row.repository)}
+            </span>
+            <span role="cell">
+              <span
+                className={
+                  row.status === "failed" || row.status === "blocked"
+                    ? "status-chip status-chip--attention"
+                    : "status-chip"
+                }
+              >
+                {formatApplyResultRepositoryStatus(row.status)}
+              </span>
+            </span>
+            <span role="cell">
+              {formatNullableValue(row.reason)}
+              <RowDiagnostics diagnostics={row.diagnostics} />
+            </span>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+);
+
 const DiagnosticEntry = ({
   diagnostic
 }: {
@@ -420,26 +542,162 @@ const DiagnosticsPanel = ({
   </section>
 );
 
-const DisabledApplyPanel = (): ReactElement => (
-  <section
-    className="detail-panel apply-preview-final-action"
-    aria-labelledby="apply-placeholder-title"
-  >
-    <h2 id="apply-placeholder-title">Apply assignment</h2>
-    <p>This preview is read-only. Applying changes will be added in UI-3B.</p>
-    <button className="primary-action" type="button" disabled>
-      Apply changes — coming in UI-3B
-    </button>
-  </section>
+const getApplyResultStudentLabel = (row: ApplyResultRepositoryRow): string =>
+  row.githubUsername ?? row.studentId ?? "Unknown student";
+
+const ConfirmationPanel = ({
+  preview,
+  isConfirming,
+  isConfirmed,
+  isApplying,
+  onOpenConfirmation,
+  onConfirmationChange,
+  onCancel,
+  onApply
+}: {
+  readonly preview: NormalizedApplyPreview;
+  readonly isConfirming: boolean;
+  readonly isConfirmed: boolean;
+  readonly isApplying: boolean;
+  readonly onOpenConfirmation: () => void;
+  readonly onConfirmationChange: (checked: boolean) => void;
+  readonly onCancel: () => void;
+  readonly onApply: () => void;
+}): ReactElement => {
+  const blockerReasons = getApplyBlockerReasons(preview);
+  const canApply = blockerReasons.length === 0;
+
+  return (
+    <section
+      className="detail-panel apply-preview-final-action"
+      aria-labelledby="apply-confirmation-title"
+    >
+      <h2 id="apply-confirmation-title">Apply assignment</h2>
+      {canApply ? (
+        <p>Preview is ready. Review and confirm before applying changes to student repositories.</p>
+      ) : (
+        <>
+          <p>Apply is disabled until the latest preview has no blockers.</p>
+          <ul className="needs-attention-list" aria-label="Apply blockers">
+            {blockerReasons.map((reason) => (
+              <li key={reason}>
+                <strong>{reason}</strong>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {!canApply ? (
+        <button className="primary-action" type="button" disabled>
+          Apply changes
+        </button>
+      ) : null}
+      {canApply && !isConfirming ? (
+        <button
+          className="primary-action"
+          type="button"
+          disabled={isApplying}
+          onClick={onOpenConfirmation}
+        >
+          Review apply changes
+        </button>
+      ) : null}
+      {canApply && isConfirming ? (
+        <div className="apply-confirmation-panel" role="dialog" aria-modal="false">
+          <h3>Confirm apply changes</h3>
+          <ul>
+            <li>This will create or update student repositories.</li>
+            <li>
+              This may write manifests/local apply state if the backend apply command does so.
+            </li>
+            <li>
+              This may push files/commits to GitHub according to the existing apply implementation.
+            </li>
+          </ul>
+          <label className="confirmation-check">
+            <input
+              type="checkbox"
+              checked={isConfirmed}
+              disabled={isApplying}
+              onChange={(event) => {
+                onConfirmationChange(event.currentTarget.checked);
+              }}
+            />
+            <span>I understand this will apply changes to student repositories</span>
+          </label>
+          <div className="apply-confirmation-actions">
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={isApplying}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+            <button
+              className="primary-action"
+              type="button"
+              disabled={!isConfirmed || isApplying}
+              onClick={onApply}
+            >
+              {isApplying ? "Applying..." : "Apply changes"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+};
+
+const ApplyResultPanel = ({
+  result,
+  onBack,
+  onRefreshAssignmentDetail,
+  onBackToDashboard
+}: {
+  readonly result: NormalizedApplyResult;
+  readonly onBack: () => void;
+  readonly onRefreshAssignmentDetail?: () => void;
+  readonly onBackToDashboard?: () => void;
+}): ReactElement => (
+  <>
+    <ApplyResultSummaryPanel result={result} />
+    <ApplyResultRowsPanel result={result} />
+    <DiagnosticsPanel diagnostics={result.diagnostics} />
+    <section className="detail-panel apply-preview-final-action" aria-labelledby="post-apply-title">
+      <h2 id="post-apply-title">Post-apply actions</h2>
+      <div className="apply-confirmation-actions">
+        <button className="secondary-action" type="button" onClick={onBack}>
+          Back to assignment detail
+        </button>
+        {onRefreshAssignmentDetail === undefined ? null : (
+          <button className="primary-action" type="button" onClick={onRefreshAssignmentDetail}>
+            Refresh assignment detail
+          </button>
+        )}
+        {onBackToDashboard === undefined ? null : (
+          <button className="secondary-action" type="button" onClick={onBackToDashboard}>
+            Back to dashboard
+          </button>
+        )}
+      </div>
+    </section>
+  </>
 );
 
 export const ApplyPreviewPage = ({
   selection,
   assignmentDetail,
-  onBack
+  onBack,
+  onRefreshAssignmentDetail,
+  onBackToDashboard
 }: ApplyPreviewPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<ApplyPreviewLoadResult | null>(null);
+  const [applyResult, setApplyResult] = useState<ApplyExecutionLoadResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [isConfirmingApply, setIsConfirmingApply] = useState(false);
+  const [isApplyConfirmed, setIsApplyConfirmed] = useState(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
 
@@ -451,8 +709,18 @@ export const ApplyPreviewPage = ({
     [loadResult, selection]
   );
 
+  const normalizedApplyResult = useMemo(
+    () =>
+      applyResult?.apply === null || applyResult?.apply === undefined
+        ? null
+        : normalizeApplyResult(applyResult.apply, applyResult.appliedAt),
+    [applyResult]
+  );
+
   const loadPreview = async (): Promise<void> => {
     setIsLoading(true);
+    setIsConfirmingApply(false);
+    setIsApplyConfirmed(false);
 
     try {
       setLoadResult(
@@ -480,6 +748,44 @@ export const ApplyPreviewPage = ({
       }));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleApply = async (): Promise<void> => {
+    if (preview === null || !canApplyPreview(preview) || !isApplyConfirmed || isApplying) {
+      return;
+    }
+
+    setIsApplying(true);
+
+    try {
+      setApplyResult(
+        await window.graiderUI.applyAssignment({
+          courseFolderId: selection.courseFolderId,
+          courseFolderPath: selection.courseFolderPath,
+          assignmentFile: selection.assignmentFile
+        })
+      );
+      setIsConfirmingApply(false);
+      setIsApplyConfirmed(false);
+    } catch {
+      setApplyResult({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        assignmentFile: selection.assignmentFile,
+        status: "failure",
+        apply: null,
+        error: {
+          code: "assignment_apply_failed",
+          message: "Unable to apply assignment.",
+          exitCode: null,
+          stdoutSnippet: null,
+          stderrSnippet: null
+        },
+        appliedAt: null
+      });
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -519,6 +825,7 @@ export const ApplyPreviewPage = ({
     assignmentDetail?.assignment.slug ?? selection.assignmentSlug
   );
   const commandErrorMessage = getCommandErrorMessage(loadResult);
+  const applyErrorMessage = getApplyCommandErrorMessage(applyResult);
   const showTokenGuidance =
     preview !== null &&
     (preview.diagnostics.some((diagnostic) => diagnostic.code === "github_token_required") ||
@@ -543,7 +850,7 @@ export const ApplyPreviewPage = ({
             <button
               className="primary-action"
               type="button"
-              disabled={isLoading}
+              disabled={isLoading || isApplying}
               onClick={() => {
                 void loadPreview();
               }}
@@ -557,7 +864,9 @@ export const ApplyPreviewPage = ({
 
       <section className="dashboard-content assignment-detail" aria-label="Apply preview">
         <p className="preview-only-notice">
-          Preview only — no repositories or files will be changed.
+          {normalizedApplyResult === null
+            ? "Preview only — no repositories or files will be changed."
+            : "Apply result — preview context remains visible below."}
         </p>
         <p className="assignment-detail__path">
           Assignment file: {preview?.files.assignmentFile ?? selection.assignmentFile}
@@ -573,6 +882,14 @@ export const ApplyPreviewPage = ({
             {commandErrorMessage}
           </p>
         )}
+
+        {applyErrorMessage === null ? null : (
+          <p className="error-message" role="alert">
+            {applyErrorMessage}
+          </p>
+        )}
+
+        {isApplying ? <p className="loading-state">Applying assignment changes...</p> : null}
 
         {showTokenGuidance ? (
           <section className="detail-guidance" aria-label="GitHub token guidance">
@@ -596,7 +913,35 @@ export const ApplyPreviewPage = ({
               <RepositorySummaryPanel preview={preview} />
               <RepositoryRowsPanel preview={preview} />
               <DiagnosticsPanel diagnostics={preview.diagnostics} />
-              <DisabledApplyPanel />
+              {normalizedApplyResult === null ? (
+                <ConfirmationPanel
+                  preview={preview}
+                  isConfirming={isConfirmingApply}
+                  isConfirmed={isApplyConfirmed}
+                  isApplying={isApplying}
+                  onOpenConfirmation={() => {
+                    setIsConfirmingApply(true);
+                    setIsApplyConfirmed(false);
+                  }}
+                  onConfirmationChange={setIsApplyConfirmed}
+                  onCancel={() => {
+                    setIsConfirmingApply(false);
+                    setIsApplyConfirmed(false);
+                  }}
+                  onApply={() => {
+                    void handleApply();
+                  }}
+                />
+              ) : (
+                <ApplyResultPanel
+                  result={normalizedApplyResult}
+                  onBack={onBack}
+                  {...(onRefreshAssignmentDetail === undefined
+                    ? {}
+                    : { onRefreshAssignmentDetail })}
+                  {...(onBackToDashboard === undefined ? {} : { onBackToDashboard })}
+                />
+              )}
             </div>
           </>
         )}

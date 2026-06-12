@@ -1,5 +1,8 @@
 # CLI JSON Contract
 
+Reusable Codex instructions for changing backend JSON commands live in the
+[Codex Backend JSON Command Contract](codex-backend-json-command-contract.md).
+
 Graider UI integrations should consume `--json` command output, not
 human-readable text. Human output is optimized for terminal use and may change
 for readability. JSON output is the stable machine-readable surface for command
@@ -47,10 +50,22 @@ Stable top-level fields:
 `diagnostics` is additive. Existing consumers that read `warnings` and `errors`
 can continue to do so.
 
-`dashboard --json`, `assignment detail --json`, and
-`assignment apply-preview --json` are UI-focused commands that add
-command-specific top-level fields to this JSON surface. `dashboard --json` adds
-a top-level `cards` array:
+`dashboard --json`, `assignment detail --json`,
+`assignment apply-preview --json`, and `assignment apply --json` are
+UI-focused commands that use this JSON surface. Dashboard, detail, and
+apply-preview add command-specific top-level fields. The canonical UI command
+family is:
+
+```bash
+graider assignment detail <assignment.yml> --json
+graider assignment apply-preview <assignment.yml> --json
+graider assignment apply <assignment.yml> --json
+```
+
+The legacy top-level `apply <assignment.yml> --json` command remains supported.
+Future UI apply execution should call `assignment apply`.
+
+`dashboard --json` adds a top-level `cards` array:
 
 ```json
 {
@@ -80,6 +95,11 @@ without `--json` returns a JSON failure with
 `assignment apply-preview <assignment.yml> --json` is also JSON-only. Running it
 without `--json` returns a JSON failure with
 `assignment_apply_preview_json_required`.
+
+`assignment apply <assignment.yml> --json` is a real mutation command. It shares
+the existing apply implementation and JSON summary shape with legacy
+`apply <assignment.yml> --json`, but reports `commandName: "assignment apply"`
+for the canonical nested route.
 
 ## Command Status Values
 
@@ -403,12 +423,21 @@ write manifests, write plan files, generate workflows, dispatch workflows,
 publish reports, inspect workflow runs, download artifacts, or scan unrelated
 repositories.
 
-### `apply --json`
+### `assignment apply <assignment.yml> --json`
+
+`assignment apply --json` is the canonical assignment-scoped apply command for
+future UI-3B work. It executes the same real mutation behavior as the legacy
+top-level `apply --json` command: validation, GitHub readiness checks, manifest
+writes, repository creation/update, collaborator/team permission setup, Actions
+enablement, and mutation guard handling are unchanged.
+
+Successful canonical responses use command name `assignment apply`:
 
 Useful fields include:
 
 ```json
 {
+  "commandName": "assignment apply",
   "assignmentSlug": "lab01",
   "manifestFile": "terms/27s1/manifests/lab01/manifest.yml",
   "studentCount": 2,
@@ -422,6 +451,9 @@ Useful fields include:
 ```
 
 `generatedFiles` includes the manifest path when a manifest was written.
+
+The legacy `apply <assignment.yml> --json` command remains supported and keeps
+its existing `commandName: "apply"` response for compatibility.
 
 ### `grade --json`
 

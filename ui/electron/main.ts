@@ -1,5 +1,6 @@
 import path from "node:path";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
+import { applyAssignment } from "./assignmentApplyRunner.js";
 import { getAssignmentApplyPreview } from "./assignmentApplyPreviewRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
@@ -14,6 +15,7 @@ import { refreshCourseFolder, refreshDashboard } from "./dashboardRunner.js";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type AssignmentApplyRequest,
   type AssignmentApplyPreviewRequest,
   type AssignmentDetailRequest
 } from "./ipc.js";
@@ -56,6 +58,9 @@ const isAssignmentDetailRequest = (value: unknown): value is AssignmentDetailReq
 };
 
 const isAssignmentApplyPreviewRequest = (value: unknown): value is AssignmentApplyPreviewRequest =>
+  isAssignmentDetailRequest(value);
+
+const isAssignmentApplyRequest = (value: unknown): value is AssignmentApplyRequest =>
   isAssignmentDetailRequest(value);
 
 export const registerIpcHandlers = (): void => {
@@ -135,6 +140,17 @@ export const registerIpcHandlers = (): void => {
     }
 
     return await getAssignmentApplyPreview(request, {
+      runner: processRunner,
+      env: process.env
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.applyAssignment, async (_event, request: unknown) => {
+    if (!isAssignmentApplyRequest(request)) {
+      throw new Error("Assignment apply request is required.");
+    }
+
+    return await applyAssignment(request, {
       runner: processRunner,
       env: process.env
     });

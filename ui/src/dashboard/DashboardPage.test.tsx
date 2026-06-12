@@ -260,6 +260,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshDashboard: vi.fn().mockResolvedValue(createCombinedDashboardResult([])),
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createAssignmentApplyPreviewResult()),
+    applyAssignment: vi.fn(),
     ...api
   };
 

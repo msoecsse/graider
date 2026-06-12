@@ -2923,6 +2923,13 @@ var buildAssignmentDetail = ({
   });
 };
 
+// src/core/command-context.ts
+var normalizeCommonCommandOptions = (options) => ({
+  json: options.json === true,
+  verbose: options.verbose === true,
+  yes: options.yes === true
+});
+
 // src/github/octokit-github-client.ts
 import { Buffer } from "buffer";
 import { inflateRawSync } from "zlib";
@@ -3824,89 +3831,6 @@ function normalizeToken2(token) {
   return normalized === void 0 || normalized.length === EMPTY_LENGTH3 ? void 0 : normalized;
 }
 
-// src/cli/commands/assignment.command.ts
-var COMMAND_NAME3 = "assignment";
-var DETAIL_COMMAND_NAME = "detail";
-var APPLY_PREVIEW_COMMAND_NAME = "apply-preview";
-var JSON_INDENT_SPACES = 2;
-var createJsonRequiredResult = () => createEmptyAssignmentDetailResult("failure", [
-  createConfigDiagnostic(
-    ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE,
-    "The assignment detail command only supports JSON output. Run with --json."
-  )
-]);
-var createApplyPreviewJsonRequiredResult = () => createEmptyAssignmentApplyPreviewResult("failure", [
-  createConfigDiagnostic(
-    ASSIGNMENT_APPLY_PREVIEW_JSON_REQUIRED_CODE,
-    "The assignment apply-preview command only supports JSON output. Run with --json."
-  )
-]);
-var resolveGitHubClient = (githubClient, token) => {
-  if (githubClient !== void 0) {
-    return githubClient;
-  }
-  return token === void 0 ? void 0 : createGitHubClient({ token });
-};
-var runAssignmentDetailCommand = ({
-  cwd,
-  assignmentFile,
-  options,
-  env = process.env,
-  githubClient
-}) => {
-  if (options.json !== true) {
-    return Promise.resolve(createJsonRequiredResult());
-  }
-  const token = readGitHubToken(env);
-  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
-  return buildAssignmentDetail({
-    cwd,
-    assignmentFile,
-    ...resolvedGitHubClient === void 0 ? {} : { githubClient: resolvedGitHubClient }
-  });
-};
-var runAssignmentApplyPreviewCommand = ({
-  cwd,
-  assignmentFile,
-  options,
-  env = process.env,
-  githubClient
-}) => {
-  if (options.json !== true) {
-    return Promise.resolve(createApplyPreviewJsonRequiredResult());
-  }
-  const token = readGitHubToken(env);
-  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
-  return buildAssignmentApplyPreview({
-    cwd,
-    assignmentFile,
-    ...resolvedGitHubClient === void 0 ? {} : { githubClient: resolvedGitHubClient }
-  });
-};
-var formatAssignmentDetailResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES);
-var formatAssignmentApplyPreviewResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES);
-var registerAssignmentCommand = (program) => {
-  const assignment = program.command(COMMAND_NAME3).description("Inspect assignment configuration and local detail data.");
-  assignment.command(DETAIL_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit assignment detail JSON").description("Build a UI-ready read-only assignment detail model.").action(async (assignmentFile, options) => {
-    const result = await runAssignmentDetailCommand({
-      cwd: process.cwd(),
-      assignmentFile,
-      options
-    });
-    console.log(formatAssignmentDetailResultAsJson(result));
-    process.exitCode = result.exitCode;
-  });
-  assignment.command(APPLY_PREVIEW_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit assignment apply preview JSON").description("Build a UI-ready read-only assignment apply preview model.").action(async (assignmentFile, options) => {
-    const result = await runAssignmentApplyPreviewCommand({
-      cwd: process.cwd(),
-      assignmentFile,
-      options
-    });
-    console.log(formatAssignmentApplyPreviewResultAsJson(result));
-    process.exitCode = result.exitCode;
-  });
-};
-
 // src/cli/commands/apply.command.ts
 import fs7 from "fs";
 
@@ -3919,13 +3843,6 @@ var systemClock = {
 };
 var formatPlanCreatedAt = (date) => date.toISOString();
 var formatFilesystemTimestamp = (date) => date.toISOString().replace(COLON_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR).replace(PERIOD_PATTERN, FILESYSTEM_TIMESTAMP_SEPARATOR);
-
-// src/core/command-context.ts
-var normalizeCommonCommandOptions = (options) => ({
-  json: options.json === true,
-  verbose: options.verbose === true,
-  yes: options.yes === true
-});
 
 // src/core/exit-codes.ts
 var AUTHORIZATION_ERROR_CODES = /* @__PURE__ */ new Set([
@@ -5557,7 +5474,7 @@ var buildPlan = async ({
 
 // src/cli/output.ts
 var CLI_JSON_SCHEMA_VERSION = 1;
-var JSON_INDENT_SPACES2 = 2;
+var JSON_INDENT_SPACES = 2;
 var EMPTY_COLLECTION_LENGTH = 0;
 var createCliJsonOutput = (result) => {
   const redactedResult = redactCommandResult(result);
@@ -5567,7 +5484,7 @@ var createCliJsonOutput = (result) => {
     diagnostics: [...redactedResult.warnings, ...redactedResult.errors]
   };
 };
-var formatCommandResultAsJson = (result) => JSON.stringify(createCliJsonOutput(result), void 0, JSON_INDENT_SPACES2);
+var formatCommandResultAsJson = (result) => JSON.stringify(createCliJsonOutput(result), void 0, JSON_INDENT_SPACES);
 var formatDiagnostic = (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`;
 var formatCommandResultAsText = (result) => {
   const redactedResult = redactCommandResult(result);
@@ -5590,7 +5507,7 @@ var writeCommandResult = (result, json) => {
 };
 
 // src/cli/commands/apply.command.ts
-var COMMAND_NAME4 = "apply";
+var COMMAND_NAME3 = "apply";
 var EMPTY_COUNT8 = 0;
 var getExecutionStatus = (errorsLength, summary) => {
   if (errorsLength === EMPTY_COUNT8) {
@@ -5603,6 +5520,7 @@ var runApplyCommand = async ({
   cwd,
   assignmentFile,
   options,
+  commandName = COMMAND_NAME3,
   githubClient,
   clock = systemClock,
   retryOptions
@@ -5621,7 +5539,7 @@ var runApplyCommand = async ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME4,
+      commandName,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -5633,7 +5551,7 @@ var runApplyCommand = async ({
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > EMPTY_COUNT8) {
     return createCommandResult({
-      commandName: COMMAND_NAME4,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -5656,7 +5574,7 @@ var runApplyCommand = async ({
   });
   if (readinessResult.errors.length > EMPTY_COUNT8) {
     return createCommandResult({
-      commandName: COMMAND_NAME4,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -5678,7 +5596,7 @@ var runApplyCommand = async ({
   const manifestResult = loadManifest(manifestPath.absolutePath);
   if (manifestResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME4,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -5703,7 +5621,7 @@ var runApplyCommand = async ({
   const guardResult = evaluateMutationGuard({ plan, options });
   if (!guardResult.allowed) {
     return createCommandResult({
-      commandName: COMMAND_NAME4,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...plan.warnings],
@@ -5731,7 +5649,7 @@ var runApplyCommand = async ({
   });
   const generatedFiles = fs7.existsSync(manifestPath.absolutePath) ? [manifestPath.relativePath] : [];
   return createCommandResult({
-    commandName: COMMAND_NAME4,
+    commandName,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: getExecutionStatus(executionResult.errors.length, executionResult.summary),
     warnings: [...rosterResult.warnings, ...plan.warnings, ...executionResult.warnings],
@@ -5750,9 +5668,120 @@ var runApplyCommand = async ({
   });
 };
 var registerApplyCommand = (program) => {
-  program.command(COMMAND_NAME4).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Apply assignment repository changes.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME3).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Apply assignment repository changes.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runApplyCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options
+    });
+    writeCommandResult(result, options.json);
+    process.exitCode = result.exitCode;
+  });
+};
+
+// src/cli/commands/assignment.command.ts
+var COMMAND_NAME4 = "assignment";
+var DETAIL_COMMAND_NAME = "detail";
+var APPLY_PREVIEW_COMMAND_NAME = "apply-preview";
+var APPLY_COMMAND_NAME = "apply";
+var ASSIGNMENT_APPLY_COMMAND_NAME = "assignment apply";
+var JSON_INDENT_SPACES2 = 2;
+var createJsonRequiredResult = () => createEmptyAssignmentDetailResult("failure", [
+  createConfigDiagnostic(
+    ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE,
+    "The assignment detail command only supports JSON output. Run with --json."
+  )
+]);
+var createApplyPreviewJsonRequiredResult = () => createEmptyAssignmentApplyPreviewResult("failure", [
+  createConfigDiagnostic(
+    ASSIGNMENT_APPLY_PREVIEW_JSON_REQUIRED_CODE,
+    "The assignment apply-preview command only supports JSON output. Run with --json."
+  )
+]);
+var resolveGitHubClient = (githubClient, token) => {
+  if (githubClient !== void 0) {
+    return githubClient;
+  }
+  return token === void 0 ? void 0 : createGitHubClient({ token });
+};
+var runAssignmentDetailCommand = ({
+  cwd,
+  assignmentFile,
+  options,
+  env = process.env,
+  githubClient
+}) => {
+  if (options.json !== true) {
+    return Promise.resolve(createJsonRequiredResult());
+  }
+  const token = readGitHubToken(env);
+  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
+  return buildAssignmentDetail({
+    cwd,
+    assignmentFile,
+    ...resolvedGitHubClient === void 0 ? {} : { githubClient: resolvedGitHubClient }
+  });
+};
+var runAssignmentApplyPreviewCommand = ({
+  cwd,
+  assignmentFile,
+  options,
+  env = process.env,
+  githubClient
+}) => {
+  if (options.json !== true) {
+    return Promise.resolve(createApplyPreviewJsonRequiredResult());
+  }
+  const token = readGitHubToken(env);
+  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
+  return buildAssignmentApplyPreview({
+    cwd,
+    assignmentFile,
+    ...resolvedGitHubClient === void 0 ? {} : { githubClient: resolvedGitHubClient }
+  });
+};
+var runAssignmentApplyCommand = ({
+  cwd,
+  assignmentFile,
+  options,
+  githubClient,
+  clock,
+  retryOptions
+}) => runApplyCommand({
+  cwd,
+  assignmentFile,
+  options,
+  commandName: ASSIGNMENT_APPLY_COMMAND_NAME,
+  ...githubClient === void 0 ? {} : { githubClient },
+  ...clock === void 0 ? {} : { clock },
+  ...retryOptions === void 0 ? {} : { retryOptions }
+});
+var formatAssignmentDetailResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
+var formatAssignmentApplyPreviewResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
+var registerAssignmentCommand = (program) => {
+  const assignment = program.command(COMMAND_NAME4).description("Inspect assignment configuration and local detail data.");
+  assignment.command(DETAIL_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit assignment detail JSON").description("Build a UI-ready read-only assignment detail model.").action(async (assignmentFile, options) => {
+    const result = await runAssignmentDetailCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options
+    });
+    console.log(formatAssignmentDetailResultAsJson(result));
+    process.exitCode = result.exitCode;
+  });
+  assignment.command(APPLY_PREVIEW_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit assignment apply preview JSON").description("Build a UI-ready read-only assignment apply preview model.").action(async (assignmentFile, options) => {
+    const result = await runAssignmentApplyPreviewCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options
+    });
+    console.log(formatAssignmentApplyPreviewResultAsJson(result));
+    process.exitCode = result.exitCode;
+  });
+  assignment.command(APPLY_COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Apply assignment repository changes.").action(async (assignmentFile, rawOptions) => {
+    const options = normalizeCommonCommandOptions(rawOptions);
+    const result = await runAssignmentApplyCommand({
       cwd: process.cwd(),
       assignmentFile,
       options

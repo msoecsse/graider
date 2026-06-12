@@ -201,6 +201,10 @@ See [live testing](docs/live-testing.md) before running live tests.
 ## More Documentation
 
 - [Runtime and CI](docs/runtime.md)
+- [Codex development contract](docs/codex-development-contract.md)
+- [Codex backend JSON command contract](docs/codex-backend-json-command-contract.md)
+- [Codex Electron UI contract](docs/codex-electron-ui-contract.md)
+- [Codex prompt template](docs/codex-prompt-template.md)
 - [GitHub token permissions](docs/github-token-permissions.md)
 - [CLI JSON contract](docs/cli-json-contract.md)
 - [Electron assignment detail developer guide](docs/electron-assignment-detail-dev.md)

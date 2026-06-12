@@ -6,7 +6,8 @@ export const IPC_CHANNELS = {
   refreshCourseFolder: "graider-ui:dashboard:refresh-course-folder",
   refreshDashboard: "graider-ui:dashboard:refresh-all",
   getAssignmentDetail: "graider-ui:assignment-detail:get",
-  getAssignmentApplyPreview: "graider-ui:assignment-apply-preview:get"
+  getAssignmentApplyPreview: "graider-ui:assignment-apply-preview:get",
+  applyAssignment: "graider-ui:assignment-apply:run"
 } as const;
 
 export interface AppInfo {
@@ -53,6 +54,8 @@ export interface AssignmentDetailRequest {
 }
 
 export type AssignmentApplyPreviewRequest = AssignmentDetailRequest;
+
+export type AssignmentApplyRequest = AssignmentDetailRequest;
 
 export interface AssignmentDetailJsonResponse {
   readonly schemaVersion: 1;
@@ -111,6 +114,29 @@ export interface AssignmentApplyPreviewResult {
   readonly refreshedAt: string | null;
 }
 
+export interface AssignmentApplyJsonResponse {
+  readonly schemaVersion: 1;
+  readonly commandName: "assignment apply";
+  readonly assignmentFile: string;
+  readonly status: string;
+  readonly exitCode: number;
+  readonly diagnostics: readonly unknown[];
+  readonly warnings: readonly unknown[];
+  readonly errors: readonly unknown[];
+  readonly generatedFiles: readonly string[];
+  readonly summary: Readonly<Record<string, unknown>>;
+}
+
+export interface AssignmentApplyResult {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly assignmentFile: string;
+  readonly status: "success" | "failure";
+  readonly apply: AssignmentApplyJsonResponse | null;
+  readonly error: DashboardCommandError | null;
+  readonly appliedAt: string | null;
+}
+
 export interface CourseFolderDashboardResult {
   readonly courseFolderId: string;
   readonly courseFolderPath: string;
@@ -138,4 +164,5 @@ export interface GraiderUIApi {
   readonly getAssignmentApplyPreview: (
     request: AssignmentApplyPreviewRequest
   ) => Promise<AssignmentApplyPreviewResult>;
+  readonly applyAssignment: (request: AssignmentApplyRequest) => Promise<AssignmentApplyResult>;
 }

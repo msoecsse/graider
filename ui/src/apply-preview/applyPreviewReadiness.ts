@@ -3,6 +3,7 @@ import {
   hasAttentionStatus
 } from "../assignment-detail/assignmentDetailReadiness";
 import type {
+  ApplyResultRepositoryStatus,
   ApplyPreviewReadinessSummary,
   ApplyPreviewRepositoryStatus,
   NormalizedApplyPreview
@@ -111,3 +112,42 @@ export const formatApplyPreviewRepositoryStatus = (
 
   return "Unknown";
 };
+
+export const formatApplyResultRepositoryStatus = (status: ApplyResultRepositoryStatus): string => {
+  if (status === "created") {
+    return "Created";
+  }
+
+  if (status === "updated") {
+    return "Updated";
+  }
+
+  if (status === "skipped") {
+    return "Skipped";
+  }
+
+  if (status === "blocked") {
+    return "Blocked";
+  }
+
+  return "Failed";
+};
+
+export const getApplyBlockerReasons = (preview: NormalizedApplyPreview): readonly string[] => {
+  const readiness = deriveApplyPreviewReadiness(preview);
+  const hasErrorDiagnostics = preview.diagnostics.some(
+    (diagnostic) => diagnostic.severity === "error"
+  );
+  const reasons = [
+    ...(readiness.status === "ready" ? [] : readiness.items),
+    ...(hasErrorDiagnostics ? ["Resolve error diagnostics before applying changes"] : []),
+    ...(preview.status !== "success" ? ["Refresh preview until status is success"] : []),
+    ...(preview.plan.summary.blockedRepositories > 0 ? ["Repository rows are blocked"] : []),
+    ...(preview.plan.summary.unknownRepositories > 0 ? ["Repository rows have unknown status"] : [])
+  ];
+
+  return [...new Set(reasons)];
+};
+
+export const canApplyPreview = (preview: NormalizedApplyPreview): boolean =>
+  getApplyBlockerReasons(preview).length === 0;

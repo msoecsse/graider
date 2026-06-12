@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
+  AssignmentApplyJsonResponse,
+  AssignmentApplyResult,
   AssignmentApplyPreviewJsonResponse,
   AssignmentApplyPreviewResult,
   GraiderUIApi
@@ -137,6 +139,116 @@ const createApplyPreviewResult = (
   ...overrides
 });
 
+const createReadyApplyPreviewJson = (): AssignmentApplyPreviewJsonResponse =>
+  createApplyPreviewJson({
+    plan: {
+      summary: {
+        wouldCreateRepositories: 1,
+        wouldUpdateRepositories: 1,
+        wouldSkipRepositories: 1,
+        blockedRepositories: 0,
+        unknownRepositories: 0
+      },
+      repositories: [
+        {
+          studentId: "s001",
+          githubUsername: "ada",
+          section: "001",
+          repository: "graider-sandbox/csc1120-lab02-ada",
+          status: "would_create",
+          reason: "student_repository_missing",
+          diagnostics: []
+        },
+        {
+          studentId: "s002",
+          githubUsername: "grace",
+          section: "001",
+          repository: "graider-sandbox/csc1120-lab02-grace",
+          status: "would_update",
+          reason: "student_repository_exists",
+          diagnostics: []
+        },
+        {
+          studentId: "s003",
+          githubUsername: "katherine",
+          section: "001",
+          repository: "graider-sandbox/csc1120-lab02-katherine",
+          status: "would_skip",
+          reason: "student_status_hold",
+          diagnostics: []
+        }
+      ]
+    },
+    actions: { apply: { available: true, implemented: false, previewOnly: true } }
+  });
+
+const createApplyJson = (
+  overrides: Partial<AssignmentApplyJsonResponse> = {}
+): AssignmentApplyJsonResponse => ({
+  schemaVersion: 1,
+  commandName: "assignment apply",
+  assignmentFile: ASSIGNMENT_FILE,
+  status: "success",
+  exitCode: 0,
+  diagnostics: [],
+  warnings: [],
+  errors: [],
+  generatedFiles: ["terms/27s1/manifests/lab02/manifest.yml"],
+  summary: {
+    assignmentSlug: "lab02",
+    manifestFile: "terms/27s1/manifests/lab02/manifest.yml",
+    created: 1,
+    updated: 1,
+    skipped: 1,
+    failed: 0,
+    blocked: 0,
+    repositories: [
+      {
+        studentId: "s001",
+        githubUsername: "ada",
+        section: "001",
+        repository: "graider-sandbox/csc1120-lab02-ada",
+        status: "created",
+        reason: "repository_created",
+        diagnostics: []
+      },
+      {
+        studentId: "s002",
+        githubUsername: "grace",
+        section: "001",
+        repository: "graider-sandbox/csc1120-lab02-grace",
+        status: "updated",
+        reason: "repository_updated",
+        diagnostics: []
+      },
+      {
+        studentId: "s003",
+        githubUsername: "katherine",
+        section: "001",
+        repository: "graider-sandbox/csc1120-lab02-katherine",
+        status: "skipped",
+        reason: "student_status_hold",
+        diagnostics: []
+      }
+    ]
+  },
+  ...overrides
+});
+
+const createApplyResult = (
+  apply: AssignmentApplyJsonResponse | null = createApplyJson(),
+  overrides: Partial<AssignmentApplyResult> = {}
+): AssignmentApplyResult => ({
+  courseFolderId: SELECTION.courseFolderId,
+  courseFolderPath: SELECTION.courseFolderPath,
+  assignmentFile: SELECTION.assignmentFile,
+  status: apply === null || apply.status === "failure" ? "failure" : "success",
+  apply,
+  error: null,
+  appliedAt: "2026-06-10T15:00:00.000Z",
+  ...overrides
+});
+
 const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   const graiderUI = {
     getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),
@@ -147,6 +259,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshDashboard: vi.fn(),
     getAssignmentDetail: vi.fn(),
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createApplyPreviewResult()),
+    applyAssignment: vi.fn().mockResolvedValue(createApplyResult()),
     ...api
   };
 
@@ -171,7 +284,7 @@ const renderApplyPreviewPage = (onBack = vi.fn()) =>
   render(<ApplyPreviewPage selection={SELECTION} assignmentDetail={null} onBack={onBack} />);
 
 describe("ApplyPreviewPage", () => {
-  it("auto-loads and renders preview context, panels, rows, diagnostics, and disabled apply", async () => {
+  it("auto-loads and renders preview context, panels, rows, diagnostics, and disabled apply for blockers", async () => {
     const getAssignmentApplyPreview = vi.fn().mockResolvedValue(createApplyPreviewResult());
 
     mockGraiderUI({ getAssignmentApplyPreview });
@@ -198,15 +311,240 @@ describe("ApplyPreviewPage", () => {
     expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
     expect(screen.getByText("student_repository_missing")).toBeInTheDocument();
     expect(screen.getAllByText("assignment_archived").length).toBeGreaterThan(0);
-    expect(screen.getByText("Apply changes — coming in UI-3B")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Apply changes" })).toBeDisabled();
     expect(
-      screen.getByText("This preview is read-only. Applying changes will be added in UI-3B.")
+      screen.getByText("Apply is disabled until the latest preview has no blockers.")
     ).toBeInTheDocument();
+    expect(screen.getByText("Repository rows are blocked")).toBeInTheDocument();
+    expect(screen.getByText("Repository rows have unknown status")).toBeInTheDocument();
     expect(getAssignmentApplyPreview).toHaveBeenCalledWith({
       courseFolderId: SELECTION.courseFolderId,
       courseFolderPath: SELECTION.courseFolderPath,
       assignmentFile: SELECTION.assignmentFile
     });
+  });
+
+  it("enables apply entry point when preview has no blockers", async () => {
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson()))
+    });
+    renderApplyPreviewPage();
+
+    expect(await screen.findByRole("button", { name: "Review apply changes" })).toBeEnabled();
+    expect(screen.getByText("Ready to preview apply")).toBeInTheDocument();
+    expect(screen.queryByText("Created")).toBeNull();
+  });
+
+  it("shows confirmation and disables Apply changes until acknowledged", async () => {
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson()))
+    });
+    renderApplyPreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      screen.getByText("This will create or update student repositories.")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This may write manifests/local apply state if the backend apply command does so."
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This may push files/commits to GitHub according to the existing apply implementation."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply changes" })).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+
+    expect(screen.getByRole("button", { name: "Apply changes" })).toBeEnabled();
+  });
+
+  it("confirmed apply calls applyAssignment exactly once with assignment context", async () => {
+    let resolveApply: (value: AssignmentApplyResult) => void = () => undefined;
+    const applyAssignment = vi.fn(
+      async () =>
+        await new Promise<AssignmentApplyResult>((resolve) => {
+          resolveApply = resolve;
+        })
+    );
+
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment
+    });
+    renderApplyPreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Applying..." }));
+
+    expect(await screen.findByText("Applying assignment changes...")).toBeInTheDocument();
+    expect(applyAssignment).toHaveBeenCalledTimes(1);
+    expect(applyAssignment).toHaveBeenCalledWith({
+      courseFolderId: SELECTION.courseFolderId,
+      courseFolderPath: SELECTION.courseFolderPath,
+      assignmentFile: SELECTION.assignmentFile
+    });
+
+    resolveApply(createApplyResult());
+
+    expect(await screen.findByText("Apply Result Summary")).toBeInTheDocument();
+    expect(applyAssignment).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders success result summary, completed rows, and post-apply actions", async () => {
+    const onBack = vi.fn();
+    const onRefreshAssignmentDetail = vi.fn();
+    const onBackToDashboard = vi.fn();
+
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(createApplyResult())
+    });
+    render(
+      <ApplyPreviewPage
+        selection={SELECTION}
+        assignmentDetail={null}
+        onBack={onBack}
+        onRefreshAssignmentDetail={onRefreshAssignmentDetail}
+        onBackToDashboard={onBackToDashboard}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(await screen.findByText("Apply Result Summary")).toBeInTheDocument();
+    expect(screen.getAllByText("Created").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Updated").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Skipped").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Would create").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("terms/27s1/manifests/lab02/manifest.yml").length).toBeGreaterThan(
+      0
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
+    expect(onRefreshAssignmentDetail).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to dashboard" }));
+    expect(onBackToDashboard).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to assignment detail" }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders partial success and failure diagnostics safely", async () => {
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(
+        createApplyResult(
+          createApplyJson({
+            status: "partial_success",
+            exitCode: 2,
+            diagnostics: [
+              {
+                code: "github_api_error",
+                severity: "error",
+                message: "GitHub API failed without token ghp_secret_token",
+                context: { authorization: "Bearer ghp_secret_token" }
+              }
+            ],
+            summary: {
+              created: 1,
+              updated: 0,
+              skipped: 0,
+              failed: 1,
+              blocked: 0,
+              manifestFile: "terms/27s1/manifests/lab02/manifest.yml"
+            }
+          })
+        )
+      )
+    });
+    renderApplyPreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(await screen.findByText("Apply Result Summary")).toBeInTheDocument();
+    expect(screen.getByText("Sensitive diagnostic details were redacted.")).toBeInTheDocument();
+    expect(screen.getByText("[redacted]")).toBeInTheDocument();
+    expect(screen.queryByText(/ghp_secret_token/u)).toBeNull();
+  });
+
+  it("renders missing CLI, invalid JSON, and thrown apply errors safely", async () => {
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(
+        createApplyResult(null, {
+          status: "failure",
+          error: {
+            code: "invalid_assignment_apply_json",
+            message: "Unexpected token",
+            exitCode: 0,
+            stdoutSnippet: "Authorization: Bearer secret-token-value",
+            stderrSnippet: null
+          }
+        })
+      )
+    });
+    renderApplyPreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(await screen.findByText("Graider returned invalid apply JSON.")).toBeInTheDocument();
+    expect(screen.queryByText(/Authorization/u)).toBeNull();
+  });
+
+  it("does not call unrelated mutation APIs", async () => {
+    const graiderUI = mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(createApplyResult())
+    });
+
+    renderApplyPreviewPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(await screen.findByText("Apply Result Summary")).toBeInTheDocument();
+    expect(graiderUI.getAssignmentDetail).not.toHaveBeenCalled();
+    expect(graiderUI.refreshDashboard).not.toHaveBeenCalled();
+    expect(graiderUI.refreshCourseFolder).not.toHaveBeenCalled();
   });
 
   it("renders no-grading and no diagnostics states cleanly", async () => {

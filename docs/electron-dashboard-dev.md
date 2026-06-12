@@ -1,5 +1,8 @@
 # Electron Dashboard Developer Guide
 
+Reusable Codex instructions for Electron UI changes live in the
+[Codex Electron UI Contract](codex-electron-ui-contract.md).
+
 This guide documents the Electron dashboard implementation completed in UI-1A
 through UI-1E, the read-only assignment detail page added and polished in
 UI-2A/UI-2C, and the preview-only Apply Preview page added in UI-3A. It is

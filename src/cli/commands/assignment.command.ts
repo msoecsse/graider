@@ -10,16 +10,28 @@ import {
 } from "../../assignment-detail/assignment-detail-builder.js";
 import type { AssignmentDetailResult } from "../../assignment-detail/assignment-detail-models.js";
 import {
+  type CommonCommandOptions,
+  normalizeCommonCommandOptions,
+  type RawCommonCommandOptions
+} from "../../core/command-context.js";
+import type { Clock } from "../../core/clock.js";
+import type { CommandResult } from "../../core/command-result.js";
+import {
   ASSIGNMENT_APPLY_PREVIEW_JSON_REQUIRED_CODE,
   ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE,
   createConfigDiagnostic
 } from "../../diagnostics/error-catalog.js";
 import type { GitHubClient } from "../../github/github-client.js";
 import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
+import type { RetryOptions } from "../../github/github-retry.js";
+import { runApplyCommand } from "./apply.command.js";
+import { writeCommandResult } from "../output.js";
 
 const COMMAND_NAME = "assignment";
 const DETAIL_COMMAND_NAME = "detail";
 const APPLY_PREVIEW_COMMAND_NAME = "apply-preview";
+const APPLY_COMMAND_NAME = "apply";
+const ASSIGNMENT_APPLY_COMMAND_NAME = "assignment apply";
 const JSON_INDENT_SPACES = 2;
 
 interface AssignmentDetailCommandOptions {
@@ -44,6 +56,15 @@ export interface AssignmentApplyPreviewCommandRequest {
   readonly options: AssignmentApplyPreviewCommandOptions;
   readonly env?: Record<string, string | undefined>;
   readonly githubClient?: GitHubClient;
+}
+
+export interface AssignmentApplyCommandRequest {
+  readonly cwd: string;
+  readonly assignmentFile: string;
+  readonly options: CommonCommandOptions;
+  readonly githubClient?: GitHubClient;
+  readonly clock?: Clock;
+  readonly retryOptions?: Partial<RetryOptions>;
 }
 
 const createJsonRequiredResult = (): AssignmentDetailResult =>
@@ -115,6 +136,24 @@ export const runAssignmentApplyPreviewCommand = ({
   });
 };
 
+export const runAssignmentApplyCommand = ({
+  cwd,
+  assignmentFile,
+  options,
+  githubClient,
+  clock,
+  retryOptions
+}: AssignmentApplyCommandRequest): Promise<CommandResult> =>
+  runApplyCommand({
+    cwd,
+    assignmentFile,
+    options,
+    commandName: ASSIGNMENT_APPLY_COMMAND_NAME,
+    ...(githubClient === undefined ? {} : { githubClient }),
+    ...(clock === undefined ? {} : { clock }),
+    ...(retryOptions === undefined ? {} : { retryOptions })
+  });
+
 export const formatAssignmentDetailResultAsJson = (result: AssignmentDetailResult): string =>
   JSON.stringify(result, undefined, JSON_INDENT_SPACES);
 
@@ -156,6 +195,25 @@ export const registerAssignmentCommand = (program: Command): void => {
       });
 
       console.log(formatAssignmentApplyPreviewResultAsJson(result));
+      process.exitCode = result.exitCode;
+    });
+
+  assignment
+    .command(APPLY_COMMAND_NAME)
+    .argument("<assignment-file>")
+    .option("--json", "Emit JSON output")
+    .option("--verbose", "Emit verbose diagnostics")
+    .option("--yes", "Confirm non-interactive execution")
+    .description("Apply assignment repository changes.")
+    .action(async (assignmentFile: string, rawOptions: RawCommonCommandOptions) => {
+      const options = normalizeCommonCommandOptions(rawOptions);
+      const result = await runAssignmentApplyCommand({
+        cwd: process.cwd(),
+        assignmentFile,
+        options
+      });
+
+      writeCommandResult(result, options.json);
       process.exitCode = result.exitCode;
     });
 };

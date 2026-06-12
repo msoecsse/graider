@@ -31,6 +31,7 @@ export interface ApplyCommandRequest {
   cwd: string;
   assignmentFile: string;
   options: CommonCommandOptions;
+  commandName?: string;
   githubClient?: GitHubClient;
   clock?: Clock;
   retryOptions?: Partial<RetryOptions>;
@@ -60,6 +61,7 @@ export const runApplyCommand = async ({
   cwd,
   assignmentFile,
   options,
+  commandName = COMMAND_NAME,
   githubClient,
   clock = systemClock,
   retryOptions
@@ -79,7 +81,7 @@ export const runApplyCommand = async ({
 
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -93,7 +95,7 @@ export const runApplyCommand = async ({
 
   if (rosterResult.errors.length > EMPTY_COUNT) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -118,7 +120,7 @@ export const runApplyCommand = async ({
 
   if (readinessResult.errors.length > EMPTY_COUNT) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -142,7 +144,7 @@ export const runApplyCommand = async ({
 
   if (manifestResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -169,7 +171,7 @@ export const runApplyCommand = async ({
 
   if (!guardResult.allowed) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...plan.warnings],
@@ -201,7 +203,7 @@ export const runApplyCommand = async ({
     : [];
 
   return createCommandResult({
-    commandName: COMMAND_NAME,
+    commandName,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: getExecutionStatus(executionResult.errors.length, executionResult.summary),
     warnings: [...rosterResult.warnings, ...plan.warnings, ...executionResult.warnings],

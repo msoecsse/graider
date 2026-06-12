@@ -1,12 +1,15 @@
 # Electron Assignment Detail Developer Guide
 
+Reusable Codex instructions for Electron UI changes live in the
+[Codex Electron UI Contract](codex-electron-ui-contract.md).
+
 This guide documents the read-only Electron assignment detail flow delivered in
-UI-2A through UI-2C and the preview-only UI-3A apply preview page. It is the
-reference for preserving the current inspection and planning boundary before
-UI-3B adds confirmed mutation workflows.
+UI-2A through UI-2C, the preview-only UI-3A apply preview page, and the guarded
+UI-3B confirmed apply execution flow.
 
 UI-2 is read-only.
 UI-3A is preview-only and still non-mutating.
+UI-3B is confirmed mutation through the apply command only.
 
 ## Overview
 
@@ -25,11 +28,14 @@ and renders:
 - grouped diagnostics
 - safe copy affordances for useful strings
 - a preview-only apply entry point
+- a guarded confirmed apply execution flow from the Apply Preview page
 - disabled placeholders for future mutation workflow actions
 
-The detail page does not apply assignments, dispatch grading, generate reports,
-publish reports, generate workflows, edit `assignment.yml`, inspect artifacts,
-inspect workflow runs, scan student repositories, or mutate GitHub.
+The detail page itself does not apply assignments, dispatch grading, generate
+reports, publish reports, generate workflows, edit `assignment.yml`, inspect
+artifacts, inspect workflow runs, scan student repositories, or mutate GitHub.
+UI-3B applies assignments only from the Apply Preview page after explicit
+confirmation.
 
 ## Navigation Flow
 
@@ -65,6 +71,12 @@ The apply preview path added in UI-3A is:
 
 ```text
 Assignment detail page -> Preview apply -> Apply Preview page
+```
+
+The confirmed apply path added in UI-3B is:
+
+```text
+Assignment detail page -> Preview apply -> Apply Preview page -> Confirm apply -> Apply result
 ```
 
 The renderer passes the original `courseFolderId`, `courseFolderPath`, and
@@ -126,6 +138,34 @@ The main process parses stdout as apply-preview JSON and returns structured
 success, partial-success, or safe error results to the renderer. It does not
 call apply execution code.
 
+UI-3B confirmed apply execution should use the canonical assignment-scoped real
+apply command:
+
+```bash
+graider assignment apply terms/27s1/assignments/lab02/assignment.yml --json
+```
+
+That command routes to the existing real apply implementation. The legacy
+top-level `graider apply <assignment.yml> --json` command remains supported, but
+new UI work should call `assignment apply` for consistency with assignment
+detail and apply-preview.
+
+The Electron main process invokes confirmed apply with an argv array:
+
+```ts
+["assignment", "apply", assignmentFile, "--json", "--yes"];
+```
+
+`--yes` is supplied only after the renderer confirmation checkbox is accepted.
+The command still runs with:
+
+- `cwd = registered course folder path`
+- `shell: false`
+- `GRAIDER_GITHUB_TOKEN` supplied from the existing environment token or
+  `gh auth token` fallback when available
+- stdout parsed as JSON in the main process
+- bounded, redacted structured errors returned to the renderer
+
 ## IPC Boundary
 
 The assignment detail preload API is:
@@ -160,9 +200,25 @@ The corresponding IPC channel is:
 graider-ui:assignment-apply-preview:get
 ```
 
+The UI-3B confirmed apply preload API is:
+
+```ts
+window.graiderUI.applyAssignment({
+  courseFolderId: "course-folder-csc1120",
+  courseFolderPath: "/Users/sean/dev/csc1120",
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+});
+```
+
+The corresponding IPC channel is:
+
+```text
+graider-ui:assignment-apply:run
+```
+
 The main process validates that the request shape contains string
 `courseFolderId`, `courseFolderPath`, and `assignmentFile` fields before running
-either command.
+assignment detail, apply preview, or confirmed apply.
 
 Current assignment-detail UI copy affordances use the browser clipboard API in
 the renderer. There are no preload APIs for copy.
@@ -184,7 +240,7 @@ results. It must not expose generic shell command execution.
 
 ## Assignment Detail Non-Mutation Guarantees
 
-The assignment detail and UI-3A apply-preview flows are inspection/planning
+The assignment detail and UI-3A apply-preview flows remain inspection/planning
 surfaces only:
 
 - Refresh detail only reruns `graider assignment detail <assignment.yml> --json`.
@@ -194,8 +250,7 @@ surfaces only:
 - Current UI-2C has no open folder or reveal file API.
 - Future open/reveal APIs must only use local OS shell APIs for validated paths
   under registered course folders.
-- The UI-3A `Apply changes — coming in UI-3B` button is disabled.
-- No `apply` command is invoked.
+- UI-3A alone does not invoke `apply`.
 - No `grade` command is invoked.
 - No `report` command is invoked.
 - No `report --publish-student-reports` command is invoked.
@@ -215,6 +270,14 @@ UI-2  = read-only inspection
 UI-3A = preview-only planning, still non-mutating
 UI-3B = confirmed mutation
 ```
+
+UI-3B is the first phase that may call:
+
+```bash
+graider assignment apply <assignment.yml> --json
+```
+
+Only a confirmed mutation flow should call it.
 
 ## Readiness Summary
 
@@ -329,7 +392,7 @@ The page renders:
 - per-student repository preview rows
 - grouped diagnostics and blockers
 - a disabled final action button:
-  `Apply changes — coming in UI-3B`
+  a guarded apply confirmation flow
 
 Repository row labels must use preview wording:
 
@@ -352,7 +415,84 @@ available.
 
 Missing-token previews can still render local target rows when the backend
 returns them. The UI shows guidance to authenticate with GitHub CLI and refresh.
-No actual apply command is wired in UI-3A.
+
+UI-3B enables `Review apply changes` only when the latest preview has no
+blockers, no unknown repository rows, no token-required rows, and no error
+diagnostics. Otherwise the Apply Preview page keeps `Apply changes` disabled
+and shows blocker reasons.
+
+## Confirmed Apply Execution
+
+UI-3B adds a confirmation panel on the Apply Preview page. The panel states:
+
+```text
+This will create or update student repositories.
+This may write manifests/local apply state if the backend apply command does so.
+This may push files/commits to GitHub according to the existing apply implementation.
+```
+
+The `Apply changes` button stays disabled until the user checks:
+
+```text
+I understand this will apply changes to student repositories
+```
+
+During execution:
+
+- `applyAssignment` is called once per confirmed click.
+- Refresh/apply controls that could start duplicate work are disabled.
+- Existing preview context remains visible.
+- Safe loading text shows that assignment changes are being applied.
+- The renderer does not call grade, report, publish, or workflow generation.
+
+If the command returns `success`, `partial_success`, or `failure` with usable
+JSON, the page renders an Apply Result Summary. If the command cannot start,
+returns invalid JSON, or fails before usable JSON is available, the page shows a
+safe error such as missing Graider CLI, missing assignment file, invalid apply
+JSON, or unable to apply assignment.
+
+## Apply Result Summary
+
+The Apply Result Summary renders the backend apply JSON surface:
+
+- command status and exit code
+- applied timestamp
+- assignment file
+- manifest file when returned
+- generated files
+- created repository count
+- updated repository count
+- skipped repository count
+- failed repository count
+- blocked repository count
+- per-student result rows when returned
+- safe diagnostics
+
+Preview rows continue to use future-tense labels:
+
+```text
+Would create
+Would update
+Would skip
+Blocked
+Unknown
+Token required
+```
+
+Apply result rows use completed labels only after execution:
+
+```text
+Created
+Updated
+Skipped
+Failed
+Blocked
+```
+
+Post-apply actions include Back to assignment detail, Refresh assignment detail,
+and Back to dashboard. Refresh assignment detail returns to the detail page and
+lets it reload the latest assignment state. It does not discard the visible
+apply result until the user chooses that navigation.
 
 ## Diagnostics Behavior
 
@@ -444,6 +584,15 @@ For Apply Preview:
 - invalid JSON renders `Graider returned invalid apply preview JSON.`
 - fallback failures render `Unable to load apply preview.`
 
+For confirmed Apply:
+
+- missing CLI renders Graider CLI setup guidance
+- missing assignment file renders `Assignment file not found.`
+- invalid JSON renders `Graider returned invalid apply JSON.`
+- fallback failures render `Unable to apply assignment.`
+- `partial_success` and `failure` JSON still render available result summary and
+  diagnostics
+
 ## Safe Copy/Open Affordances
 
 Current UI-2C copy buttons:
@@ -488,13 +637,8 @@ detail.
 `Preview apply` is functional in UI-3A and opens the preview-only Apply Preview
 page. It does not call actual apply execution.
 
-The final apply action lives on the Apply Preview page and is disabled with:
-
-```text
-Apply changes — coming in UI-3B
-```
-
-Grade, report, publish, workflow generation, and confirmed apply remain
+The final apply action lives on the Apply Preview page and is implemented in
+UI-3B with confirmation. Grade, report, publish, and workflow generation remain
 disabled placeholders. Disabled actions show either `Coming in a future slice`
 or `Unavailable for this assignment`, based on the action availability returned
 by the assignment detail JSON. They do not call mutation commands.
@@ -562,13 +706,20 @@ Edge cases to smoke when fixtures are available:
 - [ ] Null points, deadline, and LMS assignment ID.
 - [ ] Apply preview repository rows with unknown or token-required status.
 - [ ] Apply preview with no target students if a fixture exists.
+- [ ] Ready apply preview enables Review apply changes.
+- [ ] Confirmation panel appears.
+- [ ] Apply changes stays disabled until the confirmation checkbox is checked.
+- [ ] Confirmed apply runs once.
+- [ ] Apply Result Summary renders success, partial success, and failure JSON.
+- [ ] Result rows use Created, Updated, Skipped, Failed, or Blocked labels.
+- [ ] Refresh assignment detail returns to the detail page and reloads detail.
 
 ## Future Slice Boundary
 
 Planned boundaries:
 
 - UI-3A: Apply Assignment Preview, implemented as preview-only UI
-- UI-3B: Apply Assignment Confirm and Execute
+- UI-3B: Apply Assignment Confirm and Execute, implemented
 - UI-4: Grade Dispatch View
 - UI-5: Report Summary View
 - UI-6: Student Report Publishing View
@@ -593,6 +744,7 @@ That command returns target rows, repository preview statuses, readiness
 blockers, and action metadata without creating repositories, writing manifests,
 generating workflows, or dispatching workflows.
 
-UI-3B is the first slice that should execute a confirmed mutation, and it should
-add explicit confirmation and command-specific IPC rather than reusing
-assignment detail refresh.
+UI-3B is the first slice that executes a confirmed mutation. It uses explicit
+confirmation and command-specific IPC rather than reusing assignment detail
+refresh. Grade dispatch, report generation, student report publishing, and
+workflow generation remain deferred.

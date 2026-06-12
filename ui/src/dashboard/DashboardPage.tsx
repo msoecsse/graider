@@ -245,6 +245,15 @@ export const DashboardPage = (): ReactElement => {
         onBack={() => {
           setSelectedApplyPreview(null);
         }}
+        onRefreshAssignmentDetail={() => {
+          setSelectedAssignmentDetailResult(null);
+          setSelectedApplyPreview(null);
+        }}
+        onBackToDashboard={() => {
+          setSelectedAssignment(null);
+          setSelectedAssignmentDetailResult(null);
+          setSelectedApplyPreview(null);
+        }}
       />
     );
   }

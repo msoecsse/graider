@@ -1,4 +1,4 @@
-import type { AssignmentApplyPreviewResult } from "../../electron/ipc";
+import type { AssignmentApplyResult, AssignmentApplyPreviewResult } from "../../electron/ipc";
 import type {
   AssignmentDetailDiagnostic,
   AssignmentDetailSelection,
@@ -6,6 +6,8 @@ import type {
 } from "../assignment-detail/assignmentDetailTypes";
 
 export type ApplyPreviewLoadResult = AssignmentApplyPreviewResult;
+
+export type ApplyExecutionLoadResult = AssignmentApplyResult;
 
 export type ApplyPreviewRepositoryStatus =
   | "would_create"
@@ -19,6 +21,8 @@ export interface ApplyPreviewPageProps {
   readonly selection: AssignmentDetailSelection;
   readonly assignmentDetail: NormalizedAssignmentDetail | null;
   readonly onBack: () => void;
+  readonly onRefreshAssignmentDetail?: () => void;
+  readonly onBackToDashboard?: () => void;
 }
 
 export interface ApplyPreviewAssignment {
@@ -124,4 +128,37 @@ export interface ApplyPreviewReadinessSummary {
   readonly label: string;
   readonly description: string;
   readonly items: readonly string[];
+}
+
+export type ApplyResultRepositoryStatus = "created" | "updated" | "skipped" | "failed" | "blocked";
+
+export interface ApplyResultSummary {
+  readonly createdRepositories: number;
+  readonly updatedRepositories: number;
+  readonly skippedRepositories: number;
+  readonly failedRepositories: number;
+  readonly blockedRepositories: number;
+}
+
+export interface ApplyResultRepositoryRow {
+  readonly studentId: string | null;
+  readonly githubUsername: string | null;
+  readonly section: string | null;
+  readonly repository: string | null;
+  readonly status: ApplyResultRepositoryStatus;
+  readonly reason: string | null;
+  readonly diagnostics: readonly AssignmentDetailDiagnostic[];
+}
+
+export interface NormalizedApplyResult {
+  readonly status: string;
+  readonly exitCode: number;
+  readonly appliedAt: string | null;
+  readonly assignmentFile: string | null;
+  readonly diagnostics: readonly AssignmentDetailDiagnostic[];
+  readonly generatedFiles: readonly string[];
+  readonly summary: ApplyResultSummary;
+  readonly rows: readonly ApplyResultRepositoryRow[];
+  readonly manifestFile: string | null;
+  readonly rawSummary: Readonly<Record<string, unknown>>;
 }

@@ -43,7 +43,8 @@ describe("UI security boundary", () => {
       "graider-ui:dashboard:refresh-course-folder",
       "graider-ui:dashboard:refresh-all",
       "graider-ui:assignment-detail:get",
-      "graider-ui:assignment-apply-preview:get"
+      "graider-ui:assignment-apply-preview:get",
+      "graider-ui:assignment-apply:run"
     ]);
     expect(channelNames).not.toContain("runCommand");
     expect(channelNames).not.toContain("shell");

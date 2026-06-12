@@ -13,6 +13,22 @@ graider assignment apply-preview terms/27s1/assignments/lab02/assignment.yml --j
 The command is JSON-only. Running it without `--json` returns a JSON failure
 with `assignment_apply_preview_json_required`.
 
+## Assignment Command Family
+
+The canonical assignment-scoped command family for UI work is:
+
+```bash
+graider assignment detail <assignment.yml> --json
+graider assignment apply-preview <assignment.yml> --json
+graider assignment apply <assignment.yml> --json
+```
+
+`assignment apply-preview` is preview-only and must not mutate anything.
+`assignment apply` is the canonical real mutation command for UI-3B and routes
+to the existing apply implementation. The legacy top-level
+`apply <assignment.yml> --json` command remains supported as an alias for
+non-UI and backward-compatible use.
+
 ## Scope
 
 Apply preview is the backend contract for the future UI-3A Apply Assignment
@@ -261,4 +277,8 @@ UI-3B = confirmed apply execution
 ```
 
 UI-3A should call only this command for apply planning. UI-3B must add an
-explicit confirmation step before wiring any mutating apply execution.
+explicit confirmation step before wiring mutating apply execution through:
+
+```bash
+graider assignment apply <assignment.yml> --json
+```
