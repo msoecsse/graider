@@ -4,6 +4,8 @@ Reusable Codex instructions for Electron UI changes live in the
 [Codex Electron UI Contract](codex-electron-ui-contract.md).
 The Apply Preview and Confirm Apply flow is documented in
 [Electron Apply Flow Developer Guide](electron-apply-flow-dev.md).
+The Grade Dispatch Preview and Confirm Grade Dispatch flow is documented in
+[Electron Grade Dispatch Developer Guide](electron-grade-dispatch-dev.md).
 
 This guide documents the read-only Electron assignment detail flow delivered in
 UI-2A through UI-2C, the preview-only UI-3A apply preview page, and the guarded
