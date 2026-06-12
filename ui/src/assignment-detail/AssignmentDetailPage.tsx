@@ -547,6 +547,7 @@ export const AssignmentDetailPage = ({
   onBack,
   onPreviewApply,
   onPreviewGrade,
+  onViewGradeStatus,
   onDetailLoaded
 }: AssignmentDetailPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(
@@ -676,6 +677,16 @@ export const AssignmentDetailPage = ({
               }}
             >
               Preview grading
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={detail === null}
+              onClick={() => {
+                onViewGradeStatus(selection, detail, loadResult);
+              }}
+            >
+              View grading status
             </button>
             <button
               className="primary-action"

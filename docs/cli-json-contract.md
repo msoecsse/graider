@@ -52,10 +52,10 @@ can continue to do so.
 
 `dashboard --json`, `assignment detail --json`,
 `assignment apply-preview --json`, `assignment apply --json`,
-`assignment grade-preview --json`, and `assignment grade --json` are UI-focused
-commands that use this JSON surface. Dashboard, detail, apply-preview, and
-grade-preview add command-specific top-level fields. The canonical UI command
-family is:
+`assignment grade-preview --json`, `assignment grade --json`, and
+`assignment grade-status --json` are UI-focused commands that use this JSON
+surface. Dashboard, detail, apply-preview, grade-preview, and grade-status add
+command-specific top-level fields. The canonical UI command family is:
 
 ```bash
 graider assignment detail <assignment.yml> --json
@@ -63,6 +63,7 @@ graider assignment apply-preview <assignment.yml> --json
 graider assignment apply <assignment.yml> --json
 graider assignment grade-preview <assignment.yml> --json
 graider assignment grade <assignment.yml> --json
+graider assignment grade-status <assignment.yml> --json
 ```
 
 The legacy top-level `apply <assignment.yml> --json` command remains supported.
@@ -105,6 +106,12 @@ without `--json` returns a JSON failure with
 `assignment grade-preview <assignment.yml> --json` is also JSON-only. Running it
 without `--json` returns a JSON failure with
 `assignment_grade_preview_json_required`.
+
+`assignment grade-status <assignment.yml> --json` is also JSON-only. Running it
+without `--json` returns a JSON failure with
+`assignment_grade_status_json_required`. It is a read-only status snapshot that
+lists GitHub Actions grading workflow run state and does not generate reports or
+download artifacts.
 
 `assignment apply <assignment.yml> --json` is a real mutation command. It shares
 the existing apply implementation and JSON summary shape with legacy

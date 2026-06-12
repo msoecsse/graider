@@ -45,6 +45,7 @@ export type WorkflowRunConclusion =
   | "failure"
   | "cancelled"
   | "skipped"
+  | "neutral"
   | "timed_out"
   | "action_required"
   | null;

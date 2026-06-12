@@ -24,6 +24,7 @@ graider assignment apply-preview <assignment.yml> --json
 graider assignment apply <assignment.yml> --json
 graider assignment grade-preview <assignment.yml> --json
 graider assignment grade <assignment.yml> --json
+graider assignment grade-status <assignment.yml> --json
 ```
 
 `assignment grade-preview` is preview-only and is the backend contract for
@@ -31,6 +32,10 @@ UI-4A Grade Dispatch Preview.
 `assignment grade` is the canonical UI-facing real grade dispatch command for
 UI-4B. The legacy top-level `grade <assignment.yml> --json` command
 remains supported for non-UI and backward-compatible use.
+`assignment grade-status` is the read-only status snapshot command for future
+UI-5A grade run monitoring. It does not generate reports, download artifacts, or
+parse grading result files; see
+[Assignment Grade Status Command](grade-status-command.md).
 
 The Electron UI boundary for these commands is documented in
 [Electron Grade Dispatch Developer Guide](electron-grade-dispatch-dev.md).

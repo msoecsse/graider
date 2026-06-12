@@ -3,7 +3,9 @@
 Reusable Electron UI safety rules live in the
 [Codex Electron UI Contract](codex-electron-ui-contract.md). The backend
 preview/dispatch command contract lives in
-[Assignment Grade Preview Command](grade-preview-command.md).
+[Assignment Grade Preview Command](grade-preview-command.md). The grade status
+UI boundary is documented in
+[Electron Grade Status Developer Guide](electron-grade-status-dev.md).
 
 ## Purpose
 
@@ -12,7 +14,8 @@ This guide documents the boundary between:
 ```text
 UI-4A = preview-only grade dispatch planning
 UI-4B = confirmed GitHub Actions dispatch mutation
-UI-5  = future grade status/result/reporting
+UI-5A = read-only grade status monitoring
+UI-5+ = future result/reporting
 ```
 
 The implemented flow is:
@@ -23,7 +26,9 @@ Assignment Detail -> Grade Dispatch Preview -> Confirm Grade Dispatch -> Grade D
 
 Grade Dispatch Preview is non-mutating. Confirmed Grade Dispatch starts GitHub
 Actions workflow runs on student repositories. Confirmed Grade Dispatch does
-not collect grading results and does not generate faculty reports.
+not collect grading results and does not generate faculty reports. UI-5A can
+open Grade Status after dispatch to monitor workflow runs without generating
+reports.
 
 ## Commands
 
@@ -162,18 +167,21 @@ Safe command errors render bounded user-facing messages:
 Diagnostics and command snippets must not expose tokens, authorization headers,
 raw `process.env`, or raw stack traces by default.
 
-## Deferred Functionality
+## Status and Deferred Functionality
 
-The grade dispatch flow does not implement:
+The grade dispatch flow itself does not poll workflow runs. UI-5A owns the
+separate read-only Grade Status view through
+`graider assignment grade-status <assignment.yml> --json`.
 
-- workflow run status monitoring
+The grade dispatch and status flows still do not implement:
+
 - artifact/result collection
 - faculty report generation with `graider report`
 - student report publishing
 - workflow generation UI
 
 Those actions must remain disabled or absent until a future slice explicitly
-wires them. Do not wire `graider report <assignment>` from UI-4C.
+wires them. Do not wire `graider report <assignment>` from UI-5B.
 
 ## Stabilization Checks
 
@@ -185,7 +193,7 @@ When touching this flow, verify:
 - Dispatch cannot run twice concurrently.
 - Result rendering redacts token-looking values.
 - No apply, report, publish, workflow generation, workflow polling, artifact
-  inspection, or result collection APIs are wired.
+  inspection, or result collection APIs are wired from the dispatch page.
 - IPC remains narrow and typed.
 
 ## Manual Smoke-Test Checklist

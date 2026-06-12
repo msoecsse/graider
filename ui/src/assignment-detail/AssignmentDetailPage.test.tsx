@@ -105,6 +105,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
     getAssignmentApplyPreview: vi.fn(),
     getAssignmentGradePreview: vi.fn(),
+    getAssignmentGradeStatus: vi.fn(),
     applyAssignment: vi.fn(),
     gradeAssignment: vi.fn(),
     ...api
@@ -136,6 +137,7 @@ const renderAssignmentDetailPage = (
       onBack={vi.fn()}
       onPreviewApply={vi.fn()}
       onPreviewGrade={vi.fn()}
+      onViewGradeStatus={vi.fn()}
       {...props}
     />
   );
@@ -291,6 +293,28 @@ describe("AssignmentDetailPage", () => {
 
     expect(onPreviewGrade).toHaveBeenCalledTimes(1);
     expect(onPreviewGrade).toHaveBeenCalledWith(
+      SELECTION,
+      expect.objectContaining({
+        assignment: expect.objectContaining({ slug: "lab02" })
+      }),
+      expect.objectContaining({
+        assignmentFile: ASSIGNMENT_FILE
+      })
+    );
+  });
+
+  it("calls the grade status entry point with current assignment detail", async () => {
+    const onViewGradeStatus = vi.fn();
+
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+    renderAssignmentDetailPage({ onViewGradeStatus });
+
+    fireEvent.click(await screen.findByRole("button", { name: "View grading status" }));
+
+    expect(onViewGradeStatus).toHaveBeenCalledTimes(1);
+    expect(onViewGradeStatus).toHaveBeenCalledWith(
       SELECTION,
       expect.objectContaining({
         assignment: expect.objectContaining({ slug: "lab02" })

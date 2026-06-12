@@ -145,6 +145,19 @@ export interface FakeRepositoryFileRead {
   ref: string;
 }
 
+export interface FakeArtifactDownloadRead {
+  owner: string;
+  repo: string;
+  runId: number;
+  artifactName: string;
+}
+
+export interface FakeWorkflowRunRead {
+  owner: string;
+  repo: string;
+  workflowPath?: string;
+}
+
 const normalizeKeyPart = (value: string): string => value.toLowerCase();
 
 const repositoryKey = (owner: string, repo: string): string =>
@@ -185,6 +198,8 @@ export class FakeGitHubClient implements GitHubClient {
     fileWrites: []
   };
   readonly fileReads: FakeRepositoryFileRead[] = [];
+  readonly artifactDownloads: FakeArtifactDownloadRead[] = [];
+  readonly workflowRunReadRequests: FakeWorkflowRunRead[] = [];
 
   private readonly authenticatedUser: GitHubUser;
   private readonly users: GitHubUser[];
@@ -519,8 +534,10 @@ export class FakeGitHubClient implements GitHubClient {
   }
 
   listWorkflowRuns(input: ListWorkflowRunsInput): Promise<GitHubWorkflowRun[]> {
-    return this.run("listWorkflowRuns", () =>
-      this.workflowRuns
+    return this.run("listWorkflowRuns", () => {
+      this.workflowRunReadRequests.push(input);
+
+      return this.workflowRuns
         .filter(
           (record) =>
             repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo)
@@ -529,21 +546,23 @@ export class FakeGitHubClient implements GitHubClient {
           (record) =>
             input.workflowPath === undefined || record.run.workflowPath === input.workflowPath
         )
-        .map((record) => record.run)
-    );
+        .map((record) => record.run);
+    });
   }
 
   downloadArtifact(input: DownloadArtifactInput): Promise<DownloadedArtifact | null> {
-    return this.run(
-      "downloadArtifact",
-      () =>
+    return this.run("downloadArtifact", () => {
+      this.artifactDownloads.push(input);
+
+      return (
         this.artifacts.find(
           (record) =>
             repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo) &&
             record.runId === input.runId &&
             record.artifact.name === input.artifactName
         )?.artifact ?? null
-    );
+      );
+    });
   }
 
   archiveRepository(owner: string, repo: string): Promise<void> {

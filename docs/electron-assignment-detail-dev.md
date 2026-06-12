@@ -6,14 +6,18 @@ The Apply Preview and Confirm Apply flow is documented in
 [Electron Apply Flow Developer Guide](electron-apply-flow-dev.md).
 The Grade Dispatch Preview and Confirm Grade Dispatch flow is documented in
 [Electron Grade Dispatch Developer Guide](electron-grade-dispatch-dev.md).
+The Grade Status view is documented in
+[Electron Grade Status Developer Guide](electron-grade-status-dev.md).
 
 This guide documents the read-only Electron assignment detail flow delivered in
-UI-2A through UI-2C, the preview-only UI-3A apply preview page, and the guarded
-UI-3B confirmed apply execution flow.
+UI-2A through UI-2C, the preview-only UI-3A apply preview page, the guarded
+UI-3B confirmed apply execution flow, and the assignment-detail navigation
+entry points into grade dispatch and grade status.
 
 UI-2 is read-only.
 UI-3A is preview-only and still non-mutating.
 UI-3B is confirmed mutation through the apply command only.
+UI-5A Grade Status is read-only status monitoring.
 
 ## Overview
 
@@ -81,6 +85,13 @@ The confirmed apply path added in UI-3B is:
 
 ```text
 Assignment detail page -> Preview apply -> Apply Preview page -> Confirm apply -> Apply result
+```
+
+The grade status path added in UI-5A is:
+
+```text
+Assignment detail page -> Grade Status
+Grade Dispatch Result Summary -> Grade Status
 ```
 
 The renderer passes the original `courseFolderId`, `courseFolderPath`, and
@@ -252,10 +263,28 @@ The corresponding IPC channel is:
 graider-ui:assignment-grade:run
 ```
 
+The UI-5A grade status preload API is:
+
+```ts
+window.graiderUI.getAssignmentGradeStatus({
+  courseFolderId: "course-folder-csc1120",
+  courseFolderPath: "/Users/sean/dev/csc1120",
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+});
+```
+
+Filtered page-local auto-refresh passes `studentIds` to the same API.
+
+The corresponding IPC channel is:
+
+```text
+graider-ui:assignment-grade-status:get
+```
+
 The main process validates that the request shape contains string
 `courseFolderId`, `courseFolderPath`, and `assignmentFile` fields before running
-assignment detail, apply preview, grade preview, confirmed apply, or confirmed
-grade dispatch.
+assignment detail, apply preview, grade preview, grade status, confirmed apply,
+or confirmed grade dispatch.
 
 Current assignment-detail UI copy affordances use the browser clipboard API in
 the renderer. There are no preload APIs for copy.
@@ -400,8 +429,9 @@ Shows grouped diagnostics or `No diagnostics.`
 Shows the action area. `Validate / Refresh detail` reruns assignment detail.
 `Preview apply` opens the UI-3A Apply Preview page and runs only the preview
 command. `Grade submissions` opens the UI-4A Grade Dispatch Preview page and
-runs only the grade-preview command. Report, publish, and workflow generation
-actions remain disabled placeholders.
+runs only the grade-preview command. `View grading status` opens the UI-5A Grade
+Status page and runs only the grade-status command. Report, publish, and
+workflow generation actions remain disabled placeholders.
 
 ## Apply Preview Page
 
@@ -811,6 +841,7 @@ Visible actions:
 - Validate / Refresh detail
 - Preview apply
 - Grade submissions
+- View grading status
 - Generate report
 - Publish student reports
 - Generate/update workflow
@@ -823,6 +854,10 @@ page. It does not call actual apply execution.
 
 `Grade submissions` is functional and opens the Grade Dispatch Preview page.
 The page remains preview-only until explicit UI-4B confirmation is accepted.
+
+`View grading status` is functional in UI-5A and opens the read-only Grade Status
+page. It does not call `graider report`, download artifacts, parse grading
+result files, dispatch workflows, or mutate local/GitHub state.
 
 The final apply action lives on the Apply Preview page and is implemented in
 UI-3B with confirmation. The final grade dispatch action lives on the Grade
@@ -902,6 +937,12 @@ Checklist:
 - [ ] Result rows use Dispatched, Skipped, Failed, or Blocked labels.
 - [ ] Refresh grade preview keeps prior preview visible.
 - [ ] Back to assignment detail returns without rerunning detail.
+- [ ] Click View grading status.
+- [ ] Grade Status page opens.
+- [ ] Full grade status auto-loads.
+- [ ] Manual Refresh status keeps prior rows visible.
+- [ ] Queued/in-progress rows auto-refresh while the page remains open.
+- [ ] Generate report is disabled from Grade Status.
 - [ ] Apply is disabled when preview blockers exist.
 - [ ] Ready apply preview enables Review apply changes.
 - [ ] Confirmation panel appears.
@@ -940,8 +981,9 @@ Planned boundaries:
 - UI-3B: Apply Assignment Confirm and Execute, implemented
 - UI-4A: Grade Dispatch Preview, implemented as preview-only UI
 - UI-4B: Grade Dispatch Confirm and Execute, implemented
-- UI-5: Report Summary View
-- UI-6: Student Report Publishing View
+- UI-5A: Grade Status View, implemented as read-only status monitoring
+- UI-6A: Faculty Report View, future report generation with `graider report`
+- UI-6+: Student Report Publishing View
 - UI-7: Workflow Generation View
 
 The important conceptual split is:
@@ -950,6 +992,9 @@ The important conceptual split is:
 UI-2  = read-only inspection
 UI-3A = preview-only planning, still non-mutating
 UI-3B = confirmed mutation
+UI-4A = preview-only grade dispatch planning
+UI-4B = confirmed grade dispatch mutation
+UI-5A = read-only grade status monitoring
 ```
 
 UI-3A should be allowed to ask the backend for preview/plan data without

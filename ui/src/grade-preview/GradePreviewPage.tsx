@@ -622,12 +622,14 @@ const GradeDispatchResultPanel = ({
   preview,
   result,
   onBack,
+  onViewGradeStatus,
   onRefreshAssignmentDetail,
   onBackToDashboard
 }: {
   readonly preview: NormalizedGradePreview;
   readonly result: NormalizedGradeDispatchResult;
   readonly onBack: () => void;
+  readonly onViewGradeStatus?: () => void;
   readonly onRefreshAssignmentDetail?: () => void;
   readonly onBackToDashboard?: () => void;
 }): ReactElement => (
@@ -644,6 +646,11 @@ const GradeDispatchResultPanel = ({
         <button className="secondary-action" type="button" onClick={onBack}>
           Back to assignment detail
         </button>
+        {onViewGradeStatus === undefined ? null : (
+          <button className="primary-action" type="button" onClick={onViewGradeStatus}>
+            View grading status
+          </button>
+        )}
         {onRefreshAssignmentDetail === undefined ? null : (
           <button className="primary-action" type="button" onClick={onRefreshAssignmentDetail}>
             Refresh assignment detail
@@ -663,6 +670,7 @@ export const GradePreviewPage = ({
   selection,
   assignmentDetail,
   onBack,
+  onViewGradeStatus,
   onRefreshAssignmentDetail,
   onBackToDashboard
 }: GradePreviewPageProps): ReactElement => {
@@ -884,6 +892,7 @@ export const GradePreviewPage = ({
                   preview={preview}
                   result={normalizedGradeResult}
                   onBack={onBack}
+                  {...(onViewGradeStatus === undefined ? {} : { onViewGradeStatus })}
                   {...(onRefreshAssignmentDetail === undefined
                     ? {}
                     : { onRefreshAssignmentDetail })}

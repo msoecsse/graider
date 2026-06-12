@@ -790,6 +790,9 @@ function mapRepository(value: unknown): GitHubRepository {
 
 function mapWorkflowRun(value: unknown, workflowPath: string | undefined): GitHubWorkflowRun {
   const record = asRecord(value);
+  const runUrl = asString(record.html_url);
+  const event = asString(record.event);
+  const startedAt = asString(record.run_started_at);
 
   return {
     conclusion: toWorkflowConclusion(record.conclusion),
@@ -798,7 +801,13 @@ function mapWorkflowRun(value: unknown, workflowPath: string | undefined): GitHu
     id: asNumber(record.id) ?? UNKNOWN_ID,
     status: toWorkflowStatus(record.status),
     updatedAt: asString(record.updated_at) ?? "",
-    workflowPath: asString(record.path) ?? workflowPath ?? ""
+    workflowPath: asString(record.path) ?? workflowPath ?? "",
+    ...(runUrl === undefined ? {} : { runUrl }),
+    ...(event === undefined ? {} : { event }),
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(asString(record.status) === "completed"
+      ? { completedAt: asString(record.updated_at) ?? "" }
+      : {})
   };
 }
 
@@ -851,6 +860,7 @@ function toWorkflowConclusion(value: unknown): GitHubWorkflowRunConclusion {
     conclusion === "failure" ||
     conclusion === "cancelled" ||
     conclusion === "skipped" ||
+    conclusion === "neutral" ||
     conclusion === "timed_out" ||
     conclusion === "action_required"
   ) {

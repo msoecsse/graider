@@ -4,6 +4,7 @@ import { applyAssignment } from "./assignmentApplyRunner.js";
 import { gradeAssignment } from "./assignmentGradeRunner.js";
 import { getAssignmentApplyPreview } from "./assignmentApplyPreviewRunner.js";
 import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
+import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
 import {
@@ -21,7 +22,8 @@ import {
   type AssignmentApplyPreviewRequest,
   type AssignmentDetailRequest,
   type AssignmentGradeRequest,
-  type AssignmentGradePreviewRequest
+  type AssignmentGradePreviewRequest,
+  type AssignmentGradeStatusRequest
 } from "./ipc.js";
 
 const DEFAULT_WINDOW_WIDTH = 1180;
@@ -66,6 +68,20 @@ const isAssignmentApplyPreviewRequest = (value: unknown): value is AssignmentApp
 
 const isAssignmentGradePreviewRequest = (value: unknown): value is AssignmentGradePreviewRequest =>
   isAssignmentDetailRequest(value);
+
+const isAssignmentGradeStatusRequest = (value: unknown): value is AssignmentGradeStatusRequest => {
+  if (!isAssignmentDetailRequest(value)) {
+    return false;
+  }
+
+  const request = value as unknown as Record<string, unknown>;
+  const studentIds = request.studentIds;
+
+  return (
+    studentIds === undefined ||
+    (Array.isArray(studentIds) && studentIds.every((studentId) => typeof studentId === "string"))
+  );
+};
 
 const isAssignmentApplyRequest = (value: unknown): value is AssignmentApplyRequest =>
   isAssignmentDetailRequest(value);
@@ -161,6 +177,17 @@ export const registerIpcHandlers = (): void => {
     }
 
     return await getAssignmentGradePreview(request, {
+      runner: processRunner,
+      env: process.env
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getAssignmentGradeStatus, async (_event, request: unknown) => {
+    if (!isAssignmentGradeStatusRequest(request)) {
+      throw new Error("Assignment grade status request is required.");
+    }
+
+    return await getAssignmentGradeStatus(request, {
       runner: processRunner,
       env: process.env
     });

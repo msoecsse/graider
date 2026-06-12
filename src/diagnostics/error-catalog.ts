@@ -133,7 +133,16 @@ export const DiagnosticCode = {
   AssignmentDetailGithubRequestFailed: "assignment_detail_github_request_failed",
   AssignmentApplyPreviewJsonRequired: "assignment_apply_preview_json_required",
   AssignmentGradePreviewJsonRequired: "assignment_grade_preview_json_required",
+  AssignmentGradeStatusJsonRequired: "assignment_grade_status_json_required",
+  StudentFilterConflict: "student_filter_conflict",
+  StudentFilterEmpty: "student_filter_empty",
+  StudentFilterNoMatches: "student_filter_no_matches",
+  StudentFilterUnknownStudent: "student_filter_unknown_student",
   StudentRepositoryStatusUnknown: "student_repository_status_unknown",
+  GradingWorkflowRunMissing: "grading_workflow_run_missing",
+  GradingWorkflowRunInProgress: "grading_workflow_run_in_progress",
+  GradingWorkflowRunFailed: "grading_workflow_run_failed",
+  GradingWorkflowStatusUnknown: "grading_workflow_status_unknown",
   GithubTokenMissing: "github_token_missing"
 } as const;
 
@@ -290,7 +299,17 @@ export const ASSIGNMENT_APPLY_PREVIEW_JSON_REQUIRED_CODE =
   DiagnosticCode.AssignmentApplyPreviewJsonRequired;
 export const ASSIGNMENT_GRADE_PREVIEW_JSON_REQUIRED_CODE =
   DiagnosticCode.AssignmentGradePreviewJsonRequired;
+export const ASSIGNMENT_GRADE_STATUS_JSON_REQUIRED_CODE =
+  DiagnosticCode.AssignmentGradeStatusJsonRequired;
+export const STUDENT_FILTER_CONFLICT_CODE = DiagnosticCode.StudentFilterConflict;
+export const STUDENT_FILTER_EMPTY_CODE = DiagnosticCode.StudentFilterEmpty;
+export const STUDENT_FILTER_NO_MATCHES_CODE = DiagnosticCode.StudentFilterNoMatches;
+export const STUDENT_FILTER_UNKNOWN_STUDENT_CODE = DiagnosticCode.StudentFilterUnknownStudent;
 export const STUDENT_REPOSITORY_STATUS_UNKNOWN_CODE = DiagnosticCode.StudentRepositoryStatusUnknown;
+export const GRADING_WORKFLOW_RUN_MISSING_CODE = DiagnosticCode.GradingWorkflowRunMissing;
+export const GRADING_WORKFLOW_RUN_IN_PROGRESS_CODE = DiagnosticCode.GradingWorkflowRunInProgress;
+export const GRADING_WORKFLOW_RUN_FAILED_CODE = DiagnosticCode.GradingWorkflowRunFailed;
+export const GRADING_WORKFLOW_STATUS_UNKNOWN_CODE = DiagnosticCode.GradingWorkflowStatusUnknown;
 export const GITHUB_TOKEN_MISSING_CODE = DiagnosticCode.GithubTokenMissing;
 
 export const createNotSupportedInMvpDiagnostic = (

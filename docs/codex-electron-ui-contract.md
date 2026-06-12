@@ -12,6 +12,7 @@ Current detailed guides:
 - [Electron Assignment Detail Developer Guide](electron-assignment-detail-dev.md)
 - [Electron Apply Flow Developer Guide](electron-apply-flow-dev.md)
 - [Electron Grade Dispatch Developer Guide](electron-grade-dispatch-dev.md)
+- [Electron Grade Status Developer Guide](electron-grade-status-dev.md)
 
 ## Process Architecture
 
@@ -66,7 +67,8 @@ Renderer code may:
 
 Current IPC channels are specific to app info, course folder registry,
 dashboard refresh, assignment detail, assignment apply preview, and confirmed
-assignment apply, grade dispatch preview, and confirmed grade dispatch.
+assignment apply, grade dispatch preview, confirmed grade dispatch, and grade
+status.
 
 ## Command Runner Rules
 

@@ -10,6 +10,11 @@ import {
 } from "../../grade-preview/grade-preview-builder.js";
 import type { AssignmentGradePreviewResult } from "../../grade-preview/grade-preview-models.js";
 import {
+  buildAssignmentGradeStatus,
+  createEmptyAssignmentGradeStatusResult
+} from "../../grade-status/grade-status-builder.js";
+import type { AssignmentGradeStatusResult } from "../../grade-status/grade-status-models.js";
+import {
   buildAssignmentDetail,
   createEmptyAssignmentDetailResult
 } from "../../assignment-detail/assignment-detail-builder.js";
@@ -23,8 +28,11 @@ import type { Clock } from "../../core/clock.js";
 import type { CommandResult } from "../../core/command-result.js";
 import {
   ASSIGNMENT_APPLY_PREVIEW_JSON_REQUIRED_CODE,
+  ASSIGNMENT_GRADE_STATUS_JSON_REQUIRED_CODE,
   ASSIGNMENT_GRADE_PREVIEW_JSON_REQUIRED_CODE,
   ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE,
+  STUDENT_FILTER_CONFLICT_CODE,
+  STUDENT_FILTER_EMPTY_CODE,
   createConfigDiagnostic
 } from "../../diagnostics/error-catalog.js";
 import type { GitHubClient } from "../../github/github-client.js";
@@ -38,6 +46,7 @@ const COMMAND_NAME = "assignment";
 const DETAIL_COMMAND_NAME = "detail";
 const APPLY_PREVIEW_COMMAND_NAME = "apply-preview";
 const GRADE_PREVIEW_COMMAND_NAME = "grade-preview";
+const GRADE_STATUS_COMMAND_NAME = "grade-status";
 const APPLY_COMMAND_NAME = "apply";
 const GRADE_COMMAND_NAME = "grade";
 const ASSIGNMENT_APPLY_COMMAND_NAME = "assignment apply";
@@ -54,6 +63,12 @@ interface AssignmentApplyPreviewCommandOptions {
 
 interface AssignmentGradePreviewCommandOptions {
   readonly json?: boolean;
+}
+
+interface AssignmentGradeStatusCommandOptions {
+  readonly json?: boolean;
+  readonly student?: string;
+  readonly students?: string;
 }
 
 export interface AssignmentDetailCommandRequest {
@@ -76,6 +91,14 @@ export interface AssignmentGradePreviewCommandRequest {
   readonly cwd: string;
   readonly assignmentFile: string;
   readonly options: AssignmentGradePreviewCommandOptions;
+  readonly env?: Record<string, string | undefined>;
+  readonly githubClient?: GitHubClient;
+}
+
+export interface AssignmentGradeStatusCommandRequest {
+  readonly cwd: string;
+  readonly assignmentFile: string;
+  readonly options: AssignmentGradeStatusCommandOptions;
   readonly env?: Record<string, string | undefined>;
   readonly githubClient?: GitHubClient;
 }
@@ -122,6 +145,30 @@ const createGradePreviewJsonRequiredResult = (): AssignmentGradePreviewResult =>
     )
   ]);
 
+const createGradeStatusJsonRequiredResult = (): AssignmentGradeStatusResult =>
+  createEmptyAssignmentGradeStatusResult("failure", [
+    createConfigDiagnostic(
+      ASSIGNMENT_GRADE_STATUS_JSON_REQUIRED_CODE,
+      "The assignment grade-status command only supports JSON output. Run with --json."
+    )
+  ]);
+
+const createStudentFilterConflictResult = (): AssignmentGradeStatusResult =>
+  createEmptyAssignmentGradeStatusResult("failure", [
+    createConfigDiagnostic(
+      STUDENT_FILTER_CONFLICT_CODE,
+      "Use either --student or --students, not both."
+    )
+  ]);
+
+const createStudentFilterEmptyResult = (): AssignmentGradeStatusResult =>
+  createEmptyAssignmentGradeStatusResult("failure", [
+    createConfigDiagnostic(
+      STUDENT_FILTER_EMPTY_CODE,
+      "Student filter contains an empty student ID."
+    )
+  ]);
+
 const resolveGitHubClient = (
   githubClient: GitHubClient | undefined,
   token: string | undefined
@@ -131,6 +178,39 @@ const resolveGitHubClient = (
   }
 
   return token === undefined ? undefined : createGitHubClient({ token });
+};
+
+const dedupeStudentIds = (studentIds: readonly string[]): string[] =>
+  studentIds.reduce<string[]>(
+    (deduped, studentId) =>
+      deduped.some((existingStudentId) => existingStudentId === studentId)
+        ? deduped
+        : [...deduped, studentId],
+    []
+  );
+
+const parseStudentFilter = (
+  options: AssignmentGradeStatusCommandOptions
+):
+  | { readonly result: AssignmentGradeStatusResult }
+  | { readonly studentIds?: readonly string[] } => {
+  if (options.student !== undefined && options.students !== undefined) {
+    return { result: createStudentFilterConflictResult() };
+  }
+
+  const rawStudentIds =
+    options.student !== undefined
+      ? [options.student]
+      : options.students === undefined
+        ? []
+        : options.students.split(",");
+  const studentIds = rawStudentIds.map((studentId) => studentId.trim());
+
+  if (studentIds.some((studentId) => studentId.length === 0)) {
+    return { result: createStudentFilterEmptyResult() };
+  }
+
+  return studentIds.length === 0 ? {} : { studentIds: dedupeStudentIds(studentIds) };
 };
 
 export const runAssignmentDetailCommand = ({
@@ -196,6 +276,34 @@ export const runAssignmentGradePreviewCommand = ({
   });
 };
 
+export const runAssignmentGradeStatusCommand = ({
+  cwd,
+  assignmentFile,
+  options,
+  env = process.env,
+  githubClient
+}: AssignmentGradeStatusCommandRequest): Promise<AssignmentGradeStatusResult> => {
+  if (options.json !== true) {
+    return Promise.resolve(createGradeStatusJsonRequiredResult());
+  }
+
+  const filterResult = parseStudentFilter(options);
+
+  if ("result" in filterResult) {
+    return Promise.resolve(filterResult.result);
+  }
+
+  const token = readGitHubToken(env);
+  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
+
+  return buildAssignmentGradeStatus({
+    cwd,
+    assignmentFile,
+    ...(resolvedGitHubClient === undefined ? {} : { githubClient: resolvedGitHubClient }),
+    ...(filterResult.studentIds === undefined ? {} : { studentIds: filterResult.studentIds })
+  });
+};
+
 export const runAssignmentApplyCommand = ({
   cwd,
   assignmentFile,
@@ -241,6 +349,10 @@ export const formatAssignmentApplyPreviewResultAsJson = (
 
 export const formatAssignmentGradePreviewResultAsJson = (
   result: AssignmentGradePreviewResult
+): string => JSON.stringify(result, undefined, JSON_INDENT_SPACES);
+
+export const formatAssignmentGradeStatusResultAsJson = (
+  result: AssignmentGradeStatusResult
 ): string => JSON.stringify(result, undefined, JSON_INDENT_SPACES);
 
 export const registerAssignmentCommand = (program: Command): void => {
@@ -293,6 +405,27 @@ export const registerAssignmentCommand = (program: Command): void => {
       });
 
       console.log(formatAssignmentGradePreviewResultAsJson(result));
+      process.exitCode = result.exitCode;
+    });
+
+  assignment
+    .command(GRADE_STATUS_COMMAND_NAME)
+    .argument("<assignment-file>")
+    .option("--json", "Required. Emit assignment grade status JSON")
+    .option("--student <student-id>", "Check grade status for one active target student")
+    .option(
+      "--students <student-ids>",
+      "Check grade status for comma-separated active target students"
+    )
+    .description("Build a UI-ready read-only assignment grade status model.")
+    .action(async (assignmentFile: string, options: AssignmentGradeStatusCommandOptions) => {
+      const result = await runAssignmentGradeStatusCommand({
+        cwd: process.cwd(),
+        assignmentFile,
+        options
+      });
+
+      console.log(formatAssignmentGradeStatusResultAsJson(result));
       process.exitCode = result.exitCode;
     });
 
