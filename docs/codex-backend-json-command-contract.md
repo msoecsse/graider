@@ -26,10 +26,15 @@ Current JSON-only commands include:
 - `graider dashboard --json`
 - `graider assignment detail <assignment.yml> --json`
 - `graider assignment apply-preview <assignment.yml> --json`
+- `graider assignment grade-preview <assignment.yml> --json`
 
 `graider assignment apply <assignment.yml> --json` is not JSON-only; it is the
 canonical assignment-scoped real apply mutation command for future UI work and
 shares the legacy apply implementation.
+
+`graider assignment grade <assignment.yml> --json` is not JSON-only; it is the
+canonical assignment-scoped real grade dispatch command for future UI work and
+shares the legacy grade implementation.
 
 ## Response Shape
 
@@ -148,6 +153,8 @@ not call mutation paths such as:
 
 `assignment detail` is read-only inspection. `assignment apply-preview` is
 preview-only planning and must use `would_*` statuses for repository rows.
+`assignment grade-preview` is preview-only dispatch planning and must use
+future-tense statuses such as `would_dispatch`.
 
 ## Tests
 
@@ -174,7 +181,8 @@ calls.
 - Update feature docs such as
   [Dashboard Command](dashboard-command.md),
   [Assignment Detail Command](assignment-detail-command.md), or
-  [Assignment Apply Preview Command](apply-preview-command.md) when their
+  [Assignment Apply Preview Command](apply-preview-command.md), or
+  [Assignment Grade Preview Command](grade-preview-command.md) when their
   command-specific contract changes.
 - Update [Error and Warning Catalog](error-warning-catalog.md) when adding or
   changing diagnostic codes.

@@ -51,19 +51,25 @@ Stable top-level fields:
 can continue to do so.
 
 `dashboard --json`, `assignment detail --json`,
-`assignment apply-preview --json`, and `assignment apply --json` are
-UI-focused commands that use this JSON surface. Dashboard, detail, and
-apply-preview add command-specific top-level fields. The canonical UI command
+`assignment apply-preview --json`, `assignment apply --json`,
+`assignment grade-preview --json`, and `assignment grade --json` are UI-focused
+commands that use this JSON surface. Dashboard, detail, apply-preview, and
+grade-preview add command-specific top-level fields. The canonical UI command
 family is:
 
 ```bash
 graider assignment detail <assignment.yml> --json
 graider assignment apply-preview <assignment.yml> --json
 graider assignment apply <assignment.yml> --json
+graider assignment grade-preview <assignment.yml> --json
+graider assignment grade <assignment.yml> --json
 ```
 
 The legacy top-level `apply <assignment.yml> --json` command remains supported.
 Future UI apply execution should call `assignment apply`.
+
+The legacy top-level `grade <assignment.yml> --json` command remains supported.
+Future UI grade execution should call `assignment grade`.
 
 `dashboard --json` adds a top-level `cards` array:
 
@@ -96,10 +102,20 @@ without `--json` returns a JSON failure with
 without `--json` returns a JSON failure with
 `assignment_apply_preview_json_required`.
 
+`assignment grade-preview <assignment.yml> --json` is also JSON-only. Running it
+without `--json` returns a JSON failure with
+`assignment_grade_preview_json_required`.
+
 `assignment apply <assignment.yml> --json` is a real mutation command. It shares
 the existing apply implementation and JSON summary shape with legacy
 `apply <assignment.yml> --json`, but reports `commandName: "assignment apply"`
 for the canonical nested route.
+
+`assignment grade <assignment.yml> --json` is a real mutation command because it
+dispatches GitHub Actions workflows. It shares the existing grade
+implementation, target selector validation, effective grading resolution, and
+JSON summary shape with legacy `grade <assignment.yml> --json`, but reports
+`commandName: "assignment grade"` for the canonical nested route.
 
 ## Command Status Values
 

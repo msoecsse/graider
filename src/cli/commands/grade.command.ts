@@ -44,11 +44,12 @@ export interface GradeCommandRequest {
   assignmentFile: string;
   options: CommonCommandOptions;
   targetSelector: RawTargetSelector;
+  commandName?: string;
   githubClient?: GitHubClient;
   retryOptions?: Partial<RetryOptions>;
 }
 
-interface GradeRawOptions extends RawCommonCommandOptions {
+export interface GradeRawOptions extends RawCommonCommandOptions {
   all?: boolean;
   section?: string;
   studentId?: string;
@@ -87,6 +88,7 @@ export const runGradeCommand = async ({
   assignmentFile,
   options,
   targetSelector,
+  commandName = COMMAND_NAME,
   githubClient,
   retryOptions
 }: GradeCommandRequest): Promise<CommandResult> => {
@@ -94,7 +96,7 @@ export const runGradeCommand = async ({
 
   if (selectorResult.errors.length > EMPTY_COUNT || selectorResult.selector === undefined) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile,
       status: "failure",
       warnings: selectorResult.warnings,
@@ -108,7 +110,7 @@ export const runGradeCommand = async ({
 
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -122,7 +124,7 @@ export const runGradeCommand = async ({
 
   if (assignmentStatus === "draft" || assignmentStatus === "archived") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [],
@@ -139,7 +141,7 @@ export const runGradeCommand = async ({
 
   if (rosterResult.errors.length > EMPTY_COUNT) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -157,7 +159,7 @@ export const runGradeCommand = async ({
 
   if (selectionResult.errors.length > EMPTY_COUNT) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...selectionResult.warnings],
@@ -176,7 +178,7 @@ export const runGradeCommand = async ({
 
   if (!grading.enabled || grading.workflow === undefined) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "success",
       warnings: [
@@ -217,7 +219,7 @@ export const runGradeCommand = async ({
 
   if (manifestResult.status !== "loaded") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -247,7 +249,7 @@ export const runGradeCommand = async ({
       : executionResult.errors;
 
   return createCommandResult({
-    commandName: COMMAND_NAME,
+    commandName,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status,
     warnings: [...rosterResult.warnings, ...selectionResult.warnings, ...executionResult.warnings],

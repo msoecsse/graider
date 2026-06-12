@@ -153,6 +153,11 @@ export interface AssignmentDetailPageProps {
     detail: NormalizedAssignmentDetail | null,
     loadResult: AssignmentDetailLoadResult | null
   ) => void;
+  readonly onPreviewGrade: (
+    selection: AssignmentDetailSelection,
+    detail: NormalizedAssignmentDetail | null,
+    loadResult: AssignmentDetailLoadResult | null
+  ) => void;
   readonly onDetailLoaded?: (loadResult: AssignmentDetailLoadResult | null) => void;
 }
 

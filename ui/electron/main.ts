@@ -1,7 +1,9 @@
 import path from "node:path";
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
 import { applyAssignment } from "./assignmentApplyRunner.js";
+import { gradeAssignment } from "./assignmentGradeRunner.js";
 import { getAssignmentApplyPreview } from "./assignmentApplyPreviewRunner.js";
+import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
 import {
@@ -17,7 +19,9 @@ import {
   type AppInfo,
   type AssignmentApplyRequest,
   type AssignmentApplyPreviewRequest,
-  type AssignmentDetailRequest
+  type AssignmentDetailRequest,
+  type AssignmentGradeRequest,
+  type AssignmentGradePreviewRequest
 } from "./ipc.js";
 
 const DEFAULT_WINDOW_WIDTH = 1180;
@@ -60,7 +64,13 @@ const isAssignmentDetailRequest = (value: unknown): value is AssignmentDetailReq
 const isAssignmentApplyPreviewRequest = (value: unknown): value is AssignmentApplyPreviewRequest =>
   isAssignmentDetailRequest(value);
 
+const isAssignmentGradePreviewRequest = (value: unknown): value is AssignmentGradePreviewRequest =>
+  isAssignmentDetailRequest(value);
+
 const isAssignmentApplyRequest = (value: unknown): value is AssignmentApplyRequest =>
+  isAssignmentDetailRequest(value);
+
+const isAssignmentGradeRequest = (value: unknown): value is AssignmentGradeRequest =>
   isAssignmentDetailRequest(value);
 
 export const registerIpcHandlers = (): void => {
@@ -145,12 +155,34 @@ export const registerIpcHandlers = (): void => {
     });
   });
 
+  ipcMain.handle(IPC_CHANNELS.getAssignmentGradePreview, async (_event, request: unknown) => {
+    if (!isAssignmentGradePreviewRequest(request)) {
+      throw new Error("Assignment grade preview request is required.");
+    }
+
+    return await getAssignmentGradePreview(request, {
+      runner: processRunner,
+      env: process.env
+    });
+  });
+
   ipcMain.handle(IPC_CHANNELS.applyAssignment, async (_event, request: unknown) => {
     if (!isAssignmentApplyRequest(request)) {
       throw new Error("Assignment apply request is required.");
     }
 
     return await applyAssignment(request, {
+      runner: processRunner,
+      env: process.env
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.gradeAssignment, async (_event, request: unknown) => {
+    if (!isAssignmentGradeRequest(request)) {
+      throw new Error("Assignment grade request is required.");
+    }
+
+    return await gradeAssignment(request, {
       runner: processRunner,
       env: process.env
     });

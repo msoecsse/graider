@@ -134,6 +134,21 @@ describe("graider CLI shell", () => {
     expect(output).toContain("Build a UI-ready read-only assignment apply preview model");
   });
 
+  it("command exists: assignment grade-preview", () => {
+    const output = runCliText(["assignment", "grade-preview", "--help"]);
+
+    expect(output).toContain("grade-preview");
+    expect(output).toContain("Build a UI-ready read-only assignment grade preview model");
+  });
+
+  it("command exists: assignment grade", () => {
+    const output = runCliText(["assignment", "grade", "--help"]);
+
+    expect(output).toContain("grade");
+    expect(output).toContain("Dispatch assignment grading workflows");
+    expect(output).toContain("--student-id");
+  });
+
   it("command exists: assignment apply", () => {
     const output = runCliText(["assignment", "apply", "--help"]);
 

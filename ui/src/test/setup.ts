@@ -52,6 +52,15 @@ beforeEach(() => {
         error: null,
         refreshedAt: null
       }),
+      getAssignmentGradePreview: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        preview: null,
+        error: null,
+        refreshedAt: null
+      }),
       applyAssignment: vi.fn().mockResolvedValue({
         courseFolderId: "course-folder-default",
         courseFolderPath: "/tmp/course",
@@ -60,6 +69,15 @@ beforeEach(() => {
         apply: null,
         error: null,
         appliedAt: null
+      }),
+      gradeAssignment: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        grade: null,
+        error: null,
+        dispatchedAt: null
       })
     }
   });

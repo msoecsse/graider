@@ -473,6 +473,10 @@ const getActionDescription = (action: AssignmentDetailAction, actionKey: ActionK
     return "Preview what apply would do. No changes are made.";
   }
 
+  if (actionKey === "grade") {
+    return "Preview grading workflow dispatches. No workflows are started.";
+  }
+
   if (!action.implemented) {
     return "Coming in a future slice";
   }
@@ -484,12 +488,14 @@ const ActionsPanel = ({
   detail,
   isLoading,
   onRefresh,
-  onPreviewApply
+  onPreviewApply,
+  onPreviewGrade
 }: {
   readonly detail: NormalizedAssignmentDetail;
   readonly isLoading: boolean;
   readonly onRefresh: () => void;
   readonly onPreviewApply: () => void;
+  readonly onPreviewGrade: () => void;
 }): ReactElement => (
   <section className="detail-panel" aria-labelledby="assignment-actions-title">
     <h2 id="assignment-actions-title">Available actions</h2>
@@ -498,6 +504,7 @@ const ActionsPanel = ({
         const action = detail.actions[actionKey];
         const isValidate = actionKey === "validate";
         const isApplyPreview = actionKey === "apply";
+        const isGradePreview = actionKey === "grade";
 
         return (
           <div className="assignment-action" key={actionKey}>
@@ -506,8 +513,20 @@ const ActionsPanel = ({
                 isValidate ? "secondary-action" : "secondary-action assignment-action__button"
               }
               type="button"
-              disabled={(!isValidate && !isApplyPreview) || isLoading || !action.available}
-              onClick={isValidate ? onRefresh : isApplyPreview ? onPreviewApply : undefined}
+              disabled={
+                (!isValidate && !isApplyPreview && !isGradePreview) ||
+                isLoading ||
+                !action.available
+              }
+              onClick={
+                isValidate
+                  ? onRefresh
+                  : isApplyPreview
+                    ? onPreviewApply
+                    : isGradePreview
+                      ? onPreviewGrade
+                      : undefined
+              }
               aria-describedby={`assignment-action-${actionKey}-description`}
             >
               {ACTION_LABELS[actionKey]}
@@ -527,6 +546,7 @@ export const AssignmentDetailPage = ({
   initialLoadResult = null,
   onBack,
   onPreviewApply,
+  onPreviewGrade,
   onDetailLoaded
 }: AssignmentDetailPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(
@@ -648,6 +668,16 @@ export const AssignmentDetailPage = ({
               Preview apply
             </button>
             <button
+              className="secondary-action"
+              type="button"
+              disabled={detail === null}
+              onClick={() => {
+                onPreviewGrade(selection, detail, loadResult);
+              }}
+            >
+              Preview grading
+            </button>
+            <button
               className="primary-action"
               type="button"
               disabled={isLoading}
@@ -718,6 +748,9 @@ export const AssignmentDetailPage = ({
                 }}
                 onPreviewApply={() => {
                   onPreviewApply(selection, detail, loadResult);
+                }}
+                onPreviewGrade={() => {
+                  onPreviewGrade(selection, detail, loadResult);
                 }}
               />
             </div>

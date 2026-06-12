@@ -7,7 +7,9 @@ export const IPC_CHANNELS = {
   refreshDashboard: "graider-ui:dashboard:refresh-all",
   getAssignmentDetail: "graider-ui:assignment-detail:get",
   getAssignmentApplyPreview: "graider-ui:assignment-apply-preview:get",
-  applyAssignment: "graider-ui:assignment-apply:run"
+  getAssignmentGradePreview: "graider-ui:assignment-grade-preview:get",
+  applyAssignment: "graider-ui:assignment-apply:run",
+  gradeAssignment: "graider-ui:assignment-grade:run"
 } as const;
 
 export interface AppInfo {
@@ -55,7 +57,11 @@ export interface AssignmentDetailRequest {
 
 export type AssignmentApplyPreviewRequest = AssignmentDetailRequest;
 
+export type AssignmentGradePreviewRequest = AssignmentDetailRequest;
+
 export type AssignmentApplyRequest = AssignmentDetailRequest;
+
+export type AssignmentGradeRequest = AssignmentDetailRequest;
 
 export interface AssignmentDetailJsonResponse {
   readonly schemaVersion: 1;
@@ -114,6 +120,32 @@ export interface AssignmentApplyPreviewResult {
   readonly refreshedAt: string | null;
 }
 
+export interface AssignmentGradePreviewJsonResponse {
+  readonly schemaVersion: 1;
+  readonly commandName: "assignment grade-preview";
+  readonly status: string;
+  readonly exitCode: number;
+  readonly diagnostics: readonly unknown[];
+  readonly assignment: unknown;
+  readonly course: unknown;
+  readonly term: unknown;
+  readonly target: unknown;
+  readonly grading: unknown;
+  readonly plan: unknown;
+  readonly files: unknown;
+  readonly actions: unknown;
+}
+
+export interface AssignmentGradePreviewResult {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly assignmentFile: string;
+  readonly status: "success" | "failure";
+  readonly preview: AssignmentGradePreviewJsonResponse | null;
+  readonly error: DashboardCommandError | null;
+  readonly refreshedAt: string | null;
+}
+
 export interface AssignmentApplyJsonResponse {
   readonly schemaVersion: 1;
   readonly commandName: "assignment apply";
@@ -135,6 +167,29 @@ export interface AssignmentApplyResult {
   readonly apply: AssignmentApplyJsonResponse | null;
   readonly error: DashboardCommandError | null;
   readonly appliedAt: string | null;
+}
+
+export interface AssignmentGradeJsonResponse {
+  readonly schemaVersion: 1;
+  readonly commandName: "assignment grade";
+  readonly assignmentFile: string;
+  readonly status: string;
+  readonly exitCode: number;
+  readonly diagnostics: readonly unknown[];
+  readonly warnings: readonly unknown[];
+  readonly errors: readonly unknown[];
+  readonly generatedFiles: readonly string[];
+  readonly summary: Readonly<Record<string, unknown>>;
+}
+
+export interface AssignmentGradeResult {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly assignmentFile: string;
+  readonly status: "success" | "failure";
+  readonly grade: AssignmentGradeJsonResponse | null;
+  readonly error: DashboardCommandError | null;
+  readonly dispatchedAt: string | null;
 }
 
 export interface CourseFolderDashboardResult {
@@ -164,5 +219,9 @@ export interface GraiderUIApi {
   readonly getAssignmentApplyPreview: (
     request: AssignmentApplyPreviewRequest
   ) => Promise<AssignmentApplyPreviewResult>;
+  readonly getAssignmentGradePreview: (
+    request: AssignmentGradePreviewRequest
+  ) => Promise<AssignmentGradePreviewResult>;
   readonly applyAssignment: (request: AssignmentApplyRequest) => Promise<AssignmentApplyResult>;
+  readonly gradeAssignment: (request: AssignmentGradeRequest) => Promise<AssignmentGradeResult>;
 }

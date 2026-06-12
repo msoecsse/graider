@@ -8,6 +8,10 @@ import {
   type AssignmentApplyPreviewResult,
   type AssignmentDetailRequest,
   type AssignmentDetailResult,
+  type AssignmentGradeRequest,
+  type AssignmentGradeResult,
+  type AssignmentGradePreviewRequest,
+  type AssignmentGradePreviewResult,
   type CombinedDashboardResult,
   type CourseFolderDashboardResult,
   type CourseFolderRecord,
@@ -37,8 +41,14 @@ const graiderUI: GraiderUIApi = {
     request: AssignmentApplyPreviewRequest
   ): Promise<AssignmentApplyPreviewResult> =>
     await invoke<AssignmentApplyPreviewResult>(IPC_CHANNELS.getAssignmentApplyPreview, request),
+  getAssignmentGradePreview: async (
+    request: AssignmentGradePreviewRequest
+  ): Promise<AssignmentGradePreviewResult> =>
+    await invoke<AssignmentGradePreviewResult>(IPC_CHANNELS.getAssignmentGradePreview, request),
   applyAssignment: async (request: AssignmentApplyRequest): Promise<AssignmentApplyResult> =>
-    await invoke<AssignmentApplyResult>(IPC_CHANNELS.applyAssignment, request)
+    await invoke<AssignmentApplyResult>(IPC_CHANNELS.applyAssignment, request),
+  gradeAssignment: async (request: AssignmentGradeRequest): Promise<AssignmentGradeResult> =>
+    await invoke<AssignmentGradeResult>(IPC_CHANNELS.gradeAssignment, request)
 };
 
 contextBridge.exposeInMainWorld("graiderUI", graiderUI);

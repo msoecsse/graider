@@ -3,6 +3,9 @@
 `graider assignment apply-preview <assignment.yml> --json` calculates what a
 future apply step would do for one assignment without making changes.
 
+Electron UI Apply Preview and Confirm Apply behavior is documented in the
+[Electron Apply Flow Developer Guide](electron-apply-flow-dev.md).
+
 The command runs from a Graider course admin repository root and accepts a
 repository-relative assignment config path:
 
@@ -21,6 +24,7 @@ The canonical assignment-scoped command family for UI work is:
 graider assignment detail <assignment.yml> --json
 graider assignment apply-preview <assignment.yml> --json
 graider assignment apply <assignment.yml> --json
+graider assignment grade-preview <assignment.yml> --json
 ```
 
 `assignment apply-preview` is preview-only and must not mutate anything.
@@ -28,6 +32,8 @@ graider assignment apply <assignment.yml> --json
 to the existing apply implementation. The legacy top-level
 `apply <assignment.yml> --json` command remains supported as an alias for
 non-UI and backward-compatible use.
+`assignment grade-preview` is preview-only and is documented in
+[Assignment Grade Preview Command](grade-preview-command.md).
 
 ## Scope
 

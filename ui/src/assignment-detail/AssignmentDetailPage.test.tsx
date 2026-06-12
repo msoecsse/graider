@@ -104,7 +104,9 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshDashboard: vi.fn(),
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
     getAssignmentApplyPreview: vi.fn(),
+    getAssignmentGradePreview: vi.fn(),
     applyAssignment: vi.fn(),
+    gradeAssignment: vi.fn(),
     ...api
   };
 
@@ -133,6 +135,7 @@ const renderAssignmentDetailPage = (
       selection={SELECTION}
       onBack={vi.fn()}
       onPreviewApply={vi.fn()}
+      onPreviewGrade={vi.fn()}
       {...props}
     />
   );
@@ -196,7 +199,7 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getAllByText("Template").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Validate / Refresh detail" })).toBeEnabled();
     expect(getFirstPreviewApplyButton()).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Grade submissions" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Grade submissions" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Generate report" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Publish student reports" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Generate/update workflow" })).toBeDisabled();
@@ -274,6 +277,28 @@ describe("AssignmentDetailPage", () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(".github/workflows/grade.yml");
     });
+  });
+
+  it("calls the grade preview entry point with current assignment detail", async () => {
+    const onPreviewGrade = vi.fn();
+
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+    renderAssignmentDetailPage({ onPreviewGrade });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Preview grading" }));
+
+    expect(onPreviewGrade).toHaveBeenCalledTimes(1);
+    expect(onPreviewGrade).toHaveBeenCalledWith(
+      SELECTION,
+      expect.objectContaining({
+        assignment: expect.objectContaining({ slug: "lab02" })
+      }),
+      expect.objectContaining({
+        assignmentFile: ASSIGNMENT_FILE
+      })
+    );
   });
 
   it("shows copy failure feedback without storing copied values", async () => {

@@ -10,6 +10,7 @@ Current detailed guides:
 
 - [Electron Dashboard Developer Guide](electron-dashboard-dev.md)
 - [Electron Assignment Detail Developer Guide](electron-assignment-detail-dev.md)
+- [Electron Apply Flow Developer Guide](electron-apply-flow-dev.md)
 
 ## Process Architecture
 
@@ -63,7 +64,8 @@ Renderer code may:
 - Paths must be validated in the main process before use.
 
 Current IPC channels are specific to app info, course folder registry,
-dashboard refresh, assignment detail, and assignment apply preview.
+dashboard refresh, assignment detail, assignment apply preview, and confirmed
+assignment apply.
 
 ## Command Runner Rules
 

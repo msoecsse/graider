@@ -5,6 +5,10 @@ import type {
   AssignmentApplyPreviewJsonResponse,
   AssignmentApplyPreviewResult,
   AssignmentDetailResult,
+  AssignmentGradePreviewJsonResponse,
+  AssignmentGradePreviewResult,
+  AssignmentGradeJsonResponse,
+  AssignmentGradeResult,
   CombinedDashboardResult,
   CourseFolderDashboardResult,
   CourseFolderRecord,
@@ -250,6 +254,128 @@ const createAssignmentApplyPreviewResult = (
   ...overrides
 });
 
+const createAssignmentGradePreviewJson = (
+  overrides: Partial<AssignmentGradePreviewJsonResponse> = {}
+): AssignmentGradePreviewJsonResponse => ({
+  schemaVersion: 1,
+  commandName: "assignment grade-preview",
+  status: "success",
+  exitCode: 0,
+  diagnostics: [],
+  assignment: {
+    slug: "lab02",
+    title: "Lab 02",
+    file: "terms/27s1/assignments/lab02/assignment.yml",
+    status: "active"
+  },
+  course: { slug: "csc1120", title: "CSC1120" },
+  term: { slug: "27s1", title: "Spring 2027" },
+  target: { sections: ["001"], sectionCount: 1, studentCount: 2, activeStudentCount: 2 },
+  grading: {
+    enabled: true,
+    resolvedFrom: "course_default",
+    mode: "custom-workflow",
+    workflow: ".github/workflows/grade.yml",
+    artifact: "grading-results",
+    resultFile: "results.json",
+    workflowDispatch: "available",
+    workflowRef: "main"
+  },
+  plan: {
+    summary: {
+      wouldDispatch: 1,
+      wouldSkip: 1,
+      blocked: 0,
+      unknown: 0
+    },
+    repositories: [
+      {
+        studentId: "s001",
+        githubUsername: "ada",
+        section: "001",
+        repository: "graider-sandbox/csc1120-lab02-ada",
+        status: "would_dispatch",
+        reason: "workflow_dispatch_available",
+        workflow: ".github/workflows/grade.yml",
+        ref: "main",
+        diagnostics: []
+      },
+      {
+        studentId: "s002",
+        githubUsername: "grace",
+        section: "001",
+        repository: "graider-sandbox/csc1120-lab02-grace",
+        status: "would_skip",
+        reason: "roster_status_hold",
+        workflow: ".github/workflows/grade.yml",
+        ref: "main",
+        diagnostics: []
+      }
+    ]
+  },
+  files: {
+    assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+    manifestFile: "terms/27s1/manifests/lab02/manifest.yml",
+    workflowFile: ".github/workflows/grade.yml"
+  },
+  actions: {
+    grade: { available: true, implemented: false, previewOnly: true }
+  },
+  ...overrides
+});
+
+const createAssignmentGradePreviewResult = (
+  overrides: Partial<AssignmentGradePreviewResult> = {},
+  preview: AssignmentGradePreviewJsonResponse | null = createAssignmentGradePreviewJson()
+): AssignmentGradePreviewResult => ({
+  courseFolderId: COURSE_FOLDER.id,
+  courseFolderPath: COURSE_FOLDER.path,
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+  status: preview === null ? "failure" : "success",
+  preview,
+  error: null,
+  refreshedAt: "2026-06-10T14:30:00.000Z",
+  ...overrides
+});
+
+const createAssignmentGradeJson = (
+  overrides: Partial<AssignmentGradeJsonResponse> = {}
+): AssignmentGradeJsonResponse => ({
+  schemaVersion: 1,
+  commandName: "assignment grade",
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+  status: "success",
+  exitCode: 0,
+  diagnostics: [],
+  warnings: [],
+  errors: [],
+  generatedFiles: [],
+  summary: {
+    assignmentSlug: "lab02",
+    gradingEnabled: true,
+    targetsSelected: 2,
+    dispatchAttempted: 2,
+    dispatchSucceeded: 2,
+    dispatchFailed: 0,
+    skipped: 0
+  },
+  ...overrides
+});
+
+const createAssignmentGradeResult = (
+  overrides: Partial<AssignmentGradeResult> = {},
+  grade: AssignmentGradeJsonResponse | null = createAssignmentGradeJson()
+): AssignmentGradeResult => ({
+  courseFolderId: COURSE_FOLDER.id,
+  courseFolderPath: COURSE_FOLDER.path,
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+  status: grade === null || grade.status === "failure" ? "failure" : "success",
+  grade,
+  error: null,
+  dispatchedAt: "2026-06-10T15:30:00.000Z",
+  ...overrides
+});
+
 const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   const graiderUI = {
     getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),
@@ -260,7 +386,9 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshDashboard: vi.fn().mockResolvedValue(createCombinedDashboardResult([])),
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createAssignmentApplyPreviewResult()),
+    getAssignmentGradePreview: vi.fn().mockResolvedValue(createAssignmentGradePreviewResult()),
     applyAssignment: vi.fn(),
+    gradeAssignment: vi.fn().mockResolvedValue(createAssignmentGradeResult()),
     ...api
   };
 
@@ -1086,7 +1214,7 @@ describe("DashboardPage", () => {
     expect(screen.getAllByText("3").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("No diagnostics.")).toBeInTheDocument();
     expect(getFirstPreviewApplyButton()).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Grade submissions" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Grade submissions" })).toBeEnabled();
     expect(screen.getAllByText("Coming in a future slice").length).toBeGreaterThan(0);
   });
 
@@ -1127,6 +1255,48 @@ describe("DashboardPage", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Back to assignment" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+    expect(getAssignmentDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens grade dispatch preview from assignment detail and returns to assignment detail", async () => {
+    const getAssignmentDetail = vi.fn().mockResolvedValue(createAssignmentDetailResult());
+    const getAssignmentGradePreview = vi
+      .fn()
+      .mockResolvedValue(createAssignmentGradePreviewResult());
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getAssignmentDetail,
+      getAssignmentGradePreview
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+    expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview grading" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Grade Dispatch Preview" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Preview only — no GitHub Actions workflows will be started.")
+    ).toBeInTheDocument();
+    expect(getAssignmentGradePreview).toHaveBeenCalledWith({
+      courseFolderId: COURSE_FOLDER.id,
+      courseFolderPath: COURSE_FOLDER.path,
+      assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to assignment detail" }));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
     expect(getAssignmentDetail).toHaveBeenCalledTimes(1);

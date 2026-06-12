@@ -132,6 +132,7 @@ export const DiagnosticCode = {
   AssignmentDetailGithubRateLimited: "assignment_detail_github_rate_limited",
   AssignmentDetailGithubRequestFailed: "assignment_detail_github_request_failed",
   AssignmentApplyPreviewJsonRequired: "assignment_apply_preview_json_required",
+  AssignmentGradePreviewJsonRequired: "assignment_grade_preview_json_required",
   StudentRepositoryStatusUnknown: "student_repository_status_unknown",
   GithubTokenMissing: "github_token_missing"
 } as const;
@@ -287,6 +288,8 @@ export const ASSIGNMENT_DETAIL_GITHUB_REQUEST_FAILED_CODE =
   DiagnosticCode.AssignmentDetailGithubRequestFailed;
 export const ASSIGNMENT_APPLY_PREVIEW_JSON_REQUIRED_CODE =
   DiagnosticCode.AssignmentApplyPreviewJsonRequired;
+export const ASSIGNMENT_GRADE_PREVIEW_JSON_REQUIRED_CODE =
+  DiagnosticCode.AssignmentGradePreviewJsonRequired;
 export const STUDENT_REPOSITORY_STATUS_UNKNOWN_CODE = DiagnosticCode.StudentRepositoryStatusUnknown;
 export const GITHUB_TOKEN_MISSING_CODE = DiagnosticCode.GithubTokenMissing;
 

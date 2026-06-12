@@ -2,6 +2,8 @@
 
 Reusable Codex instructions for Electron UI changes live in the
 [Codex Electron UI Contract](codex-electron-ui-contract.md).
+The Apply Preview and Confirm Apply flow is documented in
+[Electron Apply Flow Developer Guide](electron-apply-flow-dev.md).
 
 This guide documents the read-only Electron assignment detail flow delivered in
 UI-2A through UI-2C, the preview-only UI-3A apply preview page, and the guarded
@@ -200,6 +202,22 @@ The corresponding IPC channel is:
 graider-ui:assignment-apply-preview:get
 ```
 
+The UI-4A grade dispatch preview preload API is:
+
+```ts
+window.graiderUI.getAssignmentGradePreview({
+  courseFolderId: "course-folder-csc1120",
+  courseFolderPath: "/Users/sean/dev/csc1120",
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+});
+```
+
+The corresponding IPC channel is:
+
+```text
+graider-ui:assignment-grade-preview:get
+```
+
 The UI-3B confirmed apply preload API is:
 
 ```ts
@@ -216,9 +234,26 @@ The corresponding IPC channel is:
 graider-ui:assignment-apply:run
 ```
 
+The UI-4B confirmed grade dispatch preload API is:
+
+```ts
+window.graiderUI.gradeAssignment({
+  courseFolderId: "course-folder-csc1120",
+  courseFolderPath: "/Users/sean/dev/csc1120",
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+});
+```
+
+The corresponding IPC channel is:
+
+```text
+graider-ui:assignment-grade:run
+```
+
 The main process validates that the request shape contains string
 `courseFolderId`, `courseFolderPath`, and `assignmentFile` fields before running
-assignment detail, apply preview, or confirmed apply.
+assignment detail, apply preview, grade preview, confirmed apply, or confirmed
+grade dispatch.
 
 Current assignment-detail UI copy affordances use the browser clipboard API in
 the renderer. There are no preload APIs for copy.
@@ -362,8 +397,9 @@ Shows grouped diagnostics or `No diagnostics.`
 
 Shows the action area. `Validate / Refresh detail` reruns assignment detail.
 `Preview apply` opens the UI-3A Apply Preview page and runs only the preview
-command. Grade, report, publish, and workflow generation actions remain disabled
-placeholders.
+command. `Grade submissions` opens the UI-4A Grade Dispatch Preview page and
+runs only the grade-preview command. Report, publish, and workflow generation
+actions remain disabled placeholders.
 
 ## Apply Preview Page
 
@@ -494,6 +530,130 @@ and Back to dashboard. Refresh assignment detail returns to the detail page and
 lets it reload the latest assignment state. It does not discard the visible
 apply result until the user chooses that navigation.
 
+## Grade Dispatch Preview Page
+
+UI-4A adds a separate full-page Grade Dispatch Preview view. It opens from the
+assignment detail page and auto-runs:
+
+```bash
+graider assignment grade-preview <assignment.yml> --json
+```
+
+The command runs from the registered course folder with argv arrays, reuses the
+main-process token resolver, parses stdout JSON in the main process, and returns
+structured result/error data to the renderer. See
+`docs/grade-preview-command.md` for the backend JSON contract.
+
+The page is preview-only. It shows visible text:
+
+```text
+Preview only — no GitHub Actions workflows will be started.
+```
+
+The page renders:
+
+- assignment, course, term, assignment-file, and manifest context
+- preview status and a renderer-derived readiness summary
+- target sections, section count, student count, and active student count
+- effective grading config, including `resolvedFrom`
+- workflow path, dispatch ref, and `workflow_dispatch` readiness
+- repository dispatch preview summary counts
+- per-student repository preview rows
+- grouped diagnostics and blockers
+- a guarded dispatch confirmation flow when the preview has no blockers
+
+Repository row labels must use preview wording:
+
+```text
+Would dispatch
+Would skip
+Blocked
+Unknown
+Token required
+```
+
+They must not use completed labels such as `Dispatched`.
+
+`Refresh preview` reruns only the grade-preview command, keeps the prior preview
+visible while loading, and replaces it when the latest result arrives. If a safe
+command error occurs during refresh, the previous preview remains visible when
+available.
+
+Missing-token previews can still render local target/config data when the
+backend returns it. The UI shows guidance to authenticate with GitHub CLI and
+refresh.
+
+## Confirmed Grade Dispatch
+
+UI-4B adds a confirmation panel on the Grade Dispatch Preview page. Confirmed
+dispatch runs:
+
+```bash
+graider assignment grade <assignment.yml> --json --all
+```
+
+The command runs from the registered course folder with argv arrays, reuses the
+main-process token resolver, parses stdout JSON in the main process, and returns
+structured result/error data to the renderer. The `--all` selector matches the
+assignment-wide Grade Dispatch Preview plan and preserves the backend grade
+command requirement that exactly one target selector be supplied.
+
+The confirmation panel states:
+
+```text
+This will start GitHub Actions grading workflows on student repositories.
+This does not collect results yet.
+Reports and result collection are handled in later slices.
+```
+
+The `Dispatch grading` button stays disabled until the user checks:
+
+```text
+I understand this will start grading workflows on student repositories
+```
+
+During execution:
+
+- `gradeAssignment` is called once per confirmed click.
+- Refresh/dispatch controls that could start duplicate work are disabled.
+- Existing preview context remains visible.
+- Safe loading text shows that grading workflows are being dispatched.
+- The renderer does not call apply, report, publish, workflow generation,
+  workflow polling, artifact inspection, or result collection.
+
+If the command returns `success`, `partial_success`, or `failure` with usable
+JSON, the page renders a Grade Dispatch Result Summary. If the command cannot
+start, returns invalid JSON, or fails before usable JSON is available, the page
+shows a safe error such as missing Graider CLI, missing assignment file, invalid
+grade JSON, or unable to dispatch grading.
+
+The result summary renders:
+
+- assignment, course, term, assignment file, workflow, and dispatch ref context
+- command status and exit code
+- dispatched timestamp
+- whether workflow dispatch was attempted
+- targeted repository count
+- dispatched count
+- skipped count
+- failed/blocked count
+- per-student dispatch result rows when returned
+- safe diagnostics
+
+Grade dispatch result rows use completed labels only after execution:
+
+```text
+Dispatched
+Skipped
+Failed
+Blocked
+```
+
+Post-dispatch actions include Back to assignment detail, Refresh assignment
+detail, and Back to dashboard. Result collection, report generation, student
+report publishing, workflow run polling, artifact inspection, and workflow
+generation remain deferred.
+
 ## Diagnostics Behavior
 
 Diagnostics are rendered in grouped sections:
@@ -584,6 +744,28 @@ For Apply Preview:
 - invalid JSON renders `Graider returned invalid apply preview JSON.`
 - fallback failures render `Unable to load apply preview.`
 
+For Grade Dispatch Preview:
+
+- opening the page shows assignment context immediately when available
+- the page auto-runs `getAssignmentGradePreview`
+- refresh keeps the prior preview visible
+- `partial_success` still renders available target, grading, workflow, and
+  repository plan data
+- token-required rows render with GitHub token guidance
+- missing CLI renders Graider CLI setup guidance
+- missing assignment file renders `Assignment file not found.`
+- invalid JSON renders `Graider returned invalid grade preview JSON.`
+- fallback failures render `Unable to load grade preview.`
+
+For confirmed Grade Dispatch:
+
+- missing CLI renders Graider CLI setup guidance
+- missing assignment file renders `Assignment file not found.`
+- invalid JSON renders `Graider returned invalid grade JSON.`
+- fallback failures render `Unable to dispatch grading.`
+- `partial_success` and `failure` JSON still render available result summary and
+  diagnostics
+
 For confirmed Apply:
 
 - missing CLI renders Graider CLI setup guidance
@@ -637,11 +819,16 @@ detail.
 `Preview apply` is functional in UI-3A and opens the preview-only Apply Preview
 page. It does not call actual apply execution.
 
+`Grade submissions` is functional and opens the Grade Dispatch Preview page.
+The page remains preview-only until explicit UI-4B confirmation is accepted.
+
 The final apply action lives on the Apply Preview page and is implemented in
-UI-3B with confirmation. Grade, report, publish, and workflow generation remain
-disabled placeholders. Disabled actions show either `Coming in a future slice`
-or `Unavailable for this assignment`, based on the action availability returned
-by the assignment detail JSON. They do not call mutation commands.
+UI-3B with confirmation. The final grade dispatch action lives on the Grade
+Dispatch Preview page and is implemented in UI-4B with confirmation. Report,
+publish, and workflow generation remain disabled placeholders. Disabled actions
+show either `Coming in a future slice` or `Unavailable for this assignment`,
+based on the action availability returned by the assignment detail JSON. They
+do not call mutation commands.
 
 ## Manual Smoke-Test Checklist
 
@@ -658,6 +845,9 @@ Start Electron in another terminal:
 cd ui
 npm run dev:electron
 ```
+
+Manual confirmed-apply and confirmed-grade smoke tests mutate GitHub/local
+state. Use only a safe sandbox course.
 
 Checklist:
 
@@ -689,7 +879,34 @@ Checklist:
 - [ ] Copy template repository works when present on the preview page.
 - [ ] Refresh preview keeps prior preview visible.
 - [ ] Back returns to the assignment detail page.
-- [ ] `Apply changes — coming in UI-3B` is visible and disabled.
+- [ ] Click Grade submissions.
+- [ ] Grade Dispatch Preview page opens.
+- [ ] Preview auto-loads.
+- [ ] Preview-only notice says no GitHub Actions workflows will be started.
+- [ ] Target panel shows sections and student count.
+- [ ] Effective grading panel shows resolved source and workflow config.
+- [ ] Workflow panel shows path/ref and `workflow_dispatch` readiness.
+- [ ] Repository summary counts render.
+- [ ] Repository rows show Would dispatch, Would skip, Blocked, Unknown, or
+      Token required as applicable.
+- [ ] Dispatch grading is disabled when preview blockers exist.
+- [ ] Ready grade preview enables Review grade dispatch.
+- [ ] Confirm grade dispatch panel appears.
+- [ ] Dispatch grading stays disabled until the confirmation checkbox is
+      checked.
+- [ ] Confirmed grade dispatch runs once on a safe sandbox course only.
+- [ ] Grade Dispatch Result Summary renders success, partial success, and
+      failure JSON.
+- [ ] Result rows use Dispatched, Skipped, Failed, or Blocked labels.
+- [ ] Refresh grade preview keeps prior preview visible.
+- [ ] Back to assignment detail returns without rerunning detail.
+- [ ] Apply is disabled when preview blockers exist.
+- [ ] Ready apply preview enables Review apply changes.
+- [ ] Confirmation panel appears.
+- [ ] Apply changes stays disabled until the confirmation checkbox is checked.
+- [ ] Confirmed apply runs once on a safe sandbox course only.
+- [ ] Apply Result Summary renders success, partial success, and failure JSON.
+- [ ] Result rows use Created, Updated, Skipped, Failed, or Blocked labels.
 - [ ] Open/reveal local affordance works if implemented. For UI-2C this is
       deferred, so verify no unsafe partial open/reveal API exists.
 - [ ] Refresh detail keeps prior detail visible.
@@ -706,12 +923,11 @@ Edge cases to smoke when fixtures are available:
 - [ ] Null points, deadline, and LMS assignment ID.
 - [ ] Apply preview repository rows with unknown or token-required status.
 - [ ] Apply preview with no target students if a fixture exists.
-- [ ] Ready apply preview enables Review apply changes.
-- [ ] Confirmation panel appears.
-- [ ] Apply changes stays disabled until the confirmation checkbox is checked.
-- [ ] Confirmed apply runs once.
-- [ ] Apply Result Summary renders success, partial success, and failure JSON.
-- [ ] Result rows use Created, Updated, Skipped, Failed, or Blocked labels.
+- [ ] Grade preview repository rows with blocked, unknown, or token-required
+      status.
+- [ ] Grade preview with grading disabled if a fixture exists.
+- [ ] Grade dispatch missing token, missing CLI, invalid JSON, and
+      partial-success failures with safe diagnostics.
 - [ ] Refresh assignment detail returns to the detail page and reloads detail.
 
 ## Future Slice Boundary
@@ -720,7 +936,8 @@ Planned boundaries:
 
 - UI-3A: Apply Assignment Preview, implemented as preview-only UI
 - UI-3B: Apply Assignment Confirm and Execute, implemented
-- UI-4: Grade Dispatch View
+- UI-4A: Grade Dispatch Preview, implemented as preview-only UI
+- UI-4B: Grade Dispatch Confirm and Execute, implemented
 - UI-5: Report Summary View
 - UI-6: Student Report Publishing View
 - UI-7: Workflow Generation View
@@ -746,5 +963,23 @@ generating workflows, or dispatching workflows.
 
 UI-3B is the first slice that executes a confirmed mutation. It uses explicit
 confirmation and command-specific IPC rather than reusing assignment detail
-refresh. Grade dispatch, report generation, student report publishing, and
-workflow generation remain deferred.
+refresh.
+
+UI-4A is non-mutating. It uses:
+
+```bash
+graider assignment grade-preview <assignment.yml> --json
+```
+
+It must not call `assignment grade`, legacy `grade`, report generation, student
+report publishing, or workflow generation.
+
+UI-4B is a confirmed mutation. It uses:
+
+```bash
+graider assignment grade <assignment.yml> --json --all
+```
+
+It starts GitHub Actions grading workflows only after explicit confirmation.
+Workflow run polling, artifact/result collection, report generation, student
+report publishing, and workflow generation remain deferred.
