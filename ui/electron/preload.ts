@@ -17,6 +17,8 @@ import {
   type CombinedDashboardResult,
   type CourseFolderDashboardResult,
   type CourseFolderRecord,
+  type FacultyReportRequest,
+  type FacultyReportResult,
   type GraiderUIApi,
   type SelectCourseFolderResult
 } from "./ipc.js";
@@ -51,6 +53,8 @@ const graiderUI: GraiderUIApi = {
     request: AssignmentGradeStatusRequest
   ): Promise<AssignmentGradeStatusResult> =>
     await invoke<AssignmentGradeStatusResult>(IPC_CHANNELS.getAssignmentGradeStatus, request),
+  getFacultyReport: async (request: FacultyReportRequest): Promise<FacultyReportResult> =>
+    await invoke<FacultyReportResult>(IPC_CHANNELS.getFacultyReport, request),
   applyAssignment: async (request: AssignmentApplyRequest): Promise<AssignmentApplyResult> =>
     await invoke<AssignmentApplyResult>(IPC_CHANNELS.applyAssignment, request),
   gradeAssignment: async (request: AssignmentGradeRequest): Promise<AssignmentGradeResult> =>

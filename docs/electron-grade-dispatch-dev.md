@@ -5,7 +5,11 @@ Reusable Electron UI safety rules live in the
 preview/dispatch command contract lives in
 [Assignment Grade Preview Command](grade-preview-command.md). The grade status
 UI boundary is documented in
-[Electron Grade Status Developer Guide](electron-grade-status-dev.md).
+[Electron Grade Status Developer Guide](electron-grade-status-dev.md), and the
+faculty report boundary is documented in
+[Electron Faculty Report Developer Guide](electron-faculty-report-dev.md).
+The current app smoke-test and release-readiness runbook is documented in
+[Electron Release Readiness Guide](electron-release-readiness.md).
 
 ## Purpose
 
@@ -15,7 +19,8 @@ This guide documents the boundary between:
 UI-4A = preview-only grade dispatch planning
 UI-4B = confirmed GitHub Actions dispatch mutation
 UI-5A = read-only grade status monitoring
-UI-5+ = future result/reporting
+UI-6A = faculty report view, no student publishing
+UI-6+ = future publishing/exporting
 ```
 
 The implemented flow is:
@@ -176,12 +181,12 @@ separate read-only Grade Status view through
 The grade dispatch and status flows still do not implement:
 
 - artifact/result collection
-- faculty report generation with `graider report`
 - student report publishing
 - workflow generation UI
 
 Those actions must remain disabled or absent until a future slice explicitly
-wires them. Do not wire `graider report <assignment>` from UI-5B.
+wires them. Faculty report generation is owned by the separate UI-6A Faculty
+Report view.
 
 ## Stabilization Checks
 

@@ -46,6 +46,7 @@ describe("UI security boundary", () => {
       "graider-ui:assignment-apply-preview:get",
       "graider-ui:assignment-grade-preview:get",
       "graider-ui:assignment-grade-status:get",
+      "graider-ui:faculty-report:get",
       "graider-ui:assignment-apply:run",
       "graider-ui:assignment-grade:run"
     ]);

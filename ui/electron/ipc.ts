@@ -9,6 +9,7 @@ export const IPC_CHANNELS = {
   getAssignmentApplyPreview: "graider-ui:assignment-apply-preview:get",
   getAssignmentGradePreview: "graider-ui:assignment-grade-preview:get",
   getAssignmentGradeStatus: "graider-ui:assignment-grade-status:get",
+  getFacultyReport: "graider-ui:faculty-report:get",
   applyAssignment: "graider-ui:assignment-apply:run",
   gradeAssignment: "graider-ui:assignment-grade:run"
 } as const;
@@ -63,6 +64,8 @@ export type AssignmentGradePreviewRequest = AssignmentDetailRequest;
 export interface AssignmentGradeStatusRequest extends AssignmentDetailRequest {
   readonly studentIds?: readonly string[];
 }
+
+export type FacultyReportRequest = AssignmentDetailRequest;
 
 export type AssignmentApplyRequest = AssignmentDetailRequest;
 
@@ -178,6 +181,31 @@ export interface AssignmentGradeStatusResult {
   readonly refreshedAt: string | null;
 }
 
+export interface FacultyReportJsonResponse {
+  readonly schemaVersion: 1;
+  readonly commandName: "report";
+  readonly assignmentFile?: string;
+  readonly status: string;
+  readonly exitCode: number;
+  readonly diagnostics: readonly unknown[];
+  readonly warnings: readonly unknown[];
+  readonly errors: readonly unknown[];
+  readonly generatedFiles: readonly string[];
+  readonly summary: Readonly<Record<string, unknown>>;
+  readonly report?: unknown;
+  readonly students?: readonly unknown[];
+}
+
+export interface FacultyReportResult {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly assignmentFile: string;
+  readonly status: "success" | "failure";
+  readonly report: FacultyReportJsonResponse | null;
+  readonly error: DashboardCommandError | null;
+  readonly refreshedAt: string | null;
+}
+
 export interface AssignmentApplyJsonResponse {
   readonly schemaVersion: 1;
   readonly commandName: "assignment apply";
@@ -257,6 +285,7 @@ export interface GraiderUIApi {
   readonly getAssignmentGradeStatus: (
     request: AssignmentGradeStatusRequest
   ) => Promise<AssignmentGradeStatusResult>;
+  readonly getFacultyReport: (request: FacultyReportRequest) => Promise<FacultyReportResult>;
   readonly applyAssignment: (request: AssignmentApplyRequest) => Promise<AssignmentApplyResult>;
   readonly gradeAssignment: (request: AssignmentGradeRequest) => Promise<AssignmentGradeResult>;
 }

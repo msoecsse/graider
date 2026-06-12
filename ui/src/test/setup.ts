@@ -70,6 +70,15 @@ beforeEach(() => {
         error: null,
         refreshedAt: null
       }),
+      getFacultyReport: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        report: null,
+        error: null,
+        refreshedAt: null
+      }),
       applyAssignment: vi.fn().mockResolvedValue({
         courseFolderId: "course-folder-default",
         courseFolderPath: "/tmp/course",

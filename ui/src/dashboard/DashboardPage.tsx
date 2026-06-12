@@ -11,8 +11,10 @@ import type {
   AssignmentDetailSelection,
   NormalizedAssignmentDetail
 } from "../assignment-detail/assignmentDetailTypes";
+import { FacultyReportPage } from "../faculty-report/FacultyReportPage";
 import { GradePreviewPage } from "../grade-preview/GradePreviewPage";
 import { GradeStatusPage } from "../grade-status/GradeStatusPage";
+import type { NormalizedGradeStatus } from "../grade-status/gradeStatusTypes";
 import { CourseCardGrid } from "./CourseCardGrid";
 import { CourseFolderList } from "./CourseFolderList";
 import { DashboardToolbar } from "./DashboardToolbar";
@@ -61,6 +63,11 @@ export const DashboardPage = (): ReactElement => {
   const [selectedGradeStatus, setSelectedGradeStatus] = useState<{
     readonly selection: AssignmentDetailSelection;
     readonly detail: NormalizedAssignmentDetail | null;
+  } | null>(null);
+  const [selectedFacultyReport, setSelectedFacultyReport] = useState<{
+    readonly selection: AssignmentDetailSelection;
+    readonly detail: NormalizedAssignmentDetail | null;
+    readonly gradeStatus: NormalizedGradeStatus | null;
   } | null>(null);
 
   useEffect(() => {
@@ -231,6 +238,7 @@ export const DashboardPage = (): ReactElement => {
       setSelectedApplyPreview(null);
       setSelectedGradePreview(null);
       setSelectedGradeStatus(null);
+      setSelectedFacultyReport(null);
     }
   };
 
@@ -261,6 +269,7 @@ export const DashboardPage = (): ReactElement => {
           setSelectedAssignmentDetailResult(null);
           setSelectedApplyPreview(null);
           setSelectedGradePreview(null);
+          setSelectedFacultyReport(null);
         }}
         onBackToDashboard={() => {
           setSelectedAssignment(null);
@@ -268,6 +277,7 @@ export const DashboardPage = (): ReactElement => {
           setSelectedApplyPreview(null);
           setSelectedGradePreview(null);
           setSelectedGradeStatus(null);
+          setSelectedFacultyReport(null);
         }}
       />
     );
@@ -283,18 +293,38 @@ export const DashboardPage = (): ReactElement => {
         }}
         onViewGradeStatus={() => {
           setSelectedGradeStatus(selectedGradePreview);
+          setSelectedFacultyReport(null);
           setSelectedGradePreview(null);
         }}
         onRefreshAssignmentDetail={() => {
           setSelectedAssignmentDetailResult(null);
           setSelectedGradePreview(null);
           setSelectedGradeStatus(null);
+          setSelectedFacultyReport(null);
         }}
         onBackToDashboard={() => {
           setSelectedAssignment(null);
           setSelectedAssignmentDetailResult(null);
           setSelectedApplyPreview(null);
           setSelectedGradePreview(null);
+          setSelectedGradeStatus(null);
+          setSelectedFacultyReport(null);
+        }}
+      />
+    );
+  }
+
+  if (selectedFacultyReport !== null) {
+    return (
+      <FacultyReportPage
+        selection={selectedFacultyReport.selection}
+        assignmentDetail={selectedFacultyReport.detail}
+        gradeStatus={selectedFacultyReport.gradeStatus}
+        onBackToGradeStatus={() => {
+          setSelectedFacultyReport(null);
+        }}
+        onBackToAssignmentDetail={() => {
+          setSelectedFacultyReport(null);
           setSelectedGradeStatus(null);
         }}
       />
@@ -308,6 +338,13 @@ export const DashboardPage = (): ReactElement => {
         assignmentDetail={selectedGradeStatus.detail}
         onBack={() => {
           setSelectedGradeStatus(null);
+        }}
+        onViewFacultyReport={(gradeStatus) => {
+          setSelectedFacultyReport({
+            selection: selectedGradeStatus.selection,
+            detail: selectedGradeStatus.detail,
+            gradeStatus
+          });
         }}
       />
     );
@@ -325,6 +362,7 @@ export const DashboardPage = (): ReactElement => {
           setSelectedApplyPreview(null);
           setSelectedGradePreview(null);
           setSelectedGradeStatus(null);
+          setSelectedFacultyReport(null);
         }}
         onPreviewApply={(selection, detail, loadResult) => {
           setSelectedAssignment(selection);
@@ -332,6 +370,7 @@ export const DashboardPage = (): ReactElement => {
           setSelectedApplyPreview({ selection, detail });
           setSelectedGradePreview(null);
           setSelectedGradeStatus(null);
+          setSelectedFacultyReport(null);
         }}
         onPreviewGrade={(selection, detail, loadResult) => {
           setSelectedAssignment(selection);
@@ -339,6 +378,7 @@ export const DashboardPage = (): ReactElement => {
           setSelectedApplyPreview(null);
           setSelectedGradePreview({ selection, detail });
           setSelectedGradeStatus(null);
+          setSelectedFacultyReport(null);
         }}
         onViewGradeStatus={(selection, detail, loadResult) => {
           setSelectedAssignment(selection);
@@ -346,6 +386,7 @@ export const DashboardPage = (): ReactElement => {
           setSelectedApplyPreview(null);
           setSelectedGradePreview(null);
           setSelectedGradeStatus({ selection, detail });
+          setSelectedFacultyReport(null);
         }}
       />
     );

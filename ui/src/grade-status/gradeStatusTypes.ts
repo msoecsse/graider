@@ -20,6 +20,7 @@ export interface GradeStatusPageProps {
   readonly selection: AssignmentDetailSelection;
   readonly assignmentDetail: NormalizedAssignmentDetail | null;
   readonly onBack: () => void;
+  readonly onViewFacultyReport: (gradeStatus: NormalizedGradeStatus) => void;
 }
 
 export interface GradeStatusAssignment {

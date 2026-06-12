@@ -338,7 +338,8 @@ const DiagnosticsPanel = ({
 export const GradeStatusPage = ({
   selection,
   assignmentDetail,
-  onBack
+  onBack,
+  onViewFacultyReport
 }: GradeStatusPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<GradeStatusLoadResult | null>(null);
   const [mergedStatus, setMergedStatus] = useState<NormalizedGradeStatus | null>(null);
@@ -563,10 +564,19 @@ export const GradeStatusPage = ({
               <p>
                 {activeStatus.summary.readyForReport
                   ? "Ready for report generation."
-                  : "Generate reports after grading status is complete."}
+                  : "Some grading runs are not complete. The report command can still run, but it may show missing results."}
               </p>
-              <button className="primary-action" type="button" disabled>
-                Generate report — coming later
+              <button
+                className="primary-action"
+                type="button"
+                onClick={() => {
+                  onViewFacultyReport(activeStatus);
+                }}
+              >
+                View faculty report
+              </button>
+              <button className="secondary-action" type="button" disabled>
+                Publish student reports — deferred
               </button>
             </section>
           </div>

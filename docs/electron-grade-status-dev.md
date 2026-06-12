@@ -3,6 +3,10 @@
 Reusable Electron UI safety rules live in the
 [Codex Electron UI Contract](codex-electron-ui-contract.md). The backend command
 contract lives in [Assignment Grade Status Command](grade-status-command.md).
+The Faculty Report view is documented in
+[Electron Faculty Report Developer Guide](electron-faculty-report-dev.md).
+The current app smoke-test and release-readiness runbook is documented in
+[Electron Release Readiness Guide](electron-release-readiness.md).
 
 ## Purpose
 
@@ -27,8 +31,8 @@ Grade Status answers:
 - which repositories need attention
 - whether report generation appears ready
 
-It does not generate or display the faculty report. UI-6A is expected to own
-the future `graider report <assignment>` flow.
+It does not generate or display the faculty report directly. UI-6A owns the
+separate Faculty Report view that calls `graider report <assignment> --json`.
 
 ## Commands and IPC
 
@@ -159,8 +163,10 @@ When not ready, the UI keeps available rows visible and explains obvious causes
 when possible, such as runs still in progress, missing completed grading runs,
 unknown rows, or blocked repositories.
 
-Do not treat `readyForReport=false` as a UI crash or load failure. UI-5B must
-not run `graider report <assignment>` or add enabled report generation controls.
+Do not treat `readyForReport=false` as a UI crash or load failure. Grade Status
+itself must not run `graider report <assignment>`. UI-6A may navigate to the
+separate Faculty Report view, which runs the report command and safely renders
+missing-data JSON.
 
 ## Diagnostics and Errors
 
@@ -198,17 +204,19 @@ Grade Status does not:
 - dispatch workflows
 - mutate local files or GitHub state
 
-The visible report action is disabled:
+In UI-6A, Grade Status exposes a navigation action:
 
 ```text
-Generate report — coming later
+View faculty report
 ```
+
+That action opens the separate Faculty Report view. It does not run the report
+command inside Grade Status.
 
 ## Deferred
 
-UI-5A/UI-5B do not implement:
+Grade Status does not implement:
 
-- faculty report generation
 - artifact/result collection UI
 - student report publishing
 - workflow generation UI
@@ -235,4 +243,4 @@ Use only a safe sandbox course for live dispatch/status smoke tests.
 - [ ] Confirm auto-refresh stops when leaving the page.
 - [ ] Confirm readyForReport display updates.
 - [ ] Confirm diagnostics render safely.
-- [ ] Confirm no report generation button is active.
+- [ ] Confirm View faculty report opens the Faculty Report view.

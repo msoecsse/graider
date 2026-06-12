@@ -9,9 +9,13 @@ import type {
   AssignmentGradePreviewResult,
   AssignmentGradeJsonResponse,
   AssignmentGradeResult,
+  AssignmentGradeStatusJsonResponse,
+  AssignmentGradeStatusResult,
   CombinedDashboardResult,
   CourseFolderDashboardResult,
   CourseFolderRecord,
+  FacultyReportJsonResponse,
+  FacultyReportResult,
   GraiderUIApi
 } from "../../electron/ipc";
 import { DashboardPage } from "./DashboardPage";
@@ -376,6 +380,123 @@ const createAssignmentGradeResult = (
   ...overrides
 });
 
+const createAssignmentGradeStatusJson = (
+  overrides: Partial<AssignmentGradeStatusJsonResponse> = {}
+): AssignmentGradeStatusJsonResponse => ({
+  schemaVersion: 1,
+  commandName: "assignment grade-status",
+  status: "success",
+  exitCode: 0,
+  diagnostics: [],
+  assignment: {
+    slug: "lab02",
+    title: "Lab 02",
+    file: "terms/27s1/assignments/lab02/assignment.yml",
+    status: "active"
+  },
+  course: { slug: "csc1120", title: "CSC1120" },
+  term: { slug: "27s1", title: "Spring 2027" },
+  target: { sections: ["001"], sectionCount: 1, studentCount: 1, activeStudentCount: 1 },
+  grading: {
+    enabled: true,
+    resolvedFrom: "course_default",
+    mode: "custom-workflow",
+    workflow: ".github/workflows/grade.yml",
+    artifact: "grading-results",
+    resultFile: "results.json",
+    workflowRef: "main"
+  },
+  summary: {
+    totalRepositories: 1,
+    queued: 0,
+    inProgress: 0,
+    completed: 1,
+    successful: 1,
+    failed: 0,
+    cancelled: 0,
+    timedOut: 0,
+    missing: 0,
+    unknown: 0,
+    blocked: 0,
+    needsAttention: 0,
+    readyForReport: true
+  },
+  repositories: [
+    {
+      studentId: "s001",
+      githubUsername: "ada",
+      section: "001",
+      repository: "graider-sandbox/csc1120-lab02-ada",
+      workflow: ".github/workflows/grade.yml",
+      ref: "main",
+      runId: 123,
+      runUrl: "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123",
+      status: "completed",
+      conclusion: "success",
+      startedAt: "2026-06-10T12:00:00.000Z",
+      completedAt: "2026-06-10T12:05:00.000Z",
+      selectionStrategy: "latest_configured_workflow_run",
+      reason: "success",
+      needsAttention: false,
+      diagnostics: []
+    }
+  ],
+  actions: {},
+  ...overrides
+});
+
+const createAssignmentGradeStatusResult = (
+  overrides: Partial<AssignmentGradeStatusResult> = {},
+  gradeStatus: AssignmentGradeStatusJsonResponse | null = createAssignmentGradeStatusJson()
+): AssignmentGradeStatusResult => ({
+  courseFolderId: COURSE_FOLDER.id,
+  courseFolderPath: COURSE_FOLDER.path,
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+  status: gradeStatus === null ? "failure" : "success",
+  gradeStatus,
+  error: null,
+  refreshedAt: "2026-06-10T16:00:00.000Z",
+  ...overrides
+});
+
+const createFacultyReportJson = (
+  overrides: Partial<FacultyReportJsonResponse> = {}
+): FacultyReportJsonResponse => ({
+  schemaVersion: 1,
+  commandName: "report",
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+  status: "success",
+  exitCode: 0,
+  diagnostics: [],
+  warnings: [],
+  errors: [],
+  generatedFiles: ["terms/27s1/reports/lab02/faculty-summary.json"],
+  summary: {
+    assignmentSlug: "lab02",
+    courseCode: "csc1120",
+    termCode: "27s1",
+    studentCount: 1,
+    passedCount: 1,
+    failedCount: 0,
+    reportFileCount: 3
+  },
+  ...overrides
+});
+
+const createFacultyReportResult = (
+  overrides: Partial<FacultyReportResult> = {},
+  report: FacultyReportJsonResponse | null = createFacultyReportJson()
+): FacultyReportResult => ({
+  courseFolderId: COURSE_FOLDER.id,
+  courseFolderPath: COURSE_FOLDER.path,
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+  status: report === null ? "failure" : "success",
+  report,
+  error: null,
+  refreshedAt: "2026-06-10T16:30:00.000Z",
+  ...overrides
+});
+
 const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   const graiderUI = {
     getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),
@@ -387,7 +508,8 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createAssignmentApplyPreviewResult()),
     getAssignmentGradePreview: vi.fn().mockResolvedValue(createAssignmentGradePreviewResult()),
-    getAssignmentGradeStatus: vi.fn(),
+    getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
+    getFacultyReport: vi.fn().mockResolvedValue(createFacultyReportResult()),
     applyAssignment: vi.fn(),
     gradeAssignment: vi.fn().mockResolvedValue(createAssignmentGradeResult()),
     ...api
@@ -1301,6 +1423,57 @@ describe("DashboardPage", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
     expect(getAssignmentDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens faculty report from grade status and returns to grade status", async () => {
+    const getAssignmentDetail = vi.fn().mockResolvedValue(createAssignmentDetailResult());
+    const getAssignmentGradeStatus = vi.fn().mockResolvedValue(createAssignmentGradeStatusResult());
+    const getFacultyReport = vi.fn().mockResolvedValue(createFacultyReportResult());
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getAssignmentDetail,
+      getAssignmentGradeStatus,
+      getFacultyReport
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+    expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "View grading status" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Grade Status" })
+    ).toBeInTheDocument();
+    expect(getAssignmentGradeStatus).toHaveBeenCalledWith({
+      courseFolderId: COURSE_FOLDER.id,
+      courseFolderPath: COURSE_FOLDER.path,
+      assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "View faculty report" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Faculty Report" })
+    ).toBeInTheDocument();
+    expect(getFacultyReport).toHaveBeenCalledWith({
+      courseFolderId: COURSE_FOLDER.id,
+      courseFolderPath: COURSE_FOLDER.path,
+      assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading status" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Grade Status" })
+    ).toBeInTheDocument();
   });
 
   it("refreshes assignment detail while preserving prior detail", async () => {

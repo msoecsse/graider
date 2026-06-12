@@ -8,6 +8,10 @@ The Grade Dispatch Preview and Confirm Grade Dispatch flow is documented in
 [Electron Grade Dispatch Developer Guide](electron-grade-dispatch-dev.md).
 The Grade Status view is documented in
 [Electron Grade Status Developer Guide](electron-grade-status-dev.md).
+The Faculty Report view is documented in
+[Electron Faculty Report Developer Guide](electron-faculty-report-dev.md).
+The current app smoke-test and release-readiness runbook is documented in
+[Electron Release Readiness Guide](electron-release-readiness.md).
 
 This guide documents the read-only Electron assignment detail flow delivered in
 UI-2A through UI-2C, the preview-only UI-3A apply preview page, the guarded
@@ -18,6 +22,8 @@ UI-2 is read-only.
 UI-3A is preview-only and still non-mutating.
 UI-3B is confirmed mutation through the apply command only.
 UI-5A Grade Status is read-only status monitoring.
+UI-6A Faculty Report runs the safe report command but does not publish student
+reports.
 
 ## Overview
 
@@ -92,6 +98,7 @@ The grade status path added in UI-5A is:
 ```text
 Assignment detail page -> Grade Status
 Grade Dispatch Result Summary -> Grade Status
+Grade Status -> Faculty Report
 ```
 
 The renderer passes the original `courseFolderId`, `courseFolderPath`, and
@@ -281,10 +288,26 @@ The corresponding IPC channel is:
 graider-ui:assignment-grade-status:get
 ```
 
+The UI-6A faculty report preload API is:
+
+```ts
+window.graiderUI.getFacultyReport({
+  courseFolderId: "course-folder-csc1120",
+  courseFolderPath: "/Users/sean/dev/csc1120",
+  assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+});
+```
+
+The corresponding IPC channel is:
+
+```text
+graider-ui:faculty-report:get
+```
+
 The main process validates that the request shape contains string
 `courseFolderId`, `courseFolderPath`, and `assignmentFile` fields before running
 assignment detail, apply preview, grade preview, grade status, confirmed apply,
-or confirmed grade dispatch.
+confirmed grade dispatch, or faculty report.
 
 Current assignment-detail UI copy affordances use the browser clipboard API in
 the renderer. There are no preload APIs for copy.
@@ -859,6 +882,10 @@ The page remains preview-only until explicit UI-4B confirmation is accepted.
 page. It does not call `graider report`, download artifacts, parse grading
 result files, dispatch workflows, or mutate local/GitHub state.
 
+`View faculty report` is functional from Grade Status in UI-6A. It opens the
+Faculty Report view and runs `graider report <assignment.yml> --json` through
+narrow IPC. It does not pass `--publish-student-reports`.
+
 The final apply action lives on the Apply Preview page and is implemented in
 UI-3B with confirmation. The final grade dispatch action lives on the Grade
 Dispatch Preview page and is implemented in UI-4B with confirmation. Report,
@@ -942,7 +969,10 @@ Checklist:
 - [ ] Full grade status auto-loads.
 - [ ] Manual Refresh status keeps prior rows visible.
 - [ ] Queued/in-progress rows auto-refresh while the page remains open.
-- [ ] Generate report is disabled from Grade Status.
+- [ ] Click View faculty report.
+- [ ] Faculty Report page opens.
+- [ ] Report summary and generated report paths render.
+- [ ] Publish student reports is disabled from Faculty Report.
 - [ ] Apply is disabled when preview blockers exist.
 - [ ] Ready apply preview enables Review apply changes.
 - [ ] Confirmation panel appears.
@@ -982,7 +1012,7 @@ Planned boundaries:
 - UI-4A: Grade Dispatch Preview, implemented as preview-only UI
 - UI-4B: Grade Dispatch Confirm and Execute, implemented
 - UI-5A: Grade Status View, implemented as read-only status monitoring
-- UI-6A: Faculty Report View, future report generation with `graider report`
+- UI-6A: Faculty Report View, implemented with `graider report`
 - UI-6+: Student Report Publishing View
 - UI-7: Workflow Generation View
 
@@ -995,6 +1025,7 @@ UI-3B = confirmed mutation
 UI-4A = preview-only grade dispatch planning
 UI-4B = confirmed grade dispatch mutation
 UI-5A = read-only grade status monitoring
+UI-6A = faculty report generation/read view, no student publishing
 ```
 
 UI-3A should be allowed to ask the backend for preview/plan data without

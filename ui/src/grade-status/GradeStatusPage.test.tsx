@@ -144,6 +144,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getAssignmentApplyPreview: vi.fn(),
     getAssignmentGradePreview: vi.fn(),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createGradeStatusResult()),
+    getFacultyReport: vi.fn(),
     applyAssignment: vi.fn(),
     gradeAssignment: vi.fn(),
     ...api
@@ -157,8 +158,15 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   return graiderUI;
 };
 
-const renderGradeStatusPage = (onBack = vi.fn()) =>
-  render(<GradeStatusPage selection={SELECTION} assignmentDetail={null} onBack={onBack} />);
+const renderGradeStatusPage = (onBack = vi.fn(), onViewFacultyReport = vi.fn()) =>
+  render(
+    <GradeStatusPage
+      selection={SELECTION}
+      assignmentDetail={null}
+      onBack={onBack}
+      onViewFacultyReport={onViewFacultyReport}
+    />
+  );
 
 afterEach(() => {
   vi.useRealTimers();
@@ -186,8 +194,27 @@ describe("GradeStatusPage", () => {
       "href",
       "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123"
     );
-    expect(screen.getByRole("button", { name: "Generate report — coming later" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "View faculty report" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Publish student reports — deferred" })
+    ).toBeDisabled();
     expect(graiderUI.gradeAssignment).not.toHaveBeenCalled();
+  });
+
+  it("opens faculty report from the latest loaded status", async () => {
+    const onViewFacultyReport = vi.fn();
+
+    mockGraiderUI({});
+    renderGradeStatusPage(vi.fn(), onViewFacultyReport);
+
+    fireEvent.click(await screen.findByRole("button", { name: "View faculty report" }));
+
+    expect(onViewFacultyReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "success",
+        assignment: expect.objectContaining({ slug: "lab02" })
+      })
+    );
   });
 
   it("manual refresh runs full grade status and keeps prior rows visible while refreshing", async () => {

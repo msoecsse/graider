@@ -7,6 +7,7 @@ import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
 import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
+import { getFacultyReport } from "./facultyReportRunner.js";
 import {
   addCourseFolderToRegistry,
   getCourseRegistryPath,
@@ -23,7 +24,8 @@ import {
   type AssignmentDetailRequest,
   type AssignmentGradeRequest,
   type AssignmentGradePreviewRequest,
-  type AssignmentGradeStatusRequest
+  type AssignmentGradeStatusRequest,
+  type FacultyReportRequest
 } from "./ipc.js";
 
 const DEFAULT_WINDOW_WIDTH = 1180;
@@ -82,6 +84,9 @@ const isAssignmentGradeStatusRequest = (value: unknown): value is AssignmentGrad
     (Array.isArray(studentIds) && studentIds.every((studentId) => typeof studentId === "string"))
   );
 };
+
+const isFacultyReportRequest = (value: unknown): value is FacultyReportRequest =>
+  isAssignmentDetailRequest(value);
 
 const isAssignmentApplyRequest = (value: unknown): value is AssignmentApplyRequest =>
   isAssignmentDetailRequest(value);
@@ -188,6 +193,17 @@ export const registerIpcHandlers = (): void => {
     }
 
     return await getAssignmentGradeStatus(request, {
+      runner: processRunner,
+      env: process.env
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getFacultyReport, async (_event, request: unknown) => {
+    if (!isFacultyReportRequest(request)) {
+      throw new Error("Faculty report request is required.");
+    }
+
+    return await getFacultyReport(request, {
       runner: processRunner,
       env: process.env
     });
