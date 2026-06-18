@@ -20,6 +20,7 @@ describe("packaging configuration", () => {
     expect(packagingConfigSource).toContain('"dist-electron/**/*"');
     expect(packagingConfigSource).toContain('"dist-graider-cli/**/*"');
     expect(packagingConfigSource).toContain('"package.json"');
+    expect(packagingConfigSource).toContain('asarUnpack: ["dist-graider-cli/**/*"]');
   });
 
   it("builds the bundled CLI before packaging app artifacts", () => {

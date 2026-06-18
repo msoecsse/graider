@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AssignmentDetailJsonResponse,
@@ -500,6 +500,12 @@ const createFacultyReportResult = (
 const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   const graiderUI = {
     getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),
+    checkGitHubAuth: vi.fn().mockResolvedValue({
+      status: "connected",
+      username: null,
+      diagnostic: null,
+      diagnosticCode: null
+    }),
     selectCourseFolder: vi.fn().mockResolvedValue({ canceled: true, courseFolder: null }),
     listCourseFolders: vi.fn().mockResolvedValue([]),
     removeCourseFolder: vi.fn().mockResolvedValue(undefined),
@@ -550,8 +556,207 @@ const getFirstPreviewApplyButton = (): HTMLElement => {
   return button;
 };
 
+const createDeferred = <T,>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+} => {
+  let resolveDeferred: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolveDeferred = resolve;
+  });
+
+  return {
+    promise,
+    resolve: resolveDeferred
+  };
+};
+
 describe("DashboardPage", () => {
+  it("checks GitHub auth on startup", async () => {
+    const checkGitHubAuth = vi.fn().mockResolvedValue({
+      status: "connected",
+      username: null,
+      diagnostic: null,
+      diagnosticCode: null
+    });
+
+    mockGraiderUI({ checkGitHubAuth });
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "GitHub authentication: Connected" })
+    ).toBeInTheDocument();
+    expect(checkGitHubAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders connected GitHub auth state without token values", async () => {
+    mockGraiderUI({
+      checkGitHubAuth: vi.fn().mockResolvedValue({
+        status: "connected",
+        username: "faculty-user",
+        diagnostic: null,
+        diagnosticCode: null
+      })
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "GitHub authentication: Connected" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/as faculty-user\./u)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("ghp_secret");
+  });
+
+  it("renders not connected GitHub auth guidance for missing gh", async () => {
+    mockGraiderUI({
+      checkGitHubAuth: vi.fn().mockResolvedValue({
+        status: "not_connected",
+        username: null,
+        diagnostic: "GitHub CLI was not found. Install GitHub CLI, then run gh auth login.",
+        diagnosticCode: "github_cli_not_found"
+      })
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "GitHub authentication: Not connected"
+      })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("GitHub authentication is required for repository checks and grading actions.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("gh auth login")).toBeInTheDocument();
+    expect(
+      screen.getByText(/If GitHub opens a 404 page for a private course repository/u)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/GitHub CLI was not found/u)).toBeInTheDocument();
+  });
+
+  it("renders safe not connected guidance when gh auth token fails", async () => {
+    mockGraiderUI({
+      checkGitHubAuth: vi.fn().mockResolvedValue({
+        status: "not_connected",
+        username: null,
+        diagnostic:
+          "GitHub CLI is installed, but no authenticated token was available. Run gh auth login, then refresh.",
+        diagnosticCode: "github_cli_auth_failed"
+      })
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "GitHub authentication: Not connected"
+      })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/no authenticated token was available/u)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("not authenticated stderr");
+  });
+
+  it("reruns GitHub auth check from the button", async () => {
+    const checkGitHubAuth = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "not_connected",
+        username: null,
+        diagnostic: null,
+        diagnosticCode: null
+      })
+      .mockResolvedValueOnce({
+        status: "connected",
+        username: null,
+        diagnostic: null,
+        diagnosticCode: null
+      });
+
+    mockGraiderUI({ checkGitHubAuth });
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "GitHub authentication: Not connected"
+      })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Check GitHub auth" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "GitHub authentication: Connected" })
+    ).toBeInTheDocument();
+    expect(checkGitHubAuth).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not render token values returned accidentally from auth check", async () => {
+    mockGraiderUI({
+      checkGitHubAuth: vi.fn().mockResolvedValue({
+        status: "connected",
+        username: null,
+        diagnostic: null,
+        diagnosticCode: null,
+        token: "ghp_secret_token"
+      })
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "GitHub authentication: Connected" })
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("ghp_secret_token");
+  });
+
+  it("keeps local dashboard loading available when GitHub auth is not connected", async () => {
+    mockGraiderUI({
+      checkGitHubAuth: vi.fn().mockResolvedValue({
+        status: "not_connected",
+        username: null,
+        diagnostic: null,
+        diagnosticCode: null
+      }),
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()]))
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "GitHub authentication: Not connected"
+      })
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" })
+    ).toBeInTheDocument();
+  });
+
+  it("renders check failed state when auth check rejects", async () => {
+    mockGraiderUI({
+      checkGitHubAuth: vi.fn().mockRejectedValue(new Error("boom"))
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "GitHub authentication: Check failed" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/GitHub authentication check failed/u)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("boom");
+  });
+
   it("renders the empty course state", async () => {
+    const refreshDashboard = vi.fn().mockResolvedValue(createCombinedDashboardResult([]));
+
+    mockGraiderUI({ refreshDashboard });
     render(<DashboardPage />);
 
     expect(screen.getByText("Graider")).toBeInTheDocument();
@@ -560,6 +765,7 @@ describe("DashboardPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Open a Graider course folder to get started.")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Open course folder" })).toHaveLength(2);
+    expect(refreshDashboard).not.toHaveBeenCalled();
   });
 
   it("renders accessible toolbar controls", async () => {
@@ -584,6 +790,194 @@ describe("DashboardPage", () => {
     expect(screen.getAllByText(COURSE_FOLDER.path).length).toBeGreaterThan(0);
     expect(screen.getAllByText(SECOND_COURSE_FOLDER.path).length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { level: 2, name: "No courses added yet." })).toBeNull();
+  });
+
+  it("auto-runs dashboard refresh for one cached folder on startup", async () => {
+    const refreshDashboard = vi
+      .fn()
+      .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()]));
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard
+    });
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" })
+    ).toBeInTheDocument();
+    expect(refreshDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-loads multiple cached folders without manual refresh", async () => {
+    const firstResult = createDashboardResult({}, [COURSE_TERM_CARD]);
+    const secondResult = createDashboardResult(
+      {
+        courseFolderId: SECOND_COURSE_FOLDER.id,
+        courseFolderPath: SECOND_COURSE_FOLDER.path
+      },
+      [SECOND_COURSE_TERM_CARD]
+    );
+    const refreshDashboard = vi
+      .fn()
+      .mockResolvedValue(createCombinedDashboardResult([firstResult, secondResult]));
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER, SECOND_COURSE_FOLDER]),
+      refreshDashboard
+    });
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "27s1-csc4641" })).toBeInTheDocument();
+    expect(refreshDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show the no-card state while startup refresh is still running", async () => {
+    const deferredRefresh = createDeferred<CombinedDashboardResult>();
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi.fn(async () => await deferredRefresh.promise)
+    });
+    render(<DashboardPage />);
+
+    expect(await screen.findByText("Loading dashboard...")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "No course-term cards found." })).toBe(
+      null
+    );
+    expect(screen.queryByRole("heading", { level: 2, name: "Refresh to load course cards." })).toBe(
+      null
+    );
+
+    deferredRefresh.resolve(createCombinedDashboardResult([createDashboardResult({}, [])]));
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "No course-term cards found." })
+    ).toBeInTheDocument();
+  });
+
+  it("manual Refresh still works after startup auto-refresh", async () => {
+    const refreshDashboard = vi
+      .fn()
+      .mockResolvedValueOnce(createCombinedDashboardResult([createDashboardResult()]))
+      .mockResolvedValueOnce(
+        createCombinedDashboardResult([
+          createDashboardResult({}, [{ ...COURSE_TERM_CARD, displayName: "27s1-csc1120-updated" }])
+        ])
+      );
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard
+    });
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-csc1120-updated" })
+    ).toBeInTheDocument();
+    expect(refreshDashboard).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not start duplicate dashboard refreshes during startup refresh", async () => {
+    const deferredRefresh = createDeferred<CombinedDashboardResult>();
+    const refreshDashboard = vi.fn(async () => await deferredRefresh.promise);
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard
+    });
+    render(<DashboardPage />);
+
+    const refreshButton = await screen.findByRole("button", { name: "Refreshing..." });
+
+    expect(refreshButton).toBeDisabled();
+    fireEvent.click(refreshButton);
+    expect(refreshDashboard).toHaveBeenCalledTimes(1);
+
+    deferredRefresh.resolve(createCombinedDashboardResult([createDashboardResult()]));
+
+    expect(await screen.findByText("1 card loaded")).toBeInTheDocument();
+    expect(refreshDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders safe startup diagnostics for a failed cached folder", async () => {
+    const failureResult = createDashboardResult({
+      status: "failure",
+      dashboard: null,
+      error: {
+        code: "dashboard_command_failed",
+        message: "Authorization: Bearer secret-token-value",
+        exitCode: 1,
+        stdoutSnippet: null,
+        stderrSnippet: null,
+        commandName: "dashboard",
+        cwd: COURSE_FOLDER.path,
+        argv: ["graider", "dashboard", "--json"],
+        runnerMode: "bundled",
+        executablePath: "/Applications/Graider.app/Contents/MacOS/Graider",
+        helperPath:
+          "/Applications/Graider.app/Contents/Resources/app.asar.unpacked/dist-graider-cli/index.js",
+        signal: null
+      },
+      refreshedAt: null
+    });
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi.fn().mockResolvedValue(createCombinedDashboardResult([failureResult]))
+    });
+    render(<DashboardPage />);
+
+    expect(await screen.findByText(`Could not load ${COURSE_FOLDER.path}`)).toBeInTheDocument();
+    expect(screen.getByText("dashboard_command_failed")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/Dashboard command failed while reading this course folder/u).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/secret-token-value/u)).toBeNull();
+  });
+
+  it("renders successful startup cards even when another cached folder fails", async () => {
+    const failureResult: CourseFolderDashboardResult = {
+      courseFolderId: SECOND_COURSE_FOLDER.id,
+      courseFolderPath: SECOND_COURSE_FOLDER.path,
+      status: "failure",
+      dashboard: null,
+      error: {
+        code: "graider_cli_not_found",
+        message: "missing secret-token-value",
+        exitCode: null,
+        stdoutSnippet: null,
+        stderrSnippet: null
+      },
+      refreshedAt: null
+    };
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER, SECOND_COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(
+          createCombinedDashboardResult([
+            createDashboardResult({}, [COURSE_TERM_CARD]),
+            failureResult
+          ])
+        )
+    });
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(`Could not load ${SECOND_COURSE_FOLDER.path}`)).toBeInTheDocument();
+    expect(screen.queryByText(/secret-token-value/u)).toBeNull();
   });
 
   it("shows refresh controls for registered folders", async () => {
@@ -628,6 +1022,34 @@ describe("DashboardPage", () => {
 
     expect(await screen.findByText(COURSE_FOLDER.path)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 2, name: "No courses added yet." })).toBeNull();
+  });
+
+  it("shows validation errors from folder selection without registering a folder", async () => {
+    const folderPath = "/Users/sean/Box Sync/WebstormProjects/graider-sandbox/not-a-course";
+
+    mockGraiderUI({
+      selectCourseFolder: vi.fn().mockResolvedValue({
+        canceled: false,
+        courseFolder: null,
+        error: {
+          code: "course_folder_missing_course_yml",
+          message: "Selected course folder must contain course.yml at its root.",
+          folderPath
+        }
+      })
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await getFirstOpenCourseFolderButton());
+
+    expect(
+      await screen.findByText(
+        `Selected course folder must contain course.yml at its root. Course folder: ${folderPath}`
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "No courses added yet." })
+    ).toBeInTheDocument();
   });
 
   it("clicking Remove from dashboard removes the folder from the UI", async () => {
@@ -1314,7 +1736,7 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("heading", { level: 2, name: "27s1-csc1120" })).toBeInTheDocument();
   });
 
-  it("renders assignment detail panels and disabled future actions", async () => {
+  it("renders assignment detail panels, compact grade status summary, and workflow actions", async () => {
     mockGraiderUI({
       listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
       refreshDashboard: vi
@@ -1328,17 +1750,29 @@ describe("DashboardPage", () => {
       await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
     );
 
-    expect(await screen.findByText("100")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 2, name: "Summary" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Template" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Grading" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Roster / Sections" })
+    ).toBeInTheDocument();
+    const gradeSummary = screen.getByLabelText("Grade status summary");
+    expect(within(gradeSummary).getByText("s001")).toBeInTheDocument();
+    expect(within(gradeSummary).getByText("Completed — success")).toBeInTheDocument();
+    expect(within(gradeSummary).queryByRole("columnheader", { name: "Workflow" })).toBeNull();
+    expect(screen.getByText("100")).toBeInTheDocument();
     expect(screen.getByText("2027-06-15T23:59:00+09:00")).toBeInTheDocument();
-    expect(screen.getByText("graider-sandbox/csc1120L2Template")).toBeInTheDocument();
-    expect(screen.getByText(".github/workflows/grade.yml")).toBeInTheDocument();
+    expect(screen.getAllByText("graider-sandbox/csc1120L2Template").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(".github/workflows/grade.yml").length).toBeGreaterThan(0);
     expect(screen.getByText("workflow_dispatch status")).toBeInTheDocument();
-    expect(screen.getByText("disabled")).toBeInTheDocument();
     expect(screen.getAllByText("3").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("No diagnostics.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
     expect(getFirstPreviewApplyButton()).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Grade submissions" })).toBeEnabled();
-    expect(screen.getAllByText("Coming in a future slice").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Preview grading" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "View grading status" })).toBeEnabled();
+    expect(
+      within(gradeSummary).getByRole("button", { name: "View full grade status" })
+    ).toBeEnabled();
   });
 
   it("opens apply preview from assignment detail and returns to assignment detail", async () => {
@@ -1556,8 +1990,10 @@ describe("DashboardPage", () => {
       await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
     );
 
-    expect(await screen.findByText("No grading configured.")).toBeInTheDocument();
-    expect(screen.queryByText("No grading configured.")).toBeInTheDocument();
+    expect(await screen.findByText("No grading")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Grade status summary" })
+    ).toBeInTheDocument();
   });
 
   it("renders partial assignment detail diagnostics and token guidance safely", async () => {

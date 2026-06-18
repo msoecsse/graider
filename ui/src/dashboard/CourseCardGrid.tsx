@@ -21,7 +21,7 @@ export const CourseCardGrid = ({
   return (
     <section className="course-card-section" aria-labelledby="course-cards-title">
       <div className="course-card-section__header">
-        <h2 id="course-cards-title">Course-term cards</h2>
+        <h2 id="course-cards-title">Courses</h2>
         <p>{cards.length === 1 ? "1 course-term loaded" : `${cards.length} course-terms loaded`}</p>
       </div>
       <div className="course-card-grid">

@@ -12,6 +12,7 @@ import {
   mergeGradeStatusRows,
   normalizeGradeStatus
 } from "./gradeStatusNormalization";
+import { getGradeStatusRunUrl } from "./gradeStatusRunUrl";
 import type {
   GradeStatusLoadResult,
   GradeStatusPageProps,
@@ -32,6 +33,14 @@ const getCommandErrorMessage = (result: GradeStatusLoadResult | null): string | 
 
   if (errorCode === "graider_cli_not_found") {
     return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
+  }
+
+  if (errorCode === "github_cli_not_found") {
+    return "GitHub CLI was not found. Install GitHub CLI or set GRAIDER_GITHUB_TOKEN before launching Graider.";
+  }
+
+  if (errorCode === "github_cli_auth_failed" || errorCode === "github_token_unavailable") {
+    return "GitHub authentication is required. Run gh auth login in Terminal, then refresh.";
   }
 
   if (errorCode === "bundled_graider_cli_not_found") {
@@ -68,18 +77,8 @@ const getCourseTermSubtitle = (status: NormalizedGradeStatus | null): string => 
 
 const formatSeconds = (milliseconds: number): number => milliseconds / MILLISECONDS_PER_SECOND;
 
-const isSafeHttpUrl = (value: string): boolean => {
-  try {
-    const url = new URL(value);
-
-    return url.protocol === "https:" || url.protocol === "http:";
-  } catch {
-    return false;
-  }
-};
-
 const getStudentLabel = (row: GradeStatusRepositoryRow): string =>
-  row.githubUsername ?? row.studentId ?? "Unknown student";
+  row.studentUsername ?? row.studentId ?? row.githubUsername ?? "Unknown student";
 
 const formatGradeStatusRowLabel = (row: GradeStatusRepositoryRow): string => {
   if (row.status === "queued") {
@@ -252,46 +251,50 @@ const RepositoryRowsPanel = ({
           <span role="columnheader">Workflow</span>
           <span role="columnheader">Run</span>
         </div>
-        {rows.map((row) => (
-          <div
-            className="apply-preview-table__row"
-            role="row"
-            key={`${row.studentId ?? row.githubUsername ?? row.repository ?? "row"}-${row.section ?? "section"}`}
-          >
-            <span role="cell">{getStudentLabel(row)}</span>
-            <span role="cell">{formatNullableValue(row.section)}</span>
-            <span role="cell" className="apply-preview-table__repository">
-              {formatNullableValue(row.repository)}
-            </span>
-            <span role="cell">
-              <span
-                className={
-                  row.needsAttention ? "status-chip status-chip--attention" : "status-chip"
-                }
-              >
-                {formatGradeStatusRowLabel(row)}
+        {rows.map((row) => {
+          const runUrl = getGradeStatusRunUrl(row);
+
+          return (
+            <div
+              className="apply-preview-table__row"
+              role="row"
+              key={`${row.studentId ?? row.githubUsername ?? row.repository ?? "row"}-${row.section ?? "section"}`}
+            >
+              <span role="cell">{getStudentLabel(row)}</span>
+              <span role="cell">{formatNullableValue(row.section)}</span>
+              <span role="cell" className="apply-preview-table__repository">
+                {formatNullableValue(row.repository)}
               </span>
-            </span>
-            <span role="cell">
-              {formatNullableValue(row.workflow)}
-              {row.ref === null ? null : <span className="muted-inline"> @ {row.ref}</span>}
-            </span>
-            <span role="cell">
-              {row.runUrl !== null && isSafeHttpUrl(row.runUrl) ? (
-                <a href={row.runUrl} target="_blank" rel="noreferrer">
-                  Run {formatNullableValue(row.runId)}
-                </a>
-              ) : (
-                <span>Run {formatNullableValue(row.runId)}</span>
-              )}
-              <span className="muted-inline"> Started {formatNullableValue(row.startedAt)}</span>
-              <span className="muted-inline">
-                {" "}
-                Completed {formatNullableValue(row.completedAt)}
+              <span role="cell">
+                <span
+                  className={
+                    row.needsAttention ? "status-chip status-chip--attention" : "status-chip"
+                  }
+                >
+                  {formatGradeStatusRowLabel(row)}
+                </span>
               </span>
-            </span>
-          </div>
-        ))}
+              <span role="cell">
+                {formatNullableValue(row.workflow)}
+                {row.ref === null ? null : <span className="muted-inline"> @ {row.ref}</span>}
+              </span>
+              <span role="cell">
+                {runUrl === null ? (
+                  <span>Run {formatNullableValue(row.runId)}</span>
+                ) : (
+                  <a href={runUrl} target="_blank" rel="noreferrer">
+                    Run {formatNullableValue(row.runId)}
+                  </a>
+                )}
+                <span className="muted-inline"> Started {formatNullableValue(row.startedAt)}</span>
+                <span className="muted-inline">
+                  {" "}
+                  Completed {formatNullableValue(row.completedAt)}
+                </span>
+              </span>
+            </div>
+          );
+        })}
       </div>
     )}
   </section>

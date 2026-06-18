@@ -35,9 +35,9 @@ Deferred in the UI:
 - The packaged Graider app includes the Graider CLI. Faculty do not need to
   install or link the CLI separately for packaged app use.
 - If your team runs the UI from source, follow the developer startup guide.
-- GitHub-backed checks and actions need a GitHub token.
-- The UI checks `GRAIDER_GITHUB_TOKEN` first, then falls back to `gh auth token`
-  when GitHub CLI authentication is available.
+- GitHub-backed checks and actions need GitHub authentication.
+- Run `gh auth login` once in Terminal. Graider checks GitHub authentication on
+  startup and does not store GitHub tokens.
 - Do not put tokens in YAML, roster files, reports, manifests, or screenshots.
 - A valid course repository/folder must exist on disk.
 
@@ -283,16 +283,24 @@ grade preview, grade status, and report-related pages.
 
 Register the course-admin folder that contains `course.yml`. This is read-only.
 If the folder is invalid, the UI shows diagnostics instead of changing files.
+Graider remembers registered course folders on this computer. When you relaunch
+the app, registered folders load automatically and the dashboard refreshes
+without pressing Refresh.
 
 Check before continuing:
 
 - `course.yml` exists at the folder root.
 - The folder contains the expected `terms/` structure.
-- GitHub authentication is available if dashboard GitHub checks are needed.
+- The dashboard shows `GitHub authentication: Connected` before you run
+  GitHub-backed checks or grading actions.
 
 ### Review The Dashboard
 
 The dashboard summarizes terms and assignments. It is read-only.
+Use Refresh when you want to manually reload registered folders after changing
+configuration, fixing GitHub authentication, or restoring a missing folder.
+Invalid or missing registered folders remain visible with diagnostics and do not
+stop other registered folders from loading.
 
 Look for:
 
@@ -303,8 +311,9 @@ Look for:
 
 ### Open An Assignment
 
-Assignment Detail is read-only. It shows the selected assignment, target
-sections, roster counts, template, grading settings, reports, and diagnostics.
+Assignment Detail is read-only. It shows the selected assignment header,
+readiness callouts, setup fields, roster/section counts, workflow actions, and a
+compact Grade Status Summary before the diagnostics area.
 
 Check before continuing:
 
@@ -312,6 +321,21 @@ Check before continuing:
 - the template repository and branch are correct
 - grading is enabled or disabled as intended
 - diagnostics are resolved or understood
+
+Use the Grade Status Summary to quickly check student grading state without
+opening the full status page. It shows student username or stable student id,
+section, repository short name, concise status, a readable last update, and
+available run links. It does not show the workflow column, raw ISO timestamps,
+or full run diagnostics.
+
+Student names in the summary prefer the roster/course username when available.
+If Graider only has a stable student id, it shows that. If only a GitHub login
+is available, it uses the GitHub login as a fallback.
+
+Use `View full grade status` for the detailed polling table, workflow/run
+details, and Faculty Report entry point. Detailed setup fields and full
+diagnostics remain lower on the page. Critical blockers still appear in the
+readiness summary.
 
 ### Preview Assignment Apply
 
@@ -398,19 +422,23 @@ available rows and diagnostics.
 
 ## Troubleshooting
 
-| Issue                               | Practical checks                                                                                      |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Dashboard is empty                  | Confirm the selected folder contains `course.yml` and term/assignment files.                          |
-| Course folder is invalid            | Check YAML syntax and required fields in `course.yml`, `term.yml`, and assignments.                   |
-| Assignment does not appear          | Confirm `assignment.slug` matches its folder and the assignment is under `terms/<term>/assignments/`. |
-| GitHub token missing                | Set `GRAIDER_GITHUB_TOKEN` or sign in with `gh auth login`, then refresh.                             |
-| Student repository missing          | Run Apply Preview and Confirm Apply if setup has not been applied.                                    |
-| Grading workflow missing            | Check `grading.workflow` and ensure the template/student repository has that workflow.                |
-| Workflow dispatch unavailable       | Confirm the workflow includes `workflow_dispatch`.                                                    |
-| Grade status stays queued/running   | Refresh later, then inspect the linked GitHub Actions run if it remains stuck.                        |
-| Faculty report says results missing | Return to Grade Status and confirm runs are completed; check artifact/result file names.              |
-| Roster errors                       | Ensure roster CSV has `student_id`, `github_username`, `section`, and `status`.                       |
-| Repository names look wrong         | Check `github.repo_name_pattern` and roster `github_username` values.                                 |
+| Issue                                   | Practical checks                                                                                                                                                                                               |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard is empty                      | Confirm the selected folder contains `course.yml` and term/assignment files.                                                                                                                                   |
+| Course folder opens but dashboard fails | Select the course root containing `course.yml`; paths with spaces are supported. Use Refresh after fixing GitHub auth/config issues. If failure persists, enable `GRAIDER_UI_DEBUG=1` and capture diagnostics. |
+| Remembered folder fails after relaunch  | Confirm the folder still exists at the shown path. Restore the folder or remove and re-open it; other registered folders should still load.                                                                    |
+| Course folder is invalid                | Check YAML syntax and required fields in `course.yml`, `term.yml`, and assignments.                                                                                                                            |
+| Assignment does not appear              | Confirm `assignment.slug` matches its folder and the assignment is under `terms/<term>/assignments/`.                                                                                                          |
+| GitHub authentication not connected     | Run `gh auth login` once in Terminal, then click Check GitHub auth in Graider.                                                                                                                                 |
+| GitHub CLI missing                      | Install GitHub CLI, then run `gh auth login`.                                                                                                                                                                  |
+| Private GitHub link opens as 404        | Sign into GitHub in your browser with the same account used for `gh auth login`.                                                                                                                               |
+| Student repository missing              | Run Apply Preview and Confirm Apply if setup has not been applied.                                                                                                                                             |
+| Grading workflow missing                | Check `grading.workflow` and ensure the template/student repository has that workflow.                                                                                                                         |
+| Workflow dispatch unavailable           | Confirm the workflow includes `workflow_dispatch`.                                                                                                                                                             |
+| Grade status stays queued/running       | Refresh later, then inspect the linked GitHub Actions run if it remains stuck.                                                                                                                                 |
+| Faculty report says results missing     | Return to Grade Status and confirm runs are completed; check artifact/result file names.                                                                                                                       |
+| Roster errors                           | Ensure roster CSV has `student_id`, `github_username`, `section`, and `status`.                                                                                                                                |
+| Repository names look wrong             | Check `github.repo_name_pattern` and roster `github_username` values.                                                                                                                                          |
 
 ## Glossary
 

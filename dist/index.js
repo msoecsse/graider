@@ -3196,6 +3196,8 @@ var TOKEN_REQUIRED_REASON2 = "token_required";
 var LATEST_WORKFLOW_RUN_SELECTION = "latest_configured_workflow_run";
 var NO_RUN_SELECTION = "no_configured_workflow_run";
 var ACTIVE_ASSIGNMENT_STATUSES2 = ["active", "closed"];
+var GITHUB_HOST = "github.com";
+var ACTIONS_RUN_PATH_SEGMENT_COUNT = 5;
 var resolveExitCode3 = (status) => {
   if (status === "success") {
     return SUCCESS_EXIT_CODE3;
@@ -3370,7 +3372,18 @@ var normalizeConclusion = (conclusion) => {
 var getRunTimestamp = (run) => run.startedAt ?? run.createdAt;
 var sortRunsNewestFirst = (runs) => [...runs].sort((left, right) => getRunTimestamp(right).localeCompare(getRunTimestamp(left)));
 var selectLatestWorkflowRun = (runs) => sortRunsNewestFirst(runs)[0] ?? null;
-var createRunUrl = (repository, run) => run.runUrl ?? `https://github.com/${repository.repository.fullName}/actions/runs/${String(run.id)}`;
+var createFallbackRunUrl = (repository, run) => `https://${GITHUB_HOST}/${repository.repository.fullName}/actions/runs/${String(run.id)}`;
+var isMatchingRunUrl = (urlValue, repository, runId) => {
+  try {
+    const url = new URL(urlValue);
+    const pathParts = url.pathname.split("/").filter((part) => part.length > 0);
+    const [owner, repo, actions, runs, pathRunId] = pathParts;
+    return url.protocol === "https:" && url.hostname === GITHUB_HOST && url.search.length === 0 && url.hash.length === 0 && pathParts.length === ACTIONS_RUN_PATH_SEGMENT_COUNT && owner === repository.repository.owner && repo === repository.repository.name && actions === "actions" && runs === "runs" && pathRunId === String(runId);
+  } catch {
+    return false;
+  }
+};
+var createRunUrl = (repository, run) => run.runUrl !== void 0 && isMatchingRunUrl(run.runUrl, repository, run.id) ? run.runUrl : createFallbackRunUrl(repository, run);
 var createRow3 = (student, repository, status, reason, workflow, ref, diagnostics = [], run = null, repositoryRecord = null) => {
   const conclusion = run === null ? "unknown" : normalizeConclusion(run.conclusion);
   const failedConclusion = conclusion === "failure" || conclusion === "cancelled" || conclusion === "timed_out";
@@ -11111,7 +11124,7 @@ var buildProgram = () => {
   registerRemoveAccessCommand(program);
   return program;
 };
-await buildProgram().parseAsync();
+await buildProgram().parseAsync(process.argv);
 export {
   buildProgram
 };

@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { copyTextToClipboard } from "./assignmentDetailClipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
+import { normalizeGradeStatus } from "../grade-status/gradeStatusNormalization";
+import { getGradeStatusRunUrl } from "../grade-status/gradeStatusRunUrl";
+import type {
+  GradeStatusLoadResult,
+  GradeStatusRepositoryRow,
+  NormalizedGradeStatus
+} from "../grade-status/gradeStatusTypes";
 import {
   collectNeedsAttentionItems,
   deriveAssignmentReadiness,
@@ -70,6 +77,14 @@ const getCommandErrorMessage = (result: AssignmentDetailLoadResult | null): stri
     return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
   }
 
+  if (errorCode === "github_cli_not_found") {
+    return "GitHub CLI was not found. Install GitHub CLI or set GRAIDER_GITHUB_TOKEN before launching Graider.";
+  }
+
+  if (errorCode === "github_cli_auth_failed" || errorCode === "github_token_unavailable") {
+    return "GitHub authentication is required. Run gh auth login in Terminal, then refresh.";
+  }
+
   if (errorCode === "bundled_graider_cli_not_found") {
     return "Bundled Graider CLI could not be started. Rebuild or reinstall the Graider app.";
   }
@@ -83,6 +98,40 @@ const getCommandErrorMessage = (result: AssignmentDetailLoadResult | null): stri
   }
 
   return "Unable to load assignment detail.";
+};
+
+const getGradeStatusCommandErrorMessage = (result: GradeStatusLoadResult | null): string | null => {
+  const errorCode = result?.error?.code;
+
+  if (errorCode === undefined) {
+    return null;
+  }
+
+  if (errorCode === "graider_cli_not_found") {
+    return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
+  }
+
+  if (errorCode === "github_cli_not_found") {
+    return "GitHub CLI was not found. Install GitHub CLI or set GRAIDER_GITHUB_TOKEN before launching Graider.";
+  }
+
+  if (errorCode === "github_cli_auth_failed" || errorCode === "github_token_unavailable") {
+    return "GitHub authentication is required to check grade status. Run gh auth login, then refresh.";
+  }
+
+  if (errorCode === "bundled_graider_cli_not_found") {
+    return "Bundled Graider CLI could not be started. Rebuild or reinstall the Graider app.";
+  }
+
+  if (errorCode === "invalid_assignment_grade_status_json") {
+    return "Graider returned invalid grade status JSON.";
+  }
+
+  if (errorCode === "assignment_file_not_found") {
+    return "Assignment file not found.";
+  }
+
+  return "Unable to load grade status summary.";
 };
 
 const getAssignmentTitle = (
@@ -464,6 +513,249 @@ const DiagnosticsPanel = ({
   </section>
 );
 
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit"
+});
+
+const getGradeStatusStudentLabel = (row: GradeStatusRepositoryRow): string =>
+  // Prefer roster/course identity when present. Current grade-status JSON always
+  // exposes studentId, with GitHub login available as a fallback.
+  row.studentUsername ?? row.studentId ?? row.githubUsername ?? "Unknown student";
+
+const getRepositoryShortName = (repository: string | null): string =>
+  repository?.split("/").at(-1) ?? "Not configured";
+
+const formatGradeStatusSummaryLabel = (row: GradeStatusRepositoryRow): string => {
+  if (row.status === "queued") {
+    return "Queued";
+  }
+
+  if (row.status === "in_progress") {
+    return "In progress";
+  }
+
+  if (row.status === "completed") {
+    if (row.conclusion === "success") {
+      return "Completed — success";
+    }
+
+    if (row.conclusion === "failure") {
+      return "Completed — failure";
+    }
+
+    if (row.conclusion === "cancelled") {
+      return "Cancelled";
+    }
+
+    if (row.conclusion === "timed_out") {
+      return "Timed out";
+    }
+
+    return "Completed — unknown";
+  }
+
+  if (row.status === "missing") {
+    return "Missing";
+  }
+
+  if (row.status === "token_required") {
+    return "Token required";
+  }
+
+  return row.status === "blocked" ? "Blocked" : "Unknown";
+};
+
+const formatReadableDateTime = (timestamp: string | null): string | null => {
+  if (timestamp === null) {
+    return null;
+  }
+
+  const date = new Date(timestamp);
+
+  return Number.isNaN(date.getTime()) ? null : DATE_TIME_FORMATTER.format(date);
+};
+
+const formatGradeStatusLastUpdate = (row: GradeStatusRepositoryRow): string => {
+  const completedAt = formatReadableDateTime(row.completedAt);
+
+  if (completedAt !== null) {
+    return `Last completed ${completedAt}`;
+  }
+
+  const startedAt = formatReadableDateTime(row.startedAt);
+
+  if (startedAt !== null) {
+    return `Started ${startedAt}`;
+  }
+
+  return "No run time available";
+};
+
+const getGradeStatusSummaryText = (status: NormalizedGradeStatus): string => {
+  const activeRuns = status.summary.queued + status.summary.inProgress;
+  const parts = [
+    status.summary.needsAttention > 0
+      ? `${status.summary.needsAttention} grading runs need attention.`
+      : null,
+    activeRuns > 0 ? `${activeRuns} runs still in progress.` : null,
+    status.summary.missing > 0
+      ? `${status.summary.missing} repositories are missing completed grading runs.`
+      : null,
+    status.summary.unknown > 0 ? `${status.summary.unknown} repositories are unknown.` : null,
+    status.summary.blocked > 0 ? `${status.summary.blocked} repositories are blocked.` : null
+  ].filter((part): part is string => part !== null);
+
+  if (parts.length > 0) {
+    return parts.join(" ");
+  }
+
+  if (status.repositories.length === 0) {
+    return "No repository status rows were returned.";
+  }
+
+  return "No grading runs need attention.";
+};
+
+const GradeStatusSummaryPanel = ({
+  status,
+  isLoading,
+  errorMessage,
+  onViewFullGradeStatus
+}: {
+  readonly status: NormalizedGradeStatus | null;
+  readonly isLoading: boolean;
+  readonly errorMessage: string | null;
+  readonly onViewFullGradeStatus: () => void;
+}): ReactElement => (
+  <section
+    className="detail-panel grade-status-summary-panel"
+    aria-labelledby="assignment-grade-status-summary-title"
+  >
+    <div className="grade-status-summary-panel__header">
+      <div>
+        <h2 id="assignment-grade-status-summary-title">Grade status summary</h2>
+        <p className="detail-panel__note">
+          {status === null
+            ? "Graider checks grading workflow run status without starting workflows."
+            : getGradeStatusSummaryText(status)}
+        </p>
+      </div>
+      <button className="secondary-action" type="button" onClick={onViewFullGradeStatus}>
+        View full grade status
+      </button>
+    </div>
+
+    {isLoading ? <p className="loading-state">Loading grade status summary...</p> : null}
+    {errorMessage === null ? null : (
+      <p className="error-message" role="alert">
+        {errorMessage}
+      </p>
+    )}
+
+    {status === null ? (
+      <p className="detail-panel__note">Grade status data is not available yet.</p>
+    ) : status.repositories.length === 0 ? (
+      <p className="detail-panel__note">No student grading rows were returned.</p>
+    ) : (
+      <div className="grade-status-summary-table-wrap">
+        <table className="grade-status-summary-table">
+          <thead>
+            <tr>
+              <th scope="col">Student</th>
+              <th scope="col">Section</th>
+              <th scope="col">Repository</th>
+              <th scope="col">Status</th>
+              <th scope="col">Last update</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {status.repositories.map((row) => {
+              const runUrl = getGradeStatusRunUrl(row);
+
+              return (
+                <tr
+                  key={`${row.studentId ?? row.githubUsername ?? row.repository ?? "row"}-${row.section ?? "section"}`}
+                >
+                  <td>{getGradeStatusStudentLabel(row)}</td>
+                  <td>{formatNullableValue(row.section)}</td>
+                  <td>{getRepositoryShortName(row.repository)}</td>
+                  <td>
+                    <span
+                      className={
+                        row.needsAttention ? "status-chip status-chip--attention" : "status-chip"
+                      }
+                    >
+                      {formatGradeStatusSummaryLabel(row)}
+                    </span>
+                  </td>
+                  <td>{formatGradeStatusLastUpdate(row)}</td>
+                  <td>
+                    {runUrl === null ? (
+                      <span className="detail-panel__note">No run link</span>
+                    ) : (
+                      <a href={runUrl} target="_blank" rel="noreferrer">
+                        Open run
+                      </a>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    {status === null || status.diagnostics.length === 0 ? null : (
+      <details className="grade-status-summary-diagnostics">
+        <summary>Grade status diagnostics ({status.diagnostics.length})</summary>
+        <ul className="assignment-detail-diagnostics">
+          {status.diagnostics.map((diagnostic, index) => (
+            <DiagnosticEntry
+              diagnostic={diagnostic}
+              key={`${diagnostic.code ?? "diagnostic"}-${index}`}
+            />
+          ))}
+        </ul>
+      </details>
+    )}
+  </section>
+);
+
+const CollapsibleDiagnosticsPanel = ({
+  diagnostics
+}: {
+  readonly diagnostics: readonly AssignmentDetailDiagnostic[];
+}): ReactElement => (
+  <details className="detail-panel assignment-detail-disclosure">
+    <summary>Diagnostics ({diagnostics.length})</summary>
+    {diagnostics.length === 0 ? (
+      <p className="detail-panel__note">No diagnostics.</p>
+    ) : (
+      <div className="diagnostic-groups">
+        {groupDiagnostics(diagnostics).map((group) => (
+          <section className="diagnostic-group" aria-label={group.label} key={group.key}>
+            <h3>{group.label}</h3>
+            <ul className="assignment-detail-diagnostics">
+              {group.diagnostics.map((diagnostic, index) => (
+                <DiagnosticEntry
+                  diagnostic={diagnostic}
+                  key={`${diagnostic.code ?? "diagnostic"}-${index}`}
+                />
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    )}
+  </details>
+);
+
 const getActionDescription = (action: AssignmentDetailAction, actionKey: ActionKey): string => {
   if (actionKey === "validate") {
     return action.available ? "Runs assignment detail again." : "Unavailable for this assignment";
@@ -557,7 +849,11 @@ export const AssignmentDetailPage = ({
   const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(
     initialLoadResult
   );
+  const [gradeStatusLoadResult, setGradeStatusLoadResult] = useState<GradeStatusLoadResult | null>(
+    null
+  );
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingGradeStatus, setIsLoadingGradeStatus] = useState(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
 
@@ -567,6 +863,18 @@ export const AssignmentDetailPage = ({
         ? null
         : normalizeAssignmentDetail(loadResult.detail, selection, loadResult.refreshedAt),
     [loadResult, selection]
+  );
+  const gradeStatus = useMemo(
+    () =>
+      gradeStatusLoadResult?.gradeStatus === null ||
+      gradeStatusLoadResult?.gradeStatus === undefined
+        ? null
+        : normalizeGradeStatus(
+            gradeStatusLoadResult.gradeStatus,
+            selection,
+            gradeStatusLoadResult.refreshedAt
+          ),
+    [gradeStatusLoadResult, selection]
   );
 
   const loadDetail = async (): Promise<void> => {
@@ -605,6 +913,38 @@ export const AssignmentDetailPage = ({
     }
   };
 
+  const loadGradeStatusSummary = async (): Promise<void> => {
+    setIsLoadingGradeStatus(true);
+
+    try {
+      setGradeStatusLoadResult(
+        await window.graiderUI.getAssignmentGradeStatus({
+          courseFolderId: selection.courseFolderId,
+          courseFolderPath: selection.courseFolderPath,
+          assignmentFile: selection.assignmentFile
+        })
+      );
+    } catch {
+      setGradeStatusLoadResult((currentResult) => ({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        assignmentFile: selection.assignmentFile,
+        status: "failure",
+        gradeStatus: currentResult?.gradeStatus ?? null,
+        error: {
+          code: "assignment_grade_status_failed",
+          message: "Unable to load grade status summary.",
+          exitCode: null,
+          stdoutSnippet: null,
+          stderrSnippet: null
+        },
+        refreshedAt: currentResult?.refreshedAt ?? null
+      }));
+    } finally {
+      setIsLoadingGradeStatus(false);
+    }
+  };
+
   const hasInitialResultForSelection =
     initialLoadResult?.courseFolderId === selection.courseFolderId &&
     initialLoadResult.assignmentFile === selection.assignmentFile;
@@ -617,6 +957,11 @@ export const AssignmentDetailPage = ({
       void loadDetail();
     }
   }, [selection.assignmentFile, selection.courseFolderId]);
+
+  useEffect(() => {
+    setGradeStatusLoadResult(null);
+    void loadGradeStatusSummary();
+  }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   const handleCopy = (copyKey: CopyKey, value: string): void => {
     if (copyFeedbackTimeoutRef.current !== null) {
@@ -646,6 +991,7 @@ export const AssignmentDetailPage = ({
 
   const title = getAssignmentTitle(detail, selection.assignmentTitle, selection.assignmentSlug);
   const commandErrorMessage = getCommandErrorMessage(loadResult);
+  const gradeStatusCommandErrorMessage = getGradeStatusCommandErrorMessage(gradeStatusLoadResult);
   const showTokenGuidance = detail !== null && hasTokenRequiredReadiness(detail);
   const needsAttentionItems = detail === null ? [] : collectNeedsAttentionItems(detail);
 
@@ -754,6 +1100,14 @@ export const AssignmentDetailPage = ({
               <GradingPanel detail={detail} copyState={copyState} onCopy={handleCopy} />
               <StudentReportsPanel detail={detail} />
               <RosterPanel detail={detail} />
+              <GradeStatusSummaryPanel
+                status={gradeStatus}
+                isLoading={isLoadingGradeStatus}
+                errorMessage={gradeStatusCommandErrorMessage}
+                onViewFullGradeStatus={() => {
+                  onViewGradeStatus(selection, detail, loadResult);
+                }}
+              />
               <DiagnosticsPanel diagnostics={detail.diagnostics} />
               <ActionsPanel
                 detail={detail}

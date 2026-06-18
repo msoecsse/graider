@@ -169,6 +169,14 @@ const getSafeFolderErrorMessage = (result: CourseFolderDashboardResult): string 
     return "GitHub token required. Run gh auth login, then refresh.";
   }
 
+  if (errorCode === "github_cli_not_found") {
+    return "GitHub CLI was not found. Install GitHub CLI or set GRAIDER_GITHUB_TOKEN before launching Graider.";
+  }
+
+  if (errorCode === "github_cli_auth_failed") {
+    return "GitHub CLI is installed, but no authenticated token was available. Run gh auth login, then refresh.";
+  }
+
   if (errorCode === "graider_cli_not_found") {
     return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
   }
@@ -181,7 +189,42 @@ const getSafeFolderErrorMessage = (result: CourseFolderDashboardResult): string 
     return "Graider dashboard returned invalid JSON.";
   }
 
+  if (errorCode === "dashboard_command_failed") {
+    return "Dashboard command failed while reading this course folder. The selected folder exists and contains course.yml, but the Graider CLI returned an error.";
+  }
+
   return "Could not refresh this course folder.";
+};
+
+const appendDetail = (details: string[], label: string, value: string | number | null): void => {
+  if (value !== null && String(value).trim().length > 0) {
+    details.push(`${label}: ${String(value)}`);
+  }
+};
+
+const getFolderErrorDetails = (result: CourseFolderDashboardResult): readonly string[] => {
+  if (result.error === null) {
+    return [];
+  }
+
+  const details: string[] = [];
+
+  appendDetail(details, "Command", result.error.commandName ?? null);
+  appendDetail(details, "Course folder", result.error.cwd ?? result.courseFolderPath);
+  appendDetail(details, "Exit code", result.error.exitCode);
+  appendDetail(details, "Signal", result.error.signal ?? null);
+  appendDetail(details, "Runner mode", result.error.runnerMode ?? null);
+  appendDetail(details, "Executable", result.error.executablePath ?? null);
+  appendDetail(details, "Helper", result.error.helperPath ?? null);
+  appendDetail(
+    details,
+    "Argv",
+    result.error.argv === undefined ? null : JSON.stringify(result.error.argv)
+  );
+  appendDetail(details, "stderr", result.error.stderrSnippet);
+  appendDetail(details, "stdout", result.error.stdoutSnippet);
+
+  return details;
 };
 
 const getFolderError = (result: CourseFolderDashboardResult): FolderDashboardError | null => {
@@ -197,7 +240,8 @@ const getFolderError = (result: CourseFolderDashboardResult): FolderDashboardErr
     sourceFolderId: result.courseFolderId,
     sourceFolderPath: result.courseFolderPath,
     code: result.error.code,
-    message: getSafeFolderErrorMessage(result)
+    message: getSafeFolderErrorMessage(result),
+    details: getFolderErrorDetails(result)
   };
 };
 

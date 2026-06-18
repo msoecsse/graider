@@ -7,8 +7,9 @@ import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
 import { getFacultyReport } from "./facultyReportRunner.js";
+import { checkGitHubAuth } from "./githubAuthChecker.js";
 import {
-  addCourseFolderToRegistry,
+  addValidatedCourseFolderToRegistry,
   getCourseRegistryPath,
   getSelectedFolderPath,
   listCourseFolders,
@@ -42,6 +43,12 @@ export const getAppInfo = (): AppInfo => ({
 
 const isDebugEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
   env[DEBUG_ENV_NAME]?.trim() === DEBUG_ENABLED_VALUE;
+
+const logDebugDiagnostic = (message: string): void => {
+  if (isDebugEnabled()) {
+    console.error(`[graider-ui] ${message}`);
+  }
+};
 
 const logRendererDiagnostic = (message: string): void => {
   console.error(`[graider-ui] ${message}`);
@@ -137,6 +144,15 @@ export const registerIpcHandlers = (): void => {
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
 
+  ipcMain.handle(
+    IPC_CHANNELS.checkGitHubAuth,
+    async () =>
+      await checkGitHubAuth({
+        runner: processRunner,
+        env: process.env
+      })
+  );
+
   ipcMain.handle(IPC_CHANNELS.listCourseFolders, () =>
     listCourseFolders(getCourseRegistryPath(app.getPath("userData")))
   );
@@ -163,13 +179,18 @@ export const registerIpcHandlers = (): void => {
       };
     }
 
-    return {
-      canceled: false,
-      courseFolder: addCourseFolderToRegistry(
-        getCourseRegistryPath(app.getPath("userData")),
-        selectedFolder
-      )
-    };
+    const selectionResult = addValidatedCourseFolderToRegistry(
+      getCourseRegistryPath(app.getPath("userData")),
+      selectedFolder
+    );
+
+    logDebugDiagnostic(
+      `Course folder selection: selectedPath=${selectedFolder} validation=${
+        selectionResult.courseFolder === null ? selectionResult.error?.code : "success"
+      } registeredPath=${selectionResult.courseFolder?.path ?? ""}`
+    );
+
+    return selectionResult;
   });
 
   ipcMain.handle(IPC_CHANNELS.refreshCourseFolder, async (_event, id: unknown) => {

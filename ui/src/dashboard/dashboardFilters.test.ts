@@ -104,7 +104,8 @@ describe("dashboardFilters", () => {
         sourceFolderId: "folder-error",
         sourceFolderPath: "/courses/broken",
         code: "graider_cli_not_found",
-        message: "Graider CLI not found."
+        message: "Graider CLI not found.",
+        details: []
       }
     ];
 

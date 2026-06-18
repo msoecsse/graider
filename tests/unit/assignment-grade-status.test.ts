@@ -118,6 +118,25 @@ describe("assignment grade status builder", () => {
     expect(githubClient.artifactDownloads).toEqual([]);
   });
 
+  it("uses the student repository owner/name for workflow run URLs", async () => {
+    const badRunUrl = {
+      ...run(JONES_REPOSITORY, TestNumber.JonesRunId, "completed", "success"),
+      runUrl: `https://github.com/${ORGANIZATION}/course-admin/actions/runs/${String(TestNumber.JonesRunId)}`
+    };
+    const githubClient = createClient(badRunUrl, null);
+    const result = await buildAssignmentGradeStatus({
+      cwd: FIXTURE_ROOT,
+      assignmentFile: ASSIGNMENT_FILE,
+      githubClient
+    });
+
+    expect(getRow(result, "jones")).toMatchObject({
+      repository: `${ORGANIZATION}/${JONES_REPOSITORY}`,
+      runId: TestNumber.JonesRunId,
+      runUrl: `https://github.com/${ORGANIZATION}/${JONES_REPOSITORY}/actions/runs/${String(TestNumber.JonesRunId)}`
+    });
+  });
+
   it("counts completed failure, cancellation, and timeout as needing attention", async () => {
     const failureClient = createClient(
       run(JONES_REPOSITORY, TestNumber.JonesRunId, "completed", "failure"),

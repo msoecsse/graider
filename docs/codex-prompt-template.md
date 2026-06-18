@@ -3,6 +3,9 @@
 Use these templates for future Graider Codex slices. Reference the shared
 contracts instead of repeating the same boilerplate.
 
+For small bugfixes, prefer the compact contract in
+[Codex Bugfix Contract](codex-bugfix-contract.md).
+
 ## Backend JSON Command Slice
 
 ```markdown
@@ -103,15 +106,15 @@ Acceptance:
 ```markdown
 # Graider Codex Prompt — Bugfix: <Title>
 
-Read and follow:
-
-- docs/codex-development-contract.md
-- relevant domain contract
+Read docs/codex-bugfix-contract.md.
 
 Bug:
 ...
 
 Expected:
+...
+
+Start files:
 ...
 
 Constraints:

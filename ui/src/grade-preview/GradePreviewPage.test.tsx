@@ -231,6 +231,12 @@ const createGradeResult = (
 const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   const graiderUI = {
     getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),
+    checkGitHubAuth: vi.fn().mockResolvedValue({
+      status: "connected",
+      username: null,
+      diagnostic: null,
+      diagnosticCode: null
+    }),
     selectCourseFolder: vi.fn().mockResolvedValue({ canceled: true, courseFolder: null }),
     listCourseFolders: vi.fn().mockResolvedValue([]),
     removeCourseFolder: vi.fn().mockResolvedValue(undefined),

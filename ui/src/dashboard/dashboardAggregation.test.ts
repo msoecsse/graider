@@ -74,9 +74,55 @@ describe("dashboardAggregation", () => {
         sourceFolderId: "course-folder-csc4641",
         sourceFolderPath: "/courses/csc4641",
         code: "graider_cli_not_found",
-        message: "Graider CLI not found. Install Graider or make sure graider is available on PATH."
+        message:
+          "Graider CLI not found. Install Graider or make sure graider is available on PATH.",
+        details: ["Course folder: /courses/csc4641"]
       }
     ]);
     expect(JSON.stringify(aggregated)).not.toContain("secret-token-value");
+  });
+
+  it("includes safe dashboard command failure details", () => {
+    const courseFolderPath = "/Users/sean/Box Sync/WebstormProjects/graider-sandbox/csc1120";
+    const aggregated = aggregateDashboardResults({
+      "course-folder-csc1120": {
+        courseFolderId: "course-folder-csc1120",
+        courseFolderPath,
+        status: "failure",
+        dashboard: null,
+        error: {
+          code: "dashboard_command_failed",
+          message: "failed",
+          exitCode: 1,
+          stdoutSnippet: "stdout",
+          stderrSnippet: "stderr",
+          commandName: "dashboard",
+          cwd: courseFolderPath,
+          argv: ["graider", "dashboard", "--json"],
+          runnerMode: "bundled",
+          executablePath: "/Applications/Graider.app/Contents/MacOS/Graider",
+          helperPath:
+            "/Applications/Graider.app/Contents/Resources/app.asar.unpacked/dist-graider-cli/index.js",
+          signal: null
+        },
+        refreshedAt: null
+      }
+    });
+
+    expect(aggregated.folderErrors[0]).toMatchObject({
+      message:
+        "Dashboard command failed while reading this course folder. The selected folder exists and contains course.yml, but the Graider CLI returned an error.",
+      details: [
+        "Command: dashboard",
+        `Course folder: ${courseFolderPath}`,
+        "Exit code: 1",
+        "Runner mode: bundled",
+        "Executable: /Applications/Graider.app/Contents/MacOS/Graider",
+        "Helper: /Applications/Graider.app/Contents/Resources/app.asar.unpacked/dist-graider-cli/index.js",
+        'Argv: ["graider","dashboard","--json"]',
+        "stderr: stderr",
+        "stdout: stdout"
+      ]
+    });
   });
 });

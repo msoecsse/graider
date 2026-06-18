@@ -1,4 +1,9 @@
-import { getGraiderCliStartError, type ProcessRunner } from "./commandRunner.js";
+import {
+  getGraiderCliStartError,
+  type ProcessRunRequest,
+  type ProcessRunResult,
+  type ProcessRunner
+} from "./commandRunner.js";
 import {
   loadCourseRegistry,
   saveCourseRegistry,
@@ -18,6 +23,8 @@ export const MAX_COMMAND_OUTPUT_SNIPPET_LENGTH = 4000;
 const GRAIDER_COMMAND = "graider";
 const DASHBOARD_ARGS = ["dashboard", "--json"] as const;
 const SUCCESS_EXIT_CODE = 0;
+const DEBUG_ENV_NAME = "GRAIDER_UI_DEBUG";
+const DEBUG_ENABLED_VALUE = "1";
 
 interface DashboardRunnerOptions {
   readonly runner: ProcessRunner;
@@ -61,8 +68,18 @@ const redactToken = (value: string, token: string): string => {
   return value.replaceAll(token, "[redacted]");
 };
 
+const redactTokenLikeValues = (value: string): string =>
+  value
+    .replace(/authorization:\s*bearer\s+[^\s]+/giu, "Authorization: Bearer [redacted]")
+    .replace(/GRAIDER_GITHUB_TOKEN\s*[:=]\s*[^\s]+/gu, "GRAIDER_GITHUB_TOKEN=[redacted]")
+    .replace(/github_pat_[A-Za-z0-9_]+/gu, "[redacted]")
+    .replace(/gh[pousr]_[A-Za-z0-9_]+/gu, "[redacted]");
+
+const sanitizeOutput = (value: string, token: string): string =>
+  redactTokenLikeValues(redactToken(value, token));
+
 const createOutputSnippet = (value: string, token: string): string | null => {
-  const redactedValue = redactToken(value, token);
+  const redactedValue = sanitizeOutput(value, token);
 
   if (redactedValue.length === 0) {
     return null;
@@ -77,14 +94,52 @@ const createCommandError = (
   exitCode: number | null,
   stdout: string,
   stderr: string,
-  token: string
+  token: string,
+  request: ProcessRunRequest,
+  result: ProcessRunResult
 ): DashboardCommandError => ({
   code,
   message,
   exitCode,
   stdoutSnippet: createOutputSnippet(stdout, token),
-  stderrSnippet: createOutputSnippet(stderr, token)
+  stderrSnippet: createOutputSnippet(stderr, token),
+  commandName: "dashboard",
+  cwd: result.diagnostic?.cwd ?? request.cwd,
+  argv: [request.command, ...request.args],
+  runnerMode: result.diagnostic?.runnerMode,
+  executablePath: result.diagnostic?.executablePath,
+  helperPath: result.diagnostic?.helperPath,
+  signal: result.signal ?? null
 });
+
+const isDebugEnabled = (env: NodeJS.ProcessEnv): boolean =>
+  env[DEBUG_ENV_NAME]?.trim() === DEBUG_ENABLED_VALUE;
+
+const logDashboardDebug = (
+  env: NodeJS.ProcessEnv,
+  request: ProcessRunRequest,
+  result: ProcessRunResult,
+  token: string
+): void => {
+  if (!isDebugEnabled(env)) {
+    return;
+  }
+
+  const debugFields = {
+    commandName: "dashboard",
+    cwd: result.diagnostic?.cwd ?? request.cwd ?? null,
+    runnerMode: result.diagnostic?.runnerMode ?? null,
+    executablePath: result.diagnostic?.executablePath ?? null,
+    helperPath: result.diagnostic?.helperPath ?? null,
+    argv: [request.command, ...request.args],
+    exitCode: result.exitCode,
+    signal: result.signal ?? null,
+    stdoutSnippet: createOutputSnippet(result.stdout, token),
+    stderrSnippet: createOutputSnippet(result.stderr, token)
+  };
+
+  console.error(`[graider-ui] Dashboard command: ${JSON.stringify(debugFields)}`);
+};
 
 const createFailureResult = (
   courseFolderId: string,
@@ -141,7 +196,7 @@ export const runDashboardCommand = async ({
   runner,
   env = process.env
 }: DashboardCommandOptions): Promise<DashboardCommandResult> => {
-  const result = await runner({
+  const request: ProcessRunRequest = {
     command: GRAIDER_COMMAND,
     args: DASHBOARD_ARGS,
     cwd: courseFolder.path,
@@ -149,7 +204,10 @@ export const runDashboardCommand = async ({
       ...env,
       [GITHUB_TOKEN_ENV_NAME]: token
     }
-  });
+  };
+  const result = await runner(request);
+
+  logDashboardDebug(env, request, result, token);
 
   if (result.error !== null) {
     const cliStartError = getGraiderCliStartError(result.error.code);
@@ -159,7 +217,7 @@ export const runDashboardCommand = async ({
     return createCommandFailureResult(
       courseFolder.id,
       courseFolder.path,
-      createCommandError(code, message, null, result.stdout, result.stderr, token)
+      createCommandError(code, message, null, result.stdout, result.stderr, token, request, result)
     );
   }
 
@@ -191,7 +249,9 @@ export const runDashboardCommand = async ({
       result.exitCode,
       result.stdout,
       result.stderr,
-      token
+      token,
+      request,
+      result
     )
   );
 };

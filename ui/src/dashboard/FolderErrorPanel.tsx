@@ -17,6 +17,16 @@ export const FolderErrorPanel = ({ folderErrors }: FolderErrorPanelProps): React
           <h2>Could not load {folderError.sourceFolderPath}</h2>
           <p>{folderError.message}</p>
           <span className="folder-error__code">{folderError.code}</span>
+          {folderError.details.length === 0 ? null : (
+            <details>
+              <summary>Command details</summary>
+              <ul>
+                {folderError.details.map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ul>
+            </details>
+          )}
         </article>
       ))}
     </section>

@@ -29,7 +29,21 @@ describe("commandRunner", () => {
       stdout: "stdout-value",
       stderr: "stderr-value",
       exitCode: SUCCESS_EXIT_CODE,
-      error: null
+      signal: null,
+      error: null,
+      diagnostic: {
+        runnerMode: "direct",
+        command: process.execPath,
+        args: [
+          "-e",
+          "process.stdout.write(process.argv[1]); process.stderr.write(process.argv[2]);",
+          "stdout-value",
+          "stderr-value"
+        ],
+        cwd: null,
+        executablePath: process.execPath,
+        helperPath: null
+      }
     });
   });
 
@@ -57,7 +71,7 @@ describe("commandRunner", () => {
     const request = {
       command: "graider",
       args: ["dashboard", "--json"],
-      cwd: "/course",
+      cwd: "/Users/sean/Box Sync/WebstormProjects/graider-sandbox/csc1120",
       env: {
         GRAIDER_GITHUB_TOKEN: "token-value"
       }
@@ -93,7 +107,7 @@ describe("commandRunner", () => {
       {
         command: "graider",
         args: ["assignment", "grade-status", "assignment.yml", "--json"],
-        cwd: "/course",
+        cwd: "/Users/sean/Box Sync/WebstormProjects/graider-sandbox/csc1120",
         env: {
           GRAIDER_GITHUB_TOKEN: "token-value"
         }
@@ -116,12 +130,57 @@ describe("commandRunner", () => {
         "assignment.yml",
         "--json"
       ],
-      cwd: "/course",
+      cwd: "/Users/sean/Box Sync/WebstormProjects/graider-sandbox/csc1120",
       env: {
         GRAIDER_GITHUB_TOKEN: "token-value",
         ELECTRON_RUN_AS_NODE: "1"
       }
     });
+    expect(result.args[0]).toContain("app.asar.unpacked");
+  });
+
+  it("executes bundled helper mode with a cwd containing spaces", async () => {
+    const tempRoot = fs.mkdtempSync(path.join("/private/tmp", "graider bundled helper-"));
+    const appPath = path.join(tempRoot, "app.asar");
+    const helperPath = getBundledGraiderCliPath(appPath);
+    const courseFolderPath = path.join(tempRoot, "Box Sync", "course root");
+
+    fs.mkdirSync(path.dirname(helperPath), { recursive: true });
+    fs.mkdirSync(courseFolderPath, { recursive: true });
+    fs.writeFileSync(
+      helperPath,
+      "process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }));\n",
+      "utf8"
+    );
+
+    try {
+      const runner = createNodeProcessRunner({
+        graiderCli: {
+          mode: "bundled",
+          appPath,
+          execPath: process.execPath
+        }
+      });
+
+      const result = await runner({
+        command: "graider",
+        args: ["dashboard", "--json"],
+        cwd: courseFolderPath
+      });
+
+      expect(JSON.parse(result.stdout)).toEqual({
+        argv: ["dashboard", "--json"],
+        cwd: courseFolderPath
+      });
+      expect(result.diagnostic).toMatchObject({
+        runnerMode: "bundled",
+        cwd: courseFolderPath,
+        executablePath: process.execPath,
+        helperPath
+      });
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("returns a safe packaged CLI error when the bundled CLI resource is missing", async () => {
@@ -143,9 +202,18 @@ describe("commandRunner", () => {
       stdout: "",
       stderr: "",
       exitCode: null,
+      signal: null,
       error: {
         code: BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE,
         message: BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE
+      },
+      diagnostic: {
+        runnerMode: "bundled",
+        command: "graider",
+        args: ["dashboard", "--json"],
+        cwd: process.cwd(),
+        executablePath: process.execPath,
+        helperPath: getBundledGraiderCliPath(path.join(process.cwd(), "missing-packaged-app"))
       }
     });
   });

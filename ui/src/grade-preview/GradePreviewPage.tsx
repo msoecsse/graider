@@ -40,6 +40,14 @@ const getCommandErrorMessage = (result: GradePreviewLoadResult | null): string |
     return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
   }
 
+  if (errorCode === "github_cli_not_found") {
+    return "GitHub CLI was not found. Install GitHub CLI or set GRAIDER_GITHUB_TOKEN before launching Graider.";
+  }
+
+  if (errorCode === "github_cli_auth_failed" || errorCode === "github_token_unavailable") {
+    return "GitHub authentication is required. Run gh auth login in Terminal, then refresh.";
+  }
+
   if (errorCode === "bundled_graider_cli_not_found") {
     return "Bundled Graider CLI could not be started. Rebuild or reinstall the Graider app.";
   }
@@ -64,6 +72,14 @@ const getGradeCommandErrorMessage = (result: GradeExecutionLoadResult | null): s
 
   if (errorCode === "graider_cli_not_found") {
     return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
+  }
+
+  if (errorCode === "github_cli_not_found") {
+    return "GitHub CLI was not found. Install GitHub CLI or set GRAIDER_GITHUB_TOKEN before launching Graider.";
+  }
+
+  if (errorCode === "github_cli_auth_failed" || errorCode === "github_token_unavailable") {
+    return "GitHub authentication is required. Run gh auth login in Terminal, then refresh.";
   }
 
   if (errorCode === "bundled_graider_cli_not_found") {

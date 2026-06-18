@@ -1,5 +1,6 @@
 export const IPC_CHANNELS = {
   getAppInfo: "graider-ui:get-app-info",
+  checkGitHubAuth: "graider-ui:github-auth:check",
   listCourseFolders: "graider-ui:course-registry:list",
   selectCourseFolder: "graider-ui:course-registry:select-folder",
   removeCourseFolder: "graider-ui:course-registry:remove",
@@ -19,6 +20,15 @@ export interface AppInfo {
   readonly version: string;
 }
 
+export type GitHubAuthStatus = "connected" | "not_connected";
+
+export interface GitHubAuthResult {
+  readonly status: GitHubAuthStatus;
+  readonly username: string | null;
+  readonly diagnostic: string | null;
+  readonly diagnosticCode: string | null;
+}
+
 export interface CourseFolderRecord {
   readonly id: string;
   readonly path: string;
@@ -31,6 +41,13 @@ export interface CourseFolderRecord {
 export interface SelectCourseFolderResult {
   readonly canceled: boolean;
   readonly courseFolder: CourseFolderRecord | null;
+  readonly error?: CourseFolderSelectionError;
+}
+
+export interface CourseFolderSelectionError {
+  readonly code: string;
+  readonly message: string;
+  readonly folderPath: string;
 }
 
 export interface DashboardJsonResponse {
@@ -49,6 +66,13 @@ export interface DashboardCommandError {
   readonly exitCode: number | null;
   readonly stderrSnippet: string | null;
   readonly stdoutSnippet: string | null;
+  readonly commandName?: string;
+  readonly cwd?: string;
+  readonly argv?: readonly string[];
+  readonly runnerMode?: string;
+  readonly executablePath?: string;
+  readonly helperPath?: string | null;
+  readonly signal?: string | null;
 }
 
 export interface AssignmentDetailRequest {
@@ -268,6 +292,7 @@ export interface CombinedDashboardResult {
 
 export interface GraiderUIApi {
   readonly getAppInfo: () => Promise<AppInfo>;
+  readonly checkGitHubAuth: () => Promise<GitHubAuthResult>;
   readonly selectCourseFolder: () => Promise<SelectCourseFolderResult>;
   readonly listCourseFolders: () => Promise<CourseFolderRecord[]>;
   readonly removeCourseFolder: (id: string) => Promise<void>;

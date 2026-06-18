@@ -33,6 +33,16 @@ The bundled CLI is built to:
 ui/dist-graider-cli/index.js
 ```
 
+In packaged builds, `dist-graider-cli` is unpacked to:
+
+```text
+Graider.app/Contents/Resources/app.asar.unpacked/dist-graider-cli/
+```
+
+The main process invokes that unpacked helper with argv arrays and sets `cwd` to
+the registered course folder. The course folder path is never shell-escaped,
+quoted, split, or passed as a dashboard argument.
+
 When `VITE_DEV_SERVER_URL` is unset, the app loads `dist/index.html`. The Vite
 dev server is used only by `npm run dev:electron`.
 
@@ -122,18 +132,37 @@ Graider CLI not found. Install Graider or make sure graider is available on PATH
 ```
 
 macOS apps launched from Finder may not inherit your shell startup files. If the
-packaged app cannot find `gh`, either install it in a location available to GUI
-apps or launch Graider from a terminal whose `PATH` includes GitHub CLI.
+packaged app cannot find `gh`, either install it in a common location available
+to GUI apps or launch Graider from a context whose `PATH` includes GitHub CLI.
+The packaged app checks PATH first, then common GitHub CLI install locations
+such as `/opt/homebrew/bin/gh`, `/usr/local/bin/gh`, and `/usr/bin/gh`.
 
 ## GitHub Token Behavior
 
-The packaged app uses the same token resolver as development mode:
+Graider checks GitHub authentication on startup. The packaged app uses the same
+token resolver as development mode:
 
 1. `GRAIDER_GITHUB_TOKEN`
 2. `gh auth token`
 
+Recommended faculty setup for packaged macOS app use:
+
+```bash
+gh auth login
+```
+
+Double-clicked macOS apps may not see a `GRAIDER_GITHUB_TOKEN` exported from
+`.zshrc`, `.zprofile`, `.bashrc`, or an interactive Terminal session. If the env
+token is not visible to the app, GitHub CLI authentication is the practical
+fallback. The app does not source shell startup files.
+
 Resolved tokens are passed only to child Graider processes. They are not sent to
 the renderer, stored in the course registry, or written to disk by the UI.
+When `GRAIDER_UI_DEBUG=1` is set, the main process may log whether env token or
+GitHub CLI auth was used. It must not log the token value.
+
+If a private repository link opens as a GitHub 404 page, sign into GitHub in the
+browser with the same account used for `gh auth login`.
 
 ## Security Boundaries
 
@@ -164,8 +193,8 @@ mutate GitHub/course state or start GitHub Actions workflows.
 - [ ] Open Faculty Report.
 - [ ] Confirm a broken packaged CLI resource shows the bundled-CLI error, not a
       generic renderer crash.
-- [ ] Confirm missing token shows a safe diagnostic when a GitHub check/action
-      needs authentication.
+- [ ] Confirm startup shows GitHub authentication status and missing auth gives
+      `gh auth login` guidance.
 - [ ] Confirm external GitHub links open in the browser.
 - [ ] Restart the packaged app and confirm the course folder registry persists.
 
@@ -202,15 +231,22 @@ If development mode works but the packaged app opens a blank window:
    ui/dist-graider-cli/index.js
    ```
 
-3. Verify the packaged app includes those files:
+3. Verify the packaged app includes renderer/main files in `app.asar` and the
+   bundled CLI in `app.asar.unpacked`:
 
    ```bash
    cd ui
    npx asar list release/mac-arm64/Graider.app/Contents/Resources/app.asar
    ```
 
-   Look for `/dist/index.html`, `/dist/assets/...`, `/dist-electron/main.js`,
-   `/dist-electron/preload.js`, and `/dist-graider-cli/index.js`.
+   Look for `/dist/index.html`, `/dist/assets/...`,
+   `/dist-electron/main.js`, and `/dist-electron/preload.js`.
+
+   Then confirm:
+
+   ```text
+   release/mac-arm64/Graider.app/Contents/Resources/app.asar.unpacked/dist-graider-cli/index.js
+   ```
 
 4. Run the packaged app with debug diagnostics:
 
@@ -228,3 +264,20 @@ If development mode works but the packaged app opens a blank window:
 Do not fix blank-window failures by enabling renderer Node integration or adding
 generic shell/command IPC. The packaged app should keep the same security
 boundary as development mode.
+
+### Course Folder Opens But Dashboard Fails
+
+Select the course root folder that contains `course.yml` and `terms/`. Paths
+with spaces, such as `/Users/sean/Box Sync/.../csc1120`, are supported.
+
+If the folder registers but dashboard refresh fails, use `Refresh` after fixing
+GitHub authentication or course configuration issues. If the failure persists,
+launch with debug diagnostics:
+
+```bash
+GRAIDER_UI_DEBUG=1 open ui/release/mac-arm64/Graider.app
+```
+
+Debug mode logs the selected folder path, validation result, dashboard `cwd`,
+runner mode, helper path, argv, exit code, and redacted stdout/stderr snippets.
+Do not include tokens in screenshots or bug reports.

@@ -51,6 +51,7 @@ export interface FolderDashboardError {
   readonly sourceFolderPath: string;
   readonly code: string;
   readonly message: string;
+  readonly details: readonly string[];
 }
 
 export interface AggregatedDashboard {

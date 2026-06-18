@@ -17,6 +17,21 @@ const getString = (record: Record<string, unknown>, key: string): string | null 
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 };
 
+const getStringFromKeys = (
+  record: Record<string, unknown>,
+  keys: readonly string[]
+): string | null => {
+  for (const key of keys) {
+    const value = getString(record, key);
+
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
+};
+
 const getNumber = (record: Record<string, unknown>, key: string): number | null => {
   const value = record[key];
 
@@ -52,6 +67,15 @@ const normalizeRepositoryRow = (value: unknown): GradeStatusRepositoryRow => {
   const row = isRecord(value) ? value : {};
 
   return {
+    studentUsername: getStringFromKeys(row, [
+      "studentUsername",
+      "student_username",
+      "rosterUsername",
+      "roster_username",
+      "courseUsername",
+      "course_username",
+      "username"
+    ]),
     studentId: getString(row, "studentId"),
     githubUsername: getString(row, "githubUsername"),
     section: getString(row, "section"),

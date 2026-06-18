@@ -20,6 +20,7 @@ import {
   type FacultyReportRequest,
   type FacultyReportResult,
   type GraiderUIApi,
+  type GitHubAuthResult,
   type SelectCourseFolderResult
 } from "./ipc.js";
 
@@ -28,6 +29,8 @@ const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<
 
 const graiderUI: GraiderUIApi = {
   getAppInfo: async (): Promise<AppInfo> => await invoke<AppInfo>(IPC_CHANNELS.getAppInfo),
+  checkGitHubAuth: async (): Promise<GitHubAuthResult> =>
+    await invoke<GitHubAuthResult>(IPC_CHANNELS.checkGitHubAuth),
   selectCourseFolder: async (): Promise<SelectCourseFolderResult> =>
     await invoke<SelectCourseFolderResult>(IPC_CHANNELS.selectCourseFolder),
   listCourseFolders: async (): Promise<CourseFolderRecord[]> =>

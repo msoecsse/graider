@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import type {
   AssignmentDetailResult,
   CombinedDashboardResult,
   CourseFolderDashboardResult,
-  CourseFolderRecord
+  CourseFolderRecord,
+  GitHubAuthResult
 } from "../../electron/ipc";
 import { ApplyPreviewPage } from "../apply-preview/ApplyPreviewPage";
 import { AssignmentDetailPage } from "../assignment-detail/AssignmentDetailPage";
@@ -33,6 +34,28 @@ const getSafeErrorMessage = (error: unknown): string =>
     ? error.message
     : "Could not update course folders.";
 
+type GitHubAuthViewState =
+  | {
+      readonly status: "checking";
+      readonly result: null;
+      readonly errorMessage: null;
+    }
+  | {
+      readonly status: "connected" | "not_connected";
+      readonly result: GitHubAuthResult;
+      readonly errorMessage: null;
+    }
+  | {
+      readonly status: "check_failed";
+      readonly result: null;
+      readonly errorMessage: string;
+    };
+
+const GITHUB_AUTH_GUIDANCE =
+  "GitHub authentication is required for repository checks and grading actions.";
+const GITHUB_BROWSER_404_NOTE =
+  "If GitHub opens a 404 page for a private course repository, make sure you are signed into GitHub in your browser with the same account.";
+
 export const DashboardPage = (): ReactElement => {
   const [courseFolders, setCourseFolders] = useState<CourseFolderRecord[]>([]);
   const [refreshResults, setRefreshResults] = useState<
@@ -47,6 +70,11 @@ export const DashboardPage = (): ReactElement => {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewFilter, setViewFilter] = useState<DashboardViewFilter>("active");
   const [sortOption, setSortOption] = useState<DashboardSortOption>("newest-first");
+  const [githubAuthState, setGithubAuthState] = useState<GitHubAuthViewState>({
+    status: "checking",
+    result: null,
+    errorMessage: null
+  });
   const [selectedAssignment, setSelectedAssignment] = useState<AssignmentDetailSelection | null>(
     null
   );
@@ -69,6 +97,35 @@ export const DashboardPage = (): ReactElement => {
     readonly detail: NormalizedAssignmentDetail | null;
     readonly gradeStatus: NormalizedGradeStatus | null;
   } | null>(null);
+  const hasStartedStartupRefresh = useRef(false);
+  const isRefreshingAllRef = useRef(false);
+
+  const runGitHubAuthCheck = async (): Promise<void> => {
+    setGithubAuthState({
+      status: "checking",
+      result: null,
+      errorMessage: null
+    });
+
+    try {
+      const result = await window.graiderUI.checkGitHubAuth();
+      setGithubAuthState({
+        status: result.status,
+        result,
+        errorMessage: null
+      });
+    } catch {
+      setGithubAuthState({
+        status: "check_failed",
+        result: null,
+        errorMessage: "GitHub authentication check failed. Try again after confirming GitHub CLI is installed."
+      });
+    }
+  };
+
+  useEffect(() => {
+    void runGitHubAuthCheck();
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -119,6 +176,8 @@ export const DashboardPage = (): ReactElement => {
             courseFolder.id === selectedCourseFolder.id ? selectedCourseFolder : courseFolder
           );
         });
+      } else if (!result.canceled && result.error !== undefined) {
+        setErrorMessage(`${result.error.message} Course folder: ${result.error.folderPath}`);
       }
     } catch (error) {
       setErrorMessage(getSafeErrorMessage(error));
@@ -172,7 +231,48 @@ export const DashboardPage = (): ReactElement => {
     applyRefreshResultMetadata(result);
   };
 
+  const rememberCombinedDashboardResult = (combinedResult: CombinedDashboardResult): void => {
+    const nextResults = combinedResult.results.reduce<Record<string, CourseFolderDashboardResult>>(
+      (results, result) => ({
+        ...results,
+        [result.courseFolderId]: result
+      }),
+      {}
+    );
+
+    setRefreshResults((currentResults) => ({
+      ...currentResults,
+      ...nextResults
+    }));
+    for (const result of combinedResult.results) {
+      applyRefreshResultMetadata(result);
+    }
+  };
+
+  const runRefreshDashboard = async (): Promise<void> => {
+    if (isRefreshingAllRef.current) {
+      return;
+    }
+
+    isRefreshingAllRef.current = true;
+    setIsRefreshingAll(true);
+    setErrorMessage(null);
+
+    try {
+      rememberCombinedDashboardResult(await window.graiderUI.refreshDashboard());
+    } catch (error) {
+      setErrorMessage(getSafeErrorMessage(error));
+    } finally {
+      isRefreshingAllRef.current = false;
+      setIsRefreshingAll(false);
+    }
+  };
+
   const handleRefreshCourseFolder = async (id: string): Promise<void> => {
+    if (isRefreshingAllRef.current) {
+      return;
+    }
+
     setRefreshingId(id);
     setErrorMessage(null);
 
@@ -186,34 +286,17 @@ export const DashboardPage = (): ReactElement => {
   };
 
   const handleRefreshDashboard = async (): Promise<void> => {
-    setIsRefreshingAll(true);
-    setErrorMessage(null);
-
-    try {
-      const combinedResult: CombinedDashboardResult = await window.graiderUI.refreshDashboard();
-      const nextResults = combinedResult.results.reduce<
-        Record<string, CourseFolderDashboardResult>
-      >(
-        (results, result) => ({
-          ...results,
-          [result.courseFolderId]: result
-        }),
-        {}
-      );
-
-      setRefreshResults((currentResults) => ({
-        ...currentResults,
-        ...nextResults
-      }));
-      for (const result of combinedResult.results) {
-        applyRefreshResultMetadata(result);
-      }
-    } catch (error) {
-      setErrorMessage(getSafeErrorMessage(error));
-    } finally {
-      setIsRefreshingAll(false);
-    }
+    await runRefreshDashboard();
   };
+
+  useEffect(() => {
+    if (isLoadingFolders || courseFolders.length === 0 || hasStartedStartupRefresh.current) {
+      return;
+    }
+
+    hasStartedStartupRefresh.current = true;
+    void runRefreshDashboard();
+  }, [courseFolders.length, isLoadingFolders]);
 
   const handleOpenAssignmentDetail = (
     combinedCard: CombinedDashboardCard,
@@ -424,6 +507,54 @@ export const DashboardPage = (): ReactElement => {
           }}
         />
 
+        <section className="github-auth-status" aria-labelledby="github-auth-title">
+          <div>
+            <h2 id="github-auth-title">GitHub authentication: {
+              githubAuthState.status === "connected"
+                ? "Connected"
+                : githubAuthState.status === "not_connected"
+                  ? "Not connected"
+                  : githubAuthState.status === "check_failed"
+                    ? "Check failed"
+                    : "Checking"
+            }</h2>
+            {githubAuthState.status === "connected" ? (
+              <p>
+                Repository checks and grading actions can use GitHub authentication
+                {githubAuthState.result.username === null ? "." : ` as ${githubAuthState.result.username}.`}
+              </p>
+            ) : null}
+            {githubAuthState.status === "not_connected" ? (
+              <>
+                <p>{GITHUB_AUTH_GUIDANCE}</p>
+                <p>Run this once in Terminal:</p>
+                <pre>gh auth login</pre>
+                <p>Then return to Graider and click Check GitHub auth.</p>
+                <p className="github-auth-status__note">{GITHUB_BROWSER_404_NOTE}</p>
+                {githubAuthState.result.diagnostic === null ? null : (
+                  <p className="github-auth-status__diagnostic">
+                    {githubAuthState.result.diagnostic}
+                  </p>
+                )}
+              </>
+            ) : null}
+            {githubAuthState.status === "check_failed" ? (
+              <p>{githubAuthState.errorMessage}</p>
+            ) : null}
+            {githubAuthState.status === "checking" ? <p>Checking GitHub authentication...</p> : null}
+          </div>
+          <button
+            className="secondary-action"
+            type="button"
+            disabled={githubAuthState.status === "checking"}
+            onClick={() => {
+              void runGitHubAuthCheck();
+            }}
+          >
+            {githubAuthState.status === "checking" ? "Checking..." : "Check GitHub auth"}
+          </button>
+        </section>
+
         {errorMessage === null ? null : (
           <p className="error-message" role="alert">
             {errorMessage}
@@ -458,14 +589,16 @@ export const DashboardPage = (): ReactElement => {
 
             {isRefreshingAll ? <p className="loading-state">Loading dashboard...</p> : null}
 
-            {!aggregatedDashboard.hasRefreshResults ? (
+            {!isRefreshingAll && !aggregatedDashboard.hasRefreshResults ? (
               <section className="dashboard-placeholder" aria-label="Dashboard loading prompt">
                 <h2>Refresh to load course cards.</h2>
                 <p>Graider will run dashboard checks for each registered course folder.</p>
               </section>
             ) : null}
 
-            {aggregatedDashboard.hasRefreshResults && aggregatedDashboard.cards.length === 0 ? (
+            {!isRefreshingAll &&
+            aggregatedDashboard.hasRefreshResults &&
+            aggregatedDashboard.cards.length === 0 ? (
               <section className="dashboard-placeholder" aria-label="No course cards">
                 <h2>No course-term cards found.</h2>
                 <p>Review the registered folder status or diagnostics, then refresh again.</p>
@@ -483,6 +616,7 @@ export const DashboardPage = (): ReactElement => {
               courseFolders={courseFolders}
               refreshResults={refreshResults}
               refreshingId={refreshingId}
+              isRefreshingAll={isRefreshingAll}
               removingId={removingId}
               onRefresh={(id) => {
                 void handleRefreshCourseFolder(id);

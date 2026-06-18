@@ -24,6 +24,12 @@ read-only: it performs one-shot command executions from the UI and may run
 page-local auto-refresh while open, but it does not run in the background after
 the user leaves the page.
 
+Assignment Detail also renders a compact Grade Status Summary from the same
+grade-status data model. That summary is not a replacement for this page: it
+does not poll, omits the workflow column and raw run details, formats timestamps
+for faculty readability, and links back to the full Grade Status view for
+detailed inspection.
+
 Grade Status answers:
 
 - whether grading workflow runs are queued, in progress, completed, missing,
@@ -143,6 +149,14 @@ Unknown
 Token required
 Blocked
 ```
+
+The Assignment Detail compact summary uses the same labels, but displays fewer
+columns: student identity, section, repository short name, status, last update,
+and available run actions. Student identity prefers a roster/course username
+when provided by JSON, then stable student id, then GitHub username as a final
+fallback. Completed rows show `Last completed` with a locale-formatted
+timestamp; started-only rows show `Started`; rows without a run time show
+`No run time available`.
 
 ## Ready For Report
 

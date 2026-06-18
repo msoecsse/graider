@@ -12,7 +12,8 @@ import {
   removeCourseFolder,
   removeCourseFolderFromRegistry,
   saveCourseRegistry,
-  selectCourseFolderWithPicker
+  selectCourseFolderWithPicker,
+  validateCourseFolderPath
 } from "./courseRegistry";
 
 const TEMP_PREFIX = "graider-ui-registry-";
@@ -30,6 +31,15 @@ const createTempRoot = (): string => {
   tempRoots.push(tempRoot);
 
   return tempRoot;
+};
+
+const createCourseRoot = (parent: string, folderName: string): string => {
+  const courseRoot = path.join(parent, folderName);
+
+  fs.mkdirSync(path.join(courseRoot, "terms"), { recursive: true });
+  fs.writeFileSync(path.join(courseRoot, "course.yml"), "schema_version: 1\n", "utf8");
+
+  return courseRoot;
 };
 
 afterEach(() => {
@@ -149,6 +159,34 @@ describe("course registry", () => {
     expect(content).not.toContain("GRAIDER_GITHUB_TOKEN");
   });
 
+  it("validates course folders with spaces when course.yml and terms exist", () => {
+    const tempRoot = createTempRoot();
+    const courseRoot = createCourseRoot(
+      path.join(tempRoot, "Box Sync", "WebstormProjects", "graider-sandbox"),
+      "csc1120"
+    );
+
+    expect(validateCourseFolderPath(courseRoot)).toEqual({
+      status: "success",
+      selectedPath: courseRoot,
+      normalizedPath: courseRoot
+    });
+  });
+
+  it("rejects selected folders that do not contain course.yml", () => {
+    const folderPath = path.join(createTempRoot(), "not-a-course");
+
+    fs.mkdirSync(path.join(folderPath, "terms"), { recursive: true });
+
+    expect(validateCourseFolderPath(folderPath)).toEqual({
+      status: "failure",
+      selectedPath: folderPath,
+      normalizedPath: folderPath,
+      code: "course_folder_missing_course_yml",
+      message: "Selected course folder must contain course.yml at its root."
+    });
+  });
+
   it("returns canceled folder selection without saving", async () => {
     const registryPath = getCourseRegistryPath(createTempRoot());
     const result = await selectCourseFolderWithPicker(registryPath, {
@@ -161,16 +199,39 @@ describe("course registry", () => {
 
   it("adds selected folders through a picker adapter", async () => {
     const registryPath = getCourseRegistryPath(createTempRoot());
+    const courseRoot = createCourseRoot(createTempRoot(), "csc1120");
     const result = await selectCourseFolderWithPicker(
       registryPath,
       {
-        selectFolder: async () => "/Users/sean/dev/csc1120"
+        selectFolder: async () => courseRoot
       },
       FIRST_OPENED_AT
     );
 
     expect(result.canceled).toBe(false);
-    expect(result.courseFolder?.path).toBe("/Users/sean/dev/csc1120");
+    expect(result.courseFolder?.path).toBe(courseRoot);
     expect(loadCourseRegistry(registryPath).courseFolders).toHaveLength(SINGLE_FOLDER_COUNT);
+  });
+
+  it("returns a selection error without saving invalid picked folders", async () => {
+    const registryPath = getCourseRegistryPath(createTempRoot());
+    const folderPath = path.join(createTempRoot(), "not-a-course");
+
+    fs.mkdirSync(folderPath, { recursive: true });
+
+    const result = await selectCourseFolderWithPicker(registryPath, {
+      selectFolder: async () => folderPath
+    });
+
+    expect(result).toEqual({
+      canceled: false,
+      courseFolder: null,
+      error: {
+        code: "course_folder_missing_course_yml",
+        message: "Selected course folder must contain course.yml at its root.",
+        folderPath
+      }
+    });
+    expect(loadCourseRegistry(registryPath).courseFolders).toEqual([]);
   });
 });

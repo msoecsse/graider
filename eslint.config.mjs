@@ -10,6 +10,7 @@ export default tseslint.config(
       "ui/dist/**",
       "ui/dist-electron/**",
       "ui/dist-graider-cli/**",
+      "ui/release/**",
       "ui/node_modules/**"
     ]
   },

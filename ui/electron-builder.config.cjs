@@ -21,5 +21,6 @@ module.exports = {
   dmg: {
     sign: false
   },
-  asar: true
+  asar: true,
+  asarUnpack: ["dist-graider-cli/**/*"]
 };

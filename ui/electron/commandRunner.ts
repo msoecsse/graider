@@ -5,6 +5,8 @@ import path from "node:path";
 const TEXT_ENCODING = "utf8";
 const GRAIDER_COMMAND = "graider";
 const BUNDLED_GRAIDER_CLI_RELATIVE_PATH = ["dist-graider-cli", "index.js"] as const;
+const ASAR_FILE_EXTENSION = ".asar";
+const ASAR_UNPACKED_FILE_EXTENSION = ".asar.unpacked";
 const ELECTRON_RUN_AS_NODE_ENV = "ELECTRON_RUN_AS_NODE";
 const ELECTRON_RUN_AS_NODE_VALUE = "1";
 
@@ -32,7 +34,9 @@ export interface ProcessRunResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number | null;
+  readonly signal?: NodeJS.Signals | null;
   readonly error: ProcessSpawnError | null;
+  readonly diagnostic?: ProcessRunDiagnostic;
 }
 
 export type ProcessRunner = (request: ProcessRunRequest) => Promise<ProcessRunResult>;
@@ -47,6 +51,15 @@ export interface NodeProcessRunnerOptions {
   readonly graiderCli?: GraiderCliResolverOptions;
 }
 
+export interface ProcessRunDiagnostic {
+  readonly runnerMode: "external" | "bundled" | "direct";
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cwd: string | null;
+  readonly executablePath: string;
+  readonly helperPath: string | null;
+}
+
 export interface GraiderCliStartError {
   readonly code:
     | typeof EXTERNAL_GRAIDER_CLI_NOT_FOUND_CODE
@@ -54,8 +67,13 @@ export interface GraiderCliStartError {
   readonly message: string;
 }
 
+export const getBundledGraiderCliBasePath = (appPath: string): string =>
+  appPath.endsWith(ASAR_FILE_EXTENSION)
+    ? `${appPath.slice(0, -ASAR_FILE_EXTENSION.length)}${ASAR_UNPACKED_FILE_EXTENSION}`
+    : appPath;
+
 export const getBundledGraiderCliPath = (appPath: string): string =>
-  path.join(appPath, ...BUNDLED_GRAIDER_CLI_RELATIVE_PATH);
+  path.join(getBundledGraiderCliBasePath(appPath), ...BUNDLED_GRAIDER_CLI_RELATIVE_PATH);
 
 export const getGraiderCliStartError = (
   processErrorCode: string | null
@@ -102,6 +120,26 @@ export const resolveProcessRunRequest = (
   };
 };
 
+const createProcessRunDiagnostic = (
+  request: ProcessRunRequest,
+  resolvedRequest: ProcessRunRequest,
+  options: NodeProcessRunnerOptions
+): ProcessRunDiagnostic => {
+  const isBundledGraider =
+    request.command === GRAIDER_COMMAND && options.graiderCli?.mode === "bundled";
+  const isExternalGraider =
+    request.command === GRAIDER_COMMAND && options.graiderCli?.mode === "external";
+
+  return {
+    runnerMode: isBundledGraider ? "bundled" : isExternalGraider ? "external" : "direct",
+    command: request.command,
+    args: request.args,
+    cwd: request.cwd ?? null,
+    executablePath: resolvedRequest.command,
+    helperPath: isBundledGraider ? (resolvedRequest.args[0] ?? null) : null
+  };
+};
+
 const isMissingBundledGraiderCli = (
   request: ProcessRunRequest,
   resolvedRequest: ProcessRunRequest,
@@ -132,16 +170,19 @@ export const createNodeProcessRunner =
         }
       };
       const resolvedRequest = resolveProcessRunRequest(request, options);
+      const diagnostic = createProcessRunDiagnostic(request, resolvedRequest, options);
 
       if (isMissingBundledGraiderCli(request, resolvedRequest, options)) {
         finish({
           stdout,
           stderr,
           exitCode: null,
+          signal: null,
           error: {
             code: BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE,
             message: BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE
-          }
+          },
+          diagnostic
         });
       } else {
         const childProcess = spawn(resolvedRequest.command, [...resolvedRequest.args], {
@@ -167,19 +208,23 @@ export const createNodeProcessRunner =
             stdout,
             stderr,
             exitCode: null,
+            signal: null,
             error: {
               code: getErrorCode(error),
               message: error.message
-            }
+            },
+            diagnostic
           });
         });
 
-        childProcess.on("close", (exitCode) => {
+        childProcess.on("close", (exitCode, signal) => {
           finish({
             stdout,
             stderr,
             exitCode,
-            error: null
+            signal,
+            error: null,
+            diagnostic
           });
         });
       }

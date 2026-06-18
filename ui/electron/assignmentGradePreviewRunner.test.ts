@@ -186,14 +186,15 @@ describe("assignmentGradePreviewRunner", () => {
   });
 
   it("falls back to local preview when token resolution is unavailable", async () => {
-    const runner = createRunner([
-      createProcessResult({
-        stdout: "",
-        exitCode: null,
-        error: { code: "ENOENT", message: "missing gh" }
-      }),
-      createProcessResult()
-    ]);
+    const runner: ProcessRunner = vi.fn(async (request) =>
+      request.command === "graider"
+        ? createProcessResult()
+        : createProcessResult({
+            stdout: "",
+            exitCode: null,
+            error: { code: "ENOENT", message: "missing gh" }
+          })
+    );
 
     const result = await getAssignmentGradePreview(GRADE_PREVIEW_REQUEST, {
       runner,
@@ -208,11 +209,13 @@ describe("assignmentGradePreviewRunner", () => {
       args: ["auth", "token"],
       env: {}
     });
-    expect(runner).toHaveBeenNthCalledWith(2, {
-      command: "graider",
-      args: ["assignment", "grade-preview", GRADE_PREVIEW_REQUEST.assignmentFile, "--json"],
-      cwd: GRADE_PREVIEW_REQUEST.courseFolderPath,
-      env: {}
-    });
+    expect(vi.mocked(runner).mock.calls).toContainEqual([
+      {
+        command: "graider",
+        args: ["assignment", "grade-preview", GRADE_PREVIEW_REQUEST.assignmentFile, "--json"],
+        cwd: GRADE_PREVIEW_REQUEST.courseFolderPath,
+        env: {}
+      }
+    ]);
   });
 });

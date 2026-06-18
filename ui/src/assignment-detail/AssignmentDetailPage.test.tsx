@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AssignmentDetailJsonResponse,
   AssignmentDetailResult,
+  AssignmentGradeStatusJsonResponse,
+  AssignmentGradeStatusResult,
   GraiderUIApi
 } from "../../electron/ipc";
 import { AssignmentDetailPage } from "./AssignmentDetailPage";
@@ -49,8 +51,8 @@ const createAssignmentDetailJson = (
     points: 100
   },
   deadline: { dueAt: "2027-06-15T23:59:00+09:00", latePolicy: "standard" },
-  sections: ["001"],
-  roster: { sectionCount: 1, activeStudentCount: 3, totalStudentCount: 3 },
+  sections: ["001", "002"],
+  roster: { sectionCount: 2, activeStudentCount: 3, totalStudentCount: 3 },
   template: {
     repository: "graider-sandbox/csc1120L2Template",
     branch: "main",
@@ -94,9 +96,149 @@ const createAssignmentDetailResult = (
   ...overrides
 });
 
+const createAssignmentGradeStatusJson = (
+  overrides: Partial<AssignmentGradeStatusJsonResponse> = {}
+): AssignmentGradeStatusJsonResponse => ({
+  schemaVersion: 1,
+  commandName: "assignment grade-status",
+  status: "success",
+  exitCode: 0,
+  diagnostics: [],
+  assignment: {
+    slug: "lab02",
+    title: "Lab 02",
+    file: ASSIGNMENT_FILE,
+    status: "active"
+  },
+  course: { slug: "csc1120", title: "CSC1120" },
+  term: { slug: "27s1", title: "Spring 2027" },
+  target: { sections: ["001", "002"], sectionCount: 2, studentCount: 4, activeStudentCount: 4 },
+  grading: {
+    enabled: true,
+    resolvedFrom: "course_default",
+    mode: "custom-workflow",
+    workflow: ".github/workflows/grade.yml",
+    artifact: "grading-results",
+    resultFile: "results.json",
+    workflowRef: "main"
+  },
+  summary: {
+    totalRepositories: 4,
+    queued: 0,
+    inProgress: 1,
+    completed: 2,
+    successful: 1,
+    failed: 1,
+    cancelled: 0,
+    timedOut: 0,
+    missing: 1,
+    unknown: 0,
+    blocked: 0,
+    needsAttention: 2,
+    readyForReport: false
+  },
+  repositories: [
+    {
+      studentUsername: "ada.course",
+      studentId: "s001",
+      githubUsername: "adalovelace",
+      section: "001",
+      repository: "graider-sandbox/csc1120-lab02-ada",
+      workflow: ".github/workflows/grade.yml",
+      ref: "main",
+      runId: 123,
+      runUrl: "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123",
+      status: "completed",
+      conclusion: "success",
+      startedAt: "2026-06-12T17:32:49Z",
+      completedAt: "2026-06-12T17:33:39Z",
+      selectionStrategy: "latest_configured_workflow_run",
+      reason: "success",
+      needsAttention: false,
+      diagnostics: []
+    },
+    {
+      studentId: null,
+      githubUsername: "github-only",
+      section: "002",
+      repository: "graider-sandbox/csc1120-lab02-github-only",
+      workflow: ".github/workflows/grade.yml",
+      ref: "main",
+      runId: null,
+      runUrl: null,
+      status: "completed",
+      conclusion: "failure",
+      startedAt: "2026-06-12T18:00:00Z",
+      completedAt: "2026-06-12T18:05:00Z",
+      selectionStrategy: "latest_configured_workflow_run",
+      reason: "tests_failed",
+      needsAttention: true,
+      diagnostics: []
+    },
+    {
+      studentId: "s003",
+      githubUsername: "linchen",
+      section: "001",
+      repository: "graider-sandbox/csc1120-lab02-lin",
+      workflow: ".github/workflows/grade.yml",
+      ref: "main",
+      runId: null,
+      runUrl: null,
+      status: "in_progress",
+      conclusion: null,
+      startedAt: "2026-06-12T19:10:00Z",
+      completedAt: null,
+      selectionStrategy: "latest_configured_workflow_run",
+      reason: "workflow_running",
+      needsAttention: false,
+      diagnostics: []
+    },
+    {
+      studentId: "s004",
+      githubUsername: "missingrepo",
+      section: "002",
+      repository: "graider-sandbox/csc1120-lab02-missing",
+      workflow: ".github/workflows/grade.yml",
+      ref: "main",
+      runId: null,
+      runUrl: null,
+      status: "missing",
+      conclusion: null,
+      startedAt: null,
+      completedAt: null,
+      selectionStrategy: "latest_configured_workflow_run",
+      reason: "no_workflow_run_found",
+      needsAttention: true,
+      diagnostics: []
+    }
+  ],
+  actions: {},
+  ...overrides
+});
+
+const createAssignmentGradeStatusResult = (
+  gradeStatus: AssignmentGradeStatusJsonResponse | null = createAssignmentGradeStatusJson(),
+  overrides: Partial<AssignmentGradeStatusResult> = {}
+): AssignmentGradeStatusResult => ({
+  courseFolderId: SELECTION.courseFolderId,
+  courseFolderPath: SELECTION.courseFolderPath,
+  assignmentFile: SELECTION.assignmentFile,
+  status: gradeStatus === null ? "failure" : "success",
+  gradeStatus,
+  error: null,
+  refreshedAt: "2026-06-10T16:00:00.000Z",
+  ...overrides
+});
+
 const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   const graiderUI = {
     getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),
+    checkGitHubAuth: vi.fn().mockResolvedValue({
+      status: "connected",
+      username: null,
+      diagnostic: null,
+      diagnosticCode: null
+    }),
     selectCourseFolder: vi.fn().mockResolvedValue({ canceled: true, courseFolder: null }),
     listCourseFolders: vi.fn().mockResolvedValue([]),
     removeCourseFolder: vi.fn().mockResolvedValue(undefined),
@@ -105,7 +247,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
     getAssignmentApplyPreview: vi.fn(),
     getAssignmentGradePreview: vi.fn(),
-    getAssignmentGradeStatus: vi.fn(),
+    getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
     getFacultyReport: vi.fn(),
     applyAssignment: vi.fn(),
     gradeAssignment: vi.fn(),
@@ -143,18 +285,8 @@ const renderAssignmentDetailPage = (
     />
   );
 
-const getFirstPreviewApplyButton = (): HTMLElement => {
-  const button = screen.getAllByRole("button", { name: "Preview apply" })[0];
-
-  if (button === undefined) {
-    throw new Error("Expected a Preview apply button.");
-  }
-
-  return button;
-};
-
 describe("AssignmentDetailPage", () => {
-  it("renders readiness, cleaned panels, grouped diagnostics, and disabled actions", async () => {
+  it("renders the existing assignment panels with a compact grade status summary before diagnostics", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(
         createAssignmentDetailResult(
@@ -187,30 +319,36 @@ describe("AssignmentDetailPage", () => {
     renderAssignmentDetailPage();
 
     expect(await screen.findByRole("heading", { level: 2, name: "Readiness" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Preview apply" })[0]).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "Preview grading" })[0]).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "View grading status" })[0]).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Refresh detail" })).toBeEnabled();
     expect(screen.getAllByText("Needs attention").length).toBeGreaterThan(0);
     expect(screen.getByText("Template repository is missing.")).toBeInTheDocument();
     expect(
       screen.getByText("GitHub authentication needed for readiness checks.")
     ).toBeInTheDocument();
-    expect(screen.getByText("LMS assignment ID")).toBeInTheDocument();
-    expect(screen.getByText("lms-123")).toBeInTheDocument();
-    expect(screen.getByText("Course folder path")).toBeInTheDocument();
-    expect(screen.getByText(COURSE_FOLDER_PATH)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 3, name: "Needs attention" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 3, name: "Warnings" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Summary" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Template" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Grading" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Roster / Sections" })
+    ).toBeInTheDocument();
+    const summaryHeading = await screen.findByRole("heading", {
+      level: 2,
+      name: "Grade status summary"
+    });
+    const diagnosticsHeading = screen.getByRole("heading", { level: 2, name: "Diagnostics" });
+    expect(
+      summaryHeading.compareDocumentPosition(diagnosticsHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).not.toBe(0);
+    expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
     expect(screen.getByText("assignment_detail_template_repository_missing")).toBeInTheDocument();
-    expect(screen.getAllByText("Template").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Validate / Refresh detail" })).toBeEnabled();
-    expect(getFirstPreviewApplyButton()).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Grade submissions" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Generate report" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Publish student reports" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Generate/update workflow" })).toBeDisabled();
-    expect(screen.getAllByText("Coming in a future slice").length).toBeGreaterThan(0);
-    expect(screen.getByText("Unavailable for this assignment")).toBeInTheDocument();
   });
 
-  it("renders neutral placeholders, no-grading state, disabled reports, and missing roster", async () => {
+  it("renders neutral placeholders and missing grade-status data without crashing", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(
         createAssignmentDetailResult(
@@ -235,17 +373,163 @@ describe("AssignmentDetailPage", () => {
             studentReports: { enabled: false, mode: "disabled" }
           })
         )
+      ),
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult(null))
+    });
+
+    renderAssignmentDetailPage();
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Grade status summary" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Grade status data is not available yet.")).toBeInTheDocument();
+    expect(screen.getByText("Roster counts could not be loaded.")).toBeInTheDocument();
+    expect(screen.getByText("No grading")).toBeInTheDocument();
+    expect(screen.getAllByText("Not configured").length).toBeGreaterThanOrEqual(4);
+    expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
+  });
+
+  it("renders compact grade status rows using roster usernames, readable times, and no workflow column", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+
+    renderAssignmentDetailPage();
+
+    const summary = await screen.findByLabelText("Grade status summary");
+    expect(within(summary).getByText("ada.course")).toBeInTheDocument();
+    expect(within(summary).getByText("github-only")).toBeInTheDocument();
+    expect(within(summary).queryByText("adalovelace")).toBeNull();
+    expect(within(summary).queryByRole("columnheader", { name: "Workflow" })).toBeNull();
+    expect(screen.queryByText("2026-06-12T17:33:39Z")).toBeNull();
+    expect(within(summary).getAllByText(/Last completed .*Jun 12, 2026/u).length).toBeGreaterThan(
+      0
+    );
+    expect(within(summary).getByText(/Started .*Jun 12, 2026/u)).toBeInTheDocument();
+    expect(within(summary).getByText("No run time available")).toBeInTheDocument();
+    expect(within(summary).getByText("Completed — success")).toBeInTheDocument();
+    expect(within(summary).getByText("Completed — failure")).toBeInTheDocument();
+    expect(within(summary).getByText("In progress")).toBeInTheDocument();
+    expect(within(summary).getByText("Missing")).toBeInTheDocument();
+    expect(within(summary).getByRole("link", { name: "Open run" })).toHaveAttribute(
+      "href",
+      "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123"
+    );
+    expect(within(summary).getAllByText("No run link")).toHaveLength(3);
+  });
+
+  it("builds Open run links from full student repository and run id when backend runUrl is missing", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(
+        createAssignmentGradeStatusResult(
+          createAssignmentGradeStatusJson({
+            repositories: [
+              {
+                studentId: "s001",
+                githubUsername: "adalovelace",
+                section: "001",
+                repository: "graider-sandbox/csc1120-lab02-ada",
+                workflow: ".github/workflows/grade.yml",
+                ref: "main",
+                runId: 789,
+                runUrl: null,
+                status: "completed",
+                conclusion: "success",
+                startedAt: "2026-06-12T17:32:49Z",
+                completedAt: "2026-06-12T17:33:39Z",
+                selectionStrategy: "latest_configured_workflow_run",
+                reason: "success",
+                needsAttention: false,
+                diagnostics: []
+              }
+            ]
+          })
+        )
       )
     });
 
     renderAssignmentDetailPage();
 
-    expect(await screen.findByText("No grading configured.")).toBeInTheDocument();
-    expect(screen.getByText("Roster summary unavailable.")).toBeInTheDocument();
-    expect(screen.getByText("Roster counts could not be loaded.")).toBeInTheDocument();
-    expect(screen.getByText("disabled")).toBeInTheDocument();
-    expect(screen.getAllByText("Not configured").length).toBeGreaterThanOrEqual(4);
-    expect(screen.getByText("No diagnostics.")).toBeInTheDocument();
+    const summary = await screen.findByLabelText("Grade status summary");
+    expect(within(summary).getByRole("link", { name: "Open run" })).toHaveAttribute(
+      "href",
+      "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/789"
+    );
+  });
+
+  it("does not render Open run for unsafe, repo-name-only, or course-admin run URLs", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(
+        createAssignmentGradeStatusResult(
+          createAssignmentGradeStatusJson({
+            repositories: [
+              {
+                studentId: "repo-name-only",
+                githubUsername: null,
+                section: "001",
+                repository: "csc1120-lab02-ada",
+                workflow: ".github/workflows/grade.yml",
+                ref: "main",
+                runId: 123,
+                runUrl: null,
+                status: "completed",
+                conclusion: "success",
+                startedAt: "2026-06-12T17:32:49Z",
+                completedAt: "2026-06-12T17:33:39Z",
+                selectionStrategy: "latest_configured_workflow_run",
+                reason: "success",
+                needsAttention: false,
+                diagnostics: []
+              },
+              {
+                studentId: "javascript-url",
+                githubUsername: null,
+                section: "001",
+                repository: "graider-sandbox/csc1120-lab02-js",
+                workflow: ".github/workflows/grade.yml",
+                ref: "main",
+                runId: 456,
+                runUrl: "javascript:alert(1)",
+                status: "completed",
+                conclusion: "success",
+                startedAt: "2026-06-12T17:32:49Z",
+                completedAt: "2026-06-12T17:33:39Z",
+                selectionStrategy: "latest_configured_workflow_run",
+                reason: "success",
+                needsAttention: false,
+                diagnostics: []
+              },
+              {
+                studentId: "admin-url",
+                githubUsername: null,
+                section: "001",
+                repository: "graider-sandbox/csc1120-lab02-admin",
+                workflow: ".github/workflows/grade.yml",
+                ref: "main",
+                runId: 789,
+                runUrl: "https://github.com/graider-sandbox/course-admin/actions/runs/789",
+                status: "completed",
+                conclusion: "success",
+                startedAt: "2026-06-12T17:32:49Z",
+                completedAt: "2026-06-12T17:33:39Z",
+                selectionStrategy: "latest_configured_workflow_run",
+                reason: "success",
+                needsAttention: false,
+                diagnostics: []
+              }
+            ]
+          })
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const summary = await screen.findByLabelText("Grade status summary");
+    expect(within(summary).queryByRole("link", { name: "Open run" })).toBeNull();
+    expect(within(summary).getAllByText("No run link")).toHaveLength(3);
   });
 
   it("copies assignment path, course folder path, template repository, and workflow path", async () => {
@@ -324,6 +608,152 @@ describe("AssignmentDetailPage", () => {
         assignmentFile: ASSIGNMENT_FILE
       })
     );
+  });
+
+  it("keeps the full grade status action available from the compact summary", async () => {
+    const onViewGradeStatus = vi.fn();
+
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+    renderAssignmentDetailPage({ onViewGradeStatus });
+
+    const summary = await screen.findByLabelText("Grade status summary");
+    fireEvent.click(within(summary).getByRole("button", { name: "View full grade status" }));
+
+    expect(onViewGradeStatus).toHaveBeenCalledTimes(1);
+    expect(onViewGradeStatus).toHaveBeenCalledWith(
+      SELECTION,
+      expect.objectContaining({
+        assignment: expect.objectContaining({ slug: "lab02" })
+      }),
+      expect.objectContaining({
+        assignmentFile: ASSIGNMENT_FILE
+      })
+    );
+  });
+
+  it("renders remaining concise grade status labels", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(
+        createAssignmentGradeStatusResult(
+          createAssignmentGradeStatusJson({
+            repositories: [
+              {
+                studentId: "queued",
+                githubUsername: null,
+                section: "001",
+                repository: "owner/queued",
+                status: "queued",
+                conclusion: null,
+                startedAt: null,
+                completedAt: null,
+                diagnostics: []
+              },
+              {
+                studentId: "unknown",
+                githubUsername: null,
+                section: "001",
+                repository: "owner/unknown",
+                status: "unknown",
+                conclusion: null,
+                startedAt: null,
+                completedAt: null,
+                diagnostics: []
+              },
+              {
+                studentId: "blocked",
+                githubUsername: null,
+                section: "001",
+                repository: "owner/blocked",
+                status: "blocked",
+                conclusion: null,
+                startedAt: null,
+                completedAt: null,
+                diagnostics: []
+              },
+              {
+                studentId: "token",
+                githubUsername: null,
+                section: "001",
+                repository: "owner/token",
+                status: "token_required",
+                conclusion: null,
+                startedAt: null,
+                completedAt: null,
+                diagnostics: []
+              }
+            ]
+          })
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const summary = await screen.findByLabelText("Grade status summary");
+    expect(within(summary).getByText("Queued")).toBeInTheDocument();
+    expect(within(summary).getByText("Unknown")).toBeInTheDocument();
+    expect(within(summary).getByText("Blocked")).toBeInTheDocument();
+    expect(within(summary).getByText("Token required")).toBeInTheDocument();
+  });
+
+  it("keeps grade status diagnostics collapsed and sanitizes command failures", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(
+        createAssignmentGradeStatusResult(
+          createAssignmentGradeStatusJson({
+            diagnostics: [
+              {
+                code: "grade_status_warning",
+                severity: "warning",
+                message: "Authorization: Bearer secret-token-value"
+              }
+            ]
+          }),
+          {
+            error: {
+              code: "grade_status_failed",
+              message: "Authorization: Bearer secret-token-value",
+              exitCode: 1,
+              stdoutSnippet: "ghp_secretTokenShouldNotRender",
+              stderrSnippet: "secret-token-value"
+            }
+          }
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const summary = await screen.findByLabelText("Grade status summary");
+    expect(within(summary).getByText("Grade status diagnostics (1)")).toBeInTheDocument();
+    expect(within(summary).getByText("Unable to load grade status summary.")).toBeInTheDocument();
+    expect(screen.queryByText(/secret-token-value/u)).toBeNull();
+    expect(screen.queryByText(/Authorization/u)).toBeNull();
+    expect(screen.queryByText(/ghp_secretTokenShouldNotRender/u)).toBeNull();
+    expect(screen.getByText("Sensitive diagnostic details were redacted.")).toBeInTheDocument();
+  });
+
+  it("does not call mutating commands while loading the grade status summary", async () => {
+    const api = mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+
+    renderAssignmentDetailPage();
+
+    await screen.findByLabelText("Grade status summary");
+
+    expect(api.getAssignmentGradeStatus).toHaveBeenCalledWith({
+      courseFolderId: SELECTION.courseFolderId,
+      courseFolderPath: SELECTION.courseFolderPath,
+      assignmentFile: SELECTION.assignmentFile
+    });
+    expect(api.applyAssignment).not.toHaveBeenCalled();
+    expect(api.gradeAssignment).not.toHaveBeenCalled();
+    expect(api.getFacultyReport).not.toHaveBeenCalled();
   });
 
   it("shows copy failure feedback without storing copied values", async () => {

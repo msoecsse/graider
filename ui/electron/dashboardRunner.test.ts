@@ -34,6 +34,11 @@ const COURSE_FOLDER: CourseFolderRecord = {
   lastDashboardStatus: null
 };
 
+const SPACE_COURSE_FOLDER: CourseFolderRecord = {
+  ...COURSE_FOLDER,
+  path: "/Users/sean/Box Sync/WebstormProjects/graider-sandbox/csc1120"
+};
+
 const createDashboardJson = (status: string = "success"): DashboardJsonResponse => ({
   schemaVersion: 1,
   commandName: "dashboard",
@@ -100,6 +105,29 @@ describe("dashboardRunner", () => {
         [GITHUB_TOKEN_ENV_NAME]: "secret-token"
       }
     });
+  });
+
+  it("runs dashboard with a selected course folder path containing spaces as cwd", async () => {
+    const runner = createRunner([createProcessResult()]);
+
+    const result = await runDashboardCommand({
+      courseFolder: SPACE_COURSE_FOLDER,
+      token: "secret-token",
+      runner,
+      env: { PATH: "/bin" }
+    });
+
+    expect(result.status).toBe("success");
+    expect(runner).toHaveBeenCalledWith({
+      command: "graider",
+      args: ["dashboard", "--json"],
+      cwd: SPACE_COURSE_FOLDER.path,
+      env: {
+        PATH: "/bin",
+        [GITHUB_TOKEN_ENV_NAME]: "secret-token"
+      }
+    });
+    expect(vi.mocked(runner).mock.calls[0]?.[0].args).not.toContain(SPACE_COURSE_FOLDER.path);
   });
 
   it("returns dashboard JSON from a nonzero graider exit", async () => {
@@ -203,6 +231,47 @@ describe("dashboardRunner", () => {
     );
   });
 
+  it("returns safe dashboard failure diagnostics with cwd, exit code, and runner metadata", async () => {
+    const runner = createRunner([
+      createProcessResult({
+        stdout: "Authorization: Bearer ghp_secret\n",
+        stderr: "failed in /Users/sean/Box Sync/WebstormProjects/graider-sandbox/csc1120\n",
+        exitCode: FAILURE_EXIT_CODE,
+        signal: null,
+        diagnostic: {
+          runnerMode: "bundled",
+          command: "graider",
+          args: ["dashboard", "--json"],
+          cwd: SPACE_COURSE_FOLDER.path,
+          executablePath: "/Applications/Graider.app/Contents/MacOS/Graider",
+          helperPath:
+            "/Applications/Graider.app/Contents/Resources/app.asar.unpacked/dist-graider-cli/index.js"
+        }
+      })
+    ]);
+
+    const result = await runDashboardCommand({
+      courseFolder: SPACE_COURSE_FOLDER,
+      token: "secret-token",
+      runner
+    });
+
+    expect(result.error).toMatchObject({
+      code: "dashboard_command_failed",
+      commandName: "dashboard",
+      cwd: SPACE_COURSE_FOLDER.path,
+      exitCode: FAILURE_EXIT_CODE,
+      runnerMode: "bundled",
+      executablePath: "/Applications/Graider.app/Contents/MacOS/Graider",
+      helperPath:
+        "/Applications/Graider.app/Contents/Resources/app.asar.unpacked/dist-graider-cli/index.js",
+      argv: ["graider", "dashboard", "--json"],
+      signal: null
+    });
+    expect(JSON.stringify(result.error)).not.toContain("ghp_secret");
+    expect(result.error?.stdoutSnippet).toBe("Authorization: Bearer [redacted]\n");
+  });
+
   it("returns course_folder_not_found for unknown registry ids", async () => {
     const runner = createRunner([createProcessResult()]);
 
@@ -263,9 +332,40 @@ describe("dashboardRunner", () => {
     const registry = loadCourseRegistry(registryPath);
 
     expect(result.status).toBe("failure");
-    expect(result.error?.code).toBe("github_token_unavailable");
-    expect(runner).toHaveBeenCalledTimes(1);
+    expect(result.error?.code).toBe("github_cli_not_found");
+    expect(vi.mocked(runner).mock.calls.some(([request]) => request.command === "graider")).toBe(
+      false
+    );
     expect(registry.courseFolders[0]?.lastRefreshedAt).toBeNull();
+  });
+
+  it("passes the GitHub CLI token only to the graider child process env", async () => {
+    const courseFolder = addCourseFolderToRegistry(registryPath, COURSE_FOLDER.path);
+    const runner = createRunner([
+      createProcessResult({ stdout: "secret-gh-token\n" }),
+      createProcessResult()
+    ]);
+
+    const result = await refreshCourseFolder(registryPath, courseFolder.id, {
+      runner,
+      env: {}
+    });
+
+    expect(result.status).toBe("success");
+    expect(vi.mocked(runner).mock.calls[0]?.[0]).toEqual({
+      command: "gh",
+      args: ["auth", "token"],
+      env: {}
+    });
+    expect(vi.mocked(runner).mock.calls[1]?.[0]).toEqual({
+      command: "graider",
+      args: ["dashboard", "--json"],
+      cwd: COURSE_FOLDER.path,
+      env: {
+        [GITHUB_TOKEN_ENV_NAME]: "secret-gh-token"
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-gh-token");
   });
 
   it("refreshes all folders and contains one folder failure", async () => {
@@ -286,5 +386,54 @@ describe("dashboardRunner", () => {
     expect(result.results).toHaveLength(2);
     expect(result.results[0]?.status).toBe("success");
     expect(result.results[1]?.status).toBe("failure");
+  });
+
+  it("loads persisted registry folders and keeps refreshing after one folder fails", async () => {
+    const firstFolder = addCourseFolderToRegistry(registryPath, "/Users/sean/dev/csc1120");
+    const missingFolder = addCourseFolderToRegistry(registryPath, "/Users/sean/dev/missing-course");
+    const runner = createRunner([
+      createProcessResult(),
+      createProcessResult({
+        stdout: "",
+        stderr: "folder missing",
+        exitCode: null,
+        error: { code: "ENOENT", message: "spawn graider ENOENT" }
+      })
+    ]);
+
+    const result = await refreshDashboard(registryPath, {
+      runner,
+      env: { [GITHUB_TOKEN_ENV_NAME]: "secret-token" },
+      now: () => FIXED_REFRESH_DATE
+    });
+    const registry = loadCourseRegistry(registryPath);
+
+    expect(result.status).toBe("partial_failure");
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0]).toMatchObject({
+      courseFolderId: firstFolder.id,
+      status: "success"
+    });
+    expect(result.results[1]).toMatchObject({
+      courseFolderId: missingFolder.id,
+      status: "failure",
+      error: {
+        code: "graider_cli_not_found"
+      }
+    });
+    expect(runner).toHaveBeenNthCalledWith(1, {
+      command: "graider",
+      args: ["dashboard", "--json"],
+      cwd: firstFolder.path,
+      env: { [GITHUB_TOKEN_ENV_NAME]: "secret-token" }
+    });
+    expect(runner).toHaveBeenNthCalledWith(2, {
+      command: "graider",
+      args: ["dashboard", "--json"],
+      cwd: missingFolder.path,
+      env: { [GITHUB_TOKEN_ENV_NAME]: "secret-token" }
+    });
+    expect(registry.courseFolders[0]?.lastDashboardStatus).toBe("success");
+    expect(registry.courseFolders[1]?.lastDashboardStatus).toBe("failure");
   });
 });

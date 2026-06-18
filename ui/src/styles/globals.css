@@ -143,6 +143,53 @@ h1 {
   color: #24292f;
 }
 
+.github-auth-status {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  background: #ffffff;
+  margin: 0 0 22px;
+  padding: 16px 18px;
+}
+
+.github-auth-status h2 {
+  margin-bottom: 6px;
+  font-size: 1rem;
+}
+
+.github-auth-status p {
+  color: #57606a;
+  margin-bottom: 8px;
+}
+
+.github-auth-status p:last-child {
+  margin-bottom: 0;
+}
+
+.github-auth-status pre {
+  display: inline-block;
+  margin: 0 0 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #f6f8fa;
+  color: #24292f;
+  padding: 8px 10px;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.875rem;
+}
+
+.github-auth-status__note {
+  max-width: 760px;
+}
+
+.github-auth-status__diagnostic {
+  font-size: 0.875rem;
+}
+
 .danger-action {
   min-height: 38px;
   border: 1px solid #d0d7de;
@@ -843,6 +890,79 @@ h1 {
   width: fit-content;
 }
 
+.grade-status-summary-panel {
+  grid-column: 1 / -1;
+}
+
+.grade-status-summary-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.grade-status-summary-panel__header h2 {
+  margin-bottom: 6px;
+}
+
+.grade-status-summary-table-wrap {
+  overflow-x: auto;
+}
+
+.grade-status-summary-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.grade-status-summary-table th,
+.grade-status-summary-table td {
+  border-top: 1px solid #d8dee4;
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.grade-status-summary-table th {
+  color: #57606a;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.grade-status-summary-table td {
+  overflow-wrap: anywhere;
+}
+
+.grade-status-summary-diagnostics {
+  border-top: 1px solid #d8dee4;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.grade-status-summary-diagnostics summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.grade-status-summary-diagnostics[open] summary {
+  margin-bottom: 12px;
+}
+
+.assignment-detail-disclosure {
+  min-width: 0;
+}
+
+.assignment-detail-disclosure summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.assignment-detail-disclosure[open] summary {
+  margin-bottom: 14px;
+}
+
 .preview-only-notice {
   border: 1px solid #d8dee4;
   border-left: 5px solid #0969da;
@@ -1031,6 +1151,10 @@ h1 {
     padding-top: 0;
   }
 
+  .github-auth-status {
+    display: grid;
+  }
+
   .course-card-section__header {
     align-items: flex-start;
     flex-direction: column;
@@ -1059,6 +1183,10 @@ h1 {
 
   .assignment-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .grade-status-summary-panel__header {
+    flex-direction: column;
   }
 
   .apply-preview-counts {

@@ -85,14 +85,23 @@ unsigned app notes, bundled CLI details, and packaged smoke-test steps.
 - The `graider` CLI on `PATH` only for development-mode UI testing, normally
   through `npm run build` and `npm link`.
 - The packaged app uses its bundled CLI instead of PATH `graider`.
-- GitHub CLI (`gh`) when relying on the token fallback.
-- `GRAIDER_GITHUB_TOKEN` when launching the app with an explicit token.
+- GitHub CLI (`gh`) for the recommended `gh auth login` setup.
+- `GRAIDER_GITHUB_TOKEN` only when launching the app with an explicit token.
 - Git, because Graider operates from course-admin repositories.
 
-The Electron token resolver checks `GRAIDER_GITHUB_TOKEN` first. If it is not
-set, the main process runs `gh auth token`. Resolved tokens are passed only to
-child Graider processes as `GRAIDER_GITHUB_TOKEN`; the renderer never receives
-or stores token values.
+Graider checks GitHub authentication on startup. The Electron token resolver
+checks `GRAIDER_GITHUB_TOKEN` first. If it is not set, the main process runs
+`gh auth token`. If `gh` is not available through the inherited PATH, the
+packaged app checks common GitHub CLI install locations such as
+`/opt/homebrew/bin/gh`, `/usr/local/bin/gh`, and `/usr/bin/gh`. Resolved tokens
+are passed only to child Graider processes as `GRAIDER_GITHUB_TOKEN`; the
+renderer never receives or stores token values.
+
+For packaged macOS app testing, prefer `gh auth login`. Apps opened by
+double-click may not see tokens exported from shell startup files such as
+`.zshrc` or `.zprofile`.
+If a private GitHub link opens as 404 in the browser, sign into GitHub in the
+browser with the same account.
 
 ## End-to-End Smoke Test Checklist
 
@@ -104,8 +113,17 @@ Actions workflow runs.
 - [ ] Start Electron with `cd ui` and `npm run dev:electron`.
 - [ ] Register or open a sandbox course folder.
 - [ ] Confirm the dashboard loads course and assignment cards.
+- [ ] Restart Electron and confirm the registered course folder auto-loads
+      without pressing Refresh.
 - [ ] Open Assignment Detail from a dashboard assignment row.
-- [ ] Confirm Assignment Detail loads and diagnostics render safely.
+- [ ] Confirm Assignment Detail loads with existing header actions and Summary,
+      Template, Grading, Student reports, Roster / Sections, Grade Status
+      Summary, Diagnostics, and Actions panels.
+- [ ] Confirm Grade Status Summary appears before Diagnostics.
+- [ ] Confirm Grade Status Summary rows show student identity, section,
+      repository, concise status, readable last update, and available run links.
+- [ ] Confirm Grade Status Summary omits the workflow column and raw ISO
+      timestamps.
 - [ ] Open Apply Preview.
 - [ ] Confirm Apply Preview auto-loads and uses `Would ...` row wording.
 - [ ] Confirm apply remains disabled when blockers exist.
@@ -147,8 +165,15 @@ mutate GitHub/course state or start GitHub Actions workflows.
 - [ ] Build/package the app with `cd ui && npm run package`.
 - [ ] Launch the packaged app from `ui/release/`.
 - [ ] Register or open a course folder.
+- [ ] Register or open a course folder whose path contains a space, such as
+      `/Users/sean/Box Sync/.../csc1120`.
 - [ ] Confirm Dashboard loads.
+- [ ] Quit and relaunch the packaged app, then confirm registered folders
+      auto-load dashboard cards without pressing Refresh.
 - [ ] Confirm Assignment Detail loads.
+- [ ] Confirm Assignment Detail keeps its existing structure, shows Grade
+      Status Summary before Diagnostics, omits the workflow column from that
+      summary, formats timestamps readably, and preserves workflow actions.
 - [ ] Confirm Apply Preview loads.
 - [ ] Confirm Grade Dispatch Preview loads.
 - [ ] Confirm Grade Status loads.
@@ -157,8 +182,8 @@ mutate GitHub/course state or start GitHub Actions workflows.
       app still loads dashboard data through the bundled CLI.
 - [ ] Confirm a missing/broken bundled CLI resource shows a clear bundled-CLI
       error instead of a blank page or raw stack trace.
-- [ ] Confirm missing token shows a safe diagnostic when GitHub checks/actions
-      need authentication.
+- [ ] Confirm startup shows GitHub authentication status and missing auth gives
+      `gh auth login` guidance.
 - [ ] Confirm external links open in the browser.
 - [ ] Restart the packaged app and confirm the course folder registry persists.
 
@@ -170,10 +195,13 @@ Verify these states with mocked tests or a sandbox setup:
       message.
 - [ ] Missing packaged bundled CLI returns a safe `bundled_graider_cli_not_found`
       style message.
-- [ ] Missing GitHub token shows token guidance and does not render token-like
-      values.
-- [ ] `gh auth token` unavailable returns safe token guidance.
+- [ ] Missing GitHub authentication shows `gh auth login` guidance and does not
+      render token-like values.
+- [ ] Missing GitHub CLI shows install-and-login guidance.
+- [ ] `gh auth token` unavailable returns safe auth guidance.
 - [ ] Invalid course folder fails safely at dashboard load.
+- [ ] Valid course folder paths with spaces run dashboard with the selected
+      folder as `cwd`.
 - [ ] Invalid assignment file fails safely on assignment-scoped pages.
 - [ ] Backend command exits nonzero with valid JSON and the UI renders the JSON
       diagnostics.
@@ -183,6 +211,10 @@ Verify these states with mocked tests or a sandbox setup:
       visible.
 - [ ] Backend command returns `failure` with diagnostics and the UI shows those
       diagnostics safely.
+- [ ] Registered course folders auto-refresh on app launch and manual Refresh
+      remains available.
+- [ ] Startup auto-refresh failures show folder diagnostics and do not block
+      other registered folders.
 - [ ] Empty dashboard shows an empty state instead of a blank screen.
 - [ ] Empty target student list shows a no-targets/diagnostic state.
 - [ ] Missing student repository rows render as blocked, missing, unknown, or
@@ -207,7 +239,8 @@ Verify these states with mocked tests or a sandbox setup:
 - Command: `graider assignment detail <assignment.yml> --json`
 - Boundary: read-only
 - Success display: assignment/course/term context, readiness, roster, template,
-  grading, reports, apply state, and diagnostics
+  grading, compact Grade Status Summary before diagnostics, and on-demand
+  diagnostics
 - Failure display: safe command error or diagnostics while preserving navigation
 - Navigation/refresh: `Refresh detail`, Back to dashboard, Apply Preview, Grade
   Dispatch Preview, and Grade Status

@@ -38,12 +38,14 @@ and renders:
 
 - assignment metadata and local context
 - readiness summary and needs-attention callouts
-- template, grading, student report, roster, and section details
-- grouped diagnostics
+- the existing summary, template, grading, student report, roster, diagnostics,
+  and action panels
+- a compact Grade Status Summary below the main assignment panels and before
+  diagnostics
 - safe copy affordances for useful strings
 - a preview-only apply entry point
 - a guarded confirmed apply execution flow from the Apply Preview page
-- disabled placeholders for future mutation workflow actions
+- grade dispatch and grade status entry points
 
 The detail page itself does not apply assignments, dispatch grading, generate
 reports, publish reports, generate workflows, edit `assignment.yml`, inspect
@@ -100,6 +102,10 @@ Assignment detail page -> Grade Status
 Grade Dispatch Result Summary -> Grade Status
 Grade Status -> Faculty Report
 ```
+
+The full Grade Status page remains the detailed/polling status surface and owns
+the Faculty Report navigation action. Student report publishing remains
+deferred.
 
 The renderer passes the original `courseFolderId`, `courseFolderPath`, and
 `assignmentFile` into the preview page. It may also pass the loaded assignment
@@ -406,8 +412,8 @@ are `not_required`.
 
 ### Header
 
-Shows the assignment title, course/term subtitle, Back to dashboard, and Refresh
-detail.
+Shows the assignment title, course/term subtitle, Back to dashboard, Preview
+apply, Preview grading, View grading status, and Refresh detail.
 
 ### Readiness Summary
 
@@ -415,46 +421,46 @@ Shows the faculty-facing readiness label, a short explanation, a raw command
 status chip as secondary context, and concise needs-attention items when
 present.
 
-### Summary
+### Assignment Panels
 
-Shows title, slug, type, status, points, due date, late policy, sections,
-faculty owner, LMS assignment ID, grading category, assignment file path, and
-course folder path. Missing optional values render neutral placeholders such as
-`Not configured`.
+The page keeps the existing assignment detail structure: Summary, Template,
+Grading, Student reports, Roster / Sections, Diagnostics, and Actions. These
+panels are driven by assignment-detail JSON and remain read-only.
 
-### Template
+### Grade Status Summary
 
-Shows repository, branch, overall status, repository status, and branch status.
-When the repository is present, the page offers `Copy template repository`.
+Assignment Detail also loads a read-only grade-status snapshot for the selected
+assignment and renders a compact `Grade status summary` section before
+Diagnostics. The summary is intentionally smaller than the full Grade Status
+view. It shows student identity, section, repository short name, concise status,
+readable last update, and available run links. It omits the workflow column,
+raw ISO timestamps, full started/completed run details, and implementation-heavy
+diagnostics.
 
-### Grading
+Student identity prefers the roster/course username when the grade-status JSON
+provides it. If no roster/course username is available, the UI falls back to the
+stable student id, then GitHub username as the last display fallback.
 
-Shows enabled, mode, workflow path, artifact name, result file, workflow file
-status, and `workflow_dispatch` status. No-grading assignments render `No
-grading configured.` and are not styled as errors.
+Timestamp labels are faculty-readable and locale-formatted. Completed runs use
+`Last completed`; rows with only `startedAt` use `Started`; rows without either
+field show `No run time available`.
 
-### Student Reports
-
-Shows enabled and mode. Disabled student reports render as a normal configured
-state, not an error.
-
-### Roster / Sections
-
-Shows sections, section count, active student count, and total student count.
-When roster data is missing, the panel renders `Roster summary unavailable.`
+The compact summary does not poll. The full Grade Status view remains the
+detailed status table and page-local auto-refresh surface.
 
 ### Diagnostics
 
-Shows grouped diagnostics or `No diagnostics.`
+Critical blockers remain visible through the readiness summary. Full diagnostic
+groups render inside a collapsible `Diagnostics (N)` section. Token-like values
+are redacted before display.
 
-### Available Actions
+### Workflow Actions
 
-Shows the action area. `Validate / Refresh detail` reruns assignment detail.
-`Preview apply` opens the UI-3A Apply Preview page and runs only the preview
-command. `Grade submissions` opens the UI-4A Grade Dispatch Preview page and
-runs only the grade-preview command. `View grading status` opens the UI-5A Grade
-Status page and runs only the grade-status command. Report, publish, and
-workflow generation actions remain disabled placeholders.
+Header actions open existing workflow pages. `Preview apply` opens UI-3A Apply
+Preview and runs only the preview command. `Preview grading` opens UI-4A Grade
+Dispatch Preview and runs only the grade-preview command. `View grading status`
+opens UI-5A Grade Status and runs only the grade-status command. Mutating apply
+and grading actions remain guarded by their existing confirmation pages.
 
 ## Apply Preview Page
 
@@ -857,42 +863,38 @@ When local open/reveal is implemented later, required safety rules are:
 - missing paths return safe structured errors
 - no generic shell/open arbitrary path IPC is exposed
 
-## Disabled Future Actions
+## Assignment Detail Workflow Actions
 
 Visible actions:
 
-- Validate / Refresh detail
+- Refresh detail
 - Preview apply
-- Grade submissions
+- Preview grading
 - View grading status
-- Generate report
-- Publish student reports
-- Generate/update workflow
 
-`Validate / Refresh detail` is functional and read-only. It reruns assignment
-detail.
+`Refresh detail` is functional and read-only. It reruns assignment detail.
 
 `Preview apply` is functional in UI-3A and opens the preview-only Apply Preview
 page. It does not call actual apply execution.
 
-`Grade submissions` is functional and opens the Grade Dispatch Preview page.
+`Preview grading` is functional and opens the Grade Dispatch Preview page.
 The page remains preview-only until explicit UI-4B confirmation is accepted.
 
 `View grading status` is functional in UI-5A and opens the read-only Grade Status
 page. It does not call `graider report`, download artifacts, parse grading
 result files, dispatch workflows, or mutate local/GitHub state.
 
-`View faculty report` is functional from Grade Status in UI-6A. It opens the
-Faculty Report view and runs `graider report <assignment.yml> --json` through
-narrow IPC. It does not pass `--publish-student-reports`.
+`View full grade status` in the compact Grade Status Summary opens the same
+UI-5A Grade Status page. `View faculty report` is available from the full Grade
+Status view in UI-6A. It opens the Faculty Report view and runs
+`graider report <assignment.yml> --json` through narrow IPC. It does not pass
+`--publish-student-reports`.
 
 The final apply action lives on the Apply Preview page and is implemented in
 UI-3B with confirmation. The final grade dispatch action lives on the Grade
-Dispatch Preview page and is implemented in UI-4B with confirmation. Report,
-publish, and workflow generation remain disabled placeholders. Disabled actions
-show either `Coming in a future slice` or `Unavailable for this assignment`,
-based on the action availability returned by the assignment detail JSON. They
-do not call mutation commands.
+Dispatch Preview page and is implemented in UI-4B with confirmation. Student
+report publishing and workflow generation remain deferred and are not launched
+from Assignment Detail.
 
 ## Manual Smoke-Test Checklist
 
@@ -920,12 +922,15 @@ Checklist:
 - [ ] Assignment detail page opens.
 - [ ] Detail auto-loads.
 - [ ] Readiness summary appears.
-- [ ] Summary panel renders points, due date, and sections.
-- [ ] Template panel renders repository, branch, and status fields.
-- [ ] Grading panel renders workflow, artifact, result file, and
-      `workflow_dispatch`.
+- [ ] Existing Summary, Template, Grading, Student reports, Roster / Sections,
+      Diagnostics, and Actions panels render.
+- [ ] Grade Status Summary appears before Diagnostics.
+- [ ] Grade Status Summary rows show student identity, section, repository,
+      concise status, readable last update, and available run links.
+- [ ] Grade Status Summary omits the workflow column and raw ISO timestamps.
+- [ ] View full grade status opens the full Grade Status view.
 - [ ] No-grading assignment renders cleanly if a fixture exists.
-- [ ] Diagnostics render and are grouped.
+- [ ] Diagnostics render in the collapsible diagnostics section.
 - [ ] Copy assignment path works.
 - [ ] Copy course folder path works.
 - [ ] Copy template repository works when present.
@@ -943,7 +948,7 @@ Checklist:
 - [ ] Copy template repository works when present on the preview page.
 - [ ] Refresh preview keeps prior preview visible.
 - [ ] Back returns to the assignment detail page.
-- [ ] Click Grade submissions.
+- [ ] Click Preview grading.
 - [ ] Grade Dispatch Preview page opens.
 - [ ] Preview auto-loads.
 - [ ] Preview-only notice says no GitHub Actions workflows will be started.
@@ -969,7 +974,7 @@ Checklist:
 - [ ] Full grade status auto-loads.
 - [ ] Manual Refresh status keeps prior rows visible.
 - [ ] Queued/in-progress rows auto-refresh while the page remains open.
-- [ ] Click View faculty report.
+- [ ] From Grade Status, click View faculty report.
 - [ ] Faculty Report page opens.
 - [ ] Report summary and generated report paths render.
 - [ ] Publish student reports is disabled from Faculty Report.

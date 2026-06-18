@@ -48,6 +48,8 @@ const TOKEN_REQUIRED_REASON = "token_required";
 const LATEST_WORKFLOW_RUN_SELECTION = "latest_configured_workflow_run";
 const NO_RUN_SELECTION = "no_configured_workflow_run";
 const ACTIVE_ASSIGNMENT_STATUSES = ["active", "closed"] as const;
+const GITHUB_HOST = "github.com";
+const ACTIONS_RUN_PATH_SEGMENT_COUNT = 5;
 
 export interface BuildAssignmentGradeStatusInput {
   readonly cwd: string;
@@ -308,9 +310,43 @@ const sortRunsNewestFirst = (runs: readonly GitHubWorkflowRun[]): GitHubWorkflow
 const selectLatestWorkflowRun = (runs: readonly GitHubWorkflowRun[]): GitHubWorkflowRun | null =>
   sortRunsNewestFirst(runs)[0] ?? null;
 
+const createFallbackRunUrl = (
+  repository: ManifestRepositoryRecord,
+  run: GitHubWorkflowRun
+): string =>
+  `https://${GITHUB_HOST}/${repository.repository.fullName}/actions/runs/${String(run.id)}`;
+
+const isMatchingRunUrl = (
+  urlValue: string,
+  repository: ManifestRepositoryRecord,
+  runId: number
+): boolean => {
+  try {
+    const url = new URL(urlValue);
+    const pathParts = url.pathname.split("/").filter((part) => part.length > 0);
+    const [owner, repo, actions, runs, pathRunId] = pathParts;
+
+    return (
+      url.protocol === "https:" &&
+      url.hostname === GITHUB_HOST &&
+      url.search.length === 0 &&
+      url.hash.length === 0 &&
+      pathParts.length === ACTIONS_RUN_PATH_SEGMENT_COUNT &&
+      owner === repository.repository.owner &&
+      repo === repository.repository.name &&
+      actions === "actions" &&
+      runs === "runs" &&
+      pathRunId === String(runId)
+    );
+  } catch {
+    return false;
+  }
+};
+
 const createRunUrl = (repository: ManifestRepositoryRecord, run: GitHubWorkflowRun): string =>
-  run.runUrl ??
-  `https://github.com/${repository.repository.fullName}/actions/runs/${String(run.id)}`;
+  run.runUrl !== undefined && isMatchingRunUrl(run.runUrl, repository, run.id)
+    ? run.runUrl
+    : createFallbackRunUrl(repository, run);
 
 const createRow = (
   student: RosterStudent,

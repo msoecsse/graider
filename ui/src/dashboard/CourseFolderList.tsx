@@ -5,6 +5,7 @@ interface CourseFolderListProps {
   readonly courseFolders: readonly CourseFolderRecord[];
   readonly refreshResults: Readonly<Record<string, CourseFolderDashboardResult>>;
   readonly refreshingId: string | null;
+  readonly isRefreshingAll: boolean;
   readonly onRemove: (id: string) => void;
   readonly onRefresh: (id: string) => void;
   readonly removingId: string | null;
@@ -27,6 +28,14 @@ const getErrorMessage = (result: CourseFolderDashboardResult): string => {
     return "GitHub token required. Graider needs GitHub access to check current course and assignment status. Run: gh auth login";
   }
 
+  if (errorCode === "github_cli_not_found") {
+    return "GitHub CLI was not found. Install GitHub CLI or set GRAIDER_GITHUB_TOKEN before launching Graider.";
+  }
+
+  if (errorCode === "github_cli_auth_failed") {
+    return "GitHub CLI is installed, but no authenticated token was available. Run gh auth login, then refresh.";
+  }
+
   if (errorCode === "graider_cli_not_found") {
     return "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
   }
@@ -37,6 +46,10 @@ const getErrorMessage = (result: CourseFolderDashboardResult): string => {
 
   if (errorCode === "invalid_dashboard_json") {
     return "Graider dashboard returned invalid JSON.";
+  }
+
+  if (errorCode === "dashboard_command_failed") {
+    return "Dashboard command failed while reading this course folder.";
   }
 
   return "Could not refresh this course folder.";
@@ -58,6 +71,7 @@ export const CourseFolderList = ({
   courseFolders,
   refreshResults,
   refreshingId,
+  isRefreshingAll,
   onRemove,
   onRefresh,
   removingId
@@ -73,6 +87,7 @@ export const CourseFolderList = ({
       {courseFolders.map((courseFolder) => {
         const refreshResult = refreshResults[courseFolder.id];
         const isRefreshing = refreshingId === courseFolder.id;
+        const isRefreshDisabled = isRefreshing || isRefreshingAll;
 
         return (
           <li className="folder-list__item" key={courseFolder.id}>
@@ -110,7 +125,7 @@ export const CourseFolderList = ({
                 className="secondary-action"
                 type="button"
                 aria-label={`Refresh ${courseFolder.path}`}
-                disabled={isRefreshing}
+                disabled={isRefreshDisabled}
                 onClick={() => {
                   onRefresh(courseFolder.id);
                 }}

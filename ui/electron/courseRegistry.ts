@@ -12,6 +12,8 @@ const HASH_ALGORITHM = "sha256";
 const HASH_ENCODING = "hex";
 const EMPTY_LENGTH = 0;
 const FIRST_FILE_PATH_INDEX = 0;
+const COURSE_CONFIG_FILE_NAME = "course.yml";
+const TERMS_DIRECTORY_NAME = "terms";
 
 export interface CourseRegistry {
   readonly schemaVersion: typeof COURSE_REGISTRY_SCHEMA_VERSION;
@@ -21,6 +23,20 @@ export interface CourseRegistry {
 export interface CourseFolderPicker {
   readonly selectFolder: () => Promise<string | null>;
 }
+
+export type CourseFolderValidationResult =
+  | {
+      readonly status: "success";
+      readonly selectedPath: string;
+      readonly normalizedPath: string;
+    }
+  | {
+      readonly status: "failure";
+      readonly selectedPath: string;
+      readonly normalizedPath: string;
+      readonly code: string;
+      readonly message: string;
+    };
 
 export const createEmptyCourseRegistry = (): CourseRegistry => ({
   schemaVersion: COURSE_REGISTRY_SCHEMA_VERSION,
@@ -32,6 +48,74 @@ export const getCourseRegistryPath = (userDataPath: string): string =>
 
 export const normalizeCourseFolderPath = (folderPath: string): string =>
   path.normalize(path.resolve(folderPath));
+
+const pathExists = (candidatePath: string): boolean => fs.existsSync(candidatePath);
+
+const isDirectory = (candidatePath: string): boolean => {
+  try {
+    return fs.statSync(candidatePath).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+const isFile = (candidatePath: string): boolean => {
+  try {
+    return fs.statSync(candidatePath).isFile();
+  } catch {
+    return false;
+  }
+};
+
+export const validateCourseFolderPath = (folderPath: string): CourseFolderValidationResult => {
+  const normalizedPath = normalizeCourseFolderPath(folderPath);
+
+  if (!pathExists(normalizedPath)) {
+    return {
+      status: "failure",
+      selectedPath: folderPath,
+      normalizedPath,
+      code: "course_folder_missing",
+      message: "Selected course folder does not exist."
+    };
+  }
+
+  if (!isDirectory(normalizedPath)) {
+    return {
+      status: "failure",
+      selectedPath: folderPath,
+      normalizedPath,
+      code: "course_folder_not_directory",
+      message: "Selected course folder is not a directory."
+    };
+  }
+
+  if (!isFile(path.join(normalizedPath, COURSE_CONFIG_FILE_NAME))) {
+    return {
+      status: "failure",
+      selectedPath: folderPath,
+      normalizedPath,
+      code: "course_folder_missing_course_yml",
+      message: "Selected course folder must contain course.yml at its root."
+    };
+  }
+
+  if (!isDirectory(path.join(normalizedPath, TERMS_DIRECTORY_NAME))) {
+    return {
+      status: "failure",
+      selectedPath: folderPath,
+      normalizedPath,
+      code: "course_folder_missing_terms",
+      message: "Selected course folder must contain a terms directory."
+    };
+  }
+
+  return {
+    status: "success",
+    selectedPath: folderPath,
+    normalizedPath
+  };
+};
 
 export const createCourseFolderPathKey = (
   normalizedPath: string,
@@ -213,6 +297,31 @@ export const addCourseFolderToRegistry = (
   return addResult.courseFolder;
 };
 
+export const addValidatedCourseFolderToRegistry = (
+  registryPath: string,
+  folderPath: string,
+  openedAt: Date = new Date()
+): SelectCourseFolderResult => {
+  const validation = validateCourseFolderPath(folderPath);
+
+  if (validation.status === "failure") {
+    return {
+      canceled: false,
+      courseFolder: null,
+      error: {
+        code: validation.code,
+        message: validation.message,
+        folderPath: validation.normalizedPath
+      }
+    };
+  }
+
+  return {
+    canceled: false,
+    courseFolder: addCourseFolderToRegistry(registryPath, validation.normalizedPath, openedAt)
+  };
+};
+
 export const removeCourseFolderFromRegistry = (registryPath: string, id: string): void => {
   const registry = removeCourseFolder(loadCourseRegistry(registryPath), id);
 
@@ -236,8 +345,5 @@ export const selectCourseFolderWithPicker = async (
     };
   }
 
-  return {
-    canceled: false,
-    courseFolder: addCourseFolderToRegistry(registryPath, selectedFolder, openedAt)
-  };
+  return addValidatedCourseFolderToRegistry(registryPath, selectedFolder, openedAt);
 };

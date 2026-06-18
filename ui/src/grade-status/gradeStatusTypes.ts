@@ -74,6 +74,7 @@ export interface GradeStatusSummary {
 }
 
 export interface GradeStatusRepositoryRow {
+  readonly studentUsername: string | null;
   readonly studentId: string | null;
   readonly githubUsername: string | null;
   readonly section: string | null;

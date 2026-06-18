@@ -185,14 +185,15 @@ describe("assignmentDetailRunner", () => {
   });
 
   it("falls back to local detail when token resolution is unavailable", async () => {
-    const runner = createRunner([
-      createProcessResult({
-        stdout: "",
-        exitCode: null,
-        error: { code: "ENOENT", message: "missing gh" }
-      }),
-      createProcessResult()
-    ]);
+    const runner: ProcessRunner = vi.fn(async (request) =>
+      request.command === "graider"
+        ? createProcessResult()
+        : createProcessResult({
+            stdout: "",
+            exitCode: null,
+            error: { code: "ENOENT", message: "missing gh" }
+          })
+    );
 
     const result = await getAssignmentDetail(ASSIGNMENT_DETAIL_REQUEST, {
       runner,
@@ -207,11 +208,13 @@ describe("assignmentDetailRunner", () => {
       args: ["auth", "token"],
       env: {}
     });
-    expect(runner).toHaveBeenNthCalledWith(2, {
-      command: "graider",
-      args: ["assignment", "detail", ASSIGNMENT_DETAIL_REQUEST.assignmentFile, "--json"],
-      cwd: ASSIGNMENT_DETAIL_REQUEST.courseFolderPath,
-      env: {}
-    });
+    expect(vi.mocked(runner).mock.calls).toContainEqual([
+      {
+        command: "graider",
+        args: ["assignment", "detail", ASSIGNMENT_DETAIL_REQUEST.assignmentFile, "--json"],
+        cwd: ASSIGNMENT_DETAIL_REQUEST.courseFolderPath,
+        env: {}
+      }
+    ]);
   });
 });

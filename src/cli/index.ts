@@ -34,4 +34,4 @@ export const buildProgram = (): Command => {
   return program;
 };
 
-await buildProgram().parseAsync();
+await buildProgram().parseAsync(process.argv);
