@@ -79,6 +79,24 @@ The packaged app bundles the Graider CLI and should not require external
 `graider` on `PATH`. See [Electron Packaging Guide](electron-packaging.md) for
 unsigned app notes, bundled CLI details, and packaged smoke-test steps.
 
+For the RC1 faculty handoff package, run:
+
+```bash
+cd ui
+npm run release:rc1
+```
+
+That command builds the bundled CLI and UI, packages `Graider.app`, and assembles
+the faculty release folder and zip under:
+
+```text
+ui/dist-release/Graider-RC1/
+ui/dist-release/Graider-macOS-RC1.zip
+```
+
+The RC docs copied into the artifact are maintained in
+[`docs/release/rc1/`](release/rc1/).
+
 ## Required Local Tools
 
 - Node.js and npm. Root Graider currently targets Node `>=24 <25`.
@@ -342,6 +360,8 @@ These are intentionally outside the current release-readiness pass:
 - student-facing report preview
 - workflow generation UI
 - packaged installer/distribution
+- RC1 faculty zip distribution is scripted, but installer distribution remains
+  deferred
 - auto-update
 - background/app-wide grade monitoring
 - advanced report export, unless already implemented

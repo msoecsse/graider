@@ -47,6 +47,11 @@ For local development from this repository, see the startup commands in
 For packaged app builds and unsigned macOS app notes, see
 [Electron Packaging Guide](electron-packaging.md).
 
+If you received the RC1 faculty package, start with
+[`README-Start-Here.md`](release/rc1/README-Start-Here.md) and use
+[`FACULTY-SMOKE-TEST.md`](release/rc1/FACULTY-SMOKE-TEST.md) for sandbox
+validation.
+
 ## Course Folder Structure
 
 Graider expects a course-admin folder with `course.yml` at the root. Assignment

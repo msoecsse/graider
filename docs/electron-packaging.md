@@ -86,6 +86,30 @@ Expected output:
 ui/release/Graider-<version>-<arch>.dmg
 ```
 
+## RC1 Faculty Release Package
+
+Maintainers can assemble the repeatable RC1 faculty package from the UI package:
+
+```bash
+cd ui
+npm run release:rc1
+```
+
+The script runs `npm run package`, locates the unpacked macOS app from
+`ui/release/`, then creates:
+
+```text
+ui/dist-release/Graider-RC1/Graider.app
+ui/dist-release/Graider-RC1/README-Start-Here.md
+ui/dist-release/Graider-RC1/FACULTY-SMOKE-TEST.md
+ui/dist-release/Graider-RC1/KNOWN-ISSUES.md
+ui/dist-release/Graider-macOS-RC1.zip
+```
+
+The source RC documents live in [`docs/release/rc1/`](release/rc1/). The
+`ui/dist-release/` output is a generated local artifact and is not intended for
+source control.
+
 ## Running The Packaged App
 
 Open the unpacked app from Finder or from a terminal:
