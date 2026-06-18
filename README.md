@@ -207,6 +207,7 @@ See [live testing](docs/live-testing.md) before running live tests.
 - [Codex prompt template](docs/codex-prompt-template.md)
 - [GitHub token permissions](docs/github-token-permissions.md)
 - [CLI JSON contract](docs/cli-json-contract.md)
+- [Faculty CLI user guide](docs/faculty-cli-user-guide.md)
 - [Faculty UI user guide](docs/faculty-ui-user-guide.md)
 - [Electron assignment detail developer guide](docs/electron-assignment-detail-dev.md)
 - [Electron packaging guide](docs/electron-packaging.md)

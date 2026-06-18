@@ -39,5 +39,8 @@ tracks grading status, and renders faculty reports.
    -> Faculty Report
    ```
 
+Prefer Terminal? Use the
+[Faculty CLI user guide](../../faculty-cli-user-guide.md).
+
 If a private GitHub link opens as a 404 page, sign into GitHub in your browser
 with the same account used for `gh auth login`.

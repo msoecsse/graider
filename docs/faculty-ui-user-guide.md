@@ -52,6 +52,9 @@ If you received the RC1 faculty package, start with
 [`FACULTY-SMOKE-TEST.md`](release/rc1/FACULTY-SMOKE-TEST.md) for sandbox
 validation.
 
+For terminal-only use, see the
+[Faculty CLI user guide](faculty-cli-user-guide.md).
+
 ## Course Folder Structure
 
 Graider expects a course-admin folder with `course.yml` at the root. Assignment
