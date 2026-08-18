@@ -14,7 +14,10 @@ export interface RecentAssignmentSummary {
   readonly slug: string | null;
   readonly title: string | null;
   readonly status: string | null;
+  readonly gradingEnabled?: boolean | null;
   readonly assignmentFile: string | null;
+  readonly applyState?: string | null;
+  readonly sections?: readonly string[];
   readonly dueAt: string | null;
   readonly needsAttention: boolean;
   readonly diagnostics: readonly DashboardDiagnostic[];
@@ -33,6 +36,7 @@ export interface DashboardCard {
   readonly attentionCount: number | null;
   readonly roster: DashboardRosterSummary | null;
   readonly assignmentCount: number | null;
+  readonly assignments: readonly RecentAssignmentSummary[];
   readonly recentAssignments: readonly RecentAssignmentSummary[];
   readonly diagnostics: readonly DashboardDiagnostic[];
 }

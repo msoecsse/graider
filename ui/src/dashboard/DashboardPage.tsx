@@ -13,6 +13,10 @@ import type {
   NormalizedAssignmentDetail
 } from "../assignment-detail/assignmentDetailTypes";
 import { FacultyReportPage } from "../faculty-report/FacultyReportPage";
+import { CourseSetupPage } from "../course-setup/CourseSetupPage";
+import { AssignmentSetupPage } from "../assignment-setup/AssignmentSetupPage";
+import { AssignmentEditPage } from "../assignment-edit/AssignmentEditPage";
+import { RosterManagerPage } from "../roster-manager/RosterManagerPage";
 import { GradePreviewPage } from "../grade-preview/GradePreviewPage";
 import { GradeStatusPage } from "../grade-status/GradeStatusPage";
 import type { NormalizedGradeStatus } from "../grade-status/gradeStatusTypes";
@@ -78,8 +82,15 @@ export const DashboardPage = (): ReactElement => {
   const [selectedAssignment, setSelectedAssignment] = useState<AssignmentDetailSelection | null>(
     null
   );
+  const [selectedCourseSetupFolderPath, setSelectedCourseSetupFolderPath] = useState<string | null>(
+    null
+  );
+  const [selectedAssignmentSetupCourse, setSelectedAssignmentSetupCourse] =
+    useState<CourseFolderRecord | null>(null);
+  const [selectedRosterCourse, setSelectedRosterCourse] = useState<CourseFolderRecord | null>(null);
   const [selectedAssignmentDetailResult, setSelectedAssignmentDetailResult] =
     useState<AssignmentDetailResult | null>(null);
+  const [isEditingAssignment, setIsEditingAssignment] = useState(false);
   const [selectedApplyPreview, setSelectedApplyPreview] = useState<{
     readonly selection: AssignmentDetailSelection;
     readonly detail: NormalizedAssignmentDetail | null;
@@ -118,7 +129,8 @@ export const DashboardPage = (): ReactElement => {
       setGithubAuthState({
         status: "check_failed",
         result: null,
-        errorMessage: "GitHub authentication check failed. Try again after confirming GitHub CLI is installed."
+        errorMessage:
+          "GitHub authentication check failed. Try again after confirming GitHub CLI is installed."
       });
     }
   };
@@ -183,6 +195,24 @@ export const DashboardPage = (): ReactElement => {
       setErrorMessage(getSafeErrorMessage(error));
     } finally {
       setIsSelectingFolder(false);
+    }
+  };
+
+  const handleOpenCourseSetup = async (): Promise<void> => {
+    const selectCourseSetupFolder = window.graiderUI.selectCourseSetupFolder;
+
+    if (selectCourseSetupFolder === undefined) {
+      setErrorMessage("Course setup is unavailable in this app build.");
+      return;
+    }
+
+    try {
+      const result = await selectCourseSetupFolder();
+      if (!result.canceled && result.courseFolderPath !== null) {
+        setSelectedCourseSetupFolderPath(result.courseFolderPath);
+      }
+    } catch (error) {
+      setErrorMessage(getSafeErrorMessage(error));
     }
   };
 
@@ -325,6 +355,16 @@ export const DashboardPage = (): ReactElement => {
     }
   };
 
+  const handleOpenAssignmentSetup = (courseFolder: CourseFolderRecord): void => {
+    setSelectedAssignmentSetupCourse(courseFolder);
+    setErrorMessage(null);
+  };
+
+  const handleOpenRosterManager = (courseFolder: CourseFolderRecord): void => {
+    setSelectedRosterCourse(courseFolder);
+    setErrorMessage(null);
+  };
+
   const aggregatedDashboard = aggregateDashboardResults(refreshResults);
   const hasCourseFolders = courseFolders.length > 0;
   const visibleCards = filterAndSortDashboardCards(
@@ -361,6 +401,56 @@ export const DashboardPage = (): ReactElement => {
           setSelectedGradePreview(null);
           setSelectedGradeStatus(null);
           setSelectedFacultyReport(null);
+        }}
+      />
+    );
+  }
+
+  if (selectedCourseSetupFolderPath !== null) {
+    return (
+      <CourseSetupPage
+        courseFolderPath={selectedCourseSetupFolderPath}
+        onBack={() => {
+          setSelectedCourseSetupFolderPath(null);
+        }}
+        onSaved={() => {
+          setSelectedCourseSetupFolderPath(null);
+          void handleRefreshDashboard();
+        }}
+      />
+    );
+  }
+
+  if (selectedAssignmentSetupCourse !== null) {
+    return (
+      <AssignmentSetupPage
+        courseFolder={selectedAssignmentSetupCourse}
+        onBack={() => {
+          setSelectedAssignmentSetupCourse(null);
+        }}
+        onOpenAssignment={(selection) => {
+          setSelectedAssignmentSetupCourse(null);
+          setSelectedAssignment(selection);
+          setSelectedAssignmentDetailResult(null);
+          setSelectedApplyPreview(null);
+          setSelectedGradePreview(null);
+          setSelectedGradeStatus(null);
+          setSelectedFacultyReport(null);
+          void handleRefreshCourseFolder(selection.courseFolderId);
+        }}
+      />
+    );
+  }
+
+  if (selectedRosterCourse !== null) {
+    return (
+      <RosterManagerPage
+        courseFolder={selectedRosterCourse}
+        onBack={() => {
+          setSelectedRosterCourse(null);
+        }}
+        onSaved={() => {
+          void handleRefreshCourseFolder(selectedRosterCourse.id);
         }}
       />
     );
@@ -434,11 +524,26 @@ export const DashboardPage = (): ReactElement => {
   }
 
   if (selectedAssignment !== null) {
+    if (isEditingAssignment) {
+      return (
+        <AssignmentEditPage
+          selection={selectedAssignment}
+          onBack={() => setIsEditingAssignment(false)}
+          onSaved={() => {
+            setIsEditingAssignment(false);
+            setSelectedAssignmentDetailResult(null);
+          }}
+        />
+      );
+    }
     return (
       <AssignmentDetailPage
         selection={selectedAssignment}
         initialLoadResult={selectedAssignmentDetailResult}
         onDetailLoaded={setSelectedAssignmentDetailResult}
+        onEditAssignment={() => {
+          setIsEditingAssignment(true);
+        }}
         onBack={() => {
           setSelectedAssignment(null);
           setSelectedAssignmentDetailResult(null);
@@ -491,6 +596,15 @@ export const DashboardPage = (): ReactElement => {
             <p className="app-header__eyebrow">Graider</p>
             <h1 id="dashboard-title">Your Courses</h1>
           </div>
+          <button
+            className="secondary-action"
+            type="button"
+            onClick={() => {
+              void handleOpenCourseSetup();
+            }}
+          >
+            Set up course folder
+          </button>
         </div>
       </header>
 
@@ -517,19 +631,22 @@ export const DashboardPage = (): ReactElement => {
 
         <section className="github-auth-status" aria-labelledby="github-auth-title">
           <div>
-            <h2 id="github-auth-title">GitHub authentication: {
-              githubAuthState.status === "connected"
+            <h2 id="github-auth-title">
+              GitHub authentication:{" "}
+              {githubAuthState.status === "connected"
                 ? "Connected"
                 : githubAuthState.status === "not_connected"
                   ? "Not connected"
                   : githubAuthState.status === "check_failed"
                     ? "Check failed"
-                    : "Checking"
-            }</h2>
+                    : "Checking"}
+            </h2>
             {githubAuthState.status === "connected" ? (
               <p>
                 Repository checks and grading actions can use GitHub authentication
-                {githubAuthState.result.username === null ? "." : ` as ${githubAuthState.result.username}.`}
+                {githubAuthState.result.username === null
+                  ? "."
+                  : ` as ${githubAuthState.result.username}.`}
               </p>
             ) : null}
             {githubAuthState.status === "not_connected" ? (
@@ -549,7 +666,9 @@ export const DashboardPage = (): ReactElement => {
             {githubAuthState.status === "check_failed" ? (
               <p>{githubAuthState.errorMessage}</p>
             ) : null}
-            {githubAuthState.status === "checking" ? <p>Checking GitHub authentication...</p> : null}
+            {githubAuthState.status === "checking" ? (
+              <p>Checking GitHub authentication...</p>
+            ) : null}
           </div>
           <button
             className="secondary-action"
@@ -593,7 +712,17 @@ export const DashboardPage = (): ReactElement => {
         {!isLoadingFolders && hasCourseFolders ? (
           <>
             <FolderErrorPanel folderErrors={visibleFolderErrors} />
-            <CourseCardGrid cards={visibleCards} onOpenAssignment={handleOpenAssignmentDetail} />
+            <CourseCardGrid
+              cards={visibleCards}
+              courseFolders={courseFolders}
+              refreshingId={refreshingId}
+              onOpenAssignment={handleOpenAssignmentDetail}
+              onSetupAssignment={handleOpenAssignmentSetup}
+              onManageRosters={handleOpenRosterManager}
+              onRefresh={(id) => {
+                void handleRefreshCourseFolder(id);
+              }}
+            />
 
             {isRefreshingAll ? <p className="loading-state">Loading dashboard...</p> : null}
 
@@ -632,6 +761,8 @@ export const DashboardPage = (): ReactElement => {
               onRemove={(id) => {
                 void handleRemoveCourseFolder(id);
               }}
+              onSetupAssignment={handleOpenAssignmentSetup}
+              onManageRosters={handleOpenRosterManager}
             />
           </>
         ) : null}

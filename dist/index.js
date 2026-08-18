@@ -8477,6 +8477,7 @@ var buildCard = async (repoRoot, githubClient, githubCache, courseConfig, course
     )
   );
   const assignments = checkedAssignments.map((loadedAssignment) => loadedAssignment.summary);
+  const sortedAssignments = [...assignments].sort(compareRecentAssignments);
   const recentAssignments = assignments.filter(shouldIncludeAssignment).sort(compareRecentAssignments).slice(EMPTY_COUNT14, DEFAULT_RECENT_ASSIGNMENT_LIMIT);
   const rosterResult = loadRosterSummary(repoRoot, term.termSlug, term.config);
   const assignmentDiagnostics = assignments.flatMap((assignment) => assignment.diagnostics);
@@ -8501,6 +8502,7 @@ var buildCard = async (repoRoot, githubClient, githubCache, courseConfig, course
     attentionCount,
     roster: rosterResult.roster,
     assignmentCount: assignments.length,
+    assignments: sortedAssignments,
     recentAssignments,
     diagnostics
   };

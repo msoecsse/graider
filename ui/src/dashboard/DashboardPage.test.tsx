@@ -627,7 +627,9 @@ describe("DashboardPage", () => {
       })
     ).toBeInTheDocument();
     expect(
-      screen.getByText("GitHub authentication is required for repository checks and grading actions.")
+      screen.getByText(
+        "GitHub authentication is required for repository checks and grading actions."
+      )
     ).toBeInTheDocument();
     expect(screen.getByText("gh auth login")).toBeInTheDocument();
     expect(
@@ -1009,6 +1011,227 @@ describe("DashboardPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens Course Setup from the dashboard and previews files through the typed API", async () => {
+    const selectCourseSetupFolder = vi
+      .fn()
+      .mockResolvedValue({ canceled: false, courseFolderPath: "/Users/sean/dev/new course" });
+    const previewCourseSetup = vi.fn().mockResolvedValue({
+      status: "ready",
+      diagnostics: [],
+      hasConflicts: false,
+      files: [
+        { path: "course.yml", content: "schema_version: 1\n", exists: false },
+        { path: "terms/27s1/term.yml", content: "schema_version: 1\n", exists: false }
+      ]
+    });
+    const saveCourseSetup = vi.fn().mockResolvedValue({
+      status: "success",
+      writtenFiles: ["course.yml", "terms/27s1/term.yml"],
+      diagnostics: []
+    });
+    const refreshDashboard = vi.fn().mockResolvedValue(createCombinedDashboardResult([]));
+
+    mockGraiderUI({
+      selectCourseSetupFolder,
+      previewCourseSetup,
+      saveCourseSetup,
+      refreshDashboard
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Set up course folder" }));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Course Setup" })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview setup" }));
+
+    await waitFor(() => {
+      expect(previewCourseSetup).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByText(/course\.yml/u)).toBeInTheDocument();
+    expect(screen.getByText(/terms\/27s1\/term\.yml/u)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save / finish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save course setup" }));
+    expect(await screen.findByText("Created 2 configuration files.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open dashboard" }));
+    await waitFor(() => {
+      expect(refreshDashboard).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("opens Assignment Setup for a registered course and navigates to Assignment Detail after save", async () => {
+    const loadAssignmentSetupTerms = vi.fn().mockResolvedValue({
+      terms: [{ code: "27s1", sections: ["001", "002"] }],
+      diagnostics: []
+    });
+    const previewAssignmentSetup = vi.fn().mockResolvedValue({
+      status: "ready",
+      diagnostics: [],
+      hasConflicts: false,
+      files: [
+        {
+          path: "terms/27s1/assignments/lab03/assignment.yml",
+          content: "schema_version: 1\n",
+          exists: false
+        }
+      ]
+    });
+    const saveAssignmentSetup = vi.fn().mockResolvedValue({
+      status: "success",
+      writtenFiles: ["terms/27s1/assignments/lab03/assignment.yml"],
+      diagnostics: []
+    });
+    const getAssignmentDetail = vi.fn().mockResolvedValue(createAssignmentDetailResult());
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      loadAssignmentSetupTerms,
+      previewAssignmentSetup,
+      saveAssignmentSetup,
+      getAssignmentDetail
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: `Create a new assignment in ${COURSE_FOLDER.path}`
+      })
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Assignment Setup" })
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Assignment title"), { target: { value: "Lab 03" } });
+    fireEvent.change(screen.getByLabelText("Assignment slug"), { target: { value: "lab03" } });
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
+    fireEvent.click(screen.getByLabelText("Section 001"));
+    fireEvent.change(screen.getByLabelText("GitHub template repository"), {
+      target: { value: "graider-sandbox/lab03-template" }
+    });
+    fireEvent.change(screen.getByLabelText("Due date and time"), {
+      target: { value: "2027-06-15T23:59" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview assignment.yml" }));
+
+    await waitFor(() => expect(previewAssignmentSetup).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/assignments\/lab03\/assignment\.yml/u)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save assignment setup" }));
+
+    await waitFor(() =>
+      expect(getAssignmentDetail).toHaveBeenCalledWith({
+        courseFolderId: COURSE_FOLDER.id,
+        courseFolderPath: COURSE_FOLDER.path,
+        assignmentFile: "terms/27s1/assignments/lab03/assignment.yml"
+      })
+    );
+  });
+
+  it("manages a roster through the typed preload APIs", async () => {
+    const loadRosterTerms = vi.fn().mockResolvedValue({
+      terms: [{ code: "27s1", sections: ["001"] }],
+      diagnostics: []
+    });
+    const getRosterForSection = vi.fn().mockResolvedValue({
+      status: "ready",
+      path: "terms/27s1/rosters/section-001.csv",
+      exists: false,
+      rows: [],
+      diagnostics: []
+    });
+    const previewRosterSave = vi.fn().mockResolvedValue({
+      status: "ready",
+      path: "terms/27s1/rosters/section-001.csv",
+      content: "student_id,github_username,email,first_name,last_name,section,status\n",
+      exists: false,
+      diagnostics: []
+    });
+    const saveRoster = vi.fn().mockResolvedValue({
+      status: "success",
+      path: "terms/27s1/rosters/section-001.csv",
+      diagnostics: []
+    });
+    const refreshCourseFolder = vi.fn().mockResolvedValue(createDashboardResult());
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      loadRosterTerms,
+      getRosterForSection,
+      previewRosterSave,
+      saveRoster,
+      refreshCourseFolder
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: `Manage rosters in ${COURSE_FOLDER.path}` })
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Manage rosters" })
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
+    fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
+    await waitFor(() => expect(getRosterForSection).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("A new roster will be created.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add row" }));
+    fireEvent.change(screen.getByLabelText("student_id row 1"), { target: { value: "S001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove row 1" }));
+    expect(screen.queryByLabelText("student_id row 1")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add row" }));
+    fireEvent.change(screen.getByLabelText("student_id row 1"), { target: { value: "S001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview roster CSV" }));
+    await waitFor(() => expect(previewRosterSave).toHaveBeenCalledTimes(1));
+    expect(await screen.findAllByText(/rosters\/section-001\.csv/u)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Save roster" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Saved terms/27s1/rosters/section-001.csv"
+    );
+    await waitFor(() => expect(refreshCourseFolder).toHaveBeenCalledWith(COURSE_FOLDER.id));
+  });
+
+  it("blocks roster save when the preview has validation errors", async () => {
+    const saveRoster = vi.fn();
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      loadRosterTerms: vi.fn().mockResolvedValue({
+        terms: [{ code: "27s1", sections: ["001"] }],
+        diagnostics: []
+      }),
+      getRosterForSection: vi.fn().mockResolvedValue({
+        status: "ready",
+        path: "terms/27s1/rosters/section-001.csv",
+        exists: false,
+        rows: [],
+        diagnostics: []
+      }),
+      previewRosterSave: vi.fn().mockResolvedValue({
+        status: "invalid",
+        path: "terms/27s1/rosters/section-001.csv",
+        content: "student_id,github_username,email,first_name,last_name,section,status\n",
+        exists: false,
+        diagnostics: [{ message: "Roster row 2 is missing email." }]
+      }),
+      saveRoster
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: `Manage rosters in ${COURSE_FOLDER.path}` })
+    );
+    await screen.findByRole("option", { name: "27s1" });
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
+    fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
+    await screen.findByRole("button", { name: "Add row" });
+    fireEvent.click(screen.getByRole("button", { name: "Preview roster CSV" }));
+
+    expect(await screen.findByText("Roster row 2 is missing email.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save roster" })).toBeDisabled();
+    expect(saveRoster).not.toHaveBeenCalled();
+  });
+
   it("successful folder selection updates the visible list", async () => {
     mockGraiderUI({
       selectCourseFolder: vi.fn().mockResolvedValue({
@@ -1363,12 +1586,20 @@ describe("DashboardPage", () => {
     expect(
       await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" })
     ).toBeInTheDocument();
+    const courseCard = screen
+      .getByRole("heading", { level: 2, name: "27s1-csc1120" })
+      .closest("article");
+    if (courseCard === null) {
+      throw new Error("Expected the course-term card.");
+    }
     expect(screen.getByText("CSC1120 · Spring 2027")).toBeInTheDocument();
     expect(screen.getByText("3 students · 1 section · 4 assignments")).toBeInTheDocument();
-    expect(screen.getByText("Completed First")).toBeInTheDocument();
-    expect(screen.getByText("Active Second")).toBeInTheDocument();
+    expect(within(courseCard).getByText("Completed First")).toBeInTheDocument();
+    expect(within(courseCard).getByText("Active Second")).toBeInTheDocument();
     expect(
-      screen.getByText("Completed First").compareDocumentPosition(screen.getByText("Active Second"))
+      within(courseCard)
+        .getByText("Completed First")
+        .compareDocumentPosition(within(courseCard).getByText("Active Second"))
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
@@ -1714,6 +1945,100 @@ describe("DashboardPage", () => {
       assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
     });
     expect(screen.getByText("terms/27s1/assignments/lab02/assignment.yml")).toBeInTheDocument();
+  });
+
+  it("shows all assignments with course actions and lifecycle labels", async () => {
+    const getAssignmentDetail = vi.fn().mockResolvedValue(createAssignmentDetailResult());
+    const firstTermCard = {
+      ...COURSE_TERM_CARD,
+      assignmentCount: 2,
+      assignments: [
+        {
+          slug: "lab02",
+          title: "Lab 02",
+          status: "active",
+          gradingEnabled: true,
+          assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+          applyState: "applied",
+          sections: ["001"],
+          needsAttention: false,
+          diagnostics: []
+        },
+        {
+          slug: "lab04",
+          title: "Lab 04",
+          status: "active",
+          gradingEnabled: true,
+          assignmentFile: "terms/27s1/assignments/lab04/assignment.yml",
+          applyState: "not_applied",
+          sections: ["001"],
+          needsAttention: false,
+          diagnostics: []
+        }
+      ]
+    };
+    const secondTermCard = {
+      ...COURSE_TERM_CARD,
+      displayName: "27s2-csc1120",
+      termSlug: "27s2",
+      termTitle: "Summer 2027",
+      assignmentCount: 1,
+      assignments: [
+        {
+          slug: "practice",
+          title: "Practice",
+          status: "active",
+          gradingEnabled: false,
+          assignmentFile: "terms/27s2/assignments/practice/assignment.yml",
+          applyState: "not_applied",
+          sections: ["001"],
+          needsAttention: true,
+          diagnostics: [
+            { code: "invalid_assignment", severity: "error", message: "Invalid config" }
+          ]
+        }
+      ]
+    };
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(
+          createCombinedDashboardResult([
+            createDashboardResult({}, [firstTermCard, secondTermCard])
+          ])
+        ),
+      getAssignmentDetail
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+
+    const actionBar = await screen.findByRole("group", { name: "csc1120 - CSC1120 actions" });
+    expect(within(actionBar).getByRole("button", { name: "New Assignment" })).toBeInTheDocument();
+    expect(within(actionBar).getByRole("button", { name: "Manage Rosters" })).toBeInTheDocument();
+    expect(
+      within(actionBar).getByRole("button", { name: "Refresh csc1120 - CSC1120" })
+    ).toBeInTheDocument();
+
+    const assignments = screen.getByLabelText("csc1120 - CSC1120 assignments");
+    expect(within(assignments).getByText("Lab 02")).toBeInTheDocument();
+    expect(within(assignments).getByText("Lab 04")).toBeInTheDocument();
+    expect(within(assignments).getByText("Practice")).toBeInTheDocument();
+    expect(within(assignments).getAllByText("001")).toHaveLength(3);
+    expect(within(assignments).getAllByText("Not applied")).toHaveLength(1);
+    expect(within(assignments).getAllByText("Repositories not created")).toHaveLength(2);
+    expect(within(assignments).getByText("Blocked")).toBeInTheDocument();
+    expect(within(assignments).queryByText("Set up assignment")).toBeNull();
+
+    fireEvent.click(within(assignments).getByRole("button", { name: "Open Lab 04" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
+    expect(getAssignmentDetail).toHaveBeenCalledWith({
+      courseFolderId: COURSE_FOLDER.id,
+      courseFolderPath: COURSE_FOLDER.path,
+      assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
+    });
   });
 
   it("returns to the preserved dashboard from assignment detail", async () => {

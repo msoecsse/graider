@@ -46,12 +46,21 @@ and renders:
 - a preview-only apply entry point
 - a guarded confirmed apply execution flow from the Apply Preview page
 - grade dispatch and grade status entry points
+- a read-only Grade Workflow viewer for `.github/workflows/grade.yml`
 
 The detail page itself does not apply assignments, dispatch grading, generate
 reports, publish reports, generate workflows, edit `assignment.yml`, inspect
 artifacts, inspect workflow runs, scan student repositories, or mutate GitHub.
 UI-3B applies assignments only from the Apply Preview page after explicit
 confirmation.
+
+The Grade Workflow viewer uses the configured template repository and branch
+from assignment-detail data. Its narrow main-process API resolves GitHub auth,
+checks repository access, then fetches the fixed workflow path through the
+GitHub Contents API. A missing file opens a blank draft. Slice F adds a
+preview-before-push flow that creates or updates only this fixed path on the
+configured branch, using the loaded file SHA to block remote changes. It does
+not clone repositories or create pull requests.
 
 ## Navigation Flow
 

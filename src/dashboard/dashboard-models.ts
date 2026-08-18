@@ -66,6 +66,9 @@ export interface DashboardCard {
   readonly attentionCount: number;
   readonly roster: DashboardRosterSummary;
   readonly assignmentCount: number;
+  /** Complete, deterministic assignment set for the course term. */
+  readonly assignments: DashboardAssignmentSummary[];
+  /** Compatibility summary for clients that only render recent assignments. */
   readonly recentAssignments: DashboardAssignmentSummary[];
   readonly diagnostics: Diagnostic[];
 }

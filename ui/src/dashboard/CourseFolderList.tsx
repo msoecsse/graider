@@ -8,6 +8,8 @@ interface CourseFolderListProps {
   readonly isRefreshingAll: boolean;
   readonly onRemove: (id: string) => void;
   readonly onRefresh: (id: string) => void;
+  readonly onSetupAssignment: (courseFolder: CourseFolderRecord) => void;
+  readonly onManageRosters: (courseFolder: CourseFolderRecord) => void;
   readonly removingId: string | null;
 }
 
@@ -74,6 +76,8 @@ export const CourseFolderList = ({
   isRefreshingAll,
   onRemove,
   onRefresh,
+  onSetupAssignment,
+  onManageRosters,
   removingId
 }: CourseFolderListProps): ReactElement => (
   <section className="folder-panel" aria-labelledby="registered-folders-title">
@@ -131,6 +135,26 @@ export const CourseFolderList = ({
                 }}
               >
                 Refresh
+              </button>
+              <button
+                className="secondary-action"
+                type="button"
+                aria-label={`Create a new assignment in ${courseFolder.path}`}
+                onClick={() => {
+                  onSetupAssignment(courseFolder);
+                }}
+              >
+                New Assignment
+              </button>
+              <button
+                className="secondary-action"
+                type="button"
+                aria-label={`Manage rosters in ${courseFolder.path}`}
+                onClick={() => {
+                  onManageRosters(courseFolder);
+                }}
+              >
+                Manage Rosters
               </button>
               <button
                 className="danger-action"

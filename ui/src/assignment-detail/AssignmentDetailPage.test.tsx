@@ -287,6 +287,82 @@ const renderAssignmentDetailPage = (
   );
 
 describe("AssignmentDetailPage", () => {
+  it("fetches and displays the grade workflow through the narrow API", async () => {
+    const getTemplateWorkflow = vi.fn().mockResolvedValue({
+      status: "success",
+      repository: "graider-sandbox/csc1120L2Template",
+      branch: "main",
+      path: ".github/workflows/grade.yml",
+      content: "name: Grade\n",
+      diagnostics: []
+    });
+    mockGraiderUI({ getTemplateWorkflow });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "View workflow" }));
+    await waitFor(() => expect(getTemplateWorkflow).toHaveBeenCalledTimes(1));
+    expect(await screen.findByLabelText("Grade workflow draft")).toHaveValue("name: Grade\n");
+    expect(screen.getByText(/Workflow changes are not saved/u)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save workflow|push workflow/u })).toBeNull();
+  });
+
+  it("shows a blank draft when the workflow is missing", async () => {
+    mockGraiderUI({
+      getTemplateWorkflow: vi.fn().mockResolvedValue({
+        status: "missing",
+        repository: "graider-sandbox/csc1120L2Template",
+        branch: "main",
+        path: ".github/workflows/grade.yml",
+        content: null,
+        diagnostics: [{ message: "No .github/workflows/grade.yml was found in the template repository on this branch." }]
+      })
+    });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "View workflow" }));
+    expect(await screen.findByText(/Start a workflow draft here/u)).toBeInTheDocument();
+    expect(screen.getByLabelText("Grade workflow draft")).toHaveValue("");
+  });
+
+  it("requires preview before a direct workflow push and invalidates it after editing", async () => {
+    const previewTemplateWorkflowSave = vi.fn().mockResolvedValue({
+      status: "ready", operation: "update", repository: "graider-sandbox/csc1120L2Template", branch: "main", path: ".github/workflows/grade.yml", commitMessage: "Update grading workflow for lab02", diagnostics: []
+    });
+    const saveTemplateWorkflow = vi.fn().mockResolvedValue({
+      status: "success", operation: "update", repository: "graider-sandbox/csc1120L2Template", branch: "main", path: ".github/workflows/grade.yml", commitMessage: "Update grading workflow for lab02", diagnostics: [], commitSha: "commit-sha", commitUrl: null
+    });
+    mockGraiderUI({
+      getTemplateWorkflow: vi.fn().mockResolvedValue({ status: "success", repository: "graider-sandbox/csc1120L2Template", branch: "main", path: ".github/workflows/grade.yml", content: "name: Grade\n", sha: "workflow-sha", diagnostics: [] }),
+      previewTemplateWorkflowSave,
+      saveTemplateWorkflow
+    });
+    renderAssignmentDetailPage();
+    fireEvent.click(await screen.findByRole("button", { name: "View workflow" }));
+    const draft = await screen.findByLabelText("Grade workflow draft");
+    expect(screen.getByRole("button", { name: "Confirm push" })).toBeDisabled();
+    fireEvent.change(draft, { target: { value: "name: Updated\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview save" }));
+    await waitFor(() => expect(previewTemplateWorkflowSave).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Update grading workflow for lab02")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm push" }));
+    await waitFor(() => expect(saveTemplateWorkflow).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("status")).toHaveTextContent("commit-sha");
+  });
+
+  it("does not fetch a workflow when grading is disabled", async () => {
+    const getTemplateWorkflow = vi.fn();
+    mockGraiderUI({ getTemplateWorkflow });
+    renderAssignmentDetailPage({
+      initialLoadResult: createAssignmentDetailResult(
+        createAssignmentDetailJson({ grading: { enabled: false, mode: "no-grading", workflow: null, artifact: null, resultFile: null, workflowStatus: null, workflowDispatch: null } })
+      )
+    });
+
+    expect(await screen.findByText("Grading or the template repository is not configured.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View workflow" })).toBeDisabled();
+    expect(getTemplateWorkflow).not.toHaveBeenCalled();
+  });
+
   it("renders the existing assignment panels with a compact grade status summary before diagnostics", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(

@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import type {
+  TemplateWorkflowResult,
+  TemplateWorkflowSavePreview,
+  TemplateWorkflowSaveResult
+} from "../../electron/ipc";
 import { copyTextToClipboard } from "./assignmentDetailClipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
 import { normalizeGradeStatus } from "../grade-status/gradeStatusNormalization";
@@ -438,6 +443,119 @@ const GradingPanel = ({
   </section>
 );
 
+const GradeWorkflowPanel = ({
+  detail,
+  workflowResult,
+  draft,
+  preview,
+  isLoading,
+  isPushing,
+  onViewWorkflow,
+  onDraftChange,
+  onPreview,
+  onPush
+}: {
+  readonly detail: NormalizedAssignmentDetail;
+  readonly workflowResult: TemplateWorkflowResult | null;
+  readonly draft: string;
+  readonly preview: TemplateWorkflowSavePreview | null;
+  readonly isLoading: boolean;
+  readonly isPushing: boolean;
+  readonly onViewWorkflow: () => void;
+  readonly onDraftChange: (value: string) => void;
+  readonly onPreview: () => void;
+  readonly onPush: () => void;
+}): ReactElement => {
+  const isConfigured =
+    detail.grading.enabled &&
+    detail.template.repository !== null &&
+    detail.template.branch !== null;
+
+  return (
+    <section className="detail-panel grade-workflow-panel" aria-labelledby="grade-workflow-title">
+      <div className="grade-workflow-panel__header">
+        <div>
+          <h2 id="grade-workflow-title">Grade workflow</h2>
+          <p className="detail-panel__note">
+            Workflow changes are not saved in this version. Saving to the template repository will
+            be added in a later slice.
+          </p>
+        </div>
+        <button
+          className="secondary-action"
+          type="button"
+          disabled={!isConfigured || isLoading}
+          onClick={onViewWorkflow}
+        >
+          {isLoading ? "Loading workflow..." : "View workflow"}
+        </button>
+      </div>
+      {!isConfigured ? (
+        <p className="detail-panel__note">Grading or the template repository is not configured.</p>
+      ) : null}
+      {workflowResult === null ? null : (
+        <>
+          <dl className="detail-grid">
+            <DetailItem label="Repository" value={workflowResult.repository} />
+            <DetailItem label="Branch" value={workflowResult.branch} />
+            <DetailItem label="Workflow path" value={workflowResult.path} />
+            <DetailItem label="Fetch status" value={workflowResult.status} />
+          </dl>
+          {workflowResult.diagnostics.map((item) => (
+            <p className="error-message" role="alert" key={item.message}>
+              {item.message}
+            </p>
+          ))}
+          {workflowResult.status === "missing" ? (
+            <p className="detail-panel__note">Start a workflow draft here. It is not saved yet.</p>
+          ) : null}
+          {workflowResult.status === "success" || workflowResult.status === "missing" ? (
+            <textarea
+              aria-label="Grade workflow draft"
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              rows={16}
+            />
+          ) : null}
+          {preview === null ? null : (
+            <>
+              <p className={preview.status === "ready" ? "detail-panel__note" : "error-message"}>
+                {preview.diagnostics.map((item) => item.message).join(" ") ||
+                  `${preview.operation} ready`}
+              </p>
+              <p className="detail-panel__note">
+                This will commit directly to the template repository branch used by this assignment.
+              </p>
+              <dl className="detail-grid">
+                <DetailItem label="Operation" value={preview.operation} />
+                <DetailItem label="Commit message" value={preview.commitMessage} />
+              </dl>
+            </>
+          )}
+          {workflowResult.status === "success" || workflowResult.status === "missing" ? (
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={isLoading || isPushing || draft === workflowResult.content}
+              onClick={onPreview}
+            >
+              Preview save
+            </button>
+          ) : null}
+          <button
+            className="primary-action"
+            type="button"
+            disabled={preview?.status !== "ready" || isPushing}
+            onClick={onPush}
+          >
+            {isPushing ? "Pushing..." : "Confirm push"}
+          </button>
+        </>
+      )}
+    </section>
+  );
+};
+
 const StudentReportsPanel = ({
   detail
 }: {
@@ -871,7 +989,8 @@ export const AssignmentDetailPage = ({
   onPreviewGrade,
   onViewFacultyReport,
   onViewGradeStatus,
-  onDetailLoaded
+  onDetailLoaded,
+  onEditAssignment = () => undefined
 }: AssignmentDetailPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(
     initialLoadResult
@@ -881,6 +1000,14 @@ export const AssignmentDetailPage = ({
   );
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingGradeStatus, setIsLoadingGradeStatus] = useState(false);
+  const [workflowResult, setWorkflowResult] = useState<TemplateWorkflowResult | null>(null);
+  const [isLoadingWorkflow, setIsLoadingWorkflow] = useState(false);
+  const [workflowDraft, setWorkflowDraft] = useState("");
+  const [workflowPreview, setWorkflowPreview] = useState<TemplateWorkflowSavePreview | null>(null);
+  const [workflowSaveResult, setWorkflowSaveResult] = useState<TemplateWorkflowSaveResult | null>(
+    null
+  );
+  const [isPushingWorkflow, setIsPushingWorkflow] = useState(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
 
@@ -972,6 +1099,79 @@ export const AssignmentDetailPage = ({
     }
   };
 
+  const loadTemplateWorkflow = async (): Promise<void> => {
+    if (detail === null || window.graiderUI.getTemplateWorkflow === undefined) return;
+    setIsLoadingWorkflow(true);
+    try {
+      const result = await window.graiderUI.getTemplateWorkflow({
+        templateRepository: detail.template.repository,
+        templateBranch: detail.template.branch,
+        workflowPath: detail.grading.workflow,
+        gradingEnabled: detail.grading.enabled
+      });
+      setWorkflowResult(result);
+      setWorkflowDraft(result.content ?? "");
+      setWorkflowPreview(null);
+      setWorkflowSaveResult(null);
+    } catch {
+      setWorkflowResult({
+        status: "error",
+        repository: detail.template.repository,
+        branch: detail.template.branch,
+        path: detail.grading.workflow ?? ".github/workflows/grade.yml",
+        content: null,
+        sha: null,
+        diagnostics: [{ message: "Unable to fetch the grade workflow." }]
+      });
+    } finally {
+      setIsLoadingWorkflow(false);
+    }
+  };
+
+  const createWorkflowSaveRequest = () =>
+    detail === null || workflowResult === null
+      ? null
+      : {
+          templateRepository: detail.template.repository,
+          templateBranch: detail.template.branch,
+          workflowPath: detail.grading.workflow,
+          gradingEnabled: detail.grading.enabled,
+          assignmentSlug: detail.assignment.slug,
+          content: workflowDraft,
+          loadedSha: workflowResult.sha,
+          confirmed: false
+        };
+  const previewWorkflowSave = async (): Promise<void> => {
+    const request = createWorkflowSaveRequest();
+    if (request === null || window.graiderUI.previewTemplateWorkflowSave === undefined) return;
+    setWorkflowPreview(await window.graiderUI.previewTemplateWorkflowSave(request));
+    setWorkflowSaveResult(null);
+  };
+  const pushWorkflow = async (): Promise<void> => {
+    const request = createWorkflowSaveRequest();
+    if (
+      request === null ||
+      workflowPreview?.status !== "ready" ||
+      window.graiderUI.saveTemplateWorkflow === undefined
+    )
+      return;
+    setIsPushingWorkflow(true);
+    try {
+      const result = await window.graiderUI.saveTemplateWorkflow({ ...request, confirmed: true });
+      setWorkflowSaveResult(result);
+      if (result.status === "success") {
+        setWorkflowResult((current) =>
+          current === null
+            ? current
+            : { ...current, content: workflowDraft, sha: result.commitSha ?? current.sha }
+        );
+        setWorkflowPreview(null);
+      }
+    } finally {
+      setIsPushingWorkflow(false);
+    }
+  };
+
   const hasInitialResultForSelection =
     initialLoadResult?.courseFolderId === selection.courseFolderId &&
     initialLoadResult.assignmentFile === selection.assignmentFile;
@@ -1035,6 +1235,14 @@ export const AssignmentDetailPage = ({
           <div className="assignment-detail__header-actions">
             <button className="secondary-action" type="button" onClick={onBack}>
               Back to dashboard
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={detail === null}
+              onClick={onEditAssignment}
+            >
+              Edit assignment
             </button>
             <button
               className="secondary-action"
@@ -1126,6 +1334,36 @@ export const AssignmentDetailPage = ({
               />
               <TemplatePanel detail={detail} copyState={copyState} onCopy={handleCopy} />
               <GradingPanel detail={detail} copyState={copyState} onCopy={handleCopy} />
+              <GradeWorkflowPanel
+                detail={detail}
+                workflowResult={workflowResult}
+                draft={workflowDraft}
+                preview={workflowPreview}
+                isLoading={isLoadingWorkflow}
+                isPushing={isPushingWorkflow}
+                onViewWorkflow={() => {
+                  void loadTemplateWorkflow();
+                }}
+                onDraftChange={(value) => {
+                  setWorkflowDraft(value);
+                  setWorkflowPreview(null);
+                  setWorkflowSaveResult(null);
+                }}
+                onPreview={() => {
+                  void previewWorkflowSave();
+                }}
+                onPush={() => {
+                  void pushWorkflow();
+                }}
+              />
+              {workflowSaveResult?.status === "success" ? (
+                <p role="status">
+                  Workflow pushed
+                  {workflowSaveResult.commitSha === null
+                    ? "."
+                    : `: ${workflowSaveResult.commitSha}`}
+                </p>
+              ) : null}
               <StudentReportsPanel detail={detail} />
               <RosterPanel detail={detail} />
               <GradeStatusSummaryPanel

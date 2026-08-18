@@ -295,6 +295,134 @@ h1 {
   margin-bottom: 24px;
 }
 
+.course-dashboard {
+  border-top: 1px solid #d8dee4;
+  margin-top: 24px;
+  padding-top: 24px;
+}
+
+.course-dashboard:first-of-type {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.course-dashboard__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.course-dashboard__eyebrow,
+.course-dashboard__path,
+.assignment-table-section__header p {
+  color: #57606a;
+}
+
+.course-dashboard__eyebrow {
+  font-size: 0.8rem;
+  font-weight: 800;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.course-dashboard__header h3 {
+  font-size: 1.4rem;
+  margin-bottom: 6px;
+}
+
+.course-dashboard__path {
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.8rem;
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+
+.course-dashboard__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.assignment-table-section {
+  margin-top: 20px;
+}
+
+.assignment-table-section__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.assignment-table-section__header h4,
+.assignment-table-section__header p {
+  margin-bottom: 0;
+}
+
+.assignment-table-section__header h4 {
+  font-size: 1.1rem;
+}
+
+.assignment-table__scroll {
+  overflow-x: auto;
+}
+
+.assignment-table {
+  border: 1px solid #d8dee4;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.assignment-table th,
+.assignment-table td {
+  border-bottom: 1px solid #d8dee4;
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.assignment-table th {
+  background: #f6f8fa;
+  color: #57606a;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.assignment-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.assignment-table__open {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.assignment-table__empty {
+  border: 1px dashed #d0d7de;
+  padding: 18px;
+}
+
+.assignment-table__empty p {
+  color: #57606a;
+}
+
+.visually-hidden {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .course-card-section__header {
   display: flex;
   align-items: end;
@@ -589,6 +717,150 @@ h1 {
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.course-setup {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.course-setup__steps {
+  display: grid;
+  gap: 4px;
+}
+
+.course-setup__step {
+  border: 0;
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.course-setup__step--active {
+  border-left-color: var(--accent-color);
+  background: var(--panel-background);
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+.course-setup__content {
+  display: grid;
+  gap: 16px;
+}
+
+.course-setup label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.course-setup input:not([type="checkbox"]) {
+  width: 100%;
+}
+
+.course-setup__section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.course-setup__commands {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.assignment-setup {
+  display: grid;
+  gap: 16px;
+}
+
+.assignment-setup label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.assignment-setup input:not([type="checkbox"]),
+.assignment-setup select {
+  width: 100%;
+}
+
+.assignment-setup__sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.assignment-setup__sections label,
+.assignment-setup__checkbox {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.roster-manager {
+  display: grid;
+  gap: 16px;
+}
+
+.roster-manager__selection {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) minmax(180px, 280px);
+  gap: 14px;
+  align-items: end;
+}
+
+.roster-manager__selection label {
+  display: grid;
+  gap: 6px;
+}
+
+.roster-manager__table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.roster-manager__table-wrap {
+  overflow-x: auto;
+}
+
+.roster-manager table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+}
+
+.roster-manager th,
+.roster-manager td {
+  border-bottom: 1px solid #d8dee4;
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.roster-manager td input,
+.roster-manager td select {
+  min-width: 120px;
+}
+
+.grade-workflow-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.grade-workflow-panel textarea {
+  width: 100%;
+  margin-top: 14px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .assignment-detail__path {
@@ -1157,6 +1429,10 @@ h1 {
 
   .course-card-section__header {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .course-dashboard__header {
     flex-direction: column;
   }
 

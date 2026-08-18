@@ -125,6 +125,7 @@ Example:
     "totalStudentCount": 3
   },
   "assignmentCount": 4,
+  "assignments": [],
   "recentAssignments": [
     {
       "slug": "lab02",

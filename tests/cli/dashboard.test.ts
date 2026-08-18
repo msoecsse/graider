@@ -498,6 +498,15 @@ describe("graider dashboard command", () => {
       "completed"
     ]);
     expect(card?.recentAssignments).toHaveLength(5);
+    expect(card?.assignments.map((assignment) => assignment.slug)).toEqual([
+      "active-new",
+      "active-middle",
+      "active-old",
+      "closed-new",
+      "closed-old",
+      "closed-older",
+      "draft-one"
+    ]);
   });
 
   it("includes roster section, active student, and total student counts", async () => {

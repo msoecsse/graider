@@ -24,7 +24,7 @@ const normalizeQuery = (query: string): string => query.trim().toLocaleLowerCase
 
 const getSearchFields = (combinedCard: CombinedDashboardCard): readonly string[] => {
   const { card } = combinedCard;
-  const assignmentFields = card.recentAssignments.flatMap((assignment) => [
+  const assignmentFields = card.assignments.flatMap((assignment) => [
     assignment.slug,
     assignment.title
   ]);
@@ -54,7 +54,7 @@ const cardMatchesSearch = (combinedCard: CombinedDashboardCard, query: string): 
 
 const cardNeedsAttention = (combinedCard: CombinedDashboardCard): boolean =>
   combinedCard.card.needsAttention ||
-  combinedCard.card.recentAssignments.some((assignment) => assignment.needsAttention);
+  combinedCard.card.assignments.some((assignment) => assignment.needsAttention);
 
 const cardMatchesView = (
   combinedCard: CombinedDashboardCard,
@@ -115,7 +115,7 @@ const compareTimestampDescending = (left: string | null, right: string | null): 
 };
 
 const getMostRecentAssignmentDueAt = (combinedCard: CombinedDashboardCard): string | null => {
-  const sortedDueDates = combinedCard.card.recentAssignments
+  const sortedDueDates = combinedCard.card.assignments
     .map((assignment) => assignment.dueAt)
     .filter((dueAt): dueAt is string => parseTimestamp(dueAt) !== null)
     .sort(compareTimestampDescending);

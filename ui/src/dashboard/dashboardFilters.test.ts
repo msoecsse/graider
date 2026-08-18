@@ -12,23 +12,28 @@ const createCard = (
   sourceFolderPath: `/courses/${id}`,
   sourceLastRefreshedAt,
   dashboardStatus: "success",
-  card: {
-    kind: "course-term",
-    displayName: id,
-    courseSlug: id,
-    courseTitle: id.toUpperCase(),
-    coursePath: ".",
-    termSlug: "27s1",
-    termTitle: "Spring 2027",
-    status: "active",
-    needsAttention: false,
-    attentionCount: 0,
-    roster: null,
-    assignmentCount: 0,
-    recentAssignments: [],
-    diagnostics: [],
-    ...card
-  }
+  card: (() => {
+    const recentAssignments = card.recentAssignments ?? [];
+
+    return {
+      kind: "course-term",
+      displayName: id,
+      courseSlug: id,
+      courseTitle: id.toUpperCase(),
+      coursePath: ".",
+      termSlug: "27s1",
+      termTitle: "Spring 2027",
+      status: "active",
+      needsAttention: false,
+      attentionCount: 0,
+      roster: null,
+      assignmentCount: 0,
+      recentAssignments,
+      diagnostics: [],
+      ...card,
+      assignments: card.assignments ?? recentAssignments
+    };
+  })()
 });
 
 describe("dashboardFilters", () => {

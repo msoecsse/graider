@@ -251,12 +251,14 @@ Each card represents one course plus one term:
     "totalStudentCount": 3
   },
   "assignmentCount": 4,
+  "assignments": [],
   "recentAssignments": [],
   "diagnostics": []
 }
 ```
 
-`--term <termSlug>` filters to one term. Recent assignments include active and
+`assignments` contains every discovered assignment for the term in deterministic
+order. `recentAssignments` remains a compatibility summary. `--term <termSlug>` filters to one term. Recent assignments include active and
 completed assignments, exclude inactive assignments, and use `not_applied` when
 no local manifest exists. The dashboard requires `GRAIDER_GITHUB_TOKEN` and does
 not silently degrade to local-only data when the token is missing.

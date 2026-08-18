@@ -1037,6 +1037,7 @@ const buildCard = async (
     )
   );
   const assignments = checkedAssignments.map((loadedAssignment) => loadedAssignment.summary);
+  const sortedAssignments = [...assignments].sort(compareRecentAssignments);
   const recentAssignments = assignments
     .filter(shouldIncludeAssignment)
     .sort(compareRecentAssignments)
@@ -1065,6 +1066,7 @@ const buildCard = async (
     attentionCount,
     roster: rosterResult.roster,
     assignmentCount: assignments.length,
+    assignments: sortedAssignments,
     recentAssignments,
     diagnostics
   };

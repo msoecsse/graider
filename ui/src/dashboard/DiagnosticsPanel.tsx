@@ -13,12 +13,12 @@ const getDiagnosticTitle = (diagnostic: DashboardDiagnostic): string => {
   return parts.length > 0 ? parts.join(" · ") : "diagnostic";
 };
 
-const getAssignmentTitle = (assignment: DashboardCard["recentAssignments"][number]): string =>
+const getAssignmentTitle = (assignment: DashboardCard["assignments"][number]): string =>
   assignment.title ?? assignment.slug ?? assignment.assignmentFile ?? "Untitled assignment";
 
 export const getCardDiagnosticCount = (card: DashboardCard): number =>
   card.diagnostics.length +
-  card.recentAssignments.reduce((count, assignment) => count + assignment.diagnostics.length, 0);
+  card.assignments.reduce((count, assignment) => count + assignment.diagnostics.length, 0);
 
 export const DiagnosticsPanel = ({ card }: DiagnosticsPanelProps): ReactElement | null => {
   const diagnosticCount = getCardDiagnosticCount(card);
@@ -42,7 +42,7 @@ export const DiagnosticsPanel = ({ card }: DiagnosticsPanelProps): ReactElement 
           </ul>
         ) : null}
 
-        {card.recentAssignments.map((assignment) =>
+        {card.assignments.map((assignment) =>
           assignment.diagnostics.length > 0 ? (
             <div
               className="diagnostics-panel__assignment"

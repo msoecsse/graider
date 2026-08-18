@@ -32,11 +32,20 @@ const getBoolean = (record: Record<string, unknown>, key: string): boolean => {
   return typeof value === "boolean" ? value : false;
 };
 
+const getOptionalBoolean = (record: Record<string, unknown>, key: string): boolean | null => {
+  const value = record[key];
+
+  return typeof value === "boolean" ? value : null;
+};
+
 const getArray = (record: Record<string, unknown>, key: string): readonly unknown[] => {
   const value = record[key];
 
   return Array.isArray(value) ? value : [];
 };
+
+const getStringArray = (record: Record<string, unknown>, key: string): readonly string[] =>
+  getArray(record, key).filter((value): value is string => typeof value === "string");
 
 export const getCardTitle = (card: DashboardCard): string => {
   if (card.displayName !== null) {
@@ -84,7 +93,10 @@ const normalizeAssignment = (value: unknown): RecentAssignmentSummary => {
       slug: null,
       title: null,
       status: null,
+      gradingEnabled: null,
       assignmentFile: null,
+      applyState: null,
+      sections: [],
       dueAt: null,
       needsAttention: true,
       diagnostics: [
@@ -101,7 +113,10 @@ const normalizeAssignment = (value: unknown): RecentAssignmentSummary => {
     slug: getString(value, "slug"),
     title: getString(value, "title"),
     status: getString(value, "status"),
+    gradingEnabled: getOptionalBoolean(value, "gradingEnabled"),
     assignmentFile: getString(value, "assignmentFile"),
+    applyState: getString(value, "applyState"),
+    sections: getStringArray(value, "sections"),
     dueAt: getString(value, "dueAt"),
     needsAttention: getBoolean(value, "needsAttention"),
     diagnostics: getArray(value, "diagnostics").map(normalizeDiagnostic)
@@ -123,6 +138,7 @@ const normalizeCard = (value: unknown): DashboardCard => {
       attentionCount: null,
       roster: null,
       assignmentCount: null,
+      assignments: [],
       recentAssignments: [],
       diagnostics: [
         {
@@ -133,6 +149,9 @@ const normalizeCard = (value: unknown): DashboardCard => {
       ]
     };
   }
+
+  const recentAssignments = getArray(value, "recentAssignments").map(normalizeAssignment);
+  const assignments = getArray(value, "assignments").map(normalizeAssignment);
 
   return {
     kind: getString(value, "kind"),
@@ -147,7 +166,8 @@ const normalizeCard = (value: unknown): DashboardCard => {
     attentionCount: getNumber(value, "attentionCount"),
     roster: normalizeRoster(value.roster),
     assignmentCount: getNumber(value, "assignmentCount"),
-    recentAssignments: getArray(value, "recentAssignments").map(normalizeAssignment),
+    assignments: assignments.length > 0 ? assignments : recentAssignments,
+    recentAssignments,
     diagnostics: getArray(value, "diagnostics").map(normalizeDiagnostic)
   };
 };

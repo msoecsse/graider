@@ -17,6 +17,29 @@ import {
   type CombinedDashboardResult,
   type CourseFolderDashboardResult,
   type CourseFolderRecord,
+  type CourseSetupFolderSelectionResult,
+  type CourseSetupPreviewResult,
+  type CourseSetupRequest,
+  type CourseSetupSaveResult,
+  type AssignmentSetupPreviewResult,
+  type AssignmentSetupRequest,
+  type AssignmentSetupSaveResult,
+  type AssignmentSetupTermsRequest,
+  type AssignmentSetupTermsResult,
+  type AssignmentEditLoadResult,
+  type AssignmentEditRequest,
+  type AssignmentEditSaveResult,
+  type AssignmentEditPreviewResult,
+  type RosterLoadResult,
+  type RosterPreviewResult,
+  type RosterSaveRequest,
+  type RosterSaveResult,
+  type RosterSectionRequest,
+  type TemplateWorkflowRequest,
+  type TemplateWorkflowResult,
+  type TemplateWorkflowSavePreview,
+  type TemplateWorkflowSaveRequest,
+  type TemplateWorkflowSaveResult,
   type FacultyReportRequest,
   type FacultyReportResult,
   type GraiderUIApi,
@@ -33,6 +56,52 @@ const graiderUI: GraiderUIApi = {
     await invoke<GitHubAuthResult>(IPC_CHANNELS.checkGitHubAuth),
   selectCourseFolder: async (): Promise<SelectCourseFolderResult> =>
     await invoke<SelectCourseFolderResult>(IPC_CHANNELS.selectCourseFolder),
+  selectCourseSetupFolder: async (): Promise<CourseSetupFolderSelectionResult> =>
+    await invoke<CourseSetupFolderSelectionResult>(IPC_CHANNELS.selectCourseSetupFolder),
+  previewCourseSetup: async (request: CourseSetupRequest): Promise<CourseSetupPreviewResult> =>
+    await invoke<CourseSetupPreviewResult>(IPC_CHANNELS.previewCourseSetup, request),
+  saveCourseSetup: async (request: CourseSetupRequest): Promise<CourseSetupSaveResult> =>
+    await invoke<CourseSetupSaveResult>(IPC_CHANNELS.saveCourseSetup, request),
+  loadAssignmentSetupTerms: async (
+    request: AssignmentSetupTermsRequest
+  ): Promise<AssignmentSetupTermsResult> =>
+    await invoke<AssignmentSetupTermsResult>(IPC_CHANNELS.loadAssignmentSetupTerms, request),
+  previewAssignmentSetup: async (
+    request: AssignmentSetupRequest
+  ): Promise<AssignmentSetupPreviewResult> =>
+    await invoke<AssignmentSetupPreviewResult>(IPC_CHANNELS.previewAssignmentSetup, request),
+  saveAssignmentSetup: async (
+    request: AssignmentSetupRequest
+  ): Promise<AssignmentSetupSaveResult> =>
+    await invoke<AssignmentSetupSaveResult>(IPC_CHANNELS.saveAssignmentSetup, request),
+  getAssignmentForEdit: async (request): Promise<AssignmentEditLoadResult> =>
+    await invoke<AssignmentEditLoadResult>(IPC_CHANNELS.getAssignmentForEdit, request),
+  previewAssignmentEdit: async (
+    request: AssignmentEditRequest
+  ): Promise<AssignmentEditPreviewResult> =>
+    await invoke<AssignmentEditPreviewResult>(IPC_CHANNELS.previewAssignmentEdit, request),
+  saveAssignmentEdit: async (request: AssignmentEditRequest): Promise<AssignmentEditSaveResult> =>
+    await invoke<AssignmentEditSaveResult>(IPC_CHANNELS.saveAssignmentEdit, request),
+  loadRosterTerms: async (
+    request: AssignmentSetupTermsRequest
+  ): Promise<AssignmentSetupTermsResult> =>
+    await invoke<AssignmentSetupTermsResult>(IPC_CHANNELS.loadRosterTerms, request),
+  getRosterForSection: async (request: RosterSectionRequest): Promise<RosterLoadResult> =>
+    await invoke<RosterLoadResult>(IPC_CHANNELS.getRosterForSection, request),
+  previewRosterSave: async (request: RosterSaveRequest): Promise<RosterPreviewResult> =>
+    await invoke<RosterPreviewResult>(IPC_CHANNELS.previewRosterSave, request),
+  saveRoster: async (request: RosterSaveRequest): Promise<RosterSaveResult> =>
+    await invoke<RosterSaveResult>(IPC_CHANNELS.saveRoster, request),
+  getTemplateWorkflow: async (request: TemplateWorkflowRequest): Promise<TemplateWorkflowResult> =>
+    await invoke<TemplateWorkflowResult>(IPC_CHANNELS.getTemplateWorkflow, request),
+  previewTemplateWorkflowSave: async (
+    request: TemplateWorkflowSaveRequest
+  ): Promise<TemplateWorkflowSavePreview> =>
+    await invoke<TemplateWorkflowSavePreview>(IPC_CHANNELS.previewTemplateWorkflowSave, request),
+  saveTemplateWorkflow: async (
+    request: TemplateWorkflowSaveRequest
+  ): Promise<TemplateWorkflowSaveResult> =>
+    await invoke<TemplateWorkflowSaveResult>(IPC_CHANNELS.saveTemplateWorkflow, request),
   listCourseFolders: async (): Promise<CourseFolderRecord[]> =>
     await invoke<CourseFolderRecord[]>(IPC_CHANNELS.listCourseFolders),
   removeCourseFolder: async (id: string): Promise<void> => {
