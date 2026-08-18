@@ -280,6 +280,7 @@ const renderAssignmentDetailPage = (
       onBack={vi.fn()}
       onPreviewApply={vi.fn()}
       onPreviewGrade={vi.fn()}
+      onViewFacultyReport={vi.fn()}
       onViewGradeStatus={vi.fn()}
       {...props}
     />
@@ -608,6 +609,48 @@ describe("AssignmentDetailPage", () => {
         assignmentFile: ASSIGNMENT_FILE
       })
     );
+  });
+
+  it("enables Generate report and opens the faculty report entry point with assignment context", async () => {
+    const onViewFacultyReport = vi.fn();
+
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+    renderAssignmentDetailPage({ onViewFacultyReport });
+
+    const reportButton = await screen.findByRole("button", { name: "Generate report" });
+    expect(reportButton).toBeEnabled();
+    expect(screen.getByText("Generate and view the faculty report.")).toBeInTheDocument();
+    expect(screen.queryByText("Coming in a future slice")).toBeNull();
+
+    fireEvent.click(reportButton);
+
+    expect(onViewFacultyReport).toHaveBeenCalledWith(
+      SELECTION,
+      expect.objectContaining({
+        assignment: expect.objectContaining({ slug: "lab02" })
+      }),
+      expect.objectContaining({
+        courseFolderId: SELECTION.courseFolderId,
+        courseFolderPath: SELECTION.courseFolderPath,
+        assignmentFile: ASSIGNMENT_FILE
+      })
+    );
+  });
+
+  it("disables Generate report only when the faculty report context is incomplete", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+    renderAssignmentDetailPage({
+      selection: { ...SELECTION, courseFolderPath: "" }
+    });
+
+    expect(await screen.findByRole("button", { name: "Generate report" })).toBeDisabled();
+    expect(
+      screen.getByText("A course folder and assignment file are required to generate a faculty report.")
+    ).toBeInTheDocument();
   });
 
   it("keeps the full grade status action available from the compact summary", async () => {

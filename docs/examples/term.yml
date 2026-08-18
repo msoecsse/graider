@@ -1,8 +1,8 @@
 schema_version: 1
 term:
-  code: 27s1
+  code: 27s2
   academic_year: 2027
-  semester: 1
+  semester: 2
   display_name: Spring 2027
 sections:
   - id: "001"

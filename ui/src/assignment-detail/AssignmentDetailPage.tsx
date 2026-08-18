@@ -49,6 +49,15 @@ const ACTION_ORDER: readonly ActionKey[] = [
 
 const COPY_FEEDBACK_TIMEOUT_MS = 2200;
 
+const hasFacultyReportContext = ({
+  courseFolderId,
+  courseFolderPath,
+  assignmentFile
+}: AssignmentDetailPageProps["selection"]): boolean =>
+  courseFolderId.trim().length > 0 &&
+  courseFolderPath.trim().length > 0 &&
+  assignmentFile.trim().length > 0;
+
 type CopyKey = "assignment-path" | "course-folder-path" | "template-repository" | "workflow-path";
 
 interface CopyState {
@@ -756,7 +765,11 @@ const CollapsibleDiagnosticsPanel = ({
   </details>
 );
 
-const getActionDescription = (action: AssignmentDetailAction, actionKey: ActionKey): string => {
+const getActionDescription = (
+  action: AssignmentDetailAction,
+  actionKey: ActionKey,
+  canGenerateFacultyReport: boolean
+): string => {
   if (actionKey === "validate") {
     return action.available ? "Runs assignment detail again." : "Unavailable for this assignment";
   }
@@ -773,11 +786,17 @@ const getActionDescription = (action: AssignmentDetailAction, actionKey: ActionK
     return "Preview grading workflow dispatches. No workflows are started.";
   }
 
-  if (!action.implemented) {
-    return "Coming in a future slice";
+  if (actionKey === "report") {
+    return canGenerateFacultyReport
+      ? "Generate and view the faculty report."
+      : "A course folder and assignment file are required to generate a faculty report.";
   }
 
-  return "Coming in a future slice";
+  if (!action.implemented) {
+    return "This action is not available in this view.";
+  }
+
+  return "This action is not available in this view.";
 };
 
 const ActionsPanel = ({
@@ -785,13 +804,17 @@ const ActionsPanel = ({
   isLoading,
   onRefresh,
   onPreviewApply,
-  onPreviewGrade
+  onPreviewGrade,
+  onViewFacultyReport,
+  canGenerateFacultyReport
 }: {
   readonly detail: NormalizedAssignmentDetail;
   readonly isLoading: boolean;
   readonly onRefresh: () => void;
   readonly onPreviewApply: () => void;
   readonly onPreviewGrade: () => void;
+  readonly onViewFacultyReport: () => void;
+  readonly canGenerateFacultyReport: boolean;
 }): ReactElement => (
   <section className="detail-panel" aria-labelledby="assignment-actions-title">
     <h2 id="assignment-actions-title">Available actions</h2>
@@ -801,6 +824,7 @@ const ActionsPanel = ({
         const isValidate = actionKey === "validate";
         const isApplyPreview = actionKey === "apply";
         const isGradePreview = actionKey === "grade";
+        const isFacultyReport = actionKey === "report";
 
         return (
           <div className="assignment-action" key={actionKey}>
@@ -810,9 +834,9 @@ const ActionsPanel = ({
               }
               type="button"
               disabled={
-                (!isValidate && !isApplyPreview && !isGradePreview) ||
+                (!isValidate && !isApplyPreview && !isGradePreview && !isFacultyReport) ||
                 isLoading ||
-                !action.available
+                (isFacultyReport ? !canGenerateFacultyReport : !action.available)
               }
               onClick={
                 isValidate
@@ -821,14 +845,16 @@ const ActionsPanel = ({
                     ? onPreviewApply
                     : isGradePreview
                       ? onPreviewGrade
-                      : undefined
+                      : isFacultyReport
+                        ? onViewFacultyReport
+                        : undefined
               }
               aria-describedby={`assignment-action-${actionKey}-description`}
             >
               {ACTION_LABELS[actionKey]}
             </button>
             <p id={`assignment-action-${actionKey}-description`}>
-              {getActionDescription(action, actionKey)}
+              {getActionDescription(action, actionKey, canGenerateFacultyReport)}
             </p>
           </div>
         );
@@ -843,6 +869,7 @@ export const AssignmentDetailPage = ({
   onBack,
   onPreviewApply,
   onPreviewGrade,
+  onViewFacultyReport,
   onViewGradeStatus,
   onDetailLoaded
 }: AssignmentDetailPageProps): ReactElement => {
@@ -994,6 +1021,7 @@ export const AssignmentDetailPage = ({
   const gradeStatusCommandErrorMessage = getGradeStatusCommandErrorMessage(gradeStatusLoadResult);
   const showTokenGuidance = detail !== null && hasTokenRequiredReadiness(detail);
   const needsAttentionItems = detail === null ? [] : collectNeedsAttentionItems(detail);
+  const canGenerateFacultyReport = hasFacultyReportContext(selection);
 
   return (
     <main className="dashboard-shell" aria-labelledby="assignment-detail-title">
@@ -1121,6 +1149,10 @@ export const AssignmentDetailPage = ({
                 onPreviewGrade={() => {
                   onPreviewGrade(selection, detail, loadResult);
                 }}
+                onViewFacultyReport={() => {
+                  onViewFacultyReport(selection, detail, loadResult);
+                }}
+                canGenerateFacultyReport={canGenerateFacultyReport}
               />
             </div>
           </>

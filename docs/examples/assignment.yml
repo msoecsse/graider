@@ -1,16 +1,16 @@
 schema_version: 1
 assignment:
-  slug: lab04
-  title: Lab 04
+  slug: lab02
+  title: Lab 02
   type: individual
   status: active
 template:
-  repository: example-org/lab04-template
+  repository: graider-sandbox/csc1120L2Template
   branch: main
 sections:
   - "001"
 deadline:
-  due_at: "2027-04-15T23:59:00+09:00"
+  due_at: "2027-06-15T23:59:00+09:00"
   late_policy: standard
 metadata:
   faculty_owner: professor

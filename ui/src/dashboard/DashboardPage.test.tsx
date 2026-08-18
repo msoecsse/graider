@@ -1769,6 +1769,7 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
     expect(getFirstPreviewApplyButton()).toBeEnabled();
     expect(screen.getByRole("button", { name: "Preview grading" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Generate report" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "View grading status" })).toBeEnabled();
     expect(
       within(gradeSummary).getByRole("button", { name: "View full grade status" })
@@ -1908,6 +1909,35 @@ describe("DashboardPage", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Grade Status" })
     ).toBeInTheDocument();
+  });
+
+  it("opens faculty report directly from assignment detail with the selected course context", async () => {
+    const getFacultyReport = vi.fn().mockResolvedValue(createFacultyReportResult());
+    const api = mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult()])),
+      getFacultyReport
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Generate report" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Faculty Report" })
+    ).toBeInTheDocument();
+    expect(getFacultyReport).toHaveBeenCalledWith({
+      courseFolderId: COURSE_FOLDER.id,
+      courseFolderPath: COURSE_FOLDER.path,
+      assignmentFile: "terms/27s1/assignments/lab02/assignment.yml"
+    });
+    expect(api.applyAssignment).not.toHaveBeenCalled();
+    expect(api.gradeAssignment).not.toHaveBeenCalled();
   });
 
   it("refreshes assignment detail while preserving prior detail", async () => {

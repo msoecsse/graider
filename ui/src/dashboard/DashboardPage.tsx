@@ -463,6 +463,14 @@ export const DashboardPage = (): ReactElement => {
           setSelectedGradeStatus(null);
           setSelectedFacultyReport(null);
         }}
+        onViewFacultyReport={(selection, detail, loadResult) => {
+          setSelectedAssignment(selection);
+          setSelectedAssignmentDetailResult(loadResult);
+          setSelectedApplyPreview(null);
+          setSelectedGradePreview(null);
+          setSelectedGradeStatus(null);
+          setSelectedFacultyReport({ selection, detail, gradeStatus: null });
+        }}
         onViewGradeStatus={(selection, detail, loadResult) => {
           setSelectedAssignment(selection);
           setSelectedAssignmentDetailResult(loadResult);
