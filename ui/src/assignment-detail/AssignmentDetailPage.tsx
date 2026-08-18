@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type {
   StudentRepoEmailPreviewResult,
+  StudentRepoEmailSendHistoryResult,
+  StudentRepoEmailTransportStatusResult,
   TemplateWorkflowResult,
   TemplateWorkflowSavePreview,
   TemplateWorkflowSaveResult
@@ -572,15 +574,57 @@ const StudentReportsPanel = ({
 );
 
 const StudentRepoEmailPreviewPanel = ({
-  preview
+  preview,
+  history,
+  transportStatus
 }: {
   readonly preview: StudentRepoEmailPreviewResult;
+  readonly history: StudentRepoEmailSendHistoryResult | null;
+  readonly transportStatus: StudentRepoEmailTransportStatusResult | null;
 }): ReactElement => (
   <section className="detail-panel" aria-labelledby="student-repo-email-preview-title">
     <h2 id="student-repo-email-preview-title">Repository email preview</h2>
     <p className="detail-panel__note">
       This preview does not send email. Delivery will be added in a later slice.
     </p>
+    <section aria-labelledby="student-repo-email-transport-title">
+      <h3 id="student-repo-email-transport-title">Email sending</h3>
+      {transportStatus === null ? (
+        <p className="detail-panel__note">Loading email transport status...</p>
+      ) : (
+        <>
+          <dl className="detail-grid">
+            <DetailItem
+              label="Transport"
+              value={
+                transportStatus.transport === "microsoft_graph"
+                  ? "Microsoft Graph planned"
+                  : transportStatus.transport.replaceAll("_", " ")
+              }
+            />
+            <DetailItem
+              label="Sender"
+              value={transportStatus.sender?.address ?? "Not configured"}
+            />
+            <DetailItem label="Status" value={transportStatus.status.replaceAll("_", " ")} />
+            <DetailItem
+              label="Sending"
+              value={transportStatus.canSend ? "Available" : "Not available in this build"}
+            />
+          </dl>
+          {transportStatus.diagnostics.map((item) => (
+            <p className="detail-panel__note" key={item.message}>
+              {item.message}
+            </p>
+          ))}
+          {transportStatus.status === "configured_placeholder" ? (
+            <p className="detail-panel__note">
+              Sender configuration is recorded for display only. Sending is not enabled yet.
+            </p>
+          ) : null}
+        </>
+      )}
+    </section>
     {preview.status === "not_ready" ? (
       <p className="detail-panel__note">
         Repositories not created yet. Preview apply and apply the assignment first.
@@ -590,18 +634,24 @@ const StudentRepoEmailPreviewPanel = ({
       .filter(
         (item) =>
           preview.status !== "not_ready" ||
-          item.message !== "Repositories not created yet. Preview apply and apply the assignment first."
+          item.message !==
+            "Repositories not created yet. Preview apply and apply the assignment first."
       )
       .map((item) => (
-      <p className={preview.status === "failure" ? "error-message" : "detail-panel__note"} role="alert" key={item.message}>
-        {item.message}
-      </p>
+        <p
+          className={preview.status === "failure" ? "error-message" : "detail-panel__note"}
+          role="alert"
+          key={item.message}
+        >
+          {item.message}
+        </p>
       ))}
     <dl className="detail-grid">
       <DetailItem label="Ready" value={preview.summary.readyCount} />
       <DetailItem label="Skipped" value={preview.summary.skippedCount} />
       <DetailItem label="Missing email" value={preview.summary.missingEmailCount} />
       <DetailItem label="Missing repository" value={preview.summary.missingRepositoryCount} />
+      <DetailItem label="Already sent" value={preview.summary.alreadySentCount} />
     </dl>
     {preview.recipients.length === 0 ? null : (
       <div className="grade-status-summary-table-wrap">
@@ -620,13 +670,21 @@ const StudentRepoEmailPreviewPanel = ({
           <tbody>
             {preview.recipients.map((recipient, index) => (
               <tr key={`${recipient.studentId || "roster"}-${recipient.section}-${index}`}>
-                <td>{[recipient.firstName, recipient.lastName].filter(Boolean).join(" ") || recipient.studentId || "Roster issue"}</td>
+                <td>
+                  {[recipient.firstName, recipient.lastName].filter(Boolean).join(" ") ||
+                    recipient.studentId ||
+                    "Roster issue"}
+                </td>
                 <td>{recipient.githubUsername || "-"}</td>
                 <td>{recipient.email || "-"}</td>
                 <td>{recipient.section}</td>
                 <td>
-                  {recipient.repositoryUrl === null ? "-" : (
-                    <a href={recipient.repositoryUrl} target="_blank" rel="noreferrer">Open repository</a>
+                  {recipient.repositoryUrl === null ? (
+                    "-"
+                  ) : (
+                    <a href={recipient.repositoryUrl} target="_blank" rel="noreferrer">
+                      Open repository
+                    </a>
                   )}
                 </td>
                 <td>{recipient.status.replaceAll("_", " ")}</td>
@@ -636,7 +694,9 @@ const StudentRepoEmailPreviewPanel = ({
                   ) : (
                     <details>
                       <summary>View email</summary>
-                      <p><strong>{recipient.subject}</strong></p>
+                      <p>
+                        <strong>{recipient.subject}</strong>
+                      </p>
                       <pre>{recipient.body}</pre>
                     </details>
                   )}
@@ -647,6 +707,60 @@ const StudentRepoEmailPreviewPanel = ({
         </table>
       </div>
     )}
+    <section aria-labelledby="student-repo-email-history-title">
+      <h3 id="student-repo-email-history-title">Send history</h3>
+      {history === null ? (
+        <p className="detail-panel__note">Loading notification history...</p>
+      ) : null}
+      {history?.exists === false && history.status === "ready" ? (
+        <p className="detail-panel__note">No repository email send history yet.</p>
+      ) : null}
+      {history?.diagnostics.map((item) => (
+        <p className="error-message" role="alert" key={item.message}>
+          {item.message}
+        </p>
+      ))}
+      {history === null || !history.exists || history.status !== "ready" ? null : (
+        <>
+          <p className="detail-panel__note">Log: {history.path}</p>
+          <dl className="detail-grid">
+            <DetailItem label="Sender" value={history.sender} />
+            <DetailItem label="Transport" value={history.transport} />
+            <DetailItem label="Created" value={history.createdAt} />
+            <DetailItem label="Updated" value={history.updatedAt} />
+            <DetailItem label="Messages" value={history.messages.length} />
+          </dl>
+          <div className="grade-status-summary-table-wrap">
+            <table className="grade-status-summary-table">
+              <thead>
+                <tr>
+                  <th scope="col">Student</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">Repository</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Sent</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.messages.map((message) => (
+                  <tr key={`${message.notificationKey}-${message.sentAt ?? "pending"}`}>
+                    <td>{message.githubUsername || message.studentId}</td>
+                    <td>{message.email}</td>
+                    <td>
+                      <a href={message.repositoryUrl} target="_blank" rel="noreferrer">
+                        Open repository
+                      </a>
+                    </td>
+                    <td>{message.status.replaceAll("_", " ")}</td>
+                    <td>{message.sentAt ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
   </section>
 );
 
@@ -1089,6 +1203,9 @@ export const AssignmentDetailPage = ({
   );
   const [isPushingWorkflow, setIsPushingWorkflow] = useState(false);
   const [emailPreview, setEmailPreview] = useState<StudentRepoEmailPreviewResult | null>(null);
+  const [emailHistory, setEmailHistory] = useState<StudentRepoEmailSendHistoryResult | null>(null);
+  const [emailTransportStatus, setEmailTransportStatus] =
+    useState<StudentRepoEmailTransportStatusResult | null>(null);
   const [isLoadingEmailPreview, setIsLoadingEmailPreview] = useState(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
@@ -1258,11 +1375,31 @@ export const AssignmentDetailPage = ({
     if (window.graiderUI.getStudentRepoEmailPreview === undefined) return;
     setIsLoadingEmailPreview(true);
     try {
-      setEmailPreview(await window.graiderUI.getStudentRepoEmailPreview({
-        courseFolderId: selection.courseFolderId,
-        courseFolderPath: selection.courseFolderPath,
-        assignmentFile: selection.assignmentFile
-      }));
+      setEmailPreview(
+        await window.graiderUI.getStudentRepoEmailPreview({
+          courseFolderId: selection.courseFolderId,
+          courseFolderPath: selection.courseFolderPath,
+          assignmentFile: selection.assignmentFile
+        })
+      );
+      if (window.graiderUI.getStudentRepoEmailSendHistory !== undefined) {
+        setEmailHistory(
+          await window.graiderUI.getStudentRepoEmailSendHistory({
+            courseFolderId: selection.courseFolderId,
+            courseFolderPath: selection.courseFolderPath,
+            assignmentFile: selection.assignmentFile
+          })
+        );
+      }
+      if (window.graiderUI.getStudentRepoEmailTransportStatus !== undefined) {
+        setEmailTransportStatus(
+          await window.graiderUI.getStudentRepoEmailTransportStatus({
+            courseFolderId: selection.courseFolderId,
+            courseFolderPath: selection.courseFolderPath,
+            assignmentFile: selection.assignmentFile
+          })
+        );
+      }
     } finally {
       setIsLoadingEmailPreview(false);
     }
@@ -1480,7 +1617,13 @@ export const AssignmentDetailPage = ({
                   onViewGradeStatus(selection, detail, loadResult);
                 }}
               />
-              {emailPreview === null ? null : <StudentRepoEmailPreviewPanel preview={emailPreview} />}
+              {emailPreview === null ? null : (
+                <StudentRepoEmailPreviewPanel
+                  preview={emailPreview}
+                  history={emailHistory}
+                  transportStatus={emailTransportStatus}
+                />
+              )}
               <DiagnosticsPanel diagnostics={detail.diagnostics} />
               <ActionsPanel
                 detail={detail}

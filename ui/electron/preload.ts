@@ -32,6 +32,8 @@ import {
   type AssignmentEditPreviewResult,
   type StudentRepoEmailPreviewRequest,
   type StudentRepoEmailPreviewResult,
+  type StudentRepoEmailSendHistoryResult,
+  type StudentRepoEmailTransportStatusResult,
   type RosterLoadResult,
   type RosterPreviewResult,
   type RosterSaveRequest,
@@ -88,6 +90,20 @@ const graiderUI: GraiderUIApi = {
     request: StudentRepoEmailPreviewRequest
   ): Promise<StudentRepoEmailPreviewResult> =>
     await invoke<StudentRepoEmailPreviewResult>(IPC_CHANNELS.getStudentRepoEmailPreview, request),
+  getStudentRepoEmailSendHistory: async (
+    request: StudentRepoEmailPreviewRequest
+  ): Promise<StudentRepoEmailSendHistoryResult> =>
+    await invoke<StudentRepoEmailSendHistoryResult>(
+      IPC_CHANNELS.getStudentRepoEmailSendHistory,
+      request
+    ),
+  getStudentRepoEmailTransportStatus: async (
+    request: StudentRepoEmailPreviewRequest
+  ): Promise<StudentRepoEmailTransportStatusResult> =>
+    await invoke<StudentRepoEmailTransportStatusResult>(
+      IPC_CHANNELS.getStudentRepoEmailTransportStatus,
+      request
+    ),
   loadRosterTerms: async (
     request: AssignmentSetupTermsRequest
   ): Promise<AssignmentSetupTermsResult> =>

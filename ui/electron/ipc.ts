@@ -13,6 +13,8 @@ export const IPC_CHANNELS = {
   previewAssignmentEdit: "graider-ui:assignment-edit:preview",
   saveAssignmentEdit: "graider-ui:assignment-edit:save",
   getStudentRepoEmailPreview: "graider-ui:student-repo-email-preview:get",
+  getStudentRepoEmailSendHistory: "graider-ui:student-repo-email-history:get",
+  getStudentRepoEmailTransportStatus: "graider-ui:student-repo-email-transport-status:get",
   loadRosterTerms: "graider-ui:roster-manager:terms",
   getRosterForSection: "graider-ui:roster-manager:get",
   previewRosterSave: "graider-ui:roster-manager:preview",
@@ -216,6 +218,7 @@ export interface StudentRepoEmailPreviewRequest extends AssignmentSetupTermsRequ
 
 export type StudentRepoEmailRecipientStatus =
   | "ready"
+  | "already_sent"
   | "skipped"
   | "missing_email"
   | "missing_repository"
@@ -233,6 +236,8 @@ export interface StudentRepoEmailRecipient {
   readonly repositoryUrl: string | null;
   readonly subject: string | null;
   readonly body: string | null;
+  readonly notificationKey: string | null;
+  readonly sentAt: string | null;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
@@ -243,6 +248,7 @@ export interface StudentRepoEmailPreviewSummary {
   readonly missingEmailCount: number;
   readonly missingRepositoryCount: number;
   readonly inactiveCount: number;
+  readonly alreadySentCount: number;
 }
 
 export interface StudentRepoEmailPreviewResult {
@@ -257,6 +263,60 @@ export interface StudentRepoEmailPreviewResult {
   readonly bodyTemplate: string;
   readonly summary: StudentRepoEmailPreviewSummary;
   readonly recipients: readonly StudentRepoEmailRecipient[];
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
+export type StudentRepoEmailLogMessageStatus = "sent" | "failed" | "skipped" | "already_sent";
+
+export interface StudentRepoEmailLogMessage {
+  readonly notificationKey: string;
+  readonly studentId: string;
+  readonly githubUsername: string;
+  readonly email: string;
+  readonly repositoryUrl: string;
+  readonly subjectHash: string;
+  readonly bodyHash: string;
+  readonly status: StudentRepoEmailLogMessageStatus;
+  readonly providerMessageId: string | null;
+  readonly sentAt: string | null;
+  readonly errorCode: string | null;
+  readonly errorMessage: string | null;
+}
+
+export interface StudentRepoEmailSendHistoryResult {
+  readonly status: "ready" | "invalid";
+  readonly path: string;
+  readonly exists: boolean;
+  readonly assignmentFile: string;
+  readonly sender: string | null;
+  readonly transport: string | null;
+  readonly createdAt: string | null;
+  readonly updatedAt: string | null;
+  readonly messages: readonly StudentRepoEmailLogMessage[];
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
+export type StudentRepoEmailTransportStatusKind =
+  | "not_configured"
+  | "configured_placeholder"
+  | "auth_required"
+  | "ready"
+  | "unavailable"
+  | "error";
+export type StudentRepoEmailTransportKind = "microsoft_graph" | "manual_preview" | "unknown";
+
+export interface StudentRepoEmailTransportSender {
+  readonly address: string;
+  readonly displayName: string | null;
+  readonly type: "shared_mailbox" | "course_mailbox" | "faculty_mailbox" | "unknown";
+}
+
+export interface StudentRepoEmailTransportStatusResult {
+  readonly schemaVersion: 1;
+  readonly status: StudentRepoEmailTransportStatusKind;
+  readonly transport: StudentRepoEmailTransportKind;
+  readonly sender: StudentRepoEmailTransportSender | null;
+  readonly canSend: boolean;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
@@ -622,6 +682,12 @@ export interface GraiderUIApi {
   readonly getStudentRepoEmailPreview?: (
     request: StudentRepoEmailPreviewRequest
   ) => Promise<StudentRepoEmailPreviewResult>;
+  readonly getStudentRepoEmailSendHistory?: (
+    request: StudentRepoEmailPreviewRequest
+  ) => Promise<StudentRepoEmailSendHistoryResult>;
+  readonly getStudentRepoEmailTransportStatus?: (
+    request: StudentRepoEmailPreviewRequest
+  ) => Promise<StudentRepoEmailTransportStatusResult>;
   readonly loadRosterTerms?: (
     request: AssignmentSetupTermsRequest
   ) => Promise<AssignmentSetupTermsResult>;

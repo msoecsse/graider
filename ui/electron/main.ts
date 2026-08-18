@@ -19,6 +19,8 @@ import {
   saveAssignmentEdit
 } from "./assignmentEditService.js";
 import { getStudentRepoEmailPreview } from "./studentRepoEmailPreviewService.js";
+import { getStudentRepoEmailSendHistory } from "./studentRepoEmailNotificationLogService.js";
+import { getStudentRepoEmailTransportStatus } from "./studentRepoEmailTransportStatusService.js";
 import {
   getRosterForSection,
   loadRosterTerms,
@@ -436,6 +438,36 @@ export const registerIpcHandlers = (): void => {
     if (!isStudentRepoEmailPreviewRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid student repository email preview request.");
     return getStudentRepoEmailPreview(request);
+  });
+  ipcMain.handle(IPC_CHANNELS.getStudentRepoEmailSendHistory, (_event, request: unknown) => {
+    if (!isStudentRepoEmailPreviewRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("Invalid student repository email history request.");
+    const loaded = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile);
+    if (loaded.model === null) {
+      return {
+        status: "invalid" as const,
+        path: "",
+        exists: false,
+        assignmentFile: request.assignmentFile,
+        sender: null,
+        transport: null,
+        createdAt: null,
+        updatedAt: null,
+        messages: [],
+        diagnostics: loaded.diagnostics
+      };
+    }
+    return getStudentRepoEmailSendHistory(
+      request.courseFolderPath,
+      request.assignmentFile,
+      loaded.model.termCode,
+      loaded.model.assignmentSlug
+    );
+  });
+  ipcMain.handle(IPC_CHANNELS.getStudentRepoEmailTransportStatus, (_event, request: unknown) => {
+    if (!isStudentRepoEmailPreviewRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("Invalid student repository email transport status request.");
+    return getStudentRepoEmailTransportStatus();
   });
 
   ipcMain.handle(IPC_CHANNELS.loadRosterTerms, (_event, request: unknown) => {

@@ -50,6 +50,8 @@ describe("UI security boundary", () => {
       "graider-ui:assignment-edit:preview",
       "graider-ui:assignment-edit:save",
       "graider-ui:student-repo-email-preview:get",
+      "graider-ui:student-repo-email-history:get",
+      "graider-ui:student-repo-email-transport-status:get",
       "graider-ui:roster-manager:terms",
       "graider-ui:roster-manager:get",
       "graider-ui:roster-manager:preview",

@@ -317,10 +317,43 @@ describe("AssignmentDetailPage", () => {
       assignmentSlug: "lab02",
       subjectTemplate: "Your {course_code} {assignment_title} repository is ready",
       bodyTemplate: "Hi {first_name}",
-      summary: { studentCount: 2, readyCount: 1, skippedCount: 0, missingEmailCount: 1, missingRepositoryCount: 0, inactiveCount: 0 },
+      summary: {
+        studentCount: 2,
+        readyCount: 1,
+        skippedCount: 0,
+        missingEmailCount: 1,
+        missingRepositoryCount: 0,
+        inactiveCount: 0
+      },
       recipients: [
-        { studentId: "s001", githubUsername: "ada", email: "ada@example.edu", firstName: "Ada", lastName: "Lovelace", section: "001", status: "ready", repositoryName: "lab02-ada", repositoryUrl: "https://github.com/owner/lab02-ada", subject: "Your CSC1120 Lab 02 repository is ready", body: "Hi Ada", diagnostics: [] },
-        { studentId: "s002", githubUsername: "ben", email: "", firstName: "Ben", lastName: "Bitdiddle", section: "001", status: "missing_email", repositoryName: null, repositoryUrl: null, subject: null, body: null, diagnostics: [{ message: "Roster row is missing an email address." }] }
+        {
+          studentId: "s001",
+          githubUsername: "ada",
+          email: "ada@example.edu",
+          firstName: "Ada",
+          lastName: "Lovelace",
+          section: "001",
+          status: "ready",
+          repositoryName: "lab02-ada",
+          repositoryUrl: "https://github.com/owner/lab02-ada",
+          subject: "Your CSC1120 Lab 02 repository is ready",
+          body: "Hi Ada",
+          diagnostics: []
+        },
+        {
+          studentId: "s002",
+          githubUsername: "ben",
+          email: "",
+          firstName: "Ben",
+          lastName: "Bitdiddle",
+          section: "001",
+          status: "missing_email",
+          repositoryName: null,
+          repositoryUrl: null,
+          subject: null,
+          body: null,
+          diagnostics: [{ message: "Roster row is missing an email address." }]
+        }
       ],
       diagnostics: []
     });
@@ -329,7 +362,9 @@ describe("AssignmentDetailPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Preview repository emails" }));
     await waitFor(() => expect(getStudentRepoEmailPreview).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("heading", { name: "Repository email preview" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Repository email preview" })
+    ).toBeInTheDocument();
     expect(screen.getByText("Missing email")).toBeInTheDocument();
     expect(screen.getByText("Roster row is missing an email address.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
@@ -338,17 +373,248 @@ describe("AssignmentDetailPage", () => {
   it("shows repositories not created as a normal email-preview state", async () => {
     mockGraiderUI({
       getStudentRepoEmailPreview: vi.fn().mockResolvedValue({
-        status: "not_ready", assignmentFile: ASSIGNMENT_FILE, courseCode: "CSC1120", courseTitle: "Data Structures",
-        termCode: "27s1", assignmentTitle: "Lab 02", assignmentSlug: "lab02",
-        subjectTemplate: "", bodyTemplate: "",
-        summary: { studentCount: 0, readyCount: 0, skippedCount: 0, missingEmailCount: 0, missingRepositoryCount: 0, inactiveCount: 0 },
-        recipients: [], diagnostics: [{ message: "Repositories not created yet. Preview apply and apply the assignment first." }]
+        status: "not_ready",
+        assignmentFile: ASSIGNMENT_FILE,
+        courseCode: "CSC1120",
+        courseTitle: "Data Structures",
+        termCode: "27s1",
+        assignmentTitle: "Lab 02",
+        assignmentSlug: "lab02",
+        subjectTemplate: "",
+        bodyTemplate: "",
+        summary: {
+          studentCount: 0,
+          readyCount: 0,
+          skippedCount: 0,
+          missingEmailCount: 0,
+          missingRepositoryCount: 0,
+          inactiveCount: 0
+        },
+        recipients: [],
+        diagnostics: [
+          { message: "Repositories not created yet. Preview apply and apply the assignment first." }
+        ]
       })
     });
     renderAssignmentDetailPage();
     fireEvent.click(await screen.findByRole("button", { name: "Preview repository emails" }));
     expect(await screen.findByText(/Repositories not created yet/u)).toBeInTheDocument();
     expect(screen.queryByText(/^Blocked$/u)).toBeNull();
+  });
+
+  it("shows already-sent recipients separately and renders read-only send history", async () => {
+    mockGraiderUI({
+      getStudentRepoEmailPreview: vi.fn().mockResolvedValue({
+        status: "partial",
+        assignmentFile: ASSIGNMENT_FILE,
+        courseCode: "CSC1120",
+        courseTitle: "Data Structures",
+        termCode: "27s1",
+        assignmentTitle: "Lab 02",
+        assignmentSlug: "lab02",
+        subjectTemplate: "",
+        bodyTemplate: "",
+        summary: {
+          studentCount: 1,
+          readyCount: 0,
+          skippedCount: 0,
+          missingEmailCount: 0,
+          missingRepositoryCount: 0,
+          inactiveCount: 0,
+          alreadySentCount: 1
+        },
+        recipients: [
+          {
+            studentId: "s001",
+            githubUsername: "ada",
+            email: "ada@example.edu",
+            firstName: "Ada",
+            lastName: "Lovelace",
+            section: "001",
+            status: "already_sent",
+            repositoryName: "lab02-ada",
+            repositoryUrl: "https://github.com/owner/lab02-ada",
+            subject: "Subject",
+            body: "Body",
+            notificationKey: "key",
+            sentAt: "2027-01-15T12:05:00.000Z",
+            diagnostics: [{ message: "Repository email was already sent." }]
+          }
+        ],
+        diagnostics: []
+      }),
+      getStudentRepoEmailSendHistory: vi.fn().mockResolvedValue({
+        status: "ready",
+        path: "terms/27s1/notifications/lab02/student-repo-emails.json",
+        exists: true,
+        assignmentFile: ASSIGNMENT_FILE,
+        sender: "no-reply@example.edu",
+        transport: "microsoft_graph",
+        createdAt: "2027-01-15T12:00:00.000Z",
+        updatedAt: "2027-01-15T12:05:00.000Z",
+        messages: [
+          {
+            notificationKey: "key",
+            studentId: "s001",
+            githubUsername: "ada",
+            email: "ada@example.edu",
+            repositoryUrl: "https://github.com/owner/lab02-ada",
+            subjectHash: "hash",
+            bodyHash: "hash",
+            status: "sent",
+            providerMessageId: "provider-1",
+            sentAt: "2027-01-15T12:05:00.000Z",
+            errorCode: null,
+            errorMessage: null
+          }
+        ],
+        diagnostics: []
+      })
+    });
+    renderAssignmentDetailPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview repository emails" }));
+    expect(await screen.findByText("already sent")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Send history" })).toBeInTheDocument();
+    expect(screen.getByText("no-reply@example.edu")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send|resend/i })).toBeNull();
+  });
+
+  it("shows an empty notification history without a send control", async () => {
+    mockGraiderUI({
+      getStudentRepoEmailPreview: vi.fn().mockResolvedValue({
+        status: "success",
+        assignmentFile: ASSIGNMENT_FILE,
+        courseCode: "CSC1120",
+        courseTitle: "Data Structures",
+        termCode: "27s1",
+        assignmentTitle: "Lab 02",
+        assignmentSlug: "lab02",
+        subjectTemplate: "",
+        bodyTemplate: "",
+        summary: {
+          studentCount: 0,
+          readyCount: 0,
+          skippedCount: 0,
+          missingEmailCount: 0,
+          missingRepositoryCount: 0,
+          inactiveCount: 0,
+          alreadySentCount: 0
+        },
+        recipients: [],
+        diagnostics: []
+      }),
+      getStudentRepoEmailSendHistory: vi.fn().mockResolvedValue({
+        status: "ready",
+        path: "terms/27s1/notifications/lab02/student-repo-emails.json",
+        exists: false,
+        assignmentFile: ASSIGNMENT_FILE,
+        sender: null,
+        transport: null,
+        createdAt: null,
+        updatedAt: null,
+        messages: [],
+        diagnostics: []
+      })
+    });
+    renderAssignmentDetailPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview repository emails" }));
+    expect(await screen.findByText("No repository email send history yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send|resend/i })).toBeNull();
+  });
+
+  it("shows not-configured transport status while keeping repository preview available", async () => {
+    mockGraiderUI({
+      getStudentRepoEmailPreview: vi.fn().mockResolvedValue({
+        status: "success",
+        assignmentFile: ASSIGNMENT_FILE,
+        courseCode: "CSC1120",
+        courseTitle: "Data Structures",
+        termCode: "27s1",
+        assignmentTitle: "Lab 02",
+        assignmentSlug: "lab02",
+        subjectTemplate: "",
+        bodyTemplate: "",
+        summary: {
+          studentCount: 0,
+          readyCount: 0,
+          skippedCount: 0,
+          missingEmailCount: 0,
+          missingRepositoryCount: 0,
+          inactiveCount: 0,
+          alreadySentCount: 0
+        },
+        recipients: [],
+        diagnostics: []
+      }),
+      getStudentRepoEmailTransportStatus: vi.fn().mockResolvedValue({
+        schemaVersion: 1,
+        status: "not_configured",
+        transport: "microsoft_graph",
+        sender: null,
+        canSend: false,
+        diagnostics: [
+          {
+            message:
+              "Email sending is not configured yet. You can still preview and copy repository emails."
+          }
+        ]
+      })
+    });
+    renderAssignmentDetailPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview repository emails" }));
+    expect(await screen.findByRole("heading", { name: "Email sending" })).toBeInTheDocument();
+    expect(screen.getByText("Microsoft Graph planned")).toBeInTheDocument();
+    expect(screen.getByText("Not configured")).toBeInTheDocument();
+    expect(
+      screen.getByText(/You can still preview and copy repository emails/u)
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+  });
+
+  it("renders a configured sender as display-only", async () => {
+    mockGraiderUI({
+      getStudentRepoEmailPreview: vi.fn().mockResolvedValue({
+        status: "success",
+        assignmentFile: ASSIGNMENT_FILE,
+        courseCode: "CSC1120",
+        courseTitle: "Data Structures",
+        termCode: "27s1",
+        assignmentTitle: "Lab 02",
+        assignmentSlug: "lab02",
+        subjectTemplate: "",
+        bodyTemplate: "",
+        summary: {
+          studentCount: 0,
+          readyCount: 0,
+          skippedCount: 0,
+          missingEmailCount: 0,
+          missingRepositoryCount: 0,
+          inactiveCount: 0,
+          alreadySentCount: 0
+        },
+        recipients: [],
+        diagnostics: []
+      }),
+      getStudentRepoEmailTransportStatus: vi.fn().mockResolvedValue({
+        schemaVersion: 1,
+        status: "configured_placeholder",
+        transport: "microsoft_graph",
+        sender: {
+          address: "no-reply@msoe.edu",
+          displayName: "MSOE Graider",
+          type: "shared_mailbox"
+        },
+        canSend: false,
+        diagnostics: []
+      })
+    });
+    renderAssignmentDetailPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview repository emails" }));
+    expect(await screen.findByText("no-reply@msoe.edu")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Sender configuration is recorded for display only/u)
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
   });
 
   it("shows a blank draft when the workflow is missing", async () => {
@@ -359,7 +625,12 @@ describe("AssignmentDetailPage", () => {
         branch: "main",
         path: ".github/workflows/grade.yml",
         content: null,
-        diagnostics: [{ message: "No .github/workflows/grade.yml was found in the template repository on this branch." }]
+        diagnostics: [
+          {
+            message:
+              "No .github/workflows/grade.yml was found in the template repository on this branch."
+          }
+        ]
       })
     });
     renderAssignmentDetailPage();
@@ -371,13 +642,35 @@ describe("AssignmentDetailPage", () => {
 
   it("requires preview before a direct workflow push and invalidates it after editing", async () => {
     const previewTemplateWorkflowSave = vi.fn().mockResolvedValue({
-      status: "ready", operation: "update", repository: "graider-sandbox/csc1120L2Template", branch: "main", path: ".github/workflows/grade.yml", commitMessage: "Update grading workflow for lab02", diagnostics: []
+      status: "ready",
+      operation: "update",
+      repository: "graider-sandbox/csc1120L2Template",
+      branch: "main",
+      path: ".github/workflows/grade.yml",
+      commitMessage: "Update grading workflow for lab02",
+      diagnostics: []
     });
     const saveTemplateWorkflow = vi.fn().mockResolvedValue({
-      status: "success", operation: "update", repository: "graider-sandbox/csc1120L2Template", branch: "main", path: ".github/workflows/grade.yml", commitMessage: "Update grading workflow for lab02", diagnostics: [], commitSha: "commit-sha", commitUrl: null
+      status: "success",
+      operation: "update",
+      repository: "graider-sandbox/csc1120L2Template",
+      branch: "main",
+      path: ".github/workflows/grade.yml",
+      commitMessage: "Update grading workflow for lab02",
+      diagnostics: [],
+      commitSha: "commit-sha",
+      commitUrl: null
     });
     mockGraiderUI({
-      getTemplateWorkflow: vi.fn().mockResolvedValue({ status: "success", repository: "graider-sandbox/csc1120L2Template", branch: "main", path: ".github/workflows/grade.yml", content: "name: Grade\n", sha: "workflow-sha", diagnostics: [] }),
+      getTemplateWorkflow: vi.fn().mockResolvedValue({
+        status: "success",
+        repository: "graider-sandbox/csc1120L2Template",
+        branch: "main",
+        path: ".github/workflows/grade.yml",
+        content: "name: Grade\n",
+        sha: "workflow-sha",
+        diagnostics: []
+      }),
       previewTemplateWorkflowSave,
       saveTemplateWorkflow
     });
@@ -399,11 +692,23 @@ describe("AssignmentDetailPage", () => {
     mockGraiderUI({ getTemplateWorkflow });
     renderAssignmentDetailPage({
       initialLoadResult: createAssignmentDetailResult(
-        createAssignmentDetailJson({ grading: { enabled: false, mode: "no-grading", workflow: null, artifact: null, resultFile: null, workflowStatus: null, workflowDispatch: null } })
+        createAssignmentDetailJson({
+          grading: {
+            enabled: false,
+            mode: "no-grading",
+            workflow: null,
+            artifact: null,
+            resultFile: null,
+            workflowStatus: null,
+            workflowDispatch: null
+          }
+        })
       )
     });
 
-    expect(await screen.findByText("Grading or the template repository is not configured.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Grading or the template repository is not configured.")
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View workflow" })).toBeDisabled();
     expect(getTemplateWorkflow).not.toHaveBeenCalled();
   });
@@ -770,7 +1075,9 @@ describe("AssignmentDetailPage", () => {
 
     expect(await screen.findByRole("button", { name: "Generate report" })).toBeDisabled();
     expect(
-      screen.getByText("A course folder and assignment file are required to generate a faculty report.")
+      screen.getByText(
+        "A course folder and assignment file are required to generate a faculty report."
+      )
     ).toBeInTheDocument();
   });
 

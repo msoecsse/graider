@@ -47,6 +47,8 @@ and renders:
 - a guarded confirmed apply execution flow from the Apply Preview page
 - grade dispatch and grade status entry points
 - a read-only Grade Workflow viewer for `.github/workflows/grade.yml`
+- a preview-only student repository email panel with read-only notification
+  history and duplicate-send indicators
 
 The detail page itself does not apply assignments, dispatch grading, generate
 reports, publish reports, generate workflows, edit `assignment.yml`, inspect
@@ -318,6 +320,38 @@ The corresponding IPC channel is:
 ```text
 graider-ui:faculty-report:get
 ```
+
+Student repository email preview and history use separate narrow APIs. Both are
+read-only: they inspect canonical roster data, the assignment manifest, and the
+assignment-scoped notification log. A successful notification entry is shown as
+`already_sent`; no email transport, authentication, send, resend, or log-write
+API is exposed by this flow.
+
+```text
+graider-ui:student-repo-email-preview:get
+graider-ui:student-repo-email-history:get
+```
+
+Notification history is stored, when a later confirmed send flow writes it, at:
+
+```text
+terms/<term-code>/notifications/<assignment-slug>/student-repo-emails.json
+```
+
+The log contains operational student data and must not contain credentials,
+tokens, authorization headers, or full email bodies. Whether it is committed or
+ignored is a campus policy decision.
+
+Slice L adds `graider-ui:student-repo-email-transport-status:get` for safe,
+read-only transport metadata. The default result is Microsoft Graph planned,
+not configured, and `canSend: false`; it does not read credentials, start
+authentication, contact Microsoft, or write logs.
+
+Slice N adds internal-only mail transport contracts, a deterministic test mock,
+and a Microsoft Graph skeleton that always returns unavailable. It has no send
+IPC, no real Microsoft authentication or HTTP calls, and no Assignment Detail
+send control. Tenant permissions and sender configuration remain subject to IT
+verification.
 
 The main process validates that the request shape contains string
 `courseFolderId`, `courseFolderPath`, and `assignmentFile` fields before running
