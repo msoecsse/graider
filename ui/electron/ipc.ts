@@ -12,6 +12,7 @@ export const IPC_CHANNELS = {
   getAssignmentForEdit: "graider-ui:assignment-edit:get",
   previewAssignmentEdit: "graider-ui:assignment-edit:preview",
   saveAssignmentEdit: "graider-ui:assignment-edit:save",
+  getStudentRepoEmailPreview: "graider-ui:student-repo-email-preview:get",
   loadRosterTerms: "graider-ui:roster-manager:terms",
   getRosterForSection: "graider-ui:roster-manager:get",
   previewRosterSave: "graider-ui:roster-manager:preview",
@@ -206,6 +207,56 @@ export interface AssignmentEditPreviewResult {
 export interface AssignmentEditSaveResult {
   readonly status: "success" | "failure" | "conflict";
   readonly path: string;
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
+export interface StudentRepoEmailPreviewRequest extends AssignmentSetupTermsRequest {
+  readonly assignmentFile: string;
+}
+
+export type StudentRepoEmailRecipientStatus =
+  | "ready"
+  | "skipped"
+  | "missing_email"
+  | "missing_repository"
+  | "invalid_roster";
+
+export interface StudentRepoEmailRecipient {
+  readonly studentId: string;
+  readonly githubUsername: string;
+  readonly email: string;
+  readonly firstName: string;
+  readonly lastName: string;
+  readonly section: string;
+  readonly status: StudentRepoEmailRecipientStatus;
+  readonly repositoryName: string | null;
+  readonly repositoryUrl: string | null;
+  readonly subject: string | null;
+  readonly body: string | null;
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
+export interface StudentRepoEmailPreviewSummary {
+  readonly studentCount: number;
+  readonly readyCount: number;
+  readonly skippedCount: number;
+  readonly missingEmailCount: number;
+  readonly missingRepositoryCount: number;
+  readonly inactiveCount: number;
+}
+
+export interface StudentRepoEmailPreviewResult {
+  readonly status: "success" | "partial" | "not_ready" | "failure";
+  readonly assignmentFile: string;
+  readonly courseCode: string | null;
+  readonly courseTitle: string | null;
+  readonly termCode: string | null;
+  readonly assignmentTitle: string | null;
+  readonly assignmentSlug: string | null;
+  readonly subjectTemplate: string;
+  readonly bodyTemplate: string;
+  readonly summary: StudentRepoEmailPreviewSummary;
+  readonly recipients: readonly StudentRepoEmailRecipient[];
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
@@ -568,6 +619,9 @@ export interface GraiderUIApi {
   readonly saveAssignmentEdit?: (
     request: AssignmentEditRequest
   ) => Promise<AssignmentEditSaveResult>;
+  readonly getStudentRepoEmailPreview?: (
+    request: StudentRepoEmailPreviewRequest
+  ) => Promise<StudentRepoEmailPreviewResult>;
   readonly loadRosterTerms?: (
     request: AssignmentSetupTermsRequest
   ) => Promise<AssignmentSetupTermsResult>;

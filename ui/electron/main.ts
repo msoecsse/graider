@@ -18,6 +18,7 @@ import {
   previewAssignmentEdit,
   saveAssignmentEdit
 } from "./assignmentEditService.js";
+import { getStudentRepoEmailPreview } from "./studentRepoEmailPreviewService.js";
 import {
   getRosterForSection,
   loadRosterTerms,
@@ -53,6 +54,7 @@ import {
   type AssignmentSetupRequest,
   type AssignmentSetupTermsRequest,
   type AssignmentEditRequest,
+  type StudentRepoEmailPreviewRequest,
   type RosterSaveRequest,
   type RosterSectionRequest,
   type TemplateWorkflowRequest,
@@ -230,6 +232,13 @@ const isAssignmentEditRequest = (value: unknown): value is AssignmentEditRequest
     typeof request.originalContent === "string" &&
     typeof request.confirmed === "boolean"
   );
+};
+
+const isStudentRepoEmailPreviewRequest = (
+  value: unknown
+): value is StudentRepoEmailPreviewRequest => {
+  if (!isAssignmentSetupTermsRequest(value)) return false;
+  return typeof (value as unknown as Record<string, unknown>).assignmentFile === "string";
 };
 
 const isRosterSectionRequest = (value: unknown): value is RosterSectionRequest => {
@@ -422,6 +431,11 @@ export const registerIpcHandlers = (): void => {
     if (!isAssignmentEditRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment edit request.");
     return saveAssignmentEdit(request);
+  });
+  ipcMain.handle(IPC_CHANNELS.getStudentRepoEmailPreview, (_event, request: unknown) => {
+    if (!isStudentRepoEmailPreviewRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("Invalid student repository email preview request.");
+    return getStudentRepoEmailPreview(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.loadRosterTerms, (_event, request: unknown) => {

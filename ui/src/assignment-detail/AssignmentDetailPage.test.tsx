@@ -306,6 +306,51 @@ describe("AssignmentDetailPage", () => {
     expect(screen.queryByRole("button", { name: /save workflow|push workflow/u })).toBeNull();
   });
 
+  it("previews repository emails through the narrow API without exposing a send action", async () => {
+    const getStudentRepoEmailPreview = vi.fn().mockResolvedValue({
+      status: "partial",
+      assignmentFile: ASSIGNMENT_FILE,
+      courseCode: "CSC1120",
+      courseTitle: "Data Structures",
+      termCode: "27s1",
+      assignmentTitle: "Lab 02",
+      assignmentSlug: "lab02",
+      subjectTemplate: "Your {course_code} {assignment_title} repository is ready",
+      bodyTemplate: "Hi {first_name}",
+      summary: { studentCount: 2, readyCount: 1, skippedCount: 0, missingEmailCount: 1, missingRepositoryCount: 0, inactiveCount: 0 },
+      recipients: [
+        { studentId: "s001", githubUsername: "ada", email: "ada@example.edu", firstName: "Ada", lastName: "Lovelace", section: "001", status: "ready", repositoryName: "lab02-ada", repositoryUrl: "https://github.com/owner/lab02-ada", subject: "Your CSC1120 Lab 02 repository is ready", body: "Hi Ada", diagnostics: [] },
+        { studentId: "s002", githubUsername: "ben", email: "", firstName: "Ben", lastName: "Bitdiddle", section: "001", status: "missing_email", repositoryName: null, repositoryUrl: null, subject: null, body: null, diagnostics: [{ message: "Roster row is missing an email address." }] }
+      ],
+      diagnostics: []
+    });
+    mockGraiderUI({ getStudentRepoEmailPreview });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Preview repository emails" }));
+    await waitFor(() => expect(getStudentRepoEmailPreview).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("heading", { name: "Repository email preview" })).toBeInTheDocument();
+    expect(screen.getByText("Missing email")).toBeInTheDocument();
+    expect(screen.getByText("Roster row is missing an email address.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+  });
+
+  it("shows repositories not created as a normal email-preview state", async () => {
+    mockGraiderUI({
+      getStudentRepoEmailPreview: vi.fn().mockResolvedValue({
+        status: "not_ready", assignmentFile: ASSIGNMENT_FILE, courseCode: "CSC1120", courseTitle: "Data Structures",
+        termCode: "27s1", assignmentTitle: "Lab 02", assignmentSlug: "lab02",
+        subjectTemplate: "", bodyTemplate: "",
+        summary: { studentCount: 0, readyCount: 0, skippedCount: 0, missingEmailCount: 0, missingRepositoryCount: 0, inactiveCount: 0 },
+        recipients: [], diagnostics: [{ message: "Repositories not created yet. Preview apply and apply the assignment first." }]
+      })
+    });
+    renderAssignmentDetailPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview repository emails" }));
+    expect(await screen.findByText(/Repositories not created yet/u)).toBeInTheDocument();
+    expect(screen.queryByText(/^Blocked$/u)).toBeNull();
+  });
+
   it("shows a blank draft when the workflow is missing", async () => {
     mockGraiderUI({
       getTemplateWorkflow: vi.fn().mockResolvedValue({

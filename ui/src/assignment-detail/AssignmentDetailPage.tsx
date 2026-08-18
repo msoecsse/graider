@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type {
+  StudentRepoEmailPreviewResult,
   TemplateWorkflowResult,
   TemplateWorkflowSavePreview,
   TemplateWorkflowSaveResult
@@ -570,6 +571,85 @@ const StudentReportsPanel = ({
   </section>
 );
 
+const StudentRepoEmailPreviewPanel = ({
+  preview
+}: {
+  readonly preview: StudentRepoEmailPreviewResult;
+}): ReactElement => (
+  <section className="detail-panel" aria-labelledby="student-repo-email-preview-title">
+    <h2 id="student-repo-email-preview-title">Repository email preview</h2>
+    <p className="detail-panel__note">
+      This preview does not send email. Delivery will be added in a later slice.
+    </p>
+    {preview.status === "not_ready" ? (
+      <p className="detail-panel__note">
+        Repositories not created yet. Preview apply and apply the assignment first.
+      </p>
+    ) : null}
+    {preview.diagnostics
+      .filter(
+        (item) =>
+          preview.status !== "not_ready" ||
+          item.message !== "Repositories not created yet. Preview apply and apply the assignment first."
+      )
+      .map((item) => (
+      <p className={preview.status === "failure" ? "error-message" : "detail-panel__note"} role="alert" key={item.message}>
+        {item.message}
+      </p>
+      ))}
+    <dl className="detail-grid">
+      <DetailItem label="Ready" value={preview.summary.readyCount} />
+      <DetailItem label="Skipped" value={preview.summary.skippedCount} />
+      <DetailItem label="Missing email" value={preview.summary.missingEmailCount} />
+      <DetailItem label="Missing repository" value={preview.summary.missingRepositoryCount} />
+    </dl>
+    {preview.recipients.length === 0 ? null : (
+      <div className="grade-status-summary-table-wrap">
+        <table className="grade-status-summary-table">
+          <thead>
+            <tr>
+              <th scope="col">Student</th>
+              <th scope="col">GitHub</th>
+              <th scope="col">Email</th>
+              <th scope="col">Section</th>
+              <th scope="col">Repository</th>
+              <th scope="col">Status</th>
+              <th scope="col">Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            {preview.recipients.map((recipient, index) => (
+              <tr key={`${recipient.studentId || "roster"}-${recipient.section}-${index}`}>
+                <td>{[recipient.firstName, recipient.lastName].filter(Boolean).join(" ") || recipient.studentId || "Roster issue"}</td>
+                <td>{recipient.githubUsername || "-"}</td>
+                <td>{recipient.email || "-"}</td>
+                <td>{recipient.section}</td>
+                <td>
+                  {recipient.repositoryUrl === null ? "-" : (
+                    <a href={recipient.repositoryUrl} target="_blank" rel="noreferrer">Open repository</a>
+                  )}
+                </td>
+                <td>{recipient.status.replaceAll("_", " ")}</td>
+                <td>
+                  {recipient.subject === null || recipient.body === null ? (
+                    recipient.diagnostics.map((item) => item.message).join(" ") || "-"
+                  ) : (
+                    <details>
+                      <summary>View email</summary>
+                      <p><strong>{recipient.subject}</strong></p>
+                      <pre>{recipient.body}</pre>
+                    </details>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </section>
+);
+
 const RosterPanel = ({ detail }: { readonly detail: NormalizedAssignmentDetail }): ReactElement => (
   <section className="detail-panel" aria-labelledby="roster-sections-title">
     <h2 id="roster-sections-title">Roster / Sections</h2>
@@ -1008,6 +1088,8 @@ export const AssignmentDetailPage = ({
     null
   );
   const [isPushingWorkflow, setIsPushingWorkflow] = useState(false);
+  const [emailPreview, setEmailPreview] = useState<StudentRepoEmailPreviewResult | null>(null);
+  const [isLoadingEmailPreview, setIsLoadingEmailPreview] = useState(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
 
@@ -1172,6 +1254,20 @@ export const AssignmentDetailPage = ({
     }
   };
 
+  const loadStudentRepoEmailPreview = async (): Promise<void> => {
+    if (window.graiderUI.getStudentRepoEmailPreview === undefined) return;
+    setIsLoadingEmailPreview(true);
+    try {
+      setEmailPreview(await window.graiderUI.getStudentRepoEmailPreview({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        assignmentFile: selection.assignmentFile
+      }));
+    } finally {
+      setIsLoadingEmailPreview(false);
+    }
+  };
+
   const hasInitialResultForSelection =
     initialLoadResult?.courseFolderId === selection.courseFolderId &&
     initialLoadResult.assignmentFile === selection.assignmentFile;
@@ -1243,6 +1339,16 @@ export const AssignmentDetailPage = ({
               onClick={onEditAssignment}
             >
               Edit assignment
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={detail === null || isLoadingEmailPreview}
+              onClick={() => {
+                void loadStudentRepoEmailPreview();
+              }}
+            >
+              {isLoadingEmailPreview ? "Loading email preview..." : "Preview repository emails"}
             </button>
             <button
               className="secondary-action"
@@ -1374,6 +1480,7 @@ export const AssignmentDetailPage = ({
                   onViewGradeStatus(selection, detail, loadResult);
                 }}
               />
+              {emailPreview === null ? null : <StudentRepoEmailPreviewPanel preview={emailPreview} />}
               <DiagnosticsPanel diagnostics={detail.diagnostics} />
               <ActionsPanel
                 detail={detail}

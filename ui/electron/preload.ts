@@ -30,6 +30,8 @@ import {
   type AssignmentEditRequest,
   type AssignmentEditSaveResult,
   type AssignmentEditPreviewResult,
+  type StudentRepoEmailPreviewRequest,
+  type StudentRepoEmailPreviewResult,
   type RosterLoadResult,
   type RosterPreviewResult,
   type RosterSaveRequest,
@@ -82,6 +84,10 @@ const graiderUI: GraiderUIApi = {
     await invoke<AssignmentEditPreviewResult>(IPC_CHANNELS.previewAssignmentEdit, request),
   saveAssignmentEdit: async (request: AssignmentEditRequest): Promise<AssignmentEditSaveResult> =>
     await invoke<AssignmentEditSaveResult>(IPC_CHANNELS.saveAssignmentEdit, request),
+  getStudentRepoEmailPreview: async (
+    request: StudentRepoEmailPreviewRequest
+  ): Promise<StudentRepoEmailPreviewResult> =>
+    await invoke<StudentRepoEmailPreviewResult>(IPC_CHANNELS.getStudentRepoEmailPreview, request),
   loadRosterTerms: async (
     request: AssignmentSetupTermsRequest
   ): Promise<AssignmentSetupTermsResult> =>
