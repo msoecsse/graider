@@ -85,8 +85,8 @@ export interface ApplyPreviewFiles {
 
 export interface ApplyPreviewAction {
   readonly available: boolean;
-  readonly implemented: false;
-  readonly previewOnly: true;
+  readonly implemented: boolean;
+  readonly previewOnly: boolean;
   readonly reason?: string;
 }
 

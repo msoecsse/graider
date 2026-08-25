@@ -730,33 +730,35 @@ describe("AssignmentDetailPage", () => {
   });
 
   it("shows repositories not created as a normal email-preview state", async () => {
+    const getStudentRepoEmailPreview = vi.fn().mockResolvedValue({
+      status: "not_ready",
+      assignmentFile: ASSIGNMENT_FILE,
+      courseCode: "CSC1120",
+      courseTitle: "Data Structures",
+      termCode: "27s1",
+      assignmentTitle: "Lab 02",
+      assignmentSlug: "lab02",
+      subjectTemplate: "",
+      bodyTemplate: "",
+      summary: {
+        studentCount: 0,
+        readyCount: 0,
+        skippedCount: 0,
+        missingEmailCount: 0,
+        missingRepositoryCount: 0,
+        inactiveCount: 0
+      },
+      recipients: [],
+      diagnostics: [
+        { message: "Repositories not created yet. Preview apply and apply the assignment first." }
+      ]
+    });
     mockGraiderUI({
-      getStudentRepoEmailPreview: vi.fn().mockResolvedValue({
-        status: "not_ready",
-        assignmentFile: ASSIGNMENT_FILE,
-        courseCode: "CSC1120",
-        courseTitle: "Data Structures",
-        termCode: "27s1",
-        assignmentTitle: "Lab 02",
-        assignmentSlug: "lab02",
-        subjectTemplate: "",
-        bodyTemplate: "",
-        summary: {
-          studentCount: 0,
-          readyCount: 0,
-          skippedCount: 0,
-          missingEmailCount: 0,
-          missingRepositoryCount: 0,
-          inactiveCount: 0
-        },
-        recipients: [],
-        diagnostics: [
-          { message: "Repositories not created yet. Preview apply and apply the assignment first." }
-        ]
-      })
+      getStudentRepoEmailPreview
     });
     renderAssignmentDetailPage();
     fireEvent.click(await screen.findByRole("button", { name: "Preview repository emails" }));
+    await waitFor(() => expect(getStudentRepoEmailPreview).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/Repositories not created yet/u)).toBeInTheDocument();
     expect(screen.queryByText(/^Blocked$/u)).toBeNull();
   });

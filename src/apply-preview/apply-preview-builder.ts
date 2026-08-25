@@ -11,8 +11,7 @@ import {
   MANIFEST_TRACKED_REPOSITORY_MISSING_CODE,
   STUDENT_REPOSITORY_STATUS_UNKNOWN_CODE,
   TARGET_MATCHES_NO_STUDENTS_CODE,
-  createConfigDiagnostic,
-  createWarningDiagnostic
+  createConfigDiagnostic
 } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
@@ -541,14 +540,10 @@ export const buildAssignmentApplyPreview = async ({
       ...rosterResult.warnings,
       ...groupPlan.warnings,
       ...groupPlan.errors,
-      ...readiness.diagnostics,
-      createWarningDiagnostic(
-        "group_repository_apply_not_implemented",
-        "Group repository Apply Preview is available. Group repository creation is not implemented yet.",
-        { assignmentFile: config.summary.assignmentConfigPath }
-      )
+      ...readiness.diagnostics
     ];
     const status = groupPlan.errors.length === EMPTY_COUNT ? createStatus(diagnostics) : "failure";
+    const groupApplySupported = !hasErrorDiagnostics(diagnostics);
     const summary: ApplyPreviewPlanSummary = {
       wouldCreateRepositories: groupPlan.targets.length,
       wouldUpdateRepositories: EMPTY_COUNT,
@@ -564,7 +559,7 @@ export const buildAssignmentApplyPreview = async ({
       exitCode: resolveExitCode(status),
       diagnostics,
       repositoryMode: "group",
-      applySupported: false,
+      applySupported: groupApplySupported,
       assignment: {
         slug: config.assignment.assignment.slug,
         title: config.assignment.assignment.title,
@@ -588,10 +583,10 @@ export const buildAssignmentApplyPreview = async ({
       },
       actions: {
         apply: {
-          available: false,
-          implemented: false,
-          previewOnly: true,
-          reason: "group_repository_apply_not_implemented"
+          available: groupApplySupported,
+          implemented: true,
+          previewOnly: false,
+          ...(groupApplySupported ? {} : { reason: "preview_has_blockers" })
         }
       }
     };

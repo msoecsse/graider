@@ -22,12 +22,16 @@ import { loadManifest } from "../../manifest/manifest-loader.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { buildPlan } from "../../planning/plan-builder.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
-import { createConfigDiagnostic, DiagnosticCode } from "../../diagnostics/error-catalog.js";
+import { createWarningDiagnostic } from "../../diagnostics/error-catalog.js";
 import { writeCommandResult } from "../output.js";
 import { runGroupApplyPreflight } from "../../groups/group-apply-preflight.js";
+import { executeGroupTargets } from "../../groups/group-target-executor.js";
+import { writeGroupApplyManifestV2 } from "../../groups/group-apply-manifest-writer.js";
 
 const COMMAND_NAME = "apply";
 const EMPTY_COUNT = 0;
+const GROUP_APPLY_INCOMPLETE_MESSAGE =
+  "Group Apply did not complete, so no manifest was written. Some group repositories may have been created before the failure. Graider will not adopt untracked repositories automatically. Delete any partial repositories manually or use a future reconcile workflow, then run Apply again.";
 
 export interface ApplyCommandRequest {
   cwd: string;
@@ -37,6 +41,8 @@ export interface ApplyCommandRequest {
   githubClient?: GitHubClient;
   clock?: Clock;
   retryOptions?: Partial<RetryOptions>;
+  groupTargetExecutor?: typeof executeGroupTargets;
+  groupManifestWriter?: typeof writeGroupApplyManifestV2;
 }
 
 const getExecutionStatus = (
@@ -66,7 +72,9 @@ export const runApplyCommand = async ({
   commandName = COMMAND_NAME,
   githubClient,
   clock = systemClock,
-  retryOptions
+  retryOptions,
+  groupTargetExecutor = executeGroupTargets,
+  groupManifestWriter = writeGroupApplyManifestV2
 }: ApplyCommandRequest): Promise<CommandResult> => {
   const retryEvents: GitHubRetryEvent[] = [];
   const effectiveRetryOptions: Partial<RetryOptions> = {
@@ -118,31 +126,114 @@ export const runApplyCommand = async ({
       students: rosterResult.students,
       githubClient: effectiveGitHubClient
     });
+    const groupTargetSummary = preflight.targets.map((target) => ({
+      groupId: target.groupId,
+      repositoryName: target.repositoryName,
+      studentIds: target.studentIds,
+      githubUsernames: target.githubUsernames,
+      status: preflight.errors.length === EMPTY_COUNT ? "pending" : "blocked",
+      diagnostics: target.diagnostics
+    }));
+    const groupSummary = {
+      options,
+      ...configResult.config.summary,
+      ...rosterResult.summary,
+      repositoryMode: "group",
+      targetCount: preflight.targets.length,
+      studentMappingCount: preflight.targets.reduce(
+        (count, target) => count + target.studentIds.length,
+        EMPTY_COUNT
+      ),
+      groupTargets: groupTargetSummary
+    };
+    if (preflight.errors.length > EMPTY_COUNT) {
+      return createCommandResult({
+        commandName,
+        assignmentFile: configResult.config.summary.assignmentConfigPath,
+        status: "failure",
+        warnings: [...rosterResult.warnings, ...preflight.warnings],
+        errors: [...preflight.errors],
+        generatedFiles: [],
+        summary: groupSummary
+      });
+    }
+
+    const execution = await groupTargetExecutor({
+      config: configResult.config,
+      targets: preflight.targets,
+      githubClient: effectiveGitHubClient
+    });
+    const executionTargetSummary = execution.targets.map((result) => ({
+      groupId: result.target.groupId,
+      repositoryName: result.target.repositoryName,
+      ...(result.htmlUrl === null ? {} : { htmlUrl: result.htmlUrl }),
+      ...(result.cloneUrl === null ? {} : { cloneUrl: result.cloneUrl }),
+      studentIds: result.target.studentIds,
+      githubUsernames: result.target.githubUsernames,
+      status: result.status,
+      diagnostics: result.diagnostics
+    }));
+    const executionSummary = {
+      ...groupSummary,
+      groupTargets: executionTargetSummary
+    };
+    if (execution.errors.length > EMPTY_COUNT) {
+      return createCommandResult({
+        commandName,
+        assignmentFile: configResult.config.summary.assignmentConfigPath,
+        status: "failure",
+        warnings: [
+          ...rosterResult.warnings,
+          ...preflight.warnings,
+          ...execution.warnings,
+          createWarningDiagnostic(
+            "group_apply_manifest_not_written",
+            GROUP_APPLY_INCOMPLETE_MESSAGE
+          )
+        ],
+        errors: [...execution.errors],
+        generatedFiles: [],
+        summary: executionSummary
+      });
+    }
+
+    const manifestWrite = groupManifestWriter({
+      repoRoot: configResult.config.summary.repoRoot,
+      termCode: configResult.config.summary.termCode,
+      assignmentSlug: configResult.config.summary.assignmentSlug,
+      plannedTargets: preflight.targets,
+      execution
+    });
+    if (manifestWrite.status === "failure") {
+      return createCommandResult({
+        commandName,
+        assignmentFile: configResult.config.summary.assignmentConfigPath,
+        status: "failure",
+        warnings: [
+          ...rosterResult.warnings,
+          ...preflight.warnings,
+          ...execution.warnings,
+          createWarningDiagnostic(
+            "group_apply_manifest_not_written",
+            GROUP_APPLY_INCOMPLETE_MESSAGE
+          )
+        ],
+        errors: [...manifestWrite.diagnostics],
+        generatedFiles: [],
+        summary: executionSummary
+      });
+    }
     return createCommandResult({
       commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
-      status: "failure",
-      warnings: [...rosterResult.warnings, ...preflight.warnings],
-      errors: [
-        ...preflight.errors,
-        createConfigDiagnostic(
-          DiagnosticCode.GroupRepositoryApplyNotImplemented,
-          "Group Apply preflight completed, but group repository creation is not implemented yet.",
-          {
-            assignmentFile: configResult.config.summary.assignmentConfigPath,
-            targetCount: preflight.targets.length
-          }
-        )
-      ],
-      generatedFiles: [],
+      status: "success",
+      warnings: [...rosterResult.warnings, ...preflight.warnings, ...execution.warnings],
+      errors: [],
+      generatedFiles: [manifestWrite.manifestPath],
       summary: {
-        options,
-        ...configResult.config.summary,
-        ...rosterResult.summary,
-        groupTargets: preflight.targets.map((target) => ({
-          groupId: target.groupId,
-          repositoryName: target.repositoryName
-        }))
+        ...executionSummary,
+        manifestFile: manifestWrite.manifestPath,
+        manifestWritten: true
       }
     });
   }

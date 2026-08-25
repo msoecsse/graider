@@ -434,7 +434,7 @@ const GroupTargetsPanel = ({
     >
       <h2 id="group-targets-title">Group repository targets</h2>
       <p className="detail-panel__note">
-        Preview is available for group repositories. Apply execution is not implemented yet.
+        Review these targets before using Apply. Apply creates one repository per group.
       </p>
       {preview.plan.groupTargets.length === 0 ? (
         <p className="detail-panel__note">No valid group repository targets were found.</p>

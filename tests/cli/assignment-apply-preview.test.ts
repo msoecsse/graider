@@ -166,8 +166,8 @@ describe("graider assignment apply-preview command", () => {
 
     expect(result.status).toBe("success");
     expect(result.repositoryMode).toBe("group");
-    expect(result.applySupported).toBe(false);
-    expect(result.diagnostics).toEqual(
+    expect(result.applySupported).toBe(true);
+    expect(result.diagnostics).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "group_repository_apply_not_implemented" })
       ])
@@ -194,8 +194,9 @@ describe("graider assignment apply-preview command", () => {
       })
     ]);
     expect(result.actions?.apply).toMatchObject({
-      available: false,
-      reason: "group_repository_apply_not_implemented"
+      available: true,
+      implemented: true,
+      previewOnly: false
     });
     expectNoMutations(githubClient);
   });
