@@ -11,7 +11,8 @@ import {
   MANIFEST_TRACKED_REPOSITORY_MISSING_CODE,
   STUDENT_REPOSITORY_STATUS_UNKNOWN_CODE,
   TARGET_MATCHES_NO_STUDENTS_CODE,
-  createConfigDiagnostic
+  createConfigDiagnostic,
+  createWarningDiagnostic
 } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
@@ -19,6 +20,7 @@ import { GitHubClientError } from "../github/github-errors.js";
 import { loadManifest } from "../manifest/manifest-loader.js";
 import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
+import { buildGroupApplyPreviewPlan } from "../groups/group-preview-planner.js";
 import { generateRepositoryName } from "../planning/repo-name.js";
 import { loadAssignmentRosters } from "../roster/roster-loader.js";
 import {
@@ -522,6 +524,77 @@ export const buildAssignmentApplyPreview = async ({
       ...configResult.diagnostics,
       createTargetStudentsEmptyDiagnostic(config)
     ]);
+  }
+
+  if (config.assignment.repository_mode === "group") {
+    const groupPlan = buildGroupApplyPreviewPlan(config, rosterResult.students);
+    const localTemplate = createTemplatePreview(config);
+    const localGrading = createGradingPreview(config);
+    const readiness = await checkAssignmentDetailGithubReadiness({
+      config,
+      template: localTemplate,
+      grading: localGrading,
+      ...(githubClient === undefined ? {} : { githubClient })
+    });
+    const diagnostics = [
+      ...configResult.diagnostics,
+      ...rosterResult.warnings,
+      ...groupPlan.warnings,
+      ...groupPlan.errors,
+      ...readiness.diagnostics,
+      createWarningDiagnostic(
+        "group_repository_apply_not_implemented",
+        "Group repository Apply Preview is available. Group repository creation is not implemented yet.",
+        { assignmentFile: config.summary.assignmentConfigPath }
+      )
+    ];
+    const status = groupPlan.errors.length === EMPTY_COUNT ? createStatus(diagnostics) : "failure";
+    const summary: ApplyPreviewPlanSummary = {
+      wouldCreateRepositories: groupPlan.targets.length,
+      wouldUpdateRepositories: EMPTY_COUNT,
+      wouldSkipRepositories: EMPTY_COUNT,
+      blockedRepositories:
+        groupPlan.errors.length === EMPTY_COUNT ? EMPTY_COUNT : groupPlan.targets.length,
+      unknownRepositories: EMPTY_COUNT
+    };
+    return {
+      schemaVersion: ASSIGNMENT_APPLY_PREVIEW_SCHEMA_VERSION,
+      commandName: COMMAND_NAME,
+      status,
+      exitCode: resolveExitCode(status),
+      diagnostics,
+      repositoryMode: "group",
+      applySupported: false,
+      assignment: {
+        slug: config.assignment.assignment.slug,
+        title: config.assignment.assignment.title,
+        file: config.summary.assignmentConfigPath,
+        status: config.assignment.assignment.status
+      },
+      course: { slug: config.course.course.code, title: config.course.course.title },
+      term: { slug: config.term.term.code, title: config.term.term.display_name },
+      target: {
+        sections: config.assignment.sections,
+        sectionCount: config.assignment.sections.length,
+        studentCount: rosterResult.summary.studentCount
+      },
+      template: readiness.template,
+      grading: readiness.grading,
+      plan: { summary, repositories: [], groupTargets: groupPlan.targets },
+      files: {
+        assignmentFile: config.summary.assignmentConfigPath,
+        workflowFile: readiness.grading.workflow,
+        templateSource: createTemplateSource(readiness.template)
+      },
+      actions: {
+        apply: {
+          available: false,
+          implemented: false,
+          previewOnly: true,
+          reason: "group_repository_apply_not_implemented"
+        }
+      }
+    };
   }
 
   const manifestPath = createManifestPath(

@@ -87,6 +87,8 @@ var DiagnosticCode = {
   ConfirmationRequired: "confirmation_required",
   ManifestTrackedRepositoryMissing: "manifest_tracked_repository_missing",
   GradingWorkflowMissing: "grading_workflow_missing",
+  GradingWorkflowPending: "grading_workflow_pending",
+  GroupRepositoryApplyNotImplemented: "group_repository_apply_not_implemented",
   WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
   WorkflowDispatchMissing: "workflow_dispatch_missing",
   WorkflowDispatchFailed: "workflow_dispatch_failed",
@@ -769,6 +771,14 @@ var reportsSchema = z.object({
   formats: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS),
   student_publish: studentPublishSchema.optional()
 }).strict();
+var studentAccessPagesSchema = z.object({
+  repository: z.string().regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u),
+  base_url: z.url().refine((value) => new URL(value).protocol === "https:"),
+  branch: z.string().min(MINIMUM_LIST_ITEMS).default("main")
+}).strict();
+var notificationsSchema = z.object({
+  student_access_pages: studentAccessPagesSchema.optional()
+}).strict();
 var rawCourseConfigSchema = z.object({
   schema_version: z.number(),
   course: z.object({
@@ -791,7 +801,8 @@ var rawCourseConfigSchema = z.object({
     assignment_type: z.string().min(MINIMUM_LIST_ITEMS)
   }).strict(),
   grading: gradingSchema,
-  reports: reportsSchema
+  reports: reportsSchema,
+  notifications: notificationsSchema.optional()
 }).strict();
 var rawTermConfigSchema = z.object({
   schema_version: z.number(),
@@ -831,7 +842,11 @@ var rawAssignmentConfigSchema = z.object({
     grading_category: z.string().min(MINIMUM_LIST_ITEMS),
     points: z.number().nullable()
   }).strict(),
-  grading: gradingSchema.optional()
+  grading: gradingSchema.optional(),
+  repository_mode: z.enum(["individual", "group"]).optional(),
+  groups: z.object({
+    file: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.csv$/u)
+  }).strict().optional()
 }).strict();
 
 // src/config/config-validation.ts
@@ -1456,6 +1471,7 @@ import { z as z2 } from "zod";
 
 // src/manifest/manifest-models.ts
 var MANIFEST_SCHEMA_VERSION = 1;
+var MANIFEST_V2_SCHEMA_VERSION = 2;
 var MANIFEST_LIFECYCLE_STATUSES = [
   "created",
   "active",
@@ -1649,6 +1665,35 @@ var rawManifestSchema = z2.object({
   warnings: z2.array(diagnosticSchema),
   errors: z2.array(diagnosticSchema)
 }).strict();
+var rawManifestV2Schema = z2.object({
+  schema_version: z2.literal(MANIFEST_V2_SCHEMA_VERSION),
+  repository_mode: z2.enum(["individual", "group"]),
+  targets: z2.array(
+    z2.object({
+      target_id: z2.string().min(1),
+      mode: z2.enum(["individual", "group"]),
+      group_id: z2.string().min(1).optional(),
+      repository_name: z2.string().min(1),
+      html_url: z2.string().optional(),
+      clone_url: z2.string().optional(),
+      section_ids: z2.array(z2.string().min(1)),
+      student_ids: z2.array(z2.string().min(1)),
+      github_usernames: z2.array(z2.string().min(1)),
+      diagnostics: z2.array(diagnosticSchema)
+    }).strict()
+  ),
+  student_mappings: z2.array(
+    z2.object({
+      student_id: z2.string().min(1),
+      github_username: z2.string().min(1),
+      target_id: z2.string().min(1),
+      repository_name: z2.string().min(1),
+      html_url: z2.string().optional(),
+      clone_url: z2.string().optional()
+    }).strict()
+  ),
+  diagnostics: z2.array(diagnosticSchema)
+}).strict();
 var createFailure2 = (errors) => ({
   status: "failure",
   warnings: [],
@@ -1674,26 +1719,26 @@ var createManifestValidationDiagnostic = (code, filePath, issue) => createConfig
   path: issue.path.join("."),
   reason: issue.message
 });
-var normalizeDiagnostic = (diagnostic) => ({
-  code: diagnostic.code,
-  severity: diagnostic.severity,
-  message: diagnostic.message,
-  ...diagnostic.context === void 0 ? {} : { context: diagnostic.context },
-  ...diagnostic.observedAt === void 0 ? {} : { observedAt: diagnostic.observedAt }
+var normalizeDiagnostic = (diagnostic2) => ({
+  code: diagnostic2.code,
+  severity: diagnostic2.severity,
+  message: diagnostic2.message,
+  ...diagnostic2.context === void 0 ? {} : { context: diagnostic2.context },
+  ...diagnostic2.observedAt === void 0 ? {} : { observedAt: diagnostic2.observedAt }
 });
 var getIssueCode = (issue) => {
   const pathParts = issue.path.map(String);
-  const path18 = pathParts.join(".");
+  const path19 = pathParts.join(".");
   if (pathParts.length === MINIMUM_ITEMS) {
     return DiagnosticCode.MissingManifestSection;
   }
-  if (path18.endsWith("lifecycle.status")) {
+  if (path19.endsWith("lifecycle.status")) {
     return DiagnosticCode.InvalidManifestLifecycleStatus;
   }
-  if (path18.endsWith("permission")) {
+  if (path19.endsWith("permission")) {
     return DiagnosticCode.InvalidManifestPermission;
   }
-  if (path18.startsWith("repositories.")) {
+  if (path19.startsWith("repositories.")) {
     return DiagnosticCode.InvalidManifestRepositoryRecord;
   }
   return DiagnosticCode.InvalidManifest;
@@ -1702,6 +1747,69 @@ var validateRawManifest = (filePath, value) => {
   const schemaVersion = z2.looseObject({
     schema_version: z2.number()
   }).safeParse(value);
+  if (schemaVersion.success && schemaVersion.data.schema_version === MANIFEST_V2_SCHEMA_VERSION) {
+    const result = rawManifestV2Schema.safeParse(value);
+    if (!result.success)
+      return createFailure2([
+        createConfigDiagnostic(
+          DiagnosticCode.InvalidManifest,
+          `Invalid manifest ${filePath}: ${result.error.issues[0]?.message ?? "schema validation failed"}.`,
+          { filePath }
+        )
+      ]);
+    const ids = /* @__PURE__ */ new Set();
+    const students = /* @__PURE__ */ new Set();
+    const duplicate = result.data.targets.find(
+      (target) => ids.has(target.target_id) ? true : (ids.add(target.target_id), false)
+    );
+    const mappingError = result.data.student_mappings.find(
+      (mapping) => !ids.has(mapping.target_id) || (students.has(mapping.student_id) ? true : (students.add(mapping.student_id), false))
+    );
+    if (duplicate !== void 0 || mappingError !== void 0)
+      return createFailure2([
+        createConfigDiagnostic(
+          DiagnosticCode.InvalidManifest,
+          "Manifest v2 targets or student mappings are invalid.",
+          { filePath }
+        )
+      ]);
+    return {
+      status: "loaded",
+      warnings: [],
+      errors: [],
+      manifest: {
+        schemaVersion: MANIFEST_V2_SCHEMA_VERSION,
+        repositoryMode: result.data.repository_mode,
+        targets: result.data.targets.map((target) => ({
+          targetId: target.target_id,
+          mode: target.mode,
+          ...target.group_id === void 0 ? {} : { groupId: target.group_id },
+          repositoryName: target.repository_name,
+          ...target.html_url === void 0 ? {} : { htmlUrl: target.html_url },
+          ...target.clone_url === void 0 ? {} : { cloneUrl: target.clone_url },
+          sectionIds: target.section_ids,
+          studentIds: target.student_ids,
+          githubUsernames: target.github_usernames,
+          diagnostics: target.diagnostics.map(normalizeDiagnostic)
+        })),
+        studentMappings: result.data.student_mappings.map((mapping) => ({
+          studentId: mapping.student_id,
+          githubUsername: mapping.github_username,
+          targetId: mapping.target_id,
+          repositoryName: mapping.repository_name,
+          ...mapping.html_url === void 0 ? {} : { htmlUrl: mapping.html_url },
+          ...mapping.clone_url === void 0 ? {} : { cloneUrl: mapping.clone_url }
+        })),
+        assignment: { termCode: "", courseCode: "", assignmentSlug: "", assignmentTitle: "" },
+        source: { sourceFiles: [], inputFingerprint: "" },
+        template: { repository: "", branch: "" },
+        repositories: [],
+        operationHistory: [],
+        warnings: result.data.diagnostics.map(normalizeDiagnostic),
+        errors: []
+      }
+    };
+  }
   if (schemaVersion.success && schemaVersion.data.schema_version !== MANIFEST_SCHEMA_VERSION) {
     return createFailure2([
       createManifestSchemaVersionDiagnostic(schemaVersion.data.schema_version)
@@ -1851,6 +1959,56 @@ var createManifestPath = (repoRoot, termCode, assignmentSlug) => {
   };
 };
 
+// src/groups/group-preview-planner.ts
+import path5 from "path";
+
+// src/io/csv.ts
+var HEADER_ROW_NUMBER = 1;
+var FIRST_DATA_ROW_NUMBER = 2;
+var EMPTY_LINE_COUNT = 0;
+var EMPTY_FIELD = "";
+var COMMA = ",";
+var QUOTE = '"';
+var DOUBLE_QUOTE = '""';
+var CARRIAGE_RETURN = "\r";
+var NEWLINE_PATTERN = /\n/;
+var stripCarriageReturn = (line) => line.endsWith(CARRIAGE_RETURN) ? line.slice(0, -CARRIAGE_RETURN.length) : line;
+var parseCsvLine = (line) => {
+  const fields = [];
+  let current = EMPTY_FIELD;
+  let inQuotes = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? EMPTY_FIELD;
+    const nextTwoCharacters = line.slice(index, index + DOUBLE_QUOTE.length);
+    if (nextTwoCharacters === DOUBLE_QUOTE && inQuotes) {
+      current += QUOTE;
+      index += QUOTE.length;
+    } else if (character === QUOTE) {
+      inQuotes = !inQuotes;
+    } else if (character === COMMA && !inQuotes) {
+      fields.push(current.trim());
+      current = EMPTY_FIELD;
+    } else {
+      current += character;
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+};
+var parseCsv = (content) => {
+  const lines = content.split(NEWLINE_PATTERN).map(stripCarriageReturn);
+  const nonEmptyLines = lines.filter((line) => line.trim().length > EMPTY_LINE_COUNT);
+  const headerLine = nonEmptyLines[HEADER_ROW_NUMBER - HEADER_ROW_NUMBER] ?? EMPTY_FIELD;
+  const dataLines = nonEmptyLines.slice(FIRST_DATA_ROW_NUMBER - HEADER_ROW_NUMBER);
+  return {
+    headers: parseCsvLine(headerLine),
+    rows: dataLines.map((line, index) => ({
+      rowNumber: index + FIRST_DATA_ROW_NUMBER,
+      values: parseCsvLine(line)
+    }))
+  };
+};
+
 // src/planning/repo-name.ts
 var PLACEHOLDER_PATTERN = /\{([a-z_]+)\}/gu;
 var REPOSITORY_NAME_PATTERN = /^[a-z0-9-]+$/u;
@@ -1965,55 +2123,219 @@ var generateRepositoryName = (input) => {
   };
 };
 
-// src/roster/roster-loader.ts
-import path5 from "path";
+// src/roster/roster-models.ts
+var ROSTER_STATUS_ACTIVE = "active";
+var ROSTER_STATUS_DROPPED = "dropped";
+var ROSTER_STATUS_HOLD = "hold";
 
-// src/io/csv.ts
-var HEADER_ROW_NUMBER = 1;
-var FIRST_DATA_ROW_NUMBER = 2;
-var EMPTY_LINE_COUNT = 0;
-var EMPTY_FIELD = "";
-var COMMA = ",";
-var QUOTE = '"';
-var DOUBLE_QUOTE = '""';
-var CARRIAGE_RETURN = "\r";
-var NEWLINE_PATTERN = /\n/;
-var stripCarriageReturn = (line) => line.endsWith(CARRIAGE_RETURN) ? line.slice(0, -CARRIAGE_RETURN.length) : line;
-var parseCsvLine = (line) => {
-  const fields = [];
-  let current = EMPTY_FIELD;
-  let inQuotes = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index] ?? EMPTY_FIELD;
-    const nextTwoCharacters = line.slice(index, index + DOUBLE_QUOTE.length);
-    if (nextTwoCharacters === DOUBLE_QUOTE && inQuotes) {
-      current += QUOTE;
-      index += QUOTE.length;
-    } else if (character === QUOTE) {
-      inQuotes = !inQuotes;
-    } else if (character === COMMA && !inQuotes) {
-      fields.push(current.trim());
-      current = EMPTY_FIELD;
-    } else {
-      current += character;
-    }
+// src/groups/group-preview-planner.ts
+var GROUP_HEADERS = ["group_id", "student_id"];
+var SAFE_GROUP_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+var SAFE_GROUP_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.csv$/u;
+var diagnostic = (code, message, context) => createConfigDiagnostic(code, message, context);
+var warning = (code, message, context) => createWarningDiagnostic(code, message, context);
+var buildGroupApplyPreviewPlan = (config, students) => {
+  const groupsFile = config.assignment.groups?.file ?? "groups.csv";
+  const assignmentDirectory = path5.dirname(
+    path5.resolve(config.summary.repoRoot, config.summary.assignmentRelativePath)
+  );
+  const groupsPath = path5.resolve(assignmentDirectory, groupsFile);
+  const baseContext = { assignmentFile: config.summary.assignmentConfigPath, groupsFile };
+  if (!SAFE_GROUP_FILE.test(groupsFile) || path5.dirname(groupsFile) !== ".") {
+    return {
+      targets: [],
+      warnings: [],
+      errors: [diagnostic("group_csv_invalid", "Group CSV file name is invalid.", baseContext)]
+    };
   }
-  fields.push(current.trim());
-  return fields;
+  if (path5.relative(assignmentDirectory, groupsPath).startsWith("..")) {
+    return {
+      targets: [],
+      warnings: [],
+      errors: [
+        diagnostic(
+          "group_csv_invalid",
+          "Group CSV path is outside the assignment directory.",
+          baseContext
+        )
+      ]
+    };
+  }
+  const file = readTextFile(groupsPath);
+  if (file.status === "failure") {
+    return {
+      targets: [],
+      warnings: [],
+      errors: [
+        diagnostic(
+          "group_csv_missing",
+          "Group CSV is missing for this group assignment.",
+          baseContext
+        )
+      ]
+    };
+  }
+  const document = parseCsv(file.content);
+  if (document.headers.length !== GROUP_HEADERS.length || document.headers.some((header, index) => header !== GROUP_HEADERS[index])) {
+    return {
+      targets: [],
+      warnings: [],
+      errors: [
+        diagnostic(
+          "group_csv_invalid",
+          "Group CSV must begin with group_id,student_id.",
+          baseContext
+        )
+      ]
+    };
+  }
+  const knownStudents = new Map(students.map((student) => [student.studentId, student]));
+  const memberships = /* @__PURE__ */ new Set();
+  const assigned = /* @__PURE__ */ new Set();
+  const groups = /* @__PURE__ */ new Map();
+  const errors = [];
+  for (const row of document.rows) {
+    const groupId = (row.values[0] ?? "").trim();
+    const studentId = (row.values[1] ?? "").trim();
+    const context = { ...baseContext, rowNumber: row.rowNumber, groupId, studentId };
+    if (row.values.length !== 2 || groupId === "" || studentId === "") {
+      errors.push(
+        diagnostic(
+          "group_csv_invalid",
+          "Each group CSV row requires group_id and student_id.",
+          context
+        )
+      );
+      continue;
+    }
+    if (!SAFE_GROUP_ID.test(groupId)) {
+      errors.push(
+        diagnostic(
+          "group_id_invalid",
+          `Group ID ${groupId} is not safe for repository naming.`,
+          context
+        )
+      );
+      continue;
+    }
+    const membership = `${groupId}\0${studentId}`;
+    if (memberships.has(membership)) {
+      errors.push(
+        diagnostic(
+          "group_membership_duplicate",
+          `Student ${studentId} is duplicated in group ${groupId}.`,
+          context
+        )
+      );
+      continue;
+    }
+    memberships.add(membership);
+    if (assigned.has(studentId)) {
+      errors.push(
+        diagnostic(
+          "group_student_multiple_groups",
+          `Student ${studentId} appears in more than one group.`,
+          context
+        )
+      );
+      continue;
+    }
+    const student = knownStudents.get(studentId);
+    if (student === void 0) {
+      errors.push(
+        diagnostic(
+          "group_student_unknown",
+          `Student ${studentId} is not in this assignment's selected sections.`,
+          context
+        )
+      );
+      continue;
+    }
+    if (student.status !== ROSTER_STATUS_ACTIVE) {
+      errors.push(
+        diagnostic(
+          "group_student_inactive",
+          `Student ${studentId} is ${student.status} and cannot be assigned to a group.`,
+          context
+        )
+      );
+      continue;
+    }
+    assigned.add(studentId);
+    groups.set(groupId, [...groups.get(groupId) ?? [], student]);
+  }
+  const targets = [];
+  const names = /* @__PURE__ */ new Map();
+  for (const [groupId, members] of groups) {
+    const sectionIds = [...new Set(members.map((student) => student.section))];
+    if (sectionIds.length !== 1) {
+      errors.push(
+        diagnostic(
+          "group_cross_section",
+          `Group ${groupId} contains students from more than one section.`,
+          { ...baseContext, groupId, sectionIds }
+        )
+      );
+      continue;
+    }
+    const repository = generateRepositoryName({
+      pattern: config.course.github.repo_name_pattern,
+      termCode: config.summary.termCode,
+      courseCode: config.course.course.code,
+      assignmentSlug: config.summary.assignmentSlug,
+      githubUsername: groupId
+    });
+    if (repository.repositoryName === void 0 || repository.errors.length > 0) {
+      errors.push(...repository.errors);
+      continue;
+    }
+    const existingGroup = names.get(repository.repositoryName);
+    if (existingGroup !== void 0) {
+      errors.push(
+        diagnostic(
+          "group_repository_name_collision",
+          `Groups ${existingGroup} and ${groupId} resolve to the same repository name ${repository.repositoryName}.`,
+          { ...baseContext, groupId, repositoryName: repository.repositoryName }
+        )
+      );
+      continue;
+    }
+    names.set(repository.repositoryName, groupId);
+    targets.push({
+      targetId: groupId,
+      mode: "group",
+      groupId,
+      repositoryName: repository.repositoryName,
+      sectionIds,
+      studentIds: members.map((student) => student.studentId),
+      githubUsernames: members.map((student) => student.githubUsername),
+      plannedStudentPermission: "admin",
+      facultyTeam: config.course.github.faculty_team,
+      facultyTeamPermission: config.course.github.faculty_permission,
+      graderTeam: config.course.github.grader_team,
+      graderTeamPermission: config.course.github.grader_permission,
+      diagnostics: [...repository.warnings]
+    });
+  }
+  if (targets.length === 0 && errors.length === 0)
+    errors.push(
+      diagnostic("group_csv_no_valid_groups", "Group CSV contains no valid groups.", baseContext)
+    );
+  const ungrouped = students.filter(
+    (student) => student.status === ROSTER_STATUS_ACTIVE && !assigned.has(student.studentId)
+  );
+  const warnings = ungrouped.length === 0 ? [] : [
+    warning(
+      "group_students_ungrouped",
+      `${String(ungrouped.length)} active student(s) in selected sections are not assigned to a group.`,
+      { ...baseContext, studentIds: ungrouped.map((student) => student.studentId) }
+    )
+  ];
+  return { targets, warnings, errors };
 };
-var parseCsv = (content) => {
-  const lines = content.split(NEWLINE_PATTERN).map(stripCarriageReturn);
-  const nonEmptyLines = lines.filter((line) => line.trim().length > EMPTY_LINE_COUNT);
-  const headerLine = nonEmptyLines[HEADER_ROW_NUMBER - HEADER_ROW_NUMBER] ?? EMPTY_FIELD;
-  const dataLines = nonEmptyLines.slice(FIRST_DATA_ROW_NUMBER - HEADER_ROW_NUMBER);
-  return {
-    headers: parseCsvLine(headerLine),
-    rows: dataLines.map((line, index) => ({
-      rowNumber: index + FIRST_DATA_ROW_NUMBER,
-      values: parseCsvLine(line)
-    }))
-  };
-};
+
+// src/roster/roster-loader.ts
+import path6 from "path";
 
 // src/roster/roster-normalization.ts
 var normalizeLowercaseValue = (value, code, message, context) => {
@@ -2050,11 +2372,6 @@ var normalizeRosterStatus = (value, context) => normalizeLowercaseValue(
   "Roster status was normalized to lowercase.",
   context
 );
-
-// src/roster/roster-models.ts
-var ROSTER_STATUS_ACTIVE = "active";
-var ROSTER_STATUS_DROPPED = "dropped";
-var ROSTER_STATUS_HOLD = "hold";
 
 // src/roster/roster-validation.ts
 var STUDENT_ID_COLUMN = "student_id";
@@ -2194,7 +2511,7 @@ var getSectionSources = (config) => {
   const sectionsById = new Map(
     config.term.sections.map((section) => [
       section.id,
-      toForwardSlashPath(path5.posix.join(termDirectory, section.roster))
+      toForwardSlashPath(path6.posix.join(termDirectory, section.roster))
     ])
   );
   return config.assignment.sections.map((sectionId) => ({
@@ -2215,7 +2532,7 @@ var createContext = (rosterPath, rowNumber, expectedSection) => ({
   expectedSection
 });
 var loadSectionRoster = (repoRoot, source) => {
-  const fileResult = readTextFile(path5.join(repoRoot, source.rosterPath));
+  const fileResult = readTextFile(path6.join(repoRoot, source.rosterPath));
   if (fileResult.status === "failure") {
     return {
       students: [],
@@ -2261,7 +2578,7 @@ var loadSectionRoster = (repoRoot, source) => {
         normalizedStudentId.warning,
         normalizedGithubUsername.warning,
         normalizedStatus.warning
-      ].filter((warning) => warning !== void 0);
+      ].filter((warning2) => warning2 !== void 0);
       const rowErrors = [
         ...validateRosterStatus(source.rosterPath, row.rowNumber, normalizedStatus.value),
         ...validateRosterSection(source.rosterPath, row.rowNumber, source.sectionId, rawSection),
@@ -2594,7 +2911,7 @@ var previewStudentRepository = async (config, student, manifest, githubClient) =
       getSkippedStudentReason(student.status)
     );
   }
-  if (generatedName.diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+  if (generatedName.diagnostics.some((diagnostic2) => diagnostic2.severity === "error")) {
     return createRow(student, repositoryFullName, "blocked", "invalid_repository_name", [
       ...generatedName.diagnostics
     ]);
@@ -2612,7 +2929,7 @@ var createPlanSummary = (repositories) => ({
   unknownRepositories: repositories.filter((row) => row.status === "unknown").length
 });
 var collectRowDiagnostics = (repositories) => repositories.flatMap((row) => row.diagnostics);
-var hasErrorDiagnostics = (diagnostics) => diagnostics.some((diagnostic) => diagnostic.severity === "error");
+var hasErrorDiagnostics = (diagnostics) => diagnostics.some((diagnostic2) => diagnostic2.severity === "error");
 var createApplyAction = (config, diagnostics, summary) => {
   const assignmentStatus = config.assignment.assignment.status;
   const lifecycleAllowsApply = assignmentStatus === ACTIVE_ASSIGNMENT_STATUS || assignmentStatus === CLOSED_ASSIGNMENT_STATUS;
@@ -2649,6 +2966,75 @@ var buildAssignmentApplyPreview = async ({
       ...configResult.diagnostics,
       createTargetStudentsEmptyDiagnostic(config)
     ]);
+  }
+  if (config.assignment.repository_mode === "group") {
+    const groupPlan = buildGroupApplyPreviewPlan(config, rosterResult.students);
+    const localTemplate2 = createTemplatePreview(config);
+    const localGrading2 = createGradingPreview(config);
+    const readiness2 = await checkAssignmentDetailGithubReadiness({
+      config,
+      template: localTemplate2,
+      grading: localGrading2,
+      ...githubClient === void 0 ? {} : { githubClient }
+    });
+    const diagnostics2 = [
+      ...configResult.diagnostics,
+      ...rosterResult.warnings,
+      ...groupPlan.warnings,
+      ...groupPlan.errors,
+      ...readiness2.diagnostics,
+      createWarningDiagnostic(
+        "group_repository_apply_not_implemented",
+        "Group repository Apply Preview is available. Group repository creation is not implemented yet.",
+        { assignmentFile: config.summary.assignmentConfigPath }
+      )
+    ];
+    const status2 = groupPlan.errors.length === EMPTY_COUNT2 ? createStatus(diagnostics2) : "failure";
+    const summary2 = {
+      wouldCreateRepositories: groupPlan.targets.length,
+      wouldUpdateRepositories: EMPTY_COUNT2,
+      wouldSkipRepositories: EMPTY_COUNT2,
+      blockedRepositories: groupPlan.errors.length === EMPTY_COUNT2 ? EMPTY_COUNT2 : groupPlan.targets.length,
+      unknownRepositories: EMPTY_COUNT2
+    };
+    return {
+      schemaVersion: ASSIGNMENT_APPLY_PREVIEW_SCHEMA_VERSION,
+      commandName: COMMAND_NAME,
+      status: status2,
+      exitCode: resolveExitCode(status2),
+      diagnostics: diagnostics2,
+      repositoryMode: "group",
+      applySupported: false,
+      assignment: {
+        slug: config.assignment.assignment.slug,
+        title: config.assignment.assignment.title,
+        file: config.summary.assignmentConfigPath,
+        status: config.assignment.assignment.status
+      },
+      course: { slug: config.course.course.code, title: config.course.course.title },
+      term: { slug: config.term.term.code, title: config.term.term.display_name },
+      target: {
+        sections: config.assignment.sections,
+        sectionCount: config.assignment.sections.length,
+        studentCount: rosterResult.summary.studentCount
+      },
+      template: readiness2.template,
+      grading: readiness2.grading,
+      plan: { summary: summary2, repositories: [], groupTargets: groupPlan.targets },
+      files: {
+        assignmentFile: config.summary.assignmentConfigPath,
+        workflowFile: readiness2.grading.workflow,
+        templateSource: createTemplateSource(readiness2.template)
+      },
+      actions: {
+        apply: {
+          available: false,
+          implemented: false,
+          previewOnly: true,
+          reason: "group_repository_apply_not_implemented"
+        }
+      }
+    };
   }
   const manifestPath = createManifestPath(
     config.summary.repoRoot,
@@ -2724,7 +3110,7 @@ var buildAssignmentApplyPreview = async ({
 };
 
 // src/workflows/workflow-paths.ts
-import path6 from "path";
+import path7 from "path";
 var TERMS_DIRECTORY3 = "terms";
 var GENERATED_WORKFLOWS_DIRECTORY = "generated-workflows";
 var WORKFLOW_FILE_NAME = "grade.yml";
@@ -2740,7 +3126,7 @@ var createGeneratedWorkflowPath = (repoRoot, termCode, assignmentSlug) => {
     WORKFLOW_FILE_NAME
   ].join("/");
   return {
-    absolutePath: path6.join(repoRoot, relativePath),
+    absolutePath: path7.join(repoRoot, relativePath),
     relativePath
   };
 };
@@ -2749,7 +3135,7 @@ var getWorkflowRepositoryPath = (configuredWorkflow) => {
   const normalizedWorkflow = normalizeWorkflowPath(configuredWorkflow);
   return normalizedWorkflow.includes(WORKFLOW_PATH_SEPARATOR) ? normalizedWorkflow : [GITHUB_WORKFLOWS_DIRECTORY, normalizedWorkflow].join(WORKFLOW_PATH_SEPARATOR);
 };
-var getWorkflowDispatchIdentifier = (configuredWorkflow) => path6.posix.basename(normalizeWorkflowPath(configuredWorkflow));
+var getWorkflowDispatchIdentifier = (configuredWorkflow) => path7.posix.basename(normalizeWorkflowPath(configuredWorkflow));
 var uniqueWorkflowPaths = (paths) => [...new Set(paths)];
 var createLocalWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkflowPaths([
   normalizeWorkflowPath(configuredWorkflow),
@@ -3065,7 +3451,7 @@ var createPlanSummary2 = (repositories) => ({
   unknown: repositories.filter((row) => row.status === "unknown" || row.status === "token_required").length
 });
 var collectRowDiagnostics2 = (repositories) => repositories.flatMap((row) => row.diagnostics);
-var hasErrorDiagnostics2 = (diagnostics) => diagnostics.some((diagnostic) => diagnostic.severity === "error");
+var hasErrorDiagnostics2 = (diagnostics) => diagnostics.some((diagnostic2) => diagnostic2.severity === "error");
 var hasTokenRequiredRows = (repositories) => repositories.some((row) => row.status === "token_required");
 var createStatus2 = (diagnostics) => hasErrorDiagnostics2(diagnostics) ? "partial_success" : "success";
 var createGradeAction = (diagnostics, summary) => {
@@ -3577,7 +3963,7 @@ var filterActiveStudents = (activeStudents, studentIds) => studentIds === void 0
   (student) => studentIds.some((studentId) => studentId === student.studentId)
 );
 var collectRowDiagnostics3 = (repositories) => repositories.flatMap((row) => row.diagnostics);
-var hasErrorDiagnostics3 = (diagnostics) => diagnostics.some((diagnostic) => diagnostic.severity === "error");
+var hasErrorDiagnostics3 = (diagnostics) => diagnostics.some((diagnostic2) => diagnostic2.severity === "error");
 var hasTokenRequiredRows2 = (repositories) => repositories.some((row) => row.status === "token_required");
 var createStatus3 = (diagnostics) => hasErrorDiagnostics3(diagnostics) ? "partial_success" : "success";
 var createActions = (summary) => ({
@@ -3744,7 +4130,7 @@ var createEmptyAssignmentDetailResult = (status, diagnostics) => ({
   applyState: null,
   actions: null
 });
-var hasErrorDiagnostics4 = (diagnostics) => diagnostics.some((diagnostic) => diagnostic.severity === "error");
+var hasErrorDiagnostics4 = (diagnostics) => diagnostics.some((diagnostic2) => diagnostic2.severity === "error");
 var getEffectiveGrading3 = (config) => config.assignment.grading ?? config.course.grading;
 var createRosterSummary = (config) => {
   const rosterResult = loadAssignmentRosters(config);
@@ -4877,7 +5263,7 @@ var GITHUB_ERROR_CODES = /* @__PURE__ */ new Set([
   DiagnosticCode.GithubRateLimited,
   DiagnosticCode.GithubTimeout
 ]);
-var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic) => codes.has(diagnostic.code));
+var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic2) => codes.has(diagnostic2.code));
 var resolveExitCode5 = ({ status, errors }) => {
   if (hasCodeInSet(errors, AUTHORIZATION_ERROR_CODES)) {
     return 3 /* AuthenticationOrAuthorizationFailure */;
@@ -4905,7 +5291,7 @@ var createCommandResult = (input) => ({
 
 // src/manifest/manifest-renderer.ts
 import fs5 from "fs";
-import path7 from "path";
+import path8 from "path";
 import { stringify } from "yaml";
 var YAML_INDENT_SPACES = 2;
 var LINE_WIDTH_DISABLED = 0;
@@ -5022,7 +5408,7 @@ var renderManifestYaml = (manifest) => stringify(toRawManifest(manifest), {
 });
 var writeManifest = (manifestPath, manifest) => {
   try {
-    fs5.mkdirSync(path7.dirname(manifestPath), {
+    fs5.mkdirSync(path8.dirname(manifestPath), {
       recursive: true
     });
     fs5.writeFileSync(manifestPath, renderManifestYaml(manifest), "utf8");
@@ -5048,10 +5434,11 @@ var writeManifest = (manifestPath, manifest) => {
 var EMPTY_COUNT6 = 0;
 var PRIVATE_REPOSITORY = true;
 var DEFAULT_ACTIONS_ENABLED = true;
-var STUDENT_PERMISSION2 = "push";
+var STUDENT_PERMISSION2 = "admin";
 var FACULTY_PERMISSION2 = "admin";
 var GRADER_PERMISSION2 = "maintain";
 var CREATE_REPOSITORY_OPERATION = "createRepositoryFromTemplate";
+var CREATE_REPOSITORY_PLAN_TYPE = "create_repository_from_template";
 var PERMISSION_RANK = {
   none: 0,
   pull: 1,
@@ -5096,6 +5483,19 @@ var createWorkflowDispatchDiagnostic = (operation) => createConfigDiagnostic(
     section: operation.section
   }
 );
+var createWorkflowPendingWarning = (operation) => createWarningDiagnostic(
+  DiagnosticCode.GradingWorkflowPending,
+  `Grading workflow is not observable yet for newly created ${operation.repository_name ?? "repository"}; it may still be becoming available.`,
+  {
+    repositoryName: operation.repository_name,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section
+  }
+);
+var wasRepositoryCreatedInPlan = (input, operation) => input.plan.operations.some(
+  (candidate) => candidate.type === CREATE_REPOSITORY_PLAN_TYPE && candidate.student_id === operation.student_id && candidate.status === "planned"
+);
 var createPermissionWarning = (operation, currentPermission, expectedPermission) => createWarningDiagnostic(
   DiagnosticCode.PermissionNotDowngraded,
   `Existing permission ${currentPermission} is higher than requested ${expectedPermission}; leaving it unchanged.`,
@@ -5132,8 +5532,13 @@ var createRepositoryCreationNotObservedDiagnostic = (operation, owner, repositor
     section: operation.section
   }
 );
-var findStudent = (students, operation) => students.find((student) => student.studentId === operation.student_id);
-var findManifestRecord4 = (manifest, operation) => manifest.repositories.find((record) => record.studentId === operation.student_id);
+var findTarget = (input, operation) => (input.targets ?? input.plan.targets).find((target) => target.targetId === operation.target_id);
+var findStudent = (input, students, operation) => students.find(
+  (student) => student.studentId === (findTarget(input, operation)?.primaryStudentId ?? operation.student_id)
+);
+var findManifestRecord4 = (input, manifest, operation) => manifest.repositories.find(
+  (record) => record.studentId === (findTarget(input, operation)?.primaryStudentId ?? operation.student_id)
+);
 var createManifestRecord = (config, student, repository, observedAt, templateCommitSha) => ({
   studentId: student.studentId,
   githubUsername: student.githubUsername,
@@ -5195,17 +5600,17 @@ var persistManifest = (state, manifestPath) => {
   }
   return state;
 };
-var recordWarning = (state, diagnostic) => ({
+var recordWarning = (state, diagnostic2) => ({
   ...state,
-  warnings: [...state.warnings, diagnostic],
+  warnings: [...state.warnings, diagnostic2],
   summary: {
     ...state.summary,
     warnings: state.summary.warnings + 1
   }
 });
-var recordError = (state, diagnostic) => ({
+var recordError = (state, diagnostic2) => ({
   ...state,
-  errors: [...state.errors, diagnostic],
+  errors: [...state.errors, diagnostic2],
   summary: {
     ...state.summary,
     failed: state.summary.failed + 1,
@@ -5222,7 +5627,7 @@ var incrementSummary = (state, key) => ({
 var hasAtLeastPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] >= PERMISSION_RANK[expectedPermission];
 var hasHigherPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] > PERMISSION_RANK[expectedPermission];
 var executeCreateRepository = async (input, state, operation, observedAt) => {
-  const student = findStudent(input.students, operation);
+  const student = findStudent(input, input.students, operation);
   if (student === void 0 || operation.repository_name === void 0) {
     return state;
   }
@@ -5289,7 +5694,7 @@ var executeStudentCollaborator = async (input, state, operation, observedAt) => 
   }
   const repositoryName = operation.repository_name;
   const githubUsername = operation.github_username;
-  if (findManifestRecord4(state.manifest, operation) === void 0) {
+  if (findManifestRecord4(input, state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
@@ -5368,7 +5773,7 @@ var executeTeamPermission = async (input, state, operation, teamSlug, expectedPe
     return state;
   }
   const repositoryName = operation.repository_name;
-  if (findManifestRecord4(state.manifest, operation) === void 0) {
+  if (findManifestRecord4(input, state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
@@ -5434,7 +5839,7 @@ var executeEnableActions = async (input, state, operation, observedAt) => {
     return state;
   }
   const repositoryName = operation.repository_name;
-  if (findManifestRecord4(state.manifest, operation) === void 0) {
+  if (findManifestRecord4(input, state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
@@ -5476,7 +5881,7 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
   const repositoryName = operation.repository_name;
   const workflowPath = input.config.course.grading.workflow;
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
-  if (findManifestRecord4(state.manifest, operation) === void 0) {
+  if (findManifestRecord4(input, state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
@@ -5489,21 +5894,22 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
       )
     );
     if (workflow === null) {
-      const diagnostic = createWorkflowMissingDiagnostic2(operation);
+      const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
+      const diagnostic2 = isNewRepository ? createWorkflowPendingWarning(operation) : createWorkflowMissingDiagnostic2(operation);
       return persistManifest(
-        recordError(
+        (isNewRepository ? recordWarning : recordError)(
           {
             ...state,
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
                 gradingWorkflowPath: workflowPath,
-                gradingWorkflowFound: false,
+                ...isNewRepository ? {} : { gradingWorkflowFound: false },
                 lastObservedAt: observedAt
               }
             })
           },
-          diagnostic
+          diagnostic2
         ),
         input.manifestPath
       );
@@ -5536,7 +5942,7 @@ var executeVerifyDispatch = async (input, state, operation, observedAt) => {
   const repositoryName = operation.repository_name;
   const workflowPath = input.config.course.grading.workflow;
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
-  if (findManifestRecord4(state.manifest, operation) === void 0) {
+  if (findManifestRecord4(input, state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
   }
   try {
@@ -5549,20 +5955,21 @@ var executeVerifyDispatch = async (input, state, operation, observedAt) => {
       )
     );
     if (workflow === null || !workflow.supportsDispatch) {
-      const diagnostic = createWorkflowDispatchDiagnostic(operation);
+      const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
+      const diagnostic2 = workflow === null && isNewRepository ? createWorkflowPendingWarning(operation) : createWorkflowDispatchDiagnostic(operation);
       return persistManifest(
-        recordError(
+        (workflow === null && isNewRepository ? recordWarning : recordError)(
           {
             ...state,
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
-                workflowDispatchSupported: false,
+                ...workflow === null && isNewRepository ? {} : { workflowDispatchSupported: false },
                 lastObservedAt: observedAt
               }
             })
           },
-          diagnostic
+          diagnostic2
         ),
         input.manifestPath
       );
@@ -5941,7 +6348,7 @@ var validateGitHubReadiness = async ({
 };
 
 // src/config/source-fingerprint.ts
-import path8 from "path";
+import path9 from "path";
 
 // src/core/hash.ts
 import { createHash } from "crypto";
@@ -5995,7 +6402,7 @@ var createSourceOutsideRepoDiagnostic = (repoRoot, sourceFilePath) => createConf
   }
 );
 var resolveSourcePath = (repoRoot, sourceFilePath) => {
-  const absolutePath = path8.isAbsolute(sourceFilePath) ? path8.resolve(sourceFilePath) : path8.resolve(repoRoot, sourceFilePath);
+  const absolutePath = path9.isAbsolute(sourceFilePath) ? path9.resolve(sourceFilePath) : path9.resolve(repoRoot, sourceFilePath);
   try {
     return {
       absolutePath,
@@ -6072,6 +6479,30 @@ var comparePlanOperations = (left, right) => (left.section ?? "").localeCompare(
 // src/planning/plan-models.ts
 var PLAN_SCHEMA_VERSION = 1;
 
+// src/planning/repository-targets.ts
+var createIndividualRepositoryTarget = (config, student) => {
+  const name = generateRepositoryName({
+    pattern: config.course.github.repo_name_pattern,
+    termCode: config.summary.termCode,
+    courseCode: config.course.course.code,
+    assignmentSlug: config.summary.assignmentSlug,
+    githubUsername: student.githubUsername
+  });
+  return {
+    targetId: student.studentId,
+    mode: "individual",
+    repositoryName: name.repositoryName ?? "",
+    sectionIds: [student.section],
+    studentIds: [student.studentId],
+    githubUsernames: [student.githubUsername],
+    primaryStudentId: student.studentId,
+    plannedStudentPermission: "admin",
+    facultyTeamPermission: config.course.github.faculty_permission,
+    graderTeamPermission: config.course.github.grader_permission,
+    diagnostics: [...name.warnings, ...name.errors]
+  };
+};
+
 // src/planning/plan-builder.ts
 var EMPTY_COUNT9 = 0;
 var NO_REPOSITORY_NAME = "";
@@ -6091,6 +6522,7 @@ var createOperation = (student, type, status, input = {}) => ({
   type,
   status,
   requires: input.requires ?? [],
+  target_id: student.studentId,
   student_id: student.studentId,
   github_username: student.githubUsername,
   section: student.section,
@@ -6145,10 +6577,10 @@ var generateStudentRepositoryName = (config, student) => {
     errors: result.errors
   };
 };
-var createLifecycleBlockedOperation = (config, student, diagnostic, repositoryName) => createOperation(student, "create_repository_from_template", "blocked", {
+var createLifecycleBlockedOperation = (config, student, diagnostic2, repositoryName) => createOperation(student, "create_repository_from_template", "blocked", {
   repositoryName,
   reason: config.assignment.assignment.status,
-  errors: [diagnostic]
+  errors: [diagnostic2]
 });
 var buildSkippedStudentOperation = (student) => createOperation(student, "create_repository_from_template", "skipped", {
   reason: `${STUDENT_STATUS_REASON_PREFIX3}_${student.status}`
@@ -6426,6 +6858,7 @@ var buildPlan = async ({
     },
     summary,
     operations,
+    targets: students.filter((student) => student.status === ROSTER_STATUS_ACTIVE).map((student) => createIndividualRepositoryTarget(config, student)),
     warnings: sourceFingerprint.warnings,
     errors: [
       ...sourceFingerprint.errors,
@@ -6448,7 +6881,7 @@ var createCliJsonOutput = (result) => {
   };
 };
 var formatCommandResultAsJson = (result) => JSON.stringify(createCliJsonOutput(result), void 0, JSON_INDENT_SPACES);
-var formatDiagnostic = (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`;
+var formatDiagnostic = (diagnostic2) => `${diagnostic2.code}: ${diagnostic2.message}`;
 var formatCommandResultAsText = (result) => {
   const redactedResult = redactCommandResult(result);
   const assignmentFile = redactedResult.assignmentFile ?? "<none>";
@@ -6509,6 +6942,23 @@ var runApplyCommand = async ({
       errors: configResult.diagnostics,
       generatedFiles: [],
       summary: { options }
+    });
+  }
+  if (configResult.config.assignment.repository_mode === "group") {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [],
+      errors: [
+        createConfigDiagnostic(
+          DiagnosticCode.GroupRepositoryApplyNotImplemented,
+          "Group Apply Preview is available, but group repository creation is not implemented yet. Graider will not create individual student repositories.",
+          { assignmentFile: configResult.config.summary.assignmentConfigPath }
+        )
+      ],
+      generatedFiles: [],
+      summary: { options, ...configResult.config.summary }
     });
   }
   const rosterResult = loadAssignmentRosters(configResult.config);
@@ -6603,6 +7053,7 @@ var runApplyCommand = async ({
   const executionResult = await executeApplyPlan({
     config: configResult.config,
     plan,
+    targets: plan.targets,
     ...manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {},
     manifestPath: manifestPath.absolutePath,
     students: rosterResult.students,
@@ -6844,14 +7295,14 @@ var createGradingNotConfiguredWarning3 = () => createWarningDiagnostic(
   "Automated grading is not configured for this assignment."
 );
 var runGitHubOperation2 = async (input, operation) => withGitHubRetry(operation, input.retryOptions);
-var recordFailure = (state, diagnostic) => ({
+var recordFailure = (state, diagnostic2) => ({
   summary: {
     ...state.summary,
     dispatchFailed: state.summary.dispatchFailed + FAILED_INCREMENT,
     errors: state.summary.errors + FAILED_INCREMENT
   },
   warnings: state.warnings,
-  errors: [...state.errors, diagnostic]
+  errors: [...state.errors, diagnostic2]
 });
 var recordSuccess = (state) => ({
   summary: {
@@ -7538,14 +7989,146 @@ var registerGradeCommand = (program) => {
   });
 };
 
+// src/manifest/repository-targets.ts
+var toTarget = (record) => ({
+  targetId: record.studentId,
+  mode: "individual",
+  repositoryName: record.repository.name,
+  repositoryUrl: record.repository.htmlUrl ?? null,
+  sectionIds: [record.section],
+  studentIds: [record.studentId],
+  githubUsernames: [record.githubUsername],
+  diagnostics: [...record.warnings, ...record.errors]
+});
+var toMapping = (record) => ({
+  studentId: record.studentId,
+  githubUsername: record.githubUsername,
+  targetId: record.studentId,
+  repositoryName: record.repository.name,
+  repositoryUrl: record.repository.htmlUrl ?? null
+});
+var normalizeManifestRepositories = (manifest) => ({
+  targets: manifest.schemaVersion === 2 ? (manifest.targets ?? []).map((target) => ({
+    targetId: target.targetId,
+    mode: target.mode,
+    repositoryName: target.repositoryName,
+    repositoryUrl: target.htmlUrl ?? null,
+    ...target.cloneUrl === void 0 ? {} : { cloneUrl: target.cloneUrl },
+    ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+    sectionIds: target.sectionIds,
+    studentIds: target.studentIds,
+    githubUsernames: target.githubUsernames,
+    diagnostics: target.diagnostics
+  })) : manifest.repositories.map(toTarget),
+  studentMappings: manifest.schemaVersion === 2 ? (manifest.studentMappings ?? []).map((mapping) => ({
+    studentId: mapping.studentId,
+    githubUsername: mapping.githubUsername,
+    targetId: mapping.targetId,
+    repositoryName: mapping.repositoryName,
+    repositoryUrl: mapping.htmlUrl ?? null,
+    ...mapping.cloneUrl === void 0 ? {} : { cloneUrl: mapping.cloneUrl }
+  })) : manifest.repositories.map(toMapping)
+});
+
+// src/repository-mappings/repository-mappings-builder.ts
+var COMMAND_NAME7 = "assignment repository-mappings";
+var createResult = (status, assignment, manifest, diagnostics, targets = [], studentMappings = []) => ({
+  schemaVersion: 1,
+  commandName: COMMAND_NAME7,
+  status,
+  exitCode: status === "success" ? 0 : status === "partial_success" ? 2 : 1,
+  assignment,
+  manifest,
+  repositoryMode: "individual",
+  targets,
+  studentMappings,
+  summary: {
+    targetCount: targets.length,
+    studentMappingCount: studentMappings.length,
+    diagnosticCount: diagnostics.length
+  },
+  diagnostics
+});
+var buildAssignmentRepositoryMappings = ({
+  cwd,
+  assignmentFile
+}) => {
+  const configResult = loadGraiderConfig({ cwd, assignmentFile });
+  if (configResult.status === "failure") {
+    return createResult(
+      "failure",
+      null,
+      { status: "invalid", schemaVersion: null, path: null },
+      configResult.diagnostics
+    );
+  }
+  const config = configResult.config;
+  const assignment = {
+    slug: config.summary.assignmentSlug,
+    title: config.assignment.assignment.title,
+    path: config.summary.assignmentConfigPath
+  };
+  const manifestPath = createManifestPath(
+    config.summary.repoRoot,
+    config.summary.termCode,
+    config.summary.assignmentSlug
+  );
+  const manifestResult = loadManifest(manifestPath.absolutePath);
+  if (manifestResult.status === "missing") {
+    return createResult(
+      "success",
+      assignment,
+      { status: "not_applied", schemaVersion: null, path: manifestPath.relativePath },
+      [
+        createConfigDiagnostic(
+          "assignment_not_applied",
+          "Repositories have not been created for this assignment yet.",
+          { manifestPath: manifestPath.relativePath }
+        )
+      ]
+    );
+  }
+  if (manifestResult.status === "failure") {
+    return createResult(
+      "failure",
+      assignment,
+      { status: "invalid", schemaVersion: null, path: manifestPath.relativePath },
+      manifestResult.errors
+    );
+  }
+  const normalized = normalizeManifestRepositories(manifestResult.manifest);
+  return {
+    ...createResult(
+      "success",
+      assignment,
+      {
+        status: "present",
+        schemaVersion: manifestResult.manifest.schemaVersion,
+        path: manifestPath.relativePath
+      },
+      [...manifestResult.warnings, ...manifestResult.errors],
+      normalized.targets,
+      normalized.studentMappings
+    ),
+    repositoryMode: manifestResult.manifest.repositoryMode ?? "individual"
+  };
+};
+var createRepositoryMappingsJsonRequiredResult = () => createResult("failure", null, { status: "invalid", schemaVersion: null, path: null }, [
+  createConfigDiagnostic(
+    "assignment_repository_mappings_json_required",
+    "The assignment repository-mappings command only supports JSON output. Run with --json."
+  )
+]);
+
 // src/cli/commands/assignment.command.ts
-var COMMAND_NAME7 = "assignment";
+var COMMAND_NAME8 = "assignment";
 var DETAIL_COMMAND_NAME = "detail";
 var APPLY_PREVIEW_COMMAND_NAME = "apply-preview";
 var GRADE_PREVIEW_COMMAND_NAME = "grade-preview";
 var GRADE_STATUS_COMMAND_NAME = "grade-status";
 var APPLY_COMMAND_NAME = "apply";
 var GRADE_COMMAND_NAME = "grade";
+var REPOSITORY_MAPPINGS_COMMAND_NAME = "repository-mappings";
 var ASSIGNMENT_APPLY_COMMAND_NAME = "assignment apply";
 var ASSIGNMENT_GRADE_COMMAND_NAME = "assignment grade";
 var JSON_INDENT_SPACES2 = 2;
@@ -7683,6 +8266,13 @@ var runAssignmentGradeStatusCommand = ({
     ...filterResult.studentIds === void 0 ? {} : { studentIds: filterResult.studentIds }
   });
 };
+var runAssignmentRepositoryMappingsCommand = ({
+  cwd,
+  assignmentFile,
+  options
+}) => Promise.resolve(
+  options.json ? buildAssignmentRepositoryMappings({ cwd, assignmentFile }) : createRepositoryMappingsJsonRequiredResult()
+);
 var runAssignmentApplyCommand = ({
   cwd,
   assignmentFile,
@@ -7719,8 +8309,9 @@ var formatAssignmentDetailResultAsJson = (result) => JSON.stringify(result, void
 var formatAssignmentApplyPreviewResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
 var formatAssignmentGradePreviewResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
 var formatAssignmentGradeStatusResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
+var formatAssignmentRepositoryMappingsResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
 var registerAssignmentCommand = (program) => {
-  const assignment = program.command(COMMAND_NAME7).description("Inspect assignment configuration and local detail data.");
+  const assignment = program.command(COMMAND_NAME8).description("Inspect assignment configuration and local detail data.");
   assignment.command(DETAIL_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit assignment detail JSON").description("Build a UI-ready read-only assignment detail model.").action(async (assignmentFile, options) => {
     const result = await runAssignmentDetailCommand({
       cwd: process.cwd(),
@@ -7760,6 +8351,15 @@ var registerAssignmentCommand = (program) => {
     console.log(formatAssignmentGradeStatusResultAsJson(result));
     process.exitCode = result.exitCode;
   });
+  assignment.command(REPOSITORY_MAPPINGS_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit normalized repository mapping JSON").description("Read normalized assignment repository targets and student mappings.").action(async (assignmentFile, options) => {
+    const result = await runAssignmentRepositoryMappingsCommand({
+      cwd: process.cwd(),
+      assignmentFile,
+      options
+    });
+    console.log(formatAssignmentRepositoryMappingsResultAsJson(result));
+    process.exitCode = result.exitCode;
+  });
   assignment.command(APPLY_COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Apply assignment repository changes.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runAssignmentApplyCommand({
@@ -7784,7 +8384,7 @@ var registerAssignmentCommand = (program) => {
 };
 
 // src/cli/commands/archive.command.ts
-var COMMAND_NAME8 = "archive";
+var COMMAND_NAME9 = "archive";
 var normalizeArchiveTargetSelector = (rawOptions) => ({
   ...rawOptions.all === void 0 ? {} : { all: rawOptions.all },
   ...rawOptions.section === void 0 ? {} : { section: rawOptions.section },
@@ -7798,11 +8398,11 @@ var runArchiveCommand = ({
   options,
   targetSelector
 }) => createCommandResult({
-  commandName: COMMAND_NAME8,
+  commandName: COMMAND_NAME9,
   assignmentFile,
   status: "failure",
   warnings: [],
-  errors: [createNotSupportedInMvpDiagnostic(COMMAND_NAME8, assignmentFile)],
+  errors: [createNotSupportedInMvpDiagnostic(COMMAND_NAME9, assignmentFile)],
   generatedFiles: [],
   summary: {
     unsupported: true,
@@ -7813,7 +8413,7 @@ var runArchiveCommand = ({
   }
 });
 var registerArchiveCommand = (program) => {
-  program.command(COMMAND_NAME8).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Reserved for future archive targeting").option("--section <section-id>", "Reserved for future archive targeting").option("--student-id <student-id>", "Reserved for future archive targeting").option("--github-username <github-username>", "Reserved for future archive targeting").option("--remove-student-access", "Reserved for future archive access removal").description("Archive assignment repositories.").action((assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME9).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Reserved for future archive targeting").option("--section <section-id>", "Reserved for future archive targeting").option("--student-id <student-id>", "Reserved for future archive targeting").option("--github-username <github-username>", "Reserved for future archive targeting").option("--remove-student-access", "Reserved for future archive access removal").description("Archive assignment repositories.").action((assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = runArchiveCommand({
       cwd: process.cwd(),
@@ -7828,13 +8428,13 @@ var registerArchiveCommand = (program) => {
 
 // src/dashboard/dashboard-builder.ts
 import fs8 from "fs";
-import path9 from "path";
+import path10 from "path";
 
 // src/dashboard/dashboard-models.ts
 var DASHBOARD_SCHEMA_VERSION = 1;
 
 // src/dashboard/dashboard-builder.ts
-var COMMAND_NAME9 = "dashboard";
+var COMMAND_NAME10 = "dashboard";
 var COURSE_CONFIG_PATH2 = "course.yml";
 var TERMS_DIRECTORY4 = "terms";
 var TERM_CONFIG_FILE_NAME2 = "term.yml";
@@ -7877,7 +8477,7 @@ var createDashboardResult = (status, diagnostics, cards) => {
   const summary = createSummary4(cards);
   return {
     schemaVersion: DASHBOARD_SCHEMA_VERSION,
-    commandName: COMMAND_NAME9,
+    commandName: COMMAND_NAME10,
     status,
     exitCode: status === "success" ? 0 : status === "partial_success" ? 2 : 1,
     diagnostics,
@@ -7887,7 +8487,7 @@ var createDashboardResult = (status, diagnostics, cards) => {
 };
 var createEmptyDashboardResult = (status, diagnostics) => ({
   schemaVersion: DASHBOARD_SCHEMA_VERSION,
-  commandName: COMMAND_NAME9,
+  commandName: COMMAND_NAME10,
   status,
   exitCode: status === "success" ? 0 : status === "partial_success" ? 2 : 1,
   diagnostics,
@@ -7901,7 +8501,7 @@ var createSummary4 = (cards) => ({
   assignmentCount: cards.reduce((count, card) => count + card.assignmentCount, EMPTY_COUNT14),
   needsAttentionCount: cards.filter((card) => card.needsAttention).length
 });
-var diagnosticRequiresAttention = (diagnostic) => diagnostic.severity === "error";
+var diagnosticRequiresAttention = (diagnostic2) => diagnostic2.severity === "error";
 var getAttentionCount = (diagnostics) => diagnostics.filter(diagnosticRequiresAttention).length;
 var listDirectoryNames = (directoryPath) => {
   try {
@@ -7924,7 +8524,7 @@ var loadCourse = (cwd) => {
       diagnostics: [rootResult.diagnostic]
     };
   }
-  const loadResult = loadCourseConfig(path9.join(rootResult.repoRoot, COURSE_CONFIG_PATH2));
+  const loadResult = loadCourseConfig(path10.join(rootResult.repoRoot, COURSE_CONFIG_PATH2));
   if (loadResult.status === "failure") {
     return {
       diagnostics: loadResult.diagnostics
@@ -7974,10 +8574,10 @@ var createAssignmentDiagnosticContext = (assignment) => ({
   ...assignment.templateBranch === void 0 ? {} : { templateBranch: assignment.templateBranch },
   ...assignment.workflow === void 0 ? {} : { workflow: assignment.workflow }
 });
-var addDiagnosticContext = (diagnostic, context) => ({
-  ...diagnostic,
+var addDiagnosticContext = (diagnostic2, context) => ({
+  ...diagnostic2,
   context: {
-    ...diagnostic.context ?? {},
+    ...diagnostic2.context ?? {},
     ...context
   }
 });
@@ -8042,12 +8642,12 @@ var createDefaultGithubStatus = (gradingEnabled) => ({
 });
 var hasTemplateBranch = (templateRepository, branch) => templateRepository.branches.some((availableBranch) => availableBranch === branch);
 var discoverTermSlugs = (repoRoot, requestedTerm) => {
-  const termSlugs = listDirectoryNames(path9.join(repoRoot, TERMS_DIRECTORY4));
+  const termSlugs = listDirectoryNames(path10.join(repoRoot, TERMS_DIRECTORY4));
   return requestedTerm === void 0 ? termSlugs : termSlugs.filter((termSlug) => termSlug === requestedTerm);
 };
 var loadTerm = (repoRoot, termSlug) => {
   const termConfigPath = [TERMS_DIRECTORY4, termSlug, TERM_CONFIG_FILE_NAME2].join("/");
-  const loadResult = loadTermConfig(path9.join(repoRoot, termConfigPath));
+  const loadResult = loadTermConfig(path10.join(repoRoot, termConfigPath));
   if (loadResult.status === "failure") {
     return {
       termSlug,
@@ -8321,7 +8921,7 @@ var loadAssignmentSummary = (repoRoot, courseConfig, termSlug, assignmentSlug) =
     assignmentSlug,
     ASSIGNMENT_CONFIG_FILE_NAME
   ].join("/");
-  const loadResult = loadAssignmentConfig(path9.join(repoRoot, assignmentFile));
+  const loadResult = loadAssignmentConfig(path10.join(repoRoot, assignmentFile));
   if (loadResult.status === "failure") {
     return {
       summary: createBrokenAssignmentSummary(assignmentSlug, assignmentFile, loadResult.diagnostics)
@@ -8341,7 +8941,7 @@ var loadAssignmentSummary = (repoRoot, courseConfig, termSlug, assignmentSlug) =
   };
 };
 var loadAssignmentSummaries = (repoRoot, courseConfig, termSlug) => {
-  const assignmentsDirectory = path9.join(
+  const assignmentsDirectory = path10.join(
     repoRoot,
     TERMS_DIRECTORY4,
     termSlug,
@@ -8369,7 +8969,7 @@ var createRosterContext = (rosterPath, rowNumber, expectedSection) => ({
   expectedSection
 });
 var loadRosterStudents = (repoRoot, rosterPath, expectedSection) => {
-  const fileResult = readTextFile(path9.join(repoRoot, rosterPath));
+  const fileResult = readTextFile(path10.join(repoRoot, rosterPath));
   if (fileResult.status === "failure") {
     return {
       students: [],
@@ -8415,7 +9015,7 @@ var loadRosterStudents = (repoRoot, rosterPath, expectedSection) => {
         ...validateRosterStatus(rosterPath, row.rowNumber, normalizedStatus.value),
         ...validateRosterSection(rosterPath, row.rowNumber, expectedSection, rawSection),
         ...validateGithubUsername(rosterPath, row.rowNumber, normalizedGithubUsername.value)
-      ].filter((diagnostic) => diagnostic !== void 0);
+      ].filter((diagnostic2) => diagnostic2 !== void 0);
       const rowErrors = rowDiagnostics.filter(diagnosticRequiresAttention);
       diagnostics.push(...rowDiagnostics);
       if (rowErrors.length === EMPTY_COUNT14 && isRosterStatus(normalizedStatus.value)) {
@@ -8461,6 +9061,9 @@ var loadRosterSummary = (repoRoot, termSlug, termConfig) => {
 };
 var getTermTitle = (term) => term.config?.term.display_name ?? term.termSlug;
 var getCardStatus = (assignments) => {
+  if (assignments.length === EMPTY_COUNT14) {
+    return STATUS_ACTIVE;
+  }
   if (assignments.some((assignment) => assignment.status === STATUS_ACTIVE)) {
     return STATUS_ACTIVE;
   }
@@ -8547,7 +9150,7 @@ var buildDashboard = async ({
 };
 
 // src/cli/commands/dashboard.command.ts
-var COMMAND_NAME10 = "dashboard";
+var COMMAND_NAME11 = "dashboard";
 var EMPTY_LENGTH5 = 0;
 var JSON_INDENT_SPACES3 = 2;
 var readGraiderToken = (env) => {
@@ -8587,7 +9190,7 @@ var runDashboardCommand = ({
 };
 var formatDashboardResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES3);
 var registerDashboardCommand = (program) => {
-  program.command(COMMAND_NAME10).option("--json", "Required. Emit dashboard JSON").option("--term <termSlug>", "Include only one term").description("Build a UI-ready dashboard model for the current course admin repository.").action(async (options) => {
+  program.command(COMMAND_NAME11).option("--json", "Required. Emit dashboard JSON").option("--term <termSlug>", "Include only one term").description("Build a UI-ready dashboard model for the current course admin repository.").action(async (options) => {
     const result = await runDashboardCommand({
       cwd: process.cwd(),
       options
@@ -8598,30 +9201,30 @@ var registerDashboardCommand = (program) => {
 };
 
 // src/planning/plan-paths.ts
-import path10 from "path";
+import path11 from "path";
 var TERMS_DIRECTORY5 = "terms";
 var PLANS_DIRECTORY = "plans";
 var PLAN_FILE_PREFIX = "plan";
 var PLAN_FILE_EXTENSION = "json";
 var createPlanPath = (repoRoot, termCode, assignmentSlug, clock) => {
-  const relativeDirectory = path10.posix.join(
+  const relativeDirectory = path11.posix.join(
     TERMS_DIRECTORY5,
     termCode,
     PLANS_DIRECTORY,
     assignmentSlug
   );
   const fileName = `${PLAN_FILE_PREFIX}-${formatFilesystemTimestamp(clock.now())}.${PLAN_FILE_EXTENSION}`;
-  const relativePath = path10.posix.join(relativeDirectory, fileName);
+  const relativePath = path11.posix.join(relativeDirectory, fileName);
   return {
     relativeDirectory,
     relativePath,
-    absolutePath: path10.join(repoRoot, relativePath)
+    absolutePath: path11.join(repoRoot, relativePath)
   };
 };
 
 // src/planning/plan-renderer.ts
 import fs9 from "fs";
-import path11 from "path";
+import path12 from "path";
 
 // src/io/stable-json.ts
 var JSON_INDENT_SPACES4 = 2;
@@ -8643,7 +9246,7 @@ var stringifyStableJson = (value) => JSON.stringify(orderValue(value), void 0, J
 var renderPlanJson = (plan) => stringifyStableJson(plan);
 var writePlanJsonFile = (plan, absolutePath) => {
   try {
-    fs9.mkdirSync(path11.dirname(absolutePath), {
+    fs9.mkdirSync(path12.dirname(absolutePath), {
       recursive: true
     });
     fs9.writeFileSync(absolutePath, `${renderPlanJson(plan)}
@@ -8667,7 +9270,7 @@ var writePlanJsonFile = (plan, absolutePath) => {
 };
 
 // src/cli/commands/plan.command.ts
-var COMMAND_NAME11 = "plan";
+var COMMAND_NAME12 = "plan";
 var DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
 var README_FILE2 = "README.md";
 var EMPTY_COUNT15 = 0;
@@ -8727,7 +9330,7 @@ var runPlanCommand = async ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME11,
+      commandName: COMMAND_NAME12,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -8741,7 +9344,7 @@ var runPlanCommand = async ({
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > EMPTY_COUNT15) {
     return createCommandResult({
-      commandName: COMMAND_NAME11,
+      commandName: COMMAND_NAME12,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -8764,7 +9367,7 @@ var runPlanCommand = async ({
   });
   if (readinessResult.errors.length > EMPTY_COUNT15) {
     return createCommandResult({
-      commandName: COMMAND_NAME11,
+      commandName: COMMAND_NAME12,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -8799,7 +9402,7 @@ var runPlanCommand = async ({
   const errors = [...plan.errors, ...writeErrors];
   const generatedFiles = writeResult.status === "success" ? [planPath.relativePath] : [];
   return createCommandResult({
-    commandName: COMMAND_NAME11,
+    commandName: COMMAND_NAME12,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: errors.length > EMPTY_COUNT15 ? "failure" : "success",
     warnings: [...rosterResult.warnings, ...readinessResult.warnings, ...plan.warnings],
@@ -8820,7 +9423,7 @@ var runPlanCommand = async ({
   });
 };
 var registerPlanCommand = (program) => {
-  program.command(COMMAND_NAME11).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Plan assignment provisioning.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME12).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Plan assignment provisioning.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runPlanCommand({
       cwd: process.cwd(),
@@ -8833,7 +9436,7 @@ var registerPlanCommand = (program) => {
 };
 
 // src/cli/commands/remove-access.command.ts
-var COMMAND_NAME12 = "remove-access";
+var COMMAND_NAME13 = "remove-access";
 var normalizeRemoveAccessTargetSelector = (rawOptions) => ({
   ...rawOptions.all === void 0 ? {} : { all: rawOptions.all },
   ...rawOptions.section === void 0 ? {} : { section: rawOptions.section },
@@ -8846,11 +9449,11 @@ var runRemoveAccessCommand = ({
   options,
   targetSelector
 }) => createCommandResult({
-  commandName: COMMAND_NAME12,
+  commandName: COMMAND_NAME13,
   assignmentFile,
   status: "failure",
   warnings: [],
-  errors: [createNotSupportedInMvpDiagnostic(COMMAND_NAME12, assignmentFile)],
+  errors: [createNotSupportedInMvpDiagnostic(COMMAND_NAME13, assignmentFile)],
   generatedFiles: [],
   summary: {
     unsupported: true,
@@ -8861,7 +9464,7 @@ var runRemoveAccessCommand = ({
   }
 });
 var registerRemoveAccessCommand = (program) => {
-  program.command(COMMAND_NAME12).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Reserved for future remove-access targeting").option("--section <section-id>", "Reserved for future remove-access targeting").option("--student-id <student-id>", "Reserved for future remove-access targeting").option("--github-username <github-username>", "Reserved for future remove-access targeting").description("Remove student access from assignment repositories.").action((assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME13).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--all", "Reserved for future remove-access targeting").option("--section <section-id>", "Reserved for future remove-access targeting").option("--student-id <student-id>", "Reserved for future remove-access targeting").option("--github-username <github-username>", "Reserved for future remove-access targeting").description("Remove student access from assignment repositories.").action((assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = runRemoveAccessCommand({
       cwd: process.cwd(),
@@ -8875,12 +9478,12 @@ var registerRemoveAccessCommand = (program) => {
 };
 
 // src/cli/commands/report.command.ts
-import path14 from "path";
+import path15 from "path";
 
 // src/reporting/student-markdown-renderer.ts
 var NEWLINE = "\n";
 var EMPTY_DISPLAY = "";
-var diagnosticCodes = (diagnostics) => diagnostics.map((diagnostic) => diagnostic.code).join("; ");
+var diagnosticCodes = (diagnostics) => diagnostics.map((diagnostic2) => diagnostic2.code).join("; ");
 var formatNullableNumber = (value) => value === void 0 || value === null ? EMPTY_DISPLAY : String(value);
 var renderRepositoryLine = (student) => {
   if (student.repositoryName === void 0) {
@@ -9978,7 +10581,7 @@ var QUOTE2 = '"';
 var ESCAPED_QUOTE = '""';
 var NEWLINE2 = "\n";
 var CSV_NEEDS_QUOTES_PATTERN = /[",\n\r]/;
-var renderDiagnosticCodes = (diagnostics) => diagnostics.map((diagnostic) => diagnostic.code).join(";");
+var renderDiagnosticCodes = (diagnostics) => diagnostics.map((diagnostic2) => diagnostic2.code).join(";");
 var renderValue = (value) => {
   const rawValue = value === void 0 || value === null ? EMPTY_FIELD2 : String(value);
   const escaped = rawValue.replaceAll(QUOTE2, ESCAPED_QUOTE);
@@ -10078,7 +10681,7 @@ var EMPTY_DISPLAY2 = "";
 var NEWLINE3 = "\n";
 var escapeCell = (value) => value.replaceAll("|", "\\|");
 var formatCount = (value) => String(value);
-var diagnosticCodes2 = (diagnostics) => diagnostics.map((diagnostic) => diagnostic.code).join("; ");
+var diagnosticCodes2 = (diagnostics) => diagnostics.map((diagnostic2) => diagnostic2.code).join("; ");
 var renderRepository = (student) => {
   if (student.repositoryName === void 0) {
     return EMPTY_DISPLAY2;
@@ -10125,29 +10728,29 @@ var renderFacultyMarkdownReport = (report) => [
 ].join(NEWLINE3);
 
 // src/reporting/report-paths.ts
-import path12 from "path";
+import path13 from "path";
 var TERMS_DIRECTORY6 = "terms";
 var REPORTS_DIRECTORY = "reports";
 var FACULTY_JSON_FILE = "faculty-summary.json";
 var FACULTY_CSV_FILE = "faculty-summary.csv";
 var FACULTY_MARKDOWN_FILE = "faculty-summary.md";
 var STUDENTS_DIRECTORY = "students";
-var createRelativeReportDirectory = (termCode, assignmentSlug) => toForwardSlashPath(path12.join(TERMS_DIRECTORY6, termCode, REPORTS_DIRECTORY, assignmentSlug));
+var createRelativeReportDirectory = (termCode, assignmentSlug) => toForwardSlashPath(path13.join(TERMS_DIRECTORY6, termCode, REPORTS_DIRECTORY, assignmentSlug));
 var createPathPair = (repoRoot, relativePath) => ({
-  absolutePath: path12.join(repoRoot, relativePath),
+  absolutePath: path13.join(repoRoot, relativePath),
   relativePath: toForwardSlashPath(relativePath)
 });
 var createReportPaths = (repoRoot, termCode, assignmentSlug) => {
   const reportDirectory = createRelativeReportDirectory(termCode, assignmentSlug);
   return {
     reportDirectory: createPathPair(repoRoot, reportDirectory),
-    facultyJson: createPathPair(repoRoot, path12.join(reportDirectory, FACULTY_JSON_FILE)),
-    facultyCsv: createPathPair(repoRoot, path12.join(reportDirectory, FACULTY_CSV_FILE)),
-    facultyMarkdown: createPathPair(repoRoot, path12.join(reportDirectory, FACULTY_MARKDOWN_FILE))
+    facultyJson: createPathPair(repoRoot, path13.join(reportDirectory, FACULTY_JSON_FILE)),
+    facultyCsv: createPathPair(repoRoot, path13.join(reportDirectory, FACULTY_CSV_FILE)),
+    facultyMarkdown: createPathPair(repoRoot, path13.join(reportDirectory, FACULTY_MARKDOWN_FILE))
   };
 };
 var createStudentReportRelativePath = (termCode, assignmentSlug, section, studentId) => toForwardSlashPath(
-  path12.join(
+  path13.join(
     createRelativeReportDirectory(termCode, assignmentSlug),
     STUDENTS_DIRECTORY,
     section,
@@ -10157,13 +10760,13 @@ var createStudentReportRelativePath = (termCode, assignmentSlug, section, studen
 
 // src/reporting/report-writer.ts
 import fs10 from "fs";
-import path13 from "path";
+import path14 from "path";
 var writeReportFiles = (files) => {
   const generatedFiles = [];
   const errors = [];
   for (const file of files) {
     try {
-      fs10.mkdirSync(path13.dirname(file.absolutePath), { recursive: true });
+      fs10.mkdirSync(path14.dirname(file.absolutePath), { recursive: true });
       fs10.writeFileSync(file.absolutePath, file.content, "utf8");
       generatedFiles.push(file.relativePath);
     } catch (error) {
@@ -10183,7 +10786,7 @@ var writeReportFiles = (files) => {
 };
 
 // src/cli/commands/report.command.ts
-var COMMAND_NAME13 = "report";
+var COMMAND_NAME14 = "report";
 var EMPTY_COUNT19 = 0;
 var getCommandStatus2 = (errorCount, generatedFileCount) => {
   if (errorCount === EMPTY_COUNT19) {
@@ -10206,7 +10809,7 @@ var createReportFiles = (repoRoot, report) => {
       student.studentId
     );
     return {
-      absolutePath: path14.join(repoRoot, relativePath),
+      absolutePath: path15.join(repoRoot, relativePath),
       relativePath,
       content: renderStudentMarkdownReport(report.assignment, student)
     };
@@ -10241,7 +10844,7 @@ var runReportCommand = async ({
   const configResult = loadGraiderConfig({ cwd, assignmentFile });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME13,
+      commandName: COMMAND_NAME14,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -10253,7 +10856,7 @@ var runReportCommand = async ({
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > EMPTY_COUNT19) {
     return createCommandResult({
-      commandName: COMMAND_NAME13,
+      commandName: COMMAND_NAME14,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -10274,7 +10877,7 @@ var runReportCommand = async ({
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: true });
   if (manifestResult.status !== "loaded") {
     return createCommandResult({
-      commandName: COMMAND_NAME13,
+      commandName: COMMAND_NAME14,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -10316,7 +10919,7 @@ var runReportCommand = async ({
   };
   const commandStatus = publishResult.errors.length > EMPTY_COUNT19 ? getCommandStatus2(publishResult.errors.length, publishResult.studentsPublished) : getCommandStatus2(writeResult.errors.length, writeResult.generatedFiles.length);
   return createCommandResult({
-    commandName: COMMAND_NAME13,
+    commandName: COMMAND_NAME14,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: commandStatus,
     warnings: [
@@ -10344,7 +10947,7 @@ var runReportCommand = async ({
   });
 };
 var registerReportCommand = (program) => {
-  program.command(COMMAND_NAME13).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--publish-student-reports", "Publish per-student reports to student repositories").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME14).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").option("--publish-student-reports", "Publish per-student reports to student repositories").description("Generate assignment reports.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runReportCommand({
       cwd: process.cwd(),
@@ -10359,12 +10962,12 @@ var registerReportCommand = (program) => {
 
 // src/workflows/workflow-compatibility-validation.ts
 import fs11 from "fs";
-import path15 from "path";
+import path16 from "path";
 var PRESET_GRADING_MODE3 = "preset";
 var getEffectiveGrading9 = (config) => config.assignment.grading ?? config.course.grading;
 var createConfiguredWorkflowCandidate = (repoRoot, workflowPath) => {
   return {
-    absolutePath: path15.join(repoRoot, workflowPath),
+    absolutePath: path16.join(repoRoot, workflowPath),
     relativePath: workflowPath
   };
 };
@@ -10438,7 +11041,7 @@ var validateWorkflowCompatibility = (config) => {
 };
 
 // src/cli/commands/validate.command.ts
-var COMMAND_NAME14 = "validate";
+var COMMAND_NAME15 = "validate";
 var DEFAULT_TEMPLATE_COMMIT_SHA2 = "fake-template-sha";
 var README_FILE3 = "README.md";
 var createDefaultTemplateRepository2 = (owner, repo, branch) => ({
@@ -10499,7 +11102,7 @@ var runValidateCommand = async ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME14,
+      commandName: COMMAND_NAME15,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -10513,7 +11116,7 @@ var runValidateCommand = async ({
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME14,
+      commandName: COMMAND_NAME15,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -10529,7 +11132,7 @@ var runValidateCommand = async ({
   const workflowCompatibilityResult = validateWorkflowCompatibility(configResult.config);
   if (workflowCompatibilityResult.errors.length > 0 && workflowCompatibilityResult.workflowStatus !== "missing") {
     return createCommandResult({
-      commandName: COMMAND_NAME14,
+      commandName: COMMAND_NAME15,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...workflowCompatibilityResult.warnings],
@@ -10553,7 +11156,7 @@ var runValidateCommand = async ({
   });
   if (readinessResult.errors.length > 0) {
     return createCommandResult({
-      commandName: COMMAND_NAME14,
+      commandName: COMMAND_NAME15,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [
@@ -10573,7 +11176,7 @@ var runValidateCommand = async ({
     });
   }
   return createCommandResult({
-    commandName: COMMAND_NAME14,
+    commandName: COMMAND_NAME15,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
     warnings: [
@@ -10593,7 +11196,7 @@ var runValidateCommand = async ({
   });
 };
 var registerValidateCommand = (program) => {
-  program.command(COMMAND_NAME14).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
+  program.command(COMMAND_NAME15).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Validate assignment configuration.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runValidateCommand({
       cwd: process.cwd(),
@@ -10606,7 +11209,7 @@ var registerValidateCommand = (program) => {
 };
 
 // src/cli/commands/workflow.command.ts
-import path17 from "path";
+import path18 from "path";
 
 // src/workflows/result-writer-template.ts
 var RESULT_SCHEMA_VERSION = 1;
@@ -10894,7 +11497,7 @@ var renderJavaJunitCheckstyleWorkflow = ({
 
 // src/workflows/workflow-writer.ts
 import fs12 from "fs";
-import path16 from "path";
+import path17 from "path";
 var writeWorkflowFile = ({
   filePath,
   content,
@@ -10913,7 +11516,7 @@ var writeWorkflowFile = ({
     };
   }
   try {
-    fs12.mkdirSync(path16.dirname(filePath), { recursive: true });
+    fs12.mkdirSync(path17.dirname(filePath), { recursive: true });
     fs12.writeFileSync(filePath, content);
     return {
       status: "success"
@@ -10936,7 +11539,7 @@ var writeWorkflowFile = ({
 // src/cli/commands/workflow.command.ts
 var WORKFLOW_COMMAND_NAME = "workflow";
 var GENERATE_COMMAND_NAME = "generate";
-var COMMAND_NAME15 = "workflow generate";
+var COMMAND_NAME16 = "workflow generate";
 var PRESET_GRADING_MODE4 = "preset";
 var LEGACY_GRADING_MODE7 = "custom-workflow";
 var EMPTY_COUNT20 = 0;
@@ -10945,7 +11548,7 @@ var formatGeneratedFilePath = (repoRoot, absolutePath) => {
   try {
     return toRepositoryRelativePath(repoRoot, absolutePath);
   } catch {
-    return toForwardSlashPath(path17.resolve(absolutePath));
+    return toForwardSlashPath(path18.resolve(absolutePath));
   }
 };
 var resolveOutputPath = (cwd, repoRoot, termCode, assignmentSlug, output) => {
@@ -10956,7 +11559,7 @@ var resolveOutputPath = (cwd, repoRoot, termCode, assignmentSlug, output) => {
       reportPath: workflowPath.relativePath
     };
   }
-  const absolutePath = path17.isAbsolute(output) ? output : path17.resolve(cwd, output);
+  const absolutePath = path18.isAbsolute(output) ? output : path18.resolve(cwd, output);
   return {
     absolutePath,
     reportPath: formatGeneratedFilePath(repoRoot, absolutePath)
@@ -10975,7 +11578,7 @@ var runWorkflowGenerateCommand = ({
   });
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME15,
+      commandName: COMMAND_NAME16,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -10993,7 +11596,7 @@ var runWorkflowGenerateCommand = ({
   const assignmentConfigPath = configResult.config.summary.assignmentConfigPath;
   if (!grading.enabled) {
     return createCommandResult({
-      commandName: COMMAND_NAME15,
+      commandName: COMMAND_NAME16,
       assignmentFile: assignmentConfigPath,
       status: "failure",
       warnings: [],
@@ -11016,7 +11619,7 @@ var runWorkflowGenerateCommand = ({
   const mode = grading.mode ?? LEGACY_GRADING_MODE7;
   if (mode !== PRESET_GRADING_MODE4) {
     return createCommandResult({
-      commandName: COMMAND_NAME15,
+      commandName: COMMAND_NAME16,
       assignmentFile: assignmentConfigPath,
       status: "failure",
       warnings: [],
@@ -11040,7 +11643,7 @@ var runWorkflowGenerateCommand = ({
   }
   if (grading.preset !== JAVA_JUNIT_CHECKSTYLE_PRESET) {
     return createCommandResult({
-      commandName: COMMAND_NAME15,
+      commandName: COMMAND_NAME16,
       assignmentFile: assignmentConfigPath,
       status: "failure",
       warnings: [],
@@ -11079,7 +11682,7 @@ var runWorkflowGenerateCommand = ({
   const errors = writeResult.status === "failure" ? [writeResult.diagnostic] : [];
   const generatedFiles = errors.length > EMPTY_COUNT20 ? [] : [outputPath.reportPath];
   return createCommandResult({
-    commandName: COMMAND_NAME15,
+    commandName: COMMAND_NAME16,
     assignmentFile: assignmentConfigPath,
     status: errors.length > EMPTY_COUNT20 ? "failure" : "success",
     warnings: [],

@@ -43,6 +43,35 @@ describe("dashboardFilters", () => {
     expect(filterAndSortDashboardCards(cards, "", "active", "course")).toHaveLength(2);
   });
 
+  it("keeps no-assignment and not-applied assignment courses in the active view", () => {
+    const cards = [
+      createCard("new-course", { assignmentCount: 0, assignments: [], recentAssignments: [] }),
+      createCard("not-applied", {
+        assignments: [
+          {
+            slug: "lab01",
+            title: "Lab 01",
+            status: "active",
+            assignmentFile: "assignment.yml",
+            applyState: "not_applied",
+            dueAt: null,
+            needsAttention: false,
+            diagnostics: []
+          }
+        ]
+      }),
+      createCard("invalid", { needsAttention: true })
+    ];
+
+    expect(
+      filterAndSortDashboardCards(cards, "", "active", "course").map((card) => card.id)
+    ).toEqual(["invalid", "new-course", "not-applied"]);
+    expect(
+      filterAndSortDashboardCards(cards, "", "needs-attention", "course").map((card) => card.id)
+    ).toEqual(["invalid"]);
+    expect(filterAndSortDashboardCards(cards, "", "all", "course")).toHaveLength(3);
+  });
+
   it("search matches displayName, course title, term slug, assignment title, and source path", () => {
     const cards = [
       createCard("alpha", {

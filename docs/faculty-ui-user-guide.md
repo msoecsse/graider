@@ -1,464 +1,340 @@
-# Graider Faculty UI User Guide
+# Graider Faculty User Guide
 
-Graider helps faculty manage GitHub-based course assignments from a course-admin
-folder. The UI can inspect course and assignment setup, preview and apply
-assignment repository setup, preview and dispatch grading workflows, watch
-grading workflow status, and view faculty reports.
+Graider is a desktop app for managing GitHub-based course assignments from a
+local course folder. Use a safe sandbox course first when trying actions that
+create repositories, push a grading workflow, or dispatch grading.
 
-This guide is for course staff who edit YAML/CSV configuration and use the
-Electron UI. It avoids developer internals and focuses on the current supported
-workflow.
+## What Graider Does
 
-## What The UI Supports
+Graider helps faculty:
 
-Current workflow:
+- set up course, term, and roster files;
+- create and edit assignments;
+- preview and apply student repository setup;
+- generate a student repository access page for Canvas;
+- view, edit, and push the configured grading workflow;
+- preview and dispatch grading, check its status, and generate a faculty report.
 
-1. Open or register a course folder.
-2. View the dashboard.
-3. Open assignment detail.
-4. Preview assignment apply.
-5. Confirm assignment apply.
-6. Preview grading dispatch.
-7. Confirm grading dispatch.
-8. Check grading status.
-9. View the faculty report.
+## What Graider Does Not Do Yet
 
-Deferred in the UI:
+- It does not send student email.
+- It does not post to Canvas.
+- It does not enable GitHub Pages.
+- It does not automatically commit or push the student access page.
+- It does not replace GitHub permissions or organization policy.
+- It does not grade on your computer; configured GitHub Actions workflows do
+  the grading.
 
-- student report publishing
-- student report publish preview/confirmation
-- student-facing report preview
-- workflow generation UI
+## Before You Start
 
-## Required Local Setup
+You need a local course folder, access to its GitHub organization and course
+repository, and GitHub authentication. For most faculty, open Terminal once and
+run `gh auth login`, then start Graider and check that the dashboard reports
+GitHub authentication as connected. The packaged app includes Graider itself;
+you do not need a separate CLI install.
 
-- The packaged Graider app includes the Graider CLI. Faculty do not need to
-  install or link the CLI separately for packaged app use.
-- If your team runs the UI from source, follow the developer startup guide.
-- GitHub-backed checks and actions need GitHub authentication.
-- Run `gh auth login` once in Terminal. Graider checks GitHub authentication on
-  startup and does not store GitHub tokens.
-- Do not put tokens in YAML, roster files, reports, manifests, or screenshots.
-- A valid course repository/folder must exist on disk.
+## Publish Course Changes
 
-For local development from this repository, see the startup commands in
+Roster CSVs, term files, assignments, and course settings are saved locally in
+the course/admin repository. From the Course Dashboard, use **Publish Course
+Changes** when the dashboard reports local Graider-managed changes or unpushed
+commits. Review the listed files and confirm before publishing.
+
+Graider stages only supported course files such as `course.yml`, `term.yml`,
+roster CSVs, assignment YAML files, and the managed grading workflow. It does
+not stage unrelated files. Student Access Pages use a separate Pages repository
+and must still be published with **Publish Student Access Page**.
+
+Prepare these items before an assignment cycle:
+
+- A configured course folder with `course.yml` at its root.
+- A canonical roster CSV for each section:
+
+  ```text
+  student_id,github_username,email,first_name,last_name,section,status
+  ```
+
+- `active`, `dropped`, or `hold` roster status for every student. Active
+  students are eligible for repositories and access-page links; dropped and
+  hold students are skipped.
+- A local clone of the configured student-access Pages repository. The private
+  course/admin repository can remain private.
+- A configured grading workflow before dispatching grading.
+
+## Launch Graider
+
+Open `Graider.app`. On macOS, the pilot build may be unsigned; if Gatekeeper
+blocks it, use your institution's approved procedure to open a known pilot app.
+Confirm the GitHub authentication status before GitHub-backed work.
+
+## Open a Course Folder
+
+Use the dashboard's course-folder action to select the local folder containing
+`course.yml`. Graider remembers registered folders and refreshes them on later
+launches. Use **Refresh** after changing files outside Graider or after fixing
+authentication.
+
+If the folder is rejected, confirm that `course.yml` is at its root and that
+the expected `terms/` folder is inside it.
+
+## Course Dashboard Overview
+
+The dashboard groups available courses, terms, and assignments. Select an
+assignment row to open Assignment Detail. Use **New Assignment** to create an
+assignment, **Manage Rosters** to edit a section roster, and **Refresh** to
+reload local/GitHub-backed readiness information.
+
+## Set Up a Course and Term
+
+For a new course, use the course setup wizard. Provide the course title and
+code, GitHub organization, term code, and one or more section IDs. You may add
+roster uploads during setup.
+
+The wizard writes these local files after confirmation:
+
+```text
+course.yml
+terms/<term-code>/term.yml
+terms/<term-code>/rosters/<section-id>.csv
+```
+
+Term codes use the `YYsN` format, such as `27s1`; use the term convention
+already adopted by your department/course repository.
+
+## Manage Rosters
+
+Choose **Manage Rosters**, select the term and section, review the table, then
+save the canonical seven-column CSV. Use **Add Student** to add an individual
+student; the selected section is filled in and the status defaults to `active`.
+Use **Remove Student** to remove a row, **Replace from CSV** to replace the
+selected roster with an uploaded canonical CSV, or **Clear Roster Rows** to
+save a header-only roster while keeping the section. Review the preview before
+using **Save Roster**. Keep `student_id` and `github_username` accurate. Use `active` for students who should receive repositories; use
+`dropped` or `hold` to exclude them from repository access-page generation.
+
+To add a section after course setup, select the term and choose **Add Section**.
+Enter a safe, unique section ID, optionally upload a canonical roster CSV (or
+leave it empty), preview the `term.yml` and roster changes, then explicitly
+save. Graider creates `terms/<term-code>/rosters/section-<section-id>.csv`.
+
+If Graider reports a legacy roster, explicitly save it through the roster
+manager to migrate it to the seven-column format. Do not remove the email and
+name columns even though the student access page never displays them.
+
+## Create a New Assignment
+
+Use **New Assignment** from the dashboard. Enter the assignment title and
+slug, term, target sections, template repository and branch, deadline, points,
+and grading settings. Review the generated configuration, then use **Save
+assignment setup**.
+
+When you select a term, all of its sections are selected by default, including
+sections with an empty roster. Clear any section checkbox that should not be
+included before previewing and saving the assignment.
+
+The assignment is stored at:
+
+```text
+terms/<term-code>/assignments/<assignment-slug>/assignment.yml
+```
+
+Before saving a template-backed assignment, Graider checks that the authenticated
+GitHub identity can access the template repository and that the selected branch
+exists. Leave the branch blank to use the repository's GitHub default branch
+(for example, `master`); an explicit branch is validated exactly as entered. If validation fails, check the owner/repository spelling, branch name,
+and GitHub permissions; Graider will not save the assignment with an unverified
+template reference.
+
+Choose the intended assignment status. A draft or closed assignment can still
+be reviewed, but repository creation and grading readiness may be restricted.
+
+## Edit an Assignment
+
+Open Assignment Detail and choose **Edit assignment**. Review the title,
+sections, template repository/branch, deadline, status, points, and grading
+settings. Save with **Save assignment changes** only after reviewing the
+preview. The assignment term and slug are identity/path fields, so create a new
+assignment rather than trying to rename them in place.
+
+## Apply an Assignment and Create Student Repositories
+
+From Assignment Detail choose **Preview apply**. The preview shows the
+repositories Graider would create, update, skip, or block. Resolve unexpected
+repository names, roster problems, and blockers before continuing.
+
+Use the confirm control on the Apply Preview page to run the apply operation.
+It creates/configures the selected students' repositories and records the local
+manifest. “Not applied” usually means repositories have not been created yet;
+it is not automatically an error. Apply must succeed before repository links
+can be shared with students.
+
+## Share Repository Links with Students Using Canvas
+
+Graider's current student-notification fallback is a static GitHub Pages access
+page, not email.
+
+1. Configure the optional Pages target in `course.yml` (or the Course Setup
+   wizard), then select its local filesystem clone from Assignment Detail. The
+   default target derives from the selected course GitHub organization as
+   `<org>/<org>pages`, with base URL `https://<org>.github.io/<org>pages`.
+   For CSC1120:
+
+   ```yaml
+   notifications:
+     student_access_pages:
+       repository: csc1120/csc1120pages
+       base_url: https://csc1120.github.io/csc1120pages
+       branch: main
+   ```
+
+   `repository` is the GitHub `owner/repository`, while `base_url` is the HTTPS
+   Pages URL. The local repository folder is a machine-local filesystem path;
+   Graider does not store that path in `course.yml`.
+
+2. In **Student repository access page**, choose **Generate student access
+   page** (or **Regenerate student access page**).
+3. Confirm the output path in the selected Pages repository is:
+
+   ```text
+   terms/<term-code>/notifications/<assignment-slug>/student-repositories.html
+   ```
+
+4. Review Included and Missing repositories. Resolve missing repository links
+   before posting the page when possible; missing rows are excluded by default.
+5. Use **Copy Canvas link**, then paste that link into Canvas.
+
+The page lists MSOE usernames (`student_id`) and repository links only. It does
+not list names, emails, grades, roster statuses, or diagnostics. Students find
+their MSOE username and select **Open repository**.
+
+For example:
+
+```text
+terms/27s2/notifications/lab02/student-repositories.html
+https://csc1120.github.io/csc1120pages/terms/27s2/notifications/lab02/student-repositories.html
+```
+
+## Publish the Student Repository Access Page
+
+Generating the file does not make the Canvas link live. In Assignment Detail,
+review **Publish readiness**:
+
+| Status               | What to do                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| Not generated        | Generate the access page first.                                                                    |
+| Not a git repository | Select the intended local Pages repository clone; Graider cannot assess publishing here.           |
+| Uncommitted          | Choose **Publish Student Access Page**, review the single page-file change, then confirm.          |
+| No upstream          | Configure/push an upstream branch using the displayed manual command.                              |
+| Unpushed             | Choose **Publish Student Access Page**, then confirm the push.                                     |
+| Pages unknown        | Local checks are complete, but the GitHub Pages URL could not be determined from course settings.  |
+| Ready to publish     | Local file, commit, and push checks look ready. Confirm Pages is enabled before posting in Canvas. |
+
+**Publish Student Access Page** is always explicit and requires a review before
+it runs. It stages only the generated page for the current assignment, commits
+it with a predictable message, and pushes the current upstream branch; it never
+stages unrelated Pages-repository files. Suggested commands remain available
+for manual troubleshooting. Readiness is local-only: Graider does not verify
+that GitHub Pages is enabled or that the URL is live. Enable Pages in GitHub
+before sharing the Canvas link. Course configuration changes still require a
+separate commit and push of the admin repository.
+
+## View or Edit the Grading Workflow
+
+From Assignment Detail select **View workflow**. Graider reads the configured
+template repository, branch, and workflow path (normally
+`.github/workflows/grade.yml`). Review changes carefully, use
+the workflow preview, and select **Confirm push** only for a safe, authorized
+template repository. If the workflow is missing, Graider shows the absence so
+you can provide the expected workflow before grading.
+
+## Configure Group Assignment Membership
+
+From Assignment Detail, select **Group repositories** under **Repository mode**
+and provide a `groups.csv` file in the assignment folder using:
+
+```text
+group_id,student_id
+team-1,student-a
+team-1,student-b
+```
+
+Each student must be active, selected for the assignment, and belong to the
+same section as the other members of their group. Saving keeps `groups.csv`
+beside `assignment.yml`; use **Publish Course Changes** to share those local
+admin-repository changes. Group Apply Preview shows one planned repository per
+group ID, including its members and repository name. Group repository creation is not available yet, so
+Apply is intentionally blocked for assignments configured in group mode.
+
+## Dispatch Grading
+
+Choose **Preview grading** from Assignment Detail. Review the planned workflow
+dispatches and diagnostics. Confirm dispatch only when the selected assignment
+and repositories are ready. Dispatch starts the configured GitHub Actions
+workflows; it does not compute grades locally.
+
+## Check Grade Status
+
+Use **View grading status** or **View full grade status**. The status page can
+refresh while work is unfinished; use **Refresh status** if automatic refresh
+stops or you want a new snapshot. A missing run usually means dispatch has not
+occurred, the workflow is unavailable, or GitHub has not started it yet.
+
+## Generate the Faculty Report
+
+Choose **Generate report** from Assignment Detail, or **View faculty report**
+from Grade Status. Use **Refresh report** after grading artifacts become
+available. The report depends on configured grading results, so unavailable or
+failed workflow results may leave report rows incomplete.
+
+## Common Problems and Fixes
+
+- **GitHub authentication not detected:** Run `gh auth login`, relaunch or
+  refresh Graider, and confirm the account can access the organization.
+- **Course folder not recognized:** Select the folder containing `course.yml`,
+  not a parent or assignment subfolder.
+- **Assignment not applied / repositories missing:** Use **Preview apply**,
+  resolve blockers, then confirm apply. Do not share the access page until the
+  manifest has repository URLs for intended active students.
+- **Roster schema rejected:** Save the canonical seven-column header shown
+  above and ensure each row's section and status are valid.
+- **Student missing from access page:** Check that the roster status is active
+  and that the assignment manifest has a repository URL for that student.
+- **Canvas link opens 404:** Confirm the page was generated in the selected
+  Pages clone, committed and pushed there, and that GitHub Pages is enabled for
+  the Pages repository.
+- **Access page uncommitted or unpushed:** Use the displayed copy-only commands
+  in a terminal from the Pages repository, then refresh readiness.
+- **Workflow missing or grade dispatch fails:** Check the configured template,
+  branch, workflow path, GitHub auth, and Assignment Detail diagnostics.
+- **Grade status has no runs:** Confirm dispatch was completed and allow GitHub
+  Actions time to start; then refresh status.
+- **Report unavailable:** Wait for grading results/artifacts and refresh the
+  report.
+- **macOS blocks the packaged app:** The pilot may be unsigned. Follow your
+  institution's approved Gatekeeper guidance for a trusted pilot build.
+
+## Safe Operating Tips
+
+- Use a sandbox course when testing apply, workflow push, or grade dispatch.
+- Always preview before confirming apply or grading.
+- Review roster identities and missing-repository diagnostics before sharing.
+- Keep course files and generated access pages under version control.
+- Never put GitHub tokens in course files, rosters, reports, or screenshots.
+
+## Quick Reference Checklist
+
+1. Confirm roster.
+2. Create or edit the assignment.
+3. Preview apply.
+4. Apply the assignment.
+5. Generate the student access page.
+6. Check publish readiness.
+7. Commit and push the generated page manually.
+8. Copy the Canvas link.
+9. Post the link in Canvas.
+10. Dispatch grading when ready.
+11. Check grade status.
+12. Generate the faculty report.
+
+For packaged-app and developer validation details, see the
 [Electron Release Readiness Guide](electron-release-readiness.md).
-
-For packaged app builds and unsigned macOS app notes, see
-[Electron Packaging Guide](electron-packaging.md).
-
-If you received the RC1 faculty package, start with
-[`README-Start-Here.md`](release/rc1/README-Start-Here.md) and use
-[`FACULTY-SMOKE-TEST.md`](release/rc1/FACULTY-SMOKE-TEST.md) for sandbox
-validation.
-
-For terminal-only use, see the
-[Faculty CLI user guide](faculty-cli-user-guide.md).
-
-## Course Folder Structure
-
-Graider expects a course-admin folder with `course.yml` at the root. Assignment
-paths follow `terms/<term-code>/assignments/<assignment-slug>/assignment.yml`.
-
-Minimal structure:
-
-```text
-my-course/
-  course.yml
-  terms/
-    27s1/
-      term.yml
-      rosters/
-        section-001.csv
-      assignments/
-        lab04/
-          assignment.yml
-```
-
-Graider currently uses roster CSV files referenced by `term.yml`. It does not
-use a `roster.yml` file.
-
-Graider may generate reviewable files later under:
-
-```text
-terms/<term-code>/plans/<assignment-slug>/
-terms/<term-code>/manifests/<assignment-slug>/
-terms/<term-code>/reports/<assignment-slug>/
-```
-
-## `course.yml`
-
-`course.yml` defines course identity, GitHub defaults, repository naming,
-default assignment type, default grading behavior, and report settings.
-
-Small example:
-
-```yaml
-schema_version: 1
-course:
-  code: se2030
-  title: Software Engineering
-  repository: se2030-course-admin
-github:
-  organization: example-org
-  repository_visibility: private
-  repo_name_pattern: "{term}-{course}-{assignment}-{github_username}"
-  student_permission: push
-  faculty_team: faculty
-  faculty_permission: admin
-  grader_team: graders
-  grader_permission: maintain
-defaults:
-  timezone: Asia/Tokyo
-  assignment_type: individual
-grading:
-  enabled: true
-  mode: custom-workflow
-  workflow: .github/workflows/grade.yml
-  artifact: grading-results
-  result_file: grading-results.json
-reports:
-  formats:
-    - markdown
-    - csv
-    - json
-```
-
-Notes:
-
-- Current repository visibility support is `private`.
-- Current assignment type support is `individual`.
-- Repository name patterns should include `{term}`, `{course}`, `{assignment}`,
-  and `{github_username}`. The older `{student}` placeholder is treated as the
-  GitHub username.
-- Student report publishing can be configured under `reports.student_publish`,
-  but the Electron UI does not publish student reports yet.
-
-## `term.yml`
-
-`term.yml` defines one term and points each section to its roster CSV.
-
-```yaml
-schema_version: 1
-term:
-  code: 27s1
-  academic_year: 2027
-  semester: 1
-  display_name: Spring 2027
-sections:
-  - id: "001"
-    roster: rosters/section-001.csv
-```
-
-Notes:
-
-- `term.code` must match the folder name under `terms/`.
-- Current term codes use the `YYsN` shape, such as `27s1`.
-- `semester` is `1`, `2`, or `3`.
-
-## Roster CSV
-
-Roster files are CSV files. Required columns are:
-
-```text
-student_id,github_username,section,status
-```
-
-Example:
-
-```csv
-student_id,github_username,section,status
-s1234567,octocat,001,active
-s2345678,hubot,001,hold
-s3456789,monalisa,001,dropped
-```
-
-Notes:
-
-- `student_id` is the stable ID Graider uses in rows, manifests, reports, and
-  filtered status checks.
-- `github_username` is the student's GitHub username.
-- `section` must match the section that referenced the roster.
-- `status` is `active`, `hold`, or `dropped`.
-- Display name and email columns are not part of the current schema.
-
-## `assignment.yml`
-
-`assignment.yml` defines one assignment, its template repository, target
-sections, deadline metadata, and optional grading override.
-
-```yaml
-schema_version: 1
-assignment:
-  slug: lab04
-  title: Lab 04
-  type: individual
-  status: active
-template:
-  repository: example-org/lab04-template
-  branch: main
-sections:
-  - "001"
-deadline:
-  due_at: "2027-04-15T23:59:00+09:00"
-  late_policy: standard
-metadata:
-  faculty_owner: professor
-  lms_assignment_id: null
-  grading_category: labs
-  points: 100
-grading:
-  enabled: true
-  mode: custom-workflow
-  workflow: .github/workflows/grade.yml
-  artifact: grading-results
-  result_file: grading-results.json
-```
-
-Notes:
-
-- `assignment.slug` must match the assignment folder name.
-- `assignment.status` is `draft`, `active`, `closed`, or `archived`.
-- `sections` selects section IDs from `term.yml`.
-- If grading is enabled, `workflow`, `artifact`, and `result_file` are required.
-- Supported enabled grading modes are `preset`, `custom-workflow`, and
-  `contract-only`.
-- The supported preset is `java-junit-checkstyle`.
-- To disable grading for one assignment, use `grading: { enabled: false }`.
-
-## Grading Defaults And Overrides
-
-`course.yml` can define default grading behavior. An assignment can omit
-`grading` to use that default.
-
-Course default:
-
-```yaml
-grading:
-  enabled: true
-  mode: custom-workflow
-  workflow: .github/workflows/grade.yml
-  artifact: grading-results
-  result_file: grading-results.json
-```
-
-Assignment that uses the course default:
-
-```yaml
-schema_version: 1
-assignment:
-  slug: lab04
-  title: Lab 04
-  type: individual
-  status: active
-template:
-  repository: example-org/lab04-template
-  branch: main
-sections:
-  - "001"
-deadline:
-  due_at: "2027-04-15T23:59:00+09:00"
-  late_policy: standard
-metadata:
-  faculty_owner: professor
-  lms_assignment_id: null
-  grading_category: labs
-  points: 100
-```
-
-Assignment override:
-
-```yaml
-grading:
-  enabled: true
-  mode: preset
-  preset: java-junit-checkstyle
-  workflow: .github/workflows/grade.yml
-  artifact: grading-results
-  result_file: grading-results.json
-```
-
-Important: an assignment-level `grading` block is a full override. It is not a
-partial merge with `course.yml`. If you add `grading` to `assignment.yml`, include
-all fields needed for that assignment.
-
-The UI shows the effective resolved grading configuration on assignment detail,
-grade preview, grade status, and report-related pages.
-
-## UI Workflow
-
-### Open A Course Folder
-
-Register the course-admin folder that contains `course.yml`. This is read-only.
-If the folder is invalid, the UI shows diagnostics instead of changing files.
-Graider remembers registered course folders on this computer. When you relaunch
-the app, registered folders load automatically and the dashboard refreshes
-without pressing Refresh.
-
-Check before continuing:
-
-- `course.yml` exists at the folder root.
-- The folder contains the expected `terms/` structure.
-- The dashboard shows `GitHub authentication: Connected` before you run
-  GitHub-backed checks or grading actions.
-
-### Review The Dashboard
-
-The dashboard summarizes terms and assignments. It is read-only.
-Use Refresh when you want to manually reload registered folders after changing
-configuration, fixing GitHub authentication, or restoring a missing folder.
-Invalid or missing registered folders remain visible with diagnostics and do not
-stop other registered folders from loading.
-
-Look for:
-
-- assignment status
-- needs-attention indicators
-- missing token or GitHub readiness diagnostics
-- assignments that do not appear because config files are missing or invalid
-
-### Open An Assignment
-
-Assignment Detail is read-only. It shows the selected assignment header,
-readiness callouts, setup fields, roster/section counts, workflow actions, and a
-compact Grade Status Summary before the diagnostics area.
-
-Check before continuing:
-
-- the assignment targets the intended sections
-- the template repository and branch are correct
-- grading is enabled or disabled as intended
-- diagnostics are resolved or understood
-
-Use the Grade Status Summary to quickly check student grading state without
-opening the full status page. It shows student username or stable student id,
-section, repository short name, concise status, a readable last update, and
-available run links. It does not show the workflow column, raw ISO timestamps,
-or full run diagnostics.
-
-Student names in the summary prefer the roster/course username when available.
-If Graider only has a stable student id, it shows that. If only a GitHub login
-is available, it uses the GitHub login as a fallback.
-
-Use `View full grade status` for the detailed polling table, workflow/run
-details, and Faculty Report entry point. Detailed setup fields and full
-diagnostics remain lower on the page. Critical blockers still appear in the
-readiness summary.
-
-### Preview Assignment Apply
-
-Apply Preview is read-only. It shows what Graider would create, update, skip, or
-block for student repositories.
-
-Check before continuing:
-
-- rows say `Would create`, `Would update`, `Would skip`, `Blocked`, or `Unknown`
-- there are no blockers before applying
-- repository names and GitHub usernames look correct
-
-### Confirm Assignment Apply
-
-Confirmed apply is mutating. It can create or update student repositories,
-permissions, GitHub Actions setup, manifests, and local apply state according to
-the apply implementation.
-
-Only confirm when:
-
-- the preview has no blockers
-- the target students and repositories are correct
-- you are using the intended course or sandbox
-
-### Preview Grading Dispatch
-
-Grade Dispatch Preview is read-only. It shows which repositories would receive a
-GitHub Actions grading workflow dispatch.
-
-Check before continuing:
-
-- grading is enabled and uses the expected workflow
-- rows say `Would dispatch`, `Would skip`, `Blocked`, `Unknown`, or
-  `Token required`
-- workflow dispatch readiness is available
-
-### Confirm Grading Dispatch
-
-Confirmed grade dispatch is mutating because it starts GitHub Actions workflows
-on student repositories. It does not collect results or generate reports.
-
-Only confirm when:
-
-- the preview has no blockers
-- the workflow path and target repositories are correct
-- you are ready for grading workflows to run
-
-### Check Grading Status
-
-Grade Status is read-only. It shows whether workflow runs are queued, in
-progress, completed, missing, blocked, token-required, or unknown.
-
-Use it to answer:
-
-- Are grading runs still active?
-- Which repositories need attention?
-- Does the UI think the assignment is ready for report generation?
-
-`readyForReport` is guidance, not a guarantee. If it is `No`, available rows are
-still useful and should remain visible.
-
-### View Faculty Report
-
-Faculty Report runs Graider's report command and displays the faculty report
-result. It may generate or refresh local report files under
-`terms/<term-code>/reports/<assignment-slug>/`. In the current UI it does not
-publish student reports.
-
-Missing results, missing artifacts, missing report files, or incomplete workflow
-runs are normal report states. If partial data is available, the UI should show
-available rows and diagnostics.
-
-## Safety Notes
-
-- Preview pages are read-only.
-- Confirm Apply can change repository setup and local generated state.
-- Confirm Grade Dispatch starts GitHub Actions workflows.
-- Grade Status is read-only and does not generate reports.
-- Faculty Report may generate local report files, but it does not publish
-  student reports from the UI.
-- Student report publishing is deferred in the UI.
-- Workflow generation UI is deferred.
-- Use a sandbox course for live testing of apply or grade dispatch.
-
-## Troubleshooting
-
-| Issue                                   | Practical checks                                                                                                                                                                                               |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dashboard is empty                      | Confirm the selected folder contains `course.yml` and term/assignment files.                                                                                                                                   |
-| Course folder opens but dashboard fails | Select the course root containing `course.yml`; paths with spaces are supported. Use Refresh after fixing GitHub auth/config issues. If failure persists, enable `GRAIDER_UI_DEBUG=1` and capture diagnostics. |
-| Remembered folder fails after relaunch  | Confirm the folder still exists at the shown path. Restore the folder or remove and re-open it; other registered folders should still load.                                                                    |
-| Course folder is invalid                | Check YAML syntax and required fields in `course.yml`, `term.yml`, and assignments.                                                                                                                            |
-| Assignment does not appear              | Confirm `assignment.slug` matches its folder and the assignment is under `terms/<term>/assignments/`.                                                                                                          |
-| GitHub authentication not connected     | Run `gh auth login` once in Terminal, then click Check GitHub auth in Graider.                                                                                                                                 |
-| GitHub CLI missing                      | Install GitHub CLI, then run `gh auth login`.                                                                                                                                                                  |
-| Private GitHub link opens as 404        | Sign into GitHub in your browser with the same account used for `gh auth login`.                                                                                                                               |
-| Student repository missing              | Run Apply Preview and Confirm Apply if setup has not been applied.                                                                                                                                             |
-| Grading workflow missing                | Check `grading.workflow` and ensure the template/student repository has that workflow.                                                                                                                         |
-| Workflow dispatch unavailable           | Confirm the workflow includes `workflow_dispatch`.                                                                                                                                                             |
-| Grade status stays queued/running       | Refresh later, then inspect the linked GitHub Actions run if it remains stuck.                                                                                                                                 |
-| Faculty report says results missing     | Return to Grade Status and confirm runs are completed; check artifact/result file names.                                                                                                                       |
-| Roster errors                           | Ensure roster CSV has `student_id`, `github_username`, `section`, and `status`.                                                                                                                                |
-| Repository names look wrong             | Check `github.repo_name_pattern` and roster `github_username` values.                                                                                                                                          |
-
-## Glossary
-
-| Term             | Meaning                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------- |
-| Course folder    | The course-admin folder containing `course.yml` and `terms/`.                            |
-| Term             | A course offering folder under `terms/`, such as `terms/27s1/`.                          |
-| Roster           | A section CSV file listing student IDs, GitHub usernames, section IDs, and status.       |
-| Assignment       | One assignment folder containing `assignment.yml`.                                       |
-| Apply            | The action that creates or updates student repository setup and local state.             |
-| Grade dispatch   | Starting the configured GitHub Actions grading workflow on student repositories.         |
-| Grade status     | A read-only snapshot of grading workflow run status across target repositories.          |
-| Faculty report   | The report view for course staff, including summaries, generated paths, and diagnostics. |
-| Student report   | Per-student feedback intended for one student's repository; UI publishing is deferred.   |
-| `readyForReport` | A conservative status hint that grading appears complete enough to try reports.          |

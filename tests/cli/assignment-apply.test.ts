@@ -124,6 +124,23 @@ const getDiagnosticCodes = (diagnostics: readonly { readonly code: string }[]): 
   diagnostics.map((diagnostic) => diagnostic.code);
 
 describe("graider assignment apply command", () => {
+  it("blocks group assignments before any repository or manifest mutation", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    fs.appendFileSync(
+      path.join(cwd, ASSIGNMENT_FILE),
+      "\nrepository_mode: group\ngroups:\n  file: groups.csv\n"
+    );
+    const githubClient = createReadyClient();
+
+    const result = await runCanonicalApply(cwd, githubClient);
+
+    expect(result.status).toBe("failure");
+    expect(getDiagnosticCodes(result.errors)).toContain("group_repository_apply_not_implemented");
+    expect(githubClient.mutations.createdRepositories).toEqual([]);
+    expect(githubClient.mutations.addedCollaborators).toEqual([]);
+    expect(loadWrittenManifest(cwd).status).toBe("missing");
+  });
+
   it("accepts assignment apply and returns the canonical JSON command name", async () => {
     const cwd = copyFixtureToTemp("grading-disabled");
     const result = await runCanonicalApply(cwd, createReadyClient());

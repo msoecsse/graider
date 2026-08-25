@@ -22,6 +22,7 @@ import { loadManifest } from "../../manifest/manifest-loader.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { buildPlan } from "../../planning/plan-builder.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
+import { createConfigDiagnostic, DiagnosticCode } from "../../diagnostics/error-catalog.js";
 import { writeCommandResult } from "../output.js";
 
 const COMMAND_NAME = "apply";
@@ -88,6 +89,24 @@ export const runApplyCommand = async ({
       errors: configResult.diagnostics,
       generatedFiles: [],
       summary: { options }
+    });
+  }
+
+  if (configResult.config.assignment.repository_mode === "group") {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [],
+      errors: [
+        createConfigDiagnostic(
+          DiagnosticCode.GroupRepositoryApplyNotImplemented,
+          "Group Apply Preview is available, but group repository creation is not implemented yet. Graider will not create individual student repositories.",
+          { assignmentFile: configResult.config.summary.assignmentConfigPath }
+        )
+      ],
+      generatedFiles: [],
+      summary: { options, ...configResult.config.summary }
     });
   }
 
@@ -191,6 +210,7 @@ export const runApplyCommand = async ({
   const executionResult = await executeApplyPlan({
     config: configResult.config,
     plan,
+    targets: plan.targets,
     ...(manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {}),
     manifestPath: manifestPath.absolutePath,
     students: rosterResult.students,

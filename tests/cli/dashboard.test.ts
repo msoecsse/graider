@@ -410,6 +410,22 @@ describe("graider dashboard command", () => {
     });
   });
 
+  it("keeps a valid course with no assignments active and ready", async () => {
+    const cwd = createTempRoot();
+    writeCourse(cwd);
+    writeTerm(cwd);
+    writeRoster(cwd);
+
+    const [card] = (await runDashboard(cwd)).cards;
+
+    expect(card).toMatchObject({
+      status: "active",
+      needsAttention: false,
+      assignmentCount: 0,
+      recentAssignments: []
+    });
+  });
+
   it("returns one card per term and supports term filtering", async () => {
     const cwd = createCourseFixture();
     writeTerm(cwd, SECOND_TERM, "Summer 2027");

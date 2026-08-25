@@ -10,6 +10,9 @@ workflow details live in:
 - [Electron Grade Status Developer Guide](electron-grade-status-dev.md)
 - [Electron Faculty Report Developer Guide](electron-faculty-report-dev.md)
 - [Electron Packaging Guide](electron-packaging.md)
+- [Faculty UI User Guide](faculty-ui-user-guide.md)
+- [RC2 Faculty Release Notes](release/rc2/RELEASE-NOTES.md)
+- [RC2 Faculty Smoke Test](release/rc2/FACULTY-SMOKE-TEST.md)
 
 This guide is the UI-7A runbook for validating the current faculty workflow
 without adding student report publishing or other deferred features.
@@ -367,6 +370,27 @@ These are intentionally outside the current release-readiness pass:
 - advanced report export, unless already implemented
 
 ## Validation Commands
+
+Run the complete local release-candidate validation sequence from the repository
+root:
+
+```bash
+npm run validate:release
+```
+
+It runs root lint, typecheck, formatting, tests, and build; then UI typecheck,
+tests, build, and package. Root `npm test` is a single non-watch `vitest run`
+command and exits with a normal pass/fail result. Root lint covers UI source as
+well; generated `dist`, Electron, bundled-CLI, package, and release output is
+explicitly ignored rather than treated as source.
+
+`npm run package` can download Electron Builder artifacts when they are not
+already cached, so a package failure caused by network/DNS availability should
+be reported separately from code validation.
+
+Student repository access-page publish readiness is intentionally local-only.
+It uses read-only git checks and never commits, pushes, enables GitHub Pages, or
+checks Pages availability over the network.
 
 For UI release-readiness changes, run:
 

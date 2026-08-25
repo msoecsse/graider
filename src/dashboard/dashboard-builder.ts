@@ -1011,6 +1011,10 @@ const loadRosterSummary = (
 const getTermTitle = (term: LoadedTerm): string => term.config?.term.display_name ?? term.termSlug;
 
 const getCardStatus = (assignments: readonly DashboardAssignmentSummary[]): string => {
+  if (assignments.length === EMPTY_COUNT) {
+    return STATUS_ACTIVE;
+  }
+
   if (assignments.some((assignment) => assignment.status === STATUS_ACTIVE)) {
     return STATUS_ACTIVE;
   }

@@ -421,6 +421,62 @@ const RepositoryRowsPanel = ({
   </section>
 );
 
+const GroupTargetsPanel = ({
+  preview
+}: {
+  readonly preview: NormalizedApplyPreview;
+}): ReactElement | null => {
+  if (preview.repositoryMode !== "group") return null;
+  return (
+    <section
+      className="detail-panel apply-preview-repositories"
+      aria-labelledby="group-targets-title"
+    >
+      <h2 id="group-targets-title">Group repository targets</h2>
+      <p className="detail-panel__note">
+        Preview is available for group repositories. Apply execution is not implemented yet.
+      </p>
+      {preview.plan.groupTargets.length === 0 ? (
+        <p className="detail-panel__note">No valid group repository targets were found.</p>
+      ) : (
+        <div className="apply-preview-table" role="table" aria-label="Group repository targets">
+          <div className="apply-preview-table__header" role="row">
+            <span role="columnheader">Group</span>
+            <span role="columnheader">Section</span>
+            <span role="columnheader">Repository</span>
+            <span role="columnheader">Students</span>
+            <span role="columnheader">Permission</span>
+            <span role="columnheader">Teams</span>
+          </div>
+          {preview.plan.groupTargets.map((target) => (
+            <div
+              className="apply-preview-table__row"
+              role="row"
+              key={target.targetId ?? target.repositoryName ?? "group"}
+            >
+              <span role="cell">{formatNullableValue(target.groupId)}</span>
+              <span role="cell">{target.sectionIds.join(", ") || "—"}</span>
+              <span role="cell" className="apply-preview-table__repository">
+                {formatNullableValue(target.repositoryName)}
+              </span>
+              <span role="cell">
+                {target.studentIds
+                  .map(
+                    (studentId, index) =>
+                      `${studentId}${target.githubUsernames[index] === undefined ? "" : ` (${target.githubUsernames[index]})`}`
+                  )
+                  .join(", ") || "—"}
+              </span>
+              <span role="cell">{formatNullableValue(target.plannedStudentPermission)}</span>
+              <span role="cell">{`${target.facultyTeam ?? "—"} (${target.facultyTeamPermission ?? "—"}), ${target.graderTeam ?? "—"} (${target.graderTeamPermission ?? "—"})`}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+};
+
 const ApplyResultSummaryPanel = ({
   result
 }: {
@@ -936,6 +992,7 @@ export const ApplyPreviewPage = ({
               <GradingPanel preview={preview} />
               <RepositorySummaryPanel preview={preview} />
               <RepositoryRowsPanel preview={preview} />
+              <GroupTargetsPanel preview={preview} />
               <DiagnosticsPanel diagnostics={preview.diagnostics} />
               {normalizedApplyResult === null ? (
                 <ConfirmationPanel

@@ -15,5 +15,7 @@ ui/node_modules/
 ui/dist/
 ui/dist-electron/
 ui/dist-graider-cli/
+ui/dist-release/
 ui/release/
+release/
 tests/fixtures/**/malformed-yaml/*.yml

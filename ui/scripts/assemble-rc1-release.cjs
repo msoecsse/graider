@@ -1,3 +1,5 @@
+/* global __dirname, console */
+
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -10,11 +12,7 @@ const RC_FOLDER_NAME = "Graider-RC1";
 const RC_FOLDER = path.join(DIST_RELEASE_ROOT, RC_FOLDER_NAME);
 const RC_ZIP = path.join(DIST_RELEASE_ROOT, "Graider-macOS-RC1.zip");
 const RC_DOC_SOURCE = path.join(REPO_ROOT, "docs", "release", "rc1");
-const REQUIRED_DOCS = [
-  "README-Start-Here.md",
-  "FACULTY-SMOKE-TEST.md",
-  "KNOWN-ISSUES.md"
-];
+const REQUIRED_DOCS = ["README-Start-Here.md", "FACULTY-SMOKE-TEST.md", "KNOWN-ISSUES.md"];
 const APP_NAME = "Graider.app";
 const MAC_RELEASE_DIRECTORIES = ["mac-arm64", "mac", "mac-x64"];
 

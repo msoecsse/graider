@@ -3,18 +3,30 @@ export const IPC_CHANNELS = {
   checkGitHubAuth: "graider-ui:github-auth:check",
   listCourseFolders: "graider-ui:course-registry:list",
   selectCourseFolder: "graider-ui:course-registry:select-folder",
+  selectStudentAccessPagesRepositoryFolder:
+    "graider-ui:student-repository-access-page:select-pages-folder",
   selectCourseSetupFolder: "graider-ui:course-setup:select-folder",
   previewCourseSetup: "graider-ui:course-setup:preview",
   saveCourseSetup: "graider-ui:course-setup:save",
+  saveStudentAccessPagesConfig: "graider-ui:student-access-pages:save-config",
   loadAssignmentSetupTerms: "graider-ui:assignment-setup:terms",
   previewAssignmentSetup: "graider-ui:assignment-setup:preview",
   saveAssignmentSetup: "graider-ui:assignment-setup:save",
   getAssignmentForEdit: "graider-ui:assignment-edit:get",
   previewAssignmentEdit: "graider-ui:assignment-edit:preview",
   saveAssignmentEdit: "graider-ui:assignment-edit:save",
+  getAssignmentGroupConfig: "graider-ui:assignment-groups:get",
+  saveAssignmentGroupConfig: "graider-ui:assignment-groups:save",
   getStudentRepoEmailPreview: "graider-ui:student-repo-email-preview:get",
   getStudentRepoEmailSendHistory: "graider-ui:student-repo-email-history:get",
   getStudentRepoEmailTransportStatus: "graider-ui:student-repo-email-transport-status:get",
+  getStudentRepositoryAccessPageStatus: "graider-ui:student-repository-access-page:status",
+  generateStudentRepositoryAccessPage: "graider-ui:student-repository-access-page:generate",
+  getStudentRepositoryAccessPagePublishStatus:
+    "graider-ui:student-repository-access-page:publish-status",
+  publishStudentRepositoryAccessPage: "graider-ui:student-repository-access-page:publish",
+  getCoursePublishStatus: "graider-ui:course-publish:status",
+  publishCourseChanges: "graider-ui:course-publish:publish",
   loadRosterTerms: "graider-ui:roster-manager:terms",
   getRosterForSection: "graider-ui:roster-manager:get",
   previewRosterSave: "graider-ui:roster-manager:preview",
@@ -39,6 +51,46 @@ export interface AppInfo {
   readonly version: string;
 }
 
+export interface StudentAccessPagesConfigRequest {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly repository: string;
+  readonly baseUrl: string;
+  readonly branch: string;
+}
+
+export interface StudentAccessPagesConfigResult {
+  readonly status: "success" | "failure";
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly changed: boolean;
+}
+
+export type CoursePublishStatus =
+  | "changes_pending"
+  | "unpushed"
+  | "up_to_date"
+  | "unrelated_changes"
+  | "not_git_repo"
+  | "no_upstream"
+  | "failure";
+
+export interface CoursePublishStatusResult {
+  readonly status: CoursePublishStatus;
+  readonly courseFolderPath: string;
+  readonly currentBranch: string | null;
+  readonly upstreamBranch: string | null;
+  readonly aheadCount: number | null;
+  readonly allowedChangedFiles: readonly string[];
+  readonly unrelatedChangedFiles: readonly string[];
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
+export interface CoursePublishActionResult {
+  readonly status: "success" | "up_to_date" | "failure";
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly commitMessage: string | null;
+}
+
 export type GitHubAuthStatus = "connected" | "not_connected";
 
 export interface GitHubAuthResult {
@@ -55,6 +107,7 @@ export interface CourseFolderRecord {
   readonly lastOpenedAt: string;
   readonly lastRefreshedAt: string | null;
   readonly lastDashboardStatus: string | null;
+  readonly pagesRepositoryFolderPath?: string | null;
 }
 
 export interface SelectCourseFolderResult {
@@ -78,6 +131,9 @@ export interface CourseSetupRequest {
   readonly courseTitle: string;
   readonly courseCode: string;
   readonly githubOrganization: string;
+  readonly studentAccessPagesRepository?: string;
+  readonly studentAccessPagesBaseUrl?: string;
+  readonly studentAccessPagesBranch?: string;
   readonly termCode: string;
   readonly sectionIds: readonly string[];
   readonly rosterUploads: readonly CourseSetupRosterUpload[];
@@ -212,8 +268,129 @@ export interface AssignmentEditSaveResult {
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
+export interface AssignmentGroupConfigRequest extends AssignmentSetupTermsRequest {
+  readonly assignmentFile: string;
+}
+
+export interface AssignmentGroupConfigSaveRequest extends AssignmentGroupConfigRequest {
+  readonly repositoryMode: "individual" | "group";
+  readonly groupsCsv: string;
+}
+
+export interface AssignmentGroupConfigResult {
+  readonly status: "ready" | "success" | "failure";
+  readonly repositoryMode: "individual" | "group";
+  readonly groupsFile: string;
+  readonly groupsCsv: string;
+  readonly groupCount: number;
+  readonly groupedStudentCount: number;
+  readonly ungroupedActiveStudentCount: number;
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
 export interface StudentRepoEmailPreviewRequest extends AssignmentSetupTermsRequest {
   readonly assignmentFile: string;
+}
+
+export interface StudentRepositoryAccessPageRequest extends AssignmentSetupTermsRequest {
+  readonly assignmentFile: string;
+  readonly pagesRepositoryFolderPath?: string | null;
+}
+
+export interface SelectStudentAccessPagesRepositoryFolderResult {
+  readonly canceled: boolean;
+  readonly folderPath: string | null;
+  readonly error?: CourseFolderSelectionError;
+}
+
+export type StudentRepositoryAccessPageStatus =
+  | "ready"
+  | "generated"
+  | "partial"
+  | "not_ready"
+  | "failure";
+
+export type StudentRepositoryAccessPageRowStatus =
+  | "included"
+  | "missing_repository"
+  | "skipped_inactive";
+
+export interface StudentRepositoryAccessPageRow {
+  readonly studentId: string;
+  readonly githubUsername: string;
+  readonly repositoryUrl: string | null;
+  readonly status: StudentRepositoryAccessPageRowStatus;
+}
+
+export interface StudentRepositoryAccessPageSummary {
+  readonly activeStudents: number;
+  readonly includedStudents: number;
+  readonly skippedInactive: number;
+  readonly missingRepository: number;
+}
+
+export interface StudentRepositoryAccessPageResult {
+  readonly schemaVersion: 1;
+  readonly assignmentFile: string;
+  readonly termCode: string | null;
+  readonly assignmentSlug: string | null;
+  readonly outputPath: string;
+  readonly githubOrganization?: string | null;
+  readonly pagesRepository: string | null;
+  readonly pagesBaseUrl?: string | null;
+  readonly pagesBranch?: string | null;
+  readonly pagesRepositoryFolderSelected: boolean;
+  readonly pagesUrl: string | null;
+  readonly generatedAt: string | null;
+  readonly exists: boolean;
+  readonly status: StudentRepositoryAccessPageStatus;
+  readonly summary: StudentRepositoryAccessPageSummary;
+  readonly rows: readonly StudentRepositoryAccessPageRow[];
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
+export type StudentRepositoryAccessPagePublishStatus =
+  | "ready_to_publish"
+  | "not_generated"
+  | "uncommitted"
+  | "unpushed"
+  | "no_upstream"
+  | "not_git_repo"
+  | "pages_folder_not_selected"
+  | "pages_unknown"
+  | "failure";
+
+export interface StudentRepositoryAccessPagePublishChecks {
+  readonly pagesRepositoryFolderSelected: boolean;
+  readonly fileExists: boolean;
+  readonly isGitRepository: boolean;
+  readonly currentBranch: string | null;
+  readonly hasUncommittedAccessPage: boolean;
+  readonly hasUncommittedOtherChanges: boolean;
+  readonly upstreamBranch: string | null;
+  readonly aheadCount: number | null;
+  readonly pagesUrlAvailable: boolean;
+  readonly remoteMatchesConfiguredRepository: boolean | null;
+}
+
+export interface StudentRepositoryAccessPagePublishResult {
+  readonly schemaVersion: 1;
+  readonly assignmentFile: string;
+  readonly termCode: string | null;
+  readonly assignmentSlug: string | null;
+  readonly outputPath: string;
+  readonly pagesRepositoryFolderPath: string | null;
+  readonly pagesUrl: string | null;
+  readonly status: StudentRepositoryAccessPagePublishStatus;
+  readonly checks: StudentRepositoryAccessPagePublishChecks;
+  readonly suggestedCommands: readonly string[];
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
+export interface StudentRepositoryAccessPagePublishActionResult {
+  readonly status: "success" | "up_to_date" | "failure";
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly commitMessage: string | null;
 }
 
 export type StudentRepoEmailRecipientStatus =
@@ -345,6 +522,7 @@ export interface RosterLoadResult {
 
 export interface RosterSaveRequest extends RosterSectionRequest {
   readonly rows: readonly RosterRow[];
+  readonly createSection?: boolean;
   readonly confirmed: boolean;
 }
 
@@ -353,6 +531,8 @@ export interface RosterPreviewResult {
   readonly path: string;
   readonly content: string;
   readonly exists: boolean;
+  readonly termPath?: string | null;
+  readonly termContent?: string | null;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
@@ -495,6 +675,8 @@ export interface AssignmentApplyPreviewJsonResponse {
   readonly status: string;
   readonly exitCode: number;
   readonly diagnostics: readonly unknown[];
+  readonly repositoryMode?: "individual" | "group";
+  readonly applySupported?: boolean;
   readonly assignment: unknown;
   readonly course: unknown;
   readonly term: unknown;
@@ -658,6 +840,14 @@ export interface GraiderUIApi {
   readonly getAppInfo: () => Promise<AppInfo>;
   readonly checkGitHubAuth: () => Promise<GitHubAuthResult>;
   readonly selectCourseFolder: () => Promise<SelectCourseFolderResult>;
+  readonly selectStudentAccessPagesRepositoryFolder?: (
+    courseFolderId: string
+  ) => Promise<SelectStudentAccessPagesRepositoryFolderResult>;
+  readonly saveStudentAccessPagesConfig?: (
+    request: StudentAccessPagesConfigRequest
+  ) => Promise<StudentAccessPagesConfigResult>;
+  readonly getCoursePublishStatus?: (courseFolderId: string) => Promise<CoursePublishStatusResult>;
+  readonly publishCourseChanges?: (courseFolderId: string) => Promise<CoursePublishActionResult>;
   readonly selectCourseSetupFolder?: () => Promise<CourseSetupFolderSelectionResult>;
   readonly previewCourseSetup?: (request: CourseSetupRequest) => Promise<CourseSetupPreviewResult>;
   readonly saveCourseSetup?: (request: CourseSetupRequest) => Promise<CourseSetupSaveResult>;
@@ -679,6 +869,12 @@ export interface GraiderUIApi {
   readonly saveAssignmentEdit?: (
     request: AssignmentEditRequest
   ) => Promise<AssignmentEditSaveResult>;
+  readonly getAssignmentGroupConfig?: (
+    request: AssignmentGroupConfigRequest
+  ) => Promise<AssignmentGroupConfigResult>;
+  readonly saveAssignmentGroupConfig?: (
+    request: AssignmentGroupConfigSaveRequest
+  ) => Promise<AssignmentGroupConfigResult>;
   readonly getStudentRepoEmailPreview?: (
     request: StudentRepoEmailPreviewRequest
   ) => Promise<StudentRepoEmailPreviewResult>;
@@ -688,6 +884,18 @@ export interface GraiderUIApi {
   readonly getStudentRepoEmailTransportStatus?: (
     request: StudentRepoEmailPreviewRequest
   ) => Promise<StudentRepoEmailTransportStatusResult>;
+  readonly getStudentRepositoryAccessPageStatus?: (
+    request: StudentRepositoryAccessPageRequest
+  ) => Promise<StudentRepositoryAccessPageResult>;
+  readonly generateStudentRepositoryAccessPage?: (
+    request: StudentRepositoryAccessPageRequest
+  ) => Promise<StudentRepositoryAccessPageResult>;
+  readonly getStudentRepositoryAccessPagePublishStatus?: (
+    request: StudentRepositoryAccessPageRequest
+  ) => Promise<StudentRepositoryAccessPagePublishResult>;
+  readonly publishStudentRepositoryAccessPage?: (
+    request: StudentRepositoryAccessPageRequest
+  ) => Promise<StudentRepositoryAccessPagePublishActionResult>;
   readonly loadRosterTerms?: (
     request: AssignmentSetupTermsRequest
   ) => Promise<AssignmentSetupTermsResult>;

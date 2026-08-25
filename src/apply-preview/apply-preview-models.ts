@@ -1,6 +1,7 @@
 import type { CommandStatus } from "../core/command-result.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { AssignmentDetailCheckStatus } from "../assignment-detail/assignment-detail-models.js";
+import type { GroupApplyPreviewTarget } from "../groups/group-preview-planner.js";
 
 export const ASSIGNMENT_APPLY_PREVIEW_SCHEMA_VERSION = 1;
 
@@ -73,6 +74,7 @@ export interface ApplyPreviewPlanSummary {
 export interface ApplyPreviewPlan {
   readonly summary: ApplyPreviewPlanSummary;
   readonly repositories: ApplyPreviewRepositoryRow[];
+  readonly groupTargets?: GroupApplyPreviewTarget[];
 }
 
 export interface ApplyPreviewFiles {
@@ -98,6 +100,8 @@ export interface AssignmentApplyPreviewResult {
   readonly status: CommandStatus;
   readonly exitCode: 0 | 1 | 2;
   readonly diagnostics: Diagnostic[];
+  readonly repositoryMode?: "individual" | "group";
+  readonly applySupported?: boolean;
   readonly assignment: ApplyPreviewAssignment | null;
   readonly course: ApplyPreviewCourse | null;
   readonly term: ApplyPreviewTerm | null;

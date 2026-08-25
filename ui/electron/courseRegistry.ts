@@ -162,7 +162,10 @@ const parseCourseFolderRecord = (value: unknown): CourseFolderRecord | undefined
     displayAlias: value.displayAlias,
     lastOpenedAt: value.lastOpenedAt,
     lastRefreshedAt: value.lastRefreshedAt,
-    lastDashboardStatus: value.lastDashboardStatus
+    lastDashboardStatus: value.lastDashboardStatus,
+    pagesRepositoryFolderPath: isStringOrNull(value.pagesRepositoryFolderPath)
+      ? value.pagesRepositoryFolderPath
+      : null
   };
 };
 
@@ -248,7 +251,8 @@ export const addCourseFolder = (
     displayAlias: null,
     lastOpenedAt: openedAtIso,
     lastRefreshedAt: null,
-    lastDashboardStatus: null
+    lastDashboardStatus: null,
+    pagesRepositoryFolderPath: null
   };
 
   return {
@@ -281,6 +285,26 @@ export const updateCourseFolderRefreshState = (
       : courseFolder
   )
 });
+
+export const setStudentAccessPagesRepositoryFolder = (
+  registryPath: string,
+  courseFolderId: string,
+  folderPath: string
+): CourseFolderRecord | null => {
+  const normalizedPath = normalizeCourseFolderPath(folderPath);
+  if (!pathExists(normalizedPath) || !isDirectory(normalizedPath)) return null;
+  const registry = loadCourseRegistry(registryPath);
+  const courseFolder = registry.courseFolders.find((folder) => folder.id === courseFolderId);
+  if (courseFolder === undefined) return null;
+  const updated = { ...courseFolder, pagesRepositoryFolderPath: normalizedPath };
+  saveCourseRegistry(registryPath, {
+    ...registry,
+    courseFolders: registry.courseFolders.map((folder) =>
+      folder.id === courseFolderId ? updated : folder
+    )
+  });
+  return updated;
+};
 
 export const listCourseFolders = (registryPath: string): CourseFolderRecord[] =>
   loadCourseRegistry(registryPath).courseFolders;

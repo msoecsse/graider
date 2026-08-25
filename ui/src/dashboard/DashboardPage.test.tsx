@@ -572,6 +572,39 @@ const createDeferred = <T,>(): {
 };
 
 describe("DashboardPage", () => {
+  it("confirms and publishes allowlisted course changes", async () => {
+    const getCoursePublishStatus = vi.fn().mockResolvedValue({
+      status: "changes_pending",
+      courseFolderPath: COURSE_FOLDER.path,
+      currentBranch: "main",
+      upstreamBranch: "origin/main",
+      aheadCount: 0,
+      allowedChangedFiles: ["course.yml", "terms/27s1/rosters/section-001.csv"],
+      unrelatedChangedFiles: ["notes.txt"],
+      diagnostics: [
+        { message: "Graider-managed course changes are local and have not been published." }
+      ]
+    });
+    const publishCourseChanges = vi.fn().mockResolvedValue({
+      status: "success",
+      commitMessage: "Publish Graider course changes",
+      diagnostics: [{ message: "Graider-managed course changes were committed and pushed." }]
+    });
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      getCoursePublishStatus,
+      publishCourseChanges
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Publish Course Changes" }));
+    expect(screen.getByText("terms/27s1/rosters/section-001.csv")).toBeInTheDocument();
+    expect(screen.getByText("Publish Graider course changes")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Course Changes" }));
+    await waitFor(() => expect(publishCourseChanges).toHaveBeenCalledWith(COURSE_FOLDER.id));
+    expect(await screen.findByText(/committed and pushed/u)).toBeInTheDocument();
+  });
+
   it("checks GitHub auth on startup", async () => {
     const checkGitHubAuth = vi.fn().mockResolvedValue({
       status: "connected",
@@ -1068,7 +1101,7 @@ describe("DashboardPage", () => {
     });
     const previewAssignmentSetup = vi.fn().mockResolvedValue({
       status: "ready",
-      diagnostics: [],
+      diagnostics: [{ message: "Template repository validated. Using default branch: master." }],
       hasConflicts: false,
       files: [
         {
@@ -1106,7 +1139,9 @@ describe("DashboardPage", () => {
     fireEvent.change(screen.getByLabelText("Assignment title"), { target: { value: "Lab 03" } });
     fireEvent.change(screen.getByLabelText("Assignment slug"), { target: { value: "lab03" } });
     fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
-    fireEvent.click(screen.getByLabelText("Section 001"));
+    expect(screen.getByLabelText("Section 001")).toBeChecked();
+    expect(screen.getByLabelText("Section 002")).toBeChecked();
+    fireEvent.click(screen.getByLabelText("Section 002"));
     fireEvent.change(screen.getByLabelText("GitHub template repository"), {
       target: { value: "graider-sandbox/lab03-template" }
     });
@@ -1116,7 +1151,16 @@ describe("DashboardPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview assignment.yml" }));
 
     await waitFor(() => expect(previewAssignmentSetup).toHaveBeenCalledTimes(1));
+    expect(previewAssignmentSetup).toHaveBeenCalledWith(
+      expect.objectContaining({ sectionIds: ["001"] })
+    );
     expect(await screen.findByText(/assignments\/lab03\/assignment\.yml/u)).toBeInTheDocument();
+    const templateValidation = screen.getByText(
+      "Template repository validated. Using default branch: master."
+    );
+    expect(templateValidation).toHaveClass("success-message");
+    expect(templateValidation).not.toHaveClass("error-message");
+    expect(templateValidation).toHaveAttribute("role", "status");
     fireEvent.click(screen.getByRole("button", { name: "Save assignment setup" }));
 
     await waitFor(() =>
@@ -1126,6 +1170,40 @@ describe("DashboardPage", () => {
         assignmentFile: "terms/27s1/assignments/lab03/assignment.yml"
       })
     );
+  });
+
+  it("shows failed template validation as an error in Assignment Setup", async () => {
+    const previewAssignmentSetup = vi.fn().mockResolvedValue({
+      status: "invalid",
+      diagnostics: [{ message: "Template repository exists, but branch main was not found." }],
+      hasConflicts: false,
+      files: []
+    });
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      loadAssignmentSetupTerms: vi.fn().mockResolvedValue({
+        terms: [{ code: "27s1", sections: ["001"] }],
+        diagnostics: []
+      }),
+      previewAssignmentSetup
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: `Create a new assignment in ${COURSE_FOLDER.path}`
+      })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Preview assignment.yml" }));
+
+    const templateValidation = await screen.findByText(
+      "Template repository exists, but branch main was not found."
+    );
+    expect(templateValidation).toHaveClass("error-message");
+    expect(templateValidation).not.toHaveClass("success-message");
+    expect(templateValidation).toHaveAttribute("role", "alert");
+    expect(screen.getByRole("button", { name: "Save assignment setup" })).toBeDisabled();
   });
 
   it("manages a roster through the typed preload APIs", async () => {
@@ -1175,16 +1253,16 @@ describe("DashboardPage", () => {
     await waitFor(() => expect(getRosterForSection).toHaveBeenCalledTimes(1));
     expect(screen.getByText("A new roster will be created.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Add row" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Student" }));
     fireEvent.change(screen.getByLabelText("student_id row 1"), { target: { value: "S001" } });
-    fireEvent.click(screen.getByRole("button", { name: "Remove row 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Student 1" }));
     expect(screen.queryByLabelText("student_id row 1")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Add row" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Student" }));
     fireEvent.change(screen.getByLabelText("student_id row 1"), { target: { value: "S001" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview roster CSV" }));
     await waitFor(() => expect(previewRosterSave).toHaveBeenCalledTimes(1));
     expect(await screen.findAllByText(/rosters\/section-001\.csv/u)).toHaveLength(2);
-    fireEvent.click(screen.getByRole("button", { name: "Save roster" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Roster" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Saved terms/27s1/rosters/section-001.csv"
@@ -1224,11 +1302,11 @@ describe("DashboardPage", () => {
     await screen.findByRole("option", { name: "27s1" });
     fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
     fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
-    await screen.findByRole("button", { name: "Add row" });
+    await screen.findByRole("button", { name: "Add Student" });
     fireEvent.click(screen.getByRole("button", { name: "Preview roster CSV" }));
 
     expect(await screen.findByText("Roster row 2 is missing email.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save roster" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save Roster" })).toBeDisabled();
     expect(saveRoster).not.toHaveBeenCalled();
   });
 

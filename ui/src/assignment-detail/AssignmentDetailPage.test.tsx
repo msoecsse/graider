@@ -271,6 +271,55 @@ const mockClipboard = (writeText: ReturnType<typeof vi.fn>): void => {
   });
 };
 
+const createAccessPageResult = (overrides = {}) => ({
+  schemaVersion: 1 as const,
+  assignmentFile: ASSIGNMENT_FILE,
+  termCode: "27s1",
+  assignmentSlug: "lab02",
+  outputPath: "terms/27s1/notifications/lab02/student-repositories.html",
+  pagesRepository: "csc1120/csc1120pages",
+  pagesRepositoryFolderSelected: true,
+  pagesUrl:
+    "https://graider-sandbox.github.io/csc1120/terms/27s1/notifications/lab02/student-repositories.html",
+  generatedAt: null,
+  exists: false,
+  status: "partial" as const,
+  summary: { activeStudents: 3, includedStudents: 2, skippedInactive: 1, missingRepository: 1 },
+  rows: [],
+  diagnostics: [{ message: "1 active student is missing a repository link." }],
+  ...overrides
+});
+
+const createAccessPagePublishResult = (overrides = {}) => ({
+  schemaVersion: 1 as const,
+  assignmentFile: ASSIGNMENT_FILE,
+  termCode: "27s1",
+  assignmentSlug: "lab02",
+  outputPath: "terms/27s1/notifications/lab02/student-repositories.html",
+  pagesUrl:
+    "https://graider-sandbox.github.io/csc1120/terms/27s1/notifications/lab02/student-repositories.html",
+  status: "uncommitted" as const,
+  checks: {
+    pagesRepositoryFolderSelected: true,
+    fileExists: true,
+    isGitRepository: true,
+    currentBranch: "main",
+    hasUncommittedAccessPage: true,
+    hasUncommittedOtherChanges: false,
+    upstreamBranch: "origin/main",
+    aheadCount: 0,
+    pagesUrlAvailable: true,
+    remoteMatchesConfiguredRepository: true
+  },
+  suggestedCommands: [
+    "git add 'terms/27s1/notifications/lab02/student-repositories.html'",
+    "git commit -m 'Add Lab 02 student repository access page'",
+    "git push"
+  ],
+  diagnostics: [{ message: "The access page exists locally but has not been committed yet." }],
+  ...overrides
+});
+
 const renderAssignmentDetailPage = (
   props: Partial<ComponentProps<typeof AssignmentDetailPage>> = {}
 ) =>
@@ -368,6 +417,316 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByText("Missing email")).toBeInTheDocument();
     expect(screen.getByText("Roster row is missing an email address.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+  });
+
+  it("shows and generates the student repository access page with a copyable Canvas link", async () => {
+    const getStudentRepositoryAccessPageStatus = vi
+      .fn()
+      .mockResolvedValue(createAccessPageResult());
+    const generateStudentRepositoryAccessPage = vi.fn().mockResolvedValue(
+      createAccessPageResult({
+        exists: true,
+        status: "generated",
+        generatedAt: "2027-01-15T12:00:00.000Z"
+      })
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    mockGraiderUI({ getStudentRepositoryAccessPageStatus, generateStudentRepositoryAccessPage });
+    renderAssignmentDetailPage();
+
+    expect(
+      await screen.findByRole("heading", { name: "Student repository access page" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("terms/27s1/notifications/lab02/student-repositories.html")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Canvas link" })).toBeInTheDocument();
+    expect(screen.getByText(/GitHub Pages to be enabled/u)).toBeInTheDocument();
+    expect(screen.getByText(/missing repository links/u)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Copy Canvas link" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Generate student access page" }));
+    await waitFor(() => expect(generateStudentRepositoryAccessPage).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByRole("button", { name: "Regenerate student access page" })
+    ).toBeInTheDocument();
+  });
+
+  it("configures Student Access Pages from the access-page panel", async () => {
+    const getStudentRepositoryAccessPageStatus = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createAccessPageResult({
+          githubOrganization: "csc1120",
+          pagesRepository: null,
+          pagesBaseUrl: null,
+          pagesBranch: null,
+          pagesRepositoryFolderSelected: false,
+          pagesUrl: null,
+          status: "not_ready"
+        })
+      )
+      .mockResolvedValue(createAccessPageResult());
+    const getStudentRepositoryAccessPagePublishStatus = vi
+      .fn()
+      .mockResolvedValue(createAccessPagePublishResult());
+    const selectStudentAccessPagesRepositoryFolder = vi.fn().mockResolvedValue({
+      canceled: false,
+      folderPath: "/tmp/csc1120pages"
+    });
+    const saveStudentAccessPagesConfig = vi.fn().mockResolvedValue({
+      status: "success",
+      changed: true,
+      diagnostics: [
+        {
+          message:
+            "Student Access Pages settings were saved locally. Commit and push course.yml manually when ready."
+        }
+      ]
+    });
+    mockGraiderUI({
+      getStudentRepositoryAccessPageStatus,
+      getStudentRepositoryAccessPagePublishStatus,
+      selectStudentAccessPagesRepositoryFolder,
+      saveStudentAccessPagesConfig
+    });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Configure Student Access Pages" }));
+    expect(screen.getByLabelText("Pages repository")).toHaveValue("csc1120/csc1120pages");
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://csc1120.github.io/csc1120pages");
+    expect(screen.getByLabelText("Branch")).toHaveValue("main");
+    expect(screen.getByText("Not selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select Pages repository folder" }));
+    await waitFor(() => expect(screen.getByText("/tmp/csc1120pages")).toBeInTheDocument());
+    expect(selectStudentAccessPagesRepositoryFolder).toHaveBeenCalledWith(SELECTION.courseFolderId);
+    fireEvent.click(screen.getByRole("button", { name: "Save Student Access Pages Settings" }));
+
+    await waitFor(() =>
+      expect(saveStudentAccessPagesConfig).toHaveBeenCalledWith({
+        courseFolderId: SELECTION.courseFolderId,
+        courseFolderPath: COURSE_FOLDER_PATH,
+        repository: "csc1120/csc1120pages",
+        baseUrl: "https://csc1120.github.io/csc1120pages",
+        branch: "main"
+      })
+    );
+    expect(getStudentRepositoryAccessPageStatus).toHaveBeenCalledTimes(3);
+    expect(getStudentRepositoryAccessPagePublishStatus).toHaveBeenCalledTimes(3);
+    expect(
+      await screen.findByText(/Student Access Pages settings were saved locally/u)
+    ).toBeInTheDocument();
+  });
+
+  it("reads saved Student Access Pages values into their matching fields", async () => {
+    mockGraiderUI({
+      getStudentRepositoryAccessPageStatus: vi.fn().mockResolvedValue(
+        createAccessPageResult({
+          githubOrganization: "csc1120",
+          pagesRepository: "csc1120/csc1120pages",
+          pagesBaseUrl: "https://pages.example.edu/course",
+          pagesBranch: "published"
+        })
+      ),
+      getStudentRepositoryAccessPagePublishStatus: vi
+        .fn()
+        .mockResolvedValue(createAccessPagePublishResult())
+    });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit Student Access Pages Settings" })
+    );
+
+    expect(screen.getByLabelText("Pages repository")).toHaveValue("csc1120/csc1120pages");
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://pages.example.edu/course");
+    expect(screen.getByLabelText("Branch")).toHaveValue("published");
+  });
+
+  it("configures group membership through the narrow assignment group settings API", async () => {
+    const getAssignmentGroupConfig = vi.fn().mockResolvedValue({
+      status: "ready",
+      repositoryMode: "individual",
+      groupsFile: "groups.csv",
+      groupsCsv: "group_id,student_id\n",
+      groupCount: 0,
+      groupedStudentCount: 0,
+      ungroupedActiveStudentCount: 2,
+      diagnostics: []
+    });
+    const saveAssignmentGroupConfig = vi.fn().mockResolvedValue({
+      status: "success",
+      repositoryMode: "group",
+      groupsFile: "groups.csv",
+      groupsCsv: "group_id,student_id\nteam-1,s001\n",
+      groupCount: 1,
+      groupedStudentCount: 1,
+      ungroupedActiveStudentCount: 1,
+      diagnostics: [
+        {
+          message:
+            "Group assignment settings were saved locally. Use Publish Course Changes to share them to the admin repo."
+        }
+      ]
+    });
+    mockGraiderUI({ getAssignmentGroupConfig, saveAssignmentGroupConfig });
+    renderAssignmentDetailPage();
+
+    expect(await screen.findByRole("heading", { name: "Repository mode" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Repository mode" }), {
+      target: { value: "group" }
+    });
+    expect(screen.getByLabelText("Group membership CSV")).toBeInTheDocument();
+    expect(screen.getByText(/Apply is blocked/u)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Group membership CSV"), {
+      target: { value: "group_id,student_id\nteam-1,s001\n" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save repository mode" }));
+    await waitFor(() =>
+      expect(saveAssignmentGroupConfig).toHaveBeenCalledWith({
+        courseFolderId: SELECTION.courseFolderId,
+        courseFolderPath: COURSE_FOLDER_PATH,
+        assignmentFile: ASSIGNMENT_FILE,
+        repositoryMode: "group",
+        groupsCsv: "group_id,student_id\nteam-1,s001\n"
+      })
+    );
+    expect(
+      await screen.findByText(/Group assignment settings were saved locally/u)
+    ).toBeInTheDocument();
+  });
+
+  it("shows local publish readiness and copy-only suggested git commands", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    mockGraiderUI({
+      getStudentRepositoryAccessPageStatus: vi.fn().mockResolvedValue(createAccessPageResult()),
+      getStudentRepositoryAccessPagePublishStatus: vi
+        .fn()
+        .mockResolvedValue(createAccessPagePublishResult())
+    });
+    renderAssignmentDetailPage();
+    expect(await screen.findByRole("heading", { name: "Publish readiness" })).toBeInTheDocument();
+    expect(screen.getByText(/has not been committed yet/u)).toBeInTheDocument();
+    expect(
+      screen.getByText(/git add 'terms\/27s1\/notifications\/lab02\/student-repositories.html'/u)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy commands" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /commit|push/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Copy commands" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+  });
+
+  it("confirms and publishes a generated student access page through the narrow API", async () => {
+    const getStudentRepositoryAccessPageStatus = vi
+      .fn()
+      .mockResolvedValue(createAccessPageResult());
+    const getStudentRepositoryAccessPagePublishStatus = vi
+      .fn()
+      .mockResolvedValue(createAccessPagePublishResult());
+    const publishStudentRepositoryAccessPage = vi.fn().mockResolvedValue({
+      status: "success",
+      commitMessage: "Publish student access page for lab02",
+      diagnostics: [{ message: "Student access page was committed and pushed." }]
+    });
+    mockGraiderUI({
+      getStudentRepositoryAccessPageStatus,
+      getStudentRepositoryAccessPagePublishStatus,
+      publishStudentRepositoryAccessPage
+    });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Publish Student Access Page" }));
+    expect(await screen.findByText("Publish student access page for lab02")).toBeInTheDocument();
+    expect(screen.getByText(/Graider does not check live GitHub Pages/u)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Student Access Page" }));
+
+    await waitFor(() =>
+      expect(publishStudentRepositoryAccessPage).toHaveBeenCalledWith({
+        courseFolderId: SELECTION.courseFolderId,
+        courseFolderPath: COURSE_FOLDER_PATH,
+        assignmentFile: ASSIGNMENT_FILE
+      })
+    );
+    expect(await screen.findByText(/committed and pushed/u)).toBeInTheDocument();
+    expect(getStudentRepositoryAccessPageStatus).toHaveBeenCalledTimes(2);
+    expect(getStudentRepositoryAccessPagePublishStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [
+      "not generated",
+      createAccessPagePublishResult({
+        status: "not_generated",
+        checks: { ...createAccessPagePublishResult().checks, fileExists: false },
+        diagnostics: [
+          { message: "Generate the student access page before publishing the Canvas link." }
+        ]
+      }),
+      "Generate the student access page before publishing"
+    ],
+    [
+      "unpushed",
+      createAccessPagePublishResult({
+        status: "unpushed",
+        diagnostics: [
+          {
+            message:
+              "The access page appears committed locally but has not been pushed to GitHub yet."
+          }
+        ]
+      }),
+      "has not been pushed to GitHub yet"
+    ],
+    [
+      "no upstream",
+      createAccessPagePublishResult({
+        status: "no_upstream",
+        diagnostics: [{ message: "This branch does not have an upstream branch configured." }]
+      }),
+      "does not have an upstream branch configured"
+    ],
+    [
+      "ready",
+      createAccessPagePublishResult({
+        status: "ready_to_publish",
+        diagnostics: [
+          {
+            message:
+              "Local publishing checks look ready. Confirm GitHub Pages is enabled before posting the link in Canvas."
+          }
+        ]
+      }),
+      "Local publishing checks look ready"
+    ]
+  ])("shows the %s publish-readiness message", async (_name, publishResult, expectedText) => {
+    mockGraiderUI({
+      getStudentRepositoryAccessPagePublishStatus: vi.fn().mockResolvedValue(publishResult)
+    });
+    renderAssignmentDetailPage();
+    expect(await screen.findByText(expectedText, { exact: false })).toBeInTheDocument();
+    expect(screen.getByText(/GitHub Pages must be enabled and published/u)).toBeInTheDocument();
+  });
+
+  it("shows the missing GitHub Pages URL diagnostic without a Canvas copy action", async () => {
+    mockGraiderUI({
+      getStudentRepositoryAccessPageStatus: vi.fn().mockResolvedValue(
+        createAccessPageResult({
+          pagesUrl: null,
+          status: "ready",
+          summary: {
+            activeStudents: 2,
+            includedStudents: 2,
+            skippedInactive: 0,
+            missingRepository: 0
+          }
+        })
+      )
+    });
+    renderAssignmentDetailPage();
+    expect(await screen.findByText(/cannot determine the GitHub Pages URL/u)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy Canvas link" })).toBeNull();
   });
 
   it("shows repositories not created as a normal email-preview state", async () => {

@@ -95,6 +95,18 @@ describe("plan builder", () => {
         })
       ])
     );
+    expect(plan.targets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetId: "jones",
+          mode: "individual",
+          repositoryName: EXPECTED_REPOSITORY_NAME,
+          studentIds: ["jones"],
+          githubUsernames: ["seanjones"],
+          plannedStudentPermission: "admin"
+        })
+      ])
+    );
   });
 
   it("skips grading workflow operations when grading is disabled", async () => {

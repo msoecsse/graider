@@ -64,7 +64,21 @@ graider assignment apply <assignment.yml> --json
 graider assignment grade-preview <assignment.yml> --json
 graider assignment grade <assignment.yml> --json
 graider assignment grade-status <assignment.yml> --json
+graider assignment repository-mappings <assignment.yml> --json
 ```
+
+### `assignment repository-mappings <assignment.yml> --json`
+
+This read-only, local-file-only command returns normalized repository targets
+and student-to-repository mappings from the assignment manifest. It is the
+approved CLI boundary for future Electron consumers; it does not call GitHub,
+write manifests, or migrate course data. A missing manifest returns a successful
+`not_applied` manifest state with empty arrays. Group repositories are not yet
+implemented.
+
+It also reads manifest-v2 targets and student mappings. A group manifest returns
+one target per repository and one mapping per student; multiple mappings may
+reference the same group target. Group Apply remains unavailable.
 
 The legacy top-level `apply <assignment.yml> --json` command remains supported.
 Future UI apply execution should call `assignment apply`.
@@ -102,6 +116,13 @@ without `--json` returns a JSON failure with
 `assignment apply-preview <assignment.yml> --json` is also JSON-only. Running it
 without `--json` returns a JSON failure with
 `assignment_apply_preview_json_required`.
+
+For an assignment configured with `repository_mode: group`, Apply Preview
+returns `repositoryMode: "group"`, `applySupported: false`, and
+`plan.groupTargets`. Each target includes its group ID, deterministic repository
+name, section, student IDs, GitHub usernames, and planned permissions. This is
+read-only planning only: `assignment apply` remains blocked for group mode and
+does not create repositories or write a manifest.
 
 `assignment grade-preview <assignment.yml> --json` is also JSON-only. Running it
 without `--json` returns a JSON failure with

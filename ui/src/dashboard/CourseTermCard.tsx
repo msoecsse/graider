@@ -102,7 +102,7 @@ export const CourseTermCard = ({
         <div className="course-card__assignments">
           <h3>Recent assignments</h3>
           {card.recentAssignments.length === 0 ? (
-            <p className="course-card__empty">No recent assignments.</p>
+            <p className="course-card__empty">No assignments yet.</p>
           ) : (
             <ul className="assignment-list">
               {card.recentAssignments.map((assignment) => (

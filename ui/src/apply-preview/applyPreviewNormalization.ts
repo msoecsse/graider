@@ -4,6 +4,7 @@ import type { AssignmentDetailSelection } from "../assignment-detail/assignmentD
 import type {
   ApplyPreviewAction,
   ApplyPreviewActions,
+  ApplyPreviewGroupTarget,
   ApplyPreviewPlanSummary,
   ApplyPreviewRepositoryRow,
   ApplyPreviewRepositoryStatus,
@@ -69,6 +70,23 @@ const normalizeRepositoryRow = (value: unknown): ApplyPreviewRepositoryRow => {
     diagnostics: normalizeAssignmentDetailDiagnostics(
       Array.isArray(row.diagnostics) ? row.diagnostics : []
     )
+  };
+};
+
+const normalizeGroupTarget = (value: unknown): ApplyPreviewGroupTarget => {
+  const target = isRecord(value) ? value : {};
+  return {
+    targetId: getString(target, "targetId"),
+    groupId: getString(target, "groupId"),
+    repositoryName: getString(target, "repositoryName"),
+    sectionIds: normalizeStringArray(target.sectionIds),
+    studentIds: normalizeStringArray(target.studentIds),
+    githubUsernames: normalizeStringArray(target.githubUsernames),
+    plannedStudentPermission: getString(target, "plannedStudentPermission"),
+    facultyTeam: getString(target, "facultyTeam"),
+    facultyTeamPermission: getString(target, "facultyTeamPermission"),
+    graderTeam: getString(target, "graderTeam"),
+    graderTeamPermission: getString(target, "graderTeamPermission")
   };
 };
 
@@ -143,9 +161,14 @@ export const normalizeApplyPreview = (
   const rows = Array.isArray(plan.repositories)
     ? plan.repositories.map((row) => normalizeRepositoryRow(row))
     : [];
+  const groupTargets = Array.isArray(plan.groupTargets)
+    ? plan.groupTargets.map((target) => normalizeGroupTarget(target))
+    : [];
 
   return {
     status: preview.status,
+    repositoryMode: preview.repositoryMode === "group" ? "group" : "individual",
+    applySupported: preview.applySupported === true,
     refreshedAt,
     diagnostics: normalizeAssignmentDetailDiagnostics(preview.diagnostics),
     assignment: {
@@ -185,7 +208,8 @@ export const normalizeApplyPreview = (
     },
     plan: {
       summary: normalizePlanSummary(plan.summary, rows),
-      repositories: rows
+      repositories: rows,
+      groupTargets
     },
     files: {
       assignmentFile: getString(files, "assignmentFile") ?? selection.assignmentFile,

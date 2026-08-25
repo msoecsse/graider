@@ -236,9 +236,21 @@ describe("graider apply command", () => {
   });
 
   it("TC-CLI-APPLY-001 active assignment creates expected repos", async () => {
-    const { result, githubClient } = await runApply("active-assignment");
+    const { cwd, result, githubClient } = await runApply("active-assignment");
+    const manifestResult = loadWrittenManifest(cwd);
 
     expect(result.exitCode).toBe(ExitCode.Success);
+    expect(result.errors).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "grading_workflow_missing" })])
+    );
+    expect(result.warnings).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "grading_workflow_pending" })])
+    );
+    expect(
+      manifestResult.manifest?.repositories.some(
+        (repository) => repository.actions.gradingWorkflowFound === true
+      )
+    ).toBe(true);
     expect(
       githubClient.mutations.createdRepositories.map((record) => record.repository.name)
     ).toEqual([JONES_REPOSITORY, PATEL_REPOSITORY]);
@@ -300,7 +312,11 @@ describe("graider apply command", () => {
     expect(result.exitCode).toBe(ExitCode.Success);
     expect(githubClient.mutations.createdRepositories).toEqual([]);
     expect(githubClient.mutations.addedCollaborators).toEqual([
-      expect.objectContaining({ repo: JONES_REPOSITORY, username: "seanjones" })
+      expect.objectContaining({
+        repo: JONES_REPOSITORY,
+        username: "seanjones",
+        permission: "admin"
+      })
     ]);
   });
 
@@ -436,7 +452,7 @@ describe("graider apply command", () => {
     expect(githubClient.mutations.createdRepositories).toEqual([]);
   });
 
-  it("TC-CLI-APPLY-010 higher student permission is left unchanged and warned", async () => {
+  it("TC-CLI-APPLY-010 existing admin student permission is preserved", async () => {
     const cwd = copyFixtureToTemp("grading-disabled");
     writeTrackedManifest(cwd, JONES_REPOSITORY);
     const githubClient = new FakeGitHubClient({
@@ -473,7 +489,6 @@ describe("graider apply command", () => {
     expect(result.exitCode).toBe(ExitCode.Success);
     expect(result.warnings).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: "permission_not_downgraded" }),
         expect.objectContaining({ code: "unexpected_collaborator_preserved" })
       ])
     );
@@ -549,7 +564,7 @@ describe("graider apply command", () => {
     ).toBeUndefined();
   });
 
-  it("missing workflow produces partial success", async () => {
+  it("new repositories with a workflow not yet observable produce a pending warning", async () => {
     const githubClient = new FakeGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
@@ -567,10 +582,13 @@ describe("graider apply command", () => {
     });
     const { result } = await runApply("active-assignment", githubClient);
 
-    expect(result.status).toBe("partial_success");
-    expect(result.exitCode).toBe(ExitCode.PartialSuccess);
-    expect(result.errors).toEqual(
-      expect.arrayContaining([expect.objectContaining({ code: "grading_workflow_missing" })])
+    expect(result.status).toBe("success");
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(result.errors).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "grading_workflow_pending" })])
+    );
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "grading_workflow_pending" })])
     );
   });
 

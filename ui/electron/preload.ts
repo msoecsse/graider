@@ -30,10 +30,17 @@ import {
   type AssignmentEditRequest,
   type AssignmentEditSaveResult,
   type AssignmentEditPreviewResult,
+  type AssignmentGroupConfigRequest,
+  type AssignmentGroupConfigResult,
+  type AssignmentGroupConfigSaveRequest,
   type StudentRepoEmailPreviewRequest,
   type StudentRepoEmailPreviewResult,
   type StudentRepoEmailSendHistoryResult,
   type StudentRepoEmailTransportStatusResult,
+  type StudentRepositoryAccessPageRequest,
+  type StudentRepositoryAccessPageResult,
+  type StudentRepositoryAccessPagePublishResult,
+  type StudentRepositoryAccessPagePublishActionResult,
   type RosterLoadResult,
   type RosterPreviewResult,
   type RosterSaveRequest,
@@ -48,7 +55,12 @@ import {
   type FacultyReportResult,
   type GraiderUIApi,
   type GitHubAuthResult,
-  type SelectCourseFolderResult
+  type SelectCourseFolderResult,
+  type SelectStudentAccessPagesRepositoryFolderResult,
+  type StudentAccessPagesConfigRequest,
+  type StudentAccessPagesConfigResult,
+  type CoursePublishStatusResult,
+  type CoursePublishActionResult
 } from "./ipc.js";
 
 const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<T> =>
@@ -60,6 +72,24 @@ const graiderUI: GraiderUIApi = {
     await invoke<GitHubAuthResult>(IPC_CHANNELS.checkGitHubAuth),
   selectCourseFolder: async (): Promise<SelectCourseFolderResult> =>
     await invoke<SelectCourseFolderResult>(IPC_CHANNELS.selectCourseFolder),
+  selectStudentAccessPagesRepositoryFolder: async (
+    courseFolderId: string
+  ): Promise<SelectStudentAccessPagesRepositoryFolderResult> =>
+    await invoke<SelectStudentAccessPagesRepositoryFolderResult>(
+      IPC_CHANNELS.selectStudentAccessPagesRepositoryFolder,
+      courseFolderId
+    ),
+  saveStudentAccessPagesConfig: async (
+    request: StudentAccessPagesConfigRequest
+  ): Promise<StudentAccessPagesConfigResult> =>
+    await invoke<StudentAccessPagesConfigResult>(
+      IPC_CHANNELS.saveStudentAccessPagesConfig,
+      request
+    ),
+  getCoursePublishStatus: async (courseFolderId: string): Promise<CoursePublishStatusResult> =>
+    await invoke<CoursePublishStatusResult>(IPC_CHANNELS.getCoursePublishStatus, courseFolderId),
+  publishCourseChanges: async (courseFolderId: string): Promise<CoursePublishActionResult> =>
+    await invoke<CoursePublishActionResult>(IPC_CHANNELS.publishCourseChanges, courseFolderId),
   selectCourseSetupFolder: async (): Promise<CourseSetupFolderSelectionResult> =>
     await invoke<CourseSetupFolderSelectionResult>(IPC_CHANNELS.selectCourseSetupFolder),
   previewCourseSetup: async (request: CourseSetupRequest): Promise<CourseSetupPreviewResult> =>
@@ -86,6 +116,14 @@ const graiderUI: GraiderUIApi = {
     await invoke<AssignmentEditPreviewResult>(IPC_CHANNELS.previewAssignmentEdit, request),
   saveAssignmentEdit: async (request: AssignmentEditRequest): Promise<AssignmentEditSaveResult> =>
     await invoke<AssignmentEditSaveResult>(IPC_CHANNELS.saveAssignmentEdit, request),
+  getAssignmentGroupConfig: async (
+    request: AssignmentGroupConfigRequest
+  ): Promise<AssignmentGroupConfigResult> =>
+    await invoke<AssignmentGroupConfigResult>(IPC_CHANNELS.getAssignmentGroupConfig, request),
+  saveAssignmentGroupConfig: async (
+    request: AssignmentGroupConfigSaveRequest
+  ): Promise<AssignmentGroupConfigResult> =>
+    await invoke<AssignmentGroupConfigResult>(IPC_CHANNELS.saveAssignmentGroupConfig, request),
   getStudentRepoEmailPreview: async (
     request: StudentRepoEmailPreviewRequest
   ): Promise<StudentRepoEmailPreviewResult> =>
@@ -102,6 +140,34 @@ const graiderUI: GraiderUIApi = {
   ): Promise<StudentRepoEmailTransportStatusResult> =>
     await invoke<StudentRepoEmailTransportStatusResult>(
       IPC_CHANNELS.getStudentRepoEmailTransportStatus,
+      request
+    ),
+  getStudentRepositoryAccessPageStatus: async (
+    request: StudentRepositoryAccessPageRequest
+  ): Promise<StudentRepositoryAccessPageResult> =>
+    await invoke<StudentRepositoryAccessPageResult>(
+      IPC_CHANNELS.getStudentRepositoryAccessPageStatus,
+      request
+    ),
+  generateStudentRepositoryAccessPage: async (
+    request: StudentRepositoryAccessPageRequest
+  ): Promise<StudentRepositoryAccessPageResult> =>
+    await invoke<StudentRepositoryAccessPageResult>(
+      IPC_CHANNELS.generateStudentRepositoryAccessPage,
+      request
+    ),
+  getStudentRepositoryAccessPagePublishStatus: async (
+    request: StudentRepositoryAccessPageRequest
+  ): Promise<StudentRepositoryAccessPagePublishResult> =>
+    await invoke<StudentRepositoryAccessPagePublishResult>(
+      IPC_CHANNELS.getStudentRepositoryAccessPagePublishStatus,
+      request
+    ),
+  publishStudentRepositoryAccessPage: async (
+    request: StudentRepositoryAccessPageRequest
+  ): Promise<StudentRepositoryAccessPagePublishActionResult> =>
+    await invoke<StudentRepositoryAccessPagePublishActionResult>(
+      IPC_CHANNELS.publishStudentRepositoryAccessPage,
       request
     ),
   loadRosterTerms: async (

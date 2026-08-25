@@ -52,6 +52,20 @@ const reportsSchema = z
   })
   .strict();
 
+const studentAccessPagesSchema = z
+  .object({
+    repository: z.string().regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u),
+    base_url: z.url().refine((value) => new URL(value).protocol === "https:"),
+    branch: z.string().min(MINIMUM_LIST_ITEMS).default("main")
+  })
+  .strict();
+
+const notificationsSchema = z
+  .object({
+    student_access_pages: studentAccessPagesSchema.optional()
+  })
+  .strict();
+
 export const rawCourseConfigSchema = z
   .object({
     schema_version: z.number(),
@@ -81,7 +95,8 @@ export const rawCourseConfigSchema = z
       })
       .strict(),
     grading: gradingSchema,
-    reports: reportsSchema
+    reports: reportsSchema,
+    notifications: notificationsSchema.optional()
   })
   .strict();
 
@@ -141,6 +156,13 @@ export const rawAssignmentConfigSchema = z
         points: z.number().nullable()
       })
       .strict(),
-    grading: gradingSchema.optional()
+    grading: gradingSchema.optional(),
+    repository_mode: z.enum(["individual", "group"]).optional(),
+    groups: z
+      .object({
+        file: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.csv$/u)
+      })
+      .strict()
+      .optional()
   })
   .strict();

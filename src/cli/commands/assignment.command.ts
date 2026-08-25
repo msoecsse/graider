@@ -41,6 +41,11 @@ import type { RetryOptions } from "../../github/github-retry.js";
 import { runApplyCommand } from "./apply.command.js";
 import { runGradeCommand, type GradeRawOptions } from "./grade.command.js";
 import { writeCommandResult } from "../output.js";
+import {
+  buildAssignmentRepositoryMappings,
+  createRepositoryMappingsJsonRequiredResult,
+  type AssignmentRepositoryMappingsResult
+} from "../../repository-mappings/repository-mappings-builder.js";
 
 const COMMAND_NAME = "assignment";
 const DETAIL_COMMAND_NAME = "detail";
@@ -49,6 +54,7 @@ const GRADE_PREVIEW_COMMAND_NAME = "grade-preview";
 const GRADE_STATUS_COMMAND_NAME = "grade-status";
 const APPLY_COMMAND_NAME = "apply";
 const GRADE_COMMAND_NAME = "grade";
+const REPOSITORY_MAPPINGS_COMMAND_NAME = "repository-mappings";
 const ASSIGNMENT_APPLY_COMMAND_NAME = "assignment apply";
 const ASSIGNMENT_GRADE_COMMAND_NAME = "assignment grade";
 const JSON_INDENT_SPACES = 2;
@@ -69,6 +75,9 @@ interface AssignmentGradeStatusCommandOptions {
   readonly json?: boolean;
   readonly student?: string;
   readonly students?: string;
+}
+interface AssignmentRepositoryMappingsCommandOptions {
+  readonly json?: boolean;
 }
 
 export interface AssignmentDetailCommandRequest {
@@ -119,6 +128,11 @@ export interface AssignmentGradeCommandRequest {
   readonly targetSelector: GradeRawOptions;
   readonly githubClient?: GitHubClient;
   readonly retryOptions?: Partial<RetryOptions>;
+}
+export interface AssignmentRepositoryMappingsCommandRequest {
+  readonly cwd: string;
+  readonly assignmentFile: string;
+  readonly options: AssignmentRepositoryMappingsCommandOptions;
 }
 
 const createJsonRequiredResult = (): AssignmentDetailResult =>
@@ -304,6 +318,17 @@ export const runAssignmentGradeStatusCommand = ({
   });
 };
 
+export const runAssignmentRepositoryMappingsCommand = ({
+  cwd,
+  assignmentFile,
+  options
+}: AssignmentRepositoryMappingsCommandRequest): Promise<AssignmentRepositoryMappingsResult> =>
+  Promise.resolve(
+    options.json
+      ? buildAssignmentRepositoryMappings({ cwd, assignmentFile })
+      : createRepositoryMappingsJsonRequiredResult()
+  );
+
 export const runAssignmentApplyCommand = ({
   cwd,
   assignmentFile,
@@ -353,6 +378,10 @@ export const formatAssignmentGradePreviewResultAsJson = (
 
 export const formatAssignmentGradeStatusResultAsJson = (
   result: AssignmentGradeStatusResult
+): string => JSON.stringify(result, undefined, JSON_INDENT_SPACES);
+
+export const formatAssignmentRepositoryMappingsResultAsJson = (
+  result: AssignmentRepositoryMappingsResult
 ): string => JSON.stringify(result, undefined, JSON_INDENT_SPACES);
 
 export const registerAssignmentCommand = (program: Command): void => {
@@ -426,6 +455,21 @@ export const registerAssignmentCommand = (program: Command): void => {
       });
 
       console.log(formatAssignmentGradeStatusResultAsJson(result));
+      process.exitCode = result.exitCode;
+    });
+
+  assignment
+    .command(REPOSITORY_MAPPINGS_COMMAND_NAME)
+    .argument("<assignment-file>")
+    .option("--json", "Required. Emit normalized repository mapping JSON")
+    .description("Read normalized assignment repository targets and student mappings.")
+    .action(async (assignmentFile: string, options: AssignmentRepositoryMappingsCommandOptions) => {
+      const result = await runAssignmentRepositoryMappingsCommand({
+        cwd: process.cwd(),
+        assignmentFile,
+        options
+      });
+      console.log(formatAssignmentRepositoryMappingsResultAsJson(result));
       process.exitCode = result.exitCode;
     });
 

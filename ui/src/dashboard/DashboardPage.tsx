@@ -4,6 +4,8 @@ import type {
   CombinedDashboardResult,
   CourseFolderDashboardResult,
   CourseFolderRecord,
+  CoursePublishActionResult,
+  CoursePublishStatusResult,
   GitHubAuthResult
 } from "../../electron/ipc";
 import { ApplyPreviewPage } from "../apply-preview/ApplyPreviewPage";
@@ -60,11 +62,112 @@ const GITHUB_AUTH_GUIDANCE =
 const GITHUB_BROWSER_404_NOTE =
   "If GitHub opens a 404 page for a private course repository, make sure you are signed into GitHub in your browser with the same account.";
 
+const CoursePublishPanel = ({
+  courseFolder,
+  result,
+  isPublishing,
+  publishResult,
+  onPublish
+}: {
+  readonly courseFolder: CourseFolderRecord;
+  readonly result: CoursePublishStatusResult;
+  readonly isPublishing: boolean;
+  readonly publishResult: CoursePublishActionResult | null;
+  readonly onPublish: () => void;
+}): ReactElement => {
+  const [isReviewing, setIsReviewing] = useState(false);
+  const canPublish = result.status === "changes_pending" || result.status === "unpushed";
+  return (
+    <section
+      className="github-auth-status"
+      aria-label={`Publish course changes for ${courseFolder.path}`}
+    >
+      <div>
+        <h2>Course changes</h2>
+        <p>{result.diagnostics.map((item) => item.message).join(" ")}</p>
+        {result.allowedChangedFiles.length > 0 ? (
+          <ul>
+            {result.allowedChangedFiles.map((file) => (
+              <li key={file}>{file}</li>
+            ))}
+          </ul>
+        ) : null}
+        {result.unrelatedChangedFiles.length > 0 ? (
+          <p>Unrelated local changes will not be staged.</p>
+        ) : null}
+        {isReviewing ? (
+          <div>
+            <p>Review the course repository change before publishing.</p>
+            <dl className="detail-grid">
+              <div className="detail-item">
+                <dt>Folder</dt>
+                <dd>{result.courseFolderPath}</dd>
+              </div>
+              <div className="detail-item">
+                <dt>Branch</dt>
+                <dd>{result.currentBranch ?? "Unknown"}</dd>
+              </div>
+              <div className="detail-item">
+                <dt>Upstream</dt>
+                <dd>{result.upstreamBranch ?? "Not configured"}</dd>
+              </div>
+              <div className="detail-item">
+                <dt>Commit message</dt>
+                <dd>Publish Graider course changes</dd>
+              </div>
+            </dl>
+            <p>
+              Only the listed Graider-managed files will be staged. Unrelated changes will not be
+              staged.
+            </p>
+            <button
+              className="primary-action"
+              type="button"
+              disabled={isPublishing}
+              onClick={onPublish}
+            >
+              {isPublishing ? "Publishing Course Changes..." : "Confirm Publish Course Changes"}
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={isPublishing}
+              onClick={() => setIsReviewing(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : null}
+        {publishResult === null ? null : (
+          <p
+            className={publishResult.status === "failure" ? "error-message" : "success-message"}
+            role="status"
+          >
+            {publishResult.diagnostics.map((item) => item.message).join(" ")}
+          </p>
+        )}
+      </div>
+      {canPublish && !isReviewing ? (
+        <button className="primary-action" type="button" onClick={() => setIsReviewing(true)}>
+          Publish Course Changes
+        </button>
+      ) : null}
+    </section>
+  );
+};
+
 export const DashboardPage = (): ReactElement => {
   const [courseFolders, setCourseFolders] = useState<CourseFolderRecord[]>([]);
   const [refreshResults, setRefreshResults] = useState<
     Readonly<Record<string, CourseFolderDashboardResult>>
   >({});
+  const [coursePublishStatuses, setCoursePublishStatuses] = useState<
+    Readonly<Record<string, CoursePublishStatusResult>>
+  >({});
+  const [coursePublishResults, setCoursePublishResults] = useState<
+    Readonly<Record<string, CoursePublishActionResult>>
+  >({});
+  const [publishingCourseId, setPublishingCourseId] = useState<string | null>(null);
   const [isLoadingFolders, setIsLoadingFolders] = useState(true);
   const [isSelectingFolder, setIsSelectingFolder] = useState(false);
   const [isRefreshingAll, setIsRefreshingAll] = useState(false);
@@ -138,6 +241,44 @@ export const DashboardPage = (): ReactElement => {
   useEffect(() => {
     void runGitHubAuthCheck();
   }, []);
+
+  const loadCoursePublishStatus = async (courseFolderId: string): Promise<void> => {
+    if (window.graiderUI.getCoursePublishStatus === undefined) return;
+    const result = await window.graiderUI.getCoursePublishStatus(courseFolderId);
+    setCoursePublishStatuses((current) => ({ ...current, [courseFolderId]: result }));
+  };
+
+  const publishCourseChanges = async (courseFolderId: string): Promise<void> => {
+    if (window.graiderUI.publishCourseChanges === undefined) return;
+    setPublishingCourseId(courseFolderId);
+    setCoursePublishResults((current) => {
+      const { [courseFolderId]: _previous, ...remaining } = current;
+      return remaining;
+    });
+    try {
+      const result = await window.graiderUI.publishCourseChanges(courseFolderId);
+      setCoursePublishResults((current) => ({ ...current, [courseFolderId]: result }));
+    } catch {
+      setCoursePublishResults((current) => ({
+        ...current,
+        [courseFolderId]: {
+          status: "failure",
+          diagnostics: [{ message: "Unable to publish course changes." }],
+          commitMessage: null
+        }
+      }));
+    } finally {
+      await Promise.allSettled([
+        loadCoursePublishStatus(courseFolderId),
+        handleRefreshCourseFolder(courseFolderId)
+      ]);
+      setPublishingCourseId(null);
+    }
+  };
+
+  useEffect(() => {
+    for (const courseFolder of courseFolders) void loadCoursePublishStatus(courseFolder.id);
+  }, [courseFolders]);
 
   useEffect(() => {
     let isMounted = true;
@@ -681,6 +822,22 @@ export const DashboardPage = (): ReactElement => {
             {githubAuthState.status === "checking" ? "Checking..." : "Check GitHub auth"}
           </button>
         </section>
+
+        {courseFolders.map((courseFolder) => {
+          const publishStatus = coursePublishStatuses[courseFolder.id];
+          return publishStatus === undefined ? null : (
+            <CoursePublishPanel
+              key={courseFolder.id}
+              courseFolder={courseFolder}
+              result={publishStatus}
+              isPublishing={publishingCourseId === courseFolder.id}
+              publishResult={coursePublishResults[courseFolder.id] ?? null}
+              onPublish={() => {
+                void publishCourseChanges(courseFolder.id);
+              }}
+            />
+          );
+        })}
 
         {errorMessage === null ? null : (
           <p className="error-message" role="alert">

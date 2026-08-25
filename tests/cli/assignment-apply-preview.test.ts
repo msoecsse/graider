@@ -144,6 +144,89 @@ const getRow = (
 };
 
 describe("graider assignment apply-preview command", () => {
+  it("plans group repositories while keeping Apply unavailable", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    fs.appendFileSync(
+      path.join(cwd, ASSIGNMENT_FILE),
+      "\nrepository_mode: group\ngroups:\n  file: groups.csv\n"
+    );
+    fs.writeFileSync(
+      path.join(cwd, "terms/27s1/assignments/lab04/groups.csv"),
+      "group_id,student_id\nteam-one,jones\nteam-two,patel\n"
+    );
+    const githubClient = createReadyClient();
+
+    const result = await runAssignmentApplyPreviewCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: { json: true },
+      env: APPLY_PREVIEW_ENV,
+      githubClient
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.repositoryMode).toBe("group");
+    expect(result.applySupported).toBe(false);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "group_repository_apply_not_implemented" })
+      ])
+    );
+    expect(result.plan?.repositories).toEqual([]);
+    expect(result.plan?.groupTargets).toEqual([
+      expect.objectContaining({
+        targetId: "team-one",
+        groupId: "team-one",
+        repositoryName: "27s1-se2030-lab04-team-one",
+        sectionIds: ["001"],
+        studentIds: ["jones"],
+        githubUsernames: ["seanjones"],
+        plannedStudentPermission: "admin",
+        facultyTeamPermission: "admin",
+        graderTeamPermission: "maintain"
+      }),
+      expect.objectContaining({
+        targetId: "team-two",
+        repositoryName: "27s1-se2030-lab04-team-two",
+        studentIds: ["patel"],
+        githubUsernames: ["mayapatel"],
+        plannedStudentPermission: "admin"
+      })
+    ]);
+    expect(result.actions?.apply).toMatchObject({
+      available: false,
+      reason: "group_repository_apply_not_implemented"
+    });
+    expectNoMutations(githubClient);
+  });
+
+  it("returns a safe diagnostic for a cross-section group without mutating GitHub", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    fs.appendFileSync(
+      path.join(cwd, ASSIGNMENT_FILE),
+      "\nrepository_mode: group\ngroups:\n  file: groups.csv\n"
+    );
+    fs.writeFileSync(
+      path.join(cwd, "terms/27s1/assignments/lab04/groups.csv"),
+      "group_id,student_id\nteam-one,jones\nteam-one,patel\n"
+    );
+    const githubClient = createReadyClient();
+
+    const result = await runAssignmentApplyPreviewCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: { json: true },
+      env: APPLY_PREVIEW_ENV,
+      githubClient
+    });
+
+    expect(result.status).toBe("failure");
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "group_cross_section" })])
+    );
+    expectNoMutations(githubClient);
+  });
+
   it("requires JSON output and returns the JSON-only diagnostic", async () => {
     const result = await runPreview("active-assignment", createReadyClient(), {});
     const json = JSON.parse(

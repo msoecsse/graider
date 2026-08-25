@@ -7,6 +7,7 @@ import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import {
   MANIFEST_LIFECYCLE_STATUSES,
   MANIFEST_SCHEMA_VERSION,
+  MANIFEST_V2_SCHEMA_VERSION,
   type Manifest,
   type ManifestActionsState,
   type ManifestCollaboratorPermission,
@@ -190,6 +191,42 @@ const rawManifestSchema = z
   })
   .strict();
 
+const rawManifestV2Schema = z
+  .object({
+    schema_version: z.literal(MANIFEST_V2_SCHEMA_VERSION),
+    repository_mode: z.enum(["individual", "group"]),
+    targets: z.array(
+      z
+        .object({
+          target_id: z.string().min(1),
+          mode: z.enum(["individual", "group"]),
+          group_id: z.string().min(1).optional(),
+          repository_name: z.string().min(1),
+          html_url: z.string().optional(),
+          clone_url: z.string().optional(),
+          section_ids: z.array(z.string().min(1)),
+          student_ids: z.array(z.string().min(1)),
+          github_usernames: z.array(z.string().min(1)),
+          diagnostics: z.array(diagnosticSchema)
+        })
+        .strict()
+    ),
+    student_mappings: z.array(
+      z
+        .object({
+          student_id: z.string().min(1),
+          github_username: z.string().min(1),
+          target_id: z.string().min(1),
+          repository_name: z.string().min(1),
+          html_url: z.string().optional(),
+          clone_url: z.string().optional()
+        })
+        .strict()
+    ),
+    diagnostics: z.array(diagnosticSchema)
+  })
+  .strict();
+
 type RawManifest = z.infer<typeof rawManifestSchema>;
 type RawRepositoryRecord = z.infer<typeof repositoryRecordSchema>;
 type RawPermissionState = z.infer<typeof permissionStateSchema>;
@@ -272,6 +309,71 @@ const validateRawManifest = (filePath: string, value: unknown): ManifestLoadResu
     })
     .safeParse(value);
 
+  if (schemaVersion.success && schemaVersion.data.schema_version === MANIFEST_V2_SCHEMA_VERSION) {
+    const result = rawManifestV2Schema.safeParse(value);
+    if (!result.success)
+      return createFailure([
+        createConfigDiagnostic(
+          DiagnosticCode.InvalidManifest,
+          `Invalid manifest ${filePath}: ${result.error.issues[0]?.message ?? "schema validation failed"}.`,
+          { filePath }
+        )
+      ]);
+    const ids = new Set<string>();
+    const students = new Set<string>();
+    const duplicate = result.data.targets.find((target) =>
+      ids.has(target.target_id) ? true : (ids.add(target.target_id), false)
+    );
+    const mappingError = result.data.student_mappings.find(
+      (mapping) =>
+        !ids.has(mapping.target_id) ||
+        (students.has(mapping.student_id) ? true : (students.add(mapping.student_id), false))
+    );
+    if (duplicate !== undefined || mappingError !== undefined)
+      return createFailure([
+        createConfigDiagnostic(
+          DiagnosticCode.InvalidManifest,
+          "Manifest v2 targets or student mappings are invalid.",
+          { filePath }
+        )
+      ]);
+    return {
+      status: "loaded",
+      warnings: [],
+      errors: [],
+      manifest: {
+        schemaVersion: MANIFEST_V2_SCHEMA_VERSION,
+        repositoryMode: result.data.repository_mode,
+        targets: result.data.targets.map((target) => ({
+          targetId: target.target_id,
+          mode: target.mode,
+          ...(target.group_id === undefined ? {} : { groupId: target.group_id }),
+          repositoryName: target.repository_name,
+          ...(target.html_url === undefined ? {} : { htmlUrl: target.html_url }),
+          ...(target.clone_url === undefined ? {} : { cloneUrl: target.clone_url }),
+          sectionIds: target.section_ids,
+          studentIds: target.student_ids,
+          githubUsernames: target.github_usernames,
+          diagnostics: target.diagnostics.map(normalizeDiagnostic)
+        })),
+        studentMappings: result.data.student_mappings.map((mapping) => ({
+          studentId: mapping.student_id,
+          githubUsername: mapping.github_username,
+          targetId: mapping.target_id,
+          repositoryName: mapping.repository_name,
+          ...(mapping.html_url === undefined ? {} : { htmlUrl: mapping.html_url }),
+          ...(mapping.clone_url === undefined ? {} : { cloneUrl: mapping.clone_url })
+        })),
+        assignment: { termCode: "", courseCode: "", assignmentSlug: "", assignmentTitle: "" },
+        source: { sourceFiles: [], inputFingerprint: "" },
+        template: { repository: "", branch: "" },
+        repositories: [],
+        operationHistory: [],
+        warnings: result.data.diagnostics.map(normalizeDiagnostic),
+        errors: []
+      }
+    };
+  }
   if (schemaVersion.success && schemaVersion.data.schema_version !== MANIFEST_SCHEMA_VERSION) {
     return createFailure([
       createManifestSchemaVersionDiagnostic(schemaVersion.data.schema_version)

@@ -87,6 +87,21 @@ export interface ApplyPreviewRepositoryRow {
 export interface ApplyPreviewPlan {
   readonly summary: ApplyPreviewPlanSummary;
   readonly repositories: readonly ApplyPreviewRepositoryRow[];
+  readonly groupTargets: readonly ApplyPreviewGroupTarget[];
+}
+
+export interface ApplyPreviewGroupTarget {
+  readonly targetId: string | null;
+  readonly groupId: string | null;
+  readonly repositoryName: string | null;
+  readonly sectionIds: readonly string[];
+  readonly studentIds: readonly string[];
+  readonly githubUsernames: readonly string[];
+  readonly plannedStudentPermission: string | null;
+  readonly facultyTeam: string | null;
+  readonly facultyTeamPermission: string | null;
+  readonly graderTeam: string | null;
+  readonly graderTeamPermission: string | null;
 }
 
 export interface ApplyPreviewFiles {
@@ -110,6 +125,8 @@ export interface NormalizedApplyPreview {
   readonly status: string;
   readonly refreshedAt: string | null;
   readonly diagnostics: readonly AssignmentDetailDiagnostic[];
+  readonly repositoryMode: "individual" | "group";
+  readonly applySupported: boolean;
   readonly assignment: ApplyPreviewAssignment;
   readonly course: ApplyPreviewCourse;
   readonly term: ApplyPreviewTerm;

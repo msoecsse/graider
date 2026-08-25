@@ -49,12 +49,59 @@ and renders:
 - a read-only Grade Workflow viewer for `.github/workflows/grade.yml`
 - a preview-only student repository email panel with read-only notification
   history and duplicate-send indicators
+- a confirmed local-only student repository access-page generator for GitHub
+  Pages
 
 The detail page itself does not apply assignments, dispatch grading, generate
 reports, publish reports, generate workflows, edit `assignment.yml`, inspect
 artifacts, inspect workflow runs, scan student repositories, or mutate GitHub.
 UI-3B applies assignments only from the Apply Preview page after explicit
 confirmation.
+
+Course/admin repository publishing is separate from Assignment Detail and is
+available from the Course Dashboard. It uses narrow IPC with an allowlist of
+Graider-managed course paths and fixed Git argv only; Pages-repository publishing
+remains a distinct workflow.
+
+## Student Repository Access Page
+
+Assignment Detail can generate or regenerate a static student-facing page at:
+
+```text
+terms/<term-code>/notifications/<assignment-slug>/student-repositories.html
+```
+
+The narrow main-process API reads local `assignment.yml`, `course.yml`,
+canonical roster CSVs, and the assignment manifest; it makes no GitHub,
+Canvas, email, Microsoft, or SMTP calls. The page includes active students'
+MSOE usernames (`student_id`) and manifest-backed repository URLs only. It
+never includes names, email addresses, grades, roster status, notification
+history, or diagnostics.
+
+When optional `notifications.student_access_pages` is configured, the UI offers
+a copyable Canvas link using its HTTPS `base_url`:
+
+```text
+https://csc1120.github.io/csc1120pages/terms/<term-code>/notifications/<assignment-slug>/student-repositories.html
+```
+
+Faculty select a local clone of the configured Pages repository through narrow
+registry-backed IPC; that local path is never written to `course.yml`. The page
+is written only under that clone, while course/admin files remain the read
+source. The UI does not enable GitHub Pages, commit, push, or publish either
+repository. Missing active-student repository URLs are excluded from the
+generated page and reported to faculty.
+
+The same panel also performs local publish-readiness checks against
+the selected Pages clone: page existence, git repository/branch/upstream
+detection, uncommitted access-page changes, and local commits ahead of upstream.
+It never checks GitHub Pages over the network and cannot guarantee the page is
+live. When readiness is `uncommitted` or `unpushed`, the faculty member may
+explicitly open a review and confirm **Publish Student Access Page**. Narrow
+main-process IPC rechecks readiness, runs fixed `git add -- <generated-page>`,
+`git commit -m <deterministic-message>`, and `git push` argv only, and never
+stages unrelated files. No generic Git or command IPC is exposed. Publishing
+the course/admin repository remains separate.
 
 The Grade Workflow viewer uses the configured template repository and branch
 from assignment-detail data. Its narrow main-process API resolves GitHub auth,

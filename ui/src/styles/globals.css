@@ -209,6 +209,15 @@ h1 {
   padding: 12px 14px;
 }
 
+.success-message {
+  border: 1px solid #aceebb;
+  border-radius: 6px;
+  background: #dafbe1;
+  color: #1a7f37;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+}
+
 .loading-state {
   color: #57606a;
 }
@@ -1014,6 +1023,42 @@ h1 {
 .detail-panel__note {
   color: #57606a;
   margin-bottom: 0;
+}
+
+.student-access-pages-settings {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.student-access-pages-settings__fields {
+  display: grid;
+  gap: 14px;
+}
+
+.student-access-pages-settings__fields label,
+.student-access-pages-settings__folder {
+  display: grid;
+  gap: 8px;
+}
+
+.student-access-pages-settings__fields input {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.student-access-pages-settings__folder {
+  border-top: 1px solid #d8dee4;
+  padding-top: 14px;
+}
+
+.student-access-pages-settings__folder span {
+  overflow-wrap: anywhere;
+}
+
+.student-access-pages-settings__folder .secondary-action,
+.student-access-pages-settings > .primary-action {
+  justify-self: start;
 }
 
 .detail-grid {

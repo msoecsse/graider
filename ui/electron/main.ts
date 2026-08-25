@@ -6,6 +6,9 @@ import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
 import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
+import { saveStudentAccessPagesConfig } from "./studentAccessPagesConfigService.js";
+import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService.js";
+import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import { getFacultyReport } from "./facultyReportRunner.js";
 import { previewCourseSetup, saveCourseSetup } from "./courseSetupService.js";
 import {
@@ -18,9 +21,19 @@ import {
   previewAssignmentEdit,
   saveAssignmentEdit
 } from "./assignmentEditService.js";
+import {
+  getAssignmentGroupConfig,
+  saveAssignmentGroupConfig
+} from "./assignmentGroupConfigService.js";
 import { getStudentRepoEmailPreview } from "./studentRepoEmailPreviewService.js";
 import { getStudentRepoEmailSendHistory } from "./studentRepoEmailNotificationLogService.js";
 import { getStudentRepoEmailTransportStatus } from "./studentRepoEmailTransportStatusService.js";
+import {
+  generateStudentRepositoryAccessPage,
+  getStudentRepositoryAccessPageStatus
+} from "./studentRepositoryAccessPageService.js";
+import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService.js";
+import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService.js";
 import {
   getRosterForSection,
   loadRosterTerms,
@@ -28,6 +41,7 @@ import {
   saveRoster
 } from "./rosterManagerService.js";
 import { checkGitHubAuth } from "./githubAuthChecker.js";
+import { validateTemplateRepository } from "./templateRepositoryValidationService.js";
 import {
   getTemplateWorkflow,
   previewTemplateWorkflowSave,
@@ -38,7 +52,8 @@ import {
   getCourseRegistryPath,
   getSelectedFolderPath,
   listCourseFolders,
-  removeCourseFolderFromRegistry
+  removeCourseFolderFromRegistry,
+  setStudentAccessPagesRepositoryFolder
 } from "./courseRegistry.js";
 import { refreshCourseFolder, refreshDashboard } from "./dashboardRunner.js";
 import { getPreloadPath, getRendererDevServerUrl, getRendererEntry } from "./rendererPaths.js";
@@ -56,11 +71,15 @@ import {
   type AssignmentSetupRequest,
   type AssignmentSetupTermsRequest,
   type AssignmentEditRequest,
+  type AssignmentGroupConfigRequest,
+  type AssignmentGroupConfigSaveRequest,
   type StudentRepoEmailPreviewRequest,
+  type StudentRepositoryAccessPageRequest,
   type RosterSaveRequest,
   type RosterSectionRequest,
   type TemplateWorkflowRequest,
-  type TemplateWorkflowSaveRequest
+  type TemplateWorkflowSaveRequest,
+  type StudentAccessPagesConfigRequest
 } from "./ipc.js";
 
 const DEFAULT_WINDOW_WIDTH = 1180;
@@ -236,11 +255,41 @@ const isAssignmentEditRequest = (value: unknown): value is AssignmentEditRequest
   );
 };
 
+const isAssignmentGroupConfigRequest = (value: unknown): value is AssignmentGroupConfigRequest =>
+  isAssignmentDetailRequest(value);
+
+const isAssignmentGroupConfigSaveRequest = (
+  value: unknown
+): value is AssignmentGroupConfigSaveRequest => {
+  if (!isAssignmentGroupConfigRequest(value)) return false;
+  const request = value as unknown as Record<string, unknown>;
+  return (
+    (request.repositoryMode === "individual" || request.repositoryMode === "group") &&
+    typeof request.groupsCsv === "string"
+  );
+};
+
 const isStudentRepoEmailPreviewRequest = (
   value: unknown
 ): value is StudentRepoEmailPreviewRequest => {
   if (!isAssignmentSetupTermsRequest(value)) return false;
   return typeof (value as unknown as Record<string, unknown>).assignmentFile === "string";
+};
+
+const isStudentRepositoryAccessPageRequest = (
+  value: unknown
+): value is StudentRepositoryAccessPageRequest => isStudentRepoEmailPreviewRequest(value);
+
+const isStudentAccessPagesConfigRequest = (
+  value: unknown
+): value is StudentAccessPagesConfigRequest => {
+  if (!isAssignmentSetupTermsRequest(value)) return false;
+  const request = value as unknown as Record<string, unknown>;
+  return (
+    typeof request.repository === "string" &&
+    typeof request.baseUrl === "string" &&
+    typeof request.branch === "string"
+  );
 };
 
 const isRosterSectionRequest = (value: unknown): value is RosterSectionRequest => {
@@ -269,6 +318,7 @@ const isRosterSaveRequest = (value: unknown): value is RosterSaveRequest => {
           "status"
         ].every((key) => typeof (row as Record<string, unknown>)[key] === "string")
     ) &&
+    (typeof request.createSection === "boolean" || request.createSection === undefined) &&
     typeof request.confirmed === "boolean"
   );
 };
@@ -313,8 +363,34 @@ export const registerIpcHandlers = (): void => {
       (courseFolder) =>
         courseFolder.id === request.courseFolderId && courseFolder.path === request.courseFolderPath
     );
+  const withRegisteredPagesFolder = (
+    request: StudentRepositoryAccessPageRequest
+  ): StudentRepositoryAccessPageRequest => {
+    const folder = listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).find(
+      (courseFolder) => courseFolder.id === request.courseFolderId
+    );
+    return { ...request, pagesRepositoryFolderPath: folder?.pagesRepositoryFolderPath ?? null };
+  };
+  const getRegisteredCourseFolderPath = (courseFolderId: unknown): string | null => {
+    if (typeof courseFolderId !== "string") return null;
+    return (
+      listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).find(
+        (courseFolder) => courseFolder.id === courseFolderId
+      )?.path ?? null
+    );
+  };
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
+  ipcMain.handle(IPC_CHANNELS.getCoursePublishStatus, async (_event, courseFolderId: unknown) => {
+    const courseFolderPath = getRegisteredCourseFolderPath(courseFolderId);
+    if (courseFolderPath === null) throw new Error("A registered course folder is required.");
+    return await getCoursePublishStatus(courseFolderPath);
+  });
+  ipcMain.handle(IPC_CHANNELS.publishCourseChanges, async (_event, courseFolderId: unknown) => {
+    const courseFolderPath = getRegisteredCourseFolderPath(courseFolderId);
+    if (courseFolderPath === null) throw new Error("A registered course folder is required.");
+    return await publishCourseChanges(courseFolderPath);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.checkGitHubAuth,
@@ -365,6 +441,33 @@ export const registerIpcHandlers = (): void => {
     return selectionResult;
   });
 
+  ipcMain.handle(
+    IPC_CHANNELS.selectStudentAccessPagesRepositoryFolder,
+    async (_event, courseFolderId: unknown) => {
+      if (typeof courseFolderId !== "string") throw new Error("Course folder id is required.");
+      const selected = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+      if (selected.canceled) return { canceled: true, folderPath: null };
+      const folderPath = getSelectedFolderPath(selected.filePaths);
+      if (folderPath === null) return { canceled: true, folderPath: null };
+      const registered = setStudentAccessPagesRepositoryFolder(
+        getCourseRegistryPath(app.getPath("userData")),
+        courseFolderId,
+        folderPath
+      );
+      return registered === null
+        ? {
+            canceled: false,
+            folderPath: null,
+            error: {
+              code: "pages_folder_invalid",
+              message: "Selected Pages repository folder must exist and be a directory.",
+              folderPath
+            }
+          }
+        : { canceled: false, folderPath: registered.pagesRepositoryFolderPath ?? null };
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.selectCourseSetupFolder, async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openDirectory", "createDirectory"]
@@ -391,6 +494,11 @@ export const registerIpcHandlers = (): void => {
       );
     return result;
   });
+  ipcMain.handle(IPC_CHANNELS.saveStudentAccessPagesConfig, (_event, request: unknown) => {
+    if (!isStudentAccessPagesConfigRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder is required for Student Access Pages settings.");
+    return saveStudentAccessPagesConfig(request);
+  });
 
   ipcMain.handle(IPC_CHANNELS.loadAssignmentSetupTerms, (_event, request: unknown) => {
     if (!isAssignmentSetupTermsRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
@@ -399,18 +507,57 @@ export const registerIpcHandlers = (): void => {
     return loadAssignmentSetupTerms(request.courseFolderPath);
   });
 
-  ipcMain.handle(IPC_CHANNELS.previewAssignmentSetup, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.previewAssignmentSetup, async (_event, request: unknown) => {
     if (!isAssignmentSetupRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for assignment setup.");
     }
-    return previewAssignmentSetup(request);
+    const preview = previewAssignmentSetup(request);
+    if (preview.status !== "ready") return preview;
+    const validation = await validateTemplateRepository(
+      request.templateRepository,
+      request.templateBranch,
+      { env: process.env, runner: processRunner }
+    );
+    const resolvedRequest = {
+      ...request,
+      templateRepository: validation.repository ?? request.templateRepository,
+      templateBranch: validation.branch ?? request.templateBranch
+    };
+    return validation.valid
+      ? {
+          ...previewAssignmentSetup(resolvedRequest),
+          diagnostics: [...preview.diagnostics, ...validation.diagnostics]
+        }
+      : {
+          ...preview,
+          status: "invalid" as const,
+          diagnostics: [...preview.diagnostics, ...validation.diagnostics]
+        };
   });
 
-  ipcMain.handle(IPC_CHANNELS.saveAssignmentSetup, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.saveAssignmentSetup, async (_event, request: unknown) => {
     if (!isAssignmentSetupRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for assignment setup.");
     }
-    return saveAssignmentSetup(request);
+    const localPreview = previewAssignmentSetup(request);
+    if (localPreview.status !== "ready")
+      return {
+        status: "failure" as const,
+        writtenFiles: [],
+        diagnostics: localPreview.diagnostics
+      };
+    const validation = await validateTemplateRepository(
+      request.templateRepository,
+      request.templateBranch,
+      { env: process.env, runner: processRunner }
+    );
+    if (!validation.valid)
+      return { status: "failure" as const, writtenFiles: [], diagnostics: validation.diagnostics };
+    return saveAssignmentSetup({
+      ...request,
+      templateRepository: validation.repository ?? request.templateRepository,
+      templateBranch: validation.branch ?? request.templateBranch
+    });
   });
   ipcMain.handle(IPC_CHANNELS.getAssignmentForEdit, (_event, request: unknown) => {
     if (
@@ -424,15 +571,73 @@ export const registerIpcHandlers = (): void => {
       (request as unknown as Record<string, unknown>).assignmentFile as string
     );
   });
-  ipcMain.handle(IPC_CHANNELS.previewAssignmentEdit, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.previewAssignmentEdit, async (_event, request: unknown) => {
     if (!isAssignmentEditRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment edit request.");
-    return previewAssignmentEdit(request);
+    const preview = previewAssignmentEdit(request);
+    const original = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile).model;
+    const changed =
+      original !== null &&
+      (original.templateRepository !== request.templateRepository ||
+        original.templateBranch !== request.templateBranch);
+    if (preview.status !== "ready" || !changed) return preview;
+    const validation = await validateTemplateRepository(
+      request.templateRepository,
+      request.templateBranch,
+      { env: process.env, runner: processRunner }
+    );
+    return validation.valid
+      ? {
+          ...previewAssignmentEdit({
+            ...request,
+            templateRepository: validation.repository ?? request.templateRepository,
+            templateBranch: validation.branch ?? request.templateBranch
+          }),
+          diagnostics: [...preview.diagnostics, ...validation.diagnostics]
+        }
+      : {
+          ...preview,
+          status: "invalid" as const,
+          diagnostics: [...preview.diagnostics, ...validation.diagnostics]
+        };
   });
-  ipcMain.handle(IPC_CHANNELS.saveAssignmentEdit, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.saveAssignmentEdit, async (_event, request: unknown) => {
     if (!isAssignmentEditRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment edit request.");
+    const original = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile).model;
+    const changed =
+      original !== null &&
+      (original.templateRepository !== request.templateRepository ||
+        original.templateBranch !== request.templateBranch);
+    if (changed) {
+      const validation = await validateTemplateRepository(
+        request.templateRepository,
+        request.templateBranch,
+        { env: process.env, runner: processRunner }
+      );
+      if (!validation.valid)
+        return {
+          status: "failure" as const,
+          path: request.assignmentFile,
+          diagnostics: validation.diagnostics
+        };
+      return saveAssignmentEdit({
+        ...request,
+        templateRepository: validation.repository ?? request.templateRepository,
+        templateBranch: validation.branch ?? request.templateBranch
+      });
+    }
     return saveAssignmentEdit(request);
+  });
+  ipcMain.handle(IPC_CHANNELS.getAssignmentGroupConfig, (_event, request: unknown) => {
+    if (!isAssignmentGroupConfigRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("Invalid assignment group settings request.");
+    return getAssignmentGroupConfig(request);
+  });
+  ipcMain.handle(IPC_CHANNELS.saveAssignmentGroupConfig, (_event, request: unknown) => {
+    if (!isAssignmentGroupConfigSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("Invalid assignment group settings request.");
+    return saveAssignmentGroupConfig(request);
   });
   ipcMain.handle(IPC_CHANNELS.getStudentRepoEmailPreview, (_event, request: unknown) => {
     if (!isStudentRepoEmailPreviewRequest(request) || !isRegisteredAssignmentSetupCourse(request))
@@ -469,6 +674,70 @@ export const registerIpcHandlers = (): void => {
       throw new Error("Invalid student repository email transport status request.");
     return getStudentRepoEmailTransportStatus();
   });
+  ipcMain.handle(
+    IPC_CHANNELS.getStudentRepositoryAccessPageStatus,
+    async (_event, request: unknown) => {
+      if (
+        !isStudentRepositoryAccessPageRequest(request) ||
+        !isRegisteredAssignmentSetupCourse(request)
+      )
+        throw new Error("Invalid student repository access page request.");
+      const accessRequest = withRegisteredPagesFolder(request);
+      const mappings = await getAssignmentRepositoryMappings({
+        ...accessRequest,
+        runner: processRunner
+      });
+      return await getStudentRepositoryAccessPageStatus(accessRequest, mappings);
+    }
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.generateStudentRepositoryAccessPage,
+    async (_event, request: unknown) => {
+      if (
+        !isStudentRepositoryAccessPageRequest(request) ||
+        !isRegisteredAssignmentSetupCourse(request)
+      )
+        throw new Error("Invalid student repository access page request.");
+      const accessRequest = withRegisteredPagesFolder(request);
+      const mappings = await getAssignmentRepositoryMappings({
+        ...accessRequest,
+        runner: processRunner
+      });
+      return await generateStudentRepositoryAccessPage(accessRequest, mappings);
+    }
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.getStudentRepositoryAccessPagePublishStatus,
+    async (_event, request: unknown) => {
+      if (
+        !isStudentRepositoryAccessPageRequest(request) ||
+        !isRegisteredAssignmentSetupCourse(request)
+      )
+        throw new Error("Invalid student repository access page publish status request.");
+      const accessRequest = withRegisteredPagesFolder(request);
+      const mappings = await getAssignmentRepositoryMappings({
+        ...accessRequest,
+        runner: processRunner
+      });
+      return await getStudentRepositoryAccessPagePublishStatus(accessRequest, mappings);
+    }
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.publishStudentRepositoryAccessPage,
+    async (_event, request: unknown) => {
+      if (
+        !isStudentRepositoryAccessPageRequest(request) ||
+        !isRegisteredAssignmentSetupCourse(request)
+      )
+        throw new Error("Invalid student repository access page publish request.");
+      const accessRequest = withRegisteredPagesFolder(request);
+      const mappings = await getAssignmentRepositoryMappings({
+        ...accessRequest,
+        runner: processRunner
+      });
+      return await publishStudentRepositoryAccessPage(accessRequest, mappings);
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.loadRosterTerms, (_event, request: unknown) => {
     if (!isAssignmentSetupTermsRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
