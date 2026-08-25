@@ -6902,6 +6902,48 @@ var writeCommandResult = (result, json) => {
   console.log(output);
 };
 
+// src/groups/group-apply-preflight.ts
+var runGroupApplyPreflight = async (input) => {
+  const plan = buildGroupApplyPreviewPlan(input.config, input.students);
+  if (plan.errors.length > 0)
+    return {
+      targets: plan.targets,
+      warnings: plan.warnings,
+      errors: plan.errors,
+      mutationSupported: false
+    };
+  const errors = [];
+  for (const target of plan.targets) {
+    const repository = await input.githubClient.getRepository(
+      input.config.course.github.organization,
+      target.repositoryName
+    );
+    if (repository !== null)
+      errors.push(
+        createConfigDiagnostic(
+          "group_repository_untracked_collision",
+          `Repository ${target.repositoryName} already exists and is not manifest-tracked. Graider will not adopt untracked repositories automatically. If this repository was created by a failed group Apply, delete it manually or use a future reconcile workflow, then run Apply again.`,
+          { groupId: target.groupId, repositoryName: target.repositoryName }
+        )
+      );
+  }
+  return {
+    targets: plan.targets,
+    warnings: [
+      ...plan.warnings,
+      ...errors.length === 0 ? [
+        createWarningDiagnostic(
+          "group_apply_preflight_mutation_not_implemented",
+          "Group Apply preflight passed, but group repository mutation is not implemented yet.",
+          { assignmentFile: input.config.summary.assignmentConfigPath }
+        )
+      ] : []
+    ],
+    errors,
+    mutationSupported: false
+  };
+};
+
 // src/cli/commands/apply.command.ts
 var COMMAND_NAME5 = "apply";
 var EMPTY_COUNT10 = 0;
@@ -6944,23 +6986,6 @@ var runApplyCommand = async ({
       summary: { options }
     });
   }
-  if (configResult.config.assignment.repository_mode === "group") {
-    return createCommandResult({
-      commandName,
-      assignmentFile: configResult.config.summary.assignmentConfigPath,
-      status: "failure",
-      warnings: [],
-      errors: [
-        createConfigDiagnostic(
-          DiagnosticCode.GroupRepositoryApplyNotImplemented,
-          "Group Apply Preview is available, but group repository creation is not implemented yet. Graider will not create individual student repositories.",
-          { assignmentFile: configResult.config.summary.assignmentConfigPath }
-        )
-      ],
-      generatedFiles: [],
-      summary: { options, ...configResult.config.summary }
-    });
-  }
   const rosterResult = loadAssignmentRosters(configResult.config);
   if (rosterResult.errors.length > EMPTY_COUNT10) {
     return createCommandResult({
@@ -6978,6 +7003,40 @@ var runApplyCommand = async ({
     });
   }
   const effectiveGitHubClient = githubClient ?? createGitHubClient();
+  if (configResult.config.assignment.repository_mode === "group") {
+    const preflight = await runGroupApplyPreflight({
+      config: configResult.config,
+      students: rosterResult.students,
+      githubClient: effectiveGitHubClient
+    });
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...preflight.warnings],
+      errors: [
+        ...preflight.errors,
+        createConfigDiagnostic(
+          DiagnosticCode.GroupRepositoryApplyNotImplemented,
+          "Group Apply preflight completed, but group repository creation is not implemented yet.",
+          {
+            assignmentFile: configResult.config.summary.assignmentConfigPath,
+            targetCount: preflight.targets.length
+          }
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        groupTargets: preflight.targets.map((target) => ({
+          groupId: target.groupId,
+          repositoryName: target.repositoryName
+        }))
+      }
+    });
+  }
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,

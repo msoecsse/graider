@@ -24,6 +24,7 @@ import { buildPlan } from "../../planning/plan-builder.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
 import { createConfigDiagnostic, DiagnosticCode } from "../../diagnostics/error-catalog.js";
 import { writeCommandResult } from "../output.js";
+import { runGroupApplyPreflight } from "../../groups/group-apply-preflight.js";
 
 const COMMAND_NAME = "apply";
 const EMPTY_COUNT = 0;
@@ -92,24 +93,6 @@ export const runApplyCommand = async ({
     });
   }
 
-  if (configResult.config.assignment.repository_mode === "group") {
-    return createCommandResult({
-      commandName,
-      assignmentFile: configResult.config.summary.assignmentConfigPath,
-      status: "failure",
-      warnings: [],
-      errors: [
-        createConfigDiagnostic(
-          DiagnosticCode.GroupRepositoryApplyNotImplemented,
-          "Group Apply Preview is available, but group repository creation is not implemented yet. Graider will not create individual student repositories.",
-          { assignmentFile: configResult.config.summary.assignmentConfigPath }
-        )
-      ],
-      generatedFiles: [],
-      summary: { options, ...configResult.config.summary }
-    });
-  }
-
   const rosterResult = loadAssignmentRosters(configResult.config);
 
   if (rosterResult.errors.length > EMPTY_COUNT) {
@@ -129,6 +112,40 @@ export const runApplyCommand = async ({
   }
 
   const effectiveGitHubClient = githubClient ?? createGitHubClient();
+  if (configResult.config.assignment.repository_mode === "group") {
+    const preflight = await runGroupApplyPreflight({
+      config: configResult.config,
+      students: rosterResult.students,
+      githubClient: effectiveGitHubClient
+    });
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...preflight.warnings],
+      errors: [
+        ...preflight.errors,
+        createConfigDiagnostic(
+          DiagnosticCode.GroupRepositoryApplyNotImplemented,
+          "Group Apply preflight completed, but group repository creation is not implemented yet.",
+          {
+            assignmentFile: configResult.config.summary.assignmentConfigPath,
+            targetCount: preflight.targets.length
+          }
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        groupTargets: preflight.targets.map((target) => ({
+          groupId: target.groupId,
+          repositoryName: target.repositoryName
+        }))
+      }
+    });
+  }
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,
