@@ -1,6 +1,7 @@
 import type { AssignmentApplyJsonResponse } from "../../electron/ipc";
 import { normalizeAssignmentDetailDiagnostics } from "../assignment-detail/assignmentDetailNormalization";
 import type {
+  ApplyResultGroupTarget,
   ApplyResultRepositoryRow,
   ApplyResultRepositoryStatus,
   ApplyResultSummary,
@@ -109,11 +110,36 @@ const normalizeRows = (
   return rowValues.map((row) => normalizeResultRow(row));
 };
 
+const normalizeStringArray = (value: unknown): readonly string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+
+const normalizeGroupTarget = (value: unknown): ApplyResultGroupTarget => {
+  const target = isRecord(value) ? value : {};
+
+  return {
+    groupId: getString(target, "groupId"),
+    repositoryName: getString(target, "repositoryName"),
+    htmlUrl: getString(target, "htmlUrl"),
+    cloneUrl: getString(target, "cloneUrl"),
+    studentIds: normalizeStringArray(target.studentIds),
+    githubUsernames: normalizeStringArray(target.githubUsernames),
+    status: getString(target, "status"),
+    diagnostics: normalizeAssignmentDetailDiagnostics(
+      Array.isArray(target.diagnostics) ? target.diagnostics : []
+    )
+  };
+};
+
 export const normalizeApplyResult = (
   apply: AssignmentApplyJsonResponse,
   appliedAt: string | null
 ): NormalizedApplyResult => {
   const rows = normalizeRows(apply.summary);
+  const repositoryMode =
+    getString(apply.summary, "repositoryMode") === "group" ? "group" : "individual";
+  const groupTargets = Array.isArray(apply.summary.groupTargets)
+    ? apply.summary.groupTargets.map((target) => normalizeGroupTarget(target))
+    : [];
 
   return {
     status: apply.status,
@@ -125,6 +151,10 @@ export const normalizeApplyResult = (
     summary: normalizeSummary(apply.summary, rows),
     rows,
     manifestFile: getString(apply.summary, "manifestFile"),
+    repositoryMode,
+    targetCount: getNumber(apply.summary, "targetCount"),
+    studentMappingCount: getNumber(apply.summary, "studentMappingCount"),
+    groupTargets,
     rawSummary: apply.summary
   };
 };

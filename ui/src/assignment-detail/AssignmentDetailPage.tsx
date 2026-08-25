@@ -2207,8 +2207,8 @@ export const AssignmentDetailPage = ({
                   {groupMode === "group" ? (
                     <>
                       <p className="detail-panel__note">
-                        Group repository creation is not implemented yet. Apply is blocked while
-                        this assignment is configured for group repositories.
+                        Apply creates one shared repository per group. Use Preview apply to verify
+                        group membership and repository targets before applying changes.
                       </p>
                       <label>
                         Group membership CSV

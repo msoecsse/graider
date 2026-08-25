@@ -512,6 +512,12 @@ const ApplyResultSummaryPanel = ({
       </div>
     </dl>
     <dl className="detail-grid apply-result-files">
+      {result.repositoryMode !== "group" ? null : (
+        <>
+          <DetailItem label="Group repositories" value={result.targetCount} />
+          <DetailItem label="Student mappings" value={result.studentMappingCount} />
+        </>
+      )}
       <DetailItem label="Assignment file" value={result.assignmentFile} />
       <DetailItem label="Manifest file" value={result.manifestFile} />
       <DetailItem label="Generated files" value={result.generatedFiles.join(", ") || null} />
@@ -569,6 +575,66 @@ const ApplyResultRowsPanel = ({
     )}
   </section>
 );
+
+const GroupApplyResultTargetsPanel = ({
+  result
+}: {
+  readonly result: NormalizedApplyResult;
+}): ReactElement | null => {
+  if (result.repositoryMode !== "group") return null;
+
+  return (
+    <section
+      className="detail-panel apply-preview-repositories"
+      aria-labelledby="group-apply-results"
+    >
+      <h2 id="group-apply-results">Group repository results</h2>
+      {result.groupTargets.length === 0 ? (
+        <p className="detail-panel__note">No group repository result targets were returned.</p>
+      ) : (
+        <div className="apply-preview-table" role="table" aria-label="Group repository results">
+          <div className="apply-preview-table__header" role="row">
+            <span role="columnheader">Group</span>
+            <span role="columnheader">Repository</span>
+            <span role="columnheader">Students</span>
+            <span role="columnheader">Result status</span>
+            <span role="columnheader">Diagnostics</span>
+          </div>
+          {result.groupTargets.map((target) => (
+            <div
+              className="apply-preview-table__row"
+              role="row"
+              key={target.groupId ?? target.repositoryName ?? "group-result"}
+            >
+              <span role="cell">{formatNullableValue(target.groupId)}</span>
+              <span role="cell" className="apply-preview-table__repository">
+                {target.htmlUrl === null ? (
+                  formatNullableValue(target.repositoryName)
+                ) : (
+                  <a href={target.htmlUrl} target="_blank" rel="noreferrer">
+                    {target.repositoryName ?? target.htmlUrl}
+                  </a>
+                )}
+              </span>
+              <span role="cell">
+                {target.studentIds
+                  .map(
+                    (studentId, index) =>
+                      `${studentId}${target.githubUsernames[index] === undefined ? "" : ` (${target.githubUsernames[index]})`}`
+                  )
+                  .join(", ") || "—"}
+              </span>
+              <span role="cell">{formatNullableValue(target.status)}</span>
+              <span role="cell">
+                <RowDiagnostics diagnostics={target.diagnostics} />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+};
 
 const DiagnosticEntry = ({
   diagnostic
@@ -654,7 +720,11 @@ const ConfirmationPanel = ({
     >
       <h2 id="apply-confirmation-title">Apply assignment</h2>
       {canApply ? (
-        <p>Preview is ready. Review and confirm before applying changes to student repositories.</p>
+        <p>
+          {preview.repositoryMode === "group"
+            ? "Preview is ready. Apply will create one repository per group and give every group member admin access."
+            : "Preview is ready. Review and confirm before applying changes to student repositories."}
+        </p>
       ) : (
         <>
           <p>Apply is disabled until the latest preview has no blockers.</p>
@@ -686,7 +756,11 @@ const ConfirmationPanel = ({
         <div className="apply-confirmation-panel" role="dialog" aria-modal="false">
           <h3>Confirm apply changes</h3>
           <ul>
-            <li>This will create or update student repositories.</li>
+            <li>
+              {preview.repositoryMode === "group"
+                ? "This will create or update one shared repository per group. Every group member will receive admin access."
+                : "This will create or update student repositories."}
+            </li>
             <li>
               This may write manifests/local apply state if the backend apply command does so.
             </li>
@@ -703,7 +777,11 @@ const ConfirmationPanel = ({
                 onConfirmationChange(event.currentTarget.checked);
               }}
             />
-            <span>I understand this will apply changes to student repositories</span>
+            <span>
+              {preview.repositoryMode === "group"
+                ? "I understand this will apply changes to group repositories"
+                : "I understand this will apply changes to student repositories"}
+            </span>
           </label>
           <div className="apply-confirmation-actions">
             <button
@@ -742,7 +820,11 @@ const ApplyResultPanel = ({
 }): ReactElement => (
   <>
     <ApplyResultSummaryPanel result={result} />
-    <ApplyResultRowsPanel result={result} />
+    {result.repositoryMode === "group" ? (
+      <GroupApplyResultTargetsPanel result={result} />
+    ) : (
+      <ApplyResultRowsPanel result={result} />
+    )}
     <DiagnosticsPanel diagnostics={result.diagnostics} />
     <section className="detail-panel apply-preview-final-action" aria-labelledby="post-apply-title">
       <h2 id="post-apply-title">Post-apply actions</h2>

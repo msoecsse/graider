@@ -16,7 +16,9 @@ const ATTENTION_REPOSITORY_STATUSES: readonly ApplyPreviewRepositoryStatus[] = [
 ];
 
 const getAffectedRepositoryCount = (preview: NormalizedApplyPreview): number =>
-  preview.plan.summary.wouldCreateRepositories + preview.plan.summary.wouldUpdateRepositories;
+  preview.repositoryMode === "group"
+    ? preview.plan.groupTargets.length
+    : preview.plan.summary.wouldCreateRepositories + preview.plan.summary.wouldUpdateRepositories;
 
 const hasTokenRequiredDiagnostic = (preview: NormalizedApplyPreview): boolean =>
   preview.diagnostics.some(
@@ -82,7 +84,10 @@ export const deriveApplyPreviewReadiness = (
   return {
     status: "ready",
     label: "Ready to preview apply",
-    description: `${String(getAffectedRepositoryCount(preview))} student repositories would be affected.`,
+    description:
+      preview.repositoryMode === "group"
+        ? `${String(getAffectedRepositoryCount(preview))} group repositories would be affected.`
+        : `${String(getAffectedRepositoryCount(preview))} student repositories would be affected.`,
     items
   };
 };

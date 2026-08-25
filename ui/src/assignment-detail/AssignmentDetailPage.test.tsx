@@ -578,7 +578,7 @@ describe("AssignmentDetailPage", () => {
       target: { value: "group" }
     });
     expect(screen.getByLabelText("Group membership CSV")).toBeInTheDocument();
-    expect(screen.getByText(/Apply is blocked/u)).toBeInTheDocument();
+    expect(screen.getByText(/Apply creates one shared repository per group/u)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Group membership CSV"), {
       target: { value: "group_id,student_id\nteam-1,s001\n" }
     });

@@ -182,6 +182,67 @@ const createReadyApplyPreviewJson = (): AssignmentApplyPreviewJsonResponse =>
     actions: { apply: { available: true, implemented: false, previewOnly: true } }
   });
 
+const createReadyGroupApplyPreviewJson = (): AssignmentApplyPreviewJsonResponse =>
+  createApplyPreviewJson({
+    repositoryMode: "group",
+    applySupported: true,
+    target: { sections: ["111", "121"], sectionCount: 2, studentCount: 3 },
+    plan: {
+      summary: {
+        wouldCreateRepositories: 2,
+        wouldUpdateRepositories: 0,
+        wouldSkipRepositories: 0,
+        blockedRepositories: 0,
+        unknownRepositories: 0
+      },
+      repositories: [],
+      groupTargets: [
+        {
+          targetId: "team-1",
+          groupId: "team-1",
+          repositoryName: "27s2-csc1120-lab02-team-1",
+          sectionIds: ["111"],
+          studentIds: ["alpha", "beta"],
+          githubUsernames: ["alpha-gh", "beta-gh"],
+          plannedStudentPermission: "admin",
+          facultyTeam: "faculty",
+          facultyTeamPermission: "push",
+          graderTeam: "graders",
+          graderTeamPermission: "maintain"
+        },
+        {
+          targetId: "team-2",
+          groupId: "team-2",
+          repositoryName: "27s2-csc1120-lab02-team-2",
+          sectionIds: ["121"],
+          studentIds: ["gamma"],
+          githubUsernames: ["gamma-gh"],
+          plannedStudentPermission: "admin",
+          facultyTeam: "faculty",
+          facultyTeamPermission: "push",
+          graderTeam: "graders",
+          graderTeamPermission: "maintain"
+        }
+      ]
+    },
+    actions: { apply: { available: true, implemented: true, previewOnly: false } }
+  });
+
+const createBlockedGroupApplyPreviewJson = (): AssignmentApplyPreviewJsonResponse => ({
+  ...createReadyGroupApplyPreviewJson(),
+  status: "failure",
+  applySupported: false,
+  diagnostics: [
+    {
+      code: "group_repository_untracked_collision",
+      severity: "error",
+      message: "The planned repository already exists and cannot be adopted.",
+      context: { groupId: "team-1", repositoryName: "27s2-csc1120-lab02-team-1" }
+    }
+  ],
+  actions: { apply: { available: false, implemented: true, previewOnly: false } }
+});
+
 const createApplyJson = (
   overrides: Partial<AssignmentApplyJsonResponse> = {}
 ): AssignmentApplyJsonResponse => ({
@@ -234,6 +295,49 @@ const createApplyJson = (
   },
   ...overrides
 });
+
+const createGroupApplyJson = (
+  overrides: Partial<AssignmentApplyJsonResponse> = {}
+): AssignmentApplyJsonResponse =>
+  createApplyJson({
+    generatedFiles: ["terms/27s2/manifests/lab02/manifest.yml"],
+    summary: {
+      repositoryMode: "group",
+      targetCount: 2,
+      studentMappingCount: 3,
+      manifestFile: "terms/27s2/manifests/lab02/manifest.yml",
+      manifestWritten: true,
+      groupTargets: [
+        {
+          groupId: "team-1",
+          repositoryName: "27s2-csc1120-lab02-team-1",
+          htmlUrl: "https://github.com/csc1120/27s2-csc1120-lab02-team-1",
+          cloneUrl: "https://github.com/csc1120/27s2-csc1120-lab02-team-1.git",
+          studentIds: ["alpha", "beta"],
+          githubUsernames: ["alpha-gh", "beta-gh"],
+          status: "success",
+          diagnostics: [
+            {
+              code: "grading_workflow_pending",
+              severity: "warning",
+              message: "Grade workflow visibility is pending.",
+              context: { groupId: "team-1", repositoryName: "27s2-csc1120-lab02-team-1" }
+            }
+          ]
+        },
+        {
+          groupId: "team-2",
+          repositoryName: "27s2-csc1120-lab02-team-2",
+          htmlUrl: "https://github.com/csc1120/27s2-csc1120-lab02-team-2",
+          studentIds: ["gamma"],
+          githubUsernames: ["gamma-gh"],
+          status: "success",
+          diagnostics: []
+        }
+      ]
+    },
+    ...overrides
+  });
 
 const createApplyResult = (
   apply: AssignmentApplyJsonResponse | null = createApplyJson(),
@@ -378,6 +482,138 @@ describe("ApplyPreviewPage", () => {
     );
 
     expect(screen.getByRole("button", { name: "Apply changes" })).toBeEnabled();
+  });
+
+  it("shows group targets and confirms one shared repository per group", async () => {
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyGroupApplyPreviewJson()))
+    });
+    renderApplyPreviewPage();
+
+    expect(
+      await screen.findByRole("table", { name: "Group repository targets" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("27s2-csc1120-lab02-team-1")).toBeInTheDocument();
+    expect(screen.getByText("alpha (alpha-gh), beta (beta-gh)")).toBeInTheDocument();
+    expect(screen.getAllByText("admin")).toHaveLength(2);
+    expect(screen.getByText("2 group repositories would be affected.")).toBeInTheDocument();
+    expect(screen.queryByText("graider-sandbox/csc1120-lab02-alpha")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review apply changes" }));
+
+    expect(
+      screen.getByText(
+        "This will create or update one shared repository per group. Every group member will receive admin access."
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("I understand this will apply changes to group repositories")
+    ).toBeInTheDocument();
+  });
+
+  it("guards Apply when group preview diagnostics are blocking", async () => {
+    const applyAssignment = vi.fn();
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createBlockedGroupApplyPreviewJson())),
+      applyAssignment
+    });
+    renderApplyPreviewPage();
+
+    expect(
+      await screen.findByText("The planned repository already exists and cannot be adopted.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply changes" })).toBeDisabled();
+    expect(applyAssignment).not.toHaveBeenCalled();
+  });
+
+  it("renders group Apply results with shared targets, mappings, and pending workflow warnings", async () => {
+    const applyAssignment = vi.fn().mockResolvedValue(createApplyResult(createGroupApplyJson()));
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyGroupApplyPreviewJson())),
+      applyAssignment
+    });
+    renderApplyPreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to group repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Group repository results" })
+    ).toBeInTheDocument();
+    expect(applyAssignment).toHaveBeenCalledWith({
+      courseFolderId: SELECTION.courseFolderId,
+      courseFolderPath: SELECTION.courseFolderPath,
+      assignmentFile: SELECTION.assignmentFile
+    });
+    expect(screen.getByText("Group repositories")).toBeInTheDocument();
+    expect(screen.getByText("Student mappings")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "27s2-csc1120-lab02-team-1" })).toHaveAttribute(
+      "href",
+      "https://github.com/csc1120/27s2-csc1120-lab02-team-1"
+    );
+    expect(screen.getAllByText("alpha (alpha-gh), beta (beta-gh)")).toHaveLength(2);
+    expect(screen.getByText("grading_workflow_pending")).toBeInTheDocument();
+    expect(screen.queryByText("Repository result rows")).toBeNull();
+  });
+
+  it("shows the no-manifest warning after a failed group Apply", async () => {
+    const incompleteMessage =
+      "Group Apply did not complete, so no manifest was written. Some group repositories may have been created before the failure. Graider will not adopt untracked repositories automatically. Delete any partial repositories manually or use a future reconcile workflow, then run Apply again.";
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyGroupApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(
+        createApplyResult(
+          createGroupApplyJson({
+            status: "failure",
+            exitCode: 1,
+            diagnostics: [
+              {
+                code: "group_repository_untracked_collision",
+                severity: "error",
+                message:
+                  "Repository 27s2-csc1120-lab02-team-2 already exists and Graider will not adopt untracked repositories automatically.",
+                context: { groupId: "team-2", repositoryName: "27s2-csc1120-lab02-team-2" }
+              },
+              {
+                code: "group_apply_manifest_not_written",
+                severity: "warning",
+                message: incompleteMessage
+              }
+            ],
+            generatedFiles: [],
+            summary: {
+              repositoryMode: "group",
+              targetCount: 2,
+              studentMappingCount: 3,
+              groupTargets: []
+            }
+          })
+        )
+      )
+    });
+    renderApplyPreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to group repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(await screen.findByText(incompleteMessage)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/will not adopt untracked repositories automatically/u)
+    ).toHaveLength(2);
   });
 
   it("confirmed apply calls applyAssignment exactly once with assignment context", async () => {

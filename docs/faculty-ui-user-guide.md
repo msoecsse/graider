@@ -263,11 +263,12 @@ same section as the other members of their group. Saving keeps `groups.csv`
 beside `assignment.yml`; use **Publish Course Changes** to share those local
 admin-repository changes. Group Apply Preview shows one planned repository per
 group ID, including its members and repository name. Use Preview before Apply.
-Apply creates one shared repository per group and gives every member admin
-access. If Apply fails partway, Graider writes no manifest and some repositories
-may already exist; delete partial repositories manually or wait for a future
-reconcile workflow before trying again. Group grading and status/report views
-remain limited until their group-aware work is completed.
+For a valid preview, confirm Apply in the UI to create one shared repository per
+group and give every member admin access. If Apply fails partway, Graider writes
+no manifest and some repositories may already exist; delete partial repositories
+manually or wait for a future reconcile workflow before trying again. Group
+grading and status/report views remain limited until their group-aware work is
+completed.
 
 ## Dispatch Grading
 

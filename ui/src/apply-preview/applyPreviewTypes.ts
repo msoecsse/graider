@@ -167,6 +167,17 @@ export interface ApplyResultRepositoryRow {
   readonly diagnostics: readonly AssignmentDetailDiagnostic[];
 }
 
+export interface ApplyResultGroupTarget {
+  readonly groupId: string | null;
+  readonly repositoryName: string | null;
+  readonly htmlUrl: string | null;
+  readonly cloneUrl: string | null;
+  readonly studentIds: readonly string[];
+  readonly githubUsernames: readonly string[];
+  readonly status: string | null;
+  readonly diagnostics: readonly AssignmentDetailDiagnostic[];
+}
+
 export interface NormalizedApplyResult {
   readonly status: string;
   readonly exitCode: number;
@@ -177,5 +188,9 @@ export interface NormalizedApplyResult {
   readonly summary: ApplyResultSummary;
   readonly rows: readonly ApplyResultRepositoryRow[];
   readonly manifestFile: string | null;
+  readonly repositoryMode: "individual" | "group";
+  readonly targetCount: number | null;
+  readonly studentMappingCount: number | null;
+  readonly groupTargets: readonly ApplyResultGroupTarget[];
   readonly rawSummary: Readonly<Record<string, unknown>>;
 }

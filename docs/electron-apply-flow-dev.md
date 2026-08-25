@@ -91,10 +91,11 @@ rows, non-success status, or error diagnostics.
 
 When apply is available, the UI uses a full-page confirmation panel on the
 Apply Preview page. The user first selects `Review apply changes`, then must
-check:
+check the mode-specific acknowledgement:
 
 ```text
 I understand this will apply changes to student repositories
+I understand this will apply changes to group repositories
 ```
 
 The final `Apply changes` button remains disabled until the checkbox is
@@ -102,13 +103,21 @@ checked. While apply is running, refresh/apply controls that could start
 duplicate work are disabled, and the renderer guards against concurrent apply
 calls.
 
-The confirmation panel states:
+For individual assignments, the confirmation panel states:
 
 ```text
 This will create or update student repositories.
 This may write manifests/local apply state if the backend apply command does so.
 This may push files/commits to GitHub according to the existing apply implementation.
 ```
+
+For group assignments, the preview renders one repository target per group and
+the confirmation explicitly states that it creates or updates one shared
+repository per group and grants every group member `admin` access. Group Apply
+uses the same narrow `applyAssignment` IPC boundary; it does not add an
+Electron-specific mutation API. Its result renders group target summaries,
+shared student mappings, workflow warnings, and safe no-manifest diagnostics.
+Individual result rows and manifest-v1 behavior remain unchanged.
 
 ## Preview vs Result Wording
 
@@ -144,8 +153,12 @@ The Apply Result Summary renders usable backend JSON for:
 - `failure`
 
 When present, the UI shows command status, exit code, applied timestamp,
-assignment file, manifest file, generated files, repository counts,
-per-student result rows, and diagnostics.
+assignment file, manifest file, generated files, repository counts, and
+diagnostics. Individual results show per-student rows. Group results show one
+target per repository, its members, repository URL, and group/student-mapping
+counts. Failed group Apply results must make clear that no manifest was written
+and partial external GitHub changes may need manual cleanup or a future
+reconcile workflow.
 
 Safe command errors render bounded user-facing messages:
 
