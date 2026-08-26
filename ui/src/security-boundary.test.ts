@@ -41,6 +41,7 @@ describe("UI security boundary", () => {
       "graider-ui:course-registry:list",
       "graider-ui:course-registry:select-folder",
       "graider-ui:student-repository-access-page:select-pages-folder",
+      "graider-ui:assignment-download:select-folder",
       "graider-ui:course-setup:select-folder",
       "graider-ui:course-setup:preview",
       "graider-ui:course-setup:save",
@@ -78,6 +79,7 @@ describe("UI security boundary", () => {
       "graider-ui:assignment-grade-status:get",
       "graider-ui:faculty-report:get",
       "graider-ui:assignment-apply:run",
+      "graider-ui:assignment-download:run",
       "graider-ui:assignment-grade:run"
     ]);
     expect(channelNames).not.toContain("runCommand");

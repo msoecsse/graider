@@ -5,6 +5,7 @@ export const IPC_CHANNELS = {
   selectCourseFolder: "graider-ui:course-registry:select-folder",
   selectStudentAccessPagesRepositoryFolder:
     "graider-ui:student-repository-access-page:select-pages-folder",
+  selectRepositoryDownloadFolder: "graider-ui:assignment-download:select-folder",
   selectCourseSetupFolder: "graider-ui:course-setup:select-folder",
   previewCourseSetup: "graider-ui:course-setup:preview",
   saveCourseSetup: "graider-ui:course-setup:save",
@@ -43,6 +44,7 @@ export const IPC_CHANNELS = {
   getAssignmentGradeStatus: "graider-ui:assignment-grade-status:get",
   getFacultyReport: "graider-ui:faculty-report:get",
   applyAssignment: "graider-ui:assignment-apply:run",
+  downloadAssignmentRepositories: "graider-ui:assignment-download:run",
   gradeAssignment: "graider-ui:assignment-grade:run"
 } as const;
 
@@ -301,6 +303,32 @@ export interface SelectStudentAccessPagesRepositoryFolderResult {
   readonly canceled: boolean;
   readonly folderPath: string | null;
   readonly error?: CourseFolderSelectionError;
+}
+export interface SelectRepositoryDownloadFolderResult {
+  readonly canceled: boolean;
+  readonly folderPath: string | null;
+}
+export interface AssignmentRepositoryDownloadRequest extends AssignmentDetailRequest {
+  readonly destination: string;
+}
+export interface AssignmentRepositoryDownloadResult {
+  readonly status: "success" | "partial_success" | "failure";
+  readonly destination: string;
+  readonly repositoryMode: "individual" | "group";
+  readonly totalTargets: number;
+  readonly clonedCount: number;
+  readonly failedCount: number;
+  readonly targets: readonly {
+    readonly targetId: string;
+    readonly groupId?: string;
+    readonly repositoryName: string;
+    readonly localPath: string;
+    readonly status: "cloned" | "failed";
+    readonly studentIds: readonly string[];
+    readonly githubUsernames: readonly string[];
+    readonly diagnostics: readonly { readonly message: string }[];
+  }[];
+  readonly diagnostics: readonly { readonly message: string }[];
 }
 
 export type StudentRepositoryAccessPageStatus =
@@ -843,6 +871,7 @@ export interface GraiderUIApi {
   readonly selectStudentAccessPagesRepositoryFolder?: (
     courseFolderId: string
   ) => Promise<SelectStudentAccessPagesRepositoryFolderResult>;
+  readonly selectRepositoryDownloadFolder?: () => Promise<SelectRepositoryDownloadFolderResult>;
   readonly saveStudentAccessPagesConfig?: (
     request: StudentAccessPagesConfigRequest
   ) => Promise<StudentAccessPagesConfigResult>;
@@ -929,5 +958,8 @@ export interface GraiderUIApi {
   ) => Promise<AssignmentGradeStatusResult>;
   readonly getFacultyReport: (request: FacultyReportRequest) => Promise<FacultyReportResult>;
   readonly applyAssignment: (request: AssignmentApplyRequest) => Promise<AssignmentApplyResult>;
+  readonly downloadAssignmentRepositories?: (
+    request: AssignmentRepositoryDownloadRequest
+  ) => Promise<AssignmentRepositoryDownloadResult>;
   readonly gradeAssignment: (request: AssignmentGradeRequest) => Promise<AssignmentGradeResult>;
 }

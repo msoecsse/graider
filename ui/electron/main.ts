@@ -79,7 +79,8 @@ import {
   type RosterSectionRequest,
   type TemplateWorkflowRequest,
   type TemplateWorkflowSaveRequest,
-  type StudentAccessPagesConfigRequest
+  type StudentAccessPagesConfigRequest,
+  type AssignmentRepositoryDownloadRequest
 } from "./ipc.js";
 
 const DEFAULT_WINDOW_WIDTH = 1180;
@@ -178,6 +179,11 @@ const isFacultyReportRequest = (value: unknown): value is FacultyReportRequest =
 
 const isAssignmentApplyRequest = (value: unknown): value is AssignmentApplyRequest =>
   isAssignmentDetailRequest(value);
+const isAssignmentRepositoryDownloadRequest = (
+  value: unknown
+): value is AssignmentRepositoryDownloadRequest =>
+  isAssignmentDetailRequest(value) &&
+  typeof (value as unknown as Record<string, unknown>).destination === "string";
 
 const isAssignmentGradeRequest = (value: unknown): value is AssignmentGradeRequest =>
   isAssignmentDetailRequest(value);
@@ -467,6 +473,13 @@ export const registerIpcHandlers = (): void => {
         : { canceled: false, folderPath: registered.pagesRepositoryFolderPath ?? null };
     }
   );
+  ipcMain.handle(IPC_CHANNELS.selectRepositoryDownloadFolder, async () => {
+    const selected = await dialog.showOpenDialog({
+      properties: ["openDirectory", "createDirectory"]
+    });
+    const folderPath = selected.canceled ? null : getSelectedFolderPath(selected.filePaths);
+    return { canceled: folderPath === null, folderPath };
+  });
 
   ipcMain.handle(IPC_CHANNELS.selectCourseSetupFolder, async () => {
     const result = await dialog.showOpenDialog({
@@ -869,6 +882,29 @@ export const registerIpcHandlers = (): void => {
       runner: processRunner,
       env: process.env
     });
+  });
+  ipcMain.handle(IPC_CHANNELS.downloadAssignmentRepositories, async (_event, request: unknown) => {
+    if (!isAssignmentRepositoryDownloadRequest(request))
+      throw new Error("Assignment download request is required.");
+    const result = await processRunner({
+      command: "graider",
+      args: [
+        "assignment",
+        "download-repositories",
+        request.assignmentFile,
+        "--destination",
+        request.destination,
+        "--json"
+      ],
+      cwd: request.courseFolderPath,
+      env: process.env
+    });
+    if (result.error !== null) throw new Error("Repository download command could not be started.");
+    try {
+      return JSON.parse(result.stdout) as unknown;
+    } catch {
+      throw new Error("Repository download returned invalid JSON.");
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.gradeAssignment, async (_event, request: unknown) => {

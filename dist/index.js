@@ -1719,26 +1719,26 @@ var createManifestValidationDiagnostic = (code, filePath, issue) => createConfig
   path: issue.path.join("."),
   reason: issue.message
 });
-var normalizeDiagnostic = (diagnostic2) => ({
-  code: diagnostic2.code,
-  severity: diagnostic2.severity,
-  message: diagnostic2.message,
-  ...diagnostic2.context === void 0 ? {} : { context: diagnostic2.context },
-  ...diagnostic2.observedAt === void 0 ? {} : { observedAt: diagnostic2.observedAt }
+var normalizeDiagnostic = (diagnostic3) => ({
+  code: diagnostic3.code,
+  severity: diagnostic3.severity,
+  message: diagnostic3.message,
+  ...diagnostic3.context === void 0 ? {} : { context: diagnostic3.context },
+  ...diagnostic3.observedAt === void 0 ? {} : { observedAt: diagnostic3.observedAt }
 });
 var getIssueCode = (issue) => {
   const pathParts = issue.path.map(String);
-  const path20 = pathParts.join(".");
+  const path21 = pathParts.join(".");
   if (pathParts.length === MINIMUM_ITEMS) {
     return DiagnosticCode.MissingManifestSection;
   }
-  if (path20.endsWith("lifecycle.status")) {
+  if (path21.endsWith("lifecycle.status")) {
     return DiagnosticCode.InvalidManifestLifecycleStatus;
   }
-  if (path20.endsWith("permission")) {
+  if (path21.endsWith("permission")) {
     return DiagnosticCode.InvalidManifestPermission;
   }
-  if (path20.startsWith("repositories.")) {
+  if (path21.startsWith("repositories.")) {
     return DiagnosticCode.InvalidManifestRepositoryRecord;
   }
   return DiagnosticCode.InvalidManifest;
@@ -2911,7 +2911,7 @@ var previewStudentRepository = async (config, student, manifest, githubClient) =
       getSkippedStudentReason(student.status)
     );
   }
-  if (generatedName.diagnostics.some((diagnostic2) => diagnostic2.severity === "error")) {
+  if (generatedName.diagnostics.some((diagnostic3) => diagnostic3.severity === "error")) {
     return createRow(student, repositoryFullName, "blocked", "invalid_repository_name", [
       ...generatedName.diagnostics
     ]);
@@ -2929,7 +2929,7 @@ var createPlanSummary = (repositories) => ({
   unknownRepositories: repositories.filter((row) => row.status === "unknown").length
 });
 var collectRowDiagnostics = (repositories) => repositories.flatMap((row) => row.diagnostics);
-var hasErrorDiagnostics = (diagnostics) => diagnostics.some((diagnostic2) => diagnostic2.severity === "error");
+var hasErrorDiagnostics = (diagnostics) => diagnostics.some((diagnostic3) => diagnostic3.severity === "error");
 var createApplyAction = (config, diagnostics, summary) => {
   const assignmentStatus = config.assignment.assignment.status;
   const lifecycleAllowsApply = assignmentStatus === ACTIVE_ASSIGNMENT_STATUS || assignmentStatus === CLOSED_ASSIGNMENT_STATUS;
@@ -3142,6 +3142,98 @@ var createRepositoryWorkflowPathCandidates = (configuredWorkflow) => uniqueWorkf
   normalizeWorkflowPath(configuredWorkflow)
 ]);
 
+// src/manifest/repository-targets.ts
+var toTarget = (record) => ({
+  targetId: record.studentId,
+  mode: "individual",
+  repositoryName: record.repository.name,
+  repositoryUrl: record.repository.htmlUrl ?? null,
+  sectionIds: [record.section],
+  studentIds: [record.studentId],
+  githubUsernames: [record.githubUsername],
+  diagnostics: [...record.warnings, ...record.errors]
+});
+var toMapping = (record) => ({
+  studentId: record.studentId,
+  githubUsername: record.githubUsername,
+  targetId: record.studentId,
+  repositoryName: record.repository.name,
+  repositoryUrl: record.repository.htmlUrl ?? null
+});
+var normalizeManifestRepositories = (manifest) => ({
+  targets: manifest.schemaVersion === 2 ? (manifest.targets ?? []).map((target) => ({
+    targetId: target.targetId,
+    mode: target.mode,
+    repositoryName: target.repositoryName,
+    repositoryUrl: target.htmlUrl ?? null,
+    ...target.cloneUrl === void 0 ? {} : { cloneUrl: target.cloneUrl },
+    ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+    sectionIds: target.sectionIds,
+    studentIds: target.studentIds,
+    githubUsernames: target.githubUsernames,
+    diagnostics: target.diagnostics
+  })) : manifest.repositories.map(toTarget),
+  studentMappings: manifest.schemaVersion === 2 ? (manifest.studentMappings ?? []).map((mapping) => ({
+    studentId: mapping.studentId,
+    githubUsername: mapping.githubUsername,
+    targetId: mapping.targetId,
+    repositoryName: mapping.repositoryName,
+    repositoryUrl: mapping.htmlUrl ?? null,
+    ...mapping.cloneUrl === void 0 ? {} : { cloneUrl: mapping.cloneUrl }
+  })) : manifest.repositories.map(toMapping)
+});
+
+// src/execution/grading-targets.ts
+var createMissingIdentityDiagnostic = (target) => createConfigDiagnostic(
+  DiagnosticCode.StudentRepositoryMissing,
+  "Manifest repository target does not have a repository identity.",
+  {
+    targetId: target.targetId,
+    ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+    repositoryName: target.repositoryName
+  }
+);
+var normalizeGradingTargets = (manifest, organization) => {
+  const normalized = normalizeManifestRepositories(manifest);
+  const diagnostics = [];
+  const targets = normalized.targets.flatMap((target) => {
+    if (target.repositoryName.length === 0) {
+      diagnostics.push(createMissingIdentityDiagnostic(target));
+      return [];
+    }
+    return [
+      {
+        repositoryMode: target.mode,
+        targetId: target.targetId,
+        ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+        owner: organization,
+        repositoryName: target.repositoryName,
+        fullName: `${organization}/${target.repositoryName}`,
+        htmlUrl: target.repositoryUrl,
+        ...target.cloneUrl === void 0 ? {} : { cloneUrl: target.cloneUrl },
+        sectionIds: target.sectionIds,
+        studentIds: target.studentIds,
+        githubUsernames: target.githubUsernames,
+        diagnostics: target.diagnostics
+      }
+    ];
+  });
+  return {
+    repositoryMode: manifest.repositoryMode ?? "individual",
+    targets,
+    diagnostics
+  };
+};
+var selectGradingTargets = (normalized, students) => {
+  const selectedStudentIds = new Set(students.map((student) => student.studentId));
+  return normalized.targets.filter(
+    (target) => target.studentIds.some((studentId) => selectedStudentIds.has(studentId))
+  );
+};
+var findGradingTargetForStudent = (normalized, student) => normalized.targets.find(
+  (target) => target.studentIds.some((studentId) => studentId === student.studentId) && target.sectionIds.some((section) => section === student.section)
+);
+
 // src/grade-preview/grade-preview-models.ts
 var ASSIGNMENT_GRADE_PREVIEW_SCHEMA_VERSION = 1;
 
@@ -3221,7 +3313,7 @@ var createManifestTrackedRepositoryMissingDiagnostic = (student, repository) => 
     studentId: student.studentId,
     githubUsername: student.githubUsername,
     section: student.section,
-    repository: repository.repository.fullName
+    repository: repository.fullName
   }
 );
 var createWorkflowMissingDiagnostic = (student, repository, workflowPath) => createConfigDiagnostic(
@@ -3231,7 +3323,7 @@ var createWorkflowMissingDiagnostic = (student, repository, workflowPath) => cre
     studentId: student.studentId,
     githubUsername: student.githubUsername,
     section: student.section,
-    repository: repository.repository.fullName,
+    repository: repository.fullName,
     workflowPath
   }
 );
@@ -3242,7 +3334,7 @@ var createWorkflowDispatchMissingDiagnostic2 = (student, repository, workflowPat
     studentId: student.studentId,
     githubUsername: student.githubUsername,
     section: student.section,
-    repository: repository.repository.fullName,
+    repository: repository.fullName,
     workflowPath
   }
 );
@@ -3250,12 +3342,12 @@ var createRepositoryStatusUnknownDiagnostic2 = (error, student, repository) => {
   if (error instanceof GitHubClientError) {
     return createConfigDiagnostic(
       error.diagnosticCode,
-      `Could not check repository ${repository.repository.fullName}: ${error.message}`,
+      `Could not check repository ${repository.fullName}: ${error.message}`,
       {
         studentId: student.studentId,
         githubUsername: student.githubUsername,
         section: student.section,
-        repository: repository.repository.fullName,
+        repository: repository.fullName,
         kind: error.kind,
         retryable: error.retryable,
         ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds }
@@ -3264,12 +3356,12 @@ var createRepositoryStatusUnknownDiagnostic2 = (error, student, repository) => {
   }
   return createConfigDiagnostic(
     STUDENT_REPOSITORY_STATUS_UNKNOWN_CODE,
-    `Could not check repository ${repository.repository.fullName}.`,
+    `Could not check repository ${repository.fullName}.`,
     {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName
+      repository: repository.fullName
     }
   );
 };
@@ -3299,9 +3391,7 @@ var createGradingPreview2 = (config, workflowDispatch) => {
     workflowRef: config.assignment.template.branch
   };
 };
-var findManifestRecord2 = (manifest, student) => manifest?.repositories.find(
-  (record) => record.studentId === student.studentId && record.section === student.section
-);
+var findManifestRecord2 = (targets, student) => targets === void 0 ? void 0 : findGradingTargetForStudent(targets, student);
 var createRow2 = (student, repository, status, reason, workflow, ref, diagnostics = []) => ({
   studentId: student.studentId,
   githubUsername: student.githubUsername,
@@ -3315,7 +3405,7 @@ var createRow2 = (student, repository, status, reason, workflow, ref, diagnostic
 });
 var createSkippedStudentRow = (student, repository) => createRow2(
   student,
-  repository?.repository.fullName ?? null,
+  repository?.fullName ?? null,
   "would_skip",
   `${STUDENT_STATUS_REASON_PREFIX2}_${student.status}`,
   null,
@@ -3323,7 +3413,7 @@ var createSkippedStudentRow = (student, repository) => createRow2(
 );
 var createBlockedLifecycleRow = (config, student, repository, workflowPath) => createRow2(
   student,
-  repository?.repository.fullName ?? null,
+  repository?.fullName ?? null,
   "blocked",
   config.assignment.assignment.status,
   workflowPath,
@@ -3332,7 +3422,7 @@ var createBlockedLifecycleRow = (config, student, repository, workflowPath) => c
 );
 var createGradingDisabledRow = (student, repository) => createRow2(
   student,
-  repository?.repository.fullName ?? null,
+  repository?.fullName ?? null,
   "would_skip",
   GRADING_NOT_CONFIGURED_CODE,
   null,
@@ -3344,13 +3434,13 @@ var createMissingManifestRow = (student, workflowPath, ref) => createRow2(studen
 var previewDispatchableRepository = async (student, repository, githubClient, workflowPath, ref) => {
   try {
     const existingRepository = await githubClient.getRepository(
-      repository.repository.owner,
-      repository.repository.name
+      repository.owner,
+      repository.repositoryName
     );
     if (existingRepository === null) {
       return createRow2(
         student,
-        repository.repository.fullName,
+        repository.fullName,
         "blocked",
         STUDENT_REPOSITORY_MISSING_CODE,
         workflowPath,
@@ -3359,14 +3449,14 @@ var previewDispatchableRepository = async (student, repository, githubClient, wo
       );
     }
     const workflow = await githubClient.getWorkflow(
-      repository.repository.owner,
-      repository.repository.name,
+      repository.owner,
+      repository.repositoryName,
       getWorkflowDispatchIdentifier(workflowPath)
     );
     if (workflow === null) {
       return createRow2(
         student,
-        repository.repository.fullName,
+        repository.fullName,
         "blocked",
         GRADING_WORKFLOW_MISSING_CODE,
         workflowPath,
@@ -3377,7 +3467,7 @@ var previewDispatchableRepository = async (student, repository, githubClient, wo
     if (!workflow.supportsDispatch) {
       return createRow2(
         student,
-        repository.repository.fullName,
+        repository.fullName,
         "blocked",
         WORKFLOW_DISPATCH_MISSING_CODE,
         workflowPath,
@@ -3387,7 +3477,7 @@ var previewDispatchableRepository = async (student, repository, githubClient, wo
     }
     return createRow2(
       student,
-      repository.repository.fullName,
+      repository.fullName,
       "would_dispatch",
       WORKFLOW_DISPATCH_AVAILABLE_REASON,
       workflowPath,
@@ -3396,7 +3486,7 @@ var previewDispatchableRepository = async (student, repository, githubClient, wo
   } catch (error) {
     return createRow2(
       student,
-      repository.repository.fullName,
+      repository.fullName,
       "unknown",
       STUDENT_REPOSITORY_STATUS_UNKNOWN_CODE,
       workflowPath,
@@ -3405,11 +3495,11 @@ var previewDispatchableRepository = async (student, repository, githubClient, wo
     );
   }
 };
-var previewStudentRepository2 = async (config, student, manifest, githubClient) => {
+var previewStudentRepository2 = async (config, student, targets, githubClient) => {
   const grading = getEffectiveGrading(config);
   const workflowPath = grading.workflow ?? null;
   const workflowRef = grading.enabled ? config.assignment.template.branch : null;
-  const repository = findManifestRecord2(manifest, student);
+  const repository = findManifestRecord2(targets, student);
   if (student.status !== ROSTER_STATUS_ACTIVE) {
     return createSkippedStudentRow(student, repository);
   }
@@ -3425,7 +3515,7 @@ var previewStudentRepository2 = async (config, student, manifest, githubClient) 
   if (githubClient === void 0) {
     return createRow2(
       student,
-      repository.repository.fullName,
+      repository.fullName,
       "token_required",
       TOKEN_REQUIRED_REASON,
       workflowPath,
@@ -3447,7 +3537,7 @@ var createPlanSummary2 = (repositories) => ({
   unknown: repositories.filter((row) => row.status === "unknown" || row.status === "token_required").length
 });
 var collectRowDiagnostics2 = (repositories) => repositories.flatMap((row) => row.diagnostics);
-var hasErrorDiagnostics2 = (diagnostics) => diagnostics.some((diagnostic2) => diagnostic2.severity === "error");
+var hasErrorDiagnostics2 = (diagnostics) => diagnostics.some((diagnostic3) => diagnostic3.severity === "error");
 var hasTokenRequiredRows = (repositories) => repositories.some((row) => row.status === "token_required");
 var createStatus2 = (diagnostics) => hasErrorDiagnostics2(diagnostics) ? "partial_success" : "success";
 var createGradeAction = (diagnostics, summary) => {
@@ -3505,9 +3595,27 @@ var buildAssignmentGradePreview = async ({
   const grading = getEffectiveGrading(config);
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: grading.enabled });
   const manifest = manifestResult.status === "loaded" ? manifestResult.manifest : void 0;
-  const repositoryRows = await Promise.all(
+  const normalizedTargets = manifest === void 0 ? void 0 : normalizeGradingTargets(manifest, config.course.github.organization);
+  const repositoryRows = normalizedTargets?.repositoryMode === "group" ? await Promise.all(
+    normalizedTargets.targets.flatMap((target) => {
+      const student = rosterResult.students.find(
+        (candidate) => target.studentIds.some((studentId) => studentId === candidate.studentId)
+      );
+      return student === void 0 ? [] : [
+        previewStudentRepository2(config, student, normalizedTargets, githubClient).then(
+          (row) => ({
+            ...row,
+            targetId: target.targetId,
+            ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+            studentIds: target.studentIds,
+            githubUsernames: target.githubUsernames
+          })
+        )
+      ];
+    })
+  ) : await Promise.all(
     rosterResult.students.map(
-      (student) => previewStudentRepository2(config, student, manifest, githubClient)
+      (student) => previewStudentRepository2(config, student, normalizedTargets, githubClient)
     )
   );
   const summary = createPlanSummary2(repositoryRows);
@@ -3528,6 +3636,7 @@ var buildAssignmentGradePreview = async ({
     status,
     exitCode: resolveExitCode2(status),
     diagnostics,
+    ...normalizedTargets?.repositoryMode === "group" ? { repositoryMode: "group" } : {},
     assignment: {
       slug: config.assignment.assignment.slug,
       title: config.assignment.assignment.title,
@@ -3598,6 +3707,7 @@ var createEmptyAssignmentGradeStatusResult = (status, diagnostics) => ({
   target: null,
   grading: null,
   summary: null,
+  targets: [],
   repositories: [],
   actions: null
 });
@@ -3661,7 +3771,7 @@ var createWorkflowRunMissingDiagnostic = (student, repository, workflowPath) => 
     studentId: student.studentId,
     githubUsername: student.githubUsername,
     section: student.section,
-    repository: repository.repository.fullName,
+    repository: repository.fullName,
     workflowPath
   }
 );
@@ -3669,12 +3779,12 @@ var createWorkflowStatusUnknownDiagnostic = (error, student, repository) => {
   if (error instanceof GitHubClientError) {
     return createConfigDiagnostic(
       error.diagnosticCode,
-      `Could not check grading workflow run status for ${repository.repository.fullName}.`,
+      `Could not check grading workflow run status for ${repository.fullName}.`,
       {
         studentId: student.studentId,
         githubUsername: student.githubUsername,
         section: student.section,
-        repository: repository.repository.fullName,
+        repository: repository.fullName,
         kind: error.kind,
         retryable: error.retryable,
         ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds }
@@ -3683,12 +3793,12 @@ var createWorkflowStatusUnknownDiagnostic = (error, student, repository) => {
   }
   return createConfigDiagnostic(
     GRADING_WORKFLOW_STATUS_UNKNOWN_CODE,
-    `Could not check grading workflow run status for ${repository.repository.fullName}.`,
+    `Could not check grading workflow run status for ${repository.fullName}.`,
     {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName
+      repository: repository.fullName
     }
   );
 };
@@ -3699,7 +3809,7 @@ var createWorkflowRunInProgressDiagnostic = (student, repository, run, workflowP
     studentId: student.studentId,
     githubUsername: student.githubUsername,
     section: student.section,
-    repository: repository.repository.fullName,
+    repository: repository.fullName,
     workflowPath,
     runId: run.id,
     status: run.status
@@ -3712,7 +3822,7 @@ var createWorkflowRunFailedDiagnostic = (student, repository, run, workflowPath,
     studentId: student.studentId,
     githubUsername: student.githubUsername,
     section: student.section,
-    repository: repository.repository.fullName,
+    repository: repository.fullName,
     workflowPath,
     runId: run.id,
     conclusion
@@ -3742,9 +3852,7 @@ var createGradingStatus = (config) => {
     workflowRef: config.assignment.template.branch
   };
 };
-var findManifestRecord3 = (manifest, student) => manifest?.repositories.find(
-  (record) => record.studentId === student.studentId && record.section === student.section
-);
+var findManifestRecord3 = (targets, student) => targets === void 0 ? void 0 : findGradingTargetForStudent(targets, student);
 var normalizeConclusion = (conclusion) => {
   if (conclusion === null) {
     return "unknown";
@@ -3754,13 +3862,13 @@ var normalizeConclusion = (conclusion) => {
 var getRunTimestamp = (run) => run.startedAt ?? run.createdAt;
 var sortRunsNewestFirst = (runs) => [...runs].sort((left, right) => getRunTimestamp(right).localeCompare(getRunTimestamp(left)));
 var selectLatestWorkflowRun = (runs) => sortRunsNewestFirst(runs)[0] ?? null;
-var createFallbackRunUrl = (repository, run) => `https://${GITHUB_HOST}/${repository.repository.fullName}/actions/runs/${String(run.id)}`;
+var createFallbackRunUrl = (repository, run) => `https://${GITHUB_HOST}/${repository.fullName}/actions/runs/${String(run.id)}`;
 var isMatchingRunUrl = (urlValue, repository, runId) => {
   try {
     const url = new URL(urlValue);
     const pathParts = url.pathname.split("/").filter((part) => part.length > 0);
     const [owner, repo, actions, runs, pathRunId] = pathParts;
-    return url.protocol === "https:" && url.hostname === GITHUB_HOST && url.search.length === 0 && url.hash.length === 0 && pathParts.length === ACTIONS_RUN_PATH_SEGMENT_COUNT && owner === repository.repository.owner && repo === repository.repository.name && actions === "actions" && runs === "runs" && pathRunId === String(runId);
+    return url.protocol === "https:" && url.hostname === GITHUB_HOST && url.search.length === 0 && url.hash.length === 0 && pathParts.length === ACTIONS_RUN_PATH_SEGMENT_COUNT && owner === repository.owner && repo === repository.repositoryName && actions === "actions" && runs === "runs" && pathRunId === String(runId);
   } catch {
     return false;
   }
@@ -3774,6 +3882,9 @@ var createRow3 = (student, repository, status, reason, workflow, ref, diagnostic
     studentId: student.studentId,
     githubUsername: student.githubUsername,
     section: student.section,
+    ...repositoryRecord === null ? {} : { targetId: repositoryRecord.targetId },
+    ...repositoryRecord?.groupId === void 0 ? {} : { groupId: repositoryRecord.groupId },
+    ...repositoryRecord === null ? {} : { studentIds: repositoryRecord.studentIds },
     repository,
     workflow,
     ref,
@@ -3791,7 +3902,7 @@ var createRow3 = (student, repository, status, reason, workflow, ref, diagnostic
 };
 var createGradingDisabledRow2 = (student, repository) => createRow3(
   student,
-  repository?.repository.fullName ?? null,
+  repository?.fullName ?? null,
   "blocked",
   GRADING_NOT_CONFIGURED_CODE,
   null,
@@ -3799,7 +3910,7 @@ var createGradingDisabledRow2 = (student, repository) => createRow3(
 );
 var createBlockedLifecycleRow2 = (config, student, repository, workflowPath) => createRow3(
   student,
-  repository?.repository.fullName ?? null,
+  repository?.fullName ?? null,
   "blocked",
   config.assignment.assignment.status,
   workflowPath,
@@ -3811,7 +3922,7 @@ var createMissingManifestRow2 = (student, workflowPath, ref) => createRow3(stude
 ]);
 var createTokenRequiredRow = (student, repository, workflowPath, ref) => createRow3(
   student,
-  repository.repository.fullName,
+  repository.fullName,
   "token_required",
   TOKEN_REQUIRED_REASON2,
   workflowPath,
@@ -3831,7 +3942,7 @@ var createRunRow = (student, repository, workflowPath, ref, run) => {
   const diagnostics = status === "queued" || status === "in_progress" ? [createWorkflowRunInProgressDiagnostic(student, repository, run, workflowPath)] : failedConclusion ? [createWorkflowRunFailedDiagnostic(student, repository, run, workflowPath, conclusion)] : [];
   return createRow3(
     student,
-    repository.repository.fullName,
+    repository.fullName,
     status,
     reason,
     workflowPath,
@@ -3843,7 +3954,7 @@ var createRunRow = (student, repository, workflowPath, ref, run) => {
 };
 var createMissingRunRow = (student, repository, workflowPath, ref) => createRow3(
   student,
-  repository.repository.fullName,
+  repository.fullName,
   "missing",
   GRADING_WORKFLOW_RUN_MISSING_CODE,
   workflowPath,
@@ -3852,7 +3963,7 @@ var createMissingRunRow = (student, repository, workflowPath, ref) => createRow3
 );
 var createUnknownRunRow = (error, student, repository, workflowPath, ref) => createRow3(
   student,
-  repository.repository.fullName,
+  repository.fullName,
   "unknown",
   GRADING_WORKFLOW_STATUS_UNKNOWN_CODE,
   workflowPath,
@@ -3862,8 +3973,8 @@ var createUnknownRunRow = (error, student, repository, workflowPath, ref) => cre
 var getRepositoryWorkflowStatus = async (student, repository, githubClient, workflowPath, ref) => {
   try {
     const runs = await githubClient.listWorkflowRuns({
-      owner: repository.repository.owner,
-      repo: repository.repository.name,
+      owner: repository.owner,
+      repo: repository.repositoryName,
       workflowPath: getWorkflowDispatchIdentifier(workflowPath)
     });
     const run = selectLatestWorkflowRun(runs);
@@ -3872,11 +3983,11 @@ var getRepositoryWorkflowStatus = async (student, repository, githubClient, work
     return createUnknownRunRow(error, student, repository, workflowPath, ref);
   }
 };
-var createRepositoryStatusRow = async (config, student, manifest, githubClient) => {
+var createRepositoryStatusRowUncached = async (config, student, targets, githubClient) => {
   const grading = getEffectiveGrading2(config);
   const workflowPath = grading.workflow ?? null;
   const workflowRef = grading.enabled ? config.assignment.template.branch : null;
-  const repository = findManifestRecord3(manifest, student);
+  const repository = findManifestRecord3(targets, student);
   if (!grading.enabled || workflowPath === null) {
     return createGradingDisabledRow2(student, repository);
   }
@@ -3901,6 +4012,28 @@ var createRepositoryStatusRow = async (config, student, manifest, githubClient) 
     workflowPath,
     config.assignment.template.branch
   );
+};
+var createRepositoryStatusRow = async (config, student, targets, githubClient, statusCache) => {
+  const repository = findManifestRecord3(targets, student);
+  if (repository === void 0) {
+    return createRepositoryStatusRowUncached(config, student, targets, githubClient);
+  }
+  const cached = statusCache.get(repository.targetId);
+  const sourceRow = cached ?? (() => {
+    const created = createRepositoryStatusRowUncached(config, student, targets, githubClient);
+    statusCache.set(repository.targetId, created);
+    return created;
+  })();
+  const row = await sourceRow;
+  return {
+    ...row,
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    section: student.section,
+    targetId: repository.targetId,
+    ...repository.groupId === void 0 ? {} : { groupId: repository.groupId },
+    studentIds: repository.studentIds
+  };
 };
 var countRows = (repositories, predicate) => repositories.filter(predicate).length;
 var createSummary3 = (repositories) => {
@@ -3959,7 +4092,7 @@ var filterActiveStudents = (activeStudents, studentIds) => studentIds === void 0
   (student) => studentIds.some((studentId) => studentId === student.studentId)
 );
 var collectRowDiagnostics3 = (repositories) => repositories.flatMap((row) => row.diagnostics);
-var hasErrorDiagnostics3 = (diagnostics) => diagnostics.some((diagnostic2) => diagnostic2.severity === "error");
+var hasErrorDiagnostics3 = (diagnostics) => diagnostics.some((diagnostic3) => diagnostic3.severity === "error");
 var hasTokenRequiredRows2 = (repositories) => repositories.some((row) => row.status === "token_required");
 var createStatus3 = (diagnostics) => hasErrorDiagnostics3(diagnostics) ? "partial_success" : "success";
 var createActions = (summary) => ({
@@ -4006,6 +4139,7 @@ var buildAssignmentGradeStatus = async ({
   const grading = getEffectiveGrading2(config);
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: grading.enabled });
   const manifest = manifestResult.status === "loaded" ? manifestResult.manifest : void 0;
+  const normalizedTargets = manifest === void 0 ? void 0 : normalizeGradingTargets(manifest, config.course.github.organization);
   const activeStudents = rosterResult.students.filter(
     (student) => student.status === ROSTER_STATUS_ACTIVE
   );
@@ -4025,12 +4159,18 @@ var buildAssignmentGradeStatus = async ({
     ),
     ...filtered && selectedStudents.length === EMPTY_COUNT4 ? [createStudentFilterNoMatchesDiagnostic(config, requestedStudentIds)] : []
   ];
+  const statusCache = /* @__PURE__ */ new Map();
   const repositoryRows = await Promise.all(
     selectedStudents.map(
-      (student) => createRepositoryStatusRow(config, student, manifest, githubClient)
+      (student) => createRepositoryStatusRow(config, student, normalizedTargets, githubClient, statusCache)
     )
   );
-  const summary = createSummary3(repositoryRows);
+  const targetRows = Array.from(
+    new Map(
+      repositoryRows.map((row) => [row.targetId ?? `${row.studentId}:${row.section}`, row])
+    ).values()
+  );
+  const summary = createSummary3(targetRows);
   const diagnostics = [
     ...configResult.diagnostics,
     ...rosterResult.warnings,
@@ -4039,7 +4179,7 @@ var buildAssignmentGradeStatus = async ({
     ...manifestResult.errors,
     ...!grading.enabled ? [createGradingNotConfiguredWarning2()] : [],
     ...hasTokenRequiredRows2(repositoryRows) ? [createTokenRequiredDiagnostic3()] : [],
-    ...collectRowDiagnostics3(repositoryRows)
+    ...collectRowDiagnostics3(targetRows)
   ];
   const status = filtered && selectedStudents.length === EMPTY_COUNT4 ? "failure" : createStatus3(diagnostics);
   const targetStudentCount = filtered ? selectedStudents.length : rosterResult.summary.studentCount;
@@ -4051,6 +4191,7 @@ var buildAssignmentGradeStatus = async ({
     status,
     exitCode: resolveExitCode3(status),
     diagnostics,
+    ...normalizedTargets?.repositoryMode === "group" ? { repositoryMode: "group" } : {},
     assignment: {
       slug: config.assignment.assignment.slug,
       title: config.assignment.assignment.title,
@@ -4073,6 +4214,7 @@ var buildAssignmentGradeStatus = async ({
     },
     grading: createGradingStatus(config),
     summary: filtered && selectedStudents.length === EMPTY_COUNT4 ? createZeroSummary() : summary,
+    targets: targetRows,
     repositories: repositoryRows,
     actions: createActions(summary)
   };
@@ -4126,7 +4268,7 @@ var createEmptyAssignmentDetailResult = (status, diagnostics) => ({
   applyState: null,
   actions: null
 });
-var hasErrorDiagnostics4 = (diagnostics) => diagnostics.some((diagnostic2) => diagnostic2.severity === "error");
+var hasErrorDiagnostics4 = (diagnostics) => diagnostics.some((diagnostic3) => diagnostic3.severity === "error");
 var getEffectiveGrading3 = (config) => config.assignment.grading ?? config.course.grading;
 var createRosterSummary = (config) => {
   const rosterResult = loadAssignmentRosters(config);
@@ -5259,7 +5401,7 @@ var GITHUB_ERROR_CODES = /* @__PURE__ */ new Set([
   DiagnosticCode.GithubRateLimited,
   DiagnosticCode.GithubTimeout
 ]);
-var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic2) => codes.has(diagnostic2.code));
+var hasCodeInSet = (diagnostics, codes) => diagnostics.some((diagnostic3) => codes.has(diagnostic3.code));
 var resolveExitCode5 = ({ status, errors }) => {
   if (hasCodeInSet(errors, AUTHORIZATION_ERROR_CODES)) {
     return 3 /* AuthenticationOrAuthorizationFailure */;
@@ -5596,17 +5738,17 @@ var persistManifest = (state, manifestPath) => {
   }
   return state;
 };
-var recordWarning = (state, diagnostic2) => ({
+var recordWarning = (state, diagnostic3) => ({
   ...state,
-  warnings: [...state.warnings, diagnostic2],
+  warnings: [...state.warnings, diagnostic3],
   summary: {
     ...state.summary,
     warnings: state.summary.warnings + 1
   }
 });
-var recordError = (state, diagnostic2) => ({
+var recordError = (state, diagnostic3) => ({
   ...state,
-  errors: [...state.errors, diagnostic2],
+  errors: [...state.errors, diagnostic3],
   summary: {
     ...state.summary,
     failed: state.summary.failed + 1,
@@ -5891,7 +6033,7 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
     );
     if (workflow === null) {
       const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
-      const diagnostic2 = isNewRepository ? createWorkflowPendingWarning(operation) : createWorkflowMissingDiagnostic2(operation);
+      const diagnostic3 = isNewRepository ? createWorkflowPendingWarning(operation) : createWorkflowMissingDiagnostic2(operation);
       return persistManifest(
         (isNewRepository ? recordWarning : recordError)(
           {
@@ -5905,7 +6047,7 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
               }
             })
           },
-          diagnostic2
+          diagnostic3
         ),
         input.manifestPath
       );
@@ -5952,7 +6094,7 @@ var executeVerifyDispatch = async (input, state, operation, observedAt) => {
     );
     if (workflow === null || !workflow.supportsDispatch) {
       const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
-      const diagnostic2 = workflow === null && isNewRepository ? createWorkflowPendingWarning(operation) : createWorkflowDispatchDiagnostic(operation);
+      const diagnostic3 = workflow === null && isNewRepository ? createWorkflowPendingWarning(operation) : createWorkflowDispatchDiagnostic(operation);
       return persistManifest(
         (workflow === null && isNewRepository ? recordWarning : recordError)(
           {
@@ -5965,7 +6107,7 @@ var executeVerifyDispatch = async (input, state, operation, observedAt) => {
               }
             })
           },
-          diagnostic2
+          diagnostic3
         ),
         input.manifestPath
       );
@@ -6573,10 +6715,10 @@ var generateStudentRepositoryName = (config, student) => {
     errors: result.errors
   };
 };
-var createLifecycleBlockedOperation = (config, student, diagnostic2, repositoryName) => createOperation(student, "create_repository_from_template", "blocked", {
+var createLifecycleBlockedOperation = (config, student, diagnostic3, repositoryName) => createOperation(student, "create_repository_from_template", "blocked", {
   repositoryName,
   reason: config.assignment.assignment.status,
-  errors: [diagnostic2]
+  errors: [diagnostic3]
 });
 var buildSkippedStudentOperation = (student) => createOperation(student, "create_repository_from_template", "skipped", {
   reason: `${STUDENT_STATUS_REASON_PREFIX3}_${student.status}`
@@ -6877,7 +7019,7 @@ var createCliJsonOutput = (result) => {
   };
 };
 var formatCommandResultAsJson = (result) => JSON.stringify(createCliJsonOutput(result), void 0, JSON_INDENT_SPACES);
-var formatDiagnostic = (diagnostic2) => `${diagnostic2.code}: ${diagnostic2.message}`;
+var formatDiagnostic = (diagnostic3) => `${diagnostic3.code}: ${diagnostic3.message}`;
 var formatCommandResultAsText = (result) => {
   const redactedResult = redactCommandResult(result);
   const assignmentFile = redactedResult.assignmentFile ?? "<none>";
@@ -6953,17 +7095,17 @@ var executeGroupTargets = async (input) => {
         target.repositoryName
       );
       if (existing !== null) {
-        const diagnostic2 = failure(
+        const diagnostic3 = failure(
           target,
           `Repository ${target.repositoryName} already exists and is not manifest-tracked. Graider will not adopt untracked repositories automatically.`
         );
         return {
           targets: [
             ...results,
-            { target, htmlUrl: null, cloneUrl: null, status: "failed", diagnostics: [diagnostic2] }
+            { target, htmlUrl: null, cloneUrl: null, status: "failed", diagnostics: [diagnostic3] }
           ],
           warnings,
-          errors: [...errors, diagnostic2]
+          errors: [...errors, diagnostic3]
         };
       }
       await input.githubClient.createRepositoryFromTemplate({
@@ -7020,17 +7162,17 @@ var executeGroupTargets = async (input) => {
         diagnostics: []
       });
     } catch {
-      const diagnostic2 = failure(
+      const diagnostic3 = failure(
         target,
         `Group target ${target.groupId} failed for repository ${target.repositoryName}.`
       );
       return {
         targets: [
           ...results,
-          { target, htmlUrl: null, cloneUrl: null, status: "failed", diagnostics: [diagnostic2] }
+          { target, htmlUrl: null, cloneUrl: null, status: "failed", diagnostics: [diagnostic3] }
         ],
         warnings,
-        errors: [...errors, diagnostic2]
+        errors: [...errors, diagnostic3]
       };
     }
   }
@@ -7595,17 +7737,13 @@ var createInitialSummary = (targetsSelected) => ({
   errors: EMPTY_COUNT12
 });
 var getEffectiveGrading5 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
-var findManifestRecord6 = (manifest, student) => manifest.repositories.find(
-  (record) => record.studentId === student.studentId && record.section === student.section
-);
-var normalizeGitHubError4 = (error, student, repository) => error instanceof GitHubClientError ? createConfigDiagnostic(
+var normalizeGitHubError4 = (error, target) => error instanceof GitHubClientError ? createConfigDiagnostic(
   DiagnosticCode.WorkflowDispatchFailed,
-  "Workflow dispatch failed for a selected student repository.",
+  "Workflow dispatch failed for a selected repository target.",
   {
-    studentId: student.studentId,
-    githubUsername: student.githubUsername,
-    section: student.section,
-    repositoryName: repository?.repository.name,
+    targetId: target.targetId,
+    ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+    repositoryName: target.repositoryName,
     underlyingDiagnosticCode: error.diagnosticCode,
     kind: error.kind
   }
@@ -7613,41 +7751,38 @@ var normalizeGitHubError4 = (error, student, repository) => error instanceof Git
   DiagnosticCode.WorkflowDispatchFailed,
   "Unexpected workflow dispatch failure.",
   {
-    studentId: student.studentId,
-    githubUsername: student.githubUsername,
-    section: student.section,
-    repositoryName: repository?.repository.name
+    targetId: target.targetId,
+    ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+    repositoryName: target.repositoryName
+  }
+);
+var createWorkflowMissingDiagnostic3 = (target, workflowPath) => createConfigDiagnostic(
+  DiagnosticCode.GradingWorkflowMissing,
+  "Configured grading workflow was not found.",
+  {
+    targetId: target.targetId,
+    ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+    repositoryName: target.repositoryName,
+    workflowPath
+  }
+);
+var createWorkflowDispatchMissingDiagnostic3 = (target, workflowPath) => createConfigDiagnostic(
+  DiagnosticCode.WorkflowDispatchMissing,
+  "Configured grading workflow does not support manual dispatch.",
+  {
+    targetId: target.targetId,
+    ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+    repositoryName: target.repositoryName,
+    workflowPath
   }
 );
 var createStudentRepositoryMissingDiagnostic3 = (student) => createConfigDiagnostic(
   DiagnosticCode.StudentRepositoryMissing,
-  "Selected student does not have a manifest-tracked repository.",
+  "Selected student does not have a manifest-tracked repository target.",
   {
     studentId: student.studentId,
     githubUsername: student.githubUsername,
     section: student.section
-  }
-);
-var createWorkflowMissingDiagnostic3 = (student, repository, workflowPath) => createConfigDiagnostic(
-  DiagnosticCode.GradingWorkflowMissing,
-  "Configured grading workflow was not found.",
-  {
-    studentId: student.studentId,
-    githubUsername: student.githubUsername,
-    section: student.section,
-    repositoryName: repository.repository.name,
-    workflowPath
-  }
-);
-var createWorkflowDispatchMissingDiagnostic3 = (student, repository, workflowPath) => createConfigDiagnostic(
-  DiagnosticCode.WorkflowDispatchMissing,
-  "Configured grading workflow does not support manual dispatch.",
-  {
-    studentId: student.studentId,
-    githubUsername: student.githubUsername,
-    section: student.section,
-    repositoryName: repository.repository.name,
-    workflowPath
   }
 );
 var createGradingNotConfiguredWarning3 = () => createWarningDiagnostic(
@@ -7655,14 +7790,14 @@ var createGradingNotConfiguredWarning3 = () => createWarningDiagnostic(
   "Automated grading is not configured for this assignment."
 );
 var runGitHubOperation2 = async (input, operation) => withGitHubRetry(operation, input.retryOptions);
-var recordFailure = (state, diagnostic2) => ({
+var recordFailure = (state, diagnostic3) => ({
   summary: {
     ...state.summary,
     dispatchFailed: state.summary.dispatchFailed + FAILED_INCREMENT,
     errors: state.summary.errors + FAILED_INCREMENT
   },
   warnings: state.warnings,
-  errors: [...state.errors, diagnostic2]
+  errors: [...state.errors, diagnostic3]
 });
 var recordSuccess = (state) => ({
   summary: {
@@ -7672,45 +7807,38 @@ var recordSuccess = (state) => ({
   warnings: state.warnings,
   errors: state.errors
 });
-var dispatchForStudent = async (input, state, student, configuredWorkflowPath) => {
-  const repository = findManifestRecord6(input.manifest, student);
+var dispatchForTarget = async (input, state, target, configuredWorkflowPath) => {
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(configuredWorkflowPath);
-  if (repository === void 0) {
-    return recordFailure(state, createStudentRepositoryMissingDiagnostic3(student));
-  }
   try {
     const workflow = await runGitHubOperation2(
       input,
       () => input.githubClient.getWorkflow(
-        repository.repository.owner,
-        repository.repository.name,
+        target.owner,
+        target.repositoryName,
         workflowDispatchIdentifier
       )
     );
     if (workflow === null) {
-      return recordFailure(
-        state,
-        createWorkflowMissingDiagnostic3(student, repository, configuredWorkflowPath)
-      );
+      return recordFailure(state, createWorkflowMissingDiagnostic3(target, configuredWorkflowPath));
     }
     if (!workflow.supportsDispatch) {
       return recordFailure(
         state,
-        createWorkflowDispatchMissingDiagnostic3(student, repository, configuredWorkflowPath)
+        createWorkflowDispatchMissingDiagnostic3(target, configuredWorkflowPath)
       );
     }
     await runGitHubOperation2(
       input,
       () => input.githubClient.dispatchWorkflow({
-        owner: repository.repository.owner,
-        repo: repository.repository.name,
+        owner: target.owner,
+        repo: target.repositoryName,
         workflowPath: workflowDispatchIdentifier,
         ref: input.config.assignment.template.branch
       })
     );
     return recordSuccess(state);
   } catch (error) {
-    return recordFailure(state, normalizeGitHubError4(error, student, repository));
+    return recordFailure(state, normalizeGitHubError4(error, target));
   }
 };
 var getGradeGitHubDiagnostics = (errors) => errors.flatMap((error) => {
@@ -7727,27 +7855,47 @@ var getGradeGitHubDiagnostics = (errors) => errors.flatMap((error) => {
 var executeGrade = async (input) => {
   const grading = getEffectiveGrading5(input.config);
   const workflowPath = grading.workflow;
+  const normalizedTargets = normalizeGradingTargets(
+    input.manifest,
+    input.config.course.github.organization
+  );
+  const targets = selectGradingTargets(normalizedTargets, input.targetStudents);
+  const selectedStudentIds = new Set(input.targetStudents.map((student) => student.studentId));
+  const targetStudentIds = new Set(targets.flatMap((target) => target.studentIds));
+  const missingStudents = input.targetStudents.filter(
+    (student) => selectedStudentIds.has(student.studentId) && !targetStudentIds.has(student.studentId)
+  );
   let state = {
-    summary: createInitialSummary(input.targetStudents.length),
+    summary: {
+      ...createInitialSummary(
+        normalizedTargets.repositoryMode === "group" ? targets.length : input.targetStudents.length
+      ),
+      dispatchFailed: missingStudents.length,
+      errors: missingStudents.length
+    },
     warnings: [],
-    errors: []
+    errors: [
+      ...normalizedTargets.diagnostics,
+      ...missingStudents.map(createStudentRepositoryMissingDiagnostic3)
+    ]
   };
   if (!grading.enabled) {
     return {
       summary: {
         ...state.summary,
-        skipped: input.targetStudents.length,
+        skipped: targets.length,
         warnings: SUCCESS_INCREMENT
       },
       warnings: [createGradingNotConfiguredWarning3()],
-      errors: []
+      errors: [],
+      targets: []
     };
   }
   if (workflowPath === void 0) {
     return {
       summary: {
         ...state.summary,
-        skipped: input.targetStudents.length,
+        skipped: targets.length,
         errors: SUCCESS_INCREMENT
       },
       warnings: [],
@@ -7756,10 +7904,12 @@ var executeGrade = async (input) => {
           DiagnosticCode.GradingNotConfigured,
           "Grading workflow is not configured for this assignment."
         )
-      ]
+      ],
+      targets: []
     };
   }
-  for (const student of input.targetStudents) {
+  const targetResults = [];
+  for (const target of targets) {
     state = {
       ...state,
       summary: {
@@ -7767,9 +7917,20 @@ var executeGrade = async (input) => {
         dispatchAttempted: state.summary.dispatchAttempted + SUCCESS_INCREMENT
       }
     };
-    state = await dispatchForStudent(input, state, student, workflowPath);
+    const priorErrorCount = state.errors.length;
+    state = await dispatchForTarget(input, state, target, workflowPath);
+    const diagnostics = state.errors.slice(priorErrorCount);
+    targetResults.push({
+      targetId: target.targetId,
+      ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+      repositoryName: target.repositoryName,
+      studentIds: target.studentIds,
+      githubUsernames: target.githubUsernames,
+      status: diagnostics.length === 0 ? "dispatched" : "failed",
+      diagnostics
+    });
   }
-  return state;
+  return { ...state, targets: targetResults };
 };
 
 // src/github/fake-github-client.ts
@@ -8326,7 +8487,12 @@ var runGradeCommand = async ({
       ...rosterResult.summary,
       ...selectionResult.summary,
       manifestFile: manifestPath.relativePath,
-      ...executionResult.summary
+      ...executionResult.summary,
+      ...manifestResult.manifest.repositoryMode === "group" ? {
+        repositoryMode: "group",
+        groupTargets: executionResult.targets,
+        studentMappingCount: selectionResult.students.length
+      } : {}
     }
   });
 };
@@ -8348,47 +8514,6 @@ var registerGradeCommand = (program) => {
     process.exitCode = result.exitCode;
   });
 };
-
-// src/manifest/repository-targets.ts
-var toTarget = (record) => ({
-  targetId: record.studentId,
-  mode: "individual",
-  repositoryName: record.repository.name,
-  repositoryUrl: record.repository.htmlUrl ?? null,
-  sectionIds: [record.section],
-  studentIds: [record.studentId],
-  githubUsernames: [record.githubUsername],
-  diagnostics: [...record.warnings, ...record.errors]
-});
-var toMapping = (record) => ({
-  studentId: record.studentId,
-  githubUsername: record.githubUsername,
-  targetId: record.studentId,
-  repositoryName: record.repository.name,
-  repositoryUrl: record.repository.htmlUrl ?? null
-});
-var normalizeManifestRepositories = (manifest) => ({
-  targets: manifest.schemaVersion === 2 ? (manifest.targets ?? []).map((target) => ({
-    targetId: target.targetId,
-    mode: target.mode,
-    repositoryName: target.repositoryName,
-    repositoryUrl: target.htmlUrl ?? null,
-    ...target.cloneUrl === void 0 ? {} : { cloneUrl: target.cloneUrl },
-    ...target.groupId === void 0 ? {} : { groupId: target.groupId },
-    sectionIds: target.sectionIds,
-    studentIds: target.studentIds,
-    githubUsernames: target.githubUsernames,
-    diagnostics: target.diagnostics
-  })) : manifest.repositories.map(toTarget),
-  studentMappings: manifest.schemaVersion === 2 ? (manifest.studentMappings ?? []).map((mapping) => ({
-    studentId: mapping.studentId,
-    githubUsername: mapping.githubUsername,
-    targetId: mapping.targetId,
-    repositoryName: mapping.repositoryName,
-    repositoryUrl: mapping.htmlUrl ?? null,
-    ...mapping.cloneUrl === void 0 ? {} : { cloneUrl: mapping.cloneUrl }
-  })) : manifest.repositories.map(toMapping)
-});
 
 // src/repository-mappings/repository-mappings-builder.ts
 var COMMAND_NAME7 = "assignment repository-mappings";
@@ -8480,6 +8605,181 @@ var createRepositoryMappingsJsonRequiredResult = () => createResult("failure", n
   )
 ]);
 
+// src/repository-download/repository-download.ts
+import fs9 from "fs";
+import path11 from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
+var execFileAsync = promisify(execFile);
+var defaultDependencies = {
+  existsSync: fs9.existsSync,
+  statSync: fs9.statSync,
+  mkdirSync: fs9.mkdirSync,
+  execFile: async (file, args) => {
+    await execFileAsync(file, [...args]);
+  }
+};
+var safeTargetPath = (destination, repositoryName) => {
+  if (repositoryName.length === 0 || repositoryName.includes("/") || repositoryName.includes("\\")) {
+    return null;
+  }
+  const resolvedDestination = path11.resolve(destination);
+  const targetPath = path11.resolve(resolvedDestination, repositoryName);
+  return targetPath.startsWith(`${resolvedDestination}${path11.sep}`) ? targetPath : null;
+};
+var diagnostic2 = (code, message, context) => createConfigDiagnostic(code, message, context);
+var downloadAssignmentRepositories = async ({
+  cwd,
+  assignmentFile,
+  destination,
+  dependencies = defaultDependencies
+}) => {
+  const mappings = buildAssignmentRepositoryMappings({ cwd, assignmentFile });
+  const base = {
+    schemaVersion: 1,
+    commandName: "assignment download-repositories",
+    assignmentPath: assignmentFile,
+    destination,
+    repositoryMode: mappings.repositoryMode,
+    totalTargets: mappings.targets.length
+  };
+  if (mappings.manifest.status !== "present") {
+    return {
+      ...base,
+      status: "failure",
+      exitCode: 1,
+      clonedCount: 0,
+      failedCount: 0,
+      targets: [],
+      diagnostics: mappings.diagnostics
+    };
+  }
+  try {
+    if (dependencies.existsSync(destination) && !dependencies.statSync(destination).isDirectory()) {
+      throw new Error("destination_not_directory");
+    }
+    dependencies.mkdirSync(destination, { recursive: true });
+  } catch {
+    return {
+      ...base,
+      status: "failure",
+      exitCode: 1,
+      clonedCount: 0,
+      failedCount: 0,
+      targets: [],
+      diagnostics: [
+        diagnostic2(
+          "repository_download_destination_invalid",
+          "Download destination is not a usable directory.",
+          { destination }
+        )
+      ]
+    };
+  }
+  try {
+    await dependencies.execFile("git", ["--version"]);
+  } catch {
+    return {
+      ...base,
+      status: "failure",
+      exitCode: 1,
+      clonedCount: 0,
+      failedCount: 0,
+      targets: [],
+      diagnostics: [
+        diagnostic2(
+          "repository_download_git_unavailable",
+          "Git is required to download repositories but was not available.",
+          {}
+        )
+      ]
+    };
+  }
+  const results = [];
+  for (const target of mappings.targets) {
+    const localPath = safeTargetPath(destination, target.repositoryName) ?? path11.join(destination, target.repositoryName);
+    const cloneUrl = target.cloneUrl ?? target.repositoryUrl;
+    const baseTarget = {
+      targetId: target.targetId,
+      ...target.groupId === void 0 ? {} : { groupId: target.groupId },
+      repositoryName: target.repositoryName,
+      ...target.cloneUrl === void 0 ? {} : { cloneUrl: target.cloneUrl },
+      ...target.repositoryUrl === null ? {} : { htmlUrl: target.repositoryUrl },
+      localPath,
+      studentIds: target.studentIds,
+      githubUsernames: target.githubUsernames
+    };
+    if (cloneUrl === null || cloneUrl.length === 0) {
+      results.push({
+        ...baseTarget,
+        status: "failed",
+        diagnostics: [
+          diagnostic2(
+            "repository_download_clone_url_missing",
+            "Repository target does not have a cloneable URL.",
+            { targetId: target.targetId, repositoryName: target.repositoryName }
+          )
+        ]
+      });
+      continue;
+    }
+    if (safeTargetPath(destination, target.repositoryName) === null) {
+      results.push({
+        ...baseTarget,
+        status: "failed",
+        diagnostics: [
+          diagnostic2(
+            "repository_download_unsafe_path",
+            "Repository name cannot be used as a safe download path.",
+            { targetId: target.targetId, repositoryName: target.repositoryName }
+          )
+        ]
+      });
+      continue;
+    }
+    if (dependencies.existsSync(localPath)) {
+      results.push({
+        ...baseTarget,
+        status: "failed",
+        diagnostics: [
+          diagnostic2(
+            "repository_download_destination_exists",
+            "Destination folder already exists; Graider will not overwrite or update it in this release.",
+            { repositoryName: target.repositoryName, localPath }
+          )
+        ]
+      });
+      continue;
+    }
+    try {
+      await dependencies.execFile("git", ["clone", cloneUrl, localPath]);
+      results.push({ ...baseTarget, status: "cloned", diagnostics: [] });
+    } catch {
+      results.push({
+        ...baseTarget,
+        status: "failed",
+        diagnostics: [
+          diagnostic2("repository_download_clone_failed", "Repository clone failed.", {
+            targetId: target.targetId,
+            repositoryName: target.repositoryName
+          })
+        ]
+      });
+    }
+  }
+  const clonedCount = results.filter((result) => result.status === "cloned").length;
+  const failedCount = results.length - clonedCount;
+  return {
+    ...base,
+    status: failedCount === 0 ? "success" : clonedCount === 0 ? "failure" : "partial_success",
+    exitCode: failedCount === 0 ? 0 : clonedCount === 0 ? 1 : 2,
+    clonedCount,
+    failedCount,
+    targets: results,
+    diagnostics: results.flatMap((result) => result.diagnostics)
+  };
+};
+
 // src/cli/commands/assignment.command.ts
 var COMMAND_NAME8 = "assignment";
 var DETAIL_COMMAND_NAME = "detail";
@@ -8489,6 +8789,7 @@ var GRADE_STATUS_COMMAND_NAME = "grade-status";
 var APPLY_COMMAND_NAME = "apply";
 var GRADE_COMMAND_NAME = "grade";
 var REPOSITORY_MAPPINGS_COMMAND_NAME = "repository-mappings";
+var DOWNLOAD_REPOSITORIES_COMMAND_NAME = "download-repositories";
 var ASSIGNMENT_APPLY_COMMAND_NAME = "assignment apply";
 var ASSIGNMENT_GRADE_COMMAND_NAME = "assignment grade";
 var JSON_INDENT_SPACES2 = 2;
@@ -8633,6 +8934,15 @@ var runAssignmentRepositoryMappingsCommand = ({
 }) => Promise.resolve(
   options.json ? buildAssignmentRepositoryMappings({ cwd, assignmentFile }) : createRepositoryMappingsJsonRequiredResult()
 );
+var runAssignmentDownloadRepositoriesCommand = async ({
+  cwd,
+  assignmentFile,
+  options
+}) => await downloadAssignmentRepositories({
+  cwd,
+  assignmentFile,
+  destination: options.destination ?? ""
+});
 var runAssignmentApplyCommand = ({
   cwd,
   assignmentFile,
@@ -8670,6 +8980,7 @@ var formatAssignmentApplyPreviewResultAsJson = (result) => JSON.stringify(result
 var formatAssignmentGradePreviewResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
 var formatAssignmentGradeStatusResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
 var formatAssignmentRepositoryMappingsResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
+var formatAssignmentDownloadRepositoriesResultAsJson = (result) => JSON.stringify(result, void 0, JSON_INDENT_SPACES2);
 var registerAssignmentCommand = (program) => {
   const assignment = program.command(COMMAND_NAME8).description("Inspect assignment configuration and local detail data.");
   assignment.command(DETAIL_COMMAND_NAME).argument("<assignment-file>").option("--json", "Required. Emit assignment detail JSON").description("Build a UI-ready read-only assignment detail model.").action(async (assignmentFile, options) => {
@@ -8720,6 +9031,17 @@ var registerAssignmentCommand = (program) => {
     console.log(formatAssignmentRepositoryMappingsResultAsJson(result));
     process.exitCode = result.exitCode;
   });
+  assignment.command(DOWNLOAD_REPOSITORIES_COMMAND_NAME).argument("<assignment-file>").requiredOption("--destination <folder>", "Local folder that receives repository clones").option("--json", "Emit JSON output").description("Clone each unique assignment repository target into a local folder.").action(
+    async (assignmentFile, options) => {
+      const result = await runAssignmentDownloadRepositoriesCommand({
+        cwd: process.cwd(),
+        assignmentFile,
+        options
+      });
+      console.log(formatAssignmentDownloadRepositoriesResultAsJson(result));
+      process.exitCode = result.exitCode;
+    }
+  );
   assignment.command(APPLY_COMMAND_NAME).argument("<assignment-file>").option("--json", "Emit JSON output").option("--verbose", "Emit verbose diagnostics").option("--yes", "Confirm non-interactive execution").description("Apply assignment repository changes.").action(async (assignmentFile, rawOptions) => {
     const options = normalizeCommonCommandOptions(rawOptions);
     const result = await runAssignmentApplyCommand({
@@ -8787,8 +9109,8 @@ var registerArchiveCommand = (program) => {
 };
 
 // src/dashboard/dashboard-builder.ts
-import fs9 from "fs";
-import path11 from "path";
+import fs10 from "fs";
+import path12 from "path";
 
 // src/dashboard/dashboard-models.ts
 var DASHBOARD_SCHEMA_VERSION = 1;
@@ -8861,18 +9183,18 @@ var createSummary4 = (cards) => ({
   assignmentCount: cards.reduce((count, card) => count + card.assignmentCount, EMPTY_COUNT14),
   needsAttentionCount: cards.filter((card) => card.needsAttention).length
 });
-var diagnosticRequiresAttention = (diagnostic2) => diagnostic2.severity === "error";
+var diagnosticRequiresAttention = (diagnostic3) => diagnostic3.severity === "error";
 var getAttentionCount = (diagnostics) => diagnostics.filter(diagnosticRequiresAttention).length;
 var listDirectoryNames = (directoryPath) => {
   try {
-    return fs9.readdirSync(directoryPath, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort((left, right) => left.localeCompare(right));
+    return fs10.readdirSync(directoryPath, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort((left, right) => left.localeCompare(right));
   } catch {
     return [];
   }
 };
 var isFile3 = (filePath) => {
   try {
-    return fs9.statSync(filePath).isFile();
+    return fs10.statSync(filePath).isFile();
   } catch {
     return false;
   }
@@ -8884,7 +9206,7 @@ var loadCourse = (cwd) => {
       diagnostics: [rootResult.diagnostic]
     };
   }
-  const loadResult = loadCourseConfig(path11.join(rootResult.repoRoot, COURSE_CONFIG_PATH2));
+  const loadResult = loadCourseConfig(path12.join(rootResult.repoRoot, COURSE_CONFIG_PATH2));
   if (loadResult.status === "failure") {
     return {
       diagnostics: loadResult.diagnostics
@@ -8934,10 +9256,10 @@ var createAssignmentDiagnosticContext = (assignment) => ({
   ...assignment.templateBranch === void 0 ? {} : { templateBranch: assignment.templateBranch },
   ...assignment.workflow === void 0 ? {} : { workflow: assignment.workflow }
 });
-var addDiagnosticContext = (diagnostic2, context) => ({
-  ...diagnostic2,
+var addDiagnosticContext = (diagnostic3, context) => ({
+  ...diagnostic3,
   context: {
-    ...diagnostic2.context ?? {},
+    ...diagnostic3.context ?? {},
     ...context
   }
 });
@@ -9002,12 +9324,12 @@ var createDefaultGithubStatus = (gradingEnabled) => ({
 });
 var hasTemplateBranch = (templateRepository, branch) => templateRepository.branches.some((availableBranch) => availableBranch === branch);
 var discoverTermSlugs = (repoRoot, requestedTerm) => {
-  const termSlugs = listDirectoryNames(path11.join(repoRoot, TERMS_DIRECTORY4));
+  const termSlugs = listDirectoryNames(path12.join(repoRoot, TERMS_DIRECTORY4));
   return requestedTerm === void 0 ? termSlugs : termSlugs.filter((termSlug) => termSlug === requestedTerm);
 };
 var loadTerm = (repoRoot, termSlug) => {
   const termConfigPath = [TERMS_DIRECTORY4, termSlug, TERM_CONFIG_FILE_NAME2].join("/");
-  const loadResult = loadTermConfig(path11.join(repoRoot, termConfigPath));
+  const loadResult = loadTermConfig(path12.join(repoRoot, termConfigPath));
   if (loadResult.status === "failure") {
     return {
       termSlug,
@@ -9281,7 +9603,7 @@ var loadAssignmentSummary = (repoRoot, courseConfig, termSlug, assignmentSlug) =
     assignmentSlug,
     ASSIGNMENT_CONFIG_FILE_NAME
   ].join("/");
-  const loadResult = loadAssignmentConfig(path11.join(repoRoot, assignmentFile));
+  const loadResult = loadAssignmentConfig(path12.join(repoRoot, assignmentFile));
   if (loadResult.status === "failure") {
     return {
       summary: createBrokenAssignmentSummary(assignmentSlug, assignmentFile, loadResult.diagnostics)
@@ -9301,7 +9623,7 @@ var loadAssignmentSummary = (repoRoot, courseConfig, termSlug, assignmentSlug) =
   };
 };
 var loadAssignmentSummaries = (repoRoot, courseConfig, termSlug) => {
-  const assignmentsDirectory = path11.join(
+  const assignmentsDirectory = path12.join(
     repoRoot,
     TERMS_DIRECTORY4,
     termSlug,
@@ -9329,7 +9651,7 @@ var createRosterContext = (rosterPath, rowNumber, expectedSection) => ({
   expectedSection
 });
 var loadRosterStudents = (repoRoot, rosterPath, expectedSection) => {
-  const fileResult = readTextFile(path11.join(repoRoot, rosterPath));
+  const fileResult = readTextFile(path12.join(repoRoot, rosterPath));
   if (fileResult.status === "failure") {
     return {
       students: [],
@@ -9375,7 +9697,7 @@ var loadRosterStudents = (repoRoot, rosterPath, expectedSection) => {
         ...validateRosterStatus(rosterPath, row.rowNumber, normalizedStatus.value),
         ...validateRosterSection(rosterPath, row.rowNumber, expectedSection, rawSection),
         ...validateGithubUsername(rosterPath, row.rowNumber, normalizedGithubUsername.value)
-      ].filter((diagnostic2) => diagnostic2 !== void 0);
+      ].filter((diagnostic3) => diagnostic3 !== void 0);
       const rowErrors = rowDiagnostics.filter(diagnosticRequiresAttention);
       diagnostics.push(...rowDiagnostics);
       if (rowErrors.length === EMPTY_COUNT14 && isRosterStatus(normalizedStatus.value)) {
@@ -9561,30 +9883,30 @@ var registerDashboardCommand = (program) => {
 };
 
 // src/planning/plan-paths.ts
-import path12 from "path";
+import path13 from "path";
 var TERMS_DIRECTORY5 = "terms";
 var PLANS_DIRECTORY = "plans";
 var PLAN_FILE_PREFIX = "plan";
 var PLAN_FILE_EXTENSION = "json";
 var createPlanPath = (repoRoot, termCode, assignmentSlug, clock) => {
-  const relativeDirectory = path12.posix.join(
+  const relativeDirectory = path13.posix.join(
     TERMS_DIRECTORY5,
     termCode,
     PLANS_DIRECTORY,
     assignmentSlug
   );
   const fileName = `${PLAN_FILE_PREFIX}-${formatFilesystemTimestamp(clock.now())}.${PLAN_FILE_EXTENSION}`;
-  const relativePath = path12.posix.join(relativeDirectory, fileName);
+  const relativePath = path13.posix.join(relativeDirectory, fileName);
   return {
     relativeDirectory,
     relativePath,
-    absolutePath: path12.join(repoRoot, relativePath)
+    absolutePath: path13.join(repoRoot, relativePath)
   };
 };
 
 // src/planning/plan-renderer.ts
-import fs10 from "fs";
-import path13 from "path";
+import fs11 from "fs";
+import path14 from "path";
 
 // src/io/stable-json.ts
 var JSON_INDENT_SPACES4 = 2;
@@ -9606,10 +9928,10 @@ var stringifyStableJson = (value) => JSON.stringify(orderValue(value), void 0, J
 var renderPlanJson = (plan) => stringifyStableJson(plan);
 var writePlanJsonFile = (plan, absolutePath) => {
   try {
-    fs10.mkdirSync(path13.dirname(absolutePath), {
+    fs11.mkdirSync(path14.dirname(absolutePath), {
       recursive: true
     });
-    fs10.writeFileSync(absolutePath, `${renderPlanJson(plan)}
+    fs11.writeFileSync(absolutePath, `${renderPlanJson(plan)}
 `, "utf8");
     return {
       status: "success"
@@ -9838,12 +10160,12 @@ var registerRemoveAccessCommand = (program) => {
 };
 
 // src/cli/commands/report.command.ts
-import path16 from "path";
+import path17 from "path";
 
 // src/reporting/student-markdown-renderer.ts
 var NEWLINE = "\n";
 var EMPTY_DISPLAY = "";
-var diagnosticCodes = (diagnostics) => diagnostics.map((diagnostic2) => diagnostic2.code).join("; ");
+var diagnosticCodes = (diagnostics) => diagnostics.map((diagnostic3) => diagnostic3.code).join("; ");
 var formatNullableNumber = (value) => value === void 0 || value === null ? EMPTY_DISPLAY : String(value);
 var renderRepositoryLine = (student) => {
   if (student.repositoryName === void 0) {
@@ -10641,9 +10963,7 @@ var compareRuns = (left, right) => {
   }
   return left.id < right.id ? FIRST_SORT_BEFORE_SECOND2 : FIRST_SORT_AFTER_SECOND2;
 };
-var findManifestRecord7 = (manifest, student) => manifest.repositories.find(
-  (record) => record.studentId === student.studentId && record.section === student.section
-);
+var findManifestRecord6 = (targets, student) => findGradingTargetForStudent(targets, student);
 var normalizeGitHubError5 = (error) => error instanceof GitHubClientError ? createGitHubDiagnostic(error) : {
   code: "github_api_error",
   severity: "error",
@@ -10717,8 +11037,8 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
   }
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(gradingConfig.workflow);
   const workflow = await input.githubClient.getWorkflow(
-    record.repository.owner,
-    record.repository.name,
+    record.owner,
+    record.repositoryName,
     workflowDispatchIdentifier
   );
   if (workflow === null) {
@@ -10742,8 +11062,8 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
     };
   }
   const workflowRuns = (await input.githubClient.listWorkflowRuns({
-    owner: record.repository.owner,
-    repo: record.repository.name,
+    owner: record.owner,
+    repo: record.repositoryName,
     workflowPath: workflowDispatchIdentifier
   })).sort(compareRuns);
   const workflowRun = workflowRuns[FIRST_WORKFLOW_RUN_INDEX];
@@ -10767,8 +11087,8 @@ var collectStudentGrading = async (input, record, repositoryStatus) => {
     };
   }
   const artifact = await input.githubClient.downloadArtifact({
-    owner: record.repository.owner,
-    repo: record.repository.name,
+    owner: record.owner,
+    repo: record.repositoryName,
     runId: workflowRun.id,
     artifactName: gradingConfig.artifact
   });
@@ -10820,10 +11140,7 @@ var collectRepositoryStatus = async (githubClient, record) => {
       errors: []
     };
   }
-  const repository = await githubClient.getRepository(
-    record.repository.owner,
-    record.repository.name
-  );
+  const repository = await githubClient.getRepository(record.owner, record.repositoryName);
   if (repository === null) {
     return {
       repositoryStatus: "missing",
@@ -10837,25 +11154,56 @@ var collectRepositoryStatus = async (githubClient, record) => {
     errors: []
   };
 };
-var collectStudent = async (input, student) => {
-  const record = findManifestRecord7(input.manifest, student);
-  const warnings = [...record?.warnings ?? []];
-  const errors = [...record?.errors ?? []];
+var collectStudent = async (input, student, targets, targetResults) => {
+  const record = findManifestRecord6(targets, student);
+  const warnings = [...record?.diagnostics ?? []];
+  const errors = [];
   try {
-    const repository = await collectRepositoryStatus(input.githubClient, record);
-    const grading = await collectStudentGrading(input, record, repository.repositoryStatus);
+    const targetResult = record === void 0 ? await (async () => {
+      const repository = await collectRepositoryStatus(input.githubClient, record);
+      const grading = await collectStudentGrading(input, record, repository.repositoryStatus);
+      return {
+        repositoryStatus: repository.repositoryStatus,
+        repositoryWarnings: repository.warnings,
+        repositoryErrors: repository.errors,
+        grading: grading.grading,
+        gradingWarnings: grading.warnings,
+        gradingErrors: grading.errors
+      };
+    })() : await (targetResults.get(record.targetId) ?? (() => {
+      const result = (async () => {
+        const repository = await collectRepositoryStatus(input.githubClient, record);
+        const grading = await collectStudentGrading(
+          input,
+          record,
+          repository.repositoryStatus
+        );
+        return {
+          repositoryStatus: repository.repositoryStatus,
+          repositoryWarnings: repository.warnings,
+          repositoryErrors: repository.errors,
+          grading: grading.grading,
+          gradingWarnings: grading.warnings,
+          gradingErrors: grading.errors
+        };
+      })();
+      targetResults.set(record.targetId, result);
+      return result;
+    })());
     return {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
       rosterStatus: student.status,
-      ...record?.repository.owner === void 0 ? {} : { repositoryOwner: record.repository.owner },
-      ...record?.repository.name === void 0 ? {} : { repositoryName: record.repository.name },
-      ...record?.repository.htmlUrl === void 0 ? {} : { repositoryUrl: record.repository.htmlUrl },
-      repositoryStatus: repository.repositoryStatus,
-      grading: grading.grading,
-      warnings: [...warnings, ...repository.warnings, ...grading.warnings],
-      errors: [...errors, ...repository.errors, ...grading.errors]
+      ...record?.owner === void 0 ? {} : { repositoryOwner: record.owner },
+      ...record?.repositoryName === void 0 ? {} : { repositoryName: record.repositoryName },
+      ...record?.htmlUrl === null || record?.htmlUrl === void 0 ? {} : { repositoryUrl: record.htmlUrl },
+      ...record === void 0 ? {} : { targetId: record.targetId },
+      ...record?.groupId === void 0 ? {} : { groupId: record.groupId },
+      repositoryStatus: targetResult.repositoryStatus,
+      grading: targetResult.grading,
+      warnings: [...warnings, ...targetResult.repositoryWarnings, ...targetResult.gradingWarnings],
+      errors: [...errors, ...targetResult.repositoryErrors, ...targetResult.gradingErrors]
     };
   } catch (error) {
     return {
@@ -10863,9 +11211,11 @@ var collectStudent = async (input, student) => {
       githubUsername: student.githubUsername,
       section: student.section,
       rosterStatus: student.status,
-      ...record?.repository.owner === void 0 ? {} : { repositoryOwner: record.repository.owner },
-      ...record?.repository.name === void 0 ? {} : { repositoryName: record.repository.name },
-      ...record?.repository.htmlUrl === void 0 ? {} : { repositoryUrl: record.repository.htmlUrl },
+      ...record?.owner === void 0 ? {} : { repositoryOwner: record.owner },
+      ...record?.repositoryName === void 0 ? {} : { repositoryName: record.repositoryName },
+      ...record?.htmlUrl === null || record?.htmlUrl === void 0 ? {} : { repositoryUrl: record.htmlUrl },
+      ...record === void 0 ? {} : { targetId: record.targetId },
+      ...record?.groupId === void 0 ? {} : { groupId: record.groupId },
       repositoryStatus: "missing",
       grading: createDefaultGrading(),
       warnings,
@@ -10893,8 +11243,10 @@ var createSummary5 = (rosterSummary, students) => ({
 var collectReport = async (input) => {
   const students = [];
   const sortedStudents = [...input.students].sort(compareStudents);
+  const targets = normalizeGradingTargets(input.manifest, input.config.course.github.organization);
+  const targetResults = /* @__PURE__ */ new Map();
   for (const student of sortedStudents) {
-    students.push(await collectStudent(input, student));
+    students.push(await collectStudent(input, student, targets, targetResults));
   }
   return {
     report: {
@@ -10941,7 +11293,7 @@ var QUOTE2 = '"';
 var ESCAPED_QUOTE = '""';
 var NEWLINE2 = "\n";
 var CSV_NEEDS_QUOTES_PATTERN = /[",\n\r]/;
-var renderDiagnosticCodes = (diagnostics) => diagnostics.map((diagnostic2) => diagnostic2.code).join(";");
+var renderDiagnosticCodes = (diagnostics) => diagnostics.map((diagnostic3) => diagnostic3.code).join(";");
 var renderValue = (value) => {
   const rawValue = value === void 0 || value === null ? EMPTY_FIELD2 : String(value);
   const escaped = rawValue.replaceAll(QUOTE2, ESCAPED_QUOTE);
@@ -10975,6 +11327,8 @@ var mapStudent = (student) => ({
   github_username: student.githubUsername,
   section: student.section,
   roster_status: student.rosterStatus,
+  ...student.targetId === void 0 ? {} : { target_id: student.targetId },
+  ...student.groupId === void 0 ? {} : { group_id: student.groupId },
   ...student.repositoryName === void 0 ? {} : { repository_name: student.repositoryName },
   ...student.repositoryUrl === void 0 ? {} : { repository_url: student.repositoryUrl },
   repository_status: student.repositoryStatus,
@@ -11041,7 +11395,7 @@ var EMPTY_DISPLAY2 = "";
 var NEWLINE3 = "\n";
 var escapeCell = (value) => value.replaceAll("|", "\\|");
 var formatCount = (value) => String(value);
-var diagnosticCodes2 = (diagnostics) => diagnostics.map((diagnostic2) => diagnostic2.code).join("; ");
+var diagnosticCodes2 = (diagnostics) => diagnostics.map((diagnostic3) => diagnostic3.code).join("; ");
 var renderRepository = (student) => {
   if (student.repositoryName === void 0) {
     return EMPTY_DISPLAY2;
@@ -11088,29 +11442,29 @@ var renderFacultyMarkdownReport = (report) => [
 ].join(NEWLINE3);
 
 // src/reporting/report-paths.ts
-import path14 from "path";
+import path15 from "path";
 var TERMS_DIRECTORY6 = "terms";
 var REPORTS_DIRECTORY = "reports";
 var FACULTY_JSON_FILE = "faculty-summary.json";
 var FACULTY_CSV_FILE = "faculty-summary.csv";
 var FACULTY_MARKDOWN_FILE = "faculty-summary.md";
 var STUDENTS_DIRECTORY = "students";
-var createRelativeReportDirectory = (termCode, assignmentSlug) => toForwardSlashPath(path14.join(TERMS_DIRECTORY6, termCode, REPORTS_DIRECTORY, assignmentSlug));
+var createRelativeReportDirectory = (termCode, assignmentSlug) => toForwardSlashPath(path15.join(TERMS_DIRECTORY6, termCode, REPORTS_DIRECTORY, assignmentSlug));
 var createPathPair = (repoRoot, relativePath) => ({
-  absolutePath: path14.join(repoRoot, relativePath),
+  absolutePath: path15.join(repoRoot, relativePath),
   relativePath: toForwardSlashPath(relativePath)
 });
 var createReportPaths = (repoRoot, termCode, assignmentSlug) => {
   const reportDirectory = createRelativeReportDirectory(termCode, assignmentSlug);
   return {
     reportDirectory: createPathPair(repoRoot, reportDirectory),
-    facultyJson: createPathPair(repoRoot, path14.join(reportDirectory, FACULTY_JSON_FILE)),
-    facultyCsv: createPathPair(repoRoot, path14.join(reportDirectory, FACULTY_CSV_FILE)),
-    facultyMarkdown: createPathPair(repoRoot, path14.join(reportDirectory, FACULTY_MARKDOWN_FILE))
+    facultyJson: createPathPair(repoRoot, path15.join(reportDirectory, FACULTY_JSON_FILE)),
+    facultyCsv: createPathPair(repoRoot, path15.join(reportDirectory, FACULTY_CSV_FILE)),
+    facultyMarkdown: createPathPair(repoRoot, path15.join(reportDirectory, FACULTY_MARKDOWN_FILE))
   };
 };
 var createStudentReportRelativePath = (termCode, assignmentSlug, section, studentId) => toForwardSlashPath(
-  path14.join(
+  path15.join(
     createRelativeReportDirectory(termCode, assignmentSlug),
     STUDENTS_DIRECTORY,
     section,
@@ -11119,15 +11473,15 @@ var createStudentReportRelativePath = (termCode, assignmentSlug, section, studen
 );
 
 // src/reporting/report-writer.ts
-import fs11 from "fs";
-import path15 from "path";
+import fs12 from "fs";
+import path16 from "path";
 var writeReportFiles = (files) => {
   const generatedFiles = [];
   const errors = [];
   for (const file of files) {
     try {
-      fs11.mkdirSync(path15.dirname(file.absolutePath), { recursive: true });
-      fs11.writeFileSync(file.absolutePath, file.content, "utf8");
+      fs12.mkdirSync(path16.dirname(file.absolutePath), { recursive: true });
+      fs12.writeFileSync(file.absolutePath, file.content, "utf8");
       generatedFiles.push(file.relativePath);
     } catch (error) {
       errors.push(
@@ -11169,7 +11523,7 @@ var createReportFiles = (repoRoot, report) => {
       student.studentId
     );
     return {
-      absolutePath: path16.join(repoRoot, relativePath),
+      absolutePath: path17.join(repoRoot, relativePath),
       relativePath,
       content: renderStudentMarkdownReport(report.assignment, student)
     };
@@ -11321,13 +11675,13 @@ var registerReportCommand = (program) => {
 };
 
 // src/workflows/workflow-compatibility-validation.ts
-import fs12 from "fs";
-import path17 from "path";
+import fs13 from "fs";
+import path18 from "path";
 var PRESET_GRADING_MODE3 = "preset";
 var getEffectiveGrading9 = (config) => config.assignment.grading ?? config.course.grading;
 var createConfiguredWorkflowCandidate = (repoRoot, workflowPath) => {
   return {
-    absolutePath: path17.join(repoRoot, workflowPath),
+    absolutePath: path18.join(repoRoot, workflowPath),
     relativePath: workflowPath
   };
 };
@@ -11345,7 +11699,7 @@ var createWorkflowCandidates = (config, grading) => {
   );
   return grading.mode === PRESET_GRADING_MODE3 ? [...configuredCandidates, generatedCandidate] : configuredCandidates;
 };
-var findExistingWorkflowCandidate = (candidates) => candidates.find((candidate) => fs12.existsSync(candidate.absolutePath));
+var findExistingWorkflowCandidate = (candidates) => candidates.find((candidate) => fs13.existsSync(candidate.absolutePath));
 var createWorkflowMissingDiagnostic4 = (grading, candidates) => createConfigDiagnostic(
   GRADING_WORKFLOW_MISSING_CODE,
   `Configured grading workflow ${String(grading.workflow)} was not found locally.`,
@@ -11380,7 +11734,7 @@ var validateWorkflowCompatibility = (config) => {
       workflowStatus: "missing"
     };
   }
-  const content = fs12.readFileSync(workflowCandidate.absolutePath, "utf8");
+  const content = fs13.readFileSync(workflowCandidate.absolutePath, "utf8");
   const parseResult = parseYaml(content, workflowCandidate.relativePath);
   if (parseResult.status === "failure") {
     return {
@@ -11569,7 +11923,7 @@ var registerValidateCommand = (program) => {
 };
 
 // src/cli/commands/workflow.command.ts
-import path19 from "path";
+import path20 from "path";
 
 // src/workflows/result-writer-template.ts
 var RESULT_SCHEMA_VERSION = 1;
@@ -11856,14 +12210,14 @@ var renderJavaJunitCheckstyleWorkflow = ({
 };
 
 // src/workflows/workflow-writer.ts
-import fs13 from "fs";
-import path18 from "path";
+import fs14 from "fs";
+import path19 from "path";
 var writeWorkflowFile = ({
   filePath,
   content,
   force
 }) => {
-  if (!force && fs13.existsSync(filePath)) {
+  if (!force && fs14.existsSync(filePath)) {
     return {
       status: "failure",
       diagnostic: createConfigDiagnostic(
@@ -11876,8 +12230,8 @@ var writeWorkflowFile = ({
     };
   }
   try {
-    fs13.mkdirSync(path18.dirname(filePath), { recursive: true });
-    fs13.writeFileSync(filePath, content);
+    fs14.mkdirSync(path19.dirname(filePath), { recursive: true });
+    fs14.writeFileSync(filePath, content);
     return {
       status: "success"
     };
@@ -11908,7 +12262,7 @@ var formatGeneratedFilePath = (repoRoot, absolutePath) => {
   try {
     return toRepositoryRelativePath(repoRoot, absolutePath);
   } catch {
-    return toForwardSlashPath(path19.resolve(absolutePath));
+    return toForwardSlashPath(path20.resolve(absolutePath));
   }
 };
 var resolveOutputPath = (cwd, repoRoot, termCode, assignmentSlug, output) => {
@@ -11919,7 +12273,7 @@ var resolveOutputPath = (cwd, repoRoot, termCode, assignmentSlug, output) => {
       reportPath: workflowPath.relativePath
     };
   }
-  const absolutePath = path19.isAbsolute(output) ? output : path19.resolve(cwd, output);
+  const absolutePath = path20.isAbsolute(output) ? output : path20.resolve(cwd, output);
   return {
     absolutePath,
     reportPath: formatGeneratedFilePath(repoRoot, absolutePath)

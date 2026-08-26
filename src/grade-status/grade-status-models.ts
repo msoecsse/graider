@@ -78,6 +78,10 @@ export interface GradeStatusRepositoryRow {
   readonly studentId: string;
   readonly githubUsername: string;
   readonly section: string;
+  /** Present for normalized group repository targets. */
+  readonly targetId?: string;
+  readonly groupId?: string;
+  readonly studentIds?: readonly string[];
   readonly repository: string | null;
   readonly workflow: string | null;
   readonly ref: string | null;
@@ -111,12 +115,16 @@ export interface AssignmentGradeStatusResult {
   readonly status: CommandStatus;
   readonly exitCode: 0 | 1 | 2;
   readonly diagnostics: Diagnostic[];
+  readonly repositoryMode?: "individual" | "group";
   readonly assignment: GradeStatusAssignment | null;
   readonly course: GradeStatusCourse | null;
   readonly term: GradeStatusTerm | null;
   readonly target: GradeStatusTarget | null;
   readonly grading: GradeStatusGrading | null;
   readonly summary: GradeStatusSummary | null;
+  /** One row per repository target; group members can share a target. */
+  readonly targets: GradeStatusRepositoryRow[];
+  /** Compatibility projection with one row per selected student. */
   readonly repositories: GradeStatusRepositoryRow[];
   readonly actions: GradeStatusActions | null;
 }

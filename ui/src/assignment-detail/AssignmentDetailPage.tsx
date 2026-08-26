@@ -1592,6 +1592,11 @@ export const AssignmentDetailPage = ({
     null
   );
   const [isLoading, setIsLoading] = useState(false);
+  const [isDownloadingRepositories, setIsDownloadingRepositories] = useState(false);
+  const [repositoryDownloadError, setRepositoryDownloadError] = useState<string | null>(null);
+  const [repositoryDownloadResult, setRepositoryDownloadResult] = useState<Awaited<
+    ReturnType<NonNullable<typeof window.graiderUI.downloadAssignmentRepositories>>
+  > | null>(null);
   const [isLoadingGradeStatus, setIsLoadingGradeStatus] = useState(false);
   const [workflowResult, setWorkflowResult] = useState<TemplateWorkflowResult | null>(null);
   const [isLoadingWorkflow, setIsLoadingWorkflow] = useState(false);
@@ -1677,6 +1682,30 @@ export const AssignmentDetailPage = ({
       onDetailLoaded?.(failureResult);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const downloadStudentRepositories = async (): Promise<void> => {
+    if (
+      window.graiderUI.selectRepositoryDownloadFolder === undefined ||
+      window.graiderUI.downloadAssignmentRepositories === undefined
+    )
+      return;
+    const selected = await window.graiderUI.selectRepositoryDownloadFolder();
+    if (selected.canceled || selected.folderPath === null) return;
+    setIsDownloadingRepositories(true);
+    setRepositoryDownloadError(null);
+    try {
+      setRepositoryDownloadResult(
+        await window.graiderUI.downloadAssignmentRepositories({
+          ...selection,
+          destination: selected.folderPath
+        })
+      );
+    } catch {
+      setRepositoryDownloadError("Unable to download student repositories.");
+    } finally {
+      setIsDownloadingRepositories(false);
     }
   };
 
@@ -2091,6 +2120,16 @@ export const AssignmentDetailPage = ({
             <button
               className="secondary-action"
               type="button"
+              disabled={detail === null || isDownloadingRepositories}
+              onClick={() => void downloadStudentRepositories()}
+            >
+              {isDownloadingRepositories
+                ? "Downloading repositories..."
+                : "Download Student Repositories"}
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
               disabled={detail === null}
               onClick={() => {
                 onViewGradeStatus(selection, detail, loadResult);
@@ -2111,6 +2150,36 @@ export const AssignmentDetailPage = ({
           </div>
         </div>
       </header>
+      {repositoryDownloadResult === null ? null : (
+        <section className="detail-panel" aria-label="Repository download results">
+          <h2>Repository download</h2>
+          <p>
+            {repositoryDownloadResult.clonedCount} cloned, {repositoryDownloadResult.failedCount}{" "}
+            failed of {repositoryDownloadResult.totalTargets}. Destination:{" "}
+            {repositoryDownloadResult.destination}
+          </p>
+          {repositoryDownloadResult.diagnostics.map((diagnostic) => (
+            <p key={diagnostic.message} role="alert">
+              {diagnostic.message}
+            </p>
+          ))}
+          <ul>
+            {repositoryDownloadResult.targets.map((target) => (
+              <li key={target.targetId}>
+                <strong>{target.repositoryName}</strong> — {target.status} — {target.localPath}
+                {target.groupId === undefined ? null : ` (${target.groupId})`}
+                <span> {target.studentIds.join(", ")}</span>
+                {target.githubUsernames.length === 0 ? null : (
+                  <span> ({target.githubUsernames.join(", ")})</span>
+                )}
+                {target.diagnostics.map((diagnostic) => (
+                  <p key={diagnostic.message}>{diagnostic.message}</p>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="dashboard-content assignment-detail" aria-label="Assignment detail">
         <p className="assignment-detail__path">
@@ -2122,6 +2191,11 @@ export const AssignmentDetailPage = ({
         {commandErrorMessage === null ? null : (
           <p className="error-message" role="alert">
             {commandErrorMessage}
+          </p>
+        )}
+        {repositoryDownloadError === null ? null : (
+          <p className="error-message" role="alert">
+            {repositoryDownloadError}
           </p>
         )}
 

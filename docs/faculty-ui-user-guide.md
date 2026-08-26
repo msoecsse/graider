@@ -343,3 +343,15 @@ failed workflow results may leave report rows incomplete.
 
 For packaged-app and developer validation details, see the
 [Electron Release Readiness Guide](electron-release-readiness.md).
+
+# Downloading assignment repositories
+
+From **Assignment Detail**, choose **Download Student Repositories**, then
+choose a destination folder. Graider creates one local folder per repository
+target: one per student repository for individual assignments, or one shared
+folder per group repository for group assignments. The result lists the
+students attached to each downloaded group repository.
+
+Existing destination folders are left unchanged and reported as failures rather
+than overwritten. A failure for one repository does not stop the remaining
+downloads; review the per-repository results when the download completes.

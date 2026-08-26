@@ -261,7 +261,14 @@ export const runGradeCommand = async ({
       ...rosterResult.summary,
       ...selectionResult.summary,
       manifestFile: manifestPath.relativePath,
-      ...executionResult.summary
+      ...executionResult.summary,
+      ...(manifestResult.manifest.repositoryMode === "group"
+        ? {
+            repositoryMode: "group",
+            groupTargets: executionResult.targets,
+            studentMappingCount: selectionResult.students.length
+          }
+        : {})
     }
   });
 };

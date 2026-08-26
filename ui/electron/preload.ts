@@ -57,6 +57,9 @@ import {
   type GitHubAuthResult,
   type SelectCourseFolderResult,
   type SelectStudentAccessPagesRepositoryFolderResult,
+  type SelectRepositoryDownloadFolderResult,
+  type AssignmentRepositoryDownloadRequest,
+  type AssignmentRepositoryDownloadResult,
   type StudentAccessPagesConfigRequest,
   type StudentAccessPagesConfigResult,
   type CoursePublishStatusResult,
@@ -79,6 +82,8 @@ const graiderUI: GraiderUIApi = {
       IPC_CHANNELS.selectStudentAccessPagesRepositoryFolder,
       courseFolderId
     ),
+  selectRepositoryDownloadFolder: async (): Promise<SelectRepositoryDownloadFolderResult> =>
+    await invoke<SelectRepositoryDownloadFolderResult>(IPC_CHANNELS.selectRepositoryDownloadFolder),
   saveStudentAccessPagesConfig: async (
     request: StudentAccessPagesConfigRequest
   ): Promise<StudentAccessPagesConfigResult> =>
@@ -217,6 +222,13 @@ const graiderUI: GraiderUIApi = {
     await invoke<FacultyReportResult>(IPC_CHANNELS.getFacultyReport, request),
   applyAssignment: async (request: AssignmentApplyRequest): Promise<AssignmentApplyResult> =>
     await invoke<AssignmentApplyResult>(IPC_CHANNELS.applyAssignment, request),
+  downloadAssignmentRepositories: async (
+    request: AssignmentRepositoryDownloadRequest
+  ): Promise<AssignmentRepositoryDownloadResult> =>
+    await invoke<AssignmentRepositoryDownloadResult>(
+      IPC_CHANNELS.downloadAssignmentRepositories,
+      request
+    ),
   gradeAssignment: async (request: AssignmentGradeRequest): Promise<AssignmentGradeResult> =>
     await invoke<AssignmentGradeResult>(IPC_CHANNELS.gradeAssignment, request)
 };

@@ -472,10 +472,11 @@ repositories.
 ### `assignment apply <assignment.yml> --json`
 
 `assignment apply --json` is the canonical assignment-scoped apply command for
-future UI-3B work. It executes the same real mutation behavior as the legacy
-top-level `apply --json` command: validation, GitHub readiness checks, manifest
-writes, repository creation/update, collaborator/team permission setup, Actions
-enablement, and mutation guard handling are unchanged.
+confirmed UI mutation. Individual assignments retain the same real mutation
+behavior as the legacy top-level `apply --json` command: validation, GitHub
+readiness checks, manifest-v1 writes, repository creation/update,
+collaborator/team permission setup, Actions enablement, and mutation guard
+handling are unchanged.
 
 Successful canonical responses use command name `assignment apply`:
 
@@ -498,10 +499,98 @@ Useful fields include:
 
 `generatedFiles` includes the manifest path when a manifest was written.
 
+For `repository_mode: group`, Apply runs group preflight, then executes one
+repository target per `group_id`. It creates each shared repository, gives every
+group member `admin` access, applies configured faculty/grader teams, and writes
+manifest-v2 only after every target succeeds. Its top-level JSON shape remains
+the standard command result; group-specific data is in `summary`:
+
+```json
+{
+  "commandName": "assignment apply",
+  "status": "success",
+  "exitCode": 0,
+  "generatedFiles": ["terms/27s2/manifests/lab02/manifest.yml"],
+  "summary": {
+    "repositoryMode": "group",
+    "targetCount": 2,
+    "studentMappingCount": 3,
+    "manifestFile": "terms/27s2/manifests/lab02/manifest.yml",
+    "manifestWritten": true,
+    "groupTargets": [
+      {
+        "groupId": "team-1",
+        "repositoryName": "27s2-csc1120-lab02-team-1",
+        "htmlUrl": "https://github.com/csc1120/27s2-csc1120-lab02-team-1",
+        "studentIds": ["student-a", "student-b"],
+        "githubUsernames": ["student-a", "student-b"],
+        "status": "created",
+        "diagnostics": []
+      }
+    ]
+  }
+}
+```
+
+`cloneUrl` is included for an executed target when available. Target diagnostics
+may include `grading_workflow_pending` for a newly created repository whose
+workflow is not observable yet.
+
+On a group preflight error, including an untracked-existing-repository
+collision, Apply performs no group mutation and writes no manifest. An executor
+or writer failure also writes no manifest, even if earlier targets already
+mutated GitHub. The response includes safe errors plus the
+`group_apply_manifest_not_written` warning; faculty must manually clean up
+partial repositories or wait for a future reconcile workflow. Graider never
+adopts an untracked existing group repository automatically.
+
 The legacy `apply <assignment.yml> --json` command remains supported and keeps
 its existing `commandName: "apply"` response for compatibility.
 
 ### `grade --json`
+
+### `assignment download-repositories <assignment.yml> --destination <folder> --json`
+
+Downloads each unique manifest-tracked repository target into a subfolder of
+`destination`. The result reports `repositoryMode`, `totalTargets`, clone and
+failure counts, and a target row containing repository identity, local path,
+members, optional group ID, and safe diagnostics. Group members share one
+target row. Existing folders are not overwritten or updated in this release.
+
+```json
+{
+  "schemaVersion": 1,
+  "commandName": "assignment download-repositories",
+  "status": "success",
+  "exitCode": 0,
+  "assignmentPath": "terms/27s2/assignments/lab02/assignment.yml",
+  "destination": "/Users/faculty/Downloads/lab02",
+  "repositoryMode": "group",
+  "totalTargets": 1,
+  "clonedCount": 1,
+  "failedCount": 0,
+  "targets": [
+    {
+      "targetId": "team-1",
+      "groupId": "team-1",
+      "repositoryName": "27s2-csc1120-lab02-team-1",
+      "cloneUrl": "https://github.com/csc1120/27s2-csc1120-lab02-team-1.git",
+      "htmlUrl": "https://github.com/csc1120/27s2-csc1120-lab02-team-1",
+      "localPath": "/Users/faculty/Downloads/lab02/27s2-csc1120-lab02-team-1",
+      "status": "cloned",
+      "studentIds": ["student-a", "student-b"],
+      "githubUsernames": ["student-a", "student-b"],
+      "diagnostics": []
+    }
+  ],
+  "diagnostics": []
+}
+```
+
+`status` is `success`, `partial_success`, or `failure`. Target status is
+`cloned` or `failed`; target failures do not prevent later targets from being
+attempted. A missing manifest, unusable destination, or unavailable Git returns
+a top-level failure without clone attempts.
 
 Dispatch summaries include:
 
@@ -530,6 +619,21 @@ No-grading summaries include:
   "dispatchFailed": 0
 }
 ```
+
+For a group manifest, `targetsSelected` and dispatch counts are repository
+target counts, not selected-student counts. The summary adds
+`repositoryMode: "group"`, `studentMappingCount`, and `groupTargets`; each
+target identifies its `targetId`, `groupId`, repository name, member student
+IDs/GitHub usernames, dispatch status, and safe diagnostics. A shared target is
+dispatched once even when multiple selected students map to it.
+
+`assignment grade-preview --json` and `assignment grade-status --json` retain
+their existing individual rows. Group rows include `targetId` and `groupId`
+where available and represent the shared repository/run rather than separate
+workflow dispatches. Grade-status additionally returns `targets`, one row per
+repository target, while `repositories` remains the per-student compatibility
+projection. Faculty report rows remain per student for compatibility,
+but include shared `targetId`/`groupId` context when reading a group manifest.
 
 ### `report --json`
 

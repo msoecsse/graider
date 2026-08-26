@@ -19,6 +19,7 @@ import {
   OctokitGitHubClient,
   type OctokitRestClientLike
 } from "../../src/github/octokit-github-client.js";
+import { renderManifestV2Yaml } from "../../src/manifest/manifest-v2-renderer.js";
 
 enum ReportTestNumber {
   RepositoryId = 101,
@@ -33,6 +34,7 @@ const REPORT_TIMESTAMP = "2026-09-01T15:30:00.000Z";
 const ORGANIZATION = "example-org";
 const JONES_REPOSITORY = "27s1-se2030-lab04-seanjones";
 const SMITH_REPOSITORY = "27s1-se2030-lab04-janesmith";
+const GROUP_REPOSITORY = "27s1-se2030-lab04-team-1";
 const RAW_LOG_TEXT = "RAW WORKFLOW LOG SHOULD NOT APPEAR";
 const TOKEN = "ghp_reporttesttoken1234567890";
 const GRADING_RESULTS_ARTIFACT_ZIP_BASE64 =
@@ -353,6 +355,45 @@ const runReport = async (
   return { cwd, result, githubClient };
 };
 
+const writeGroupManifest = (cwd: string): void => {
+  fs.writeFileSync(
+    path.join(cwd, "terms/27s1/manifests/lab04/manifest.yml"),
+    renderManifestV2Yaml({
+      repositoryMode: "group",
+      targets: [
+        {
+          targetId: "team-1",
+          mode: "group",
+          groupId: "team-1",
+          repositoryName: GROUP_REPOSITORY,
+          htmlUrl: `https://github.com/${ORGANIZATION}/${GROUP_REPOSITORY}`,
+          sectionIds: ["001"],
+          studentIds: ["jones", "smith"],
+          githubUsernames: ["seanjones", "janesmith"],
+          diagnostics: []
+        }
+      ],
+      studentMappings: [
+        {
+          studentId: "jones",
+          githubUsername: "seanjones",
+          targetId: "team-1",
+          repositoryName: GROUP_REPOSITORY,
+          htmlUrl: `https://github.com/${ORGANIZATION}/${GROUP_REPOSITORY}`
+        },
+        {
+          studentId: "smith",
+          githubUsername: "janesmith",
+          targetId: "team-1",
+          repositoryName: GROUP_REPOSITORY,
+          htmlUrl: `https://github.com/${ORGANIZATION}/${GROUP_REPOSITORY}`
+        }
+      ]
+    }),
+    "utf8"
+  );
+};
+
 const reportPath = (cwd: string, relativePath: string): string => path.join(cwd, relativePath);
 
 const setLiveStyleResultFile = (cwd: string): void => {
@@ -378,6 +419,86 @@ const setLiveStyleResultFileWithTrailingSpace = (cwd: string): void => {
 };
 
 describe("graider report command", () => {
+  it("collects one shared v2 group repository result and maps it to every member", async () => {
+    const cwd = copyFixtureToTemp("valid-results");
+    writeGroupManifest(cwd);
+    const artifact = createArtifact();
+    const githubClient = new FakeGitHubClient({
+      repositories: [createRepository(GROUP_REPOSITORY)],
+      workflows: [{ owner: ORGANIZATION, repo: GROUP_REPOSITORY, workflow: gradingWorkflow }],
+      workflowRuns: [{ owner: ORGANIZATION, repo: GROUP_REPOSITORY, run: workflowRun }],
+      artifacts: [
+        {
+          owner: ORGANIZATION,
+          repo: GROUP_REPOSITORY,
+          runId: ReportTestNumber.WorkflowRunId,
+          artifact
+        }
+      ]
+    });
+    const result = await runReportCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock
+    });
+    const facultyReport = JSON.parse(
+      fs.readFileSync(path.join(cwd, "terms/27s1/reports/lab04/faculty-summary.json"), "utf8")
+    ) as { students: Array<Record<string, unknown>> };
+
+    expect(result.status).toBe("success");
+    expect(githubClient.artifactDownloads).toHaveLength(1);
+    const jones = facultyReport.students.find((student) => student.student_id === "jones");
+    const smith = facultyReport.students.find((student) => student.student_id === "smith");
+    expect(jones).toMatchObject({
+      target_id: "team-1",
+      group_id: "team-1",
+      repository_name: GROUP_REPOSITORY
+    });
+    expect(smith).toMatchObject({
+      target_id: "team-1",
+      group_id: "team-1",
+      repository_name: GROUP_REPOSITORY
+    });
+  });
+
+  it("marks every mapped group member safely when the shared artifact is missing", async () => {
+    const cwd = copyFixtureToTemp("valid-results");
+    writeGroupManifest(cwd);
+    const githubClient = new FakeGitHubClient({
+      repositories: [createRepository(GROUP_REPOSITORY)],
+      workflows: [{ owner: ORGANIZATION, repo: GROUP_REPOSITORY, workflow: gradingWorkflow }],
+      workflowRuns: [{ owner: ORGANIZATION, repo: GROUP_REPOSITORY, run: workflowRun }]
+    });
+    await runReportCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock
+    });
+    const facultyReport = JSON.parse(
+      fs.readFileSync(path.join(cwd, "terms/27s1/reports/lab04/faculty-summary.json"), "utf8")
+    ) as unknown as {
+      students: Array<{
+        student_id: string;
+        target_id?: string;
+        grading: { result_status: string };
+      }>;
+    };
+
+    expect(githubClient.artifactDownloads).toHaveLength(1);
+    const groupStudents = facultyReport.students.filter(
+      (student) => student.target_id === "team-1"
+    );
+    expect(groupStudents.map((student) => student.student_id)).toEqual(["jones", "smith"]);
+    expect(groupStudents.map((student) => student.grading.result_status)).toEqual([
+      "missing_artifact",
+      "missing_artifact"
+    ]);
+  });
+
   it("TC-CLI-REPORT-001 missing manifest fails", async () => {
     const { result } = await runReport("missing-manifest");
 

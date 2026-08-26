@@ -2,13 +2,13 @@
 
 ## Internal group-target executor
 
-Group configuration, preview, and Apply preflight exist. The dependency-injected
+Group configuration, preview, Apply preflight, and public Apply execution exist. The dependency-injected
 `src/groups/group-target-executor.ts` is tested only with mocked GitHub
 dependencies. It performs one
 repository operation per group target, never per student; adds deduplicated
 members as `admin` collaborators; applies configured faculty/grader teams; and
-returns in-memory target identities and URLs for later manifest-v2 construction.
-It writes no manifests.
+returns in-memory target identities and URLs for manifest-v2 construction. It
+does not write manifests itself.
 
 It is fail-fast: repository, collaborator, team, and workflow API failures
 stop later targets without cleanup. Workflow found succeeds; a newly-created
@@ -33,22 +33,41 @@ and writes only the standard assignment manifest path after a full success. It
 refuses partial results and paths outside the course repository. Public Apply
 uses it only after every group target succeeds.
 
-Graider currently persists manifest schema version 1. Its records are
-per-student, but `normalizeManifestRepositories` provides a repository-centric
-view: repository targets plus student-to-repository mappings. Individual
-assignments produce exactly one target and mapping per student.
+Individual Apply continues to create one repository per active student and
+writes manifest-v1 records. Group Apply creates one repository per `group_id`,
+adds every member as an `admin` collaborator, applies the configured
+faculty/grader team permissions, and writes manifest-v2 only after every planned
+target succeeds. Existing v1 manifests remain readable; no migration is
+required.
 
-This is compatibility groundwork only. Existing manifests remain readable and
-new applies continue to write schema version 1; no migration is required.
+`normalizeManifestRepositories` provides a repository-centric view over both
+manifest versions: repository targets plus student-to-repository mappings.
+`assignment repository-mappings --json` exposes that view for v2 group
+manifests, preserving one target per group repository and one mapping per
+student.
 
-Group grading, status, reports, dashboard display, and access-page polish remain
-deferred. They must preserve the normalized mapping contract so multiple
-students can associate with one repository.
+Grading consumers use `normalizeGradingTargets`, built on the manifest target
+normalization, rather than reading the v1-only `manifest.repositories` list.
+For an individual manifest this remains one target per student. For a group v2
+manifest it dispatches and observes one workflow per group target, then maps
+that shared target result back to every group member in status and report rows.
+Grade-preview rows likewise represent one dispatchable group target. Group
+status now exposes one target row per shared repository alongside its
+per-student compatibility rows. Faculty report collection reads each group
+repository/workflow/artifact once and projects the shared result to each member.
+Dashboard/status/report presentation, Student Access Pages regression/polish,
+email-preview mapping review, and recovery/reconcile remain deferred.
+
+`assignment download-repositories --destination <folder> --json` uses the same
+normalized targets. It clones one folder per individual repository or shared
+group target, never one clone per group member. This first release is
+clone-only: an existing target folder is reported and left untouched rather
+than being updated or overwritten.
 
 ## Read-only CLI boundary
 
 `graider assignment repository-mappings <assignment.yml> --json` is the approved
-boundary for Electron services. It reads the local legacy manifest and returns
+boundary for Electron services. It reads the local v1 or v2 manifest and returns
 normalized targets and student mappings; it makes no writes or network calls.
 Electron must call this JSON command rather than import backend manifest code.
 Missing manifests are reported as `not_applied`. Group Apply writes v2 manifests
@@ -62,25 +81,22 @@ remains deferred.
 ## Group configuration safety guard
 
 Assignment configuration can now record `repository_mode: group` with an
-assignment-local `groups.csv` (`group_id,student_id`). Group Apply Preview
-builds an in-memory repository target per group ID, using that ID in the normal
-repository naming pattern and assigning each member planned `admin` access. This is configuration
-only: Apply Preview shows one target per group. Apply creates one repository per
-group after preflight, gives every group member `admin` access, and writes a v2
-manifest only after all targets succeed. Group grading, status, and reporting
+assignment-local `groups.csv` (`group_id,student_id`). Group Apply Preview is
+read-only and builds one in-memory repository target per group ID, using that ID
+in the normal repository naming pattern and assigning each member planned
+`admin` access. Group Apply execution is supported for a valid preview and
+preflight: it creates one repository per group, gives every group member
+`admin` access, applies configured teams, and writes a v2 manifest only after
+all targets succeed. Group grading, status, reporting, and dashboard display
 remain deferred.
-
-Follow-up: U2C wires access pages/email preview; U2D adds lifecycle/workflow
-metadata for status/report/dashboard; U2E migrates apply planning; U3 adds group
-configuration and apply behavior.
 
 ## Apply execution identity
 
 Apply planning and execution now carry repository targets internally. Individual
 mode creates one target per active student and adapts that target to the
-existing v1 per-student manifest record. Group targets remain preview-only and
-group Apply uses those targets for mutation and v2 persistence, while individual
-Apply retains its v1 compatibility adapter.
+existing v1 per-student manifest record. Group Apply Preview is read-only;
+group Apply uses its group targets for mutation and v2 persistence, while
+individual Apply retains its v1 compatibility adapter.
 
 ## Manifest v2 preparation
 

@@ -18,11 +18,16 @@ import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
 import { GitHubClientError } from "../github/github-errors.js";
 import { loadManifest } from "../manifest/manifest-loader.js";
-import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
 import { loadAssignmentRosters } from "../roster/roster-loader.js";
 import { ROSTER_STATUS_ACTIVE, type RosterStudent } from "../roster/roster-models.js";
 import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
+import {
+  findGradingTargetForStudent,
+  normalizeGradingTargets,
+  type GradingRepositoryTarget,
+  type NormalizedGradingTargets
+} from "../execution/grading-targets.js";
 import {
   ASSIGNMENT_GRADE_PREVIEW_SCHEMA_VERSION,
   type AssignmentGradePreviewResult,
@@ -132,7 +137,7 @@ const createStudentRepositoryMissingDiagnostic = (student: RosterStudent): Diagn
 
 const createManifestTrackedRepositoryMissingDiagnostic = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord
+  repository: GradingRepositoryTarget
 ): Diagnostic =>
   createConfigDiagnostic(
     STUDENT_REPOSITORY_MISSING_CODE,
@@ -141,13 +146,13 @@ const createManifestTrackedRepositoryMissingDiagnostic = (
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName
+      repository: repository.fullName
     }
   );
 
 const createWorkflowMissingDiagnostic = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   workflowPath: string
 ): Diagnostic =>
   createConfigDiagnostic(
@@ -157,14 +162,14 @@ const createWorkflowMissingDiagnostic = (
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName,
+      repository: repository.fullName,
       workflowPath
     }
   );
 
 const createWorkflowDispatchMissingDiagnostic = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   workflowPath: string
 ): Diagnostic =>
   createConfigDiagnostic(
@@ -174,7 +179,7 @@ const createWorkflowDispatchMissingDiagnostic = (
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName,
+      repository: repository.fullName,
       workflowPath
     }
   );
@@ -182,17 +187,17 @@ const createWorkflowDispatchMissingDiagnostic = (
 const createRepositoryStatusUnknownDiagnostic = (
   error: unknown,
   student: RosterStudent,
-  repository: ManifestRepositoryRecord
+  repository: GradingRepositoryTarget
 ): Diagnostic => {
   if (error instanceof GitHubClientError) {
     return createConfigDiagnostic(
       error.diagnosticCode,
-      `Could not check repository ${repository.repository.fullName}: ${error.message}`,
+      `Could not check repository ${repository.fullName}: ${error.message}`,
       {
         studentId: student.studentId,
         githubUsername: student.githubUsername,
         section: student.section,
-        repository: repository.repository.fullName,
+        repository: repository.fullName,
         kind: error.kind,
         retryable: error.retryable,
         ...(error.retryAfterSeconds === undefined
@@ -204,12 +209,12 @@ const createRepositoryStatusUnknownDiagnostic = (
 
   return createConfigDiagnostic(
     STUDENT_REPOSITORY_STATUS_UNKNOWN_CODE,
-    `Could not check repository ${repository.repository.fullName}.`,
+    `Could not check repository ${repository.fullName}.`,
     {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName
+      repository: repository.fullName
     }
   );
 };
@@ -248,12 +253,10 @@ const createGradingPreview = (
 };
 
 const findManifestRecord = (
-  manifest: Manifest | undefined,
+  targets: NormalizedGradingTargets | undefined,
   student: RosterStudent
-): ManifestRepositoryRecord | undefined =>
-  manifest?.repositories.find(
-    (record) => record.studentId === student.studentId && record.section === student.section
-  );
+): GradingRepositoryTarget | undefined =>
+  targets === undefined ? undefined : findGradingTargetForStudent(targets, student);
 
 const createRow = (
   student: RosterStudent,
@@ -277,11 +280,11 @@ const createRow = (
 
 const createSkippedStudentRow = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord | undefined
+  repository: GradingRepositoryTarget | undefined
 ): GradePreviewRepositoryRow =>
   createRow(
     student,
-    repository?.repository.fullName ?? null,
+    repository?.fullName ?? null,
     "would_skip",
     `${STUDENT_STATUS_REASON_PREFIX}_${student.status}`,
     null,
@@ -291,12 +294,12 @@ const createSkippedStudentRow = (
 const createBlockedLifecycleRow = (
   config: LoadedGraiderConfig,
   student: RosterStudent,
-  repository: ManifestRepositoryRecord | undefined,
+  repository: GradingRepositoryTarget | undefined,
   workflowPath: string | null
 ): GradePreviewRepositoryRow =>
   createRow(
     student,
-    repository?.repository.fullName ?? null,
+    repository?.fullName ?? null,
     "blocked",
     config.assignment.assignment.status,
     workflowPath,
@@ -306,11 +309,11 @@ const createBlockedLifecycleRow = (
 
 const createGradingDisabledRow = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord | undefined
+  repository: GradingRepositoryTarget | undefined
 ): GradePreviewRepositoryRow =>
   createRow(
     student,
-    repository?.repository.fullName ?? null,
+    repository?.fullName ?? null,
     "would_skip",
     GRADING_NOT_CONFIGURED_CODE,
     null,
@@ -328,21 +331,21 @@ const createMissingManifestRow = (
 
 const previewDispatchableRepository = async (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   githubClient: GitHubClient,
   workflowPath: string,
   ref: string
 ): Promise<GradePreviewRepositoryRow> => {
   try {
     const existingRepository = await githubClient.getRepository(
-      repository.repository.owner,
-      repository.repository.name
+      repository.owner,
+      repository.repositoryName
     );
 
     if (existingRepository === null) {
       return createRow(
         student,
-        repository.repository.fullName,
+        repository.fullName,
         "blocked",
         STUDENT_REPOSITORY_MISSING_CODE,
         workflowPath,
@@ -352,15 +355,15 @@ const previewDispatchableRepository = async (
     }
 
     const workflow = await githubClient.getWorkflow(
-      repository.repository.owner,
-      repository.repository.name,
+      repository.owner,
+      repository.repositoryName,
       getWorkflowDispatchIdentifier(workflowPath)
     );
 
     if (workflow === null) {
       return createRow(
         student,
-        repository.repository.fullName,
+        repository.fullName,
         "blocked",
         GRADING_WORKFLOW_MISSING_CODE,
         workflowPath,
@@ -372,7 +375,7 @@ const previewDispatchableRepository = async (
     if (!workflow.supportsDispatch) {
       return createRow(
         student,
-        repository.repository.fullName,
+        repository.fullName,
         "blocked",
         WORKFLOW_DISPATCH_MISSING_CODE,
         workflowPath,
@@ -383,7 +386,7 @@ const previewDispatchableRepository = async (
 
     return createRow(
       student,
-      repository.repository.fullName,
+      repository.fullName,
       "would_dispatch",
       WORKFLOW_DISPATCH_AVAILABLE_REASON,
       workflowPath,
@@ -392,7 +395,7 @@ const previewDispatchableRepository = async (
   } catch (error) {
     return createRow(
       student,
-      repository.repository.fullName,
+      repository.fullName,
       "unknown",
       STUDENT_REPOSITORY_STATUS_UNKNOWN_CODE,
       workflowPath,
@@ -405,13 +408,13 @@ const previewDispatchableRepository = async (
 const previewStudentRepository = async (
   config: LoadedGraiderConfig,
   student: RosterStudent,
-  manifest: Manifest | undefined,
+  targets: NormalizedGradingTargets | undefined,
   githubClient: GitHubClient | undefined
 ): Promise<GradePreviewRepositoryRow> => {
   const grading = getEffectiveGrading(config);
   const workflowPath = grading.workflow ?? null;
   const workflowRef = grading.enabled ? config.assignment.template.branch : null;
-  const repository = findManifestRecord(manifest, student);
+  const repository = findManifestRecord(targets, student);
 
   if (student.status !== ROSTER_STATUS_ACTIVE) {
     return createSkippedStudentRow(student, repository);
@@ -434,7 +437,7 @@ const previewStudentRepository = async (
   if (githubClient === undefined) {
     return createRow(
       student,
-      repository.repository.fullName,
+      repository.fullName,
       "token_required",
       TOKEN_REQUIRED_REASON,
       workflowPath,
@@ -553,11 +556,37 @@ export const buildAssignmentGradePreview = async ({
   const grading = getEffectiveGrading(config);
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: grading.enabled });
   const manifest = manifestResult.status === "loaded" ? manifestResult.manifest : undefined;
-  const repositoryRows = await Promise.all(
-    rosterResult.students.map((student) =>
-      previewStudentRepository(config, student, manifest, githubClient)
-    )
-  );
+  const normalizedTargets =
+    manifest === undefined
+      ? undefined
+      : normalizeGradingTargets(manifest, config.course.github.organization);
+  const repositoryRows =
+    normalizedTargets?.repositoryMode === "group"
+      ? await Promise.all(
+          normalizedTargets.targets.flatMap((target) => {
+            const student = rosterResult.students.find((candidate) =>
+              target.studentIds.some((studentId) => studentId === candidate.studentId)
+            );
+            return student === undefined
+              ? []
+              : [
+                  previewStudentRepository(config, student, normalizedTargets, githubClient).then(
+                    (row) => ({
+                      ...row,
+                      targetId: target.targetId,
+                      ...(target.groupId === undefined ? {} : { groupId: target.groupId }),
+                      studentIds: target.studentIds,
+                      githubUsernames: target.githubUsernames
+                    })
+                  )
+                ];
+          })
+        )
+      : await Promise.all(
+          rosterResult.students.map((student) =>
+            previewStudentRepository(config, student, normalizedTargets, githubClient)
+          )
+        );
   const summary = createPlanSummary(repositoryRows);
   const rowDiagnostics = collectRowDiagnostics(repositoryRows);
   const diagnostics = [
@@ -577,6 +606,7 @@ export const buildAssignmentGradePreview = async ({
     status,
     exitCode: resolveExitCode(status),
     diagnostics,
+    ...(normalizedTargets?.repositoryMode === "group" ? { repositoryMode: "group" as const } : {}),
     assignment: {
       slug: config.assignment.assignment.slug,
       title: config.assignment.assignment.title,

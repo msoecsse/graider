@@ -6,6 +6,8 @@ const mapStudent = (student: StudentReportSummary) => ({
   github_username: student.githubUsername,
   section: student.section,
   roster_status: student.rosterStatus,
+  ...(student.targetId === undefined ? {} : { target_id: student.targetId }),
+  ...(student.groupId === undefined ? {} : { group_id: student.groupId }),
   ...(student.repositoryName === undefined ? {} : { repository_name: student.repositoryName }),
   ...(student.repositoryUrl === undefined ? {} : { repository_url: student.repositoryUrl }),
   repository_status: student.repositoryStatus,

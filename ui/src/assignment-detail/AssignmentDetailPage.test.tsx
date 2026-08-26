@@ -6,6 +6,7 @@ import type {
   AssignmentDetailResult,
   AssignmentGradeStatusJsonResponse,
   AssignmentGradeStatusResult,
+  AssignmentRepositoryDownloadResult,
   GraiderUIApi
 } from "../../electron/ipc";
 import { AssignmentDetailPage } from "./AssignmentDetailPage";
@@ -227,6 +228,39 @@ const createAssignmentGradeStatusResult = (
   gradeStatus,
   error: null,
   refreshedAt: "2026-06-10T16:00:00.000Z",
+  ...overrides
+});
+
+const createRepositoryDownloadResult = (
+  overrides: Partial<AssignmentRepositoryDownloadResult> = {}
+): AssignmentRepositoryDownloadResult => ({
+  status: "success",
+  destination: "/Users/sean/Downloads/lab02",
+  repositoryMode: "individual",
+  totalTargets: 2,
+  clonedCount: 2,
+  failedCount: 0,
+  targets: [
+    {
+      targetId: "student-alpha",
+      repositoryName: "27s1-csc1120-lab02-alpha",
+      localPath: "/Users/sean/Downloads/lab02/27s1-csc1120-lab02-alpha",
+      status: "cloned",
+      studentIds: ["alpha"],
+      githubUsernames: ["alpha-gh"],
+      diagnostics: []
+    },
+    {
+      targetId: "student-beta",
+      repositoryName: "27s1-csc1120-lab02-beta",
+      localPath: "/Users/sean/Downloads/lab02/27s1-csc1120-lab02-beta",
+      status: "cloned",
+      studentIds: ["beta"],
+      githubUsernames: ["beta-gh"],
+      diagnostics: []
+    }
+  ],
+  diagnostics: [],
   ...overrides
 });
 
@@ -1665,5 +1699,164 @@ describe("AssignmentDetailPage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/secret-token-value/u)).toBeNull();
     expect(screen.queryByText(/Authorization/u)).toBeNull();
+  });
+
+  it("opens the repository download folder picker and runs the fixed download command API", async () => {
+    const selectRepositoryDownloadFolder = vi
+      .fn()
+      .mockResolvedValue({ canceled: false, folderPath: "/Users/sean/Downloads/lab02" });
+    const downloadAssignmentRepositories = vi
+      .fn()
+      .mockResolvedValue(createRepositoryDownloadResult());
+    mockGraiderUI({ selectRepositoryDownloadFolder, downloadAssignmentRepositories });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+
+    await waitFor(() => expect(downloadAssignmentRepositories).toHaveBeenCalledTimes(1));
+    expect(selectRepositoryDownloadFolder).toHaveBeenCalledTimes(1);
+    expect(downloadAssignmentRepositories).toHaveBeenCalledWith({
+      ...SELECTION,
+      destination: "/Users/sean/Downloads/lab02"
+    });
+  });
+
+  it("does nothing when the repository download folder picker is cancelled", async () => {
+    const selectRepositoryDownloadFolder = vi
+      .fn()
+      .mockResolvedValue({ canceled: true, folderPath: null });
+    const downloadAssignmentRepositories = vi.fn();
+    mockGraiderUI({ selectRepositoryDownloadFolder, downloadAssignmentRepositories });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+
+    await waitFor(() => expect(selectRepositoryDownloadFolder).toHaveBeenCalledTimes(1));
+    expect(downloadAssignmentRepositories).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Repository download results")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows repository download busy state and individual target results", async () => {
+    let resolveDownload: (value: AssignmentRepositoryDownloadResult) => void = () => undefined;
+    const downloadAssignmentRepositories = vi.fn(
+      async () =>
+        await new Promise<AssignmentRepositoryDownloadResult>((resolve) => {
+          resolveDownload = resolve;
+        })
+    );
+    mockGraiderUI({
+      selectRepositoryDownloadFolder: vi
+        .fn()
+        .mockResolvedValue({ canceled: false, folderPath: "/Users/sean/Downloads/lab02" }),
+      downloadAssignmentRepositories
+    });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Downloading repositories..." })
+    ).toBeDisabled();
+    resolveDownload(createRepositoryDownloadResult());
+
+    const results = await screen.findByLabelText("Repository download results");
+    expect(within(results).getByText(/2 cloned, 0 failed of 2/u)).toBeInTheDocument();
+    expect(
+      within(results).getByText(/Destination:.*\/Users\/sean\/Downloads\/lab02/u)
+    ).toBeInTheDocument();
+    expect(within(results).getByText("27s1-csc1120-lab02-alpha")).toBeInTheDocument();
+    expect(within(results).getByText("27s1-csc1120-lab02-beta")).toBeInTheDocument();
+    expect(within(results).getByText("alpha")).toBeInTheDocument();
+    expect(within(results).getByText(/\(alpha-gh\)/u)).toBeInTheDocument();
+  });
+
+  it("renders one shared group repository result with all group members", async () => {
+    const groupResult = createRepositoryDownloadResult({
+      repositoryMode: "group",
+      totalTargets: 1,
+      clonedCount: 1,
+      targets: [
+        {
+          targetId: "team-1",
+          groupId: "team-1",
+          repositoryName: "27s1-csc1120-lab02-team-1",
+          localPath: "/Users/sean/Downloads/lab02/27s1-csc1120-lab02-team-1",
+          status: "cloned",
+          studentIds: ["alpha", "beta"],
+          githubUsernames: ["alpha-gh", "beta-gh"],
+          diagnostics: []
+        }
+      ]
+    });
+    mockGraiderUI({
+      selectRepositoryDownloadFolder: vi
+        .fn()
+        .mockResolvedValue({ canceled: false, folderPath: groupResult.destination }),
+      downloadAssignmentRepositories: vi.fn().mockResolvedValue(groupResult)
+    });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+
+    const results = await screen.findByLabelText("Repository download results");
+    expect(within(results).getByText(/1 cloned, 0 failed of 1/u)).toBeInTheDocument();
+    expect(within(results).getByText("27s1-csc1120-lab02-team-1")).toBeInTheDocument();
+    expect(within(results).getByText(/\(team-1\)/u)).toBeInTheDocument();
+    expect(within(results).getByText(/alpha, beta/u)).toBeInTheDocument();
+    expect(within(results).getByText(/alpha-gh, beta-gh/u)).toBeInTheDocument();
+    expect(within(results).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("keeps successful download rows visible and reports target and command failures safely", async () => {
+    const partialFailure = createRepositoryDownloadResult({
+      status: "partial_success",
+      clonedCount: 1,
+      failedCount: 1,
+      targets: [
+        createRepositoryDownloadResult().targets[0]!,
+        {
+          targetId: "student-beta",
+          repositoryName: "27s1-csc1120-lab02-beta",
+          localPath: "/Users/sean/Downloads/lab02/27s1-csc1120-lab02-beta",
+          status: "failed",
+          studentIds: ["beta"],
+          githubUsernames: ["beta-gh"],
+          diagnostics: [
+            { message: "Destination folder already exists; Graider left it unchanged." }
+          ]
+        }
+      ],
+      diagnostics: [{ message: "One repository could not be downloaded." }]
+    });
+    const downloadAssignmentRepositories = vi
+      .fn()
+      .mockResolvedValueOnce(partialFailure)
+      .mockRejectedValueOnce(new Error("command failure"));
+    mockGraiderUI({
+      selectRepositoryDownloadFolder: vi
+        .fn()
+        .mockResolvedValue({ canceled: false, folderPath: partialFailure.destination }),
+      downloadAssignmentRepositories
+    });
+    renderAssignmentDetailPage();
+
+    const button = await screen.findByRole("button", { name: "Download Student Repositories" });
+    fireEvent.click(button);
+    const results = await screen.findByLabelText("Repository download results");
+    expect(within(results).getByText("27s1-csc1120-lab02-alpha")).toBeInTheDocument();
+    expect(within(results).getByText("27s1-csc1120-lab02-beta")).toBeInTheDocument();
+    expect(within(results).getByText(/Destination folder already exists/u)).toBeInTheDocument();
+    expect(
+      within(results).getByText(/One repository could not be downloaded/u)
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Download Student Repositories" }));
+    expect(await screen.findByText("Unable to download student repositories.")).toHaveAttribute(
+      "role",
+      "alert"
+    );
+    expect(screen.getByRole("button", { name: "Download Student Repositories" })).toBeEnabled();
+    expect(screen.queryByText("command failure")).toBeNull();
   });
 });

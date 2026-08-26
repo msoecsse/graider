@@ -57,6 +57,10 @@ export interface GradePreviewRepositoryRow {
   readonly studentId: string;
   readonly githubUsername: string;
   readonly section: string;
+  readonly targetId?: string;
+  readonly groupId?: string;
+  readonly studentIds?: readonly string[];
+  readonly githubUsernames?: readonly string[];
   readonly repository: string | null;
   readonly status: GradePreviewRepositoryStatus;
   readonly reason: string;
@@ -100,6 +104,7 @@ export interface AssignmentGradePreviewResult {
   readonly status: CommandStatus;
   readonly exitCode: 0 | 1 | 2;
   readonly diagnostics: Diagnostic[];
+  readonly repositoryMode?: "individual" | "group";
   readonly assignment: GradePreviewAssignment | null;
   readonly course: GradePreviewCourse | null;
   readonly term: GradePreviewTerm | null;

@@ -46,6 +46,10 @@ import {
   createRepositoryMappingsJsonRequiredResult,
   type AssignmentRepositoryMappingsResult
 } from "../../repository-mappings/repository-mappings-builder.js";
+import {
+  downloadAssignmentRepositories,
+  type RepositoryDownloadResult
+} from "../../repository-download/repository-download.js";
 
 const COMMAND_NAME = "assignment";
 const DETAIL_COMMAND_NAME = "detail";
@@ -55,6 +59,7 @@ const GRADE_STATUS_COMMAND_NAME = "grade-status";
 const APPLY_COMMAND_NAME = "apply";
 const GRADE_COMMAND_NAME = "grade";
 const REPOSITORY_MAPPINGS_COMMAND_NAME = "repository-mappings";
+const DOWNLOAD_REPOSITORIES_COMMAND_NAME = "download-repositories";
 const ASSIGNMENT_APPLY_COMMAND_NAME = "assignment apply";
 const ASSIGNMENT_GRADE_COMMAND_NAME = "assignment grade";
 const JSON_INDENT_SPACES = 2;
@@ -78,6 +83,10 @@ interface AssignmentGradeStatusCommandOptions {
 }
 interface AssignmentRepositoryMappingsCommandOptions {
   readonly json?: boolean;
+}
+interface AssignmentDownloadRepositoriesCommandOptions {
+  readonly json?: boolean;
+  readonly destination?: string;
 }
 
 export interface AssignmentDetailCommandRequest {
@@ -133,6 +142,11 @@ export interface AssignmentRepositoryMappingsCommandRequest {
   readonly cwd: string;
   readonly assignmentFile: string;
   readonly options: AssignmentRepositoryMappingsCommandOptions;
+}
+export interface AssignmentDownloadRepositoriesCommandRequest {
+  readonly cwd: string;
+  readonly assignmentFile: string;
+  readonly options: AssignmentDownloadRepositoriesCommandOptions;
 }
 
 const createJsonRequiredResult = (): AssignmentDetailResult =>
@@ -329,6 +343,17 @@ export const runAssignmentRepositoryMappingsCommand = ({
       : createRepositoryMappingsJsonRequiredResult()
   );
 
+export const runAssignmentDownloadRepositoriesCommand = async ({
+  cwd,
+  assignmentFile,
+  options
+}: AssignmentDownloadRepositoriesCommandRequest): Promise<RepositoryDownloadResult> =>
+  await downloadAssignmentRepositories({
+    cwd,
+    assignmentFile,
+    destination: options.destination ?? ""
+  });
+
 export const runAssignmentApplyCommand = ({
   cwd,
   assignmentFile,
@@ -382,6 +407,10 @@ export const formatAssignmentGradeStatusResultAsJson = (
 
 export const formatAssignmentRepositoryMappingsResultAsJson = (
   result: AssignmentRepositoryMappingsResult
+): string => JSON.stringify(result, undefined, JSON_INDENT_SPACES);
+
+export const formatAssignmentDownloadRepositoriesResultAsJson = (
+  result: RepositoryDownloadResult
 ): string => JSON.stringify(result, undefined, JSON_INDENT_SPACES);
 
 export const registerAssignmentCommand = (program: Command): void => {
@@ -472,6 +501,24 @@ export const registerAssignmentCommand = (program: Command): void => {
       console.log(formatAssignmentRepositoryMappingsResultAsJson(result));
       process.exitCode = result.exitCode;
     });
+
+  assignment
+    .command(DOWNLOAD_REPOSITORIES_COMMAND_NAME)
+    .argument("<assignment-file>")
+    .requiredOption("--destination <folder>", "Local folder that receives repository clones")
+    .option("--json", "Emit JSON output")
+    .description("Clone each unique assignment repository target into a local folder.")
+    .action(
+      async (assignmentFile: string, options: AssignmentDownloadRepositoriesCommandOptions) => {
+        const result = await runAssignmentDownloadRepositoriesCommand({
+          cwd: process.cwd(),
+          assignmentFile,
+          options
+        });
+        console.log(formatAssignmentDownloadRepositoriesResultAsJson(result));
+        process.exitCode = result.exitCode;
+      }
+    );
 
   assignment
     .command(APPLY_COMMAND_NAME)

@@ -22,11 +22,16 @@ import type { GitHubClient } from "../github/github-client.js";
 import { GitHubClientError } from "../github/github-errors.js";
 import type { GitHubWorkflowRun, GitHubWorkflowRunConclusion } from "../github/github-models.js";
 import { loadManifest } from "../manifest/manifest-loader.js";
-import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
 import { loadAssignmentRosters } from "../roster/roster-loader.js";
 import { ROSTER_STATUS_ACTIVE, type RosterStudent } from "../roster/roster-models.js";
 import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
+import {
+  findGradingTargetForStudent,
+  normalizeGradingTargets,
+  type GradingRepositoryTarget,
+  type NormalizedGradingTargets
+} from "../execution/grading-targets.js";
 import {
   ASSIGNMENT_GRADE_STATUS_SCHEMA_VERSION,
   type AssignmentGradeStatusResult,
@@ -81,6 +86,7 @@ export const createEmptyAssignmentGradeStatusResult = (
   target: null,
   grading: null,
   summary: null,
+  targets: [],
   repositories: [],
   actions: null
 });
@@ -165,7 +171,7 @@ const createStudentRepositoryMissingDiagnostic = (student: RosterStudent): Diagn
 
 const createWorkflowRunMissingDiagnostic = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   workflowPath: string
 ): Diagnostic =>
   createConfigDiagnostic(
@@ -175,7 +181,7 @@ const createWorkflowRunMissingDiagnostic = (
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName,
+      repository: repository.fullName,
       workflowPath
     }
   );
@@ -183,17 +189,17 @@ const createWorkflowRunMissingDiagnostic = (
 const createWorkflowStatusUnknownDiagnostic = (
   error: unknown,
   student: RosterStudent,
-  repository: ManifestRepositoryRecord
+  repository: GradingRepositoryTarget
 ): Diagnostic => {
   if (error instanceof GitHubClientError) {
     return createConfigDiagnostic(
       error.diagnosticCode,
-      `Could not check grading workflow run status for ${repository.repository.fullName}.`,
+      `Could not check grading workflow run status for ${repository.fullName}.`,
       {
         studentId: student.studentId,
         githubUsername: student.githubUsername,
         section: student.section,
-        repository: repository.repository.fullName,
+        repository: repository.fullName,
         kind: error.kind,
         retryable: error.retryable,
         ...(error.retryAfterSeconds === undefined
@@ -205,19 +211,19 @@ const createWorkflowStatusUnknownDiagnostic = (
 
   return createConfigDiagnostic(
     GRADING_WORKFLOW_STATUS_UNKNOWN_CODE,
-    `Could not check grading workflow run status for ${repository.repository.fullName}.`,
+    `Could not check grading workflow run status for ${repository.fullName}.`,
     {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName
+      repository: repository.fullName
     }
   );
 };
 
 const createWorkflowRunInProgressDiagnostic = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   run: GitHubWorkflowRun,
   workflowPath: string
 ): Diagnostic =>
@@ -228,7 +234,7 @@ const createWorkflowRunInProgressDiagnostic = (
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName,
+      repository: repository.fullName,
       workflowPath,
       runId: run.id,
       status: run.status
@@ -237,7 +243,7 @@ const createWorkflowRunInProgressDiagnostic = (
 
 const createWorkflowRunFailedDiagnostic = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   run: GitHubWorkflowRun,
   workflowPath: string,
   conclusion: GradeStatusRepositoryConclusion
@@ -249,7 +255,7 @@ const createWorkflowRunFailedDiagnostic = (
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
-      repository: repository.repository.fullName,
+      repository: repository.fullName,
       workflowPath,
       runId: run.id,
       conclusion
@@ -285,12 +291,10 @@ const createGradingStatus = (config: LoadedGraiderConfig): GradeStatusGrading =>
 };
 
 const findManifestRecord = (
-  manifest: Manifest | undefined,
+  targets: NormalizedGradingTargets | undefined,
   student: RosterStudent
-): ManifestRepositoryRecord | undefined =>
-  manifest?.repositories.find(
-    (record) => record.studentId === student.studentId && record.section === student.section
-  );
+): GradingRepositoryTarget | undefined =>
+  targets === undefined ? undefined : findGradingTargetForStudent(targets, student);
 
 const normalizeConclusion = (
   conclusion: GitHubWorkflowRunConclusion
@@ -311,14 +315,13 @@ const selectLatestWorkflowRun = (runs: readonly GitHubWorkflowRun[]): GitHubWork
   sortRunsNewestFirst(runs)[0] ?? null;
 
 const createFallbackRunUrl = (
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   run: GitHubWorkflowRun
-): string =>
-  `https://${GITHUB_HOST}/${repository.repository.fullName}/actions/runs/${String(run.id)}`;
+): string => `https://${GITHUB_HOST}/${repository.fullName}/actions/runs/${String(run.id)}`;
 
 const isMatchingRunUrl = (
   urlValue: string,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   runId: number
 ): boolean => {
   try {
@@ -332,8 +335,8 @@ const isMatchingRunUrl = (
       url.search.length === 0 &&
       url.hash.length === 0 &&
       pathParts.length === ACTIONS_RUN_PATH_SEGMENT_COUNT &&
-      owner === repository.repository.owner &&
-      repo === repository.repository.name &&
+      owner === repository.owner &&
+      repo === repository.repositoryName &&
       actions === "actions" &&
       runs === "runs" &&
       pathRunId === String(runId)
@@ -343,7 +346,7 @@ const isMatchingRunUrl = (
   }
 };
 
-const createRunUrl = (repository: ManifestRepositoryRecord, run: GitHubWorkflowRun): string =>
+const createRunUrl = (repository: GradingRepositoryTarget, run: GitHubWorkflowRun): string =>
   run.runUrl !== undefined && isMatchingRunUrl(run.runUrl, repository, run.id)
     ? run.runUrl
     : createFallbackRunUrl(repository, run);
@@ -357,7 +360,7 @@ const createRow = (
   ref: string | null,
   diagnostics: Diagnostic[] = [],
   run: GitHubWorkflowRun | null = null,
-  repositoryRecord: ManifestRepositoryRecord | null = null
+  repositoryRecord: GradingRepositoryTarget | null = null
 ): GradeStatusRepositoryRow => {
   const conclusion = run === null ? "unknown" : normalizeConclusion(run.conclusion);
   const failedConclusion =
@@ -373,6 +376,9 @@ const createRow = (
     studentId: student.studentId,
     githubUsername: student.githubUsername,
     section: student.section,
+    ...(repositoryRecord === null ? {} : { targetId: repositoryRecord.targetId }),
+    ...(repositoryRecord?.groupId === undefined ? {} : { groupId: repositoryRecord.groupId }),
+    ...(repositoryRecord === null ? {} : { studentIds: repositoryRecord.studentIds }),
     repository,
     workflow,
     ref,
@@ -391,11 +397,11 @@ const createRow = (
 
 const createGradingDisabledRow = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord | undefined
+  repository: GradingRepositoryTarget | undefined
 ): GradeStatusRepositoryRow =>
   createRow(
     student,
-    repository?.repository.fullName ?? null,
+    repository?.fullName ?? null,
     "blocked",
     GRADING_NOT_CONFIGURED_CODE,
     null,
@@ -405,12 +411,12 @@ const createGradingDisabledRow = (
 const createBlockedLifecycleRow = (
   config: LoadedGraiderConfig,
   student: RosterStudent,
-  repository: ManifestRepositoryRecord | undefined,
+  repository: GradingRepositoryTarget | undefined,
   workflowPath: string | null
 ): GradeStatusRepositoryRow =>
   createRow(
     student,
-    repository?.repository.fullName ?? null,
+    repository?.fullName ?? null,
     "blocked",
     config.assignment.assignment.status,
     workflowPath,
@@ -429,13 +435,13 @@ const createMissingManifestRow = (
 
 const createTokenRequiredRow = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   workflowPath: string,
   ref: string
 ): GradeStatusRepositoryRow =>
   createRow(
     student,
-    repository.repository.fullName,
+    repository.fullName,
     "token_required",
     TOKEN_REQUIRED_REASON,
     workflowPath,
@@ -452,7 +458,7 @@ const mapRunStatus = (run: GitHubWorkflowRun): GradeStatusRepositoryStatus => {
 
 const createRunRow = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   workflowPath: string,
   ref: string,
   run: GitHubWorkflowRun
@@ -471,7 +477,7 @@ const createRunRow = (
 
   return createRow(
     student,
-    repository.repository.fullName,
+    repository.fullName,
     status,
     reason,
     workflowPath,
@@ -484,13 +490,13 @@ const createRunRow = (
 
 const createMissingRunRow = (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   workflowPath: string,
   ref: string
 ): GradeStatusRepositoryRow =>
   createRow(
     student,
-    repository.repository.fullName,
+    repository.fullName,
     "missing",
     GRADING_WORKFLOW_RUN_MISSING_CODE,
     workflowPath,
@@ -501,13 +507,13 @@ const createMissingRunRow = (
 const createUnknownRunRow = (
   error: unknown,
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   workflowPath: string,
   ref: string
 ): GradeStatusRepositoryRow =>
   createRow(
     student,
-    repository.repository.fullName,
+    repository.fullName,
     "unknown",
     GRADING_WORKFLOW_STATUS_UNKNOWN_CODE,
     workflowPath,
@@ -517,15 +523,15 @@ const createUnknownRunRow = (
 
 const getRepositoryWorkflowStatus = async (
   student: RosterStudent,
-  repository: ManifestRepositoryRecord,
+  repository: GradingRepositoryTarget,
   githubClient: GitHubClient,
   workflowPath: string,
   ref: string
 ): Promise<GradeStatusRepositoryRow> => {
   try {
     const runs = await githubClient.listWorkflowRuns({
-      owner: repository.repository.owner,
-      repo: repository.repository.name,
+      owner: repository.owner,
+      repo: repository.repositoryName,
       workflowPath: getWorkflowDispatchIdentifier(workflowPath)
     });
     const run = selectLatestWorkflowRun(runs);
@@ -538,16 +544,16 @@ const getRepositoryWorkflowStatus = async (
   }
 };
 
-const createRepositoryStatusRow = async (
+const createRepositoryStatusRowUncached = async (
   config: LoadedGraiderConfig,
   student: RosterStudent,
-  manifest: Manifest | undefined,
+  targets: NormalizedGradingTargets | undefined,
   githubClient: GitHubClient | undefined
 ): Promise<GradeStatusRepositoryRow> => {
   const grading = getEffectiveGrading(config);
   const workflowPath = grading.workflow ?? null;
   const workflowRef = grading.enabled ? config.assignment.template.branch : null;
-  const repository = findManifestRecord(manifest, student);
+  const repository = findManifestRecord(targets, student);
 
   if (!grading.enabled || workflowPath === null) {
     return createGradingDisabledRow(student, repository);
@@ -579,6 +585,40 @@ const createRepositoryStatusRow = async (
     workflowPath,
     config.assignment.template.branch
   );
+};
+
+const createRepositoryStatusRow = async (
+  config: LoadedGraiderConfig,
+  student: RosterStudent,
+  targets: NormalizedGradingTargets | undefined,
+  githubClient: GitHubClient | undefined,
+  statusCache: Map<string, Promise<GradeStatusRepositoryRow>>
+): Promise<GradeStatusRepositoryRow> => {
+  const repository = findManifestRecord(targets, student);
+
+  if (repository === undefined) {
+    return createRepositoryStatusRowUncached(config, student, targets, githubClient);
+  }
+
+  const cached = statusCache.get(repository.targetId);
+  const sourceRow =
+    cached ??
+    (() => {
+      const created = createRepositoryStatusRowUncached(config, student, targets, githubClient);
+      statusCache.set(repository.targetId, created);
+      return created;
+    })();
+
+  const row = await sourceRow;
+  return {
+    ...row,
+    studentId: student.studentId,
+    githubUsername: student.githubUsername,
+    section: student.section,
+    targetId: repository.targetId,
+    ...(repository.groupId === undefined ? {} : { groupId: repository.groupId }),
+    studentIds: repository.studentIds
+  };
 };
 
 const countRows = (
@@ -729,6 +769,10 @@ export const buildAssignmentGradeStatus = async ({
   const grading = getEffectiveGrading(config);
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: grading.enabled });
   const manifest = manifestResult.status === "loaded" ? manifestResult.manifest : undefined;
+  const normalizedTargets =
+    manifest === undefined
+      ? undefined
+      : normalizeGradingTargets(manifest, config.course.github.organization);
   const activeStudents = rosterResult.students.filter(
     (student) => student.status === ROSTER_STATUS_ACTIVE
   );
@@ -754,12 +798,18 @@ export const buildAssignmentGradeStatus = async ({
       ? [createStudentFilterNoMatchesDiagnostic(config, requestedStudentIds)]
       : [])
   ];
+  const statusCache = new Map<string, Promise<GradeStatusRepositoryRow>>();
   const repositoryRows = await Promise.all(
     selectedStudents.map((student) =>
-      createRepositoryStatusRow(config, student, manifest, githubClient)
+      createRepositoryStatusRow(config, student, normalizedTargets, githubClient, statusCache)
     )
   );
-  const summary = createSummary(repositoryRows);
+  const targetRows = Array.from(
+    new Map(
+      repositoryRows.map((row) => [row.targetId ?? `${row.studentId}:${row.section}`, row])
+    ).values()
+  );
+  const summary = createSummary(targetRows);
   const diagnostics = [
     ...configResult.diagnostics,
     ...rosterResult.warnings,
@@ -768,7 +818,7 @@ export const buildAssignmentGradeStatus = async ({
     ...manifestResult.errors,
     ...(!grading.enabled ? [createGradingNotConfiguredWarning()] : []),
     ...(hasTokenRequiredRows(repositoryRows) ? [createTokenRequiredDiagnostic()] : []),
-    ...collectRowDiagnostics(repositoryRows)
+    ...collectRowDiagnostics(targetRows)
   ];
   const status: CommandStatus =
     filtered && selectedStudents.length === EMPTY_COUNT ? "failure" : createStatus(diagnostics);
@@ -784,6 +834,7 @@ export const buildAssignmentGradeStatus = async ({
     status,
     exitCode: resolveExitCode(status),
     diagnostics,
+    ...(normalizedTargets?.repositoryMode === "group" ? { repositoryMode: "group" as const } : {}),
     assignment: {
       slug: config.assignment.assignment.slug,
       title: config.assignment.assignment.title,
@@ -806,6 +857,7 @@ export const buildAssignmentGradeStatus = async ({
     },
     grading: createGradingStatus(config),
     summary: filtered && selectedStudents.length === EMPTY_COUNT ? createZeroSummary() : summary,
+    targets: targetRows,
     repositories: repositoryRows,
     actions: createActions(summary)
   };

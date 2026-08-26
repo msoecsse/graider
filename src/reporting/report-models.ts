@@ -59,6 +59,8 @@ export interface StudentReportSummary {
   githubUsername: string;
   section: string;
   rosterStatus: RosterStatus;
+  targetId?: string;
+  groupId?: string;
   repositoryOwner?: string;
   repositoryName?: string;
   repositoryUrl?: string;

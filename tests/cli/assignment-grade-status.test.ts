@@ -10,6 +10,7 @@ import { DiagnosticCode } from "../../src/diagnostics/error-catalog.js";
 import type { AssignmentGradeStatusResult } from "../../src/grade-status/grade-status-models.js";
 import { FakeGitHubClient } from "../../src/github/fake-github-client.js";
 import type { GitHubRepository, GitHubWorkflowRun } from "../../src/github/github-models.js";
+import { renderManifestV2Yaml } from "../../src/manifest/manifest-v2-renderer.js";
 
 enum TestNumber {
   JonesRepositoryId = 101,
@@ -25,6 +26,7 @@ const MANIFEST_FILE = "terms/27s1/manifests/lab04/manifest.yml";
 const ORGANIZATION = "example-org";
 const JONES_REPOSITORY = "27s1-se2030-lab04-seanjones";
 const KIM_REPOSITORY = "27s1-se2030-lab04-kimstudent";
+const GROUP_REPOSITORY = "27s1-se2030-lab04-team-1";
 const DEFAULT_WORKFLOW = "grade.yml";
 const CUSTOM_WORKFLOW = ".github/workflows/custom-grade.yml";
 const CUSTOM_WORKFLOW_IDENTIFIER = "custom-grade.yml";
@@ -158,7 +160,120 @@ const addAssignmentGradingOverride = (cwd: string): void => {
   fs.writeFileSync(assignmentPath, `${original}${override}`, "utf8");
 };
 
+const writeGroupManifest = (cwd: string): void => {
+  fs.writeFileSync(
+    path.join(cwd, MANIFEST_FILE),
+    renderManifestV2Yaml({
+      repositoryMode: "group",
+      targets: [
+        {
+          targetId: "team-1",
+          mode: "group",
+          groupId: "team-1",
+          repositoryName: GROUP_REPOSITORY,
+          htmlUrl: `https://github.com/${ORGANIZATION}/${GROUP_REPOSITORY}`,
+          sectionIds: ["001", "002"],
+          studentIds: ["jones", "kim"],
+          githubUsernames: ["seanjones", "kimstudent"],
+          diagnostics: []
+        }
+      ],
+      studentMappings: [
+        {
+          studentId: "jones",
+          githubUsername: "seanjones",
+          targetId: "team-1",
+          repositoryName: GROUP_REPOSITORY,
+          htmlUrl: `https://github.com/${ORGANIZATION}/${GROUP_REPOSITORY}`
+        },
+        {
+          studentId: "kim",
+          githubUsername: "kimstudent",
+          targetId: "team-1",
+          repositoryName: GROUP_REPOSITORY,
+          htmlUrl: `https://github.com/${ORGANIZATION}/${GROUP_REPOSITORY}`
+        }
+      ]
+    }),
+    "utf8"
+  );
+};
+
 describe("graider assignment grade-status command", () => {
+  it("reads one shared v2 group target and projects its status to each member", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    writeGroupManifest(cwd);
+    const githubClient = new FakeGitHubClient({
+      repositories: [repository(GROUP_REPOSITORY, TestNumber.JonesRepositoryId)],
+      workflowRuns: [
+        {
+          owner: ORGANIZATION,
+          repo: GROUP_REPOSITORY,
+          run: run(GROUP_REPOSITORY, TestNumber.JonesRunId, "completed", "success")
+        }
+      ]
+    });
+    const result = await runAssignmentGradeStatusCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: jsonOptions,
+      env: GRADE_STATUS_ENV,
+      githubClient
+    });
+
+    expect(result.repositoryMode).toBe("group");
+    expect(result.targets).toHaveLength(1);
+    expect(result.targets[0]).toMatchObject({
+      targetId: "team-1",
+      groupId: "team-1",
+      repository: `${ORGANIZATION}/${GROUP_REPOSITORY}`,
+      studentIds: ["jones", "kim"],
+      status: "completed"
+    });
+    expect(getRow(result, "jones")).toMatchObject({
+      targetId: "team-1",
+      groupId: "team-1",
+      status: "completed"
+    });
+    expect(getRow(result, "kim")).toMatchObject({
+      targetId: "team-1",
+      groupId: "team-1",
+      status: "completed"
+    });
+    expect(githubClient.workflowRunReadRequests.map((request) => request.repo)).toEqual([
+      GROUP_REPOSITORY
+    ]);
+  });
+
+  it("reports a missing shared group run once and maps the diagnostic to both members", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    writeGroupManifest(cwd);
+    const githubClient = new FakeGitHubClient({
+      repositories: [repository(GROUP_REPOSITORY, TestNumber.JonesRepositoryId)]
+    });
+    const result = await runAssignmentGradeStatusCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: jsonOptions,
+      env: GRADE_STATUS_ENV,
+      githubClient
+    });
+
+    expect(result.targets).toEqual([
+      expect.objectContaining({
+        targetId: "team-1",
+        groupId: "team-1",
+        status: "missing",
+        diagnostics: [expect.objectContaining({ code: DiagnosticCode.GradingWorkflowRunMissing })]
+      })
+    ]);
+    expect(getRow(result, "jones").diagnostics).toEqual([
+      expect.objectContaining({ code: DiagnosticCode.GradingWorkflowRunMissing })
+    ]);
+    expect(getRow(result, "kim").diagnostics).toEqual([
+      expect.objectContaining({ code: DiagnosticCode.GradingWorkflowRunMissing })
+    ]);
+  });
   it("requires JSON output and returns the JSON-only diagnostic", async () => {
     const result = await runStatus("active-assignment", createStatusClient(), {});
     const json = JSON.parse(
