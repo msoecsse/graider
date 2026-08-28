@@ -225,7 +225,11 @@ const createGradingPreview = (
 ): GradePreviewGrading => {
   const grading = getEffectiveGrading(config);
   const resolvedFrom =
-    config.summary.gradingSource === "assignment" ? "assignment_override" : "course_default";
+    config.summary.gradingSource === "assignment"
+      ? "assignment_override"
+      : config.summary.gradingSource === "course"
+        ? "course_default"
+        : "none";
 
   if (!grading.enabled) {
     return {

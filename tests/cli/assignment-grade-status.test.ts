@@ -122,6 +122,13 @@ const runStatus = (
     ...(githubClient === null ? {} : { githubClient })
   });
 
+const removeCourseGrading = (cwd: string): void => {
+  const coursePath = path.join(cwd, "course.yml");
+  const original = fs.readFileSync(coursePath, "utf8");
+
+  fs.writeFileSync(coursePath, original.replace("grading:\n  enabled: false\n", ""), "utf8");
+};
+
 const getRow = (
   result: AssignmentGradeStatusResult,
   studentId: string
@@ -403,6 +410,27 @@ describe("graider assignment grade-status command", () => {
     expect(getRow(result, "jones")).toMatchObject({
       workflow: CUSTOM_WORKFLOW,
       status: "completed"
+    });
+    expectNoMutations(githubClient);
+  });
+
+  it("reports no grading source when neither course nor assignment configures grading", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    const githubClient = createStatusClient();
+    removeCourseGrading(cwd);
+    const result = await runAssignmentGradeStatusCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: jsonOptions,
+      env: GRADE_STATUS_ENV,
+      githubClient
+    });
+
+    expect(result.grading).toMatchObject({
+      enabled: false,
+      resolvedFrom: "none",
+      workflow: null,
+      workflowRef: null
     });
     expectNoMutations(githubClient);
   });

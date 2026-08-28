@@ -130,6 +130,13 @@ const addAssignmentGradingOverride = (cwd: string): void => {
   fs.writeFileSync(assignmentPath, `${original}${override}`, "utf8");
 };
 
+const removeCourseGrading = (cwd: string): void => {
+  const coursePath = path.join(cwd, "course.yml");
+  const original = fs.readFileSync(coursePath, "utf8");
+
+  fs.writeFileSync(coursePath, original.replace("grading:\n  enabled: false\n", ""), "utf8");
+};
+
 describe("graider assignment grade-preview command", () => {
   it("requires JSON output and returns the JSON-only diagnostic", async () => {
     const result = await runPreview("active-assignment", createReadyClient(), {});
@@ -277,6 +284,27 @@ describe("graider assignment grade-preview command", () => {
       unknown: 0
     });
     expect(result.actions?.grade.available).toBe(false);
+    expectNoMutations(githubClient);
+  });
+
+  it("reports no grading source when neither course nor assignment configures grading", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    const githubClient = createReadyClient();
+    removeCourseGrading(cwd);
+    const result = await runAssignmentGradePreviewCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: { json: true },
+      env: GRADE_PREVIEW_ENV,
+      githubClient
+    });
+
+    expect(result.grading).toMatchObject({
+      enabled: false,
+      resolvedFrom: "none",
+      workflow: null,
+      workflowDispatch: "not_required"
+    });
     expectNoMutations(githubClient);
   });
 

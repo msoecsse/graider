@@ -3,7 +3,7 @@ import type { Diagnostic } from "../diagnostics/diagnostic.js";
 
 export const ASSIGNMENT_GRADE_PREVIEW_SCHEMA_VERSION = 1;
 
-export type GradePreviewResolvedFrom = "course_default" | "assignment_override";
+export type GradePreviewResolvedFrom = "course_default" | "assignment_override" | "none";
 
 export type GradePreviewWorkflowDispatchStatus =
   | "available"
