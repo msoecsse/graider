@@ -171,7 +171,7 @@ const createTermContentWithRosterReference = (request: RosterSectionRequest): st
   }
 };
 
-const createTermContentWithoutRosterReference = (request: RosterSectionRequest): string | null => {
+const createTermContentWithoutSection = (request: RosterSectionRequest): string | null => {
   const termPath = path.join(request.courseFolderPath, getTermPath(request.termCode));
   try {
     const document = parseDocument(fs.readFileSync(termPath, "utf8"));
@@ -179,16 +179,12 @@ const createTermContentWithoutRosterReference = (request: RosterSectionRequest):
     if (!Array.isArray(root.sections)) return null;
     document.set(
       "sections",
-      root.sections.map((section) => {
-        if (
+      root.sections.filter(
+        (section) =>
           typeof section !== "object" ||
           section === null ||
           (section as Record<string, unknown>).id !== request.sectionId
-        )
-          return section;
-        const { roster: _roster, ...withoutRoster } = section as Record<string, unknown>;
-        return withoutRoster;
-      })
+      )
     );
     return document.toString();
   } catch {
@@ -413,7 +409,7 @@ export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult =
       path: rosterPath,
       diagnostics: [diagnostic("Roster removal path is outside the selected course folder.")]
     };
-  const termContent = createTermContentWithoutRosterReference(request);
+  const termContent = createTermContentWithoutSection(request);
   if (termContent === null)
     return {
       status: "failure",

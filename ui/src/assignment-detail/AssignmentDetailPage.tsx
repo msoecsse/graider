@@ -1390,7 +1390,8 @@ export const AssignmentDetailPage = ({
   onViewFacultyReport,
   onViewGradeStatus,
   onDetailLoaded,
-  onEditAssignment = () => undefined
+  onEditAssignment = () => undefined,
+  onDeleted = () => undefined
 }: AssignmentDetailPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(
     initialLoadResult
@@ -1428,6 +1429,10 @@ export const AssignmentDetailPage = ({
   const [groupsCsv, setGroupsCsv] = useState("group_id,student_id\n");
   const [isSavingGroupConfig, setIsSavingGroupConfig] = useState(false);
   const [groupConfigFeedback, setGroupConfigFeedback] = useState<string | null>(null);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
 
@@ -1484,6 +1489,29 @@ export const AssignmentDetailPage = ({
       onDetailLoaded?.(failureResult);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const deleteLocalAssignment = async (): Promise<void> => {
+    if (!isDeleteConfirmed || window.graiderUI.deleteAssignment === undefined) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const result = await window.graiderUI.deleteAssignment({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        assignmentFile: selection.assignmentFile,
+        confirmed: true
+      });
+      if (result.status === "success") {
+        onDeleted();
+      } else {
+        setDeleteError(result.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
+      }
+    } catch {
+      setDeleteError("Unable to delete local assignment configuration.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1856,6 +1884,18 @@ export const AssignmentDetailPage = ({
               Edit assignment
             </button>
             <button
+              className="danger-action"
+              type="button"
+              disabled={detail === null || isDeleting}
+              onClick={() => {
+                setIsConfirmingDelete(true);
+                setIsDeleteConfirmed(false);
+                setDeleteError(null);
+              }}
+            >
+              Delete assignment
+            </button>
+            <button
               className="secondary-action"
               type="button"
               disabled={detail === null}
@@ -1908,6 +1948,50 @@ export const AssignmentDetailPage = ({
           </div>
         </div>
       </header>
+      {!isConfirmingDelete ? null : (
+        <section className="detail-panel" role="dialog" aria-labelledby="delete-assignment-title">
+          <h2 id="delete-assignment-title">Delete assignment</h2>
+          <p>
+            This deletes only the local assignment configuration file. It does not delete GitHub
+            repositories, student repositories, GitHub Classroom resources, or other remote
+            resources.
+          </p>
+          <label className="confirmation-check">
+            <input
+              type="checkbox"
+              checked={isDeleteConfirmed}
+              onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
+            />
+            I understand this deletes the local assignment configuration.
+          </label>
+          <div className="apply-confirmation-actions">
+            <button
+              className="secondary-action"
+              type="button"
+              disabled={isDeleting}
+              onClick={() => {
+                setIsConfirmingDelete(false);
+                setIsDeleteConfirmed(false);
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              className="danger-action"
+              type="button"
+              disabled={!isDeleteConfirmed || isDeleting}
+              onClick={() => void deleteLocalAssignment()}
+            >
+              {isDeleting ? "Deleting assignment..." : "Delete assignment"}
+            </button>
+          </div>
+        </section>
+      )}
+      {deleteError === null ? null : (
+        <p className="error-message" role="alert">
+          {deleteError}
+        </p>
+      )}
       {repositoryDownloadResult === null ? null : (
         <section className="detail-panel" aria-label="Repository download results">
           <h2>Repository download</h2>

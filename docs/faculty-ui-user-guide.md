@@ -83,6 +83,12 @@ assignment row to open Assignment Detail. Use **New Assignment** to create an
 assignment, **Manage Rosters** to edit a section roster, and **Refresh** to
 reload local/GitHub-backed readiness information.
 
+From Assignment Detail, **Delete assignment** requires confirmation and removes
+only that assignment's local `assignment.yml` configuration. It does not delete
+GitHub repositories, student repositories, GitHub Classroom resources, or
+generated local artifacts; create the assignment again with **New Assignment**
+when needed.
+
 ## Set Up a Course and Term
 
 For a new course, use the course setup wizard. Provide the course title and
@@ -108,10 +114,12 @@ student; the selected section is filled in and the status defaults to `active`.
 Use **Remove Student** to remove a row, **Replace from CSV** to replace the
 selected roster with an uploaded canonical CSV, or **Clear Roster Rows** to
 save a header-only roster while keeping the section. **Remove Roster** instead
-deletes the roster CSV and removes its term reference after confirmation; the
-section remains and a roster can be added again later. Review the preview before
-using **Save Roster**. Keep `student_id` and `github_username` accurate. Use `active` for students who should receive repositories; use
-`dropped` or `hold` to exclude them from repository access-page generation.
+deletes the roster CSV and removes its section from the term configuration after
+confirmation. To add it again later, choose **Add Section** and save/import its
+roster. Review the preview before using **Save Roster**. Keep `student_id` and
+`github_username` accurate. Use `active` for students who should receive
+repositories; use `dropped` or `hold` to exclude them from repository
+access-page generation.
 
 To add a section after course setup, select the term and choose **Add Section**.
 Enter a safe, unique section ID, optionally upload a canonical roster CSV (or

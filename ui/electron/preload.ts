@@ -30,6 +30,8 @@ import {
   type AssignmentEditRequest,
   type AssignmentEditSaveResult,
   type AssignmentEditPreviewResult,
+  type AssignmentDeleteRequest,
+  type AssignmentDeleteResult,
   type AssignmentGroupConfigRequest,
   type AssignmentGroupConfigResult,
   type AssignmentGroupConfigSaveRequest,
@@ -119,6 +121,8 @@ const graiderUI: GraiderUIApi = {
     await invoke<AssignmentEditPreviewResult>(IPC_CHANNELS.previewAssignmentEdit, request),
   saveAssignmentEdit: async (request: AssignmentEditRequest): Promise<AssignmentEditSaveResult> =>
     await invoke<AssignmentEditSaveResult>(IPC_CHANNELS.saveAssignmentEdit, request),
+  deleteAssignment: async (request: AssignmentDeleteRequest): Promise<AssignmentDeleteResult> =>
+    await invoke<AssignmentDeleteResult>(IPC_CHANNELS.deleteAssignment, request),
   getAssignmentGroupConfig: async (
     request: AssignmentGroupConfigRequest
   ): Promise<AssignmentGroupConfigResult> =>

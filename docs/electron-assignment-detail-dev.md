@@ -410,8 +410,9 @@ surfaces only:
 - No `report` command is invoked.
 - No `report --publish-student-reports` command is invoked.
 - No `workflow generate` command is invoked.
-- No local files are written by the assignment detail page.
-- No `assignment.yml` edits are performed.
+- Delete assignment is the sole local destructive action on the detail page. It
+  requires explicit confirmation and deletes only the selected local
+  `assignment.yml`; it preserves generated artifacts and all remote resources.
 - No GitHub repositories are created, updated, deleted, or permission-modified.
 - No GitHub workflows are dispatched.
 - No reports are published.
@@ -931,8 +932,14 @@ Visible actions:
 - Preview apply
 - Preview grading
 - View grading status
+- Delete assignment
 
 `Refresh detail` is functional and read-only. It reruns assignment detail.
+
+`Delete assignment` requires confirmation, deletes the selected local
+`assignment.yml`, returns to the dashboard, and refreshes its assignment list.
+It does not delete GitHub repositories, student repositories, GitHub Classroom
+resources, or generated local artifacts.
 
 `Preview apply` is functional in UI-3A and opens the preview-only Apply Preview
 page. It does not call actual apply execution.

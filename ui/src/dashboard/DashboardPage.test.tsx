@@ -1356,6 +1356,9 @@ describe("DashboardPage", () => {
         confirmed: true
       })
     );
+    await waitFor(() =>
+      expect(screen.queryByRole("option", { name: "001" })).not.toBeInTheDocument()
+    );
   });
 
   it("successful folder selection updates the visible list", async () => {

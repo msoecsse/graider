@@ -16,6 +16,7 @@ export const IPC_CHANNELS = {
   getAssignmentForEdit: "graider-ui:assignment-edit:get",
   previewAssignmentEdit: "graider-ui:assignment-edit:preview",
   saveAssignmentEdit: "graider-ui:assignment-edit:save",
+  deleteAssignment: "graider-ui:assignment-delete:remove",
   getAssignmentGroupConfig: "graider-ui:assignment-groups:get",
   saveAssignmentGroupConfig: "graider-ui:assignment-groups:save",
   getStudentRepositoryAccessPageStatus: "graider-ui:student-repository-access-page:status",
@@ -269,6 +270,17 @@ export interface AssignmentEditPreviewResult {
 
 export interface AssignmentEditSaveResult {
   readonly status: "success" | "failure" | "conflict";
+  readonly path: string;
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
+export interface AssignmentDeleteRequest extends AssignmentSetupTermsRequest {
+  readonly assignmentFile: string;
+  readonly confirmed: boolean;
+}
+
+export interface AssignmentDeleteResult {
+  readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
@@ -800,6 +812,7 @@ export interface GraiderUIApi {
   readonly saveAssignmentEdit?: (
     request: AssignmentEditRequest
   ) => Promise<AssignmentEditSaveResult>;
+  readonly deleteAssignment?: (request: AssignmentDeleteRequest) => Promise<AssignmentDeleteResult>;
   readonly getAssignmentGroupConfig?: (
     request: AssignmentGroupConfigRequest
   ) => Promise<AssignmentGroupConfigResult>;

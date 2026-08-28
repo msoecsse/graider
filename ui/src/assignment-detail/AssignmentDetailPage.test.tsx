@@ -370,6 +370,36 @@ const renderAssignmentDetailPage = (
   );
 
 describe("AssignmentDetailPage", () => {
+  it("requires confirmation before deleting the local assignment and returns to the dashboard", async () => {
+    const deleteAssignment = vi.fn().mockResolvedValue({
+      status: "success",
+      path: ASSIGNMENT_FILE,
+      diagnostics: []
+    });
+    const onDeleted = vi.fn();
+    mockGraiderUI({ deleteAssignment });
+    renderAssignmentDetailPage({ onDeleted });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete assignment" }));
+    expect(deleteAssignment).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Delete assignment" });
+    expect(dialog).toBeInTheDocument();
+    fireEvent.click(
+      within(dialog).getByLabelText("I understand this deletes the local assignment configuration.")
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete assignment" }));
+
+    await waitFor(() =>
+      expect(deleteAssignment).toHaveBeenCalledWith({
+        courseFolderId: SELECTION.courseFolderId,
+        courseFolderPath: SELECTION.courseFolderPath,
+        assignmentFile: ASSIGNMENT_FILE,
+        confirmed: true
+      })
+    );
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+  });
+
   it("fetches and displays the grade workflow through the narrow API", async () => {
     const getTemplateWorkflow = vi.fn().mockResolvedValue({
       status: "success",

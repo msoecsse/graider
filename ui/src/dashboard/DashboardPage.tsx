@@ -685,6 +685,16 @@ export const DashboardPage = (): ReactElement => {
         onEditAssignment={() => {
           setIsEditingAssignment(true);
         }}
+        onDeleted={() => {
+          const courseFolderId = selectedAssignment.courseFolderId;
+          setSelectedAssignment(null);
+          setSelectedAssignmentDetailResult(null);
+          setSelectedApplyPreview(null);
+          setSelectedGradePreview(null);
+          setSelectedGradeStatus(null);
+          setSelectedFacultyReport(null);
+          void handleRefreshCourseFolder(courseFolderId);
+        }}
         onBack={() => {
           setSelectedAssignment(null);
           setSelectedAssignmentDetailResult(null);

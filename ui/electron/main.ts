@@ -21,6 +21,7 @@ import {
   previewAssignmentEdit,
   saveAssignmentEdit
 } from "./assignmentEditService.js";
+import { deleteAssignment } from "./assignmentDeleteService.js";
 import {
   getAssignmentGroupConfig,
   saveAssignmentGroupConfig
@@ -69,6 +70,7 @@ import {
   type AssignmentSetupRequest,
   type AssignmentSetupTermsRequest,
   type AssignmentEditRequest,
+  type AssignmentDeleteRequest,
   type AssignmentGroupConfigRequest,
   type AssignmentGroupConfigSaveRequest,
   type StudentRepositoryAccessPageRequest,
@@ -262,6 +264,12 @@ const isAssignmentEditRequest = (value: unknown): value is AssignmentEditRequest
     typeof request.originalContent === "string" &&
     typeof request.confirmed === "boolean"
   );
+};
+
+const isAssignmentDeleteRequest = (value: unknown): value is AssignmentDeleteRequest => {
+  if (!isAssignmentSetupTermsRequest(value)) return false;
+  const request = value as unknown as Record<string, unknown>;
+  return typeof request.assignmentFile === "string" && typeof request.confirmed === "boolean";
 };
 
 const isAssignmentGroupConfigRequest = (value: unknown): value is AssignmentGroupConfigRequest =>
@@ -649,6 +657,11 @@ export const registerIpcHandlers = (): void => {
       });
     }
     return saveAssignmentEdit(request);
+  });
+  ipcMain.handle(IPC_CHANNELS.deleteAssignment, (_event, request: unknown) => {
+    if (!isAssignmentDeleteRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("Invalid assignment delete request.");
+    return deleteAssignment(request);
   });
   ipcMain.handle(IPC_CHANNELS.getAssignmentGroupConfig, (_event, request: unknown) => {
     if (!isAssignmentGroupConfigRequest(request) || !isRegisteredAssignmentSetupCourse(request))

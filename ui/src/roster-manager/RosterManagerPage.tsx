@@ -222,6 +222,14 @@ export const RosterManagerPage = ({
     try {
       const result = await removeRoster(removeRequest);
       if (result.status === "success") {
+        setTerms((current) =>
+          current.map((term) =>
+            term.code === termCode
+              ? { ...term, sections: term.sections.filter((section) => section !== sectionId) }
+              : term
+          )
+        );
+        setSectionId("");
         setRows([]);
         setIsExisting(false);
         setChangeDescription(null);
@@ -463,8 +471,8 @@ export const RosterManagerPage = ({
           <section className="detail-panel" role="dialog" aria-labelledby="remove-roster-title">
             <h2 id="remove-roster-title">Remove roster</h2>
             <p>
-              This deletes {targetPath} and removes its reference from term.yml. It does not remove
-              the section or any student repositories.
+              This deletes {targetPath} and removes its section from term.yml. It does not remove
+              any student repositories.
             </p>
             <label className="confirmation-check">
               <input

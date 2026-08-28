@@ -227,7 +227,7 @@ describe("roster manager service", () => {
     expect(fs.readFileSync(rosterPath, "utf8")).toBe(`${CANONICAL_HEADER}\n`);
   });
 
-  it("removes the roster CSV and term reference only after confirmation, then allows re-adding", () => {
+  it("removes the roster CSV and section only after confirmation, then allows re-adding", () => {
     const root = createRoot();
     createTerm(root);
     const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
@@ -238,10 +238,16 @@ describe("roster manager service", () => {
     expect(fs.existsSync(rosterPath)).toBe(true);
     expect(removeRoster(removeRequest(root, true))).toMatchObject({ status: "success" });
     expect(fs.existsSync(rosterPath)).toBe(false);
+    expect(fs.readFileSync(termPath, "utf8")).not.toContain('id: "001"');
     expect(fs.readFileSync(termPath, "utf8")).not.toContain("roster:");
-    expect(getRosterForSection(loadRequest(root))).toMatchObject({ exists: false, rows: [] });
+    expect(getRosterForSection(loadRequest(root))).toMatchObject({
+      status: "invalid",
+      exists: false
+    });
 
-    expect(saveRoster({ ...request(root), confirmed: true }).status).toBe("success");
+    expect(saveRoster({ ...request(root, { createSection: true }), confirmed: true }).status).toBe(
+      "success"
+    );
     expect(fs.existsSync(rosterPath)).toBe(true);
     expect(fs.readFileSync(termPath, "utf8")).toContain("roster: rosters/section-001.csv");
   });
