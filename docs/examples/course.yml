@@ -1,23 +1,23 @@
 schema_version: 1
 course:
-  code: se2030
-  title: Software Engineering
-  repository: se2030-course-admin
+  code: csc1120
+  title: Data Structures
+  repository: csc1120
 github:
-  organization: example-org
+  organization: graider-sandbox
   repository_visibility: private
   repo_name_pattern: "{term}-{course}-{assignment}-{github_username}"
-  student_permission: push
+  student_permission: admin
   faculty_team: faculty
   faculty_permission: admin
   grader_team: graders
   grader_permission: maintain
 defaults:
-  timezone: Asia/Tokyo
+  timezone: America/Chicago
   assignment_type: individual
 grading:
   enabled: true
-  workflow: grade.yml
+  workflow: .github/workflows/grade.yml
   artifact: grading-results
   result_file: grading-results.json
 reports:

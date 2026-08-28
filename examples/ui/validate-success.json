@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "commandName": "validate",
+  "assignmentFile": "terms/27s1/assignments/lab01/assignment.yml",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "warnings": [],
+  "errors": [],
+  "generatedFiles": [],
+  "summary": {
+    "assignmentSlug": "lab01",
+    "termCode": "27s1",
+    "courseCode": "csc1120",
+    "gradingEnabled": true,
+    "gradingMode": "preset",
+    "workflowCompatibilityChecked": true,
+    "githubReadinessChecked": true,
+    "studentCount": 2,
+    "activeStudentCount": 2,
+    "warningCount": 0,
+    "errorCount": 0
+  }
+}

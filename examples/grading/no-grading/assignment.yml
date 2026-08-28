@@ -1,0 +1,21 @@
+schema_version: 1
+assignment:
+  slug: lab-manual
+  title: Manual Review Lab
+  type: individual
+  status: active
+template:
+  repository: example-org/lab-manual-template
+  branch: main
+sections:
+  - "001"
+deadline:
+  due_at: "2027-03-22T23:59:00-06:00"
+  late_policy: none
+metadata:
+  faculty_owner: faculty@example.edu
+  lms_assignment_id: null
+  grading_category: labs
+  points: 10
+grading:
+  enabled: false

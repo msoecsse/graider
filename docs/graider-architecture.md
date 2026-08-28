@@ -452,7 +452,7 @@ export interface CourseConfig {
     organization: string;
     repositoryVisibility: "private";
     repoNamePattern: string;
-    studentPermission: "push";
+    studentPermission: "admin";
     facultyTeam: string;
     facultyPermission: "admin";
     graderTeam: string;

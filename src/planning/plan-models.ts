@@ -1,6 +1,7 @@
 import type { SourceFileHash } from "../config/source-fingerprint.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { PlanOperation } from "./operation-models.js";
+import type { ApplyRepositoryTarget } from "./repository-targets.js";
 
 export const PLAN_SCHEMA_VERSION = 1;
 
@@ -34,6 +35,7 @@ export interface Plan {
   source: PlanSource;
   summary: PlanSummary;
   operations: PlanOperation[];
+  targets: ApplyRepositoryTarget[];
   warnings: Diagnostic[];
   errors: Diagnostic[];
 }

@@ -70,16 +70,17 @@ const getTermDirectory = (termConfigPath: string): string =>
 const getSectionSources = (config: LoadedGraiderConfig): RosterSectionSource[] => {
   const termDirectory = getTermDirectory(config.summary.termConfigPath);
   const sectionsById = new Map(
-    config.term.sections.map((section) => [
-      section.id,
-      toForwardSlashPath(path.posix.join(termDirectory, section.roster))
-    ])
+    config.term.sections.flatMap((section) =>
+      section.roster === undefined
+        ? []
+        : [[section.id, toForwardSlashPath(path.posix.join(termDirectory, section.roster))]]
+    )
   );
 
-  return config.assignment.sections.map((sectionId) => ({
-    sectionId,
-    rosterPath: sectionsById.get(sectionId) ?? ""
-  }));
+  return config.assignment.sections.flatMap((sectionId) => {
+    const rosterPath = sectionsById.get(sectionId);
+    return rosterPath === undefined ? [] : [{ sectionId, rosterPath }];
+  });
 };
 
 const getColumnIndexes = (headers: readonly string[]): RosterColumnIndexes => ({

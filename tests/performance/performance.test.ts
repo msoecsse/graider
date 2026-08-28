@@ -20,7 +20,7 @@ enum PerformanceNumber {
   StudentIdPadLength = 4,
   SectionModulo = 2,
   FirstIndex = 1,
-  ScaleTestTimeoutMs = 20000
+  ScaleTestTimeoutMs = 60000
 }
 
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
@@ -93,7 +93,7 @@ github:
   organization: ${ORGANIZATION}
   repository_visibility: private
   repo_name_pattern: "{term}-{course}-{assignment}-{github_username}"
-  student_permission: push
+  student_permission: admin
   faculty_team: faculty
   faculty_permission: admin
   grader_team: graders

@@ -6,6 +6,8 @@ import {
   type LoadedGraiderConfigSummary,
   type RawAssignmentConfig,
   type RawCourseConfig,
+  type ResolvedAssignmentConfig,
+  type ResolvedCourseConfig,
   type RawTermConfig
 } from "./config-models.js";
 import { loadAssignmentConfig } from "./load-assignment-config.js";
@@ -105,14 +107,19 @@ const getGradingEnabled = (
   gradingEnabled: boolean;
   gradingSource: GradingSource;
 } =>
-  assignment.grading === undefined
+  assignment.grading !== undefined
+    ? {
+        gradingEnabled: assignment.grading.enabled,
+        gradingSource: "assignment"
+      }
+    : course.grading !== undefined
     ? {
         gradingEnabled: course.grading.enabled,
         gradingSource: "course"
       }
     : {
-        gradingEnabled: assignment.grading.enabled,
-        gradingSource: "assignment"
+        gradingEnabled: false,
+        gradingSource: "none"
       };
 
 const createSummary = (
@@ -129,6 +136,16 @@ const createSummary = (
   termCode: parts.termCode,
   assignmentSlug: parts.assignmentSlug,
   ...getGradingEnabled(course, assignment)
+});
+
+const resolveCourseConfig = (course: RawCourseConfig): ResolvedCourseConfig => ({
+  ...course,
+  grading: course.grading ?? { enabled: false, mode: "no-grading" }
+});
+
+const resolveAssignmentConfig = (assignment: RawAssignmentConfig): ResolvedAssignmentConfig => ({
+  ...assignment,
+  template: assignment.template ?? { repository: "", branch: "" }
 });
 
 export const loadGraiderConfig = (request: ConfigLoadRequest): ConfigLoadResult => {
@@ -167,9 +184,9 @@ export const loadGraiderConfig = (request: ConfigLoadRequest): ConfigLoadResult 
   return {
     status: "success",
     config: {
-      course: loadResult.course,
+      course: resolveCourseConfig(loadResult.course),
       term: loadResult.term,
-      assignment: loadResult.assignment,
+      assignment: resolveAssignmentConfig(loadResult.assignment),
       summary: createSummary(
         repositoryRootResult.repoRoot,
         parts,

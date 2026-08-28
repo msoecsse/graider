@@ -6,13 +6,8 @@ assignment:
   status: active
 template:
   repository: example-org/lab04-template
-  branch: main
 sections:
   - "001"
 deadline:
   due_at: "2027-04-15T23:59:00+09:00"
   late_policy: standard
-metadata:
-  faculty_owner: professor
-  lms_assignment_id: null
-  grading_category: labs

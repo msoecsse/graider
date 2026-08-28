@@ -36,7 +36,9 @@ Or run the non-build check shortcut:
 npm run check
 ```
 
-Normal tests use `FakeGitHubClient` and do not require GitHub credentials.
+Normal tests use `FakeGitHubClient` and do not require GitHub credentials. Production GitHub
+operations require `GRAIDER_GITHUB_TOKEN` (or `GITHUB_TOKEN` as a fallback); the fake client is
+test infrastructure only.
 
 ## CI
 

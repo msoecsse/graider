@@ -1,0 +1,7 @@
+reports:
+  student_publish:
+    enabled: true
+    mode: faculty-provided
+    artifact: grading-results
+    source_file: graider-output/student-report.md
+    destination_file: grading/report.md

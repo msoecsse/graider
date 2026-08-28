@@ -1,7 +1,5 @@
 import type { Command } from "commander";
-import { parseTemplateRepository } from "../../config/github-config-validation.js";
 import { loadGraiderConfig } from "../../config/config-loader.js";
-import type { LoadedGraiderConfig } from "../../config/config-models.js";
 import { type Clock, formatPlanCreatedAt, systemClock } from "../../core/clock.js";
 import {
   type CommonCommandOptions,
@@ -9,25 +7,21 @@ import {
   type RawCommonCommandOptions
 } from "../../core/command-context.js";
 import { createCommandResult, type CommandResult } from "../../core/command-result.js";
-import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
 import { validateGitHubReadiness } from "../../github/github-readiness-validation.js";
-import type { GitHubTemplateRepository } from "../../github/github-models.js";
 import { buildPlan } from "../../planning/plan-builder.js";
 import { createPlanPath } from "../../planning/plan-paths.js";
 import { writePlanJsonFile } from "../../planning/plan-renderer.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
-import type { RosterStudent } from "../../roster/roster-models.js";
+import {
+  GITHUB_TOKEN_REQUIRED_CODE,
+  createConfigDiagnostic
+} from "../../diagnostics/error-catalog.js";
 import { writeCommandResult } from "../output.js";
 
 const COMMAND_NAME = "plan";
-const DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
-const README_FILE = "README.md";
 const EMPTY_COUNT = 0;
-
-enum PlanCommandNumber {
-  DefaultTemplateRepositoryId = 1
-}
 
 export interface PlanCommandRequest {
   cwd: string;
@@ -36,62 +30,6 @@ export interface PlanCommandRequest {
   githubClient?: GitHubClient;
   clock?: Clock;
 }
-
-const createDefaultTemplateRepository = (
-  owner: string,
-  repo: string,
-  branch: string
-): GitHubTemplateRepository => ({
-  owner,
-  name: repo,
-  fullName: `${owner}/${repo}`,
-  id: PlanCommandNumber.DefaultTemplateRepositoryId,
-  private: true,
-  archived: false,
-  defaultBranch: branch,
-  htmlUrl: `https://github.com/${owner}/${repo}`,
-  isTemplate: true,
-  branches: [branch],
-  files: [README_FILE],
-  latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA
-});
-
-const createDefaultGitHubClient = (
-  config: LoadedGraiderConfig,
-  students: readonly RosterStudent[]
-): GitHubClient => {
-  const parsedTemplateRepository = parseTemplateRepository(
-    config.course.github.organization,
-    config.assignment.template.repository
-  );
-  const templateRepositories =
-    parsedTemplateRepository.status === "success"
-      ? [
-          createDefaultTemplateRepository(
-            parsedTemplateRepository.repository.owner,
-            parsedTemplateRepository.repository.repo,
-            config.assignment.template.branch
-          )
-        ]
-      : [];
-
-  return new FakeGitHubClient({
-    templateRepositories,
-    users: students.map((student) => ({ username: student.githubUsername })),
-    teams: [
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.faculty_team,
-        name: config.course.github.faculty_team
-      },
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.grader_team,
-        name: config.course.github.grader_team
-      }
-    ]
-  });
-};
 
 export const runPlanCommand = async ({
   cwd,
@@ -137,8 +75,24 @@ export const runPlanCommand = async ({
     });
   }
 
-  const effectiveGitHubClient =
-    githubClient ?? createDefaultGitHubClient(configResult.config, rosterResult.students);
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: [
+        createConfigDiagnostic(
+          GITHUB_TOKEN_REQUIRED_CODE,
+          "A GitHub token is required before Plan can check GitHub readiness. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: { options, ...configResult.config.summary, ...rosterResult.summary }
+    });
+  }
+  const effectiveGitHubClient = githubResolution.githubClient;
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,

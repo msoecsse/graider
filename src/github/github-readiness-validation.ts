@@ -6,7 +6,13 @@ import type {
 import { parseTemplateRepository } from "../config/github-config-validation.js";
 import { DiagnosticCode, createConfigDiagnostic } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
+import { parseYaml } from "../io/stable-yaml.js";
 import type { RosterStudent } from "../roster/roster-models.js";
+import {
+  WORKFLOW_DISPATCH_TRIGGER,
+  hasWorkflowDispatchTrigger
+} from "../workflows/workflow-dispatch-validation.js";
+import { createRepositoryWorkflowPathCandidates } from "../workflows/workflow-paths.js";
 import type { GitHubClient } from "./github-client.js";
 import { GitHubClientError, createGitHubDiagnostic } from "./github-errors.js";
 import type { GitHubTemplateRepository } from "./github-models.js";
@@ -20,6 +26,7 @@ export interface GitHubReadinessValidationInput {
   assignmentConfig: RawAssignmentConfig;
   students: RosterStudent[];
   githubClient: GitHubClient;
+  validateTemplateWorkflow?: boolean;
 }
 
 export interface GitHubReadinessValidationResult {
@@ -184,6 +191,122 @@ const validateTemplateRepository = async (
   }
 };
 
+const getEffectiveGrading = (
+  courseConfig: RawCourseConfig,
+  assignmentConfig: RawAssignmentConfig
+): RawCourseConfig["grading"] => assignmentConfig.grading ?? courseConfig.grading;
+
+const createTemplateWorkflowMissingDiagnostic = (
+  reference: TemplateRepositoryReference,
+  workflow: string,
+  checkedPaths: readonly string[]
+): Diagnostic =>
+  createConfigDiagnostic(
+    DiagnosticCode.GradingWorkflowMissing,
+    `Configured grading workflow ${workflow} was not found in template repository ${reference.fullName}.`,
+    {
+      workflow,
+      checkedPaths,
+      templateRepository: reference.fullName,
+      templateBranch: reference.branch
+    }
+  );
+
+const createTemplateWorkflowDispatchUnsupportedDiagnostic = (
+  reference: TemplateRepositoryReference,
+  workflowPath: string
+): Diagnostic =>
+  createConfigDiagnostic(
+    DiagnosticCode.WorkflowDispatchUnsupported,
+    `Configured grading workflow ${workflowPath} does not include ${WORKFLOW_DISPATCH_TRIGGER}.`,
+    {
+      workflow: workflowPath,
+      templateRepository: reference.fullName,
+      templateBranch: reference.branch,
+      requiredTrigger: WORKFLOW_DISPATCH_TRIGGER
+    }
+  );
+
+const validateTemplateWorkflowContent = (
+  reference: TemplateRepositoryReference,
+  workflowPath: string,
+  content: string
+): Diagnostic[] => {
+  const parseResult = parseYaml(content, workflowPath);
+
+  if (parseResult.status === "failure") {
+    return [parseResult.diagnostic];
+  }
+
+  return hasWorkflowDispatchTrigger(parseResult.value)
+    ? []
+    : [createTemplateWorkflowDispatchUnsupportedDiagnostic(reference, workflowPath)];
+};
+
+const validateTemplateWorkflow = async (
+  courseConfig: RawCourseConfig,
+  assignmentConfig: RawAssignmentConfig,
+  githubClient: GitHubClient
+): Promise<Diagnostic[]> => {
+  const grading = getEffectiveGrading(courseConfig, assignmentConfig);
+
+  if (!grading.enabled || grading.workflow === undefined) {
+    return [];
+  }
+
+  const parsedRepository = parseTemplateRepository(
+    courseConfig.github.organization,
+    assignmentConfig.template.repository
+  );
+
+  if (parsedRepository.status === "failure") {
+    return [];
+  }
+
+  const reference = {
+    ...parsedRepository.repository,
+    branch: assignmentConfig.template.branch,
+    organization: courseConfig.github.organization
+  };
+  const checkedPaths = createRepositoryWorkflowPathCandidates(grading.workflow);
+
+  try {
+    const templateRepository = await githubClient.getTemplateRepository(
+      reference.owner,
+      reference.repo
+    );
+
+    if (templateRepository === null || templateRepository.owner !== reference.organization) {
+      return [];
+    }
+
+    let workflowContent: string | undefined;
+    let workflowPath: string | undefined;
+
+    for (const checkedPath of checkedPaths) {
+      if (workflowContent === undefined) {
+        const content = await githubClient.getRepositoryFileContent(
+          reference.owner,
+          reference.repo,
+          checkedPath,
+          reference.branch
+        );
+
+        if (content !== null) {
+          workflowContent = content;
+          workflowPath = checkedPath;
+        }
+      }
+    }
+
+    return workflowContent === undefined || workflowPath === undefined
+      ? [createTemplateWorkflowMissingDiagnostic(reference, grading.workflow, checkedPaths)]
+      : validateTemplateWorkflowContent(reference, workflowPath, workflowContent);
+  } catch (error: unknown) {
+    return [normalizeGitHubError(error)];
+  }
+};
+
 const createTeamMissingDiagnostic = (
   code: string,
   label: string,
@@ -278,7 +401,8 @@ export const validateGitHubReadiness = async ({
   courseConfig,
   assignmentConfig,
   students,
-  githubClient
+  githubClient,
+  validateTemplateWorkflow: shouldValidateTemplateWorkflow = false
 }: GitHubReadinessValidationInput): Promise<GitHubReadinessValidationResult> => {
   const authenticationErrors = await validateAuthentication(githubClient);
 
@@ -291,6 +415,9 @@ export const validateGitHubReadiness = async ({
 
   const errors = [
     ...(await validateTemplateRepository(courseConfig, assignmentConfig, githubClient)),
+    ...(shouldValidateTemplateWorkflow
+      ? await validateTemplateWorkflow(courseConfig, assignmentConfig, githubClient)
+      : []),
     ...(await validateTeams(courseConfig, githubClient)),
     ...(await validateGithubUsers(githubClient, students))
   ];

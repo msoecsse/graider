@@ -19,6 +19,7 @@ export interface PlanOperation {
   type: PlanOperationType;
   status: PlanOperationStatus;
   requires: string[];
+  target_id?: string;
   student_id?: string;
   github_username?: string;
   section?: string;

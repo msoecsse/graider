@@ -1,0 +1,108 @@
+import { cleanup } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { afterEach, beforeEach, vi } from "vitest";
+
+afterEach(() => {
+  cleanup();
+});
+
+beforeEach(() => {
+  Object.defineProperty(window, "graiderUI", {
+    configurable: true,
+    value: {
+      getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),
+      checkGitHubAuth: vi.fn().mockResolvedValue({
+        status: "connected",
+        username: null,
+        diagnostic: null,
+        diagnosticCode: null
+      }),
+      selectCourseFolder: vi.fn().mockResolvedValue({ canceled: true, courseFolder: null }),
+      listCourseFolders: vi.fn().mockResolvedValue([]),
+      removeCourseFolder: vi.fn().mockResolvedValue(undefined),
+      refreshCourseFolder: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        status: "success",
+        dashboard: {
+          schemaVersion: 1,
+          commandName: "dashboard",
+          status: "success",
+          exitCode: 0,
+          diagnostics: [],
+          summary: { cardCount: 0 },
+          cards: []
+        },
+        error: null,
+        refreshedAt: "2026-06-10T12:00:00.000Z"
+      }),
+      refreshDashboard: vi.fn().mockResolvedValue({
+        status: "success",
+        results: []
+      }),
+      getAssignmentDetail: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        detail: null,
+        error: null,
+        refreshedAt: null
+      }),
+      getAssignmentApplyPreview: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        preview: null,
+        error: null,
+        refreshedAt: null
+      }),
+      getAssignmentGradePreview: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        preview: null,
+        error: null,
+        refreshedAt: null
+      }),
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        gradeStatus: null,
+        error: null,
+        refreshedAt: null
+      }),
+      getFacultyReport: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        report: null,
+        error: null,
+        refreshedAt: null
+      }),
+      applyAssignment: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        apply: null,
+        error: null,
+        appliedAt: null
+      }),
+      gradeAssignment: vi.fn().mockResolvedValue({
+        courseFolderId: "course-folder-default",
+        courseFolderPath: "/tmp/course",
+        assignmentFile: "terms/27s1/assignments/lab02/assignment.yml",
+        status: "failure",
+        grade: null,
+        error: null,
+        dispatchedAt: null
+      })
+    }
+  });
+});

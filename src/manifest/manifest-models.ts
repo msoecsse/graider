@@ -5,6 +5,7 @@ import type { GitHubPermission } from "../github/github-models.js";
 import type { RosterStatus } from "../roster/roster-models.js";
 
 export const MANIFEST_SCHEMA_VERSION = 1;
+export const MANIFEST_V2_SCHEMA_VERSION = 2;
 
 export const MANIFEST_LIFECYCLE_STATUSES = [
   "created",
@@ -19,7 +20,10 @@ export type ManifestLifecycleStatus = (typeof MANIFEST_LIFECYCLE_STATUSES)[numbe
 export type ManifestPermission = Exclude<GitHubPermission, "none">;
 
 export interface Manifest {
-  schemaVersion: typeof MANIFEST_SCHEMA_VERSION;
+  schemaVersion: typeof MANIFEST_SCHEMA_VERSION | typeof MANIFEST_V2_SCHEMA_VERSION;
+  repositoryMode?: "individual" | "group";
+  targets?: ManifestRepositoryTarget[];
+  studentMappings?: ManifestStudentMapping[];
   assignment: ManifestAssignment;
   source: ManifestSource;
   template: ManifestTemplate;
@@ -27,6 +31,27 @@ export interface Manifest {
   operationHistory: ManifestOperationRecord[];
   warnings: Diagnostic[];
   errors: Diagnostic[];
+}
+
+export interface ManifestRepositoryTarget {
+  targetId: string;
+  mode: "individual" | "group";
+  groupId?: string;
+  repositoryName: string;
+  htmlUrl?: string;
+  cloneUrl?: string;
+  sectionIds: string[];
+  studentIds: string[];
+  githubUsernames: string[];
+  diagnostics: Diagnostic[];
+}
+export interface ManifestStudentMapping {
+  studentId: string;
+  githubUsername: string;
+  targetId: string;
+  repositoryName: string;
+  htmlUrl?: string;
+  cloneUrl?: string;
 }
 
 export interface ManifestAssignment {

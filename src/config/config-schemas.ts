@@ -5,18 +5,64 @@ const MINIMUM_LIST_ITEMS = 1;
 export const SUPPORTED_SCHEMA_VERSION = 1;
 export const SUPPORTED_ASSIGNMENT_TYPE = "individual";
 export const SUPPORTED_REPOSITORY_VISIBILITY = "private";
-export const STUDENT_PERMISSION = "push";
+export const STUDENT_PERMISSION = "admin";
 export const FACULTY_PERMISSION = "admin";
 export const GRADER_PERMISSION = "maintain";
 export const VALID_ASSIGNMENT_STATUSES = ["draft", "active", "closed", "archived"] as const;
+export const ENABLED_GRADING_MODES = ["preset", "custom-workflow", "contract-only"] as const;
+export const DISABLED_GRADING_MODE = "no-grading";
+export const SUPPORTED_GRADING_PRESETS = ["java-junit-checkstyle"] as const;
+export const ENABLED_STUDENT_PUBLISH_MODES = [
+  "graider-generated",
+  "faculty-provided",
+  "both"
+] as const;
+export const DISABLED_STUDENT_PUBLISH_MODE = "disabled";
 export const TERM_CODE_PATTERN = /^\d{2}s[123]$/;
 
 const gradingSchema = z
   .object({
     enabled: z.boolean(),
+    mode: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    preset: z.string().min(MINIMUM_LIST_ITEMS).optional(),
     workflow: z.string().min(MINIMUM_LIST_ITEMS).optional(),
     artifact: z.string().min(MINIMUM_LIST_ITEMS).optional(),
     result_file: z.string().min(MINIMUM_LIST_ITEMS).optional()
+  })
+  .strict();
+
+const studentPublishSchema = z
+  .object({
+    enabled: z.boolean(),
+    mode: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    source: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    artifact: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    source_file: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    destination_file: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    graider_report_destination: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    faculty_report_source: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    faculty_report_destination: z.string().min(MINIMUM_LIST_ITEMS).optional()
+  })
+  .strict();
+
+const reportsSchema = z
+  .object({
+    formats: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS),
+    student_publish: studentPublishSchema.optional()
+  })
+  .strict();
+
+const studentAccessPagesSchema = z
+  .object({
+    repository: z.string().regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u),
+    base_url: z.url().refine((value) => new URL(value).protocol === "https:"),
+    branch: z.string().min(MINIMUM_LIST_ITEMS).default("main")
+  })
+  .strict();
+
+const notificationsSchema = z
+  .object({
+    student_access_pages: studentAccessPagesSchema.optional()
   })
   .strict();
 
@@ -48,12 +94,9 @@ export const rawCourseConfigSchema = z
         assignment_type: z.string().min(MINIMUM_LIST_ITEMS)
       })
       .strict(),
-    grading: gradingSchema,
-    reports: z
-      .object({
-        formats: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS)
-      })
-      .strict()
+    grading: gradingSchema.optional(),
+    reports: reportsSchema,
+    notifications: notificationsSchema.optional()
   })
   .strict();
 
@@ -73,7 +116,7 @@ export const rawTermConfigSchema = z
         z
           .object({
             id: z.string().min(MINIMUM_LIST_ITEMS),
-            roster: z.string().min(MINIMUM_LIST_ITEMS)
+            roster: z.string().min(MINIMUM_LIST_ITEMS).optional()
           })
           .strict()
       )
@@ -97,22 +140,32 @@ export const rawAssignmentConfigSchema = z
         repository: z.string().min(MINIMUM_LIST_ITEMS),
         branch: z.string().min(MINIMUM_LIST_ITEMS)
       })
-      .strict(),
+      .strict()
+      .optional(),
     sections: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS),
     deadline: z
       .object({
         due_at: z.string().min(MINIMUM_LIST_ITEMS),
         late_policy: z.string().min(MINIMUM_LIST_ITEMS)
       })
-      .strict(),
+      .strict()
+      .optional(),
     metadata: z
       .object({
-        faculty_owner: z.string().min(MINIMUM_LIST_ITEMS),
-        lms_assignment_id: z.string().nullable(),
-        grading_category: z.string().min(MINIMUM_LIST_ITEMS),
-        points: z.number().nullable()
+        faculty_owner: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+        lms_assignment_id: z.string().nullable().optional(),
+        grading_category: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+        points: z.number().nullable().optional()
       })
-      .strict(),
-    grading: gradingSchema.optional()
+      .strict()
+      .optional(),
+    grading: gradingSchema.optional(),
+    repository_mode: z.enum(["individual", "group"]).optional(),
+    groups: z
+      .object({
+        file: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.csv$/u)
+      })
+      .strict()
+      .optional()
   })
   .strict();

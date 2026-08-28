@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "commandName": "report",
+  "assignmentFile": "terms/27s1/assignments/lab01/assignment.yml",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "warnings": [],
+  "errors": [],
+  "generatedFiles": [
+    "terms/27s1/reports/lab01/faculty-summary.json",
+    "terms/27s1/reports/lab01/faculty-summary.csv",
+    "terms/27s1/reports/lab01/faculty-summary.md",
+    "terms/27s1/reports/lab01/students/001/student01.md",
+    "terms/27s1/reports/lab01/students/001/student02.md"
+  ],
+  "summary": {
+    "assignmentSlug": "lab01",
+    "facultySummaryPath": "terms/27s1/reports/lab01/faculty-summary.json",
+    "studentsReported": 2,
+    "passedCount": 1,
+    "failedCount": 1,
+    "skippedCount": 0,
+    "notConfiguredCount": 0,
+    "missingArtifactCount": 0,
+    "missingResultFileCount": 0,
+    "students": [
+      {
+        "studentId": "student01",
+        "githubUsername": "student01",
+        "repository": "27s1-csc1120-lab01-student01",
+        "repositoryStatus": "available",
+        "workflowStatus": "completed",
+        "artifactStatus": "found",
+        "resultFileStatus": "valid",
+        "resultStatus": "passed",
+        "checks": [
+          {
+            "name": "Unit Tests",
+            "status": "passed"
+          }
+        ],
+        "diagnostics": []
+      },
+      {
+        "studentId": "student02",
+        "githubUsername": "student02",
+        "repository": "27s1-csc1120-lab01-student02",
+        "repositoryStatus": "available",
+        "workflowStatus": "completed",
+        "artifactStatus": "found",
+        "resultFileStatus": "valid",
+        "resultStatus": "failed",
+        "checks": [
+          {
+            "name": "Unit Tests",
+            "status": "failed"
+          }
+        ],
+        "diagnostics": []
+      }
+    ]
+  }
+}

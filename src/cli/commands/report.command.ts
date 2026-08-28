@@ -13,9 +13,12 @@ import {
 } from "../../core/command-result.js";
 import { type Clock, systemClock } from "../../core/clock.js";
 import { publishStudentReports as publishReportsToStudentRepositories } from "../../execution/report-publisher.js";
-import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
+import {
+  GITHUB_TOKEN_REQUIRED_CODE,
+  createConfigDiagnostic
+} from "../../diagnostics/error-catalog.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
@@ -54,9 +57,6 @@ const getCommandStatus = (errorCount: number, generatedFileCount: number): Comma
 
   return generatedFileCount > EMPTY_COUNT ? "partial_success" : "failure";
 };
-
-const createDefaultGitHubClient = (): GitHubClient =>
-  readGitHubToken() === undefined ? new FakeGitHubClient() : createGitHubClient();
 
 const createReportFiles = (
   repoRoot: string,
@@ -166,14 +166,37 @@ export const runReportCommand = async ({
     });
   }
 
-  const activeGitHubClient = githubClient ?? createDefaultGitHubClient();
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: [
+        createConfigDiagnostic(
+          GITHUB_TOKEN_REQUIRED_CODE,
+          "A GitHub token is required before Report can collect GitHub data. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        manifestFile: manifestPath.relativePath
+      }
+    });
+  }
+  const activeGitHubClient = githubResolution.githubClient;
   const collectResult = await collectReport({
     config: configResult.config,
     rosterSummary: rosterResult.summary,
     students: rosterResult.students,
     manifest: manifestResult.manifest,
     githubClient: activeGitHubClient,
-    generatedAt: clock.now().toISOString()
+    generatedAt: clock.now().toISOString(),
+    includeArtifactFileKeys: options.verbose
   });
   const writeResult = writeReportFiles(
     createReportFiles(configResult.config.summary.repoRoot, collectResult.report)
@@ -182,7 +205,8 @@ export const runReportCommand = async ({
     publishStudentReports && writeResult.errors.length === EMPTY_COUNT
       ? await publishReportsToStudentRepositories({
           report: collectResult.report,
-          githubClient: activeGitHubClient
+          githubClient: activeGitHubClient,
+          studentPublishConfig: configResult.config.course.reports.student_publish
         })
       : {
           publishedFiles: [],

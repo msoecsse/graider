@@ -14,6 +14,7 @@ import type { PlanOperation, PlanOperationType } from "./operation-models.js";
 import { comparePlanOperations, createOperationId } from "./operation-ordering.js";
 import { PLAN_SCHEMA_VERSION, type Plan, type PlanSummary } from "./plan-models.js";
 import { generateRepositoryName } from "./repo-name.js";
+import { createIndividualRepositoryTarget } from "./repository-targets.js";
 
 const EMPTY_COUNT = 0;
 const NO_REPOSITORY_NAME = "";
@@ -60,6 +61,7 @@ const createOperation = (
   type,
   status,
   requires: input.requires ?? [],
+  target_id: student.studentId,
   student_id: student.studentId,
   github_username: student.githubUsername,
   section: student.section,
@@ -503,6 +505,9 @@ export const buildPlan = async ({
     },
     summary,
     operations,
+    targets: students
+      .filter((student) => student.status === ROSTER_STATUS_ACTIVE)
+      .map((student) => createIndividualRepositoryTarget(config, student)),
     warnings: sourceFingerprint.warnings,
     errors: [
       ...sourceFingerprint.errors,

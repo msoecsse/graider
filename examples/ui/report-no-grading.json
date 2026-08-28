@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "commandName": "report",
+  "assignmentFile": "terms/27s1/assignments/manual-lab/assignment.yml",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "warnings": [],
+  "errors": [],
+  "generatedFiles": ["terms/27s1/reports/manual-lab/faculty-summary.json"],
+  "summary": {
+    "assignmentSlug": "manual-lab",
+    "studentsReported": 1,
+    "passedCount": 0,
+    "failedCount": 0,
+    "skippedCount": 0,
+    "notConfiguredCount": 1,
+    "missingArtifactCount": 0,
+    "missingResultFileCount": 0,
+    "students": [
+      {
+        "studentId": "student01",
+        "githubUsername": "student01",
+        "repository": "27s1-csc1120-manual-lab-student01",
+        "repositoryStatus": "available",
+        "workflowStatus": "not_configured",
+        "artifactStatus": "not_checked",
+        "resultFileStatus": "not_checked",
+        "resultStatus": "not_configured",
+        "checks": [],
+        "diagnostics": []
+      }
+    ]
+  }
+}

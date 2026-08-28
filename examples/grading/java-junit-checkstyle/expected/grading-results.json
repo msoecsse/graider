@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "checks": [
+    {
+      "name": "CheckStyle",
+      "status": "passed"
+    },
+    {
+      "name": "Unit Tests",
+      "status": "passed"
+    }
+  ]
+}

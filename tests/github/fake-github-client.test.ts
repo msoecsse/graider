@@ -141,6 +141,30 @@ describe("FakeGitHubClient", () => {
     ).resolves.toBeNull();
   });
 
+  it("simulates repository file content reads by path and ref", async () => {
+    const client = new FakeGitHubClient({
+      repositoryFiles: [
+        {
+          owner: OWNER,
+          repo: TEMPLATE_REPOSITORY_NAME,
+          path: WORKFLOW_PATH,
+          content: FILE_CONTENT,
+          message: "Seed workflow",
+          commitSha: GENERATED_COMMIT_SHA,
+          branch: "main"
+        }
+      ]
+    });
+
+    await expect(
+      client.getRepositoryFileContent(OWNER, TEMPLATE_REPOSITORY_NAME, WORKFLOW_PATH, "main")
+    ).resolves.toBe(FILE_CONTENT);
+    await expect(
+      client.getRepositoryFileContent(OWNER, TEMPLATE_REPOSITORY_NAME, "grade.yml", "main")
+    ).resolves.toBeNull();
+    expect(client.fileReads.map((read) => read.path)).toEqual([WORKFLOW_PATH, "grade.yml"]);
+  });
+
   it("TC-GITHUB-FAKE-008 simulates auth failure", async () => {
     const client = new FakeGitHubClient();
     client.failNext("getAuthenticatedUser", "auth_failed");

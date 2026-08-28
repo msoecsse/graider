@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "commandName": "grade",
+  "assignmentFile": "terms/27s1/assignments/lab01/assignment.yml",
+  "status": "success",
+  "exitCode": 0,
+  "diagnostics": [],
+  "warnings": [],
+  "errors": [],
+  "generatedFiles": [],
+  "summary": {
+    "assignmentSlug": "lab01",
+    "gradingEnabled": true,
+    "workflow": "grade.yml",
+    "workflowDispatchAttempted": true,
+    "targetsSelected": 2,
+    "dispatchAttempted": 2,
+    "dispatchSucceeded": 2,
+    "dispatchFailed": 0,
+    "skipped": 0
+  }
+}

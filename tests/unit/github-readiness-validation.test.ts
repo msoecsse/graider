@@ -37,7 +37,7 @@ const courseConfig: RawCourseConfig = {
     organization: ORGANIZATION,
     repository_visibility: "private",
     repo_name_pattern: "{term}-{course}-{assignment}-{student}",
-    student_permission: "push",
+    student_permission: "admin",
     faculty_team: FACULTY_TEAM,
     faculty_permission: "admin",
     grader_team: GRADER_TEAM,

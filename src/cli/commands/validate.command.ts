@@ -1,29 +1,23 @@
 import type { Command } from "commander";
 import { loadGraiderConfig } from "../../config/config-loader.js";
-import type { LoadedGraiderConfig } from "../../config/config-models.js";
 import {
   type CommonCommandOptions,
   normalizeCommonCommandOptions,
   type RawCommonCommandOptions
 } from "../../core/command-context.js";
 import { createCommandResult, type CommandResult } from "../../core/command-result.js";
-import { parseTemplateRepository } from "../../config/github-config-validation.js";
-import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
 import { validateGitHubReadiness } from "../../github/github-readiness-validation.js";
-import type { GitHubTemplateRepository } from "../../github/github-models.js";
-import type { RosterStudent } from "../../roster/roster-models.js";
+import {
+  GITHUB_TOKEN_REQUIRED_CODE,
+  createConfigDiagnostic
+} from "../../diagnostics/error-catalog.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
+import { validateWorkflowCompatibility } from "../../workflows/workflow-compatibility-validation.js";
 import { writeCommandResult } from "../output.js";
 
 const COMMAND_NAME = "validate";
-const DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
-const README_FILE = "README.md";
-
-enum ValidateCommandNumber {
-  DefaultTemplateRepositoryId = 1
-}
 
 export interface ValidateCommandRequest {
   cwd: string;
@@ -31,66 +25,6 @@ export interface ValidateCommandRequest {
   options: CommonCommandOptions;
   githubClient?: GitHubClient;
 }
-
-const createDefaultTemplateRepository = (
-  owner: string,
-  repo: string,
-  branch: string
-): GitHubTemplateRepository => ({
-  owner,
-  name: repo,
-  fullName: `${owner}/${repo}`,
-  id: ValidateCommandNumber.DefaultTemplateRepositoryId,
-  private: true,
-  archived: false,
-  defaultBranch: branch,
-  htmlUrl: `https://github.com/${owner}/${repo}`,
-  isTemplate: true,
-  branches: [branch],
-  files: [README_FILE],
-  latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA
-});
-
-const createDefaultGitHubClient = (
-  config: LoadedGraiderConfig,
-  students: readonly RosterStudent[]
-): GitHubClient => {
-  if (readGitHubToken() !== undefined) {
-    return createGitHubClient();
-  }
-
-  const parsedTemplateRepository = parseTemplateRepository(
-    config.course.github.organization,
-    config.assignment.template.repository
-  );
-  const templateRepositories =
-    parsedTemplateRepository.status === "success"
-      ? [
-          createDefaultTemplateRepository(
-            parsedTemplateRepository.repository.owner,
-            parsedTemplateRepository.repository.repo,
-            config.assignment.template.branch
-          )
-        ]
-      : [];
-
-  return new FakeGitHubClient({
-    templateRepositories,
-    users: students.map((student) => ({ username: student.githubUsername })),
-    teams: [
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.faculty_team,
-        name: config.course.github.faculty_team
-      },
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.grader_team,
-        name: config.course.github.grader_team
-      }
-    ]
-  });
-};
 
 export const runValidateCommand = async ({
   cwd,
@@ -135,13 +69,53 @@ export const runValidateCommand = async ({
     });
   }
 
+  const workflowCompatibilityResult = validateWorkflowCompatibility(configResult.config);
+
+  if (
+    workflowCompatibilityResult.errors.length > 0 &&
+    workflowCompatibilityResult.workflowStatus !== "missing"
+  ) {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...workflowCompatibilityResult.warnings],
+      errors: workflowCompatibilityResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        workflowCompatibilityChecked: true
+      }
+    });
+  }
+
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName: COMMAND_NAME,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...workflowCompatibilityResult.warnings],
+      errors: [
+        createConfigDiagnostic(
+          GITHUB_TOKEN_REQUIRED_CODE,
+          "A GitHub token is required before Validate can check GitHub readiness. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: { options, ...configResult.config.summary, ...rosterResult.summary }
+    });
+  }
+
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,
     assignmentConfig: configResult.config.assignment,
     students: rosterResult.students,
-    githubClient:
-      githubClient ?? createDefaultGitHubClient(configResult.config, rosterResult.students)
+    githubClient: githubResolution.githubClient,
+    validateTemplateWorkflow: workflowCompatibilityResult.workflowStatus === "missing"
   });
 
   if (readinessResult.errors.length > 0) {
@@ -149,13 +123,18 @@ export const runValidateCommand = async ({
       commandName: COMMAND_NAME,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
-      warnings: [...rosterResult.warnings, ...readinessResult.warnings],
+      warnings: [
+        ...rosterResult.warnings,
+        ...workflowCompatibilityResult.warnings,
+        ...readinessResult.warnings
+      ],
       errors: readinessResult.errors,
       generatedFiles: [],
       summary: {
         options,
         ...configResult.config.summary,
         ...rosterResult.summary,
+        workflowCompatibilityChecked: true,
         githubReadinessChecked: true
       }
     });
@@ -165,13 +144,18 @@ export const runValidateCommand = async ({
     commandName: COMMAND_NAME,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: "success",
-    warnings: [...rosterResult.warnings, ...readinessResult.warnings],
+    warnings: [
+      ...rosterResult.warnings,
+      ...workflowCompatibilityResult.warnings,
+      ...readinessResult.warnings
+    ],
     errors: [],
     generatedFiles: [],
     summary: {
       options,
       ...configResult.config.summary,
       ...rosterResult.summary,
+      workflowCompatibilityChecked: true,
       githubReadinessChecked: true
     }
   });

@@ -11,3 +11,11 @@ docs/graider-traceability-matrix.md
 docs/graider-implementation-plan.md
 tests/fixtures/config/malformed-yaml/course.yml
 tests/fixtures/manifest/malformed-yaml/manifest.yml
+ui/node_modules/
+ui/dist/
+ui/dist-electron/
+ui/dist-graider-cli/
+ui/dist-release/
+ui/release/
+release/
+tests/fixtures/**/malformed-yaml/*.yml

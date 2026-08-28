@@ -60,12 +60,12 @@ const parseJsonResult = (output: string): JsonCommandResult =>
   JSON.parse(output) as JsonCommandResult;
 
 describe("graider CLI shell", () => {
-  it("TC-CLI-SHELL-001 command exists: validate", () => {
-    const output = runCliText(["validate", TEST_ASSIGNMENT_FILE], VALID_REPO_ROOT);
+  it("TC-CLI-SHELL-001 tokenless validate reports structured authentication requirements", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
+    const json = parseJsonResult(result.stdout);
 
-    expect(output).toContain("validate");
-    expect(output).toContain(TEST_ASSIGNMENT_FILE);
-    expect(output).toContain("success");
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
   });
 
   it("TC-CLI-SHELL-002 command exists: plan", () => {
@@ -105,7 +105,58 @@ describe("graider CLI shell", () => {
     expect(result.stdout).toContain("not_supported_in_mvp");
   });
 
-  it("TC-CLI-SHELL-007 command exists: remove-access", () => {
+  it("TC-CLI-SHELL-007 command exists: workflow generate", () => {
+    const output = runCliText(["workflow", "generate", "--help"]);
+
+    expect(output).toContain("generate");
+    expect(output).toContain("Generate a local grading workflow file");
+  });
+
+  it("command exists: dashboard", () => {
+    const output = runCliText(["dashboard", "--help"]);
+
+    expect(output).toContain("dashboard");
+    expect(output).toContain("Build a UI-ready dashboard model");
+    expect(output).toContain("--term");
+  });
+
+  it("command exists: assignment detail", () => {
+    const output = runCliText(["assignment", "detail", "--help"]);
+
+    expect(output).toContain("detail");
+    expect(output).toContain("Build a UI-ready read-only assignment detail model");
+  });
+
+  it("command exists: assignment apply-preview", () => {
+    const output = runCliText(["assignment", "apply-preview", "--help"]);
+
+    expect(output).toContain("apply-preview");
+    expect(output).toContain("Build a UI-ready read-only assignment apply preview model");
+  });
+
+  it("command exists: assignment grade-preview", () => {
+    const output = runCliText(["assignment", "grade-preview", "--help"]);
+
+    expect(output).toContain("grade-preview");
+    expect(output).toContain("Build a UI-ready read-only assignment grade preview model");
+  });
+
+  it("command exists: assignment grade", () => {
+    const output = runCliText(["assignment", "grade", "--help"]);
+
+    expect(output).toContain("grade");
+    expect(output).toContain("Dispatch assignment grading workflows");
+    expect(output).toContain("--student-id");
+  });
+
+  it("command exists: assignment apply", () => {
+    const output = runCliText(["assignment", "apply", "--help"]);
+
+    expect(output).toContain("apply");
+    expect(output).toContain("Apply assignment repository changes");
+  });
+
+  it("TC-CLI-SHELL-008 command exists: remove-access", () => {
     const result = runCli(["remove-access", TEST_ASSIGNMENT_FILE]);
 
     expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
@@ -114,27 +165,27 @@ describe("graider CLI shell", () => {
     expect(result.stdout).toContain("not_supported_in_mvp");
   });
 
-  it("TC-CLI-SHELL-008 unknown command exits nonzero", () => {
+  it("TC-CLI-SHELL-009 unknown command exits nonzero", () => {
     const result = runCli(["unknown-command", TEST_ASSIGNMENT_FILE]);
 
     expect(result.status).not.toBe(SUCCESS_EXIT_CODE);
     expect(result.stderr).toContain("unknown command");
   });
 
-  it("TC-CLI-SHELL-009 --json emits valid JSON command output", () => {
+  it("TC-CLI-SHELL-010 --json emits valid JSON command output", () => {
     const result = runCli(
       ["validate", TEST_ASSIGNMENT_FILE, "--json", "--verbose", "--yes"],
       VALID_REPO_ROOT
     );
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
     expect(json.commandName).toBe("validate");
     expect(json.assignmentFile).toBe(TEST_ASSIGNMENT_FILE);
-    expect(json.status).toBe("success");
-    expect(json.exitCode).toBe(SUCCESS_EXIT_CODE);
+    expect(json.status).toBe("failure");
+    expect(json.exitCode).toBe(COMMAND_ERROR_EXIT_CODE);
     expect(json.warnings).toEqual([]);
-    expect(json.errors).toEqual([]);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.generatedFiles).toEqual([]);
     expect(json.summary).toMatchObject({
       options: {
@@ -145,7 +196,7 @@ describe("graider CLI shell", () => {
     });
   });
 
-  it("TC-CLI-SHELL-010 archive returns not_supported_in_mvp", () => {
+  it("TC-CLI-SHELL-011 archive returns not_supported_in_mvp", () => {
     const result = runCli(["archive", TEST_ASSIGNMENT_FILE, "--json"]);
     const json = parseJsonResult(result.stdout);
 
@@ -160,7 +211,7 @@ describe("graider CLI shell", () => {
     ]);
   });
 
-  it("TC-CLI-SHELL-011 remove-access returns not_supported_in_mvp", () => {
+  it("TC-CLI-SHELL-012 remove-access returns not_supported_in_mvp", () => {
     const result = runCli(["remove-access", TEST_ASSIGNMENT_FILE, "--json"]);
     const json = parseJsonResult(result.stdout);
 
@@ -177,19 +228,20 @@ describe("graider CLI shell", () => {
 });
 
 describe("graider validate roster validation", () => {
-  it("succeeds for a valid fixture with rosters", () => {
+  it("reports token-required after loading a valid roster fixture", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE], VALID_ROSTER_REPO_ROOT);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
     expect(result.stdout).toContain("validate");
-    expect(result.stdout).toContain("success");
+    expect(result.stdout).toContain("github_token_required");
   });
 
   it("emits parseable JSON with roster summary counts", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_ROSTER_REPO_ROOT);
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.summary).toMatchObject({
       rosterFiles: ["terms/27s1/rosters/section-001.csv", "terms/27s1/rosters/section-002.csv"],
       studentCount: 4,
@@ -236,15 +288,16 @@ describe("graider validate roster validation", () => {
     ]);
   });
 
-  it("exits 0 when only normalization warnings occur", () => {
+  it("preserves normalization warnings before token-required", () => {
     const result = runCli(
       ["validate", TEST_ASSIGNMENT_FILE, "--json"],
       NORMALIZATION_WARNINGS_ROOT
     );
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.status).toBe("success");
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.status).toBe("failure");
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.warnings).toEqual([
       expect.objectContaining({
         code: "student_id_normalized"
@@ -285,23 +338,25 @@ describe("graider validate roster validation", () => {
 });
 
 describe("graider validate path resolution", () => {
-  it("validate run from repo root succeeds", () => {
+  it("tokenless validate resolves the repository root before requiring a token", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.summary).toMatchObject({
       repoRoot: VALID_REPO_ROOT,
       assignmentRelativePath: TEST_ASSIGNMENT_FILE
     });
   });
 
-  it("validate run from subdirectory succeeds", () => {
+  it("tokenless validate resolves the repository root from a subdirectory before requiring a token", () => {
     const assignmentFile = "assignments/lab04/assignment.yml";
     const result = runCli(["validate", assignmentFile, "--json"], VALID_REPO_SUBDIRECTORY);
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.summary).toMatchObject({
       repoRoot: VALID_REPO_ROOT,
       assignmentRelativePath: TEST_ASSIGNMENT_FILE
@@ -326,20 +381,21 @@ describe("graider validate path resolution", () => {
 });
 
 describe("graider validate config validation", () => {
-  it("succeeds for a valid fixture", () => {
-    const output = runCliText(["validate", TEST_ASSIGNMENT_FILE], VALID_REPO_ROOT);
+  it("reports token-required for a tokenless valid fixture", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
+    const json = parseJsonResult(result.stdout);
 
-    expect(output).toContain("validate");
-    expect(output).toContain("success");
-    expect(output).toContain(TEST_ASSIGNMENT_FILE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
   });
 
   it("emits parseable JSON for a valid fixture", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.status).toBe("success");
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.status).toBe("failure");
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.summary).toMatchObject({
       courseConfigPath: "course.yml",
       termConfigPath: "terms/27s1/term.yml",

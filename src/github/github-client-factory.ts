@@ -10,10 +10,35 @@ export interface GitHubClientFactoryOptions {
   env?: Record<string, string | undefined>;
 }
 
+export type ProductionGitHubClientResolution =
+  | { readonly status: "available"; readonly githubClient: GitHubClient }
+  | { readonly status: "token_missing" };
+
 export function createGitHubClient(options: GitHubClientFactoryOptions = {}): GitHubClient {
   const token = options.token ?? readGitHubToken(options.env);
-  return new OctokitGitHubClient(token === undefined ? {} : { token });
+
+  if (token === undefined) {
+    throw new Error("A GitHub token is required to create a production GitHub client.");
+  }
+
+  return new OctokitGitHubClient({ token });
 }
+
+export const resolveProductionGitHubClient = ({
+  githubClient,
+  env
+}: GitHubClientFactoryOptions & {
+  readonly githubClient?: GitHubClient | undefined;
+} = {}): ProductionGitHubClientResolution => {
+  if (githubClient !== undefined) {
+    return { status: "available", githubClient };
+  }
+
+  const token = readGitHubToken(env);
+  return token === undefined
+    ? { status: "token_missing" }
+    : { status: "available", githubClient: createGitHubClient({ token }) };
+};
 
 export function readGitHubToken(
   env: Record<string, string | undefined> = process.env

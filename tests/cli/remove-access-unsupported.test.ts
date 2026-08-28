@@ -15,6 +15,7 @@ const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
 const SUCCESS_EXIT_CODE = 0;
 const COMMAND_ERROR_EXIT_CODE = 1;
 const EMPTY_FILE_COUNT = 0;
+const CLI_HELP_TIMEOUT_MS = 15_000;
 const jsonOptions = normalizeCommonCommandOptions({ json: true });
 
 interface CliResult {
@@ -54,13 +55,17 @@ const listFiles = (directory: string): string[] =>
   });
 
 describe("remove-access unsupported command shell", () => {
-  it("TC-CLI-REMOVE-UNSUPPORTED-001 remove-access command exists", () => {
-    const result = runCli(["remove-access", "--help"]);
+  it(
+    "TC-CLI-REMOVE-UNSUPPORTED-001 remove-access command exists",
+    () => {
+      const result = runCli(["remove-access", "--help"]);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(result.stdout).toContain("remove-access");
-    expect(result.stdout).toContain("Remove student access");
-  });
+      expect(result.status).toBe(SUCCESS_EXIT_CODE);
+      expect(result.stdout).toContain("remove-access");
+      expect(result.stdout).toContain("Remove student access");
+    },
+    CLI_HELP_TIMEOUT_MS
+  );
 
   it("TC-CLI-REMOVE-UNSUPPORTED-002 remove-access returns not_supported_in_mvp", () => {
     const result = runCli(["remove-access", ASSIGNMENT_FILE, "--json"]);

@@ -16,15 +16,18 @@ import {
   validateTargetSelector,
   type RawTargetSelector
 } from "../../core/target-selector.js";
-import { DiagnosticCode, createConfigDiagnostic } from "../../diagnostics/error-catalog.js";
+import {
+  DiagnosticCode,
+  createConfigDiagnostic,
+  createWarningDiagnostic
+} from "../../diagnostics/error-catalog.js";
 import {
   executeGrade,
   getGradeGitHubDiagnostics,
   type GradeExecutionResult
 } from "../../execution/grade-executor.js";
-import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
 import type { RetryOptions } from "../../github/github-retry.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";
@@ -33,25 +36,24 @@ import { writeCommandResult } from "../output.js";
 
 const COMMAND_NAME = "grade";
 const EMPTY_COUNT = 0;
+const NOT_CONFIGURED_WARNING_COUNT = 1;
 
 export interface GradeCommandRequest {
   cwd: string;
   assignmentFile: string;
   options: CommonCommandOptions;
   targetSelector: RawTargetSelector;
+  commandName?: string;
   githubClient?: GitHubClient;
   retryOptions?: Partial<RetryOptions>;
 }
 
-interface GradeRawOptions extends RawCommonCommandOptions {
+export interface GradeRawOptions extends RawCommonCommandOptions {
   all?: boolean;
   section?: string;
   studentId?: string;
   githubUsername?: string;
 }
-
-const createDefaultGitHubClient = (): GitHubClient =>
-  readGitHubToken() === undefined ? new FakeGitHubClient() : createGitHubClient();
 
 const getEffectiveGrading = (config: LoadedGraiderConfig) =>
   config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
@@ -71,11 +73,18 @@ const createLifecycleDiagnostic = (status: string) =>
     { assignmentStatus: status }
   );
 
+const createGradingNotConfiguredWarning = () =>
+  createWarningDiagnostic(
+    DiagnosticCode.GradingNotConfigured,
+    "Automated grading is not configured for this assignment."
+  );
+
 export const runGradeCommand = async ({
   cwd,
   assignmentFile,
   options,
   targetSelector,
+  commandName = COMMAND_NAME,
   githubClient,
   retryOptions
 }: GradeCommandRequest): Promise<CommandResult> => {
@@ -83,7 +92,7 @@ export const runGradeCommand = async ({
 
   if (selectorResult.errors.length > EMPTY_COUNT || selectorResult.selector === undefined) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile,
       status: "failure",
       warnings: selectorResult.warnings,
@@ -97,7 +106,7 @@ export const runGradeCommand = async ({
 
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -111,7 +120,7 @@ export const runGradeCommand = async ({
 
   if (assignmentStatus === "draft" || assignmentStatus === "archived") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [],
@@ -124,33 +133,11 @@ export const runGradeCommand = async ({
     });
   }
 
-  const grading = getEffectiveGrading(configResult.config);
-
-  if (!grading.enabled || grading.workflow === undefined) {
-    return createCommandResult({
-      commandName: COMMAND_NAME,
-      assignmentFile: configResult.config.summary.assignmentConfigPath,
-      status: "failure",
-      warnings: [],
-      errors: [
-        createConfigDiagnostic(
-          DiagnosticCode.GradingNotConfigured,
-          "Grading workflow is not configured for this assignment."
-        )
-      ],
-      generatedFiles: [],
-      summary: {
-        options,
-        ...configResult.config.summary
-      }
-    });
-  }
-
   const rosterResult = loadAssignmentRosters(configResult.config);
 
   if (rosterResult.errors.length > EMPTY_COUNT) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -168,7 +155,7 @@ export const runGradeCommand = async ({
 
   if (selectionResult.errors.length > EMPTY_COUNT) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...selectionResult.warnings],
@@ -183,6 +170,42 @@ export const runGradeCommand = async ({
     });
   }
 
+  const grading = getEffectiveGrading(configResult.config);
+
+  if (!grading.enabled || grading.workflow === undefined) {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "success",
+      warnings: [
+        ...rosterResult.warnings,
+        ...selectionResult.warnings,
+        createGradingNotConfiguredWarning()
+      ],
+      errors: [],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        ...selectionResult.summary,
+        gradingEnabled: false,
+        workflowDispatchAttempted: false,
+        resultStatus: "not_configured",
+        targetsSelected: selectionResult.students.length,
+        dispatchAttempted: EMPTY_COUNT,
+        dispatchSucceeded: EMPTY_COUNT,
+        dispatchFailed: EMPTY_COUNT,
+        skipped: selectionResult.students.length,
+        warnings:
+          rosterResult.warnings.length +
+          selectionResult.warnings.length +
+          NOT_CONFIGURED_WARNING_COUNT,
+        errors: EMPTY_COUNT
+      }
+    });
+  }
+
   const manifestPath = createManifestPath(
     configResult.config.summary.repoRoot,
     configResult.config.summary.termCode,
@@ -192,7 +215,7 @@ export const runGradeCommand = async ({
 
   if (manifestResult.status !== "loaded") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -208,11 +231,35 @@ export const runGradeCommand = async ({
     });
   }
 
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...selectionResult.warnings],
+      errors: [
+        createConfigDiagnostic(
+          DiagnosticCode.GithubTokenRequired,
+          "A GitHub token is required before Grade can dispatch workflows. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        ...selectionResult.summary,
+        manifestFile: manifestPath.relativePath
+      }
+    });
+  }
+
   const executionResult = await executeGrade({
     config: configResult.config,
     manifest: manifestResult.manifest,
     targetStudents: selectionResult.students,
-    githubClient: githubClient ?? createDefaultGitHubClient(),
+    githubClient: githubResolution.githubClient,
     ...(retryOptions === undefined ? {} : { retryOptions })
   });
   const status = getCommandStatus(executionResult);
@@ -222,7 +269,7 @@ export const runGradeCommand = async ({
       : executionResult.errors;
 
   return createCommandResult({
-    commandName: COMMAND_NAME,
+    commandName,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status,
     warnings: [...rosterResult.warnings, ...selectionResult.warnings, ...executionResult.warnings],
@@ -234,7 +281,14 @@ export const runGradeCommand = async ({
       ...rosterResult.summary,
       ...selectionResult.summary,
       manifestFile: manifestPath.relativePath,
-      ...executionResult.summary
+      ...executionResult.summary,
+      ...(manifestResult.manifest.repositoryMode === "group"
+        ? {
+            repositoryMode: "group",
+            groupTargets: executionResult.targets,
+            studentMappingCount: selectionResult.students.length
+          }
+        : {})
     }
   });
 };

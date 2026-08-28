@@ -2,11 +2,27 @@ import type { CommandResult } from "../core/command-result.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { redactCommandResult } from "../diagnostics/redaction.js";
 
+export const CLI_JSON_SCHEMA_VERSION = 1;
 const JSON_INDENT_SPACES = 2;
 const EMPTY_COLLECTION_LENGTH = 0;
 
+export interface CliJsonOutput extends CommandResult {
+  schemaVersion: typeof CLI_JSON_SCHEMA_VERSION;
+  diagnostics: Diagnostic[];
+}
+
+const createCliJsonOutput = (result: CommandResult): CliJsonOutput => {
+  const redactedResult = redactCommandResult(result);
+
+  return {
+    schemaVersion: CLI_JSON_SCHEMA_VERSION,
+    ...redactedResult,
+    diagnostics: [...redactedResult.warnings, ...redactedResult.errors]
+  };
+};
+
 export const formatCommandResultAsJson = (result: CommandResult): string =>
-  JSON.stringify(redactCommandResult(result), undefined, JSON_INDENT_SPACES);
+  JSON.stringify(createCliJsonOutput(result), undefined, JSON_INDENT_SPACES);
 
 const formatDiagnostic = (diagnostic: Diagnostic): string =>
   `${diagnostic.code}: ${diagnostic.message}`;

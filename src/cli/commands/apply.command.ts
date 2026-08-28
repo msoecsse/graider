@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import type { Command } from "commander";
-import { parseTemplateRepository } from "../../config/github-config-validation.js";
 import { loadGraiderConfig } from "../../config/config-loader.js";
-import type { LoadedGraiderConfig } from "../../config/config-models.js";
 import { type Clock, formatPlanCreatedAt, systemClock } from "../../core/clock.js";
 import {
   type CommonCommandOptions,
@@ -16,96 +14,40 @@ import {
 } from "../../core/command-result.js";
 import { executeApplyPlan } from "../../execution/apply-executor.js";
 import { evaluateMutationGuard } from "../../execution/mutation-guard.js";
-import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
 import { validateGitHubReadiness } from "../../github/github-readiness-validation.js";
-import type { GitHubTemplateRepository } from "../../github/github-models.js";
 import type { GitHubRetryEvent, RetryOptions } from "../../github/github-retry.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { buildPlan } from "../../planning/plan-builder.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
-import type { RosterStudent } from "../../roster/roster-models.js";
+import {
+  GITHUB_TOKEN_REQUIRED_CODE,
+  createConfigDiagnostic,
+  createWarningDiagnostic
+} from "../../diagnostics/error-catalog.js";
 import { writeCommandResult } from "../output.js";
+import { runGroupApplyPreflight } from "../../groups/group-apply-preflight.js";
+import { executeGroupTargets } from "../../groups/group-target-executor.js";
+import { writeGroupApplyManifestV2 } from "../../groups/group-apply-manifest-writer.js";
 
 const COMMAND_NAME = "apply";
-const DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
-const README_FILE = "README.md";
 const EMPTY_COUNT = 0;
-
-enum ApplyCommandNumber {
-  DefaultTemplateRepositoryId = 1
-}
+const GROUP_APPLY_INCOMPLETE_MESSAGE =
+  "Group Apply did not complete, so no manifest was written. Some group repositories may have been created before the failure. Graider will not adopt untracked repositories automatically. Delete any partial repositories manually or use a future reconcile workflow, then run Apply again.";
 
 export interface ApplyCommandRequest {
   cwd: string;
   assignmentFile: string;
   options: CommonCommandOptions;
+  commandName?: string;
   githubClient?: GitHubClient;
   clock?: Clock;
   retryOptions?: Partial<RetryOptions>;
+  groupTargetExecutor?: typeof executeGroupTargets;
+  groupManifestWriter?: typeof writeGroupApplyManifestV2;
 }
-
-const createDefaultTemplateRepository = (
-  owner: string,
-  repo: string,
-  branch: string
-): GitHubTemplateRepository => ({
-  owner,
-  name: repo,
-  fullName: `${owner}/${repo}`,
-  id: ApplyCommandNumber.DefaultTemplateRepositoryId,
-  private: true,
-  archived: false,
-  defaultBranch: branch,
-  htmlUrl: `https://github.com/${owner}/${repo}`,
-  isTemplate: true,
-  branches: [branch],
-  files: [README_FILE],
-  latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA
-});
-
-const createDefaultGitHubClient = (
-  config: LoadedGraiderConfig,
-  students: readonly RosterStudent[]
-): GitHubClient => {
-  if (readGitHubToken() !== undefined) {
-    return createGitHubClient();
-  }
-
-  const parsedTemplateRepository = parseTemplateRepository(
-    config.course.github.organization,
-    config.assignment.template.repository
-  );
-  const templateRepositories =
-    parsedTemplateRepository.status === "success"
-      ? [
-          createDefaultTemplateRepository(
-            parsedTemplateRepository.repository.owner,
-            parsedTemplateRepository.repository.repo,
-            config.assignment.template.branch
-          )
-        ]
-      : [];
-
-  return new FakeGitHubClient({
-    templateRepositories,
-    users: students.map((student) => ({ username: student.githubUsername })),
-    teams: [
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.faculty_team,
-        name: config.course.github.faculty_team
-      },
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.grader_team,
-        name: config.course.github.grader_team
-      }
-    ]
-  });
-};
 
 const getExecutionStatus = (
   errorsLength: number,
@@ -131,9 +73,12 @@ export const runApplyCommand = async ({
   cwd,
   assignmentFile,
   options,
+  commandName = COMMAND_NAME,
   githubClient,
   clock = systemClock,
-  retryOptions
+  retryOptions,
+  groupTargetExecutor = executeGroupTargets,
+  groupManifestWriter = writeGroupApplyManifestV2
 }: ApplyCommandRequest): Promise<CommandResult> => {
   const retryEvents: GitHubRetryEvent[] = [];
   const effectiveRetryOptions: Partial<RetryOptions> = {
@@ -150,7 +95,7 @@ export const runApplyCommand = async ({
 
   if (configResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile,
       status: "failure",
       warnings: [],
@@ -164,7 +109,7 @@ export const runApplyCommand = async ({
 
   if (rosterResult.errors.length > EMPTY_COUNT) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: rosterResult.warnings,
@@ -178,8 +123,145 @@ export const runApplyCommand = async ({
     });
   }
 
-  const effectiveGitHubClient =
-    githubClient ?? createDefaultGitHubClient(configResult.config, rosterResult.students);
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: [
+        createConfigDiagnostic(
+          GITHUB_TOKEN_REQUIRED_CODE,
+          "A GitHub token is required before Apply can contact GitHub. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: { options, ...configResult.config.summary, ...rosterResult.summary }
+    });
+  }
+  const effectiveGitHubClient = githubResolution.githubClient;
+  if (configResult.config.assignment.repository_mode === "group") {
+    const preflight = await runGroupApplyPreflight({
+      config: configResult.config,
+      students: rosterResult.students,
+      githubClient: effectiveGitHubClient
+    });
+    const groupTargetSummary = preflight.targets.map((target) => ({
+      groupId: target.groupId,
+      repositoryName: target.repositoryName,
+      studentIds: target.studentIds,
+      githubUsernames: target.githubUsernames,
+      status: preflight.errors.length === EMPTY_COUNT ? "pending" : "blocked",
+      diagnostics: target.diagnostics
+    }));
+    const groupSummary = {
+      options,
+      ...configResult.config.summary,
+      ...rosterResult.summary,
+      repositoryMode: "group",
+      targetCount: preflight.targets.length,
+      studentMappingCount: preflight.targets.reduce(
+        (count, target) => count + target.studentIds.length,
+        EMPTY_COUNT
+      ),
+      groupTargets: groupTargetSummary
+    };
+    const guardResult = evaluateMutationGuard({
+      options,
+      preflightErrors: preflight.errors
+    });
+    if (!guardResult.allowed) {
+      return createCommandResult({
+        commandName,
+        assignmentFile: configResult.config.summary.assignmentConfigPath,
+        status: "failure",
+        warnings: [...rosterResult.warnings, ...preflight.warnings],
+        errors: guardResult.errors,
+        generatedFiles: [],
+        summary: groupSummary
+      });
+    }
+
+    const execution = await groupTargetExecutor({
+      config: configResult.config,
+      targets: preflight.targets,
+      githubClient: effectiveGitHubClient
+    });
+    const executionTargetSummary = execution.targets.map((result) => ({
+      groupId: result.target.groupId,
+      repositoryName: result.target.repositoryName,
+      ...(result.htmlUrl === null ? {} : { htmlUrl: result.htmlUrl }),
+      ...(result.cloneUrl === null ? {} : { cloneUrl: result.cloneUrl }),
+      studentIds: result.target.studentIds,
+      githubUsernames: result.target.githubUsernames,
+      status: result.status,
+      diagnostics: result.diagnostics
+    }));
+    const executionSummary = {
+      ...groupSummary,
+      groupTargets: executionTargetSummary
+    };
+    if (execution.errors.length > EMPTY_COUNT) {
+      return createCommandResult({
+        commandName,
+        assignmentFile: configResult.config.summary.assignmentConfigPath,
+        status: "failure",
+        warnings: [
+          ...rosterResult.warnings,
+          ...preflight.warnings,
+          ...execution.warnings,
+          createWarningDiagnostic(
+            "group_apply_manifest_not_written",
+            GROUP_APPLY_INCOMPLETE_MESSAGE
+          )
+        ],
+        errors: [...execution.errors],
+        generatedFiles: [],
+        summary: executionSummary
+      });
+    }
+
+    const manifestWrite = groupManifestWriter({
+      repoRoot: configResult.config.summary.repoRoot,
+      termCode: configResult.config.summary.termCode,
+      assignmentSlug: configResult.config.summary.assignmentSlug,
+      plannedTargets: preflight.targets,
+      execution
+    });
+    if (manifestWrite.status === "failure") {
+      return createCommandResult({
+        commandName,
+        assignmentFile: configResult.config.summary.assignmentConfigPath,
+        status: "failure",
+        warnings: [
+          ...rosterResult.warnings,
+          ...preflight.warnings,
+          ...execution.warnings,
+          createWarningDiagnostic(
+            "group_apply_manifest_not_written",
+            GROUP_APPLY_INCOMPLETE_MESSAGE
+          )
+        ],
+        errors: [...manifestWrite.diagnostics],
+        generatedFiles: [],
+        summary: executionSummary
+      });
+    }
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "success",
+      warnings: [...rosterResult.warnings, ...preflight.warnings, ...execution.warnings],
+      errors: [],
+      generatedFiles: [manifestWrite.manifestPath],
+      summary: {
+        ...executionSummary,
+        manifestFile: manifestWrite.manifestPath,
+        manifestWritten: true
+      }
+    });
+  }
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,
@@ -190,7 +272,7 @@ export const runApplyCommand = async ({
 
   if (readinessResult.errors.length > EMPTY_COUNT) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...readinessResult.warnings],
@@ -214,7 +296,7 @@ export const runApplyCommand = async ({
 
   if (manifestResult.status === "failure") {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: manifestResult.warnings,
@@ -241,7 +323,7 @@ export const runApplyCommand = async ({
 
   if (!guardResult.allowed) {
     return createCommandResult({
-      commandName: COMMAND_NAME,
+      commandName,
       assignmentFile: configResult.config.summary.assignmentConfigPath,
       status: "failure",
       warnings: [...rosterResult.warnings, ...plan.warnings],
@@ -261,6 +343,7 @@ export const runApplyCommand = async ({
   const executionResult = await executeApplyPlan({
     config: configResult.config,
     plan,
+    targets: plan.targets,
     ...(manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {}),
     manifestPath: manifestPath.absolutePath,
     students: rosterResult.students,
@@ -273,7 +356,7 @@ export const runApplyCommand = async ({
     : [];
 
   return createCommandResult({
-    commandName: COMMAND_NAME,
+    commandName,
     assignmentFile: configResult.config.summary.assignmentConfigPath,
     status: getExecutionStatus(executionResult.errors.length, executionResult.summary),
     warnings: [...rosterResult.warnings, ...plan.warnings, ...executionResult.warnings],

@@ -6,6 +6,8 @@ const mapStudent = (student: StudentReportSummary) => ({
   github_username: student.githubUsername,
   section: student.section,
   roster_status: student.rosterStatus,
+  ...(student.targetId === undefined ? {} : { target_id: student.targetId }),
+  ...(student.groupId === undefined ? {} : { group_id: student.groupId }),
   ...(student.repositoryName === undefined ? {} : { repository_name: student.repositoryName }),
   ...(student.repositoryUrl === undefined ? {} : { repository_url: student.repositoryUrl }),
   repository_status: student.repositoryStatus,
@@ -20,6 +22,15 @@ const mapStudent = (student: StudentReportSummary) => ({
       ? {}
       : { workflow_run_id: student.grading.workflowRunId }),
     ...(student.grading.commitSha === undefined ? {} : { commit_sha: student.grading.commitSha }),
+    ...(student.grading.artifactFileKeys === undefined
+      ? {}
+      : { artifact_file_keys: student.grading.artifactFileKeys }),
+    ...(student.grading.configuredResultFile === undefined
+      ? {}
+      : { configured_result_file: student.grading.configuredResultFile }),
+    ...(student.grading.normalizedResultFile === undefined
+      ? {}
+      : { normalized_result_file: student.grading.normalizedResultFile }),
     checks: student.grading.checks.map((check) => ({
       name: check.name,
       status: check.status,

@@ -6,7 +6,8 @@ import type { Plan } from "../planning/plan-models.js";
 const EMPTY_COUNT = 0;
 
 export interface MutationGuardInput {
-  plan: Plan;
+  plan?: Plan;
+  preflightErrors?: readonly Diagnostic[];
   options: CommonCommandOptions;
 }
 
@@ -29,14 +30,17 @@ const createConfirmationRequiredDiagnostic = (): Diagnostic =>
 
 export const evaluateMutationGuard = ({
   plan,
+  preflightErrors = [],
   options
 }: MutationGuardInput): MutationGuardResult => {
-  const hasBlockedOperations = plan.operations.some((operation) => operation.status === "blocked");
+  const hasBlockedOperations =
+    plan?.operations.some((operation) => operation.status === "blocked") ?? false;
+  const errors = [...(plan?.errors ?? []), ...preflightErrors];
 
-  if (hasBlockedOperations || plan.errors.length > EMPTY_COUNT) {
+  if (hasBlockedOperations || errors.length > EMPTY_COUNT) {
     return {
       allowed: false,
-      errors: [createMutationBlockedDiagnostic(), ...plan.errors]
+      errors: [createMutationBlockedDiagnostic(), ...errors]
     };
   }
 

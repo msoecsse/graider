@@ -39,7 +39,7 @@ The system shall allow assignments with no grading workflow.
 
 - Given `assignment.yml` with `grading.enabled: false`, validation does not warn about a missing grading workflow.
 - Given `grading.enabled: false`, `graider report` reports `workflow_status: not_configured` and `result_status: not_configured`.
-- Given `grading.enabled: false`, `graider grade` exits with a command error and triggers no workflows.
+- Given `grading.enabled: false`, `graider grade` exits successfully as a no-op and triggers no workflows.
 
 ---
 

@@ -138,6 +138,26 @@ export interface FakeGitHubClientMutations {
   fileWrites: FakeRepositoryFileRecord[];
 }
 
+export interface FakeRepositoryFileRead {
+  owner: string;
+  repo: string;
+  path: string;
+  ref: string;
+}
+
+export interface FakeArtifactDownloadRead {
+  owner: string;
+  repo: string;
+  runId: number;
+  artifactName: string;
+}
+
+export interface FakeWorkflowRunRead {
+  owner: string;
+  repo: string;
+  workflowPath?: string;
+}
+
 const normalizeKeyPart = (value: string): string => value.toLowerCase();
 
 const repositoryKey = (owner: string, repo: string): string =>
@@ -177,6 +197,9 @@ export class FakeGitHubClient implements GitHubClient {
     archivedRepositories: [],
     fileWrites: []
   };
+  readonly fileReads: FakeRepositoryFileRead[] = [];
+  readonly artifactDownloads: FakeArtifactDownloadRead[] = [];
+  readonly workflowRunReadRequests: FakeWorkflowRunRead[] = [];
 
   private readonly authenticatedUser: GitHubUser;
   private readonly users: GitHubUser[];
@@ -467,6 +490,31 @@ export class FakeGitHubClient implements GitHubClient {
     });
   }
 
+  getRepositoryFileContent(
+    owner: string,
+    repo: string,
+    filePath: string,
+    ref: string
+  ): Promise<string | null> {
+    return this.run("getRepositoryFileContent", () => {
+      this.fileReads.push({
+        owner,
+        repo,
+        path: filePath,
+        ref
+      });
+
+      return (
+        this.repositoryFiles.find(
+          (file) =>
+            repositoryKey(file.owner, file.repo) === repositoryKey(owner, repo) &&
+            file.path === filePath &&
+            (file.branch === ref || file.branch === undefined)
+        )?.content ?? null
+      );
+    });
+  }
+
   getWorkflow(owner: string, repo: string, workflowPath: string): Promise<GitHubWorkflow | null> {
     return this.run(
       "getWorkflow",
@@ -486,8 +534,10 @@ export class FakeGitHubClient implements GitHubClient {
   }
 
   listWorkflowRuns(input: ListWorkflowRunsInput): Promise<GitHubWorkflowRun[]> {
-    return this.run("listWorkflowRuns", () =>
-      this.workflowRuns
+    return this.run("listWorkflowRuns", () => {
+      this.workflowRunReadRequests.push(input);
+
+      return this.workflowRuns
         .filter(
           (record) =>
             repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo)
@@ -496,21 +546,23 @@ export class FakeGitHubClient implements GitHubClient {
           (record) =>
             input.workflowPath === undefined || record.run.workflowPath === input.workflowPath
         )
-        .map((record) => record.run)
-    );
+        .map((record) => record.run);
+    });
   }
 
   downloadArtifact(input: DownloadArtifactInput): Promise<DownloadedArtifact | null> {
-    return this.run(
-      "downloadArtifact",
-      () =>
+    return this.run("downloadArtifact", () => {
+      this.artifactDownloads.push(input);
+
+      return (
         this.artifacts.find(
           (record) =>
             repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo) &&
             record.runId === input.runId &&
             record.artifact.name === input.artifactName
         )?.artifact ?? null
-    );
+      );
+    });
   }
 
   archiveRepository(owner: string, repo: string): Promise<void> {

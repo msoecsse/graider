@@ -5,6 +5,7 @@ import { Octokit } from "@octokit/rest";
 
 import { GitHubClient } from "./github-client.js";
 import { GitHubClientError } from "./github-errors.js";
+import { withGitHubRetry } from "./github-retry.js";
 import {
   AddCollaboratorInput,
   AddTeamPermissionInput,
@@ -33,6 +34,7 @@ import {
 
 const HTTP_STATUS_UNAUTHORIZED = 401;
 const HTTP_STATUS_CREATED = 201;
+const HTTP_STATUS_FOUND = 302;
 const HTTP_STATUS_FORBIDDEN = 403;
 const HTTP_STATUS_NOT_FOUND = 404;
 const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
@@ -43,25 +45,48 @@ const FIRST_PAGE_LIMIT = 1;
 const UNKNOWN_COMMIT_SHA = "unknown";
 const UNKNOWN_ID = 0;
 const EMPTY_LENGTH = 0;
+const SINGLE_BYTE_STEP = 1;
 const DECIMAL_RADIX = 10;
 const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
+const ZIP_CENTRAL_DIRECTORY_FILE_HEADER_SIGNATURE = 0x02014b50;
+const ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
 const ZIP_DEFLATE_COMPRESSION = 8;
 const ZIP_STORED_COMPRESSION = 0;
 const ZIP_GENERAL_PURPOSE_DATA_DESCRIPTOR_FLAG = 0x08;
 const ZIP_MIN_LOCAL_FILE_HEADER_BYTES = 30;
+const ZIP_MIN_CENTRAL_DIRECTORY_FILE_HEADER_BYTES = 46;
+const ZIP_MIN_END_OF_CENTRAL_DIRECTORY_BYTES = 22;
+const ZIP_MAX_COMMENT_BYTES = 65_535;
 const ZIP_COMPRESSION_METHOD_OFFSET = 8;
 const ZIP_GENERAL_PURPOSE_FLAG_OFFSET = 6;
 const ZIP_COMPRESSED_SIZE_OFFSET = 18;
 const ZIP_FILE_NAME_LENGTH_OFFSET = 26;
 const ZIP_EXTRA_FIELD_LENGTH_OFFSET = 28;
 const ZIP_LOCAL_FILE_NAME_OFFSET = 30;
+const ZIP_CENTRAL_COMPRESSION_METHOD_OFFSET = 10;
+const ZIP_CENTRAL_COMPRESSED_SIZE_OFFSET = 20;
+const ZIP_CENTRAL_FILE_NAME_LENGTH_OFFSET = 28;
+const ZIP_CENTRAL_EXTRA_FIELD_LENGTH_OFFSET = 30;
+const ZIP_CENTRAL_FILE_COMMENT_LENGTH_OFFSET = 32;
+const ZIP_CENTRAL_LOCAL_HEADER_OFFSET = 42;
+const ZIP_CENTRAL_FILE_NAME_OFFSET = 46;
+const ZIP_END_CENTRAL_DIRECTORY_ENTRY_COUNT_OFFSET = 10;
+const ZIP_END_CENTRAL_DIRECTORY_SIZE_OFFSET = 12;
+const ZIP_END_CENTRAL_DIRECTORY_OFFSET = 16;
+const ZIP_END_CENTRAL_DIRECTORY_COMMENT_LENGTH_OFFSET = 20;
 const BASE64_ENCODING = "base64";
 const UTF8_ENCODING = "utf8";
+const WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
+const PARSE_SUCCESS_RESPONSE_BODY_DISABLED = false;
+const LOCATION_HEADER = "location";
+const LOCATION_HEADER_ALTERNATE = "Location";
+const GET_METHOD = "GET";
 
 type OctokitParameters = Record<string, unknown>;
 
 export interface OctokitResponseLike {
   data: unknown;
+  headers?: Record<string, string>;
   status?: number;
 }
 
@@ -109,6 +134,25 @@ export interface OctokitRestClientLike {
 export interface OctokitGitHubClientOptions {
   token?: string;
   octokit?: OctokitRestClientLike;
+}
+
+interface ReadableStreamReaderLike {
+  read: () => Promise<{ done: boolean; value?: unknown }>;
+  releaseLock?: () => void;
+}
+
+interface ReadableStreamLike {
+  getReader: () => ReadableStreamReaderLike;
+}
+
+interface BlobLike {
+  arrayBuffer: () => Promise<ArrayBuffer>;
+}
+
+type AsyncIterableLike = AsyncIterable<unknown>;
+
+interface AsyncIterableCandidate {
+  [Symbol.asyncIterator]?: unknown;
 }
 
 export class OctokitGitHubClient implements GitHubClient {
@@ -330,6 +374,33 @@ export class OctokitGitHubClient implements GitHubClient {
     );
   }
 
+  async getRepositoryFileContent(
+    owner: string,
+    repo: string,
+    filePath: string,
+    ref: string
+  ): Promise<string | null> {
+    const data = await this.runNullable(() =>
+      this.octokit.rest.repos.getContent({
+        owner,
+        path: filePath,
+        ref,
+        repo
+      })
+    );
+
+    if (data === null || Array.isArray(data)) {
+      return null;
+    }
+
+    const record = asRecord(data);
+    const content = asString(record.content);
+
+    return content === undefined
+      ? null
+      : Buffer.from(content, BASE64_ENCODING).toString(UTF8_ENCODING);
+  }
+
   async getWorkflow(
     owner: string,
     repo: string,
@@ -359,11 +430,11 @@ export class OctokitGitHubClient implements GitHubClient {
   async dispatchWorkflow(input: DispatchWorkflowInput): Promise<void> {
     await this.run(() =>
       this.octokit.rest.actions.createWorkflowDispatch({
-        inputs: input.inputs,
         owner: input.owner,
         ref: input.ref,
         repo: input.repo,
-        workflow_id: input.workflowPath
+        workflow_id: input.workflowPath,
+        ...(input.inputs === undefined ? {} : { inputs: input.inputs })
       })
     );
   }
@@ -413,19 +484,55 @@ export class OctokitGitHubClient implements GitHubClient {
       return null;
     }
 
-    const archiveData = await this.run(() =>
-      this.octokit.rest.actions.downloadArtifact({
-        archive_format: "zip",
-        artifact_id: artifactId,
-        owner: input.owner,
-        repo: input.repo
-      })
+    const archiveResponse = await this.resolveArtifactDownloadResponse(
+      await this.runResponse(() =>
+        this.octokit.rest.actions.downloadArtifact({
+          archive_format: "zip",
+          artifact_id: artifactId,
+          owner: input.owner,
+          repo: input.repo,
+          request: {
+            parseSuccessResponseBody: PARSE_SUCCESS_RESPONSE_BODY_DISABLED
+          }
+        })
+      )
     );
+    const archiveBuffer = await toBuffer(archiveResponse.data);
+    const files = extractZipTextFiles(archiveBuffer);
+
+    if (Object.keys(files).length === EMPTY_LENGTH) {
+      throw createArtifactDecodeError();
+    }
 
     return {
-      files: extractZipTextFiles(archiveData),
+      files,
       name: input.artifactName
     };
+  }
+
+  private async resolveArtifactDownloadResponse(
+    response: OctokitResponseLike
+  ): Promise<OctokitResponseLike> {
+    if (response.status !== HTTP_STATUS_FOUND) {
+      return response;
+    }
+
+    const location =
+      response.headers?.[LOCATION_HEADER] ?? response.headers?.[LOCATION_HEADER_ALTERNATE];
+
+    if (location === undefined || location.length === EMPTY_LENGTH) {
+      throw createArtifactDecodeError();
+    }
+
+    return this.runResponse(() =>
+      this.octokit.request({
+        method: GET_METHOD,
+        url: location,
+        request: {
+          parseSuccessResponseBody: PARSE_SUCCESS_RESPONSE_BODY_DISABLED
+        }
+      })
+    );
   }
 
   async archiveRepository(owner: string, repo: string): Promise<void> {
@@ -433,6 +540,12 @@ export class OctokitGitHubClient implements GitHubClient {
   }
 
   async writeRepositoryFile(input: WriteRepositoryFileInput): Promise<GitHubFileWriteResult> {
+    return withGitHubRetry(() => this.writeRepositoryFileOnce(input));
+  }
+
+  private async writeRepositoryFileOnce(
+    input: WriteRepositoryFileInput
+  ): Promise<GitHubFileWriteResult> {
     const existingSha = await this.getExistingFileSha(input);
     const response = await this.run(() =>
       this.octokit.rest.repos.createOrUpdateFileContents({
@@ -442,7 +555,7 @@ export class OctokitGitHubClient implements GitHubClient {
         owner: input.owner,
         path: input.path,
         repo: input.repo,
-        sha: existingSha
+        ...(existingSha === undefined ? {} : { sha: existingSha })
       })
     );
     const record = asRecord(response);
@@ -602,6 +715,10 @@ function normalizeOctokitError(error: unknown): GitHubClientError {
   return new GitHubClientError("network_error", "GitHub network request failed.");
 }
 
+function createArtifactDecodeError(): GitHubClientError {
+  return new GitHubClientError("api_error", "GitHub artifact download could not be decoded.");
+}
+
 function getErrorStatus(error: unknown): number | undefined {
   const record = asRecord(error);
   return asNumber(record.status);
@@ -673,6 +790,9 @@ function mapRepository(value: unknown): GitHubRepository {
 
 function mapWorkflowRun(value: unknown, workflowPath: string | undefined): GitHubWorkflowRun {
   const record = asRecord(value);
+  const runUrl = asString(record.html_url);
+  const event = asString(record.event);
+  const startedAt = asString(record.run_started_at);
 
   return {
     conclusion: toWorkflowConclusion(record.conclusion),
@@ -681,7 +801,13 @@ function mapWorkflowRun(value: unknown, workflowPath: string | undefined): GitHu
     id: asNumber(record.id) ?? UNKNOWN_ID,
     status: toWorkflowStatus(record.status),
     updatedAt: asString(record.updated_at) ?? "",
-    workflowPath: asString(record.path) ?? workflowPath ?? ""
+    workflowPath: asString(record.path) ?? workflowPath ?? "",
+    ...(runUrl === undefined ? {} : { runUrl }),
+    ...(event === undefined ? {} : { event }),
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(asString(record.status) === "completed"
+      ? { completedAt: asString(record.updated_at) ?? "" }
+      : {})
   };
 }
 
@@ -734,6 +860,7 @@ function toWorkflowConclusion(value: unknown): GitHubWorkflowRunConclusion {
     conclusion === "failure" ||
     conclusion === "cancelled" ||
     conclusion === "skipped" ||
+    conclusion === "neutral" ||
     conclusion === "timed_out" ||
     conclusion === "action_required"
   ) {
@@ -750,8 +877,78 @@ function noPermission(): GitHubPermissionState {
   };
 }
 
-function extractZipTextFiles(value: unknown): Record<string, string> {
-  const buffer = toBuffer(value);
+function extractZipTextFiles(buffer: Buffer): Record<string, string> {
+  const centralDirectoryFiles = extractZipTextFilesFromCentralDirectory(buffer);
+
+  if (Object.keys(centralDirectoryFiles).length !== EMPTY_LENGTH) {
+    return centralDirectoryFiles;
+  }
+
+  return extractZipTextFilesFromLocalHeaders(buffer);
+}
+
+function extractZipTextFilesFromCentralDirectory(buffer: Buffer): Record<string, string> {
+  const files: Record<string, string> = {};
+  const directory = findZipCentralDirectory(buffer);
+
+  if (directory === undefined) {
+    return files;
+  }
+
+  const directoryEnd = Math.min(directory.offset + directory.size, buffer.length);
+
+  for (
+    let offset = directory.offset, remainingEntries = directory.entries, scanning = true;
+    scanning &&
+    remainingEntries > EMPTY_LENGTH &&
+    offset + ZIP_MIN_CENTRAL_DIRECTORY_FILE_HEADER_BYTES <= directoryEnd;
+    remainingEntries -= SINGLE_BYTE_STEP
+  ) {
+    const signature = buffer.readUInt32LE(offset);
+
+    if (signature !== ZIP_CENTRAL_DIRECTORY_FILE_HEADER_SIGNATURE) {
+      scanning = false;
+    } else {
+      const fileNameLength = buffer.readUInt16LE(offset + ZIP_CENTRAL_FILE_NAME_LENGTH_OFFSET);
+      const extraFieldLength = buffer.readUInt16LE(offset + ZIP_CENTRAL_EXTRA_FIELD_LENGTH_OFFSET);
+      const fileCommentLength = buffer.readUInt16LE(
+        offset + ZIP_CENTRAL_FILE_COMMENT_LENGTH_OFFSET
+      );
+      const nameStart = offset + ZIP_CENTRAL_FILE_NAME_OFFSET;
+      const nameEnd = nameStart + fileNameLength;
+      const nextOffset = nameEnd + extraFieldLength + fileCommentLength;
+
+      if (nextOffset > directoryEnd) {
+        scanning = false;
+      } else {
+        const compressionMethod = buffer.readUInt16LE(
+          offset + ZIP_CENTRAL_COMPRESSION_METHOD_OFFSET
+        );
+        const compressedSize = buffer.readUInt32LE(offset + ZIP_CENTRAL_COMPRESSED_SIZE_OFFSET);
+        const localHeaderOffset = buffer.readUInt32LE(offset + ZIP_CENTRAL_LOCAL_HEADER_OFFSET);
+        const name = normalizeZipEntryPath(
+          buffer.subarray(nameStart, nameEnd).toString(UTF8_ENCODING)
+        );
+        const content = extractZipEntryContent(
+          buffer,
+          localHeaderOffset,
+          compressedSize,
+          compressionMethod
+        );
+
+        if (content !== undefined && name.length > EMPTY_LENGTH && !name.endsWith("/")) {
+          files[name] = content.toString(UTF8_ENCODING);
+        }
+
+        offset = nextOffset;
+      }
+    }
+  }
+
+  return files;
+}
+
+function extractZipTextFilesFromLocalHeaders(buffer: Buffer): Record<string, string> {
   const files: Record<string, string> = {};
 
   for (
@@ -776,7 +973,9 @@ function extractZipTextFiles(value: unknown): Record<string, string> {
       if ((flags & ZIP_GENERAL_PURPOSE_DATA_DESCRIPTOR_FLAG) !== 0 || dataEnd > buffer.length) {
         scanning = false;
       } else {
-        const name = buffer.subarray(nameStart, nameEnd).toString(UTF8_ENCODING);
+        const name = normalizeZipEntryPath(
+          buffer.subarray(nameStart, nameEnd).toString(UTF8_ENCODING)
+        );
         const compressed = buffer.subarray(dataStart, dataEnd);
         const content =
           compressionMethod === ZIP_DEFLATE_COMPRESSION
@@ -797,7 +996,110 @@ function extractZipTextFiles(value: unknown): Record<string, string> {
   return files;
 }
 
-function toBuffer(value: unknown): Buffer {
+function findZipCentralDirectory(
+  buffer: Buffer
+): { offset: number; size: number; entries: number } | undefined {
+  const firstOffset = Math.max(
+    EMPTY_LENGTH,
+    buffer.length - ZIP_MIN_END_OF_CENTRAL_DIRECTORY_BYTES - ZIP_MAX_COMMENT_BYTES
+  );
+  let directory: { offset: number; size: number; entries: number } | undefined;
+
+  for (
+    let offset = buffer.length - ZIP_MIN_END_OF_CENTRAL_DIRECTORY_BYTES;
+    directory === undefined && offset >= firstOffset;
+    offset -= SINGLE_BYTE_STEP
+  ) {
+    const signature = buffer.readUInt32LE(offset);
+
+    if (signature === ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE) {
+      const commentLength = buffer.readUInt16LE(
+        offset + ZIP_END_CENTRAL_DIRECTORY_COMMENT_LENGTH_OFFSET
+      );
+      const expectedEnd = offset + ZIP_MIN_END_OF_CENTRAL_DIRECTORY_BYTES + commentLength;
+
+      if (expectedEnd <= buffer.length) {
+        directory = {
+          entries: buffer.readUInt16LE(offset + ZIP_END_CENTRAL_DIRECTORY_ENTRY_COUNT_OFFSET),
+          offset: buffer.readUInt32LE(offset + ZIP_END_CENTRAL_DIRECTORY_OFFSET),
+          size: buffer.readUInt32LE(offset + ZIP_END_CENTRAL_DIRECTORY_SIZE_OFFSET)
+        };
+      }
+    }
+  }
+
+  return directory;
+}
+
+function extractZipEntryContent(
+  buffer: Buffer,
+  localHeaderOffset: number,
+  compressedSize: number,
+  compressionMethod: number
+): Buffer | undefined {
+  if (
+    localHeaderOffset + ZIP_MIN_LOCAL_FILE_HEADER_BYTES > buffer.length ||
+    buffer.readUInt32LE(localHeaderOffset) !== ZIP_LOCAL_FILE_HEADER_SIGNATURE
+  ) {
+    return undefined;
+  }
+
+  const fileNameLength = buffer.readUInt16LE(localHeaderOffset + ZIP_FILE_NAME_LENGTH_OFFSET);
+  const extraFieldLength = buffer.readUInt16LE(localHeaderOffset + ZIP_EXTRA_FIELD_LENGTH_OFFSET);
+  const dataStart =
+    localHeaderOffset + ZIP_LOCAL_FILE_NAME_OFFSET + fileNameLength + extraFieldLength;
+  const dataEnd = dataStart + compressedSize;
+
+  if (dataEnd > buffer.length) {
+    return undefined;
+  }
+
+  const compressed = buffer.subarray(dataStart, dataEnd);
+
+  return compressionMethod === ZIP_DEFLATE_COMPRESSION
+    ? inflateRawSync(compressed)
+    : compressionMethod === ZIP_STORED_COMPRESSION
+      ? compressed
+      : undefined;
+}
+
+function normalizeZipEntryPath(filePath: string): string {
+  return filePath.replace(WINDOWS_PATH_SEPARATOR_PATTERN, "/");
+}
+
+async function toBuffer(value: unknown): Promise<Buffer> {
+  const directBuffer = toDirectBuffer(value);
+
+  if (directBuffer !== undefined) {
+    if (directBuffer.length === EMPTY_LENGTH) {
+      throw createArtifactDecodeError();
+    }
+
+    return directBuffer;
+  }
+
+  if (isReadableStreamLike(value)) {
+    return readStreamToBuffer(value);
+  }
+
+  if (isAsyncIterableLike(value)) {
+    return readAsyncIterableToBuffer(value);
+  }
+
+  if (isBlobLike(value)) {
+    const blobBuffer = Buffer.from(await value.arrayBuffer());
+
+    if (blobBuffer.length === EMPTY_LENGTH) {
+      throw createArtifactDecodeError();
+    }
+
+    return blobBuffer;
+  }
+
+  throw createArtifactDecodeError();
+}
+
+function toDirectBuffer(value: unknown): Buffer | undefined {
   if (Buffer.isBuffer(value)) {
     return value;
   }
@@ -810,7 +1112,83 @@ function toBuffer(value: unknown): Buffer {
     return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
   }
 
-  return Buffer.alloc(0);
+  if (typeof value === "string") {
+    return Buffer.from(value, UTF8_ENCODING);
+  }
+
+  return undefined;
+}
+
+async function readStreamToBuffer(stream: ReadableStreamLike): Promise<Buffer> {
+  const reader = stream.getReader();
+  const chunks: Buffer[] = [];
+
+  try {
+    for (let reading = true; reading; ) {
+      const result = await reader.read();
+
+      if (result.done) {
+        reading = false;
+      } else {
+        const chunk = toDirectBuffer(result.value);
+
+        if (chunk !== undefined) {
+          chunks.push(chunk);
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+
+  const buffer = Buffer.concat(chunks);
+
+  if (buffer.length === EMPTY_LENGTH) {
+    throw createArtifactDecodeError();
+  }
+
+  return buffer;
+}
+
+async function readAsyncIterableToBuffer(iterable: AsyncIterableLike): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+
+  for await (const value of iterable) {
+    const chunk = toDirectBuffer(value);
+
+    if (chunk === undefined) {
+      throw createArtifactDecodeError();
+    }
+
+    chunks.push(chunk);
+  }
+
+  const buffer = Buffer.concat(chunks);
+
+  if (buffer.length === EMPTY_LENGTH) {
+    throw createArtifactDecodeError();
+  }
+
+  return buffer;
+}
+
+function isReadableStreamLike(value: unknown): value is ReadableStreamLike {
+  const candidate = asRecord(value);
+
+  return typeof candidate.getReader === "function";
+}
+
+function isAsyncIterableLike(value: unknown): value is AsyncIterableLike {
+  const candidate =
+    typeof value === "object" && value !== null ? (value as AsyncIterableCandidate) : {};
+
+  return typeof candidate[Symbol.asyncIterator] === "function";
+}
+
+function isBlobLike(value: unknown): value is BlobLike {
+  const candidate = asRecord(value);
+
+  return typeof candidate.arrayBuffer === "function";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

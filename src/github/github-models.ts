@@ -61,6 +61,7 @@ export type GitHubWorkflowRunConclusion =
   | "failure"
   | "cancelled"
   | "skipped"
+  | "neutral"
   | "timed_out"
   | "action_required"
   | null;
@@ -73,6 +74,10 @@ export interface GitHubWorkflowRun {
   headSha: string;
   createdAt: string;
   updatedAt: string;
+  runUrl?: string;
+  event?: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 export interface DownloadedArtifact {

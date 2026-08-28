@@ -3,7 +3,18 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**", "coverage/**"]
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "coverage/**",
+      "ui/dist/**",
+      "ui/dist-electron/**",
+      "ui/dist-graider-cli/**",
+      "ui/dist-release/**",
+      "ui/release/**",
+      "release/**",
+      "ui/node_modules/**"
+    ]
   },
 
   js.configs.recommended,

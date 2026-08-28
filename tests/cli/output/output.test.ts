@@ -14,7 +14,6 @@ const WARNINGS_ONLY_ROOT = path.join(ROSTER_FIXTURE_ROOT, "normalization-warning
 const TOKEN_OUTPUT_ROOT = path.join(ROSTER_FIXTURE_ROOT, "invalid-github-username");
 const TOKEN_VALUE = "ghp_abcdefghijklmnopqrstuvwxyz123456";
 const REDACTED_VALUE = "[REDACTED]";
-const SUCCESS_EXIT_CODE = 0;
 const COMMAND_ERROR_EXIT_CODE = 1;
 const CONFIGURATION_ERROR_EXIT_CODE = 5;
 
@@ -47,13 +46,14 @@ const expectNoStackTrace = (output: string): void => {
 };
 
 describe("CLI output formatting", () => {
-  it("successful command JSON output is parseable", () => {
+  it("tokenless GitHub-backed command JSON output is parseable", () => {
     const result = runCli(["validate", ASSIGNMENT_FILE, "--json"], VALID_ROOT);
     const json = parseJson(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
     expect(json.commandName).toBe("validate");
-    expect(json.status).toBe("success");
+    expect(json.status).toBe("failure");
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
   });
 
   it("unsupported command JSON output is parseable and redacted", () => {
@@ -86,13 +86,14 @@ describe("CLI output formatting", () => {
     expect(json.exitCode).toBe(COMMAND_ERROR_EXIT_CODE);
   });
 
-  it("validate warnings-only result exits 0", () => {
+  it("validate preserves warnings before returning token-required", () => {
     const result = runCli(["validate", ASSIGNMENT_FILE, "--json"], WARNINGS_ONLY_ROOT);
     const json = parseJson(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.exitCode).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.exitCode).toBe(COMMAND_ERROR_EXIT_CODE);
     expect(json.warnings.length).toBeGreaterThan(0);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
   });
 
   it("normal output includes diagnostic codes but no stack trace", () => {
@@ -133,11 +134,12 @@ describe("CLI output formatting", () => {
     expect(result.stdout).not.toContain(TOKEN_VALUE);
   });
 
-  it("successful validate output remains parseable JSON", () => {
+  it("tokenless validate output remains parseable JSON", () => {
     const result = runCli(["validate", ASSIGNMENT_FILE, "--json"], VALID_ROOT);
     const json = parseJson(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.status).toBe("success");
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.status).toBe("failure");
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
   });
 });

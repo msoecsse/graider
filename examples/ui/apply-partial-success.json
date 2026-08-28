@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "commandName": "apply",
+  "assignmentFile": "terms/27s1/assignments/lab01/assignment.yml",
+  "status": "partial_success",
+  "exitCode": 2,
+  "diagnostics": [
+    {
+      "code": "grading_workflow_missing",
+      "severity": "error",
+      "message": "Configured grading workflow was not found.",
+      "context": {
+        "repository": "27s1-csc1120-lab01-student02",
+        "assignmentSlug": "lab01"
+      }
+    }
+  ],
+  "warnings": [],
+  "errors": [
+    {
+      "code": "grading_workflow_missing",
+      "severity": "error",
+      "message": "Configured grading workflow was not found.",
+      "context": {
+        "repository": "27s1-csc1120-lab01-student02",
+        "assignmentSlug": "lab01"
+      }
+    }
+  ],
+  "generatedFiles": ["terms/27s1/manifests/lab01/manifest.yml"],
+  "summary": {
+    "assignmentSlug": "lab01",
+    "manifestFile": "terms/27s1/manifests/lab01/manifest.yml",
+    "studentsProcessed": 2,
+    "created": 1,
+    "existing": 1,
+    "verified": 1,
+    "noop": 0,
+    "skipped": 0,
+    "retryCount": 0
+  }
+}

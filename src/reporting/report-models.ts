@@ -49,6 +49,9 @@ export interface StudentGradingSummary {
   checks: GradingCheckResult[];
   workflowRunId?: number;
   commitSha?: string;
+  artifactFileKeys?: string[];
+  configuredResultFile?: string;
+  normalizedResultFile?: string;
 }
 
 export interface StudentReportSummary {
@@ -56,6 +59,8 @@ export interface StudentReportSummary {
   githubUsername: string;
   section: string;
   rosterStatus: RosterStatus;
+  targetId?: string;
+  groupId?: string;
   repositoryOwner?: string;
   repositoryName?: string;
   repositoryUrl?: string;

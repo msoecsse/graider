@@ -1,0 +1,100 @@
+name: Custom Command Grading
+
+on:
+  - push
+  - repository_dispatch
+  - workflow_dispatch
+
+permissions:
+  checks: write
+  actions: read
+  contents: read
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Graider result writer
+        run: |
+          mkdir -p .graider
+          cat > .graider/write-grading-result.py <<'PY'
+          #!/usr/bin/env python3
+          import argparse
+          import json
+          import os
+          import sys
+
+          STATUS_PASSED = "passed"
+          STATUS_FAILED = "failed"
+          STATUS_SKIPPED = "skipped"
+          OUTCOME_MAP = {
+              "success": STATUS_PASSED,
+              "failure": STATUS_FAILED,
+              "cancelled": STATUS_FAILED,
+              "skipped": STATUS_SKIPPED,
+          }
+
+          def map_outcome(outcome):
+              return OUTCOME_MAP.get((outcome or "").strip().lower(), STATUS_FAILED)
+
+          def parse_check(raw_check):
+              name, separator, outcome = raw_check.partition("=")
+              if not name.strip():
+                  raise ValueError("check name must not be empty")
+              return {"name": name.strip(), "status": map_outcome(outcome if separator else "")}
+
+          def overall_status(checks):
+              statuses = [check["status"] for check in checks]
+              if not statuses:
+                  return STATUS_SKIPPED
+              if STATUS_FAILED in statuses:
+                  return STATUS_FAILED
+              if all(status == STATUS_SKIPPED for status in statuses):
+                  return STATUS_SKIPPED
+              return STATUS_PASSED
+
+          def main(argv):
+              parser = argparse.ArgumentParser()
+              parser.add_argument("--output", required=True)
+              parser.add_argument("--check", action="append", default=[])
+              args = parser.parse_args(argv)
+              checks = [parse_check(raw_check) for raw_check in args.check]
+              parent = os.path.dirname(args.output)
+              if parent:
+                  os.makedirs(parent, exist_ok=True)
+              with open(args.output, "w", encoding="utf-8") as output_file:
+                  json.dump(
+                      {"schema_version": 1, "status": overall_status(checks), "checks": checks},
+                      output_file,
+                      indent=2,
+                  )
+                  output_file.write("\n")
+              return 0
+
+          if __name__ == "__main__":
+              raise SystemExit(main(sys.argv[1:]))
+          PY
+
+      - name: Run custom grading command
+        id: custom-check
+        continue-on-error: true
+        run: ./grade.sh
+
+      - name: Write Graider grading result
+        if: always()
+        env:
+          CUSTOM_CHECK_OUTCOME: ${{ steps.custom-check.outcome }}
+        run: |
+          python3 .graider/write-grading-result.py \
+            --output graider-output/grading-results.json \
+            --check "Custom Command=$CUSTOM_CHECK_OUTCOME"
+
+      - name: Upload Graider grading result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grading-results
+          path: graider-output/grading-results.json

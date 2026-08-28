@@ -1,0 +1,26 @@
+schema_version: 1
+assignment:
+  slug: lab-java
+  title: Java Lab
+  type: individual
+  status: active
+template:
+  repository: example-org/lab-java-template
+  branch: main
+sections:
+  - "001"
+deadline:
+  due_at: "2027-02-15T23:59:00-06:00"
+  late_policy: none
+metadata:
+  faculty_owner: faculty@example.edu
+  lms_assignment_id: null
+  grading_category: labs
+  points: 10
+grading:
+  enabled: true
+  mode: preset
+  preset: java-junit-checkstyle
+  workflow: .github/workflows/grade.yml
+  artifact: grading-results
+  result_file: grading-results.json

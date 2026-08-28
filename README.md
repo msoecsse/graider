@@ -16,15 +16,16 @@ The MVP focuses on deterministic, auditable assignment administration:
 
 Implemented MVP commands:
 
-| Command         | Status                                                              |
-| --------------- | ------------------------------------------------------------------- |
-| `validate`      | Validate local config, rosters, and GitHub readiness.               |
-| `plan`          | Generate a timestamped JSON plan file.                              |
-| `apply`         | Execute safe additive provisioning and update the manifest.         |
-| `grade`         | Dispatch configured grading workflows for selected active students. |
-| `report`        | Generate local reports and optionally publish student reports.      |
-| `archive`       | Reserved command shell; not supported in MVP.                       |
-| `remove-access` | Reserved command shell; not supported in MVP.                       |
+| Command             | Status                                                              |
+| ------------------- | ------------------------------------------------------------------- |
+| `validate`          | Validate local config, rosters, and GitHub readiness.               |
+| `plan`              | Generate a timestamped JSON plan file.                              |
+| `apply`             | Execute safe additive provisioning and update the manifest.         |
+| `grade`             | Dispatch configured grading workflows for selected active students. |
+| `report`            | Generate local reports and optionally publish student reports.      |
+| `workflow generate` | Generate a local preset grading workflow file.                      |
+| `archive`           | Reserved command shell; not supported in MVP.                       |
+| `remove-access`     | Reserved command shell; not supported in MVP.                       |
 
 Known MVP exclusions:
 
@@ -67,6 +68,12 @@ graider validate terms/27s1/assignments/lab04/assignment.yml
 
 ## Course-Admin Layout
 
+Course grading is optional. Assignment template, deadline, metadata, and
+grading blocks are also optional; when present, their existing validation rules
+still apply. The canonical roster CSV has exactly `student_id`,
+`github_username`, `section`, and `status`; former seven-column rosters are
+accepted only for import and are saved in canonical form.
+
 ```text
 course.yml
 terms/
@@ -96,6 +103,10 @@ terms/
 User-authored files are `course.yml`, `term.yml`, assignment YAML files, and roster CSV files. Graider-generated files live under `plans/`, `manifests/`, and `reports/`.
 
 ## Commands
+
+For UI integrations and automation, use `--json` output instead of scraping
+human-readable command text. See the
+[CLI JSON contract](docs/cli-json-contract.md).
 
 Validate:
 
@@ -135,6 +146,25 @@ graider report terms/27s1/assignments/lab04/assignment.yml
 graider report terms/27s1/assignments/lab04/assignment.yml --publish-student-reports
 ```
 
+`--publish-student-reports` supports Graider-generated reports and
+artifact-based faculty-provided reports configured under
+`reports.student_publish`.
+
+Generate a local preset grading workflow:
+
+```bash
+graider workflow generate terms/27s1/assignments/lab04/assignment.yml
+graider workflow generate terms/27s1/assignments/lab04/assignment.yml --output /path/to/grade.yml
+```
+
+`workflow generate` currently supports `grading.mode: preset` with
+`grading.preset: java-junit-checkstyle`. It writes only to the local filesystem
+and does not overwrite existing files unless `--force` is provided.
+
+Assignments with `grading.enabled: false` are supported for repository
+management and reporting. `grade` is a no-op success for those assignments, and
+`workflow generate` fails clearly instead of producing a workflow.
+
 Unsupported MVP command shells:
 
 ```bash
@@ -164,7 +194,9 @@ npm run build
 npm run audit
 ```
 
-Normal tests use `FakeGitHubClient` and do not require GitHub credentials.
+Normal tests use `FakeGitHubClient` and do not require GitHub credentials. Production GitHub
+operations require `GRAIDER_GITHUB_TOKEN` (or `GITHUB_TOKEN` as a fallback); the fake client is
+test infrastructure only.
 
 Live GitHub tests are optional and sandbox-only:
 
@@ -177,8 +209,21 @@ See [live testing](docs/live-testing.md) before running live tests.
 ## More Documentation
 
 - [Runtime and CI](docs/runtime.md)
+- [Codex development contract](docs/codex-development-contract.md)
+- [Codex backend JSON command contract](docs/codex-backend-json-command-contract.md)
+- [Codex Electron UI contract](docs/codex-electron-ui-contract.md)
+- [Codex prompt template](docs/codex-prompt-template.md)
 - [GitHub token permissions](docs/github-token-permissions.md)
+- [CLI JSON contract](docs/cli-json-contract.md)
+- [Faculty CLI user guide](docs/faculty-cli-user-guide.md)
+- [Faculty UI user guide](docs/faculty-ui-user-guide.md)
+- [Electron assignment detail developer guide](docs/electron-assignment-detail-dev.md)
+- [Electron packaging guide](docs/electron-packaging.md)
+- [Electron release readiness guide](docs/electron-release-readiness.md)
+- [Assignment apply preview command](docs/apply-preview-command.md)
+- [Grading result contract](docs/grading-result-contract.md)
 - [Generated files](docs/generated-files.md)
 - [Error and warning catalog](docs/error-warning-catalog.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Examples](docs/examples/README.md)
+- [Reusable grading examples](examples/grading/README.md)

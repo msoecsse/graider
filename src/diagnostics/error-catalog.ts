@@ -13,6 +13,23 @@ export const DiagnosticCode = {
   InvalidRepositoryVisibility: "invalid_repository_visibility",
   InvalidPermission: "invalid_permission",
   InvalidGradingConfig: "invalid_grading_config",
+  UnsupportedGradingMode: "unsupported_grading_mode",
+  MissingGradingWorkflow: "missing_grading_workflow",
+  MissingGradingArtifact: "missing_grading_artifact",
+  MissingGradingResultFile: "missing_grading_result_file",
+  MissingGradingPreset: "missing_grading_preset",
+  UnsupportedGradingPreset: "unsupported_grading_preset",
+  UnsupportedStudentPublishMode: "unsupported_student_publish_mode",
+  MissingStudentPublishDestination: "missing_student_publish_destination",
+  MissingStudentPublishSourceFile: "missing_student_publish_source_file",
+  MissingStudentPublishArtifact: "missing_student_publish_artifact",
+  MissingGraiderReportDestination: "missing_graider_report_destination",
+  MissingFacultyReportSource: "missing_faculty_report_source",
+  MissingFacultyReportDestination: "missing_faculty_report_destination",
+  WorkflowGenerationNotConfigured: "workflow_generation_not_configured",
+  WorkflowGenerationRequiresPresetMode: "workflow_generation_requires_preset_mode",
+  GeneratedWorkflowExists: "generated_workflow_exists",
+  WorkflowGenerationWriteFailed: "workflow_generation_write_failed",
   MissingRequiredColumn: "missing_required_column",
   MissingRequiredValue: "missing_required_value",
   InvalidRosterStatus: "invalid_roster_status",
@@ -66,6 +83,8 @@ export const DiagnosticCode = {
   ConfirmationRequired: "confirmation_required",
   ManifestTrackedRepositoryMissing: "manifest_tracked_repository_missing",
   GradingWorkflowMissing: "grading_workflow_missing",
+  GradingWorkflowPending: "grading_workflow_pending",
+  GroupRepositoryApplyNotImplemented: "group_repository_apply_not_implemented",
   WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
   WorkflowDispatchMissing: "workflow_dispatch_missing",
   WorkflowDispatchFailed: "workflow_dispatch_failed",
@@ -89,9 +108,44 @@ export const DiagnosticCode = {
   ReportWriteFailed: "report_write_failed",
   StudentReportPublishFailed: "student_report_publish_failed",
   StudentReportRepositoryMissing: "student_report_repository_missing",
+  StudentReportSourceMissing: "student_report_source_missing",
+  StudentReportArtifactMissing: "student_report_artifact_missing",
   StudentReportWriteFailed: "student_report_write_failed",
   StudentReportPublishPartial: "student_report_publish_partial",
-  StudentReportPublishNotRequested: "student_report_publish_not_requested"
+  StudentReportPublishNotRequested: "student_report_publish_not_requested",
+  DashboardJsonRequired: "dashboard_json_required",
+  DashboardTermNotFound: "dashboard_term_not_found",
+  DashboardTemplateRepositoryMissing: "dashboard_template_repository_missing",
+  DashboardTemplateBranchMissing: "dashboard_template_branch_missing",
+  DashboardGradingWorkflowMissing: "dashboard_grading_workflow_missing",
+  DashboardWorkflowDispatchMissing: "dashboard_workflow_dispatch_missing",
+  DashboardGithubAuthFailed: "dashboard_github_auth_failed",
+  DashboardGithubPermissionDenied: "dashboard_github_permission_denied",
+  DashboardGithubRateLimited: "dashboard_github_rate_limited",
+  DashboardGithubRequestFailed: "dashboard_github_request_failed",
+  AssignmentDetailJsonRequired: "assignment_detail_json_required",
+  GithubTokenRequired: "github_token_required",
+  AssignmentDetailTemplateRepositoryMissing: "assignment_detail_template_repository_missing",
+  AssignmentDetailTemplateBranchMissing: "assignment_detail_template_branch_missing",
+  AssignmentDetailGradingWorkflowMissing: "assignment_detail_grading_workflow_missing",
+  AssignmentDetailWorkflowDispatchMissing: "assignment_detail_workflow_dispatch_missing",
+  AssignmentDetailGithubAuthFailed: "assignment_detail_github_auth_failed",
+  AssignmentDetailGithubPermissionDenied: "assignment_detail_github_permission_denied",
+  AssignmentDetailGithubRateLimited: "assignment_detail_github_rate_limited",
+  AssignmentDetailGithubRequestFailed: "assignment_detail_github_request_failed",
+  AssignmentApplyPreviewJsonRequired: "assignment_apply_preview_json_required",
+  AssignmentGradePreviewJsonRequired: "assignment_grade_preview_json_required",
+  AssignmentGradeStatusJsonRequired: "assignment_grade_status_json_required",
+  StudentFilterConflict: "student_filter_conflict",
+  StudentFilterEmpty: "student_filter_empty",
+  StudentFilterNoMatches: "student_filter_no_matches",
+  StudentFilterUnknownStudent: "student_filter_unknown_student",
+  StudentRepositoryStatusUnknown: "student_repository_status_unknown",
+  GradingWorkflowRunMissing: "grading_workflow_run_missing",
+  GradingWorkflowRunInProgress: "grading_workflow_run_in_progress",
+  GradingWorkflowRunFailed: "grading_workflow_run_failed",
+  GradingWorkflowStatusUnknown: "grading_workflow_status_unknown",
+  GithubTokenMissing: "github_token_missing"
 } as const;
 
 export type DiagnosticCodeValue = (typeof DiagnosticCode)[keyof typeof DiagnosticCode];
@@ -109,6 +163,29 @@ export const INVALID_ASSIGNMENT_STATUS_CODE = DiagnosticCode.InvalidAssignmentSt
 export const INVALID_REPOSITORY_VISIBILITY_CODE = DiagnosticCode.InvalidRepositoryVisibility;
 export const INVALID_PERMISSION_CODE = DiagnosticCode.InvalidPermission;
 export const INVALID_GRADING_CONFIG_CODE = DiagnosticCode.InvalidGradingConfig;
+export const UNSUPPORTED_GRADING_MODE_CODE = DiagnosticCode.UnsupportedGradingMode;
+export const MISSING_GRADING_WORKFLOW_CODE = DiagnosticCode.MissingGradingWorkflow;
+export const MISSING_GRADING_ARTIFACT_CODE = DiagnosticCode.MissingGradingArtifact;
+export const MISSING_GRADING_RESULT_FILE_CODE = DiagnosticCode.MissingGradingResultFile;
+export const MISSING_GRADING_PRESET_CODE = DiagnosticCode.MissingGradingPreset;
+export const UNSUPPORTED_GRADING_PRESET_CODE = DiagnosticCode.UnsupportedGradingPreset;
+export const UNSUPPORTED_STUDENT_PUBLISH_MODE_CODE = DiagnosticCode.UnsupportedStudentPublishMode;
+export const MISSING_STUDENT_PUBLISH_DESTINATION_CODE =
+  DiagnosticCode.MissingStudentPublishDestination;
+export const MISSING_STUDENT_PUBLISH_SOURCE_FILE_CODE =
+  DiagnosticCode.MissingStudentPublishSourceFile;
+export const MISSING_STUDENT_PUBLISH_ARTIFACT_CODE = DiagnosticCode.MissingStudentPublishArtifact;
+export const MISSING_GRAIDER_REPORT_DESTINATION_CODE =
+  DiagnosticCode.MissingGraiderReportDestination;
+export const MISSING_FACULTY_REPORT_SOURCE_CODE = DiagnosticCode.MissingFacultyReportSource;
+export const MISSING_FACULTY_REPORT_DESTINATION_CODE =
+  DiagnosticCode.MissingFacultyReportDestination;
+export const WORKFLOW_GENERATION_NOT_CONFIGURED_CODE =
+  DiagnosticCode.WorkflowGenerationNotConfigured;
+export const WORKFLOW_GENERATION_REQUIRES_PRESET_MODE_CODE =
+  DiagnosticCode.WorkflowGenerationRequiresPresetMode;
+export const GENERATED_WORKFLOW_EXISTS_CODE = DiagnosticCode.GeneratedWorkflowExists;
+export const WORKFLOW_GENERATION_WRITE_FAILED_CODE = DiagnosticCode.WorkflowGenerationWriteFailed;
 export const MISSING_REQUIRED_COLUMN_CODE = DiagnosticCode.MissingRequiredColumn;
 export const MISSING_REQUIRED_VALUE_CODE = DiagnosticCode.MissingRequiredValue;
 export const INVALID_ROSTER_STATUS_CODE = DiagnosticCode.InvalidRosterStatus;
@@ -188,6 +265,54 @@ export const STUDENT_REPORT_WRITE_FAILED_CODE = DiagnosticCode.StudentReportWrit
 export const STUDENT_REPORT_PUBLISH_PARTIAL_CODE = DiagnosticCode.StudentReportPublishPartial;
 export const STUDENT_REPORT_PUBLISH_NOT_REQUESTED_CODE =
   DiagnosticCode.StudentReportPublishNotRequested;
+export const DASHBOARD_JSON_REQUIRED_CODE = DiagnosticCode.DashboardJsonRequired;
+export const DASHBOARD_TERM_NOT_FOUND_CODE = DiagnosticCode.DashboardTermNotFound;
+export const DASHBOARD_TEMPLATE_REPOSITORY_MISSING_CODE =
+  DiagnosticCode.DashboardTemplateRepositoryMissing;
+export const DASHBOARD_TEMPLATE_BRANCH_MISSING_CODE = DiagnosticCode.DashboardTemplateBranchMissing;
+export const DASHBOARD_GRADING_WORKFLOW_MISSING_CODE =
+  DiagnosticCode.DashboardGradingWorkflowMissing;
+export const DASHBOARD_WORKFLOW_DISPATCH_MISSING_CODE =
+  DiagnosticCode.DashboardWorkflowDispatchMissing;
+export const DASHBOARD_GITHUB_AUTH_FAILED_CODE = DiagnosticCode.DashboardGithubAuthFailed;
+export const DASHBOARD_GITHUB_PERMISSION_DENIED_CODE =
+  DiagnosticCode.DashboardGithubPermissionDenied;
+export const DASHBOARD_GITHUB_RATE_LIMITED_CODE = DiagnosticCode.DashboardGithubRateLimited;
+export const DASHBOARD_GITHUB_REQUEST_FAILED_CODE = DiagnosticCode.DashboardGithubRequestFailed;
+export const ASSIGNMENT_DETAIL_JSON_REQUIRED_CODE = DiagnosticCode.AssignmentDetailJsonRequired;
+export const GITHUB_TOKEN_REQUIRED_CODE = DiagnosticCode.GithubTokenRequired;
+export const ASSIGNMENT_DETAIL_TEMPLATE_REPOSITORY_MISSING_CODE =
+  DiagnosticCode.AssignmentDetailTemplateRepositoryMissing;
+export const ASSIGNMENT_DETAIL_TEMPLATE_BRANCH_MISSING_CODE =
+  DiagnosticCode.AssignmentDetailTemplateBranchMissing;
+export const ASSIGNMENT_DETAIL_GRADING_WORKFLOW_MISSING_CODE =
+  DiagnosticCode.AssignmentDetailGradingWorkflowMissing;
+export const ASSIGNMENT_DETAIL_WORKFLOW_DISPATCH_MISSING_CODE =
+  DiagnosticCode.AssignmentDetailWorkflowDispatchMissing;
+export const ASSIGNMENT_DETAIL_GITHUB_AUTH_FAILED_CODE =
+  DiagnosticCode.AssignmentDetailGithubAuthFailed;
+export const ASSIGNMENT_DETAIL_GITHUB_PERMISSION_DENIED_CODE =
+  DiagnosticCode.AssignmentDetailGithubPermissionDenied;
+export const ASSIGNMENT_DETAIL_GITHUB_RATE_LIMITED_CODE =
+  DiagnosticCode.AssignmentDetailGithubRateLimited;
+export const ASSIGNMENT_DETAIL_GITHUB_REQUEST_FAILED_CODE =
+  DiagnosticCode.AssignmentDetailGithubRequestFailed;
+export const ASSIGNMENT_APPLY_PREVIEW_JSON_REQUIRED_CODE =
+  DiagnosticCode.AssignmentApplyPreviewJsonRequired;
+export const ASSIGNMENT_GRADE_PREVIEW_JSON_REQUIRED_CODE =
+  DiagnosticCode.AssignmentGradePreviewJsonRequired;
+export const ASSIGNMENT_GRADE_STATUS_JSON_REQUIRED_CODE =
+  DiagnosticCode.AssignmentGradeStatusJsonRequired;
+export const STUDENT_FILTER_CONFLICT_CODE = DiagnosticCode.StudentFilterConflict;
+export const STUDENT_FILTER_EMPTY_CODE = DiagnosticCode.StudentFilterEmpty;
+export const STUDENT_FILTER_NO_MATCHES_CODE = DiagnosticCode.StudentFilterNoMatches;
+export const STUDENT_FILTER_UNKNOWN_STUDENT_CODE = DiagnosticCode.StudentFilterUnknownStudent;
+export const STUDENT_REPOSITORY_STATUS_UNKNOWN_CODE = DiagnosticCode.StudentRepositoryStatusUnknown;
+export const GRADING_WORKFLOW_RUN_MISSING_CODE = DiagnosticCode.GradingWorkflowRunMissing;
+export const GRADING_WORKFLOW_RUN_IN_PROGRESS_CODE = DiagnosticCode.GradingWorkflowRunInProgress;
+export const GRADING_WORKFLOW_RUN_FAILED_CODE = DiagnosticCode.GradingWorkflowRunFailed;
+export const GRADING_WORKFLOW_STATUS_UNKNOWN_CODE = DiagnosticCode.GradingWorkflowStatusUnknown;
+export const GITHUB_TOKEN_MISSING_CODE = DiagnosticCode.GithubTokenMissing;
 
 export const createNotSupportedInMvpDiagnostic = (
   commandName: string,

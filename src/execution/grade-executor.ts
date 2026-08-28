@@ -1,11 +1,21 @@
 import type { LoadedGraiderConfig } from "../config/config-models.js";
-import { DiagnosticCode, createConfigDiagnostic } from "../diagnostics/error-catalog.js";
+import {
+  DiagnosticCode,
+  createConfigDiagnostic,
+  createWarningDiagnostic
+} from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
 import { GitHubClientError } from "../github/github-errors.js";
 import { type RetryOptions, withGitHubRetry } from "../github/github-retry.js";
-import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
+import type { Manifest } from "../manifest/manifest-models.js";
 import type { RosterStudent } from "../roster/roster-models.js";
+import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
+import {
+  normalizeGradingTargets,
+  selectGradingTargets,
+  type GradingRepositoryTarget
+} from "./grading-targets.js";
 
 const EMPTY_COUNT = 0;
 const SUCCESS_INCREMENT = 1;
@@ -33,6 +43,17 @@ export interface GradeExecutionResult {
   summary: GradeExecutionSummary;
   warnings: Diagnostic[];
   errors: Diagnostic[];
+  targets: GradeExecutionTargetResult[];
+}
+
+export interface GradeExecutionTargetResult {
+  readonly targetId: string;
+  readonly groupId?: string;
+  readonly repositoryName: string;
+  readonly studentIds: readonly string[];
+  readonly githubUsernames: readonly string[];
+  readonly status: "dispatched" | "failed";
+  readonly diagnostics: readonly Diagnostic[];
 }
 
 interface GradeExecutionState {
@@ -54,28 +75,15 @@ const createInitialSummary = (targetsSelected: number): GradeExecutionSummary =>
 const getEffectiveGrading = (config: LoadedGraiderConfig) =>
   config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
 
-const findManifestRecord = (
-  manifest: Manifest,
-  student: RosterStudent
-): ManifestRepositoryRecord | undefined =>
-  manifest.repositories.find(
-    (record) => record.studentId === student.studentId && record.section === student.section
-  );
-
-const normalizeGitHubError = (
-  error: unknown,
-  student: RosterStudent,
-  repository?: ManifestRepositoryRecord
-): Diagnostic =>
+const normalizeGitHubError = (error: unknown, target: GradingRepositoryTarget): Diagnostic =>
   error instanceof GitHubClientError
     ? createConfigDiagnostic(
         DiagnosticCode.WorkflowDispatchFailed,
-        "Workflow dispatch failed for a selected student repository.",
+        "Workflow dispatch failed for a selected repository target.",
         {
-          studentId: student.studentId,
-          githubUsername: student.githubUsername,
-          section: student.section,
-          repositoryName: repository?.repository.name,
+          targetId: target.targetId,
+          ...(target.groupId === undefined ? {} : { groupId: target.groupId }),
+          repositoryName: target.repositoryName,
           underlyingDiagnosticCode: error.diagnosticCode,
           kind: error.kind
         }
@@ -84,17 +92,46 @@ const normalizeGitHubError = (
         DiagnosticCode.WorkflowDispatchFailed,
         "Unexpected workflow dispatch failure.",
         {
-          studentId: student.studentId,
-          githubUsername: student.githubUsername,
-          section: student.section,
-          repositoryName: repository?.repository.name
+          targetId: target.targetId,
+          ...(target.groupId === undefined ? {} : { groupId: target.groupId }),
+          repositoryName: target.repositoryName
         }
       );
+
+const createWorkflowMissingDiagnostic = (
+  target: GradingRepositoryTarget,
+  workflowPath: string
+): Diagnostic =>
+  createConfigDiagnostic(
+    DiagnosticCode.GradingWorkflowMissing,
+    "Configured grading workflow was not found.",
+    {
+      targetId: target.targetId,
+      ...(target.groupId === undefined ? {} : { groupId: target.groupId }),
+      repositoryName: target.repositoryName,
+      workflowPath
+    }
+  );
+
+const createWorkflowDispatchMissingDiagnostic = (
+  target: GradingRepositoryTarget,
+  workflowPath: string
+): Diagnostic =>
+  createConfigDiagnostic(
+    DiagnosticCode.WorkflowDispatchMissing,
+    "Configured grading workflow does not support manual dispatch.",
+    {
+      targetId: target.targetId,
+      ...(target.groupId === undefined ? {} : { groupId: target.groupId }),
+      repositoryName: target.repositoryName,
+      workflowPath
+    }
+  );
 
 const createStudentRepositoryMissingDiagnostic = (student: RosterStudent): Diagnostic =>
   createConfigDiagnostic(
     DiagnosticCode.StudentRepositoryMissing,
-    "Selected student does not have a manifest-tracked repository.",
+    "Selected student does not have a manifest-tracked repository target.",
     {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
@@ -102,38 +139,10 @@ const createStudentRepositoryMissingDiagnostic = (student: RosterStudent): Diagn
     }
   );
 
-const createWorkflowMissingDiagnostic = (
-  student: RosterStudent,
-  repository: ManifestRepositoryRecord,
-  workflowPath: string
-): Diagnostic =>
-  createConfigDiagnostic(
-    DiagnosticCode.GradingWorkflowMissing,
-    "Configured grading workflow was not found.",
-    {
-      studentId: student.studentId,
-      githubUsername: student.githubUsername,
-      section: student.section,
-      repositoryName: repository.repository.name,
-      workflowPath
-    }
-  );
-
-const createWorkflowDispatchMissingDiagnostic = (
-  student: RosterStudent,
-  repository: ManifestRepositoryRecord,
-  workflowPath: string
-): Diagnostic =>
-  createConfigDiagnostic(
-    DiagnosticCode.WorkflowDispatchMissing,
-    "Configured grading workflow does not support manual dispatch.",
-    {
-      studentId: student.studentId,
-      githubUsername: student.githubUsername,
-      section: student.section,
-      repositoryName: repository.repository.name,
-      workflowPath
-    }
+const createGradingNotConfiguredWarning = (): Diagnostic =>
+  createWarningDiagnostic(
+    DiagnosticCode.GradingNotConfigured,
+    "Automated grading is not configured for this assignment."
   );
 
 const runGitHubOperation = async <T>(
@@ -163,64 +172,46 @@ const recordSuccess = (state: GradeExecutionState): GradeExecutionState => ({
   errors: state.errors
 });
 
-const createDispatchInputs = (
-  config: LoadedGraiderConfig,
-  student: RosterStudent
-): Record<string, string> => ({
-  student_id: student.studentId,
-  github_username: student.githubUsername,
-  section: student.section,
-  assignment_slug: config.summary.assignmentSlug
-});
-
-const dispatchForStudent = async (
+const dispatchForTarget = async (
   input: GradeExecutionInput,
   state: GradeExecutionState,
-  student: RosterStudent,
-  workflowPath: string
+  target: GradingRepositoryTarget,
+  configuredWorkflowPath: string
 ): Promise<GradeExecutionState> => {
-  const repository = findManifestRecord(input.manifest, student);
-
-  if (repository === undefined) {
-    return recordFailure(state, createStudentRepositoryMissingDiagnostic(student));
-  }
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(configuredWorkflowPath);
 
   try {
     const workflow = await runGitHubOperation(input, () =>
       input.githubClient.getWorkflow(
-        repository.repository.owner,
-        repository.repository.name,
-        workflowPath
+        target.owner,
+        target.repositoryName,
+        workflowDispatchIdentifier
       )
     );
 
     if (workflow === null) {
-      return recordFailure(
-        state,
-        createWorkflowMissingDiagnostic(student, repository, workflowPath)
-      );
+      return recordFailure(state, createWorkflowMissingDiagnostic(target, configuredWorkflowPath));
     }
 
     if (!workflow.supportsDispatch) {
       return recordFailure(
         state,
-        createWorkflowDispatchMissingDiagnostic(student, repository, workflowPath)
+        createWorkflowDispatchMissingDiagnostic(target, configuredWorkflowPath)
       );
     }
 
     await runGitHubOperation(input, () =>
       input.githubClient.dispatchWorkflow({
-        owner: repository.repository.owner,
-        repo: repository.repository.name,
-        workflowPath,
-        ref: input.config.assignment.template.branch,
-        inputs: createDispatchInputs(input.config, student)
+        owner: target.owner,
+        repo: target.repositoryName,
+        workflowPath: workflowDispatchIdentifier,
+        ref: input.config.assignment.template.branch
       })
     );
 
     return recordSuccess(state);
   } catch (error: unknown) {
-    return recordFailure(state, normalizeGitHubError(error, student, repository));
+    return recordFailure(state, normalizeGitHubError(error, target));
   }
 };
 
@@ -243,17 +234,50 @@ export const getGradeGitHubDiagnostics = (errors: readonly Diagnostic[]): Diagno
 export const executeGrade = async (input: GradeExecutionInput): Promise<GradeExecutionResult> => {
   const grading = getEffectiveGrading(input.config);
   const workflowPath = grading.workflow;
+  const normalizedTargets = normalizeGradingTargets(
+    input.manifest,
+    input.config.course.github.organization
+  );
+  const targets = selectGradingTargets(normalizedTargets, input.targetStudents);
+  const selectedStudentIds = new Set(input.targetStudents.map((student) => student.studentId));
+  const targetStudentIds = new Set(targets.flatMap((target) => target.studentIds));
+  const missingStudents = input.targetStudents.filter(
+    (student) =>
+      selectedStudentIds.has(student.studentId) && !targetStudentIds.has(student.studentId)
+  );
   let state: GradeExecutionState = {
-    summary: createInitialSummary(input.targetStudents.length),
+    summary: {
+      ...createInitialSummary(
+        normalizedTargets.repositoryMode === "group" ? targets.length : input.targetStudents.length
+      ),
+      dispatchFailed: missingStudents.length,
+      errors: missingStudents.length
+    },
     warnings: [],
-    errors: []
+    errors: [
+      ...normalizedTargets.diagnostics,
+      ...missingStudents.map(createStudentRepositoryMissingDiagnostic)
+    ]
   };
+
+  if (!grading.enabled) {
+    return {
+      summary: {
+        ...state.summary,
+        skipped: targets.length,
+        warnings: SUCCESS_INCREMENT
+      },
+      warnings: [createGradingNotConfiguredWarning()],
+      errors: [],
+      targets: []
+    };
+  }
 
   if (workflowPath === undefined) {
     return {
       summary: {
         ...state.summary,
-        skipped: input.targetStudents.length,
+        skipped: targets.length,
         errors: SUCCESS_INCREMENT
       },
       warnings: [],
@@ -262,11 +286,13 @@ export const executeGrade = async (input: GradeExecutionInput): Promise<GradeExe
           DiagnosticCode.GradingNotConfigured,
           "Grading workflow is not configured for this assignment."
         )
-      ]
+      ],
+      targets: []
     };
   }
 
-  for (const student of input.targetStudents) {
+  const targetResults: GradeExecutionTargetResult[] = [];
+  for (const target of targets) {
     state = {
       ...state,
       summary: {
@@ -274,8 +300,19 @@ export const executeGrade = async (input: GradeExecutionInput): Promise<GradeExe
         dispatchAttempted: state.summary.dispatchAttempted + SUCCESS_INCREMENT
       }
     };
-    state = await dispatchForStudent(input, state, student, workflowPath);
+    const priorErrorCount = state.errors.length;
+    state = await dispatchForTarget(input, state, target, workflowPath);
+    const diagnostics = state.errors.slice(priorErrorCount);
+    targetResults.push({
+      targetId: target.targetId,
+      ...(target.groupId === undefined ? {} : { groupId: target.groupId }),
+      repositoryName: target.repositoryName,
+      studentIds: target.studentIds,
+      githubUsernames: target.githubUsernames,
+      status: diagnostics.length === 0 ? "dispatched" : "failed",
+      diagnostics
+    });
   }
 
-  return state;
+  return { ...state, targets: targetResults };
 };

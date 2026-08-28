@@ -2,7 +2,7 @@ import type { LoadedGraiderConfig } from "../config/config-models.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { createGitHubDiagnostic, GitHubClientError } from "../github/github-errors.js";
 import type { GitHubClient } from "../github/github-client.js";
-import type { GitHubWorkflowRun } from "../github/github-models.js";
+import type { DownloadedArtifact, GitHubWorkflowRun } from "../github/github-models.js";
 import { mapGradingStatus } from "../grading/grading-status-mapper.js";
 import { parseGradingResultsJsonText } from "../grading/grading-result-validator.js";
 import type {
@@ -12,8 +12,15 @@ import type {
   WorkflowRunConclusion,
   WorkflowRunStatus
 } from "../grading/grading-result-models.js";
-import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
+import type { Manifest } from "../manifest/manifest-models.js";
 import type { RosterStudent, RosterSummary } from "../roster/roster-models.js";
+import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
+import {
+  findGradingTargetForStudent,
+  normalizeGradingTargets,
+  type GradingRepositoryTarget,
+  type NormalizedGradingTargets
+} from "../execution/grading-targets.js";
 import type {
   FacultyReportSummaryCounts,
   FacultySummaryReport,
@@ -27,6 +34,8 @@ const EMPTY_COUNT = 0;
 const FIRST_SORT_BEFORE_SECOND = -1;
 const FIRST_SORT_AFTER_SECOND = 1;
 const FIRST_WORKFLOW_RUN_INDEX = 0;
+const CURRENT_DIRECTORY_PREFIX = "./";
+const WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
 
 interface CollectReportInput {
   config: LoadedGraiderConfig;
@@ -35,10 +44,20 @@ interface CollectReportInput {
   manifest: Manifest;
   githubClient: GitHubClient;
   generatedAt: string;
+  includeArtifactFileKeys?: boolean;
 }
 
 export interface CollectReportResult {
   report: FacultySummaryReport;
+}
+
+interface CollectedTargetResult {
+  readonly repositoryStatus: RepositoryReportStatus;
+  readonly repositoryWarnings: readonly Diagnostic[];
+  readonly repositoryErrors: readonly Diagnostic[];
+  readonly grading: StudentGradingSummary;
+  readonly gradingWarnings: readonly Diagnostic[];
+  readonly gradingErrors: readonly Diagnostic[];
 }
 
 const compareStudents = (left: RosterStudent, right: RosterStudent): number => {
@@ -62,12 +81,9 @@ const compareRuns = (left: GitHubWorkflowRun, right: GitHubWorkflowRun): number 
 };
 
 const findManifestRecord = (
-  manifest: Manifest,
+  targets: NormalizedGradingTargets,
   student: RosterStudent
-): ManifestRepositoryRecord | undefined =>
-  manifest.repositories.find(
-    (record) => record.studentId === student.studentId && record.section === student.section
-  );
+): GradingRepositoryTarget | undefined => findGradingTargetForStudent(targets, student);
 
 const normalizeGitHubError = (error: unknown): Diagnostic =>
   error instanceof GitHubClientError
@@ -88,6 +104,36 @@ const getWorkflowRunConclusion = (
   run: GitHubWorkflowRun | undefined
 ): WorkflowRunConclusion | undefined => (run === undefined ? undefined : run.conclusion);
 
+const normalizeArtifactPath = (filePath: string): string => {
+  const normalizedPath = filePath.trim().replace(WINDOWS_PATH_SEPARATOR_PATTERN, "/");
+
+  return normalizedPath.startsWith(CURRENT_DIRECTORY_PREFIX)
+    ? normalizedPath.slice(CURRENT_DIRECTORY_PREFIX.length)
+    : normalizedPath;
+};
+
+const findArtifactResultText = (
+  artifact: DownloadedArtifact | null,
+  resultFilePath: string
+): string | undefined => {
+  if (artifact === null) {
+    return undefined;
+  }
+
+  const normalizedResultFilePath = normalizeArtifactPath(resultFilePath);
+
+  return Object.entries(artifact.files).find(
+    ([filePath]) => normalizeArtifactPath(filePath) === normalizedResultFilePath
+  )?.[1];
+};
+
+const getArtifactFileKeys = (artifact: DownloadedArtifact | null): string[] =>
+  artifact === null
+    ? []
+    : Object.keys(artifact.files)
+        .map(normalizeArtifactPath)
+        .sort((left, right) => left.localeCompare(right));
+
 const createDefaultGrading = (): StudentGradingSummary => ({
   workflowStatus: "unknown",
   resultStatus: "unknown",
@@ -98,7 +144,7 @@ const createDefaultGrading = (): StudentGradingSummary => ({
 
 const collectStudentGrading = async (
   input: CollectReportInput,
-  record: ManifestRepositoryRecord | undefined,
+  record: GradingRepositoryTarget | undefined,
   repositoryStatus: RepositoryReportStatus
 ): Promise<{
   grading: StudentGradingSummary;
@@ -157,10 +203,11 @@ const collectStudentGrading = async (
     };
   }
 
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(gradingConfig.workflow);
   const workflow = await input.githubClient.getWorkflow(
-    record.repository.owner,
-    record.repository.name,
-    gradingConfig.workflow
+    record.owner,
+    record.repositoryName,
+    workflowDispatchIdentifier
   );
 
   if (workflow === null) {
@@ -187,9 +234,9 @@ const collectStudentGrading = async (
 
   const workflowRuns = (
     await input.githubClient.listWorkflowRuns({
-      owner: record.repository.owner,
-      repo: record.repository.name,
-      workflowPath: gradingConfig.workflow
+      owner: record.owner,
+      repo: record.repositoryName,
+      workflowPath: workflowDispatchIdentifier
     })
   ).sort(compareRuns);
   const workflowRun = workflowRuns[FIRST_WORKFLOW_RUN_INDEX];
@@ -216,13 +263,14 @@ const collectStudentGrading = async (
   }
 
   const artifact = await input.githubClient.downloadArtifact({
-    owner: record.repository.owner,
-    repo: record.repository.name,
+    owner: record.owner,
+    repo: record.repositoryName,
     runId: workflowRun.id,
     artifactName: gradingConfig.artifact
   });
   const artifactStatus: ArtifactStatus = artifact === null ? "missing" : "found";
-  const resultText = artifact?.files[gradingConfig.result_file];
+  const artifactFileKeys = getArtifactFileKeys(artifact);
+  const resultText = findArtifactResultText(artifact, gradingConfig.result_file);
   const resultFileStatus: ResultFileStatus =
     artifact === null ? "not_checked" : resultText === undefined ? "missing" : "valid";
   const validationResult =
@@ -259,7 +307,14 @@ const collectStudentGrading = async (
         : { maxScore: validationResult.result.maxScore }),
       checks: validationResult?.result?.checks ?? [],
       workflowRunId: workflowRun.id,
-      commitSha: workflowRun.headSha
+      commitSha: workflowRun.headSha,
+      ...(input.includeArtifactFileKeys
+        ? {
+            artifactFileKeys,
+            configuredResultFile: gradingConfig.result_file,
+            normalizedResultFile: normalizeArtifactPath(gradingConfig.result_file)
+          }
+        : {})
     },
     warnings: [...mapping.warnings, ...(validationResult?.warnings ?? [])],
     errors: [...mapping.errors, ...(validationResult?.errors ?? [])]
@@ -268,7 +323,7 @@ const collectStudentGrading = async (
 
 const collectRepositoryStatus = async (
   githubClient: GitHubClient,
-  record: ManifestRepositoryRecord | undefined
+  record: GradingRepositoryTarget | undefined
 ): Promise<{
   repositoryStatus: RepositoryReportStatus;
   warnings: Diagnostic[];
@@ -282,10 +337,7 @@ const collectRepositoryStatus = async (
     };
   }
 
-  const repository = await githubClient.getRepository(
-    record.repository.owner,
-    record.repository.name
-  );
+  const repository = await githubClient.getRepository(record.owner, record.repositoryName);
 
   if (repository === null) {
     return {
@@ -304,32 +356,67 @@ const collectRepositoryStatus = async (
 
 const collectStudent = async (
   input: CollectReportInput,
-  student: RosterStudent
+  student: RosterStudent,
+  targets: NormalizedGradingTargets,
+  targetResults: Map<string, Promise<CollectedTargetResult>>
 ): Promise<StudentReportSummary> => {
-  const record = findManifestRecord(input.manifest, student);
-  const warnings = [...(record?.warnings ?? [])];
-  const errors = [...(record?.errors ?? [])];
+  const record = findManifestRecord(targets, student);
+  const warnings = [...(record?.diagnostics ?? [])];
+  const errors: Diagnostic[] = [];
 
   try {
-    const repository = await collectRepositoryStatus(input.githubClient, record);
-    const grading = await collectStudentGrading(input, record, repository.repositoryStatus);
+    const targetResult =
+      record === undefined
+        ? await (async (): Promise<CollectedTargetResult> => {
+            const repository = await collectRepositoryStatus(input.githubClient, record);
+            const grading = await collectStudentGrading(input, record, repository.repositoryStatus);
+            return {
+              repositoryStatus: repository.repositoryStatus,
+              repositoryWarnings: repository.warnings,
+              repositoryErrors: repository.errors,
+              grading: grading.grading,
+              gradingWarnings: grading.warnings,
+              gradingErrors: grading.errors
+            };
+          })()
+        : await (targetResults.get(record.targetId) ??
+            (() => {
+              const result = (async (): Promise<CollectedTargetResult> => {
+                const repository = await collectRepositoryStatus(input.githubClient, record);
+                const grading = await collectStudentGrading(
+                  input,
+                  record,
+                  repository.repositoryStatus
+                );
+                return {
+                  repositoryStatus: repository.repositoryStatus,
+                  repositoryWarnings: repository.warnings,
+                  repositoryErrors: repository.errors,
+                  grading: grading.grading,
+                  gradingWarnings: grading.warnings,
+                  gradingErrors: grading.errors
+                };
+              })();
+              targetResults.set(record.targetId, result);
+              return result;
+            })());
 
     return {
       studentId: student.studentId,
       githubUsername: student.githubUsername,
       section: student.section,
       rosterStatus: student.status,
-      ...(record?.repository.owner === undefined
+      ...(record?.owner === undefined ? {} : { repositoryOwner: record.owner }),
+      ...(record?.repositoryName === undefined ? {} : { repositoryName: record.repositoryName }),
+      ...(record?.htmlUrl === null || record?.htmlUrl === undefined
         ? {}
-        : { repositoryOwner: record.repository.owner }),
-      ...(record?.repository.name === undefined ? {} : { repositoryName: record.repository.name }),
-      ...(record?.repository.htmlUrl === undefined
-        ? {}
-        : { repositoryUrl: record.repository.htmlUrl }),
-      repositoryStatus: repository.repositoryStatus,
-      grading: grading.grading,
-      warnings: [...warnings, ...repository.warnings, ...grading.warnings],
-      errors: [...errors, ...repository.errors, ...grading.errors]
+        : { repositoryUrl: record.htmlUrl }),
+      ...(record === undefined ? {} : { targetId: record.targetId }),
+      ...(record?.groupId === undefined ? {} : { groupId: record.groupId }),
+      repositoryStatus: targetResult.repositoryStatus,
+      grading: targetResult.grading,
+      warnings: [...warnings, ...targetResult.repositoryWarnings, ...targetResult.gradingWarnings],
+      errors: [...errors, ...targetResult.repositoryErrors, ...targetResult.gradingErrors]
     };
   } catch (error: unknown) {
     return {
@@ -337,13 +424,13 @@ const collectStudent = async (
       githubUsername: student.githubUsername,
       section: student.section,
       rosterStatus: student.status,
-      ...(record?.repository.owner === undefined
+      ...(record?.owner === undefined ? {} : { repositoryOwner: record.owner }),
+      ...(record?.repositoryName === undefined ? {} : { repositoryName: record.repositoryName }),
+      ...(record?.htmlUrl === null || record?.htmlUrl === undefined
         ? {}
-        : { repositoryOwner: record.repository.owner }),
-      ...(record?.repository.name === undefined ? {} : { repositoryName: record.repository.name }),
-      ...(record?.repository.htmlUrl === undefined
-        ? {}
-        : { repositoryUrl: record.repository.htmlUrl }),
+        : { repositoryUrl: record.htmlUrl }),
+      ...(record === undefined ? {} : { targetId: record.targetId }),
+      ...(record?.groupId === undefined ? {} : { groupId: record.groupId }),
       repositoryStatus: "missing",
       grading: createDefaultGrading(),
       warnings,
@@ -384,9 +471,11 @@ const createSummary = (
 export const collectReport = async (input: CollectReportInput): Promise<CollectReportResult> => {
   const students: StudentReportSummary[] = [];
   const sortedStudents = [...input.students].sort(compareStudents);
+  const targets = normalizeGradingTargets(input.manifest, input.config.course.github.organization);
+  const targetResults = new Map<string, Promise<CollectedTargetResult>>();
 
   for (const student of sortedStudents) {
-    students.push(await collectStudent(input, student));
+    students.push(await collectStudent(input, student, targets, targetResults));
   }
 
   return {

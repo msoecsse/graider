@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "commandName": "report",
+  "assignmentFile": "terms/27s1/assignments/lab01/assignment.yml",
+  "status": "failure",
+  "exitCode": 2,
+  "diagnostics": [
+    {
+      "code": "student_report_source_missing",
+      "severity": "error",
+      "message": "Faculty-provided student report source file is missing from the artifact.",
+      "context": {
+        "studentId": "student01",
+        "githubUsername": "student01",
+        "repository": "27s1-csc1120-lab01-student01",
+        "artifact": "grading-results",
+        "sourceFile": "graider-output/student-report.md",
+        "destinationFile": "grading/report.md"
+      }
+    }
+  ],
+  "warnings": [],
+  "errors": [
+    {
+      "code": "student_report_source_missing",
+      "severity": "error",
+      "message": "Faculty-provided student report source file is missing from the artifact.",
+      "context": {
+        "studentId": "student01",
+        "githubUsername": "student01",
+        "repository": "27s1-csc1120-lab01-student01",
+        "artifact": "grading-results",
+        "sourceFile": "graider-output/student-report.md",
+        "destinationFile": "grading/report.md"
+      }
+    }
+  ],
+  "generatedFiles": ["terms/27s1/reports/lab01/faculty-summary.json"],
+  "summary": {
+    "assignmentSlug": "lab01",
+    "publishStudentReports": true,
+    "studentsReported": 1,
+    "studentsPublished": 0,
+    "publishFailed": 1,
+    "publishSkipped": 0
+  }
+}

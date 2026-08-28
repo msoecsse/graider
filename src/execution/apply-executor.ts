@@ -21,14 +21,18 @@ import {
 } from "../manifest/manifest-updater.js";
 import type { PlanOperation } from "../planning/operation-models.js";
 import type { Plan } from "../planning/plan-models.js";
+import type { ApplyRepositoryTarget } from "../planning/repository-targets.js";
 import type { RosterStudent } from "../roster/roster-models.js";
+import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
 
 const EMPTY_COUNT = 0;
 const PRIVATE_REPOSITORY = true;
 const DEFAULT_ACTIONS_ENABLED = true;
-const STUDENT_PERMISSION: Exclude<GitHubPermission, "none"> = "push";
+const STUDENT_PERMISSION: Exclude<GitHubPermission, "none"> = "admin";
 const FACULTY_PERMISSION: Exclude<GitHubPermission, "none"> = "admin";
 const GRADER_PERMISSION: Exclude<GitHubPermission, "none"> = "maintain";
+const CREATE_REPOSITORY_OPERATION = "createRepositoryFromTemplate";
+const CREATE_REPOSITORY_PLAN_TYPE = "create_repository_from_template";
 
 const PERMISSION_RANK = {
   none: 0,
@@ -42,6 +46,7 @@ const PERMISSION_RANK = {
 export interface ApplyExecutionInput {
   config: LoadedGraiderConfig;
   plan: Plan;
+  targets?: readonly ApplyRepositoryTarget[];
   manifest?: Manifest;
   manifestPath: string;
   students: RosterStudent[];
@@ -125,6 +130,29 @@ const createWorkflowDispatchDiagnostic = (operation: PlanOperation): Diagnostic 
     }
   );
 
+const createWorkflowPendingWarning = (operation: PlanOperation): Diagnostic =>
+  createWarningDiagnostic(
+    DiagnosticCode.GradingWorkflowPending,
+    `Grading workflow is not observable yet for newly created ${operation.repository_name ?? "repository"}; it may still be becoming available.`,
+    {
+      repositoryName: operation.repository_name,
+      student_id: operation.student_id,
+      github_username: operation.github_username,
+      section: operation.section
+    }
+  );
+
+const wasRepositoryCreatedInPlan = (
+  input: ApplyExecutionInput,
+  operation: PlanOperation
+): boolean =>
+  input.plan.operations.some(
+    (candidate) =>
+      candidate.type === CREATE_REPOSITORY_PLAN_TYPE &&
+      candidate.student_id === operation.student_id &&
+      candidate.status === "planned"
+  );
+
 const createPermissionWarning = (
   operation: PlanOperation,
   currentPermission: GitHubPermission,
@@ -161,17 +189,49 @@ const createUnexpectedCollaboratorWarning = (
     }
   );
 
+const createRepositoryCreationNotObservedDiagnostic = (
+  operation: PlanOperation,
+  owner: string,
+  repositoryName: string
+): Diagnostic =>
+  createConfigDiagnostic(
+    DiagnosticCode.GithubApiError,
+    `Repository creation did not produce an observable repository for ${owner}/${repositoryName}.`,
+    {
+      operation: CREATE_REPOSITORY_OPERATION,
+      owner,
+      repositoryName,
+      student_id: operation.student_id,
+      github_username: operation.github_username,
+      section: operation.section
+    }
+  );
+
+const findTarget = (
+  input: ApplyExecutionInput,
+  operation: PlanOperation
+): ApplyRepositoryTarget | undefined =>
+  (input.targets ?? input.plan.targets).find((target) => target.targetId === operation.target_id);
+
 const findStudent = (
+  input: ApplyExecutionInput,
   students: readonly RosterStudent[],
   operation: PlanOperation
 ): RosterStudent | undefined =>
-  students.find((student) => student.studentId === operation.student_id);
+  students.find(
+    (student) =>
+      student.studentId === (findTarget(input, operation)?.primaryStudentId ?? operation.student_id)
+  );
 
 const findManifestRecord = (
+  input: ApplyExecutionInput,
   manifest: Manifest,
   operation: PlanOperation
 ): ManifestRepositoryRecord | undefined =>
-  manifest.repositories.find((record) => record.studentId === operation.student_id);
+  manifest.repositories.find(
+    (record) =>
+      record.studentId === (findTarget(input, operation)?.primaryStudentId ?? operation.student_id)
+  );
 
 const createManifestRecord = (
   config: LoadedGraiderConfig,
@@ -300,7 +360,7 @@ const executeCreateRepository = async (
   operation: PlanOperation,
   observedAt: string
 ): Promise<ApplyState> => {
-  const student = findStudent(input.students, operation);
+  const student = findStudent(input, input.students, operation);
 
   if (student === undefined || operation.repository_name === undefined) {
     return state;
@@ -318,7 +378,7 @@ const executeCreateRepository = async (
       return recordError(state, parsedTemplate.diagnostic);
     }
 
-    const repository = await runGitHubOperation(input, () =>
+    await runGitHubOperation(input, () =>
       input.githubClient.createRepositoryFromTemplate({
         templateOwner: parsedTemplate.repository.owner,
         templateRepo: parsedTemplate.repository.repo,
@@ -327,6 +387,21 @@ const executeCreateRepository = async (
         private: PRIVATE_REPOSITORY
       })
     );
+    const repository = await runGitHubOperation(input, () =>
+      input.githubClient.getRepository(input.config.course.github.organization, repositoryName)
+    );
+
+    if (repository === null) {
+      return recordError(
+        state,
+        createRepositoryCreationNotObservedDiagnostic(
+          operation,
+          input.config.course.github.organization,
+          repositoryName
+        )
+      );
+    }
+
     const manifest = upsertRepositoryRecord(
       state.manifest,
       createManifestRecord(
@@ -366,7 +441,7 @@ const executeStudentCollaborator = async (
   const repositoryName = operation.repository_name;
   const githubUsername = operation.github_username;
 
-  if (findManifestRecord(state.manifest, operation) === undefined) {
+  if (findManifestRecord(input, state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
@@ -461,7 +536,7 @@ const executeTeamPermission = async (
 
   const repositoryName = operation.repository_name;
 
-  if (findManifestRecord(state.manifest, operation) === undefined) {
+  if (findManifestRecord(input, state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
@@ -546,7 +621,7 @@ const executeEnableActions = async (
 
   const repositoryName = operation.repository_name;
 
-  if (findManifestRecord(state.manifest, operation) === undefined) {
+  if (findManifestRecord(input, state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
@@ -598,8 +673,9 @@ const executeVerifyWorkflow = async (
 
   const repositoryName = operation.repository_name;
   const workflowPath = input.config.course.grading.workflow;
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
 
-  if (findManifestRecord(state.manifest, operation) === undefined) {
+  if (findManifestRecord(input, state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
@@ -608,22 +684,25 @@ const executeVerifyWorkflow = async (
       input.githubClient.getWorkflow(
         input.config.course.github.organization,
         repositoryName,
-        workflowPath
+        workflowDispatchIdentifier
       )
     );
 
     if (workflow === null) {
-      const diagnostic = createWorkflowMissingDiagnostic(operation);
+      const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
+      const diagnostic = isNewRepository
+        ? createWorkflowPendingWarning(operation)
+        : createWorkflowMissingDiagnostic(operation);
 
       return persistManifest(
-        recordError(
+        (isNewRepository ? recordWarning : recordError)(
           {
             ...state,
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
                 gradingWorkflowPath: workflowPath,
-                gradingWorkflowFound: false,
+                ...(isNewRepository ? {} : { gradingWorkflowFound: false }),
                 lastObservedAt: observedAt
               }
             })
@@ -671,8 +750,9 @@ const executeVerifyDispatch = async (
 
   const repositoryName = operation.repository_name;
   const workflowPath = input.config.course.grading.workflow;
+  const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
 
-  if (findManifestRecord(state.manifest, operation) === undefined) {
+  if (findManifestRecord(input, state.manifest, operation) === undefined) {
     return incrementSummary(state, "skipped");
   }
 
@@ -681,21 +761,27 @@ const executeVerifyDispatch = async (
       input.githubClient.getWorkflow(
         input.config.course.github.organization,
         repositoryName,
-        workflowPath
+        workflowDispatchIdentifier
       )
     );
 
     if (workflow === null || !workflow.supportsDispatch) {
-      const diagnostic = createWorkflowDispatchDiagnostic(operation);
+      const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
+      const diagnostic =
+        workflow === null && isNewRepository
+          ? createWorkflowPendingWarning(operation)
+          : createWorkflowDispatchDiagnostic(operation);
 
       return persistManifest(
-        recordError(
+        (workflow === null && isNewRepository ? recordWarning : recordError)(
           {
             ...state,
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
-                workflowDispatchSupported: false,
+                ...(workflow === null && isNewRepository
+                  ? {}
+                  : { workflowDispatchSupported: false }),
                 lastObservedAt: observedAt
               }
             })

@@ -137,4 +137,63 @@ describe("grade executor", () => {
       expect.objectContaining({ code: DiagnosticCode.WorkflowDispatchMissing })
     ]);
   });
+
+  it("dispatches one workflow per shared group target", async () => {
+    const input = loadExecutionInput();
+    const activeStudents = input.students.filter((student) => student.status === "active");
+    const groupManifest = {
+      ...input.manifest,
+      schemaVersion: 2 as const,
+      repositoryMode: "group" as const,
+      repositories: [],
+      targets: [
+        {
+          targetId: "team-1",
+          mode: "group" as const,
+          groupId: "team-1",
+          repositoryName: "27s1-se2030-lab04-team-1",
+          htmlUrl: "https://github.com/example-org/27s1-se2030-lab04-team-1",
+          sectionIds: ["001"],
+          studentIds: activeStudents.map((student) => student.studentId),
+          githubUsernames: activeStudents.map((student) => student.githubUsername),
+          diagnostics: []
+        }
+      ],
+      studentMappings: activeStudents.map((student) => ({
+        studentId: student.studentId,
+        githubUsername: student.githubUsername,
+        targetId: "team-1",
+        repositoryName: "27s1-se2030-lab04-team-1",
+        htmlUrl: "https://github.com/example-org/27s1-se2030-lab04-team-1"
+      }))
+    };
+    const githubClient = new FakeGitHubClient({
+      repositories: [createRepository("27s1-se2030-lab04-team-1")],
+      workflows: [
+        {
+          owner: ORGANIZATION,
+          repo: "27s1-se2030-lab04-team-1",
+          workflow
+        }
+      ]
+    });
+
+    const result = await executeGrade({
+      ...input,
+      manifest: groupManifest,
+      targetStudents: activeStudents,
+      githubClient
+    });
+
+    expect(result.summary).toMatchObject({ targetsSelected: 1, dispatchSucceeded: 1 });
+    expect(githubClient.mutations.workflowDispatches).toHaveLength(1);
+    expect(result.targets).toEqual([
+      expect.objectContaining({
+        targetId: "team-1",
+        groupId: "team-1",
+        repositoryName: "27s1-se2030-lab04-team-1",
+        status: "dispatched"
+      })
+    ]);
+  });
 });
