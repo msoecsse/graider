@@ -55,8 +55,7 @@ Grade-preview rows likewise represent one dispatchable group target. Group
 status now exposes one target row per shared repository alongside its
 per-student compatibility rows. Faculty report collection reads each group
 repository/workflow/artifact once and projects the shared result to each member.
-Dashboard/status/report presentation, Student Access Pages regression/polish,
-email-preview mapping review, and recovery/reconcile remain deferred.
+Dashboard/status/report presentation and recovery/reconcile remain deferred.
 
 `assignment download-repositories --destination <folder> --json` uses the same
 normalized targets. It clones one folder per individual repository or shared
@@ -75,8 +74,7 @@ with shared student mappings; group-specific UI polish remains deferred.
 
 The access-page status, generation, and publish-readiness IPC path now awaits
 this read-only command through the Electron CLI runner. Direct manifest YAML
-parsing is no longer used to resolve access-page repository links. Email preview
-remains deferred.
+parsing is no longer used to resolve access-page repository links.
 
 ## Group configuration safety guard
 

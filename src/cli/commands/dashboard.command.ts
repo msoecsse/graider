@@ -7,13 +7,9 @@ import {
   createConfigDiagnostic
 } from "../../diagnostics/error-catalog.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import {
-  GRAIDER_GITHUB_TOKEN_ENV,
-  createGitHubClient
-} from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
 
 const COMMAND_NAME = "dashboard";
-const EMPTY_LENGTH = 0;
 const JSON_INDENT_SPACES = 2;
 
 interface DashboardCommandOptions {
@@ -27,12 +23,6 @@ export interface DashboardCommandRequest {
   readonly env?: Record<string, string | undefined>;
   readonly githubClient?: GitHubClient;
 }
-
-const readGraiderToken = (env: Record<string, string | undefined>): string | undefined => {
-  const token = env[GRAIDER_GITHUB_TOKEN_ENV]?.trim();
-
-  return token === undefined || token.length === EMPTY_LENGTH ? undefined : token;
-};
 
 const createJsonRequiredResult = (): DashboardResult =>
   createEmptyDashboardResult("failure", [
@@ -60,15 +50,14 @@ export const runDashboardCommand = ({
     return Promise.resolve(createJsonRequiredResult());
   }
 
-  const token = readGraiderToken(env);
-
-  if (token === undefined) {
+  const githubResolution = resolveProductionGitHubClient({ githubClient, env });
+  if (githubResolution.status === "token_missing") {
     return Promise.resolve(createTokenMissingResult());
   }
 
   return buildDashboard({
     cwd,
-    githubClient: githubClient ?? createGitHubClient({ token }),
+    githubClient: githubResolution.githubClient,
     ...(options.term === undefined ? {} : { term: options.term })
   });
 };

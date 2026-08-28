@@ -19,8 +19,9 @@ The command is read-only. It loads course, term, assignment, roster, lightweight
 local apply-state data, and bounded GitHub readiness when a token is available.
 
 If `GRAIDER_GITHUB_TOKEN` or another project-supported token source is present,
-the command checks the configured template repository, template branch, grading
-workflow file, and `workflow_dispatch` trigger. If no token is available, the
+the command checks configured template repository, template branch, grading
+workflow file, and `workflow_dispatch` trigger. Absent template or grading
+configuration is represented as not required. If no token is available, the
 command still returns local detail with `partial_success` and
 `token_required` readiness statuses.
 

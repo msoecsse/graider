@@ -35,7 +35,7 @@ const writeFixture = (root: string, course = true): void => {
   );
   fs.writeFileSync(
     path.join(root, "terms/27s1/rosters/section-001.csv"),
-    "student_id,github_username,email,first_name,last_name,section,status\nz002,zoe,zoe@example.edu,Zoe,Example,001,active\na001,ada,ada@example.edu,Ada,Lovelace,001,active\nd001,drop,drop@example.edu,Drop,Student,001,dropped\nh001,hold,hold@example.edu,Hold,Student,001,hold\nm001,missing,missing@example.edu,Missing,Repo,001,active\n",
+    "student_id,github_username,section,status\nz002,zoe,001,active\na001,ada,001,active\nd001,drop,001,dropped\nh001,hold,001,hold\nm001,missing,001,active\n",
     "utf8"
   );
   fs.mkdirSync(path.dirname(path.join(root, assignmentFile)), { recursive: true });

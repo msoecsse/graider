@@ -18,9 +18,6 @@ export const IPC_CHANNELS = {
   saveAssignmentEdit: "graider-ui:assignment-edit:save",
   getAssignmentGroupConfig: "graider-ui:assignment-groups:get",
   saveAssignmentGroupConfig: "graider-ui:assignment-groups:save",
-  getStudentRepoEmailPreview: "graider-ui:student-repo-email-preview:get",
-  getStudentRepoEmailSendHistory: "graider-ui:student-repo-email-history:get",
-  getStudentRepoEmailTransportStatus: "graider-ui:student-repo-email-transport-status:get",
   getStudentRepositoryAccessPageStatus: "graider-ui:student-repository-access-page:status",
   generateStudentRepositoryAccessPage: "graider-ui:student-repository-access-page:generate",
   getStudentRepositoryAccessPagePublishStatus:
@@ -32,6 +29,7 @@ export const IPC_CHANNELS = {
   getRosterForSection: "graider-ui:roster-manager:get",
   previewRosterSave: "graider-ui:roster-manager:preview",
   saveRoster: "graider-ui:roster-manager:save",
+  removeRoster: "graider-ui:roster-manager:remove",
   getTemplateWorkflow: "graider-ui:template-workflow:get",
   previewTemplateWorkflowSave: "graider-ui:template-workflow:preview-save",
   saveTemplateWorkflow: "graider-ui:template-workflow:save",
@@ -133,6 +131,7 @@ export interface CourseSetupRequest {
   readonly courseTitle: string;
   readonly courseCode: string;
   readonly githubOrganization: string;
+  readonly gradingEnabled?: boolean;
   readonly studentAccessPagesRepository?: string;
   readonly studentAccessPagesBaseUrl?: string;
   readonly studentAccessPagesBranch?: string;
@@ -187,7 +186,9 @@ export interface AssignmentSetupRequest extends AssignmentSetupTermsRequest {
   readonly templateBranch: string;
   readonly dueAt: string;
   readonly gradingEnabled: boolean;
-  readonly points: number;
+  readonly points: number | null;
+  readonly facultyOwner: string;
+  readonly lmsAssignmentId: string;
   readonly gradingCategory: string;
   readonly confirmed: boolean;
   readonly replaceExisting: boolean;
@@ -222,7 +223,9 @@ export interface AssignmentEditRequest extends AssignmentSetupTermsRequest {
   readonly latePolicy: string;
   readonly assignmentStatus: string;
   readonly gradingEnabled: boolean;
-  readonly points: number;
+  readonly points: number | null;
+  readonly facultyOwner: string;
+  readonly lmsAssignmentId: string;
   readonly gradingCategory: string;
   readonly originalContent: string;
   readonly confirmed: boolean;
@@ -240,7 +243,7 @@ export interface AssignmentEditModel {
   readonly dueAt: string;
   readonly latePolicy: string;
   readonly gradingEnabled: boolean;
-  readonly points: number;
+  readonly points: number | null;
   readonly gradingCategory: string;
   readonly facultyOwner: string;
   readonly lmsAssignmentId: string | null;
@@ -288,10 +291,6 @@ export interface AssignmentGroupConfigResult {
   readonly groupedStudentCount: number;
   readonly ungroupedActiveStudentCount: number;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
-}
-
-export interface StudentRepoEmailPreviewRequest extends AssignmentSetupTermsRequest {
-  readonly assignmentFile: string;
 }
 
 export interface StudentRepositoryAccessPageRequest extends AssignmentSetupTermsRequest {
@@ -421,116 +420,9 @@ export interface StudentRepositoryAccessPagePublishActionResult {
   readonly commitMessage: string | null;
 }
 
-export type StudentRepoEmailRecipientStatus =
-  | "ready"
-  | "already_sent"
-  | "skipped"
-  | "missing_email"
-  | "missing_repository"
-  | "invalid_roster";
-
-export interface StudentRepoEmailRecipient {
-  readonly studentId: string;
-  readonly githubUsername: string;
-  readonly email: string;
-  readonly firstName: string;
-  readonly lastName: string;
-  readonly section: string;
-  readonly status: StudentRepoEmailRecipientStatus;
-  readonly repositoryName: string | null;
-  readonly repositoryUrl: string | null;
-  readonly subject: string | null;
-  readonly body: string | null;
-  readonly notificationKey: string | null;
-  readonly sentAt: string | null;
-  readonly diagnostics: readonly CourseSetupDiagnostic[];
-}
-
-export interface StudentRepoEmailPreviewSummary {
-  readonly studentCount: number;
-  readonly readyCount: number;
-  readonly skippedCount: number;
-  readonly missingEmailCount: number;
-  readonly missingRepositoryCount: number;
-  readonly inactiveCount: number;
-  readonly alreadySentCount: number;
-}
-
-export interface StudentRepoEmailPreviewResult {
-  readonly status: "success" | "partial" | "not_ready" | "failure";
-  readonly assignmentFile: string;
-  readonly courseCode: string | null;
-  readonly courseTitle: string | null;
-  readonly termCode: string | null;
-  readonly assignmentTitle: string | null;
-  readonly assignmentSlug: string | null;
-  readonly subjectTemplate: string;
-  readonly bodyTemplate: string;
-  readonly summary: StudentRepoEmailPreviewSummary;
-  readonly recipients: readonly StudentRepoEmailRecipient[];
-  readonly diagnostics: readonly CourseSetupDiagnostic[];
-}
-
-export type StudentRepoEmailLogMessageStatus = "sent" | "failed" | "skipped" | "already_sent";
-
-export interface StudentRepoEmailLogMessage {
-  readonly notificationKey: string;
-  readonly studentId: string;
-  readonly githubUsername: string;
-  readonly email: string;
-  readonly repositoryUrl: string;
-  readonly subjectHash: string;
-  readonly bodyHash: string;
-  readonly status: StudentRepoEmailLogMessageStatus;
-  readonly providerMessageId: string | null;
-  readonly sentAt: string | null;
-  readonly errorCode: string | null;
-  readonly errorMessage: string | null;
-}
-
-export interface StudentRepoEmailSendHistoryResult {
-  readonly status: "ready" | "invalid";
-  readonly path: string;
-  readonly exists: boolean;
-  readonly assignmentFile: string;
-  readonly sender: string | null;
-  readonly transport: string | null;
-  readonly createdAt: string | null;
-  readonly updatedAt: string | null;
-  readonly messages: readonly StudentRepoEmailLogMessage[];
-  readonly diagnostics: readonly CourseSetupDiagnostic[];
-}
-
-export type StudentRepoEmailTransportStatusKind =
-  | "not_configured"
-  | "configured_placeholder"
-  | "auth_required"
-  | "ready"
-  | "unavailable"
-  | "error";
-export type StudentRepoEmailTransportKind = "microsoft_graph" | "manual_preview" | "unknown";
-
-export interface StudentRepoEmailTransportSender {
-  readonly address: string;
-  readonly displayName: string | null;
-  readonly type: "shared_mailbox" | "course_mailbox" | "faculty_mailbox" | "unknown";
-}
-
-export interface StudentRepoEmailTransportStatusResult {
-  readonly schemaVersion: 1;
-  readonly status: StudentRepoEmailTransportStatusKind;
-  readonly transport: StudentRepoEmailTransportKind;
-  readonly sender: StudentRepoEmailTransportSender | null;
-  readonly canSend: boolean;
-  readonly diagnostics: readonly CourseSetupDiagnostic[];
-}
-
 export interface RosterRow {
   readonly studentId: string;
   readonly githubUsername: string;
-  readonly email: string;
-  readonly firstName: string;
-  readonly lastName: string;
   readonly section: string;
   readonly status: string;
 }
@@ -565,6 +457,16 @@ export interface RosterPreviewResult {
 }
 
 export interface RosterSaveResult {
+  readonly status: "success" | "failure";
+  readonly path: string;
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
+export interface RosterRemoveRequest extends RosterSectionRequest {
+  readonly confirmed: boolean;
+}
+
+export interface RosterRemoveResult {
   readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
@@ -904,15 +806,6 @@ export interface GraiderUIApi {
   readonly saveAssignmentGroupConfig?: (
     request: AssignmentGroupConfigSaveRequest
   ) => Promise<AssignmentGroupConfigResult>;
-  readonly getStudentRepoEmailPreview?: (
-    request: StudentRepoEmailPreviewRequest
-  ) => Promise<StudentRepoEmailPreviewResult>;
-  readonly getStudentRepoEmailSendHistory?: (
-    request: StudentRepoEmailPreviewRequest
-  ) => Promise<StudentRepoEmailSendHistoryResult>;
-  readonly getStudentRepoEmailTransportStatus?: (
-    request: StudentRepoEmailPreviewRequest
-  ) => Promise<StudentRepoEmailTransportStatusResult>;
   readonly getStudentRepositoryAccessPageStatus?: (
     request: StudentRepositoryAccessPageRequest
   ) => Promise<StudentRepositoryAccessPageResult>;
@@ -931,6 +824,7 @@ export interface GraiderUIApi {
   readonly getRosterForSection?: (request: RosterSectionRequest) => Promise<RosterLoadResult>;
   readonly previewRosterSave?: (request: RosterSaveRequest) => Promise<RosterPreviewResult>;
   readonly saveRoster?: (request: RosterSaveRequest) => Promise<RosterSaveResult>;
+  readonly removeRoster?: (request: RosterRemoveRequest) => Promise<RosterRemoveResult>;
   readonly getTemplateWorkflow?: (
     request: TemplateWorkflowRequest
   ) => Promise<TemplateWorkflowResult>;

@@ -93,6 +93,9 @@ Grade status uses the same effective grading selection as `graider grade` and
 - if `assignment.yml` includes `grading`, use the assignment grading block as
   the full override
 
+If both files omit grading, grading is not configured and status returns the
+disabled/no-grading state.
+
 The JSON response exposes the resolved source:
 
 ```json
@@ -109,7 +112,8 @@ The JSON response exposes the resolved source:
 }
 ```
 
-`resolvedFrom` is `course_default` or `assignment_override`.
+`resolvedFrom` is `course_default`, `assignment_override`, or `none` when no
+course or assignment grading configuration exists.
 
 ## Run Selection
 

@@ -39,9 +39,9 @@ export interface AssignmentDetailAssignment {
 }
 
 export interface AssignmentDetailMetadata {
-  readonly facultyOwner: string;
+  readonly facultyOwner: string | null;
   readonly lmsAssignmentId: string | null;
-  readonly gradingCategory: string;
+  readonly gradingCategory: string | null;
   readonly points: number | null;
 }
 

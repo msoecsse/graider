@@ -68,6 +68,12 @@ graider validate terms/27s1/assignments/lab04/assignment.yml
 
 ## Course-Admin Layout
 
+Course grading is optional. Assignment template, deadline, metadata, and
+grading blocks are also optional; when present, their existing validation rules
+still apply. The canonical roster CSV has exactly `student_id`,
+`github_username`, `section`, and `status`; former seven-column rosters are
+accepted only for import and are saved in canonical form.
+
 ```text
 course.yml
 terms/
@@ -188,7 +194,9 @@ npm run build
 npm run audit
 ```
 
-Normal tests use `FakeGitHubClient` and do not require GitHub credentials.
+Normal tests use `FakeGitHubClient` and do not require GitHub credentials. Production GitHub
+operations require `GRAIDER_GITHUB_TOKEN` (or `GITHUB_TOKEN` as a fallback); the fake client is
+test infrastructure only.
 
 Live GitHub tests are optional and sandbox-only:
 

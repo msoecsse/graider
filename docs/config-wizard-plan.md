@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Plan faculty-facing configuration wizards that create Graider course, term,
-roster, and assignment files. This plan does not add UI, file-writing IPC, or
-GitHub mutation. The CLI loaders and schemas remain the source of truth.
+Document the implemented faculty-facing configuration wizards that create
+Graider course, term, roster, and assignment files. The CLI loaders and schemas
+remain the source of truth.
 
 ## Current Config Files
 
@@ -12,12 +12,12 @@ All YAML schemas are strict, require `schema_version: 1`, and are loaded by
 `src/config/load-*-config.ts` before `src/config/config-validation.ts` applies
 semantic checks.
 
-| File             | Current required shape and relevant validation                                                                                                                                                                                                                                                                                                             |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `course.yml`     | `course.code`, `course.title`, `course.repository`; GitHub organization, private visibility, repository-name pattern, faculty/grader teams and permissions; `defaults.timezone`, `defaults.assignment_type`; `grading`; and `reports.formats`. Only `individual`, private visibility, `push`/`admin`/`maintain`, and supported grading modes are accepted. |
-| `term.yml`       | `term.code`, `academic_year`, `semester` (`1`, `2`, or `3`), `display_name`; at least one `{ id, roster }` section. The code must be `YYsN` and equal the term directory name. Roster paths are relative to the term directory.                                                                                                                            |
-| `assignment.yml` | Assignment `slug`, `title`, `type`, `status`; template `repository` and `branch`; non-empty sections; deadline `due_at` and `late_policy`; metadata `faculty_owner`, nullable `lms_assignment_id`, `grading_category`, nullable `points`; optional grading override. The slug must equal its containing assignment directory.                              |
-| roster CSV       | Current parser requires `student_id,github_username,section,status`, validates values/status/section/GitHub username, normalizes ID, GitHub username, and status to lowercase, and rejects duplicate IDs/usernames across selected sections.                                                                                                               |
+| File             | Current required shape and relevant validation                                                                                                                                                                                                                                                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `course.yml`     | `course.code`, `course.title`, `course.repository`; GitHub organization, private visibility, repository-name pattern, faculty/grader teams and permissions; `defaults.timezone`, `defaults.assignment_type`; and `reports.formats`. `grading` is optional; when present, its validation remains strict. |
+| `term.yml`       | `term.code`, `academic_year`, `semester` (`1`, `2`, or `3`), `display_name`; at least one section with `id` and an optional `roster` reference. The code must be `YYsN` and equal the term directory name. Roster paths are relative to the term directory. |
+| `assignment.yml` | Assignment `slug`, `title`, `type`, `status`; optional template block with `repository` and `branch` when present; non-empty sections; optional deadline, metadata block, and grading override. Metadata fields are individually optional (`faculty_owner`, `grading_category`, nullable `lms_assignment_id`, and nullable `points`). The slug must equal its containing assignment directory. |
+| roster CSV       | Current parser requires `student_id,github_username,section,status`, validates values/status/section/GitHub username, normalizes ID, GitHub username, and status to lowercase, and rejects duplicate IDs/usernames across selected sections.                                                                                                                      |
 
 `loadGraiderConfig` derives term and assignment identity from
 `terms/<term-code>/assignments/<assignment-slug>/assignment.yml`; callers must
@@ -41,8 +41,9 @@ Assignment setup generates only:
 terms/<term-code>/assignments/<assignment-slug>/assignment.yml
 ```
 
-`rosters/` is canonical and plural. `term.yml` records each roster as
-`rosters/<section-id>.csv`, relative to `terms/<term-code>/`.
+`rosters/` is canonical and plural. When configured, `term.yml` records each
+roster as `rosters/<section-id>.csv`, relative to `terms/<term-code>/`. Removing
+a roster deletes that CSV and removes the reference while keeping the section.
 
 ## Course Setup Wizard Contract
 
@@ -66,9 +67,9 @@ Emit these defaults in the first implementation:
 | GitHub visibility and permissions | `private`, `push`, `admin`, `maintain`.                                                                                                                                                                                |
 | GitHub naming/teams               | `{term}-{course}-{assignment}-{github_username}`, `faculty`, `graders`.                                                                                                                                                |
 | `defaults.assignment_type`        | `individual`.                                                                                                                                                                                                          |
-| course grading                    | enabled custom workflow: `.github/workflows/grade.yml`, `grading-results`, `grading-results.json`.                                                                                                                     |
+| course grading                    | Optional. The setup checkbox writes the enabled custom-workflow block only when selected.                                                                                                                               |
 | reports                           | `formats: [markdown, csv, json]`; omit `student_publish`.                                                                                                                                                              |
-| roster absent                     | Include the section in `term.yml`; do not generate an empty roster CSV. Existing validation will report the missing roster when an assignment targets it, which is preferable to silently creating incomplete records. |
+| roster absent                     | Include the section in `term.yml` without a roster reference and do not generate an empty roster CSV. Add/importing a roster writes both the CSV and reference. |
 
 Slice B uses `America/Chicago` for `defaults.timezone`, matching the Course
 Setup contract. Other examples may retain their configured timezone.
@@ -93,38 +94,26 @@ rule is implemented.
 The planned canonical header order is exactly:
 
 ```csv
-student_id,github_username,email,first_name,last_name,section,status
+student_id,github_username,section,status
 ```
 
-All seven headers will be required and emitted in that order. `student_id`,
-`github_username`, `section`, and `status` remain required values. `email`,
-`first_name`, and `last_name` may be empty, preserving compatibility with
-faculty data that lacks profile fields; non-empty profile values should be
-trimmed and retained without changing existing identity normalization.
+The four MVP headers are required and emitted in that order: `student_id`,
+`github_username`, `section`, and `status`. Former seven-column rosters are
+accepted for import compatibility, but only these four fields are retained.
 
-The migration slice must update `src/roster/roster-validation.ts`,
-`roster-loader.ts`, and `roster-models.ts`; extend roster diagnostics/tests;
-and update every roster fixture plus `docs/examples/section-001.csv`, faculty
-guides, and MVP requirements that describe the four-column schema. Consumers
-that need only identity may continue using the current four model fields, but
-the loader must retain the three new optional profile fields for Slice D.
+Legacy import handling is limited to accepting the former seven-column header;
+all saves emit the canonical four-column schema.
 
 ## Assignment Wizard Contract
 
-Slice C is a single assignment page with section cards, then preview. Require
-title, slug, one existing term, at least one section from that term, a valid
-template repository URL or owner/name, and a deadline. Parse the template
-input to the existing `owner/name` config representation; do not contact or
-create the repository. Only `individual` is selectable.
+The assignment page requires title, slug, one existing term, and at least one
+section from that term. Template configuration is optional: leave both template
+fields blank to omit the block; when configured, the repository/branch are
+validated. Only `individual` is selectable.
 
-Generated assignment defaults are: `type: individual`, `status: draft`,
-`template.branch: main`, `deadline.late_policy: standard`,
-`metadata.lms_assignment_id: null`, and `metadata.points: null`. The initial
-wizard must expose or explicitly default the schema-required
-`metadata.faculty_owner` and `metadata.grading_category`; current loaders have
-no defaults for either. If grading is enabled, omit `grading` to inherit the
-course grading block. If disabled, write the valid override
-`enabled: false, mode: no-grading`. Do not write any template-repository file.
+Generated assignment defaults are `type: individual` and `status: active`.
+Deadline, metadata, template, and grading blocks are omitted when their fields
+are blank or disabled. Do not write any template-repository file.
 
 ## Grade Workflow Viewer/Editor Later Slice
 
@@ -223,7 +212,7 @@ generic configuration writer to expose or reuse.
 ## Slice D: Editable Roster Table
 
 Load/write only canonical roster CSVs through a typed preview/save operation.
-Use the new profile columns, preserve header order, show row diagnostics and
+Use the four canonical columns, preserve header order, show row diagnostics and
 duplicate identity errors, and retain create-only/explicit-replace safeguards.
 Do not combine this with course creation or assignment creation.
 
@@ -240,14 +229,12 @@ neither changes Graider config schemas.
 Unit-test YAML/CSV generation and term-code derivation without Electron. Test
 preview/save services in temporary course roots for strict-schema acceptance,
 path traversal rejection, conflicts, no overwrite by default, stale preview
-rejection, and post-save validation. Update config/roster fixtures and loader
-tests for the seven-column roster migration, including empty optional profile
-values. UI tests mock `window.graiderUI`; Electron tests mock dialogs,
+rejection, and post-save validation. Include legacy seven-column import and
+canonical four-column save coverage. UI tests mock `window.graiderUI`; Electron tests mock dialogs,
 filesystem services, runners, and GitHub clients. No tests make live GitHub
 calls or invoke apply/grade/report/publish/workflow mutation.
 
-## Open Questions
+## Resolved Configuration Choices
 
-- Choose initial values or form controls for required `faculty_owner` and
-  `grading_category`; existing schemas require both, but the stated assignment
-  inputs do not provide them.
+- Assignment metadata fields are optional; blank values omit their fields and
+  omit `metadata` when all four are blank.

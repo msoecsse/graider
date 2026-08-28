@@ -234,9 +234,9 @@ When no token-backed GitHub client is available, active target rows use
 
 ## Template and Grading Readiness
 
-Apply preview reuses the assignment detail GitHub readiness checks. The response
-includes template repository, template branch, grading workflow file, and
-`workflow_dispatch` statuses.
+Apply preview reuses assignment-detail GitHub readiness checks for configured
+template and grading blocks. When template configuration is absent, template
+and workflow checks are `not_required`.
 
 No-grading assignments return:
 

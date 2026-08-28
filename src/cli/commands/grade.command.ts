@@ -26,9 +26,8 @@ import {
   getGradeGitHubDiagnostics,
   type GradeExecutionResult
 } from "../../execution/grade-executor.js";
-import { FakeGitHubClient } from "../../github/fake-github-client.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
 import type { RetryOptions } from "../../github/github-retry.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";
@@ -55,9 +54,6 @@ export interface GradeRawOptions extends RawCommonCommandOptions {
   studentId?: string;
   githubUsername?: string;
 }
-
-const createDefaultGitHubClient = (): GitHubClient =>
-  readGitHubToken() === undefined ? new FakeGitHubClient() : createGitHubClient();
 
 const getEffectiveGrading = (config: LoadedGraiderConfig) =>
   config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
@@ -235,11 +231,35 @@ export const runGradeCommand = async ({
     });
   }
 
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...selectionResult.warnings],
+      errors: [
+        createConfigDiagnostic(
+          DiagnosticCode.GithubTokenRequired,
+          "A GitHub token is required before Grade can dispatch workflows. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        ...selectionResult.summary,
+        manifestFile: manifestPath.relativePath
+      }
+    });
+  }
+
   const executionResult = await executeGrade({
     config: configResult.config,
     manifest: manifestResult.manifest,
     targetStudents: selectionResult.students,
-    githubClient: githubClient ?? createDefaultGitHubClient(),
+    githubClient: githubResolution.githubClient,
     ...(retryOptions === undefined ? {} : { retryOptions })
   });
   const status = getCommandStatus(executionResult);

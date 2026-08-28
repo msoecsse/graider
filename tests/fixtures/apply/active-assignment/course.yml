@@ -7,7 +7,7 @@ github:
   organization: example-org
   repository_visibility: private
   repo_name_pattern: "{term}-{course}-{assignment}-{github_username}"
-  student_permission: push
+  student_permission: admin
   faculty_team: faculty
   faculty_permission: admin
   grader_team: graders

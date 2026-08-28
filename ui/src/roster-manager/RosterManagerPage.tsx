@@ -3,6 +3,7 @@ import type {
   AssignmentSetupTerm,
   CourseFolderRecord,
   RosterPreviewResult,
+  RosterRemoveRequest,
   RosterRow,
   RosterSaveRequest
 } from "../../electron/ipc";
@@ -10,37 +11,39 @@ import type {
 const HEADERS = [
   ["studentId", "student_id"],
   ["githubUsername", "github_username"],
-  ["email", "email"],
-  ["firstName", "first_name"],
-  ["lastName", "last_name"],
   ["section", "section"],
   ["status", "status"]
+] as const;
+const MVP_ROSTER_HEADERS = ["student_id", "github_username", "section", "status"] as const;
+const LEGACY_ROSTER_HEADERS = [
+  "student_id",
+  "github_username",
+  "email",
+  "first_name",
+  "last_name",
+  "section",
+  "status"
 ] as const;
 
 const emptyRow = (section: string): RosterRow => ({
   studentId: "",
   githubUsername: "",
-  email: "",
-  firstName: "",
-  lastName: "",
   section,
   status: "active"
 });
 
 const parseUploadedRoster = (content: string, sectionId: string): RosterRow[] | null => {
   const lines = content.split(/\r?\n/u).filter((line) => line.length > 0);
-  if (lines[0] !== "student_id,github_username,email,first_name,last_name,section,status")
-    return null;
+  const isLegacyHeader = lines[0] === LEGACY_ROSTER_HEADERS.join(",");
+  if (lines[0] !== MVP_ROSTER_HEADERS.join(",") && !isLegacyHeader) return null;
+  const headers = isLegacyHeader ? LEGACY_ROSTER_HEADERS : MVP_ROSTER_HEADERS;
   return lines.slice(1).map((line) => {
     const values = line.split(",");
     return {
-      studentId: values[0] ?? "",
-      githubUsername: values[1] ?? "",
-      email: values[2] ?? "",
-      firstName: values[3] ?? "",
-      lastName: values[4] ?? "",
-      section: values[5] ?? sectionId,
-      status: values[6] ?? "active"
+      studentId: values[headers.indexOf("student_id")] ?? "",
+      githubUsername: values[headers.indexOf("github_username")] ?? "",
+      section: values[headers.indexOf("section")] ?? sectionId,
+      status: values[headers.indexOf("status")] ?? "active"
     };
   });
 };
@@ -64,6 +67,9 @@ export const RosterManagerPage = ({
   const [changeDescription, setChangeDescription] = useState<string | null>(null);
   const [preview, setPreview] = useState<RosterPreviewResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isConfirmingRosterRemoval, setIsConfirmingRosterRemoval] = useState(false);
+  const [isRosterRemovalConfirmed, setIsRosterRemovalConfirmed] = useState(false);
+  const [isRemovingRoster, setIsRemovingRoster] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -147,7 +153,7 @@ export const RosterManagerPage = ({
     void file.text().then((content) => {
       const uploadedRows = parseUploadedRoster(content, sectionId);
       if (uploadedRows === null) {
-        setLoadMessage("Uploaded roster must use the canonical seven-column Graider header.");
+        setLoadMessage("Uploaded roster must use the canonical four-column Graider header.");
         return;
       }
       setRows(uploadedRows);
@@ -198,6 +204,39 @@ export const RosterManagerPage = ({
       setMessage("Unable to save roster CSV.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleRemoveRoster = async (): Promise<void> => {
+    const removeRoster = window.graiderUI.removeRoster;
+    if (removeRoster === undefined || !isRosterRemovalConfirmed) return;
+    setIsRemovingRoster(true);
+    setMessage(null);
+    const removeRequest: RosterRemoveRequest = {
+      courseFolderId: courseFolder.id,
+      courseFolderPath: courseFolder.path,
+      termCode,
+      sectionId,
+      confirmed: true
+    };
+    try {
+      const result = await removeRoster(removeRequest);
+      if (result.status === "success") {
+        setRows([]);
+        setIsExisting(false);
+        setChangeDescription(null);
+        clearPreview();
+        setIsConfirmingRosterRemoval(false);
+        setIsRosterRemovalConfirmed(false);
+        setMessage(`Removed ${result.path}`);
+        onSaved();
+      } else {
+        setMessage(result.diagnostics.map((item) => item.message).join(" "));
+      }
+    } catch {
+      setMessage("Unable to remove roster CSV.");
+    } finally {
+      setIsRemovingRoster(false);
     }
   };
 
@@ -406,6 +445,56 @@ export const RosterManagerPage = ({
             >
               Clear Roster Rows
             </button>
+            <button
+              className="danger-action"
+              type="button"
+              disabled={!isExisting || isLoading || isRemovingRoster}
+              onClick={() => {
+                setIsConfirmingRosterRemoval(true);
+                setIsRosterRemovalConfirmed(false);
+                setMessage(null);
+              }}
+            >
+              Remove Roster
+            </button>
+          </section>
+        )}
+        {!isConfirmingRosterRemoval ? null : (
+          <section className="detail-panel" role="dialog" aria-labelledby="remove-roster-title">
+            <h2 id="remove-roster-title">Remove roster</h2>
+            <p>
+              This deletes {targetPath} and removes its reference from term.yml. It does not remove
+              the section or any student repositories.
+            </p>
+            <label className="confirmation-check">
+              <input
+                type="checkbox"
+                checked={isRosterRemovalConfirmed}
+                onChange={(event) => setIsRosterRemovalConfirmed(event.target.checked)}
+              />
+              I understand this removes the entire roster.
+            </label>
+            <div className="apply-confirmation-actions">
+              <button
+                className="secondary-action"
+                type="button"
+                disabled={isRemovingRoster}
+                onClick={() => {
+                  setIsConfirmingRosterRemoval(false);
+                  setIsRosterRemovalConfirmed(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="danger-action"
+                type="button"
+                disabled={!isRosterRemovalConfirmed || isRemovingRoster}
+                onClick={() => void handleRemoveRoster()}
+              >
+                {isRemovingRoster ? "Removing roster..." : "Remove roster"}
+              </button>
+            </div>
           </section>
         )}
         {sectionId.length === 0 ? null : (

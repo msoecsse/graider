@@ -308,6 +308,14 @@ export const checkAssignmentDetailGithubReadiness = async ({
   grading,
   githubClient
 }: AssignmentDetailGithubReadinessInput): Promise<AssignmentDetailGithubReadinessResult> => {
+  if (config.assignment.template.repository === "" && config.assignment.template.branch === "") {
+    return {
+      template: withTemplateStatus(template, STATUS_NOT_REQUIRED, STATUS_NOT_REQUIRED),
+      grading: withWorkflowStatus(grading, STATUS_NOT_REQUIRED, STATUS_NOT_REQUIRED),
+      diagnostics: []
+    };
+  }
+
   if (githubClient === undefined) {
     return createTokenRequiredResult(config, template, grading);
   }

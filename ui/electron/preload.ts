@@ -33,16 +33,14 @@ import {
   type AssignmentGroupConfigRequest,
   type AssignmentGroupConfigResult,
   type AssignmentGroupConfigSaveRequest,
-  type StudentRepoEmailPreviewRequest,
-  type StudentRepoEmailPreviewResult,
-  type StudentRepoEmailSendHistoryResult,
-  type StudentRepoEmailTransportStatusResult,
   type StudentRepositoryAccessPageRequest,
   type StudentRepositoryAccessPageResult,
   type StudentRepositoryAccessPagePublishResult,
   type StudentRepositoryAccessPagePublishActionResult,
   type RosterLoadResult,
   type RosterPreviewResult,
+  type RosterRemoveRequest,
+  type RosterRemoveResult,
   type RosterSaveRequest,
   type RosterSaveResult,
   type RosterSectionRequest,
@@ -129,24 +127,6 @@ const graiderUI: GraiderUIApi = {
     request: AssignmentGroupConfigSaveRequest
   ): Promise<AssignmentGroupConfigResult> =>
     await invoke<AssignmentGroupConfigResult>(IPC_CHANNELS.saveAssignmentGroupConfig, request),
-  getStudentRepoEmailPreview: async (
-    request: StudentRepoEmailPreviewRequest
-  ): Promise<StudentRepoEmailPreviewResult> =>
-    await invoke<StudentRepoEmailPreviewResult>(IPC_CHANNELS.getStudentRepoEmailPreview, request),
-  getStudentRepoEmailSendHistory: async (
-    request: StudentRepoEmailPreviewRequest
-  ): Promise<StudentRepoEmailSendHistoryResult> =>
-    await invoke<StudentRepoEmailSendHistoryResult>(
-      IPC_CHANNELS.getStudentRepoEmailSendHistory,
-      request
-    ),
-  getStudentRepoEmailTransportStatus: async (
-    request: StudentRepoEmailPreviewRequest
-  ): Promise<StudentRepoEmailTransportStatusResult> =>
-    await invoke<StudentRepoEmailTransportStatusResult>(
-      IPC_CHANNELS.getStudentRepoEmailTransportStatus,
-      request
-    ),
   getStudentRepositoryAccessPageStatus: async (
     request: StudentRepositoryAccessPageRequest
   ): Promise<StudentRepositoryAccessPageResult> =>
@@ -185,6 +165,8 @@ const graiderUI: GraiderUIApi = {
     await invoke<RosterPreviewResult>(IPC_CHANNELS.previewRosterSave, request),
   saveRoster: async (request: RosterSaveRequest): Promise<RosterSaveResult> =>
     await invoke<RosterSaveResult>(IPC_CHANNELS.saveRoster, request),
+  removeRoster: async (request: RosterRemoveRequest): Promise<RosterRemoveResult> =>
+    await invoke<RosterRemoveResult>(IPC_CHANNELS.removeRoster, request),
   getTemplateWorkflow: async (request: TemplateWorkflowRequest): Promise<TemplateWorkflowResult> =>
     await invoke<TemplateWorkflowResult>(IPC_CHANNELS.getTemplateWorkflow, request),
   previewTemplateWorkflowSave: async (

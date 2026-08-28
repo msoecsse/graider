@@ -552,8 +552,10 @@ const createAssignmentSummary = (
     ...(courseConfig.reports.student_publish === undefined
       ? {}
       : { studentPublishEnabled: courseConfig.reports.student_publish.enabled }),
-    dueAt: assignmentConfig.deadline.due_at,
-    points: assignmentConfig.metadata.points,
+    ...(assignmentConfig.deadline === undefined ? {} : { dueAt: assignmentConfig.deadline.due_at }),
+    ...(assignmentConfig.metadata?.points === undefined
+      ? {}
+      : { points: assignmentConfig.metadata.points }),
     sections: assignmentConfig.sections,
     templateRepository: assignmentConfig.template.repository,
     templateBranch: assignmentConfig.template.branch,
@@ -988,8 +990,10 @@ const loadRosterSummary = (
     };
   }
 
-  const loadedRosters = termConfig.sections.map((section) =>
-    loadRosterStudents(repoRoot, [TERMS_DIRECTORY, termSlug, section.roster].join("/"), section.id)
+  const loadedRosters = termConfig.sections.flatMap((section) =>
+    section.roster === undefined
+      ? []
+      : [loadRosterStudents(repoRoot, [TERMS_DIRECTORY, termSlug, section.roster].join("/"), section.id)]
   );
   const students = loadedRosters.flatMap((roster) => roster.students);
   const diagnostics = [

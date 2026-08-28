@@ -1,5 +1,5 @@
 import { BrowserWindow, app, dialog, ipcMain } from "electron";
-import { applyAssignment } from "./assignmentApplyRunner.js";
+import { applyAssignmentWithStudentRepositoryAccessPage } from "./assignmentApplyWithAccessPageService.js";
 import { gradeAssignment } from "./assignmentGradeRunner.js";
 import { getAssignmentApplyPreview } from "./assignmentApplyPreviewRunner.js";
 import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
@@ -25,9 +25,6 @@ import {
   getAssignmentGroupConfig,
   saveAssignmentGroupConfig
 } from "./assignmentGroupConfigService.js";
-import { getStudentRepoEmailPreview } from "./studentRepoEmailPreviewService.js";
-import { getStudentRepoEmailSendHistory } from "./studentRepoEmailNotificationLogService.js";
-import { getStudentRepoEmailTransportStatus } from "./studentRepoEmailTransportStatusService.js";
 import {
   generateStudentRepositoryAccessPage,
   getStudentRepositoryAccessPageStatus
@@ -38,6 +35,7 @@ import {
   getRosterForSection,
   loadRosterTerms,
   previewRosterSave,
+  removeRoster,
   saveRoster
 } from "./rosterManagerService.js";
 import { checkGitHubAuth } from "./githubAuthChecker.js";
@@ -73,9 +71,9 @@ import {
   type AssignmentEditRequest,
   type AssignmentGroupConfigRequest,
   type AssignmentGroupConfigSaveRequest,
-  type StudentRepoEmailPreviewRequest,
   type StudentRepositoryAccessPageRequest,
   type RosterSaveRequest,
+  type RosterRemoveRequest,
   type RosterSectionRequest,
   type TemplateWorkflowRequest,
   type TemplateWorkflowSaveRequest,
@@ -197,6 +195,7 @@ const isCourseSetupRequest = (value: unknown): value is CourseSetupRequest => {
     typeof request.courseTitle === "string" &&
     typeof request.courseCode === "string" &&
     typeof request.githubOrganization === "string" &&
+    (request.gradingEnabled === undefined || typeof request.gradingEnabled === "boolean") &&
     typeof request.termCode === "string" &&
     Array.isArray(request.sectionIds) &&
     request.sectionIds.every((sectionId) => typeof sectionId === "string") &&
@@ -233,7 +232,9 @@ const isAssignmentSetupRequest = (value: unknown): value is AssignmentSetupReque
     typeof request.templateBranch === "string" &&
     typeof request.dueAt === "string" &&
     typeof request.gradingEnabled === "boolean" &&
-    typeof request.points === "number" &&
+    (typeof request.points === "number" || request.points === null) &&
+    typeof request.facultyOwner === "string" &&
+    typeof request.lmsAssignmentId === "string" &&
     typeof request.gradingCategory === "string" &&
     typeof request.confirmed === "boolean" &&
     typeof request.replaceExisting === "boolean"
@@ -254,7 +255,9 @@ const isAssignmentEditRequest = (value: unknown): value is AssignmentEditRequest
     typeof request.latePolicy === "string" &&
     typeof request.assignmentStatus === "string" &&
     typeof request.gradingEnabled === "boolean" &&
-    typeof request.points === "number" &&
+    (typeof request.points === "number" || request.points === null) &&
+    typeof request.facultyOwner === "string" &&
+    typeof request.lmsAssignmentId === "string" &&
     typeof request.gradingCategory === "string" &&
     typeof request.originalContent === "string" &&
     typeof request.confirmed === "boolean"
@@ -275,16 +278,12 @@ const isAssignmentGroupConfigSaveRequest = (
   );
 };
 
-const isStudentRepoEmailPreviewRequest = (
+const isStudentRepositoryAccessPageRequest = (
   value: unknown
-): value is StudentRepoEmailPreviewRequest => {
+): value is StudentRepositoryAccessPageRequest => {
   if (!isAssignmentSetupTermsRequest(value)) return false;
   return typeof (value as unknown as Record<string, unknown>).assignmentFile === "string";
 };
-
-const isStudentRepositoryAccessPageRequest = (
-  value: unknown
-): value is StudentRepositoryAccessPageRequest => isStudentRepoEmailPreviewRequest(value);
 
 const isStudentAccessPagesConfigRequest = (
   value: unknown
@@ -328,6 +327,10 @@ const isRosterSaveRequest = (value: unknown): value is RosterSaveRequest => {
     typeof request.confirmed === "boolean"
   );
 };
+
+const isRosterRemoveRequest = (value: unknown): value is RosterRemoveRequest =>
+  isRosterSectionRequest(value) &&
+  typeof (value as unknown as Record<string, unknown>).confirmed === "boolean";
 
 const isTemplateWorkflowRequest = (value: unknown): value is TemplateWorkflowRequest => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -526,10 +529,14 @@ export const registerIpcHandlers = (): void => {
     }
     const preview = previewAssignmentSetup(request);
     if (preview.status !== "ready") return preview;
+    if (request.templateRepository.trim() === "") return saveAssignmentSetup(request);
     const validation = await validateTemplateRepository(
       request.templateRepository,
       request.templateBranch,
-      { env: process.env, runner: processRunner }
+      {
+        env: process.env,
+        runner: processRunner
+      }
     );
     const resolvedRequest = {
       ...request,
@@ -593,7 +600,8 @@ export const registerIpcHandlers = (): void => {
       original !== null &&
       (original.templateRepository !== request.templateRepository ||
         original.templateBranch !== request.templateBranch);
-    if (preview.status !== "ready" || !changed) return preview;
+    if (preview.status !== "ready" || !changed || request.templateRepository.trim() === "")
+      return preview;
     const validation = await validateTemplateRepository(
       request.templateRepository,
       request.templateBranch,
@@ -622,7 +630,7 @@ export const registerIpcHandlers = (): void => {
       original !== null &&
       (original.templateRepository !== request.templateRepository ||
         original.templateBranch !== request.templateBranch);
-    if (changed) {
+    if (changed && request.templateRepository.trim() !== "") {
       const validation = await validateTemplateRepository(
         request.templateRepository,
         request.templateBranch,
@@ -651,41 +659,6 @@ export const registerIpcHandlers = (): void => {
     if (!isAssignmentGroupConfigSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment group settings request.");
     return saveAssignmentGroupConfig(request);
-  });
-  ipcMain.handle(IPC_CHANNELS.getStudentRepoEmailPreview, (_event, request: unknown) => {
-    if (!isStudentRepoEmailPreviewRequest(request) || !isRegisteredAssignmentSetupCourse(request))
-      throw new Error("Invalid student repository email preview request.");
-    return getStudentRepoEmailPreview(request);
-  });
-  ipcMain.handle(IPC_CHANNELS.getStudentRepoEmailSendHistory, (_event, request: unknown) => {
-    if (!isStudentRepoEmailPreviewRequest(request) || !isRegisteredAssignmentSetupCourse(request))
-      throw new Error("Invalid student repository email history request.");
-    const loaded = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile);
-    if (loaded.model === null) {
-      return {
-        status: "invalid" as const,
-        path: "",
-        exists: false,
-        assignmentFile: request.assignmentFile,
-        sender: null,
-        transport: null,
-        createdAt: null,
-        updatedAt: null,
-        messages: [],
-        diagnostics: loaded.diagnostics
-      };
-    }
-    return getStudentRepoEmailSendHistory(
-      request.courseFolderPath,
-      request.assignmentFile,
-      loaded.model.termCode,
-      loaded.model.assignmentSlug
-    );
-  });
-  ipcMain.handle(IPC_CHANNELS.getStudentRepoEmailTransportStatus, (_event, request: unknown) => {
-    if (!isStudentRepoEmailPreviewRequest(request) || !isRegisteredAssignmentSetupCourse(request))
-      throw new Error("Invalid student repository email transport status request.");
-    return getStudentRepoEmailTransportStatus();
   });
   ipcMain.handle(
     IPC_CHANNELS.getStudentRepositoryAccessPageStatus,
@@ -778,6 +751,12 @@ export const registerIpcHandlers = (): void => {
       throw new Error("A registered course folder is required for roster management.");
     }
     return saveRoster(request);
+  });
+  ipcMain.handle(IPC_CHANNELS.removeRoster, (_event, request: unknown) => {
+    if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
+      throw new Error("A registered course folder is required for roster management.");
+    }
+    return removeRoster(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.getTemplateWorkflow, async (_event, request: unknown) => {
@@ -878,9 +857,11 @@ export const registerIpcHandlers = (): void => {
       throw new Error("Assignment apply request is required.");
     }
 
-    return await applyAssignment(request, {
+    return await applyAssignmentWithStudentRepositoryAccessPage(request, {
       runner: processRunner,
-      env: process.env
+      env: process.env,
+      pagesRepositoryFolderPath:
+        withRegisteredPagesFolder(request).pagesRepositoryFolderPath ?? null
     });
   });
   ipcMain.handle(IPC_CHANNELS.downloadAssignmentRepositories, async (_event, request: unknown) => {

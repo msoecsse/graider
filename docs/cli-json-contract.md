@@ -139,6 +139,8 @@ the existing apply implementation and JSON summary shape with legacy
 `apply <assignment.yml> --json`, but reports `commandName: "assignment apply"`
 for the canonical nested route.
 
+Both individual and group Apply require `--yes` before any GitHub mutation or manifest write.
+
 `assignment grade <assignment.yml> --json` is a real mutation command because it
 dispatches GitHub Actions workflows. It shares the existing grade
 implementation, target selector validation, effective grading resolution, and

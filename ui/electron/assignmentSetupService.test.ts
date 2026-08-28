@@ -46,6 +46,8 @@ const createRequest = (
   dueAt: "2027-06-15T23:59:00-05:00",
   gradingEnabled: true,
   points: 100,
+  facultyOwner: "professor",
+  lmsAssignmentId: "",
   gradingCategory: "labs",
   confirmed: false,
   replaceExisting: false,
@@ -85,6 +87,78 @@ describe("assignment setup service", () => {
     expect(preview.files[0]?.content).toContain("status: active");
     expect(preview.files[0]?.content).toContain("workflow: .github/workflows/grade.yml");
     expect(preview.files[0]?.content).toContain("points: 100");
+  });
+
+  it("allows a blank due date and omits the deadline block", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    const preview = previewAssignmentSetup(createRequest(root, { dueAt: "" }));
+
+    expect(preview.status).toBe("ready");
+    expect(preview.files[0]?.content).not.toContain("deadline:");
+  });
+
+  it("allows a blank template configuration and omits the template block", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    const preview = previewAssignmentSetup(
+      createRequest(root, { templateRepository: "", templateBranch: "" })
+    );
+
+    expect(preview.status).toBe("ready");
+    expect(preview.files[0]?.content).not.toContain("template:");
+  });
+
+  it("allows blank points and omits the points field", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    const preview = previewAssignmentSetup(createRequest(root, { points: null }));
+
+    expect(preview.status).toBe("ready");
+    expect(preview.files[0]?.content).not.toContain("points:");
+  });
+
+  it("allows blank faculty owner and grading category and omits both fields", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    const preview = previewAssignmentSetup(
+      createRequest(root, { facultyOwner: "", gradingCategory: "" })
+    );
+
+    expect(preview.status).toBe("ready");
+    expect(preview.files[0]?.content).not.toContain("faculty_owner:");
+    expect(preview.files[0]?.content).not.toContain("grading_category:");
+  });
+
+  it("allows a blank LMS assignment ID and omits the field", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    const preview = previewAssignmentSetup(createRequest(root, { lmsAssignmentId: "" }));
+
+    expect(preview.status).toBe("ready");
+    expect(preview.files[0]?.content).not.toContain("lms_assignment_id:");
+  });
+
+  it("omits metadata when every metadata field is blank", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    const preview = previewAssignmentSetup(
+      createRequest(root, {
+        points: null,
+        facultyOwner: "",
+        lmsAssignmentId: "",
+        gradingCategory: ""
+      })
+    );
+
+    expect(preview.status).toBe("ready");
+    expect(preview.files[0]?.content).not.toContain("metadata:");
   });
 
   it("normalizes GitHub template URLs and accepts direct owner/repo input", () => {

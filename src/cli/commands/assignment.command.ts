@@ -36,7 +36,10 @@ import {
   createConfigDiagnostic
 } from "../../diagnostics/error-catalog.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { createGitHubClient, readGitHubToken } from "../../github/github-client-factory.js";
+import {
+  readGitHubToken,
+  resolveProductionGitHubClient
+} from "../../github/github-client-factory.js";
 import type { RetryOptions } from "../../github/github-retry.js";
 import { runApplyCommand } from "./apply.command.js";
 import { runGradeCommand, type GradeRawOptions } from "./grade.command.js";
@@ -205,7 +208,11 @@ const resolveGitHubClient = (
     return githubClient;
   }
 
-  return token === undefined ? undefined : createGitHubClient({ token });
+  const resolution = resolveProductionGitHubClient({
+    ...(token === undefined ? {} : { token })
+  });
+
+  return resolution.status === "available" ? resolution.githubClient : undefined;
 };
 
 const dedupeStudentIds = (studentIds: readonly string[]): string[] =>

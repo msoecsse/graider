@@ -268,15 +268,18 @@ export const buildAssignmentDetail = ({
         file: config.summary.assignmentConfigPath
       },
       metadata: {
-        facultyOwner: config.assignment.metadata.faculty_owner,
-        lmsAssignmentId: config.assignment.metadata.lms_assignment_id,
-        gradingCategory: config.assignment.metadata.grading_category,
-        points: config.assignment.metadata.points
+        facultyOwner: config.assignment.metadata?.faculty_owner ?? null,
+        lmsAssignmentId: config.assignment.metadata?.lms_assignment_id ?? null,
+        gradingCategory: config.assignment.metadata?.grading_category ?? null,
+        points: config.assignment.metadata?.points ?? null
       },
-      deadline: {
-        dueAt: config.assignment.deadline.due_at,
-        latePolicy: config.assignment.deadline.late_policy
-      },
+      deadline:
+        config.assignment.deadline === undefined
+          ? null
+          : {
+              dueAt: config.assignment.deadline.due_at,
+              latePolicy: config.assignment.deadline.late_policy
+            },
       sections: config.assignment.sections,
       roster: rosterResult.roster,
       template: githubReadiness.template,

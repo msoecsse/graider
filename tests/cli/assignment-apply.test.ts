@@ -31,6 +31,7 @@ const APPLY_TIMESTAMP = "2026-09-01T14:30:00.000Z";
 const JONES_REPOSITORY = "27s1-se2030-lab04-seanjones";
 const JSON_YES_OPTIONS = normalizeCommonCommandOptions({ json: true, yes: true });
 const YES_OPTIONS = normalizeCommonCommandOptions({ yes: true });
+const NO_OPTIONS = normalizeCommonCommandOptions({});
 const FIXED_CLOCK = {
   now: () => new Date(APPLY_TIMESTAMP)
 };
@@ -248,6 +249,28 @@ describe("graider assignment apply command", () => {
     expect(githubClient.mutations.createdRepositories).toEqual([]);
     expect(githubClient.mutations.addedCollaborators).toEqual([]);
     expect(loadWrittenManifest(cwd).status).toBe("missing");
+  });
+
+  it("requires confirmation before group execution or manifest writing", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    configureGroupAssignment(cwd, "team-1,jones\nteam-2,patel\n");
+    const githubClient = createReadyClient();
+    const groupTargetExecutor = vi.fn();
+    const groupManifestWriter = vi.fn();
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: NO_OPTIONS,
+      githubClient,
+      groupTargetExecutor,
+      groupManifestWriter
+    });
+
+    expect(result.errors).toEqual([expect.objectContaining({ code: "confirmation_required" })]);
+    expect(groupTargetExecutor).not.toHaveBeenCalled();
+    expect(groupManifestWriter).not.toHaveBeenCalled();
+    expect(githubClient.mutations.createdRepositories).toEqual([]);
   });
 
   it("blocks untracked existing group repositories before mutation", async () => {

@@ -296,7 +296,9 @@ const validateGradingConfig = (
   grading: RawCourseConfig["grading"],
   owner: string
 ): Diagnostic[] =>
-  grading.enabled
+  grading === undefined
+    ? []
+    : grading.enabled
     ? validateEnabledGradingConfig(filePath, grading, owner)
     : validateDisabledGradingConfig(filePath, grading, owner);
 

@@ -43,7 +43,7 @@ const asString = (value: unknown): string | null => (typeof value === "string" ?
 const createYaml = (
   model: AssignmentEditModel,
   request: AssignmentEditRequest,
-  repository: string
+  repository: string | null
 ): string => {
   const sections = request.sectionIds
     .map((section) => `  - ${quoteYaml(section.trim())}`)
@@ -51,26 +51,38 @@ const createYaml = (
   const grading = request.gradingEnabled
     ? `grading:\n  enabled: true\n  workflow: ${quoteYaml(model.workflow)}\n  artifact: ${quoteYaml(model.artifact)}\n  result_file: ${quoteYaml(model.resultFile)}\n`
     : "grading:\n  enabled: false\n  mode: no-grading\n";
+  const deadline =
+    request.dueAt.trim() === ""
+      ? ""
+      : `deadline:\n  due_at: ${quoteYaml(request.dueAt.trim())}\n  late_policy: ${quoteYaml(request.latePolicy.trim())}\n`;
+  const points = request.points === null ? "" : `  points: ${String(request.points)}\n`;
+  const facultyOwner =
+    request.facultyOwner.trim() === ""
+      ? ""
+      : `  faculty_owner: ${quoteYaml(request.facultyOwner.trim())}\n`;
+  const lmsAssignmentId =
+    request.lmsAssignmentId.trim() === ""
+      ? ""
+      : `  lms_assignment_id: ${quoteYaml(request.lmsAssignmentId.trim())}\n`;
+  const gradingCategory =
+    request.gradingCategory.trim() === ""
+      ? ""
+      : `  grading_category: ${quoteYaml(request.gradingCategory.trim())}\n`;
+  const metadata = `${facultyOwner}${lmsAssignmentId}${gradingCategory}${points}`;
+  const metadataBlock = metadata === "" ? "" : `metadata:\n${metadata}`;
+  const template =
+    repository === null
+      ? ""
+      : `template:\n  repository: ${quoteYaml(repository)}\n  branch: ${quoteYaml(request.templateBranch.trim())}\n`;
   return `schema_version: 1
 assignment:
   slug: ${quoteYaml(model.assignmentSlug)}
   title: ${quoteYaml(request.assignmentTitle.trim())}
   type: individual
   status: ${quoteYaml(request.assignmentStatus)}
-template:
-  repository: ${quoteYaml(repository)}
-  branch: ${quoteYaml(request.templateBranch.trim())}
-sections:
+${template}sections:
 ${sections}
-deadline:
-  due_at: ${quoteYaml(request.dueAt.trim())}
-  late_policy: ${quoteYaml(request.latePolicy.trim())}
-metadata:
-  faculty_owner: ${quoteYaml(model.facultyOwner)}
-  lms_assignment_id: ${model.lmsAssignmentId === null ? "null" : quoteYaml(model.lmsAssignmentId)}
-  grading_category: ${quoteYaml(request.gradingCategory.trim())}
-  points: ${String(request.points)}
-${grading}`;
+${deadline}${metadataBlock}${grading}`;
 };
 
 export const getAssignmentForEdit = (
@@ -104,22 +116,21 @@ export const getAssignmentForEdit = (
     const status = asString(assignment?.status);
     const repository = asString(template?.repository);
     const branch = asString(template?.branch);
-    const dueAt = asString(deadline?.due_at);
-    const latePolicy = asString(deadline?.late_policy);
-    const facultyOwner = asString(metadata?.faculty_owner);
-    const gradingCategory = asString(metadata?.grading_category);
-    const points = metadata?.points;
+    const dueAt = asString(deadline?.due_at) ?? "";
+    const latePolicy = asString(deadline?.late_policy) ?? "";
+    const facultyOwner = asString(metadata?.faculty_owner) ?? "";
+    const gradingCategory = asString(metadata?.grading_category) ?? "";
+    const points = typeof metadata?.points === "number" ? metadata.points : null;
     if (
       document.errors.length > 0 ||
       title === null ||
       status === null ||
-      repository === null ||
-      branch === null ||
-      dueAt === null ||
-      latePolicy === null ||
-      facultyOwner === null ||
-      gradingCategory === null ||
-      typeof points !== "number"
+      (template !== null && (repository === null || branch === null)) ||
+      (metadata?.faculty_owner !== undefined && typeof metadata.faculty_owner !== "string") ||
+      (metadata?.grading_category !== undefined && typeof metadata.grading_category !== "string") ||
+      (metadata?.points !== undefined &&
+        metadata.points !== null &&
+        typeof metadata.points !== "number")
     ) {
       return {
         status: "error",
@@ -139,8 +150,8 @@ export const getAssignmentForEdit = (
         assignmentTitle: title,
         assignmentStatus: status,
         sectionIds: sections,
-        templateRepository: repository,
-        templateBranch: branch,
+        templateRepository: repository ?? "",
+        templateBranch: branch ?? "",
         dueAt,
         latePolicy,
         gradingEnabled: grading?.enabled !== false,
@@ -188,13 +199,16 @@ const getPreview = (
       ? [diagnostic("The assignment.yml changed after it was loaded. Reload before saving.")]
       : []),
     ...(request.assignmentTitle.trim() === "" ? [diagnostic("Assignment title is required.")] : []),
-    ...(repository === null
+    ...((request.templateRepository.trim() !== "" || request.templateBranch.trim() !== "") &&
+    repository === null
       ? [diagnostic("Template repository must be owner/repo or a GitHub repository URL.")]
       : []),
-    ...(!ISO_DATE_TIME_WITH_OFFSET_PATTERN.test(request.dueAt.trim())
+    ...(request.dueAt.trim() !== "" && !ISO_DATE_TIME_WITH_OFFSET_PATTERN.test(request.dueAt.trim())
       ? [diagnostic("Due date and time must include a UTC offset.")]
       : []),
-    ...(request.latePolicy.trim() === "" ? [diagnostic("Late policy is required.")] : []),
+    ...(request.dueAt.trim() !== "" && request.latePolicy.trim() === ""
+      ? [diagnostic("Late policy is required.")]
+      : []),
     ...(!VALID_STATUSES.has(request.assignmentStatus)
       ? [diagnostic("Assignment status is invalid.")]
       : []),
@@ -207,10 +221,9 @@ const getPreview = (
     ...(term === undefined || sections.some((section) => !term.sections.includes(section))
       ? [diagnostic("Selected sections must exist in the assignment term.")]
       : []),
-    ...(!Number.isFinite(request.points) || request.points <= 0
+    ...(request.points !== null && (!Number.isFinite(request.points) || request.points <= 0)
       ? [diagnostic("Points must be a positive number.")]
-      : []),
-    ...(request.gradingCategory.trim() === "" ? [diagnostic("Grading category is required.")] : [])
+      : [])
   ];
   const changed = request.originalContent !== model.originalContent;
   return {
@@ -218,7 +231,7 @@ const getPreview = (
     preview: {
       status: changed ? "conflict" : diagnostics.length === 0 ? "ready" : "invalid",
       path: model.assignmentFile,
-      content: createYaml(model, request, repository ?? ""),
+      content: createYaml(model, request, repository),
       diagnostics
     }
   };

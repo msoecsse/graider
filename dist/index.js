@@ -734,7 +734,7 @@ var MINIMUM_LIST_ITEMS = 1;
 var SUPPORTED_SCHEMA_VERSION = 1;
 var SUPPORTED_ASSIGNMENT_TYPE = "individual";
 var SUPPORTED_REPOSITORY_VISIBILITY = "private";
-var STUDENT_PERMISSION = "push";
+var STUDENT_PERMISSION = "admin";
 var FACULTY_PERMISSION = "admin";
 var GRADER_PERMISSION = "maintain";
 var VALID_ASSIGNMENT_STATUSES = ["draft", "active", "closed", "archived"];
@@ -800,7 +800,7 @@ var rawCourseConfigSchema = z.object({
     timezone: z.string().min(MINIMUM_LIST_ITEMS),
     assignment_type: z.string().min(MINIMUM_LIST_ITEMS)
   }).strict(),
-  grading: gradingSchema,
+  grading: gradingSchema.optional(),
   reports: reportsSchema,
   notifications: notificationsSchema.optional()
 }).strict();
@@ -830,18 +830,18 @@ var rawAssignmentConfigSchema = z.object({
   template: z.object({
     repository: z.string().min(MINIMUM_LIST_ITEMS),
     branch: z.string().min(MINIMUM_LIST_ITEMS)
-  }).strict(),
+  }).strict().optional(),
   sections: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS),
   deadline: z.object({
     due_at: z.string().min(MINIMUM_LIST_ITEMS),
     late_policy: z.string().min(MINIMUM_LIST_ITEMS)
-  }).strict(),
+  }).strict().optional(),
   metadata: z.object({
-    faculty_owner: z.string().min(MINIMUM_LIST_ITEMS),
-    lms_assignment_id: z.string().nullable(),
-    grading_category: z.string().min(MINIMUM_LIST_ITEMS),
-    points: z.number().nullable()
-  }).strict(),
+    faculty_owner: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    lms_assignment_id: z.string().nullable().optional(),
+    grading_category: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    points: z.number().nullable().optional()
+  }).strict().optional(),
   grading: gradingSchema.optional(),
   repository_mode: z.enum(["individual", "group"]).optional(),
   groups: z.object({
@@ -1022,7 +1022,7 @@ var validateDisabledGradingConfig = (filePath, grading, owner) => {
   }
   return [];
 };
-var validateGradingConfig = (filePath, grading, owner) => grading.enabled ? validateEnabledGradingConfig(filePath, grading, owner) : validateDisabledGradingConfig(filePath, grading, owner);
+var validateGradingConfig = (filePath, grading, owner) => grading === void 0 ? [] : grading.enabled ? validateEnabledGradingConfig(filePath, grading, owner) : validateDisabledGradingConfig(filePath, grading, owner);
 var createMissingStudentPublishFieldDiagnostic = (filePath, code, field) => createConfigDiagnostic(code, `Student report publishing in ${filePath} must include ${field}.`, {
   filePath,
   field
@@ -1404,12 +1404,15 @@ var loadAllConfigFiles = (repoRoot, parts) => {
     assignment: assignmentResult.value
   };
 };
-var getGradingEnabled = (course, assignment) => assignment.grading === void 0 ? {
+var getGradingEnabled = (course, assignment) => assignment.grading !== void 0 ? {
+  gradingEnabled: assignment.grading.enabled,
+  gradingSource: "assignment"
+} : course.grading !== void 0 ? {
   gradingEnabled: course.grading.enabled,
   gradingSource: "course"
 } : {
-  gradingEnabled: assignment.grading.enabled,
-  gradingSource: "assignment"
+  gradingEnabled: false,
+  gradingSource: "none"
 };
 var createSummary = (repoRoot, parts, course, assignment) => ({
   repoRoot,
@@ -4418,12 +4421,12 @@ var buildAssignmentDetail = ({
         file: config.summary.assignmentConfigPath
       },
       metadata: {
-        facultyOwner: config.assignment.metadata.faculty_owner,
-        lmsAssignmentId: config.assignment.metadata.lms_assignment_id,
-        gradingCategory: config.assignment.metadata.grading_category,
-        points: config.assignment.metadata.points
+        facultyOwner: config.assignment.metadata?.faculty_owner ?? null,
+        lmsAssignmentId: config.assignment.metadata?.lms_assignment_id ?? null,
+        gradingCategory: config.assignment.metadata?.grading_category ?? null,
+        points: config.assignment.metadata?.points ?? null
       },
-      deadline: {
+      deadline: config.assignment.deadline === void 0 ? null : {
         dueAt: config.assignment.deadline.due_at,
         latePolicy: config.assignment.deadline.late_policy
       },
@@ -5341,8 +5344,21 @@ var GITHUB_TOKEN_ENV = "GITHUB_TOKEN";
 var EMPTY_LENGTH3 = 0;
 function createGitHubClient(options = {}) {
   const token = options.token ?? readGitHubToken(options.env);
-  return new OctokitGitHubClient(token === void 0 ? {} : { token });
+  if (token === void 0) {
+    throw new Error("A GitHub token is required to create a production GitHub client.");
+  }
+  return new OctokitGitHubClient({ token });
 }
+var resolveProductionGitHubClient = ({
+  githubClient,
+  env
+} = {}) => {
+  if (githubClient !== void 0) {
+    return { status: "available", githubClient };
+  }
+  const token = readGitHubToken(env);
+  return token === void 0 ? { status: "token_missing" } : { status: "available", githubClient: createGitHubClient({ token }) };
+};
 function readGitHubToken(env = process.env) {
   const graiderToken = normalizeToken2(env[GRAIDER_GITHUB_TOKEN_ENV]);
   if (graiderToken !== void 0) {
@@ -6203,13 +6219,15 @@ var createConfirmationRequiredDiagnostic = () => createConfigDiagnostic(
 );
 var evaluateMutationGuard = ({
   plan,
+  preflightErrors = [],
   options
 }) => {
-  const hasBlockedOperations = plan.operations.some((operation) => operation.status === "blocked");
-  if (hasBlockedOperations || plan.errors.length > EMPTY_COUNT7) {
+  const hasBlockedOperations = plan?.operations.some((operation) => operation.status === "blocked") ?? false;
+  const errors = [...plan?.errors ?? [], ...preflightErrors];
+  if (hasBlockedOperations || errors.length > EMPTY_COUNT7) {
     return {
       allowed: false,
-      errors: [createMutationBlockedDiagnostic(), ...plan.errors]
+      errors: [createMutationBlockedDiagnostic(), ...errors]
     };
   }
   if (!options.yes) {
@@ -7364,7 +7382,24 @@ var runApplyCommand = async ({
       }
     });
   }
-  const effectiveGitHubClient = githubClient ?? createGitHubClient();
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: [
+        createConfigDiagnostic(
+          GITHUB_TOKEN_REQUIRED_CODE,
+          "A GitHub token is required before Apply can contact GitHub. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: { options, ...configResult.config.summary, ...rosterResult.summary }
+    });
+  }
+  const effectiveGitHubClient = githubResolution.githubClient;
   if (configResult.config.assignment.repository_mode === "group") {
     const preflight = await runGroupApplyPreflight({
       config: configResult.config,
@@ -7391,13 +7426,17 @@ var runApplyCommand = async ({
       ),
       groupTargets: groupTargetSummary
     };
-    if (preflight.errors.length > EMPTY_COUNT10) {
+    const guardResult2 = evaluateMutationGuard({
+      options,
+      preflightErrors: preflight.errors
+    });
+    if (!guardResult2.allowed) {
       return createCommandResult({
         commandName,
         assignmentFile: configResult.config.summary.assignmentConfigPath,
         status: "failure",
         warnings: [...rosterResult.warnings, ...preflight.warnings],
-        errors: [...preflight.errors],
+        errors: guardResult2.errors,
         generatedFiles: [],
         summary: groupSummary
       });
@@ -7933,387 +7972,10 @@ var executeGrade = async (input) => {
   return { ...state, targets: targetResults };
 };
 
-// src/github/fake-github-client.ts
-var NO_FAKE_GITHUB_FAILURES = 0;
-var DEFAULT_AUTHENTICATED_USER = {
-  username: "graider-fake-user"
-};
-var DEFAULT_BRANCH = "main";
-var DEFAULT_ACTIONS_STATE = "disabled";
-var DEFAULT_PERMISSION_STATE = {
-  permission: "none",
-  pendingInvite: false
-};
-var GENERATED_COMMIT_SHA_PREFIX = "fake-commit-";
-var normalizeKeyPart = (value) => value.toLowerCase();
-var repositoryKey = (owner, repo) => `${normalizeKeyPart(owner)}/${normalizeKeyPart(repo)}`;
-var userKey = (username) => normalizeKeyPart(username);
-var teamKey = (org, teamSlug) => `${normalizeKeyPart(org)}/${normalizeKeyPart(teamSlug)}`;
-var workflowKey = (owner, repo, workflowPath) => `${repositoryKey(owner, repo)}:${workflowPath}`;
-var collaboratorKey = (owner, repo, username) => `${repositoryKey(owner, repo)}:${userKey(username)}`;
-var teamPermissionKey = (owner, repo, teamSlug) => `${repositoryKey(owner, repo)}:${normalizeKeyPart(teamSlug)}`;
-var actionsStateKey = (owner, repo) => repositoryKey(owner, repo);
-var createGitHubClientError = (failure2) => new GitHubClientError(failure2.kind, `Fake GitHub ${failure2.kind} failure.`, {
-  ...failure2.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: failure2.retryAfterSeconds }
-});
-var FakeGitHubClient = class {
-  mutations = {
-    createdRepositories: [],
-    addedCollaborators: [],
-    removedCollaborators: [],
-    teamPermissions: [],
-    enabledActions: [],
-    workflowDispatches: [],
-    archivedRepositories: [],
-    fileWrites: []
-  };
-  fileReads = [];
-  artifactDownloads = [];
-  workflowRunReadRequests = [];
-  authenticatedUser;
-  users;
-  teams;
-  repositories;
-  templateRepositories;
-  collaboratorPermissions;
-  teamPermissions;
-  actionsStates;
-  workflows;
-  workflowRuns;
-  artifacts;
-  repositoryFiles;
-  failures;
-  nextRepositoryId;
-  nextCommitNumber;
-  constructor(state = {}) {
-    this.authenticatedUser = state.authenticatedUser ?? DEFAULT_AUTHENTICATED_USER;
-    this.users = [...state.users ?? []];
-    this.teams = [...state.teams ?? []];
-    this.repositories = [...state.repositories ?? []];
-    this.templateRepositories = [...state.templateRepositories ?? []];
-    this.collaboratorPermissions = [...state.collaboratorPermissions ?? []];
-    this.teamPermissions = [...state.teamPermissions ?? []];
-    this.actionsStates = [...state.actionsStates ?? []];
-    this.workflows = [...state.workflows ?? []];
-    this.workflowRuns = [...state.workflowRuns ?? []];
-    this.artifacts = [...state.artifacts ?? []];
-    this.repositoryFiles = [...state.repositoryFiles ?? []];
-    this.failures = [...state.failures ?? []];
-    this.nextRepositoryId = 1e3 /* FirstGeneratedRepositoryId */;
-    this.nextCommitNumber = 1 /* FirstGeneratedCommitNumber */;
-  }
-  failNext(method, kind, options = {}) {
-    this.failures.push({
-      method,
-      kind,
-      ...options
-    });
-  }
-  failTimes(method, kind, count, options = {}) {
-    for (let remaining = count; remaining > NO_FAKE_GITHUB_FAILURES; remaining -= 1) {
-      this.failNext(method, kind, options);
-    }
-  }
-  failAll(kind, options = {}) {
-    this.failures.push({
-      kind,
-      persistent: true,
-      ...options
-    });
-  }
-  clearFailures() {
-    this.failures.splice(0);
-  }
-  getAuthenticatedUser() {
-    return this.run("getAuthenticatedUser", () => this.authenticatedUser);
-  }
-  getRepository(owner, repo) {
-    return this.run(
-      "getRepository",
-      () => this.repositories.find(
-        (repository) => repositoryKey(repository.owner, repository.name) === repositoryKey(owner, repo)
-      ) ?? null
-    );
-  }
-  getTemplateRepository(owner, repo) {
-    return this.run(
-      "getTemplateRepository",
-      () => this.templateRepositories.find(
-        (repository) => repositoryKey(repository.owner, repository.name) === repositoryKey(owner, repo)
-      ) ?? null
-    );
-  }
-  createRepositoryFromTemplate(input) {
-    return this.run("createRepositoryFromTemplate", () => {
-      const templateRepository = this.templateRepositories.find(
-        (repository2) => repositoryKey(repository2.owner, repository2.name) === repositoryKey(input.templateOwner, input.templateRepo)
-      );
-      const defaultBranch = templateRepository?.defaultBranch ?? DEFAULT_BRANCH;
-      const repository = {
-        owner: input.owner,
-        name: input.name,
-        fullName: `${input.owner}/${input.name}`,
-        id: this.consumeRepositoryId(),
-        private: input.private,
-        archived: false,
-        defaultBranch,
-        htmlUrl: `https://github.com/${input.owner}/${input.name}`
-      };
-      this.repositories.push(repository);
-      this.mutations.createdRepositories.push({
-        input,
-        repository
-      });
-      return repository;
-    });
-  }
-  getUser(username) {
-    return this.run(
-      "getUser",
-      () => this.users.find((user) => userKey(user.username) === userKey(username)) ?? null
-    );
-  }
-  getTeam(org, teamSlug) {
-    return this.run(
-      "getTeam",
-      () => this.teams.find((team) => teamKey(team.org, team.slug) === teamKey(org, teamSlug)) ?? null
-    );
-  }
-  getCollaboratorPermission(owner, repo, username) {
-    return this.run("getCollaboratorPermission", () => {
-      const permissionRecord = this.collaboratorPermissions.find(
-        (record) => collaboratorKey(record.owner, record.repo, record.username) === collaboratorKey(owner, repo, username)
-      );
-      if (permissionRecord === void 0) {
-        return DEFAULT_PERMISSION_STATE;
-      }
-      return {
-        permission: permissionRecord.permission,
-        pendingInvite: permissionRecord.pendingInvite ?? false
-      };
-    });
-  }
-  listCollaboratorPermissions(owner, repo) {
-    return this.run(
-      "listCollaboratorPermissions",
-      () => this.collaboratorPermissions.filter((record) => repositoryKey(record.owner, record.repo) === repositoryKey(owner, repo)).map((record) => ({
-        username: record.username,
-        permission: record.permission,
-        pendingInvite: record.pendingInvite ?? false
-      }))
-    );
-  }
-  addCollaborator(input) {
-    return this.run("addCollaborator", () => {
-      const existingIndex = this.collaboratorPermissions.findIndex(
-        (record2) => collaboratorKey(record2.owner, record2.repo, record2.username) === collaboratorKey(input.owner, input.repo, input.username)
-      );
-      const record = {
-        ...input,
-        pendingInvite: false
-      };
-      if (existingIndex < 0) {
-        this.collaboratorPermissions.push(record);
-      } else {
-        this.collaboratorPermissions[existingIndex] = record;
-      }
-      this.mutations.addedCollaborators.push(input);
-      return {
-        username: input.username,
-        permission: input.permission,
-        pendingInvite: false
-      };
-    });
-  }
-  removeCollaborator(input) {
-    return this.run("removeCollaborator", () => {
-      const existingIndex = this.collaboratorPermissions.findIndex(
-        (record) => collaboratorKey(record.owner, record.repo, record.username) === collaboratorKey(input.owner, input.repo, input.username)
-      );
-      if (existingIndex >= 0) {
-        this.collaboratorPermissions.splice(existingIndex, 1 /* SingleRecord */);
-      }
-      this.mutations.removedCollaborators.push(input);
-    });
-  }
-  getTeamPermission(owner, repo, teamSlug) {
-    return this.run("getTeamPermission", () => {
-      const permissionRecord = this.teamPermissions.find(
-        (record) => teamPermissionKey(record.owner, record.repo, record.teamSlug) === teamPermissionKey(owner, repo, teamSlug)
-      );
-      if (permissionRecord === void 0) {
-        return DEFAULT_PERMISSION_STATE;
-      }
-      return {
-        permission: permissionRecord.permission,
-        pendingInvite: false
-      };
-    });
-  }
-  addTeamPermission(input) {
-    return this.run("addTeamPermission", () => {
-      const existingIndex = this.teamPermissions.findIndex(
-        (record) => teamPermissionKey(record.owner, record.repo, record.teamSlug) === teamPermissionKey(input.owner, input.repo, input.teamSlug)
-      );
-      if (existingIndex < 0) {
-        this.teamPermissions.push(input);
-      } else {
-        this.teamPermissions[existingIndex] = input;
-      }
-      this.mutations.teamPermissions.push(input);
-    });
-  }
-  getActionsState(owner, repo) {
-    return this.run(
-      "getActionsState",
-      () => this.actionsStates.find(
-        (record) => actionsStateKey(record.owner, record.repo) === actionsStateKey(owner, repo)
-      )?.state ?? DEFAULT_ACTIONS_STATE
-    );
-  }
-  enableActions(owner, repo) {
-    return this.run("enableActions", () => {
-      const existingIndex = this.actionsStates.findIndex(
-        (record2) => actionsStateKey(record2.owner, record2.repo) === actionsStateKey(owner, repo)
-      );
-      const record = {
-        owner,
-        repo,
-        state: "enabled"
-      };
-      if (existingIndex < 0) {
-        this.actionsStates.push(record);
-      } else {
-        this.actionsStates[existingIndex] = record;
-      }
-      this.mutations.enabledActions.push({ owner, repo });
-    });
-  }
-  getRepositoryFileContent(owner, repo, filePath, ref) {
-    return this.run("getRepositoryFileContent", () => {
-      this.fileReads.push({
-        owner,
-        repo,
-        path: filePath,
-        ref
-      });
-      return this.repositoryFiles.find(
-        (file) => repositoryKey(file.owner, file.repo) === repositoryKey(owner, repo) && file.path === filePath && (file.branch === ref || file.branch === void 0)
-      )?.content ?? null;
-    });
-  }
-  getWorkflow(owner, repo, workflowPath) {
-    return this.run(
-      "getWorkflow",
-      () => this.workflows.find(
-        (record) => workflowKey(record.owner, record.repo, record.workflow.path) === workflowKey(owner, repo, workflowPath)
-      )?.workflow ?? null
-    );
-  }
-  dispatchWorkflow(input) {
-    return this.run("dispatchWorkflow", () => {
-      this.mutations.workflowDispatches.push(input);
-    });
-  }
-  listWorkflowRuns(input) {
-    return this.run("listWorkflowRuns", () => {
-      this.workflowRunReadRequests.push(input);
-      return this.workflowRuns.filter(
-        (record) => repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo)
-      ).filter(
-        (record) => input.workflowPath === void 0 || record.run.workflowPath === input.workflowPath
-      ).map((record) => record.run);
-    });
-  }
-  downloadArtifact(input) {
-    return this.run("downloadArtifact", () => {
-      this.artifactDownloads.push(input);
-      return this.artifacts.find(
-        (record) => repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo) && record.runId === input.runId && record.artifact.name === input.artifactName
-      )?.artifact ?? null;
-    });
-  }
-  archiveRepository(owner, repo) {
-    return this.run("archiveRepository", () => {
-      const existingIndex = this.repositories.findIndex(
-        (repository) => repositoryKey(repository.owner, repository.name) === repositoryKey(owner, repo)
-      );
-      if (existingIndex >= 0) {
-        const existingRepository = this.repositories[existingIndex];
-        if (existingRepository !== void 0) {
-          this.repositories[existingIndex] = {
-            ...existingRepository,
-            archived: true
-          };
-        }
-      }
-      this.mutations.archivedRepositories.push({ owner, repo });
-    });
-  }
-  writeRepositoryFile(input) {
-    return this.run("writeRepositoryFile", () => {
-      const commitSha = this.consumeCommitSha();
-      const record = {
-        owner: input.owner,
-        repo: input.repo,
-        path: input.path,
-        content: input.content,
-        message: input.message,
-        commitSha,
-        ...input.branch === void 0 ? {} : { branch: input.branch }
-      };
-      const existingIndex = this.repositoryFiles.findIndex(
-        (file) => repositoryKey(file.owner, file.repo) === repositoryKey(input.owner, input.repo) && file.path === input.path && file.branch === input.branch
-      );
-      if (existingIndex < 0) {
-        this.repositoryFiles.push(record);
-      } else {
-        this.repositoryFiles[existingIndex] = record;
-      }
-      this.mutations.fileWrites.push(record);
-      return {
-        path: input.path,
-        commitSha
-      };
-    });
-  }
-  run(method, action2) {
-    const failure2 = this.consumeFailure(method);
-    if (failure2 !== void 0) {
-      return Promise.reject(createGitHubClientError(failure2));
-    }
-    return Promise.resolve(action2());
-  }
-  consumeFailure(method) {
-    const failureIndex = this.failures.findIndex(
-      (failure3) => failure3.method === void 0 || failure3.method === method
-    );
-    if (failureIndex < 0) {
-      return void 0;
-    }
-    const failure2 = this.failures[failureIndex];
-    if (failure2?.persistent !== true) {
-      this.failures.splice(failureIndex, 1 /* SingleRecord */);
-    }
-    return failure2;
-  }
-  consumeRepositoryId() {
-    const repositoryId = this.nextRepositoryId;
-    this.nextRepositoryId += 1 /* SingleRecord */;
-    return repositoryId;
-  }
-  consumeCommitSha() {
-    const commitSha = `${GENERATED_COMMIT_SHA_PREFIX}${String(this.nextCommitNumber)}`;
-    this.nextCommitNumber += 1 /* SingleRecord */;
-    return commitSha;
-  }
-};
-
 // src/cli/commands/grade.command.ts
 var COMMAND_NAME6 = "grade";
 var EMPTY_COUNT13 = 0;
 var NOT_CONFIGURED_WARNING_COUNT = 1;
-var createDefaultGitHubClient = () => readGitHubToken() === void 0 ? new FakeGitHubClient() : createGitHubClient();
 var getEffectiveGrading6 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getCommandStatus = (result) => {
   if (result.errors.length === EMPTY_COUNT13) {
@@ -8465,11 +8127,34 @@ var runGradeCommand = async ({
       }
     });
   }
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...selectionResult.warnings],
+      errors: [
+        createConfigDiagnostic(
+          DiagnosticCode.GithubTokenRequired,
+          "A GitHub token is required before Grade can dispatch workflows. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        ...selectionResult.summary,
+        manifestFile: manifestPath.relativePath
+      }
+    });
+  }
   const executionResult = await executeGrade({
     config: configResult.config,
     manifest: manifestResult.manifest,
     targetStudents: selectionResult.students,
-    githubClient: githubClient ?? createDefaultGitHubClient(),
+    githubClient: githubResolution.githubClient,
     ...retryOptions === void 0 ? {} : { retryOptions }
   });
   const status = getCommandStatus(executionResult);
@@ -8833,7 +8518,10 @@ var resolveGitHubClient = (githubClient, token) => {
   if (githubClient !== void 0) {
     return githubClient;
   }
-  return token === void 0 ? void 0 : createGitHubClient({ token });
+  const resolution = resolveProductionGitHubClient({
+    ...token === void 0 ? {} : { token }
+  });
+  return resolution.status === "available" ? resolution.githubClient : void 0;
 };
 var dedupeStudentIds = (studentIds) => studentIds.reduce(
   (deduped, studentId) => deduped.some((existingStudentId) => existingStudentId === studentId) ? deduped : [...deduped, studentId],
@@ -9400,8 +9088,8 @@ var createAssignmentSummary = (repoRoot, courseConfig, assignmentConfig, assignm
     diagnostics,
     ...grading.enabled ? { gradingMode: grading.mode ?? LEGACY_GRADING_MODE6 } : grading.mode === void 0 ? {} : { gradingMode: grading.mode },
     ...courseConfig.reports.student_publish === void 0 ? {} : { studentPublishEnabled: courseConfig.reports.student_publish.enabled },
-    dueAt: assignmentConfig.deadline.due_at,
-    points: assignmentConfig.metadata.points,
+    ...assignmentConfig.deadline === void 0 ? {} : { dueAt: assignmentConfig.deadline.due_at },
+    ...assignmentConfig.metadata?.points === void 0 ? {} : { points: assignmentConfig.metadata.points },
     sections: assignmentConfig.sections,
     templateRepository: assignmentConfig.template.repository,
     templateBranch: assignmentConfig.template.branch,
@@ -9833,12 +9521,7 @@ var buildDashboard = async ({
 
 // src/cli/commands/dashboard.command.ts
 var COMMAND_NAME11 = "dashboard";
-var EMPTY_LENGTH5 = 0;
 var JSON_INDENT_SPACES3 = 2;
-var readGraiderToken = (env) => {
-  const token = env[GRAIDER_GITHUB_TOKEN_ENV]?.trim();
-  return token === void 0 || token.length === EMPTY_LENGTH5 ? void 0 : token;
-};
 var createJsonRequiredResult2 = () => createEmptyDashboardResult("failure", [
   createConfigDiagnostic(
     DASHBOARD_JSON_REQUIRED_CODE,
@@ -9860,13 +9543,13 @@ var runDashboardCommand = ({
   if (options.json !== true) {
     return Promise.resolve(createJsonRequiredResult2());
   }
-  const token = readGraiderToken(env);
-  if (token === void 0) {
+  const githubResolution = resolveProductionGitHubClient({ githubClient, env });
+  if (githubResolution.status === "token_missing") {
     return Promise.resolve(createTokenMissingResult());
   }
   return buildDashboard({
     cwd,
-    githubClient: githubClient ?? createGitHubClient({ token }),
+    githubClient: githubResolution.githubClient,
     ...options.term === void 0 ? {} : { term: options.term }
   });
 };
@@ -9953,52 +9636,7 @@ var writePlanJsonFile = (plan, absolutePath) => {
 
 // src/cli/commands/plan.command.ts
 var COMMAND_NAME12 = "plan";
-var DEFAULT_TEMPLATE_COMMIT_SHA = "fake-template-sha";
-var README_FILE2 = "README.md";
 var EMPTY_COUNT15 = 0;
-var createDefaultTemplateRepository = (owner, repo, branch) => ({
-  owner,
-  name: repo,
-  fullName: `${owner}/${repo}`,
-  id: 1 /* DefaultTemplateRepositoryId */,
-  private: true,
-  archived: false,
-  defaultBranch: branch,
-  htmlUrl: `https://github.com/${owner}/${repo}`,
-  isTemplate: true,
-  branches: [branch],
-  files: [README_FILE2],
-  latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA
-});
-var createDefaultGitHubClient2 = (config, students) => {
-  const parsedTemplateRepository = parseTemplateRepository(
-    config.course.github.organization,
-    config.assignment.template.repository
-  );
-  const templateRepositories = parsedTemplateRepository.status === "success" ? [
-    createDefaultTemplateRepository(
-      parsedTemplateRepository.repository.owner,
-      parsedTemplateRepository.repository.repo,
-      config.assignment.template.branch
-    )
-  ] : [];
-  return new FakeGitHubClient({
-    templateRepositories,
-    users: students.map((student) => ({ username: student.githubUsername })),
-    teams: [
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.faculty_team,
-        name: config.course.github.faculty_team
-      },
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.grader_team,
-        name: config.course.github.grader_team
-      }
-    ]
-  });
-};
 var runPlanCommand = async ({
   cwd,
   assignmentFile,
@@ -10039,7 +9677,24 @@ var runPlanCommand = async ({
       }
     });
   }
-  const effectiveGitHubClient = githubClient ?? createDefaultGitHubClient2(configResult.config, rosterResult.students);
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName: COMMAND_NAME12,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: [
+        createConfigDiagnostic(
+          GITHUB_TOKEN_REQUIRED_CODE,
+          "A GitHub token is required before Plan can check GitHub readiness. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: { options, ...configResult.config.summary, ...rosterResult.summary }
+    });
+  }
+  const effectiveGitHubClient = githubResolution.githubClient;
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,
@@ -11508,7 +11163,6 @@ var getCommandStatus2 = (errorCount, generatedFileCount) => {
   }
   return generatedFileCount > EMPTY_COUNT19 ? "partial_success" : "failure";
 };
-var createDefaultGitHubClient3 = () => readGitHubToken() === void 0 ? new FakeGitHubClient() : createGitHubClient();
 var createReportFiles = (repoRoot, report) => {
   const paths = createReportPaths(
     repoRoot,
@@ -11605,7 +11259,29 @@ var runReportCommand = async ({
       }
     });
   }
-  const activeGitHubClient = githubClient ?? createDefaultGitHubClient3();
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName: COMMAND_NAME14,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: [
+        createConfigDiagnostic(
+          GITHUB_TOKEN_REQUIRED_CODE,
+          "A GitHub token is required before Report can collect GitHub data. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        manifestFile: manifestPath.relativePath
+      }
+    });
+  }
+  const activeGitHubClient = githubResolution.githubClient;
   const collectResult = await collectReport({
     config: configResult.config,
     rosterSummary: rosterResult.summary,
@@ -11756,54 +11432,6 @@ var validateWorkflowCompatibility = (config) => {
 
 // src/cli/commands/validate.command.ts
 var COMMAND_NAME15 = "validate";
-var DEFAULT_TEMPLATE_COMMIT_SHA2 = "fake-template-sha";
-var README_FILE3 = "README.md";
-var createDefaultTemplateRepository2 = (owner, repo, branch) => ({
-  owner,
-  name: repo,
-  fullName: `${owner}/${repo}`,
-  id: 1 /* DefaultTemplateRepositoryId */,
-  private: true,
-  archived: false,
-  defaultBranch: branch,
-  htmlUrl: `https://github.com/${owner}/${repo}`,
-  isTemplate: true,
-  branches: [branch],
-  files: [README_FILE3],
-  latestCommitSha: DEFAULT_TEMPLATE_COMMIT_SHA2
-});
-var createDefaultGitHubClient4 = (config, students) => {
-  if (readGitHubToken() !== void 0) {
-    return createGitHubClient();
-  }
-  const parsedTemplateRepository = parseTemplateRepository(
-    config.course.github.organization,
-    config.assignment.template.repository
-  );
-  const templateRepositories = parsedTemplateRepository.status === "success" ? [
-    createDefaultTemplateRepository2(
-      parsedTemplateRepository.repository.owner,
-      parsedTemplateRepository.repository.repo,
-      config.assignment.template.branch
-    )
-  ] : [];
-  return new FakeGitHubClient({
-    templateRepositories,
-    users: students.map((student) => ({ username: student.githubUsername })),
-    teams: [
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.faculty_team,
-        name: config.course.github.faculty_team
-      },
-      {
-        org: config.course.github.organization,
-        slug: config.course.github.grader_team,
-        name: config.course.github.grader_team
-      }
-    ]
-  });
-};
 var runValidateCommand = async ({
   cwd,
   assignmentFile,
@@ -11860,12 +11488,29 @@ var runValidateCommand = async ({
       }
     });
   }
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName: COMMAND_NAME15,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: [...rosterResult.warnings, ...workflowCompatibilityResult.warnings],
+      errors: [
+        createConfigDiagnostic(
+          GITHUB_TOKEN_REQUIRED_CODE,
+          "A GitHub token is required before Validate can check GitHub readiness. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: { options, ...configResult.config.summary, ...rosterResult.summary }
+    });
+  }
   const readinessResult = await validateGitHubReadiness({
     courseConfig: configResult.config.course,
     termConfig: configResult.config.term,
     assignmentConfig: configResult.config.assignment,
     students: rosterResult.students,
-    githubClient: githubClient ?? createDefaultGitHubClient4(configResult.config, rosterResult.students),
+    githubClient: githubResolution.githubClient,
     validateTemplateWorkflow: workflowCompatibilityResult.workflowStatus === "missing"
   });
   if (readinessResult.errors.length > 0) {

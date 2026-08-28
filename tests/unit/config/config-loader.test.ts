@@ -157,12 +157,95 @@ describe("config loading and validation", () => {
     expectFailureCode("partial-grading-override", "invalid_grading_config");
   });
 
+  it("accepts absent course grading and assignment template blocks", () => {
+    const cwd = copyValidFixtureToTemp();
+    replaceCourseGrading(cwd, "");
+    const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
+    fs.writeFileSync(
+      assignmentPath,
+      fs.readFileSync(assignmentPath, "utf8").replace(/template:\n(?: {2}.*\n){2}/u, ""),
+      "utf8"
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.summary).toMatchObject({ gradingEnabled: false, gradingSource: "none" });
+  });
+
   it("TC-CONFIG-010 missing required term.yml field fails", () => {
     expectFailureCode("missing-term-field", "missing_required_field");
   });
 
   it("TC-CONFIG-011 missing required assignment.yml field fails", () => {
     expectFailureCode("missing-assignment-field", "missing_required_field");
+  });
+
+  it("accepts an assignment with no deadline block", () => {
+    const cwd = copyValidFixtureToTemp();
+    const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
+    fs.writeFileSync(
+      assignmentPath,
+      fs.readFileSync(assignmentPath, "utf8").replace(/deadline:\n(?: {2}.*\n){2}/u, ""),
+      "utf8"
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.assignment.deadline).toBeUndefined();
+  });
+
+  it("accepts an assignment with no points field", () => {
+    const cwd = copyValidFixtureToTemp();
+    const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
+    fs.writeFileSync(
+      assignmentPath,
+      fs.readFileSync(assignmentPath, "utf8").replace(/^  points: .*\n/mu, ""),
+      "utf8"
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.assignment.metadata?.points).toBeUndefined();
+  });
+
+  it("accepts an assignment with no faculty owner or grading category", () => {
+    const cwd = copyValidFixtureToTemp();
+    const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
+    fs.writeFileSync(
+      assignmentPath,
+      fs
+        .readFileSync(assignmentPath, "utf8")
+        .replace(/^  faculty_owner: .*\n/mu, "")
+        .replace(/^  grading_category: .*\n/mu, ""),
+      "utf8"
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.assignment.metadata?.faculty_owner).toBeUndefined();
+    expect(result.config.assignment.metadata?.grading_category).toBeUndefined();
+  });
+
+  it("accepts an assignment with no LMS assignment ID", () => {
+    const cwd = copyValidFixtureToTemp();
+    const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
+    fs.writeFileSync(
+      assignmentPath,
+      fs.readFileSync(assignmentPath, "utf8").replace(/^  lms_assignment_id: .*\n/mu, ""),
+      "utf8"
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.assignment.metadata?.lms_assignment_id).toBeUndefined();
+  });
+
+  it("accepts an assignment with no metadata block", () => {
+    const cwd = copyValidFixtureToTemp();
+    const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
+    fs.writeFileSync(
+      assignmentPath,
+      fs.readFileSync(assignmentPath, "utf8").replace(/metadata:\n(?: {2}.*\n){4}/u, ""),
+      "utf8"
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.assignment.metadata).toBeUndefined();
   });
 
   it("accepts preset grading mode with supported preset", () => {

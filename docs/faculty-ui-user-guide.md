@@ -17,7 +17,6 @@ Graider helps faculty:
 
 ## What Graider Does Not Do Yet
 
-- It does not send student email.
 - It does not post to Canvas.
 - It does not enable GitHub Pages.
 - It does not automatically commit or push the student access page.
@@ -51,7 +50,7 @@ Prepare these items before an assignment cycle:
 - A canonical roster CSV for each section:
 
   ```text
-  student_id,github_username,email,first_name,last_name,section,status
+  student_id,github_username,section,status
   ```
 
 - `active`, `dropped`, or `hold` roster status for every student. Active
@@ -104,11 +103,13 @@ already adopted by your department/course repository.
 ## Manage Rosters
 
 Choose **Manage Rosters**, select the term and section, review the table, then
-save the canonical seven-column CSV. Use **Add Student** to add an individual
+save the canonical four-column CSV. Use **Add Student** to add an individual
 student; the selected section is filled in and the status defaults to `active`.
 Use **Remove Student** to remove a row, **Replace from CSV** to replace the
 selected roster with an uploaded canonical CSV, or **Clear Roster Rows** to
-save a header-only roster while keeping the section. Review the preview before
+save a header-only roster while keeping the section. **Remove Roster** instead
+deletes the roster CSV and removes its term reference after confirmation; the
+section remains and a roster can be added again later. Review the preview before
 using **Save Roster**. Keep `student_id` and `github_username` accurate. Use `active` for students who should receive repositories; use
 `dropped` or `hold` to exclude them from repository access-page generation.
 
@@ -117,16 +118,16 @@ Enter a safe, unique section ID, optionally upload a canonical roster CSV (or
 leave it empty), preview the `term.yml` and roster changes, then explicitly
 save. Graider creates `terms/<term-code>/rosters/section-<section-id>.csv`.
 
-If Graider reports a legacy roster, explicitly save it through the roster
-manager to migrate it to the seven-column format. Do not remove the email and
-name columns even though the student access page never displays them.
+Graider accepts former seven-column rosters for import compatibility and saves
+them in the canonical four-column format.
 
 ## Create a New Assignment
 
 Use **New Assignment** from the dashboard. Enter the assignment title and
-slug, term, target sections, template repository and branch, deadline, points,
-and grading settings. Review the generated configuration, then use **Save
-assignment setup**.
+slug, term, target sections, optional template repository/branch, optional
+deadline and metadata (points, faculty owner, LMS assignment ID, and grading
+category), and optional grading settings. Review the generated configuration,
+then use **Save assignment setup**.
 
 When you select a term, all of its sections are selected by default, including
 sections with an empty roster. Clear any section checkbox that should not be
@@ -138,7 +139,8 @@ The assignment is stored at:
 terms/<term-code>/assignments/<assignment-slug>/assignment.yml
 ```
 
-Before saving a template-backed assignment, Graider checks that the authenticated
+Leave both template fields blank to omit the template block. Before saving a
+template-backed assignment, Graider checks that the authenticated
 GitHub identity can access the template repository and that the selected branch
 exists. Leave the branch blank to use the repository's GitHub default branch
 (for example, `master`); an explicit branch is validated exactly as entered. If validation fails, check the owner/repository spelling, branch name,
@@ -151,10 +153,11 @@ be reviewed, but repository creation and grading readiness may be restricted.
 ## Edit an Assignment
 
 Open Assignment Detail and choose **Edit assignment**. Review the title,
-sections, template repository/branch, deadline, status, points, and grading
-settings. Save with **Save assignment changes** only after reviewing the
-preview. The assignment term and slug are identity/path fields, so create a new
-assignment rather than trying to rename them in place.
+sections, optional template repository/branch, optional deadline, status,
+optional metadata (points, faculty owner, LMS assignment ID, and grading
+category), and grading settings. Save with **Save assignment changes** only
+after reviewing the preview. The assignment term and slug are identity/path
+fields, so create a new assignment rather than trying to rename them in place.
 
 ## Apply an Assignment and Create Student Repositories
 
@@ -163,15 +166,15 @@ repositories Graider would create, update, skip, or block. Resolve unexpected
 repository names, roster problems, and blockers before continuing.
 
 Use the confirm control on the Apply Preview page to run the apply operation.
-It creates/configures the selected students' repositories and records the local
-manifest. “Not applied” usually means repositories have not been created yet;
-it is not automatically an error. Apply must succeed before repository links
-can be shared with students.
+It creates/configures the selected students' repositories, records the local
+manifest, and generates or updates the student repository access page. Apply
+reports failure if the required access page cannot be generated. “Not applied”
+usually means repositories have not been created yet; it is not automatically
+an error. Apply must succeed before repository links can be shared with students.
 
 ## Share Repository Links with Students Using Canvas
 
-Graider's current student-notification fallback is a static GitHub Pages access
-page, not email.
+Graider provides a static GitHub Pages access page for repository links.
 
 1. Configure the optional Pages target in `course.yml` (or the Course Setup
    wizard), then select its local filesystem clone from Assignment Detail. The
@@ -191,8 +194,9 @@ page, not email.
    Pages URL. The local repository folder is a machine-local filesystem path;
    Graider does not store that path in `course.yml`.
 
-2. In **Student repository access page**, choose **Generate student access
-   page** (or **Regenerate student access page**).
+2. After Apply, confirm the generated page in **Student repository access page**.
+   Choose **Regenerate student access page** only after roster or repository-link
+   corrections.
 3. Confirm the output path in the selected Pages repository is:
 
    ```text
@@ -221,7 +225,7 @@ review **Publish readiness**:
 
 | Status               | What to do                                                                                         |
 | -------------------- | -------------------------------------------------------------------------------------------------- |
-| Not generated        | Generate the access page first.                                                                    |
+| Not generated        | Apply the assignment, or regenerate the access page after correcting its inputs.                   |
 | Not a git repository | Select the intended local Pages repository clone; Graider cannot assess publishing here.           |
 | Uncommitted          | Choose **Publish Student Access Page**, review the single page-file change, then confirm.          |
 | No upstream          | Configure/push an upstream branch using the displayed manual command.                              |
@@ -300,8 +304,9 @@ failed workflow results may leave report rows incomplete.
 - **Assignment not applied / repositories missing:** Use **Preview apply**,
   resolve blockers, then confirm apply. Do not share the access page until the
   manifest has repository URLs for intended active students.
-- **Roster schema rejected:** Save the canonical seven-column header shown
-  above and ensure each row's section and status are valid.
+- **Roster schema rejected:** Save the canonical four-column header shown
+  above and ensure each row's section and status are valid. Former seven-column
+  files are accepted only for import and are saved back in canonical form.
 - **Student missing from access page:** Check that the roster status is active
   and that the assignment manifest has a repository URL for that student.
 - **Canvas link opens 404:** Confirm the page was generated in the selected
@@ -331,15 +336,14 @@ failed workflow results may leave report rows incomplete.
 1. Confirm roster.
 2. Create or edit the assignment.
 3. Preview apply.
-4. Apply the assignment.
-5. Generate the student access page.
-6. Check publish readiness.
-7. Commit and push the generated page manually.
-8. Copy the Canvas link.
-9. Post the link in Canvas.
-10. Dispatch grading when ready.
-11. Check grade status.
-12. Generate the faculty report.
+4. Apply the assignment (which generates the student access page).
+5. Check publish readiness.
+6. Commit and push the generated page manually.
+7. Copy the Canvas link.
+8. Post the link in Canvas.
+9. Dispatch grading when ready.
+10. Check grade status.
+11. Generate the faculty report.
 
 For packaged-app and developer validation details, see the
 [Electron Release Readiness Guide](electron-release-readiness.md).

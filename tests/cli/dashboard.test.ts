@@ -66,7 +66,7 @@ github:
   organization: example-org
   repository_visibility: private
   repo_name_pattern: "{term}-{course}-{assignment}-{github_username}"
-  student_permission: push
+  student_permission: admin
   faculty_team: faculty
   faculty_permission: admin
   grader_team: graders
@@ -329,16 +329,14 @@ describe("graider dashboard command", () => {
     expect(json.cards).toEqual([]);
   });
 
-  it("requires GRAIDER_GITHUB_TOKEN before local card loading", async () => {
+  it("allows an injected GitHub client without an environment token", async () => {
     const result = await runDashboard(createCourseFixture(), { json: true }, {});
 
-    expect(result.status).toBe("failure");
-    expect(result.exitCode).toBe(1);
-    expect(result.diagnostics).toEqual([expect.objectContaining({ code: "github_token_missing" })]);
-    expect(result.cards).toEqual([]);
+    expect(result.status).toBe("success");
+    expect(result.diagnostics).toEqual([]);
   });
 
-  it("treats blank and whitespace GRAIDER_GITHUB_TOKEN as missing", async () => {
+  it("allows blank environment tokens when a GitHub client is injected", async () => {
     const blank = await runDashboard(
       createCourseFixture(),
       { json: true },
@@ -350,10 +348,8 @@ describe("graider dashboard command", () => {
       { GRAIDER_GITHUB_TOKEN: "   " }
     );
 
-    expect(blank.diagnostics).toEqual([expect.objectContaining({ code: "github_token_missing" })]);
-    expect(whitespace.diagnostics).toEqual([
-      expect.objectContaining({ code: "github_token_missing" })
-    ]);
+    expect(blank.diagnostics).toEqual([]);
+    expect(whitespace.diagnostics).toEqual([]);
   });
 
   it("returns the dashboard JSON contract for one course and one term", async () => {

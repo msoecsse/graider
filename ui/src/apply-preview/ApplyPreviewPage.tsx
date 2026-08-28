@@ -107,6 +107,10 @@ const getApplyCommandErrorMessage = (result: ApplyExecutionLoadResult | null): s
     return "Graider returned invalid apply JSON.";
   }
 
+  if (errorCode === "student_repository_access_page_generation_failed") {
+    return result?.error?.message ?? "Student repository access page generation failed.";
+  }
+
   if (errorCode === "assignment_file_not_found") {
     return "Assignment file not found.";
   }

@@ -2,10 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { RosterSaveRequest, RosterSectionRequest } from "./ipc";
-import { getRosterForSection, previewRosterSave, saveRoster } from "./rosterManagerService";
+import type { RosterRemoveRequest, RosterSaveRequest, RosterSectionRequest } from "./ipc";
+import {
+  getRosterForSection,
+  removeRoster,
+  previewRosterSave,
+  saveRoster
+} from "./rosterManagerService";
 
-const CANONICAL_HEADER = "student_id,github_username,email,first_name,last_name,section,status";
+const CANONICAL_HEADER = "student_id,github_username,section,status";
 const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-roster-manager-"));
 
 const createTerm = (root: string): void => {
@@ -37,9 +42,6 @@ const request = (root: string, overrides: Partial<RosterSaveRequest> = {}): Rost
     {
       studentId: "S001",
       githubUsername: "octocat",
-      email: "octo@example.test",
-      firstName: "Octo",
-      lastName: "Cat",
       section: "001",
       status: "active"
     }
@@ -55,6 +57,11 @@ const loadRequest = (root: string): RosterSectionRequest => ({
   sectionId: "001"
 });
 
+const removeRequest = (root: string, confirmed = false): RosterRemoveRequest => ({
+  ...loadRequest(root),
+  confirmed
+});
+
 describe("roster manager service", () => {
   it("loads canonical rows and returns an empty roster when the file is missing", () => {
     const root = createRoot();
@@ -67,11 +74,7 @@ describe("roster manager service", () => {
 
     const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
     fs.mkdirSync(path.dirname(rosterPath), { recursive: true });
-    fs.writeFileSync(
-      rosterPath,
-      `${CANONICAL_HEADER}\nS001,octocat,octo@example.test,Octo,Cat,001,active\n`,
-      "utf8"
-    );
+    fs.writeFileSync(rosterPath, `${CANONICAL_HEADER}\nS001,octocat,001,active\n`, "utf8");
 
     expect(getRosterForSection(loadRequest(root))).toMatchObject({
       status: "ready",
@@ -80,38 +83,38 @@ describe("roster manager service", () => {
     });
   });
 
-  it("generates canonical LF CSV and escapes values", () => {
+  it("generates canonical four-column LF CSV", () => {
     const root = createRoot();
     createTerm(root);
     const preview = previewRosterSave(
       request(root, {
-        rows: [{ ...request(root).rows[0]!, firstName: 'Octo, "Professor"' }]
+        rows: [{ ...request(root).rows[0]!, githubUsername: "octocat" }]
       })
     );
 
     expect(preview.status).toBe("ready");
     expect(preview.path).toBe("terms/27s1/rosters/section-001.csv");
-    expect(preview.content).toBe(
-      `${CANONICAL_HEADER}\nS001,octocat,octo@example.test,"Octo, ""Professor""",Cat,001,active\n`
-    );
+    expect(preview.content).toBe(`${CANONICAL_HEADER}\nS001,octocat,001,active\n`);
     expect(preview.content).not.toContain("\r");
   });
 
-  it("rejects missing fields, malformed emails, invalid statuses, duplicates, and wrong sections", () => {
+  it("rejects missing retained fields, invalid statuses, duplicates, and wrong sections", () => {
     const root = createRoot();
     createTerm(root);
     const first = request(root).rows[0]!;
     const preview = previewRosterSave(
       request(root, {
         rows: [
-          { ...first, email: "not-an-email", status: "unknown", section: "002" },
-          { ...first, firstName: "" }
+          { ...first, status: "unknown", section: "002" },
+          { ...first, githubUsername: "" }
         ]
       })
     );
 
     expect(preview.status).toBe("invalid");
-    expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain("invalid email");
+    expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain(
+      "missing githubUsername"
+    );
     expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain("invalid status");
     expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain(
       "Duplicate student_id"
@@ -119,7 +122,7 @@ describe("roster manager service", () => {
     expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain("expected 001");
   });
 
-  it("detects legacy and unknown headers without silently replacing them", () => {
+  it("accepts the MVP header and rejects unknown headers without silently replacing them", () => {
     const root = createRoot();
     createTerm(root);
     const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
@@ -130,9 +133,33 @@ describe("roster manager service", () => {
       "utf8"
     );
 
-    expect(getRosterForSection(loadRequest(root)).status).toBe("migration_required");
+    expect(getRosterForSection(loadRequest(root)).status).toBe("ready");
     fs.writeFileSync(rosterPath, "name,email\nOcto,octo@example.test\n", "utf8");
     expect(getRosterForSection(loadRequest(root)).status).toBe("invalid");
+  });
+
+  it("loads the former seven-column header while retaining only MVP fields", () => {
+    const root = createRoot();
+    createTerm(root);
+    const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    fs.mkdirSync(path.dirname(rosterPath), { recursive: true });
+    fs.writeFileSync(
+      rosterPath,
+      "student_id,github_username,email,first_name,last_name,section,status\nS001,octocat,octo@example.test,Octo,Cat,001,active\n",
+      "utf8"
+    );
+
+    expect(getRosterForSection(loadRequest(root))).toMatchObject({
+      status: "ready",
+      rows: [
+        {
+          studentId: "S001",
+          githubUsername: "octocat",
+          section: "001",
+          status: "active"
+        }
+      ]
+    });
   });
 
   it("does not write during preview and writes only after confirmation in paths with spaces", () => {
@@ -198,6 +225,25 @@ describe("roster manager service", () => {
     expect(fs.readFileSync(rosterPath, "utf8")).not.toContain("S001");
     expect(saveRoster(request(root, { rows: [], confirmed: true })).status).toBe("success");
     expect(fs.readFileSync(rosterPath, "utf8")).toBe(`${CANONICAL_HEADER}\n`);
+  });
+
+  it("removes the roster CSV and term reference only after confirmation, then allows re-adding", () => {
+    const root = createRoot();
+    createTerm(root);
+    const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    expect(saveRoster({ ...request(root), confirmed: true }).status).toBe("success");
+
+    expect(removeRoster(removeRequest(root))).toMatchObject({ status: "failure" });
+    expect(fs.existsSync(rosterPath)).toBe(true);
+    expect(removeRoster(removeRequest(root, true))).toMatchObject({ status: "success" });
+    expect(fs.existsSync(rosterPath)).toBe(false);
+    expect(fs.readFileSync(termPath, "utf8")).not.toContain("roster:");
+    expect(getRosterForSection(loadRequest(root))).toMatchObject({ exists: false, rows: [] });
+
+    expect(saveRoster({ ...request(root), confirmed: true }).status).toBe("success");
+    expect(fs.existsSync(rosterPath)).toBe(true);
+    expect(fs.readFileSync(termPath, "utf8")).toContain("roster: rosters/section-001.csv");
   });
 
   it("adds canonical roster rows and rejects invalid new section requests", () => {

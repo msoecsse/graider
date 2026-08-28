@@ -30,6 +30,63 @@ const writeFixture = (root: string): void => {
   );
 };
 
+const removeDeadline = (root: string): void => {
+  const filePath = path.join(root, assignmentFile);
+  fs.writeFileSync(
+    filePath,
+    fs.readFileSync(filePath, "utf8").replace(/deadline:\n(?: {2}.*\n){2}/u, ""),
+    "utf8"
+  );
+};
+
+const removePoints = (root: string): void => {
+  const filePath = path.join(root, assignmentFile);
+  fs.writeFileSync(
+    filePath,
+    fs.readFileSync(filePath, "utf8").replace(/^  points: .*\n/mu, ""),
+    "utf8"
+  );
+};
+
+const removeFacultyOwnerAndGradingCategory = (root: string): void => {
+  const filePath = path.join(root, assignmentFile);
+  fs.writeFileSync(
+    filePath,
+    fs
+      .readFileSync(filePath, "utf8")
+      .replace(/^  faculty_owner: .*\n/mu, "")
+      .replace(/^  grading_category: .*\n/mu, ""),
+    "utf8"
+  );
+};
+
+const removeLmsAssignmentId = (root: string): void => {
+  const filePath = path.join(root, assignmentFile);
+  fs.writeFileSync(
+    filePath,
+    fs.readFileSync(filePath, "utf8").replace(/^  lms_assignment_id: .*\n/mu, ""),
+    "utf8"
+  );
+};
+
+const removeMetadata = (root: string): void => {
+  const filePath = path.join(root, assignmentFile);
+  fs.writeFileSync(
+    filePath,
+    fs.readFileSync(filePath, "utf8").replace(/metadata:\n(?: {2}.*\n){4}/u, ""),
+    "utf8"
+  );
+};
+
+const removeTemplate = (root: string): void => {
+  const filePath = path.join(root, assignmentFile);
+  fs.writeFileSync(
+    filePath,
+    fs.readFileSync(filePath, "utf8").replace(/template:\n(?: {2}.*\n){2}/u, ""),
+    "utf8"
+  );
+};
+
 const createRequest = (root: string): AssignmentEditRequest => {
   const loaded = getAssignmentForEdit(root, assignmentFile).model;
   if (loaded === null) throw new Error("Expected assignment model.");
@@ -46,6 +103,8 @@ const createRequest = (root: string): AssignmentEditRequest => {
     assignmentStatus: "active",
     gradingEnabled: true,
     points: 125,
+    facultyOwner: "professor",
+    lmsAssignmentId: "",
     gradingCategory: "labs",
     originalContent: loaded.originalContent,
     confirmed: false
@@ -72,6 +131,27 @@ describe("assignmentEditService", () => {
     );
   });
 
+  it("loads and saves an assignment without inventing a template", () => {
+    const root = createRoot();
+    writeFixture(root);
+    removeTemplate(root);
+    const loaded = getAssignmentForEdit(root, assignmentFile);
+
+    expect(loaded.model).toMatchObject({ templateRepository: "", templateBranch: "" });
+    if (loaded.model === null) throw new Error("Expected assignment model.");
+    const request = {
+      ...createRequest(root),
+      templateRepository: "",
+      templateBranch: "",
+      originalContent: loaded.model.originalContent
+    };
+
+    expect(previewAssignmentEdit(request)).toMatchObject({ status: "ready" });
+    expect(previewAssignmentEdit(request).content).not.toContain("template:");
+    expect(saveAssignmentEdit({ ...request, confirmed: true }).status).toBe("success");
+    expect(fs.readFileSync(path.join(root, assignmentFile), "utf8")).not.toContain("template:");
+  });
+
   it("blocks a save when assignment.yml changes after loading", () => {
     const root = createRoot();
     writeFixture(root);
@@ -81,5 +161,128 @@ describe("assignmentEditService", () => {
     expect(saveAssignmentEdit({ ...request, confirmed: true })).toMatchObject({
       status: "conflict"
     });
+  });
+
+  it("loads and saves an assignment without inventing a deadline", () => {
+    const root = createRoot();
+    writeFixture(root);
+    removeDeadline(root);
+    const loaded = getAssignmentForEdit(root, assignmentFile);
+
+    expect(loaded.model).toMatchObject({ dueAt: "", latePolicy: "" });
+    if (loaded.model === null) throw new Error("Expected assignment model.");
+    const preview = previewAssignmentEdit({
+      ...createRequest(root),
+      dueAt: "",
+      latePolicy: "",
+      originalContent: loaded.model.originalContent
+    });
+
+    expect(preview.status).toBe("ready");
+    expect(preview.content).not.toContain("deadline:");
+    expect(
+      saveAssignmentEdit({
+        ...createRequest(root),
+        dueAt: "",
+        latePolicy: "",
+        originalContent: loaded.model.originalContent,
+        confirmed: true
+      }).status
+    ).toBe("success");
+    expect(fs.readFileSync(path.join(root, assignmentFile), "utf8")).not.toContain("deadline:");
+  });
+
+  it("loads and saves an assignment without inventing points", () => {
+    const root = createRoot();
+    writeFixture(root);
+    removePoints(root);
+    const loaded = getAssignmentForEdit(root, assignmentFile);
+
+    expect(loaded.model).toMatchObject({ points: null });
+    if (loaded.model === null) throw new Error("Expected assignment model.");
+    const request = {
+      ...createRequest(root),
+      points: null,
+      originalContent: loaded.model.originalContent
+    };
+
+    expect(previewAssignmentEdit(request)).toMatchObject({ status: "ready" });
+    expect(previewAssignmentEdit(request).content).not.toContain("points:");
+    expect(saveAssignmentEdit({ ...request, confirmed: true }).status).toBe("success");
+    expect(fs.readFileSync(path.join(root, assignmentFile), "utf8")).not.toContain("points:");
+  });
+
+  it("loads and saves an assignment without inventing faculty metadata", () => {
+    const root = createRoot();
+    writeFixture(root);
+    removeFacultyOwnerAndGradingCategory(root);
+    const loaded = getAssignmentForEdit(root, assignmentFile);
+
+    expect(loaded.model).toMatchObject({ facultyOwner: "", gradingCategory: "" });
+    if (loaded.model === null) throw new Error("Expected assignment model.");
+    const request = {
+      ...createRequest(root),
+      facultyOwner: "",
+      gradingCategory: "",
+      originalContent: loaded.model.originalContent
+    };
+
+    expect(previewAssignmentEdit(request)).toMatchObject({ status: "ready" });
+    expect(previewAssignmentEdit(request).content).not.toContain("faculty_owner:");
+    expect(previewAssignmentEdit(request).content).not.toContain("grading_category:");
+    expect(saveAssignmentEdit({ ...request, confirmed: true }).status).toBe("success");
+    const content = fs.readFileSync(path.join(root, assignmentFile), "utf8");
+    expect(content).not.toContain("faculty_owner:");
+    expect(content).not.toContain("grading_category:");
+  });
+
+  it("loads and saves an assignment without inventing an LMS assignment ID", () => {
+    const root = createRoot();
+    writeFixture(root);
+    removeLmsAssignmentId(root);
+    const loaded = getAssignmentForEdit(root, assignmentFile);
+
+    expect(loaded.model).toMatchObject({ lmsAssignmentId: null });
+    if (loaded.model === null) throw new Error("Expected assignment model.");
+    const request = {
+      ...createRequest(root),
+      lmsAssignmentId: "",
+      originalContent: loaded.model.originalContent
+    };
+
+    expect(previewAssignmentEdit(request)).toMatchObject({ status: "ready" });
+    expect(previewAssignmentEdit(request).content).not.toContain("lms_assignment_id:");
+    expect(saveAssignmentEdit({ ...request, confirmed: true }).status).toBe("success");
+    expect(fs.readFileSync(path.join(root, assignmentFile), "utf8")).not.toContain(
+      "lms_assignment_id:"
+    );
+  });
+
+  it("loads and saves an assignment without inventing metadata", () => {
+    const root = createRoot();
+    writeFixture(root);
+    removeMetadata(root);
+    const loaded = getAssignmentForEdit(root, assignmentFile);
+
+    expect(loaded.model).toMatchObject({
+      points: null,
+      facultyOwner: "",
+      lmsAssignmentId: null,
+      gradingCategory: ""
+    });
+    if (loaded.model === null) throw new Error("Expected assignment model.");
+    const request = {
+      ...createRequest(root),
+      points: null,
+      facultyOwner: "",
+      lmsAssignmentId: "",
+      gradingCategory: "",
+      originalContent: loaded.model.originalContent
+    };
+
+    expect(previewAssignmentEdit(request)).toMatchObject({ status: "ready" });
+    expect(previewAssignmentEdit(request).content).not.toContain("metadata:");
+    expect(saveAssignmentEdit({ ...request, confirmed: true }).status).toBe("success");
+    expect(fs.readFileSync(path.join(root, assignmentFile), "utf8")).not.toContain("metadata:");
   });
 });

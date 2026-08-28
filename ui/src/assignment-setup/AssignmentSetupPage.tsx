@@ -32,7 +32,9 @@ const createRequest = (
     templateBranch: string;
     dueAt: string;
     gradingEnabled: boolean;
-    points: number;
+    points: number | null;
+    facultyOwner: string;
+    lmsAssignmentId: string;
     gradingCategory: string;
   }
 ): AssignmentSetupRequest => ({
@@ -63,6 +65,8 @@ export const AssignmentSetupPage = ({
   const [dueAt, setDueAt] = useState("");
   const [gradingEnabled, setGradingEnabled] = useState(true);
   const [points, setPoints] = useState("100");
+  const [facultyOwner, setFacultyOwner] = useState("");
+  const [lmsAssignmentId, setLmsAssignmentId] = useState("");
   const [gradingCategory, setGradingCategory] = useState("labs");
   const [preview, setPreview] = useState<AssignmentSetupPreviewResult | null>(null);
   const [replaceExisting, setReplaceExisting] = useState(false);
@@ -95,7 +99,9 @@ export const AssignmentSetupPage = ({
         templateBranch,
         dueAt: toIsoWithOffset(dueAt),
         gradingEnabled,
-        points: Number(points),
+        points: points.trim() === "" ? null : Number(points),
+        facultyOwner,
+        lmsAssignmentId,
         gradingCategory
       }),
     [
@@ -103,8 +109,10 @@ export const AssignmentSetupPage = ({
       assignmentTitle,
       courseFolder,
       dueAt,
+      facultyOwner,
       gradingCategory,
       gradingEnabled,
+      lmsAssignmentId,
       points,
       sectionIds,
       templateBranch,
@@ -279,12 +287,12 @@ export const AssignmentSetupPage = ({
           )}
         </section>
         <section className="detail-panel">
-          <h2>Template repository</h2>
+          <h2>Template repository (optional)</h2>
           <label>
             GitHub template repository
             <input
               value={templateRepository}
-              placeholder="owner/repository"
+              placeholder="Leave both template fields blank to omit"
               onChange={(event) => {
                 setTemplateRepository(event.target.value);
                 clearPreview();
@@ -334,6 +342,26 @@ export const AssignmentSetupPage = ({
               value={gradingCategory}
               onChange={(event) => {
                 setGradingCategory(event.target.value);
+                clearPreview();
+              }}
+            />
+          </label>
+          <label>
+            Faculty owner
+            <input
+              value={facultyOwner}
+              onChange={(event) => {
+                setFacultyOwner(event.target.value);
+                clearPreview();
+              }}
+            />
+          </label>
+          <label>
+            LMS assignment ID
+            <input
+              value={lmsAssignmentId}
+              onChange={(event) => {
+                setLmsAssignmentId(event.target.value);
                 clearPreview();
               }}
             />

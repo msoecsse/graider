@@ -10,7 +10,15 @@ export type RawCourseConfig = z.infer<typeof rawCourseConfigSchema>;
 export type RawTermConfig = z.infer<typeof rawTermConfigSchema>;
 export type RawAssignmentConfig = z.infer<typeof rawAssignmentConfigSchema>;
 
-export type GradingSource = "course" | "assignment";
+export type ResolvedCourseConfig = RawCourseConfig & {
+  readonly grading: NonNullable<RawCourseConfig["grading"]>;
+};
+
+export type ResolvedAssignmentConfig = RawAssignmentConfig & {
+  readonly template: NonNullable<RawAssignmentConfig["template"]>;
+};
+
+export type GradingSource = "course" | "assignment" | "none";
 
 export interface LoadedGraiderConfigSummary {
   repoRoot: string;
@@ -25,9 +33,9 @@ export interface LoadedGraiderConfigSummary {
 }
 
 export interface LoadedGraiderConfig {
-  course: RawCourseConfig;
+  course: ResolvedCourseConfig;
   term: RawTermConfig;
-  assignment: RawAssignmentConfig;
+  assignment: ResolvedAssignmentConfig;
   summary: LoadedGraiderConfigSummary;
 }
 

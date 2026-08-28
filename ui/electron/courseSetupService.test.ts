@@ -23,8 +23,7 @@ const createRequest = (
   ...overrides
 });
 
-const ROSTER =
-  "student_id,github_username,email,first_name,last_name,section,status\nS123,octocat,octo@example.test,Octo,Cat,001,ACTIVE\n";
+const ROSTER = "student_id,github_username,section,status\nS123,octocat,001,ACTIVE\n";
 
 describe("course setup service", () => {
   it("generates course defaults and derives Fall 2026 for 27s1", () => {
@@ -35,6 +34,13 @@ describe("course setup service", () => {
     expect(preview.files[0]?.content).toContain("timezone: America/Chicago");
     expect(preview.files[1]?.content).toContain('display_name: "Fall 2026"');
     expect(preview.files.map((file) => file.path)).toEqual(["course.yml", "terms/27s1/term.yml"]);
+  });
+
+  it("omits course grading when grading is not configured", () => {
+    const preview = previewCourseSetup(createRequest(createRoot(), { gradingEnabled: false }));
+
+    expect(preview.status).toBe("ready");
+    expect(preview.files[0]?.content).not.toContain("grading:");
   });
 
   it.each([
@@ -54,11 +60,11 @@ describe("course setup service", () => {
     expect(preview.status).toBe("ready");
     expect(roster?.path).toBe("terms/27s1/rosters/section-001.csv");
     expect(roster?.content).toContain(
-      "student_id,github_username,email,first_name,last_name,section,status\nS123,octocat,octo@example.test,Octo,Cat,001,ACTIVE"
+      "student_id,github_username,section,status\nS123,octocat,001,ACTIVE"
     );
   });
 
-  it("rejects blank or duplicate sections and the legacy roster header", () => {
+  it("rejects blank or duplicate sections and non-MVP roster headers", () => {
     const duplicate = previewCourseSetup(
       createRequest(createRoot(), { sectionIds: ["001", " 001 "] })
     );
@@ -67,7 +73,8 @@ describe("course setup service", () => {
         rosterUploads: [
           {
             sectionId: "001",
-            content: "student_id,github_username,section,status\ns1,octocat,001,active\n"
+            content:
+              "student_id,github_username,name,section,status\ns1,octocat,Student,001,active\n"
           }
         ]
       })
@@ -75,7 +82,26 @@ describe("course setup service", () => {
 
     expect(duplicate.status).toBe("invalid");
     expect(legacy.diagnostics.map((diagnostic) => diagnostic.message).join(" ")).toContain(
-      "legacy four-column"
+      "student_id,github_username,section,status"
+    );
+  });
+
+  it("imports the former seven-column roster and writes the four retained fields", () => {
+    const preview = previewCourseSetup(
+      createRequest(createRoot(), {
+        rosterUploads: [
+          {
+            sectionId: "001",
+            content:
+              "student_id,github_username,email,first_name,last_name,section,status\ns1,octocat,s1@example.test,Student,One,001,active\n"
+          }
+        ]
+      })
+    );
+
+    expect(preview.status).toBe("ready");
+    expect(preview.files.find((file) => file.path.endsWith("section-001.csv"))?.content).toBe(
+      "student_id,github_username,section,status\ns1,octocat,001,active\n"
     );
   });
 

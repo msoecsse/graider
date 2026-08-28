@@ -9,13 +9,16 @@ import type {
   CourseSetupDiagnostic,
   RosterLoadResult,
   RosterPreviewResult,
+  RosterRemoveRequest,
+  RosterRemoveResult,
   RosterRow,
   RosterSaveRequest,
   RosterSaveResult,
   RosterSectionRequest
 } from "./ipc.js";
 
-const ROSTER_HEADERS = [
+const ROSTER_HEADERS = ["student_id", "github_username", "section", "status"] as const;
+const LEGACY_ROSTER_HEADERS = [
   "student_id",
   "github_username",
   "email",
@@ -24,9 +27,7 @@ const ROSTER_HEADERS = [
   "section",
   "status"
 ] as const;
-const LEGACY_HEADERS = ["student_id", "github_username", "section", "status"] as const;
 const VALID_STATUSES = ["active", "dropped", "hold"] as const;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const SECTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
@@ -73,9 +74,6 @@ const parseRows = (content: string, header: readonly string[]): RosterRow[] =>
       return {
         studentId: fields.student_id ?? "",
         githubUsername: fields.github_username ?? "",
-        email: fields.email ?? "",
-        firstName: fields.first_name ?? "",
-        lastName: fields.last_name ?? "",
         section: fields.section ?? "",
         status: (fields.status ?? "").toLowerCase()
       };
@@ -126,6 +124,78 @@ const createTermContentWithSection = (request: RosterSaveRequest): string | null
   }
 };
 
+const hasRosterReference = (request: RosterSectionRequest): boolean => {
+  try {
+    const root = parseDocument(
+      fs.readFileSync(path.join(request.courseFolderPath, getTermPath(request.termCode)), "utf8")
+    ).toJS() as { sections?: unknown };
+    return (
+      Array.isArray(root.sections) &&
+      root.sections.some(
+        (section) =>
+          typeof section === "object" &&
+          section !== null &&
+          (section as Record<string, unknown>).id === request.sectionId &&
+          typeof (section as Record<string, unknown>).roster === "string"
+      )
+    );
+  } catch {
+    return false;
+  }
+};
+
+const createTermContentWithRosterReference = (request: RosterSectionRequest): string | null => {
+  const termPath = path.join(request.courseFolderPath, getTermPath(request.termCode));
+  try {
+    const document = parseDocument(fs.readFileSync(termPath, "utf8"));
+    const root = document.toJS() as { sections?: unknown };
+    if (!Array.isArray(root.sections)) return null;
+    document.set(
+      "sections",
+      root.sections.map((section) => {
+        if (
+          typeof section !== "object" ||
+          section === null ||
+          (section as Record<string, unknown>).id !== request.sectionId
+        )
+          return section;
+        return {
+          ...(section as Record<string, unknown>),
+          roster: `rosters/section-${request.sectionId}.csv`
+        };
+      })
+    );
+    return document.toString();
+  } catch {
+    return null;
+  }
+};
+
+const createTermContentWithoutRosterReference = (request: RosterSectionRequest): string | null => {
+  const termPath = path.join(request.courseFolderPath, getTermPath(request.termCode));
+  try {
+    const document = parseDocument(fs.readFileSync(termPath, "utf8"));
+    const root = document.toJS() as { sections?: unknown };
+    if (!Array.isArray(root.sections)) return null;
+    document.set(
+      "sections",
+      root.sections.map((section) => {
+        if (
+          typeof section !== "object" ||
+          section === null ||
+          (section as Record<string, unknown>).id !== request.sectionId
+        )
+          return section;
+        const { roster: _roster, ...withoutRoster } = section as Record<string, unknown>;
+        return withoutRoster;
+      })
+    );
+    return document.toString();
+  } catch {
+    return null;
+  }
+};
+
 export const loadRosterTerms = (courseFolderPath: string): AssignmentSetupTermsResult =>
   loadAssignmentSetupTerms(courseFolderPath);
 
@@ -149,26 +219,15 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
   try {
     const content = fs.readFileSync(absolutePath, "utf8");
     const header = parseCsvLine(content.split(/\r?\n/u)[0] ?? "");
-    if (header.join(",") === ROSTER_HEADERS.join(",")) {
+    const isCanonicalHeader = header.join(",") === ROSTER_HEADERS.join(",");
+    const isLegacyHeader = header.join(",") === LEGACY_ROSTER_HEADERS.join(",");
+    if (isCanonicalHeader || isLegacyHeader) {
       return {
         status: "ready",
         path: rosterPath,
         exists: true,
         rows: parseRows(content, header),
         diagnostics: []
-      };
-    }
-    if (header.join(",") === LEGACY_HEADERS.join(",")) {
-      return {
-        status: "migration_required",
-        path: rosterPath,
-        exists: true,
-        rows: parseRows(content, header),
-        diagnostics: [
-          diagnostic(
-            "This roster uses the legacy four-column schema. Review the missing profile fields, then explicitly save a canonical replacement."
-          )
-        ]
       };
     }
     return {
@@ -199,18 +258,12 @@ const validateRows = (request: RosterSaveRequest): CourseSetupDiagnostic[] => {
     const values = {
       studentId: row.studentId.trim(),
       githubUsername: row.githubUsername.trim(),
-      email: row.email.trim(),
-      firstName: row.firstName.trim(),
-      lastName: row.lastName.trim(),
       section: row.section.trim(),
       status: row.status.trim().toLowerCase()
     };
     for (const [name, value] of Object.entries(values)) {
       if (value.length === 0)
         diagnostics.push(diagnostic(`Roster row ${String(rowNumber)} is missing ${name}.`));
-    }
-    if (values.email.length > 0 && !EMAIL_PATTERN.test(values.email)) {
-      diagnostics.push(diagnostic(`Roster row ${String(rowNumber)} has an invalid email address.`));
     }
     if (values.section.length > 0 && values.section !== request.sectionId) {
       diagnostics.push(
@@ -243,15 +296,7 @@ const validateRows = (request: RosterSaveRequest): CourseSetupDiagnostic[] => {
 const createCsv = (rows: readonly RosterRow[]): string => {
   const content = rows
     .map((row) =>
-      [
-        row.studentId,
-        row.githubUsername,
-        row.email,
-        row.firstName,
-        row.lastName,
-        row.section,
-        row.status
-      ]
+      [row.studentId, row.githubUsername, row.section, row.status]
         .map((value) => encodeCsvValue(value.trim()))
         .join(",")
     )
@@ -275,11 +320,14 @@ export const previewRosterSave = (request: RosterSaveRequest): RosterPreviewResu
     path: pathValue,
     content: createCsv(request.rows),
     exists: fs.existsSync(path.join(request.courseFolderPath, pathValue)),
-    termPath: request.createSection ? getTermPath(request.termCode) : null,
+    termPath:
+      request.createSection || !hasRosterReference(request) ? getTermPath(request.termCode) : null,
     termContent:
       request.createSection && creationDiagnostics.length === 0
         ? createTermContentWithSection(request)
-        : null,
+        : !request.createSection && !hasRosterReference(request)
+          ? createTermContentWithRosterReference(request)
+          : null,
     diagnostics
   };
 };
@@ -313,13 +361,8 @@ export const saveRoster = (request: RosterSaveRequest): RosterSaveResult => {
     };
   }
   try {
-    if (request.createSection) {
-      if (
-        preview.termPath === null ||
-        preview.termPath === undefined ||
-        preview.termContent === null ||
-        preview.termContent === undefined
-      )
+    if (preview.termContent !== null && preview.termPath !== null) {
+      if (preview.termPath === undefined || preview.termContent === undefined)
         return {
           status: "failure",
           path: preview.path,
@@ -342,6 +385,63 @@ export const saveRoster = (request: RosterSaveRequest): RosterSaveResult => {
       status: "failure",
       path: preview.path,
       diagnostics: [diagnostic("Unable to save roster CSV.")]
+    };
+  }
+};
+
+export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult => {
+  const rosterPath = getRosterPath(request.termCode, request.sectionId);
+  if (!request.confirmed)
+    return {
+      status: "failure",
+      path: rosterPath,
+      diagnostics: [diagnostic("Roster removal must be confirmed before deleting files.")]
+    };
+  if (!hasTermSection(request))
+    return {
+      status: "failure",
+      path: rosterPath,
+      diagnostics: [diagnostic("Select an existing term and section before removing a roster.")]
+    };
+
+  const root = path.resolve(request.courseFolderPath);
+  const absoluteRosterPath = path.resolve(root, rosterPath);
+  const termPath = path.resolve(root, getTermPath(request.termCode));
+  if (!isContainedPath(root, absoluteRosterPath) || !isContainedPath(root, termPath))
+    return {
+      status: "failure",
+      path: rosterPath,
+      diagnostics: [diagnostic("Roster removal path is outside the selected course folder.")]
+    };
+  const termContent = createTermContentWithoutRosterReference(request);
+  if (termContent === null)
+    return {
+      status: "failure",
+      path: rosterPath,
+      diagnostics: [diagnostic("Unable to update term.yml while removing the roster.")]
+    };
+  if (!fs.existsSync(absoluteRosterPath) && !hasRosterReference(request))
+    return {
+      status: "failure",
+      path: rosterPath,
+      diagnostics: [diagnostic("No configured roster exists for this section.")]
+    };
+
+  try {
+    const originalTermContent = fs.readFileSync(termPath, "utf8");
+    fs.writeFileSync(termPath, termContent, "utf8");
+    try {
+      if (fs.existsSync(absoluteRosterPath)) fs.unlinkSync(absoluteRosterPath);
+    } catch {
+      fs.writeFileSync(termPath, originalTermContent, "utf8");
+      throw new Error("Unable to delete roster CSV.");
+    }
+    return { status: "success", path: rosterPath, diagnostics: [] };
+  } catch {
+    return {
+      status: "failure",
+      path: rosterPath,
+      diagnostics: [diagnostic("Unable to remove roster CSV and update term.yml.")]
     };
   }
 };

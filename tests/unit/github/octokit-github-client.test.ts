@@ -477,6 +477,11 @@ describe("OctokitGitHubClient", () => {
     expect(createGitHubClient({ token: TOKEN })).toBeInstanceOf(OctokitGitHubClient);
   });
 
+  it("rejects missing and whitespace-only production tokens", () => {
+    expect(readGitHubToken({ GRAIDER_GITHUB_TOKEN: "  ", GITHUB_TOKEN: "\t" })).toBeUndefined();
+    expect(() => createGitHubClient({ env: {} })).toThrow("GitHub token is required");
+  });
+
   it("invalid token maps to github_auth_failed", async () => {
     const octokit = createMockOctokit();
     octokit.rest.users.getAuthenticated = () =>

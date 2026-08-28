@@ -19,7 +19,7 @@ const createFixture = (): string => {
   );
   fs.writeFileSync(
     path.join(root, "terms/27s1/rosters/section-001.csv"),
-    "student_id,github_username,email,first_name,last_name,section,status\na,aa,a@example.edu,A,A,001,active\nb,bb,b@example.edu,B,B,001,active\nc,cc,c@example.edu,C,C,001,dropped\n",
+    "student_id,github_username,section,status\na,aa,001,active\nb,bb,001,active\nc,cc,001,dropped\n",
     "utf8"
   );
   return root;

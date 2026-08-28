@@ -47,8 +47,6 @@ and renders:
 - a guarded confirmed apply execution flow from the Apply Preview page
 - grade dispatch and grade status entry points
 - a read-only Grade Workflow viewer for `.github/workflows/grade.yml`
-- a preview-only student repository email panel with read-only notification
-  history and duplicate-send indicators
 - a confirmed local-only student repository access-page generator for GitHub
   Pages
 
@@ -63,20 +61,23 @@ available from the Course Dashboard. It uses narrow IPC with an allowlist of
 Graider-managed course paths and fixed Git argv only; Pages-repository publishing
 remains a distinct workflow.
 
+Assignment template, grading, deadline, and metadata configuration are optional.
+When absent, detail renders template/workflow checks as not required and leaves
+metadata values empty rather than inventing defaults.
+
 ## Student Repository Access Page
 
-Assignment Detail can generate or regenerate a static student-facing page at:
+Successful Apply generates or updates a static student-facing page at:
 
 ```text
 terms/<term-code>/notifications/<assignment-slug>/student-repositories.html
 ```
 
 The narrow main-process API reads local `assignment.yml`, `course.yml`,
-canonical roster CSVs, and the assignment manifest; it makes no GitHub,
-Canvas, email, Microsoft, or SMTP calls. The page includes active students'
+canonical roster CSVs, and the assignment manifest; it makes no GitHub or
+Canvas calls. The page includes active students'
 MSOE usernames (`student_id`) and manifest-backed repository URLs only. It
-never includes names, email addresses, grades, roster status, notification
-history, or diagnostics.
+never includes names, grades, roster status, or diagnostics.
 
 When optional `notifications.student_access_pages` is configured, the UI offers
 a copyable Canvas link using its HTTPS `base_url`:
@@ -90,7 +91,8 @@ registry-backed IPC; that local path is never written to `course.yml`. The page
 is written only under that clone, while course/admin files remain the read
 source. The UI does not enable GitHub Pages, commit, push, or publish either
 repository. Missing active-student repository URLs are excluded from the
-generated page and reported to faculty.
+generated page and reported to faculty. The standalone action is retained only
+to regenerate after correcting roster, repository-link, or Pages configuration.
 
 The same panel also performs local publish-readiness checks against
 the selected Pages clone: page existence, git repository/branch/upstream
@@ -367,38 +369,6 @@ The corresponding IPC channel is:
 ```text
 graider-ui:faculty-report:get
 ```
-
-Student repository email preview and history use separate narrow APIs. Both are
-read-only: they inspect canonical roster data, the assignment manifest, and the
-assignment-scoped notification log. A successful notification entry is shown as
-`already_sent`; no email transport, authentication, send, resend, or log-write
-API is exposed by this flow.
-
-```text
-graider-ui:student-repo-email-preview:get
-graider-ui:student-repo-email-history:get
-```
-
-Notification history is stored, when a later confirmed send flow writes it, at:
-
-```text
-terms/<term-code>/notifications/<assignment-slug>/student-repo-emails.json
-```
-
-The log contains operational student data and must not contain credentials,
-tokens, authorization headers, or full email bodies. Whether it is committed or
-ignored is a campus policy decision.
-
-Slice L adds `graider-ui:student-repo-email-transport-status:get` for safe,
-read-only transport metadata. The default result is Microsoft Graph planned,
-not configured, and `canSend: false`; it does not read credentials, start
-authentication, contact Microsoft, or write logs.
-
-Slice N adds internal-only mail transport contracts, a deterministic test mock,
-and a Microsoft Graph skeleton that always returns unavailable. It has no send
-IPC, no real Microsoft authentication or HTTP calls, and no Assignment Detail
-send control. Tenant permissions and sender configuration remain subject to IT
-verification.
 
 The main process validates that the request shape contains string
 `courseFolderId`, `courseFolderPath`, and `assignmentFile` fields before running

@@ -10,7 +10,8 @@ import type {
 } from "./ipc.js";
 
 const TERM_CODE_PATTERN = /^\d{2}s[123]$/;
-const ROSTER_HEADERS = [
+const ROSTER_HEADERS = ["student_id", "github_username", "section", "status"] as const;
+const LEGACY_ROSTER_HEADERS = [
   "student_id",
   "github_username",
   "email",
@@ -103,13 +104,15 @@ const normalizeRoster = (
 ): { content: string | null; diagnostics: CourseSetupDiagnostic[] } => {
   const lines = content.split(/\r?\n/u).filter((line) => line.trim().length > 0);
   const headers = parseCsvLine(lines[0] ?? "");
+  const isCanonicalHeader = headers.join(",") === ROSTER_HEADERS.join(",");
+  const isLegacyHeader = headers.join(",") === LEGACY_ROSTER_HEADERS.join(",");
 
-  if (headers.join(",") !== ROSTER_HEADERS.join(",")) {
+  if (!isCanonicalHeader && !isLegacyHeader) {
     return {
       content: null,
       diagnostics: [
         createDiagnostic(
-          `Roster for section ${sectionId} must use the header ${ROSTER_HEADERS.join(",")}. The legacy four-column roster format is not supported by Course Setup.`
+          `Roster for section ${sectionId} must use the header ${ROSTER_HEADERS.join(",")}.`
         )
       ]
     };
@@ -119,7 +122,7 @@ const normalizeRoster = (
   const diagnostics = rows.flatMap((row, index) => {
     const rowNumber = index + 2;
     const values = Object.fromEntries(
-      ROSTER_HEADERS.map((header, column) => [header, row[column] ?? ""])
+      ROSTER_HEADERS.map((header) => [header, row[headers.indexOf(header)] ?? ""])
     );
     const missing = REQUIRED_ROSTER_VALUE_HEADERS.filter(
       (header) => values[header]?.trim().length === 0
@@ -146,7 +149,9 @@ const normalizeRoster = (
         ? null
         : `${ROSTER_HEADERS.join(",")}${LINE_ENDING}${rows
             .map((row) =>
-              ROSTER_HEADERS.map((_, index) => encodeCsvValue((row[index] ?? "").trim())).join(",")
+              ROSTER_HEADERS.map((header) =>
+                encodeCsvValue((row[headers.indexOf(header)] ?? "").trim())
+              ).join(",")
             )
             .join(LINE_ENDING)}${rows.length > 0 ? LINE_ENDING : ""}`,
     diagnostics
@@ -162,7 +167,7 @@ github:
   organization: ${quoteYaml(request.githubOrganization.trim())}
   repository_visibility: private
   repo_name_pattern: ${quoteYaml("{term}-{course}-{assignment}-{github_username}")}
-  student_permission: push
+  student_permission: admin
   faculty_team: faculty
   faculty_permission: admin
   grader_team: graders
@@ -170,11 +175,16 @@ github:
 defaults:
   timezone: America/Chicago
   assignment_type: individual
-grading:
+${
+  request.gradingEnabled === false
+    ? ""
+    : `grading:
   enabled: true
   workflow: .github/workflows/grade.yml
   artifact: grading-results
   result_file: grading-results.json
+`
+}
 reports:
   formats:
     - markdown

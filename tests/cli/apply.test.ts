@@ -223,10 +223,10 @@ describe("graider apply command", () => {
       });
       const manifestResult = loadWrittenManifest(cwd);
 
-      expect(result.exitCode).toBe(ExitCode.AuthenticationOrAuthorizationFailure);
+      expect(result.exitCode).toBe(ExitCode.CommandError);
       expect(result.errors).toEqual([
         expect.objectContaining({
-          code: "github_auth_missing"
+          code: "github_token_required"
         })
       ]);
       expect(manifestResult.status).toBe("missing");

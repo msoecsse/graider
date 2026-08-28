@@ -1,0 +1,5 @@
+dist/
+dist-electron/
+dist-graider-cli/
+dist-release/
+release/

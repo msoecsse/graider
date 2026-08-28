@@ -5,7 +5,7 @@ const MINIMUM_LIST_ITEMS = 1;
 export const SUPPORTED_SCHEMA_VERSION = 1;
 export const SUPPORTED_ASSIGNMENT_TYPE = "individual";
 export const SUPPORTED_REPOSITORY_VISIBILITY = "private";
-export const STUDENT_PERMISSION = "push";
+export const STUDENT_PERMISSION = "admin";
 export const FACULTY_PERMISSION = "admin";
 export const GRADER_PERMISSION = "maintain";
 export const VALID_ASSIGNMENT_STATUSES = ["draft", "active", "closed", "archived"] as const;
@@ -94,7 +94,7 @@ export const rawCourseConfigSchema = z
         assignment_type: z.string().min(MINIMUM_LIST_ITEMS)
       })
       .strict(),
-    grading: gradingSchema,
+    grading: gradingSchema.optional(),
     reports: reportsSchema,
     notifications: notificationsSchema.optional()
   })
@@ -116,7 +116,7 @@ export const rawTermConfigSchema = z
         z
           .object({
             id: z.string().min(MINIMUM_LIST_ITEMS),
-            roster: z.string().min(MINIMUM_LIST_ITEMS)
+            roster: z.string().min(MINIMUM_LIST_ITEMS).optional()
           })
           .strict()
       )
@@ -140,22 +140,25 @@ export const rawAssignmentConfigSchema = z
         repository: z.string().min(MINIMUM_LIST_ITEMS),
         branch: z.string().min(MINIMUM_LIST_ITEMS)
       })
-      .strict(),
+      .strict()
+      .optional(),
     sections: z.array(z.string().min(MINIMUM_LIST_ITEMS)).min(MINIMUM_LIST_ITEMS),
     deadline: z
       .object({
         due_at: z.string().min(MINIMUM_LIST_ITEMS),
         late_policy: z.string().min(MINIMUM_LIST_ITEMS)
       })
-      .strict(),
+      .strict()
+      .optional(),
     metadata: z
       .object({
-        faculty_owner: z.string().min(MINIMUM_LIST_ITEMS),
-        lms_assignment_id: z.string().nullable(),
-        grading_category: z.string().min(MINIMUM_LIST_ITEMS),
-        points: z.number().nullable()
+        faculty_owner: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+        lms_assignment_id: z.string().nullable().optional(),
+        grading_category: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+        points: z.number().nullable().optional()
       })
-      .strict(),
+      .strict()
+      .optional(),
     grading: gradingSchema.optional(),
     repository_mode: z.enum(["individual", "group"]).optional(),
     groups: z

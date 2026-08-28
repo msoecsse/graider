@@ -371,10 +371,10 @@ roster missing
 roster invalid
 assignment.yml parse/schema problem
 assignment.yml schema problem
-required template repository missing
-template branch missing
-grading workflow missing
-workflow_dispatch missing
+configured template repository missing
+configured template branch missing
+configured grading workflow missing
+configured workflow_dispatch missing
 required generated/supporting document missing
 student repo missing after apply/manifest indicates it should exist
 invalid report publishing config

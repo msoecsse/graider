@@ -28,6 +28,7 @@ const createRequest = (
   courseTitle: string,
   courseCode: string,
   githubOrganization: string,
+  gradingEnabled: boolean,
   studentAccessPagesRepository: string,
   studentAccessPagesBaseUrl: string,
   studentAccessPagesBranch: string,
@@ -41,6 +42,7 @@ const createRequest = (
   courseTitle,
   courseCode,
   githubOrganization,
+  gradingEnabled,
   studentAccessPagesRepository,
   studentAccessPagesBaseUrl,
   studentAccessPagesBranch,
@@ -64,6 +66,7 @@ export const CourseSetupPage = ({
   const [courseTitle, setCourseTitle] = useState("");
   const [courseCode, setCourseCode] = useState("");
   const [githubOrganization, setGithubOrganization] = useState("");
+  const [gradingEnabled, setGradingEnabled] = useState(true);
   const [studentAccessPagesRepository, setStudentAccessPagesRepository] = useState("");
   const [studentAccessPagesBaseUrl, setStudentAccessPagesBaseUrl] = useState("");
   const [studentAccessPagesBranch, setStudentAccessPagesBranch] = useState("main");
@@ -84,6 +87,7 @@ export const CourseSetupPage = ({
         courseTitle,
         courseCode,
         githubOrganization,
+        gradingEnabled,
         studentAccessPagesRepository,
         studentAccessPagesBaseUrl,
         studentAccessPagesBranch,
@@ -96,6 +100,7 @@ export const CourseSetupPage = ({
       courseTitle,
       courseCode,
       githubOrganization,
+      gradingEnabled,
       studentAccessPagesRepository,
       studentAccessPagesBaseUrl,
       studentAccessPagesBranch,
@@ -243,6 +248,17 @@ export const CourseSetupPage = ({
                   setPreview(null);
                 }}
               />
+            </label>
+            <label className="assignment-setup__checkbox">
+              <input
+                type="checkbox"
+                checked={gradingEnabled}
+                onChange={(event) => {
+                  setGradingEnabled(event.target.checked);
+                  setPreview(null);
+                }}
+              />
+              Configure course grading
             </label>
             <h3>Student access pages / GitHub Pages (optional)</h3>
             <label>

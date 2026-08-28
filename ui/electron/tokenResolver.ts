@@ -4,6 +4,7 @@ import type { ProcessRunner } from "./commandRunner.js";
 import type { DashboardCommandError } from "./ipc.js";
 
 export const GITHUB_TOKEN_ENV_NAME = "GRAIDER_GITHUB_TOKEN";
+export const GITHUB_TOKEN_FALLBACK_ENV_NAME = "GITHUB_TOKEN";
 export const GITHUB_CLI_NOT_FOUND_CODE = "github_cli_not_found";
 export const GITHUB_CLI_AUTH_FAILED_CODE = "github_cli_auth_failed";
 export const GITHUB_AUTH_REQUIRED_CODE = "github_token_unavailable";
@@ -106,7 +107,8 @@ export const resolveGithubToken = async ({
   platform = process.platform,
   runner
 }: GithubTokenResolverOptions): Promise<GithubTokenResolution> => {
-  const environmentToken = env[GITHUB_TOKEN_ENV_NAME]?.trim();
+  const environmentToken =
+    env[GITHUB_TOKEN_ENV_NAME]?.trim() ?? env[GITHUB_TOKEN_FALLBACK_ENV_NAME]?.trim();
 
   if (environmentToken !== undefined && environmentToken.length > 0) {
     logAuthResolution(env, "env token present.");

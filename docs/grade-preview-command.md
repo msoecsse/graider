@@ -73,6 +73,9 @@ Grade preview uses the same effective grading selection as `graider grade`:
 - if `assignment.yml` includes `grading`, use the assignment grading block as
   the full override
 
+If both files omit grading, automated grading is not configured and preview
+returns disabled/no-grading state rather than requiring a grading block.
+
 The current config model does not merge partial assignment grading overrides
 with course defaults. Assignment-level grading must satisfy the same validation
 rules as course-level grading.
@@ -94,7 +97,8 @@ The JSON response exposes:
 }
 ```
 
-`resolvedFrom` is `course_default` or `assignment_override`.
+`resolvedFrom` is `course_default`, `assignment_override`, or `none` when no
+course or assignment grading configuration exists.
 
 The real dispatch command `graider assignment grade <assignment.yml> --json`
 uses the same effective grading resolution. It receives an `assignment.yml`

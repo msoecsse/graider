@@ -60,12 +60,12 @@ const parseJsonResult = (output: string): JsonCommandResult =>
   JSON.parse(output) as JsonCommandResult;
 
 describe("graider CLI shell", () => {
-  it("TC-CLI-SHELL-001 command exists: validate", () => {
-    const output = runCliText(["validate", TEST_ASSIGNMENT_FILE], VALID_REPO_ROOT);
+  it("TC-CLI-SHELL-001 tokenless validate reports structured authentication requirements", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
+    const json = parseJsonResult(result.stdout);
 
-    expect(output).toContain("validate");
-    expect(output).toContain(TEST_ASSIGNMENT_FILE);
-    expect(output).toContain("success");
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
   });
 
   it("TC-CLI-SHELL-002 command exists: plan", () => {
@@ -179,13 +179,13 @@ describe("graider CLI shell", () => {
     );
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
     expect(json.commandName).toBe("validate");
     expect(json.assignmentFile).toBe(TEST_ASSIGNMENT_FILE);
-    expect(json.status).toBe("success");
-    expect(json.exitCode).toBe(SUCCESS_EXIT_CODE);
+    expect(json.status).toBe("failure");
+    expect(json.exitCode).toBe(COMMAND_ERROR_EXIT_CODE);
     expect(json.warnings).toEqual([]);
-    expect(json.errors).toEqual([]);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.generatedFiles).toEqual([]);
     expect(json.summary).toMatchObject({
       options: {
@@ -228,19 +228,20 @@ describe("graider CLI shell", () => {
 });
 
 describe("graider validate roster validation", () => {
-  it("succeeds for a valid fixture with rosters", () => {
+  it("reports token-required after loading a valid roster fixture", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE], VALID_ROSTER_REPO_ROOT);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
     expect(result.stdout).toContain("validate");
-    expect(result.stdout).toContain("success");
+    expect(result.stdout).toContain("github_token_required");
   });
 
   it("emits parseable JSON with roster summary counts", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_ROSTER_REPO_ROOT);
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.summary).toMatchObject({
       rosterFiles: ["terms/27s1/rosters/section-001.csv", "terms/27s1/rosters/section-002.csv"],
       studentCount: 4,
@@ -287,15 +288,16 @@ describe("graider validate roster validation", () => {
     ]);
   });
 
-  it("exits 0 when only normalization warnings occur", () => {
+  it("preserves normalization warnings before token-required", () => {
     const result = runCli(
       ["validate", TEST_ASSIGNMENT_FILE, "--json"],
       NORMALIZATION_WARNINGS_ROOT
     );
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.status).toBe("success");
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.status).toBe("failure");
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.warnings).toEqual([
       expect.objectContaining({
         code: "student_id_normalized"
@@ -336,23 +338,25 @@ describe("graider validate roster validation", () => {
 });
 
 describe("graider validate path resolution", () => {
-  it("validate run from repo root succeeds", () => {
+  it("tokenless validate resolves the repository root before requiring a token", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.summary).toMatchObject({
       repoRoot: VALID_REPO_ROOT,
       assignmentRelativePath: TEST_ASSIGNMENT_FILE
     });
   });
 
-  it("validate run from subdirectory succeeds", () => {
+  it("tokenless validate resolves the repository root from a subdirectory before requiring a token", () => {
     const assignmentFile = "assignments/lab04/assignment.yml";
     const result = runCli(["validate", assignmentFile, "--json"], VALID_REPO_SUBDIRECTORY);
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.summary).toMatchObject({
       repoRoot: VALID_REPO_ROOT,
       assignmentRelativePath: TEST_ASSIGNMENT_FILE
@@ -377,20 +381,21 @@ describe("graider validate path resolution", () => {
 });
 
 describe("graider validate config validation", () => {
-  it("succeeds for a valid fixture", () => {
-    const output = runCliText(["validate", TEST_ASSIGNMENT_FILE], VALID_REPO_ROOT);
+  it("reports token-required for a tokenless valid fixture", () => {
+    const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
+    const json = parseJsonResult(result.stdout);
 
-    expect(output).toContain("validate");
-    expect(output).toContain("success");
-    expect(output).toContain(TEST_ASSIGNMENT_FILE);
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
   });
 
   it("emits parseable JSON for a valid fixture", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
     const json = parseJsonResult(result.stdout);
 
-    expect(result.status).toBe(SUCCESS_EXIT_CODE);
-    expect(json.status).toBe("success");
+    expect(result.status).toBe(COMMAND_ERROR_EXIT_CODE);
+    expect(json.status).toBe("failure");
+    expect(json.errors).toEqual([expect.objectContaining({ code: "github_token_required" })]);
     expect(json.summary).toMatchObject({
       courseConfigPath: "course.yml",
       termConfigPath: "terms/27s1/term.yml",

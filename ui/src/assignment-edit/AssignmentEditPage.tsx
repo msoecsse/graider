@@ -42,6 +42,8 @@ export const AssignmentEditPage = ({
   const [status, setStatus] = useState("active");
   const [gradingEnabled, setGradingEnabled] = useState(true);
   const [points, setPoints] = useState("");
+  const [facultyOwner, setFacultyOwner] = useState("");
+  const [lmsAssignmentId, setLmsAssignmentId] = useState("");
   const [gradingCategory, setGradingCategory] = useState("");
   useEffect(() => {
     const load = window.graiderUI.getAssignmentForEdit;
@@ -69,7 +71,9 @@ export const AssignmentEditPage = ({
           setLatePolicy(value.latePolicy);
           setStatus(value.assignmentStatus);
           setGradingEnabled(value.gradingEnabled);
-          setPoints(String(value.points));
+          setPoints(value.points === null ? "" : String(value.points));
+          setFacultyOwner(value.facultyOwner);
+          setLmsAssignmentId(value.lmsAssignmentId ?? "");
           setGradingCategory(value.gradingCategory);
         }
       })
@@ -92,7 +96,9 @@ export const AssignmentEditPage = ({
             latePolicy,
             assignmentStatus: status,
             gradingEnabled,
-            points: Number(points),
+            points: points.trim() === "" ? null : Number(points),
+            facultyOwner,
+            lmsAssignmentId,
             gradingCategory,
             originalContent: model.originalContent,
             confirmed: false
@@ -100,9 +106,11 @@ export const AssignmentEditPage = ({
     [
       branch,
       dueAt,
+      facultyOwner,
       gradingCategory,
       gradingEnabled,
       latePolicy,
+      lmsAssignmentId,
       model,
       points,
       repository,
@@ -238,11 +246,12 @@ export const AssignmentEditPage = ({
               ))}
             </section>
             <section className="detail-panel">
-              <h2>Template repository</h2>
+              <h2>Template repository (optional)</h2>
               <label>
                 GitHub template repository
                 <input
                   value={repository}
+                  placeholder="Leave both template fields blank to omit"
                   onChange={(event) => {
                     setRepository(event.target.value);
                     clear();
@@ -291,6 +300,26 @@ export const AssignmentEditPage = ({
                   value={gradingCategory}
                   onChange={(event) => {
                     setGradingCategory(event.target.value);
+                    clear();
+                  }}
+                />
+              </label>
+              <label>
+                Faculty owner
+                <input
+                  value={facultyOwner}
+                  onChange={(event) => {
+                    setFacultyOwner(event.target.value);
+                    clear();
+                  }}
+                />
+              </label>
+              <label>
+                LMS assignment ID
+                <input
+                  value={lmsAssignmentId}
+                  onChange={(event) => {
+                    setLmsAssignmentId(event.target.value);
                     clear();
                   }}
                 />

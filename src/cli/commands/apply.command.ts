@@ -15,14 +15,18 @@ import {
 import { executeApplyPlan } from "../../execution/apply-executor.js";
 import { evaluateMutationGuard } from "../../execution/mutation-guard.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { createGitHubClient } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
 import { validateGitHubReadiness } from "../../github/github-readiness-validation.js";
 import type { GitHubRetryEvent, RetryOptions } from "../../github/github-retry.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { buildPlan } from "../../planning/plan-builder.js";
 import { loadAssignmentRosters } from "../../roster/roster-loader.js";
-import { createWarningDiagnostic } from "../../diagnostics/error-catalog.js";
+import {
+  GITHUB_TOKEN_REQUIRED_CODE,
+  createConfigDiagnostic,
+  createWarningDiagnostic
+} from "../../diagnostics/error-catalog.js";
 import { writeCommandResult } from "../output.js";
 import { runGroupApplyPreflight } from "../../groups/group-apply-preflight.js";
 import { executeGroupTargets } from "../../groups/group-target-executor.js";
@@ -119,7 +123,24 @@ export const runApplyCommand = async ({
     });
   }
 
-  const effectiveGitHubClient = githubClient ?? createGitHubClient();
+  const githubResolution = resolveProductionGitHubClient({ githubClient });
+  if (githubResolution.status === "token_missing") {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: rosterResult.warnings,
+      errors: [
+        createConfigDiagnostic(
+          GITHUB_TOKEN_REQUIRED_CODE,
+          "A GitHub token is required before Apply can contact GitHub. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN."
+        )
+      ],
+      generatedFiles: [],
+      summary: { options, ...configResult.config.summary, ...rosterResult.summary }
+    });
+  }
+  const effectiveGitHubClient = githubResolution.githubClient;
   if (configResult.config.assignment.repository_mode === "group") {
     const preflight = await runGroupApplyPreflight({
       config: configResult.config,
@@ -146,13 +167,17 @@ export const runApplyCommand = async ({
       ),
       groupTargets: groupTargetSummary
     };
-    if (preflight.errors.length > EMPTY_COUNT) {
+    const guardResult = evaluateMutationGuard({
+      options,
+      preflightErrors: preflight.errors
+    });
+    if (!guardResult.allowed) {
       return createCommandResult({
         commandName,
         assignmentFile: configResult.config.summary.assignmentConfigPath,
         status: "failure",
         warnings: [...rosterResult.warnings, ...preflight.warnings],
-        errors: [...preflight.errors],
+        errors: guardResult.errors,
         generatedFiles: [],
         summary: groupSummary
       });

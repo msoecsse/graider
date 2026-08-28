@@ -91,13 +91,39 @@ export const normalizeTemplateRepository = (value: string): string | null => {
 const getRelativePath = (request: AssignmentSetupRequest): string =>
   `terms/${request.termCode.trim()}/assignments/${request.assignmentSlug.trim()}/assignment.yml`;
 
-const createAssignmentYaml = (request: AssignmentSetupRequest, repository: string): string => {
+const createAssignmentYaml = (
+  request: AssignmentSetupRequest,
+  repository: string | null
+): string => {
   const sections = request.sectionIds
     .map((sectionId) => `  - ${quoteYaml(sectionId.trim())}`)
     .join("\n");
   const grading = request.gradingEnabled
     ? "grading:\n  enabled: true\n  workflow: .github/workflows/grade.yml\n  artifact: grading-results\n  result_file: grading-results.json\n"
     : "grading:\n  enabled: false\n  mode: no-grading\n";
+  const deadline =
+    request.dueAt.trim() === ""
+      ? ""
+      : `deadline:\n  due_at: ${quoteYaml(request.dueAt.trim())}\n  late_policy: standard\n`;
+  const points = request.points === null ? "" : `  points: ${String(request.points)}\n`;
+  const facultyOwner =
+    request.facultyOwner.trim() === ""
+      ? ""
+      : `  faculty_owner: ${quoteYaml(request.facultyOwner.trim())}\n`;
+  const lmsAssignmentId =
+    request.lmsAssignmentId.trim() === ""
+      ? ""
+      : `  lms_assignment_id: ${quoteYaml(request.lmsAssignmentId.trim())}\n`;
+  const gradingCategory =
+    request.gradingCategory.trim() === ""
+      ? ""
+      : `  grading_category: ${quoteYaml(request.gradingCategory.trim())}\n`;
+  const metadata = `${facultyOwner}${lmsAssignmentId}${gradingCategory}${points}`;
+  const metadataBlock = metadata === "" ? "" : `metadata:\n${metadata}`;
+  const template =
+    repository === null
+      ? ""
+      : `template:\n  repository: ${quoteYaml(repository)}\n  branch: ${quoteYaml(request.templateBranch.trim())}\n`;
 
   return `schema_version: 1
 assignment:
@@ -105,20 +131,9 @@ assignment:
   title: ${quoteYaml(request.assignmentTitle.trim())}
   type: individual
   status: active
-template:
-  repository: ${quoteYaml(repository)}
-  branch: ${quoteYaml(request.templateBranch.trim())}
-sections:
+${template}sections:
 ${sections}
-deadline:
-  due_at: ${quoteYaml(request.dueAt.trim())}
-  late_policy: standard
-metadata:
-  faculty_owner: professor
-  lms_assignment_id: null
-  grading_category: ${quoteYaml(request.gradingCategory.trim())}
-  points: ${String(request.points)}
-${grading}`;
+${deadline}${metadataBlock}${grading}`;
 };
 
 const getGeneratedFile = (
@@ -156,24 +171,22 @@ const getGeneratedFile = (
     ...(term !== undefined && sections.some((section) => !term.sections.includes(section))
       ? [diagnostic("Selected sections must exist in the selected term.")]
       : []),
-    ...(repository === null
+    ...((request.templateRepository.trim() !== "" || request.templateBranch.trim() !== "") &&
+    repository === null
       ? [diagnostic("Template repository must be owner/repo or a GitHub repository URL.")]
       : []),
-    ...(!ISO_DATE_TIME_WITH_OFFSET_PATTERN.test(request.dueAt.trim())
+    ...(request.dueAt.trim() !== "" && !ISO_DATE_TIME_WITH_OFFSET_PATTERN.test(request.dueAt.trim())
       ? [diagnostic("Due date and time must include a UTC offset.")]
       : []),
-    ...(!Number.isFinite(request.points) || request.points <= 0
+    ...(request.points !== null && (!Number.isFinite(request.points) || request.points <= 0)
       ? [diagnostic("Points must be a positive number.")]
-      : []),
-    ...(request.gradingCategory.trim().length === 0
-      ? [diagnostic("Grading category is required.")]
       : []),
     ...termResult.diagnostics
   ];
   return {
     file: {
       path: getRelativePath(request),
-      content: createAssignmentYaml(request, repository ?? ""),
+      content: createAssignmentYaml(request, repository),
       exists: false
     },
     diagnostics
