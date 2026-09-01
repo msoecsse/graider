@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { RosterRemoveRequest, RosterSaveRequest, RosterSectionRequest } from "./ipc";
 import {
   getRosterForSection,
+  removeSection,
   removeRoster,
   previewRosterSave,
   saveRoster
@@ -250,6 +251,28 @@ describe("roster manager service", () => {
     );
     expect(fs.existsSync(rosterPath)).toBe(true);
     expect(fs.readFileSync(termPath, "utf8")).toContain("roster: rosters/section-001.csv");
+  });
+
+  it("removes a section without a roster after confirmation, then allows it to be re-added", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    fs.writeFileSync(
+      termPath,
+      fs.readFileSync(termPath, "utf8").replace("    roster: rosters/section-001.csv\n", ""),
+      "utf8"
+    );
+
+    expect(removeSection(removeRequest(root))).toMatchObject({ status: "failure" });
+    expect(removeSection(removeRequest(root, true))).toMatchObject({ status: "success" });
+    expect(fs.readFileSync(termPath, "utf8")).not.toContain('id: "001"');
+    expect(fs.existsSync(rosterPath)).toBe(false);
+
+    expect(saveRoster({ ...request(root, { createSection: true }), confirmed: true }).status).toBe(
+      "success"
+    );
+    expect(fs.existsSync(rosterPath)).toBe(true);
   });
 
   it("adds canonical roster rows and rejects invalid new section requests", () => {

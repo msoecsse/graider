@@ -171,6 +171,8 @@ const graiderUI: GraiderUIApi = {
     await invoke<RosterSaveResult>(IPC_CHANNELS.saveRoster, request),
   removeRoster: async (request: RosterRemoveRequest): Promise<RosterRemoveResult> =>
     await invoke<RosterRemoveResult>(IPC_CHANNELS.removeRoster, request),
+  removeSection: async (request: RosterRemoveRequest): Promise<RosterRemoveResult> =>
+    await invoke<RosterRemoveResult>(IPC_CHANNELS.removeSection, request),
   getTemplateWorkflow: async (request: TemplateWorkflowRequest): Promise<TemplateWorkflowResult> =>
     await invoke<TemplateWorkflowResult>(IPC_CHANNELS.getTemplateWorkflow, request),
   previewTemplateWorkflowSave: async (

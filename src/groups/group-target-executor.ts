@@ -85,12 +85,14 @@ export const executeGroupTargets = async (input: {
         teamSlug: target.facultyTeam,
         permission: target.facultyTeamPermission as never
       });
-      await input.githubClient.addTeamPermission({
-        owner: repository.owner,
-        repo: repository.name,
-        teamSlug: target.graderTeam,
-        permission: target.graderTeamPermission as never
-      });
+      if (target.graderTeam !== undefined && target.graderTeamPermission !== undefined) {
+        await input.githubClient.addTeamPermission({
+          owner: repository.owner,
+          repo: repository.name,
+          teamSlug: target.graderTeam,
+          permission: target.graderTeamPermission as never
+        });
+      }
       if (
         input.config.summary.gradingEnabled &&
         input.config.course.grading.workflow !== undefined

@@ -171,6 +171,17 @@ describe("config loading and validation", () => {
     expect(result.config.summary).toMatchObject({ gradingEnabled: false, gradingSource: "none" });
   });
 
+  it("accepts an omitted Graders team without inventing one", () => {
+    const cwd = copyValidFixtureToTemp();
+    writeCourseConfig(cwd, (content) =>
+      content.replace(/^  grader_team: .*\n  grader_permission: .*\n/mu, "")
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.course.github.grader_team).toBeUndefined();
+    expect(result.config.course.github.grader_permission).toBeUndefined();
+  });
+
   it("TC-CONFIG-010 missing required term.yml field fails", () => {
     expectFailureCode("missing-term-field", "missing_required_field");
   });

@@ -192,6 +192,31 @@ const createTermContentWithoutSection = (request: RosterSectionRequest): string 
   }
 };
 
+const getAssociatedRosterPaths = (request: RosterSectionRequest): string[] => {
+  const paths = [getRosterPath(request.termCode, request.sectionId)];
+  try {
+    const root = parseDocument(
+      fs.readFileSync(path.join(request.courseFolderPath, getTermPath(request.termCode)), "utf8")
+    ).toJS() as { sections?: unknown };
+    const section = Array.isArray(root.sections)
+      ? root.sections.find(
+          (candidate) =>
+            typeof candidate === "object" &&
+            candidate !== null &&
+            (candidate as Record<string, unknown>).id === request.sectionId
+        )
+      : undefined;
+    const roster =
+      section !== undefined && typeof (section as Record<string, unknown>).roster === "string"
+        ? (section as Record<string, unknown>).roster
+        : null;
+    if (roster !== null) paths.push(`terms/${request.termCode}/${roster}`);
+  } catch {
+    return paths;
+  }
+  return [...new Set(paths)];
+};
+
 export const loadRosterTerms = (courseFolderPath: string): AssignmentSetupTermsResult =>
   loadAssignmentSetupTerms(courseFolderPath);
 
@@ -385,13 +410,17 @@ export const saveRoster = (request: RosterSaveRequest): RosterSaveResult => {
   }
 };
 
-export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult => {
+const removeSectionAndRoster = (
+  request: RosterRemoveRequest,
+  confirmationMessage: string,
+  requireRoster: boolean
+): RosterRemoveResult => {
   const rosterPath = getRosterPath(request.termCode, request.sectionId);
   if (!request.confirmed)
     return {
       status: "failure",
       path: rosterPath,
-      diagnostics: [diagnostic("Roster removal must be confirmed before deleting files.")]
+      diagnostics: [diagnostic(confirmationMessage)]
     };
   if (!hasTermSection(request))
     return {
@@ -401,9 +430,14 @@ export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult =
     };
 
   const root = path.resolve(request.courseFolderPath);
-  const absoluteRosterPath = path.resolve(root, rosterPath);
   const termPath = path.resolve(root, getTermPath(request.termCode));
-  if (!isContainedPath(root, absoluteRosterPath) || !isContainedPath(root, termPath))
+  const absoluteRosterPaths = getAssociatedRosterPaths(request).map((rosterFilePath) =>
+    path.resolve(root, rosterFilePath)
+  );
+  if (
+    !absoluteRosterPaths.every((rosterFilePath) => isContainedPath(root, rosterFilePath)) ||
+    !isContainedPath(root, termPath)
+  )
     return {
       status: "failure",
       path: rosterPath,
@@ -416,7 +450,11 @@ export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult =
       path: rosterPath,
       diagnostics: [diagnostic("Unable to update term.yml while removing the roster.")]
     };
-  if (!fs.existsSync(absoluteRosterPath) && !hasRosterReference(request))
+  if (
+    requireRoster &&
+    !absoluteRosterPaths.some((rosterFilePath) => fs.existsSync(rosterFilePath)) &&
+    !hasRosterReference(request)
+  )
     return {
       status: "failure",
       path: rosterPath,
@@ -427,7 +465,9 @@ export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult =
     const originalTermContent = fs.readFileSync(termPath, "utf8");
     fs.writeFileSync(termPath, termContent, "utf8");
     try {
-      if (fs.existsSync(absoluteRosterPath)) fs.unlinkSync(absoluteRosterPath);
+      for (const rosterFilePath of absoluteRosterPaths) {
+        if (fs.existsSync(rosterFilePath)) fs.unlinkSync(rosterFilePath);
+      }
     } catch {
       fs.writeFileSync(termPath, originalTermContent, "utf8");
       throw new Error("Unable to delete roster CSV.");
@@ -441,3 +481,13 @@ export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult =
     };
   }
 };
+
+export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult =>
+  removeSectionAndRoster(request, "Roster removal must be confirmed before deleting files.", true);
+
+export const removeSection = (request: RosterRemoveRequest): RosterRemoveResult =>
+  removeSectionAndRoster(
+    request,
+    "Section removal must be confirmed before deleting files.",
+    false
+  );

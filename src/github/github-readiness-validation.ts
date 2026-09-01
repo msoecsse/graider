@@ -346,13 +346,16 @@ const validateTeams = async (
     DiagnosticCode.FacultyTeamMissing,
     "Faculty"
   );
-  const graderTeamErrors = await validateTeam(
-    githubClient,
-    organization,
-    courseConfig.github.grader_team,
-    DiagnosticCode.GraderTeamMissing,
-    "Grader"
-  );
+  const graderTeamErrors =
+    courseConfig.github.grader_team === undefined
+      ? []
+      : await validateTeam(
+          githubClient,
+          organization,
+          courseConfig.github.grader_team,
+          DiagnosticCode.GraderTeamMissing,
+          "Grader"
+        );
 
   return [...facultyTeamErrors, ...graderTeamErrors];
 };

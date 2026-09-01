@@ -70,6 +70,9 @@ export const RosterManagerPage = ({
   const [isConfirmingRosterRemoval, setIsConfirmingRosterRemoval] = useState(false);
   const [isRosterRemovalConfirmed, setIsRosterRemovalConfirmed] = useState(false);
   const [isRemovingRoster, setIsRemovingRoster] = useState(false);
+  const [isConfirmingSectionRemoval, setIsConfirmingSectionRemoval] = useState(false);
+  const [isSectionRemovalConfirmed, setIsSectionRemovalConfirmed] = useState(false);
+  const [isRemovingSection, setIsRemovingSection] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -245,6 +248,47 @@ export const RosterManagerPage = ({
       setMessage("Unable to remove roster CSV.");
     } finally {
       setIsRemovingRoster(false);
+    }
+  };
+
+  const handleRemoveSection = async (): Promise<void> => {
+    const removeSection = window.graiderUI.removeSection;
+    if (removeSection === undefined || !isSectionRemovalConfirmed) return;
+    setIsRemovingSection(true);
+    setMessage(null);
+    const removeRequest: RosterRemoveRequest = {
+      courseFolderId: courseFolder.id,
+      courseFolderPath: courseFolder.path,
+      termCode,
+      sectionId,
+      confirmed: true
+    };
+    try {
+      const result = await removeSection(removeRequest);
+      if (result.status === "success") {
+        setTerms((current) =>
+          current.map((term) =>
+            term.code === termCode
+              ? { ...term, sections: term.sections.filter((section) => section !== sectionId) }
+              : term
+          )
+        );
+        setSectionId("");
+        setRows([]);
+        setIsExisting(false);
+        setChangeDescription(null);
+        clearPreview();
+        setIsConfirmingSectionRemoval(false);
+        setIsSectionRemovalConfirmed(false);
+        setMessage(`Removed section ${sectionId}`);
+        onSaved();
+      } else {
+        setMessage(result.diagnostics.map((item) => item.message).join(" "));
+      }
+    } catch {
+      setMessage("Unable to remove section.");
+    } finally {
+      setIsRemovingSection(false);
     }
   };
 
@@ -465,6 +509,18 @@ export const RosterManagerPage = ({
             >
               Remove Roster
             </button>
+            <button
+              className="danger-action"
+              type="button"
+              disabled={isLoading || isRemovingSection}
+              onClick={() => {
+                setIsConfirmingSectionRemoval(true);
+                setIsSectionRemovalConfirmed(false);
+                setMessage(null);
+              }}
+            >
+              Remove Section
+            </button>
           </section>
         )}
         {!isConfirmingRosterRemoval ? null : (
@@ -501,6 +557,44 @@ export const RosterManagerPage = ({
                 onClick={() => void handleRemoveRoster()}
               >
                 {isRemovingRoster ? "Removing roster..." : "Remove roster"}
+              </button>
+            </div>
+          </section>
+        )}
+        {!isConfirmingSectionRemoval ? null : (
+          <section className="detail-panel" role="dialog" aria-labelledby="remove-section-title">
+            <h2 id="remove-section-title">Remove section</h2>
+            <p>
+              This removes section {sectionId} from term.yml and deletes its roster CSV if present.
+              It does not remove any student repositories.
+            </p>
+            <label className="confirmation-check">
+              <input
+                type="checkbox"
+                checked={isSectionRemovalConfirmed}
+                onChange={(event) => setIsSectionRemovalConfirmed(event.target.checked)}
+              />
+              I understand this removes the entire section.
+            </label>
+            <div className="apply-confirmation-actions">
+              <button
+                className="secondary-action"
+                type="button"
+                disabled={isRemovingSection}
+                onClick={() => {
+                  setIsConfirmingSectionRemoval(false);
+                  setIsSectionRemovalConfirmed(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="danger-action"
+                type="button"
+                disabled={!isSectionRemovalConfirmed || isRemovingSection}
+                onClick={() => void handleRemoveSection()}
+              >
+                {isRemovingSection ? "Removing section..." : "Remove section"}
               </button>
             </div>
           </section>

@@ -488,7 +488,9 @@ export const validateCourseConfig = (filePath: string, config: RawCourseConfig):
       ]),
   ...(config.github.student_permission === STUDENT_PERMISSION &&
   config.github.faculty_permission === FACULTY_PERMISSION &&
-  config.github.grader_permission === GRADER_PERMISSION
+  (config.github.grader_team === undefined
+    ? config.github.grader_permission === undefined
+    : config.github.grader_permission === GRADER_PERMISSION)
     ? []
     : [
         createConfigDiagnostic(

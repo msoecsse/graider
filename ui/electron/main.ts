@@ -36,9 +36,15 @@ import {
   getRosterForSection,
   loadRosterTerms,
   previewRosterSave,
+  removeSection,
   removeRoster,
   saveRoster
 } from "./rosterManagerService.js";
+import {
+  isRosterRemoveRequest,
+  isRosterSaveRequest,
+  isRosterSectionRequest
+} from "./rosterRequestValidation.js";
 import { checkGitHubAuth } from "./githubAuthChecker.js";
 import { validateTemplateRepository } from "./templateRepositoryValidationService.js";
 import {
@@ -74,9 +80,6 @@ import {
   type AssignmentGroupConfigRequest,
   type AssignmentGroupConfigSaveRequest,
   type StudentRepositoryAccessPageRequest,
-  type RosterSaveRequest,
-  type RosterRemoveRequest,
-  type RosterSectionRequest,
   type TemplateWorkflowRequest,
   type TemplateWorkflowSaveRequest,
   type StudentAccessPagesConfigRequest,
@@ -304,41 +307,6 @@ const isStudentAccessPagesConfigRequest = (
     typeof request.branch === "string"
   );
 };
-
-const isRosterSectionRequest = (value: unknown): value is RosterSectionRequest => {
-  if (!isAssignmentSetupTermsRequest(value)) return false;
-  const request = value as unknown as Record<string, unknown>;
-  return typeof request.termCode === "string" && typeof request.sectionId === "string";
-};
-
-const isRosterSaveRequest = (value: unknown): value is RosterSaveRequest => {
-  if (!isRosterSectionRequest(value)) return false;
-  const request = value as unknown as Record<string, unknown>;
-  return (
-    Array.isArray(request.rows) &&
-    request.rows.every(
-      (row) =>
-        typeof row === "object" &&
-        row !== null &&
-        !Array.isArray(row) &&
-        [
-          "studentId",
-          "githubUsername",
-          "email",
-          "firstName",
-          "lastName",
-          "section",
-          "status"
-        ].every((key) => typeof (row as Record<string, unknown>)[key] === "string")
-    ) &&
-    (typeof request.createSection === "boolean" || request.createSection === undefined) &&
-    typeof request.confirmed === "boolean"
-  );
-};
-
-const isRosterRemoveRequest = (value: unknown): value is RosterRemoveRequest =>
-  isRosterSectionRequest(value) &&
-  typeof (value as unknown as Record<string, unknown>).confirmed === "boolean";
 
 const isTemplateWorkflowRequest = (value: unknown): value is TemplateWorkflowRequest => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -770,6 +738,12 @@ export const registerIpcHandlers = (): void => {
       throw new Error("A registered course folder is required for roster management.");
     }
     return removeRoster(request);
+  });
+  ipcMain.handle(IPC_CHANNELS.removeSection, (_event, request: unknown) => {
+    if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
+      throw new Error("A registered course folder is required for roster management.");
+    }
+    return removeSection(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.getTemplateWorkflow, async (_event, request: unknown) => {

@@ -851,11 +851,13 @@ const executeOperation = async (
   }
 
   if (operation.type === "add_grader_team_permission") {
+    const graderTeam = input.config.course.github.grader_team;
+    if (graderTeam === undefined) return state;
     return executeTeamPermission(
       input,
       state,
       operation,
-      input.config.course.github.grader_team,
+      graderTeam,
       GRADER_PERMISSION,
       observedAt
     );

@@ -31,6 +31,7 @@ export const IPC_CHANNELS = {
   previewRosterSave: "graider-ui:roster-manager:preview",
   saveRoster: "graider-ui:roster-manager:save",
   removeRoster: "graider-ui:roster-manager:remove",
+  removeSection: "graider-ui:roster-manager:remove-section",
   getTemplateWorkflow: "graider-ui:template-workflow:get",
   previewTemplateWorkflowSave: "graider-ui:template-workflow:preview-save",
   saveTemplateWorkflow: "graider-ui:template-workflow:save",
@@ -838,6 +839,7 @@ export interface GraiderUIApi {
   readonly previewRosterSave?: (request: RosterSaveRequest) => Promise<RosterPreviewResult>;
   readonly saveRoster?: (request: RosterSaveRequest) => Promise<RosterSaveResult>;
   readonly removeRoster?: (request: RosterRemoveRequest) => Promise<RosterRemoveResult>;
+  readonly removeSection?: (request: RosterRemoveRequest) => Promise<RosterRemoveResult>;
   readonly getTemplateWorkflow?: (
     request: TemplateWorkflowRequest
   ) => Promise<TemplateWorkflowResult>;

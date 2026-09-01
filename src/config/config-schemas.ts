@@ -84,8 +84,8 @@ export const rawCourseConfigSchema = z
         student_permission: z.string().min(MINIMUM_LIST_ITEMS),
         faculty_team: z.string().min(MINIMUM_LIST_ITEMS),
         faculty_permission: z.string().min(MINIMUM_LIST_ITEMS),
-        grader_team: z.string().min(MINIMUM_LIST_ITEMS),
-        grader_permission: z.string().min(MINIMUM_LIST_ITEMS)
+        grader_team: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+        grader_permission: z.string().min(MINIMUM_LIST_ITEMS).optional()
       })
       .strict(),
     defaults: z

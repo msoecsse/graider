@@ -1270,6 +1270,52 @@ describe("DashboardPage", () => {
     await waitFor(() => expect(refreshCourseFolder).toHaveBeenCalledWith(COURSE_FOLDER.id));
   });
 
+  it("removes a selected section through the confirmed section action", async () => {
+    const removeSection = vi.fn().mockResolvedValue({
+      status: "success",
+      path: "terms/27s1/rosters/section-001.csv",
+      diagnostics: []
+    });
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      loadRosterTerms: vi.fn().mockResolvedValue({
+        terms: [{ code: "27s1", sections: ["001"] }],
+        diagnostics: []
+      }),
+      getRosterForSection: vi.fn().mockResolvedValue({
+        status: "ready",
+        path: "terms/27s1/rosters/section-001.csv",
+        exists: false,
+        rows: [],
+        diagnostics: []
+      }),
+      removeSection
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: `Manage rosters in ${COURSE_FOLDER.path}` })
+    );
+    await screen.findByRole("option", { name: "27s1" });
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
+    fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
+    await screen.findByRole("button", { name: "Remove Section" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove Section" }));
+    fireEvent.click(screen.getByLabelText("I understand this removes the entire section."));
+    fireEvent.click(screen.getByRole("button", { name: "Remove section" }));
+
+    await waitFor(() =>
+      expect(removeSection).toHaveBeenCalledWith({
+        courseFolderId: COURSE_FOLDER.id,
+        courseFolderPath: COURSE_FOLDER.path,
+        termCode: "27s1",
+        sectionId: "001",
+        confirmed: true
+      })
+    );
+    expect(screen.queryByRole("option", { name: "001" })).toBeNull();
+  });
+
   it("blocks roster save when the preview has validation errors", async () => {
     const saveRoster = vi.fn();
     mockGraiderUI({

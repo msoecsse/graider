@@ -170,8 +170,6 @@ github:
   student_permission: admin
   faculty_team: faculty
   faculty_permission: admin
-  grader_team: graders
-  grader_permission: maintain
 defaults:
   timezone: America/Chicago
   assignment_type: individual
