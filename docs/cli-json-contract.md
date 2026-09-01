@@ -534,9 +534,9 @@ the standard command result; group-specific data is in `summary`:
 }
 ```
 
-`cloneUrl` is included for an executed target when available. Target diagnostics
-may include `grading_workflow_pending` for a newly created repository whose
-workflow is not observable yet.
+`cloneUrl` is included for an executed target when available. A workflow that
+is not observable immediately after repository creation is treated as
+transient and does not add a target warning.
 
 On a group preflight error, including an untracked-existing-repository
 collision, Apply performs no group mutation and writes no manifest. An executor

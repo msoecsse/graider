@@ -394,6 +394,7 @@ export type StudentRepositoryAccessPagePublishStatus =
   | "not_generated"
   | "uncommitted"
   | "unpushed"
+  | "behind_upstream"
   | "no_upstream"
   | "not_git_repo"
   | "pages_folder_not_selected"
@@ -409,6 +410,7 @@ export interface StudentRepositoryAccessPagePublishChecks {
   readonly hasUncommittedOtherChanges: boolean;
   readonly upstreamBranch: string | null;
   readonly aheadCount: number | null;
+  readonly behindCount: number | null;
   readonly pagesUrlAvailable: boolean;
   readonly remoteMatchesConfiguredRepository: boolean | null;
 }

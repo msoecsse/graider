@@ -903,6 +903,18 @@ h1 {
   color: #7a4d00;
 }
 
+.status-chip--success {
+  border-color: #1a7f37;
+  background: #dafbe1;
+  color: #116329;
+}
+
+.status-chip--error {
+  border-color: #cf222e;
+  background: #ffebe9;
+  color: #a40e26;
+}
+
 .detail-guidance {
   border: 1px solid #f0b429;
   border-radius: 8px;

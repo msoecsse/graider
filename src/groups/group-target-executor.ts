@@ -1,5 +1,5 @@
 import type { LoadedGraiderConfig } from "../config/config-models.js";
-import { createConfigDiagnostic, createWarningDiagnostic } from "../diagnostics/error-catalog.js";
+import { createConfigDiagnostic } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
 import { parseTemplateRepository } from "../config/github-config-validation.js";
@@ -96,21 +96,12 @@ export const executeGroupTargets = async (input: {
       if (
         input.config.summary.gradingEnabled &&
         input.config.course.grading.workflow !== undefined
-      ) {
-        const workflow = await input.githubClient.getWorkflow(
+      )
+        await input.githubClient.getWorkflow(
           repository.owner,
           repository.name,
           getWorkflowDispatchIdentifier(input.config.course.grading.workflow)
         );
-        if (workflow === null)
-          warnings.push(
-            createWarningDiagnostic(
-              "grading_workflow_pending",
-              `Grading workflow is not observable yet for newly created ${repository.name}; it may still be becoming available.`,
-              { groupId: target.groupId, repositoryName: repository.name }
-            )
-          );
-      }
       results.push({
         target,
         htmlUrl: repository.htmlUrl,

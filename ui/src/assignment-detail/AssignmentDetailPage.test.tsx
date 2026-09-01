@@ -342,6 +342,7 @@ const createAccessPagePublishResult = (overrides = {}) => ({
     hasUncommittedOtherChanges: false,
     upstreamBranch: "origin/main",
     aheadCount: 0,
+    behindCount: 0,
     pagesUrlAvailable: true,
     remoteMatchesConfiguredRepository: true
   },

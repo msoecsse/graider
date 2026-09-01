@@ -880,6 +880,7 @@ const StudentRepositoryAccessPagePublishPanel = ({
           value={result.checks.hasUncommittedAccessPage ? "Yes" : "No"}
         />
         <DetailItem label="Commits ahead" value={result.checks.aheadCount} />
+        <DetailItem label="Commits behind" value={result.checks.behindCount} />
         <DetailItem
           label="Pages remote"
           value={

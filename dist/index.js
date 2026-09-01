@@ -87,7 +87,6 @@ var DiagnosticCode = {
   ConfirmationRequired: "confirmation_required",
   ManifestTrackedRepositoryMissing: "manifest_tracked_repository_missing",
   GradingWorkflowMissing: "grading_workflow_missing",
-  GradingWorkflowPending: "grading_workflow_pending",
   GroupRepositoryApplyNotImplemented: "group_repository_apply_not_implemented",
   WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
   WorkflowDispatchMissing: "workflow_dispatch_missing",
@@ -5619,16 +5618,6 @@ var createWorkflowDispatchDiagnostic = (operation) => createConfigDiagnostic(
     section: operation.section
   }
 );
-var createWorkflowPendingWarning = (operation) => createWarningDiagnostic(
-  DiagnosticCode.GradingWorkflowPending,
-  `Grading workflow is not observable yet for newly created ${operation.repository_name ?? "repository"}; it may still be becoming available.`,
-  {
-    repositoryName: operation.repository_name,
-    student_id: operation.student_id,
-    github_username: operation.github_username,
-    section: operation.section
-  }
-);
 var wasRepositoryCreatedInPlan = (input, operation) => input.plan.operations.some(
   (candidate) => candidate.type === CREATE_REPOSITORY_PLAN_TYPE && candidate.student_id === operation.student_id && candidate.status === "planned"
 );
@@ -6000,21 +5989,31 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
     );
     if (workflow === null) {
       const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
-      const diagnostic3 = isNewRepository ? createWorkflowPendingWarning(operation) : createWorkflowMissingDiagnostic2(operation);
+      if (isNewRepository)
+        return persistManifest(
+          {
+            ...state,
+            manifest: updateActionsState(state.manifest, {
+              studentId: operation.student_id ?? "",
+              actions: { gradingWorkflowPath: workflowPath, lastObservedAt: observedAt }
+            })
+          },
+          input.manifestPath
+        );
       return persistManifest(
-        (isNewRepository ? recordWarning : recordError)(
+        recordError(
           {
             ...state,
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
                 gradingWorkflowPath: workflowPath,
-                ...isNewRepository ? {} : { gradingWorkflowFound: false },
+                gradingWorkflowFound: false,
                 lastObservedAt: observedAt
               }
             })
           },
-          diagnostic3
+          createWorkflowMissingDiagnostic2(operation)
         ),
         input.manifestPath
       );
@@ -6061,20 +6060,30 @@ var executeVerifyDispatch = async (input, state, operation, observedAt) => {
     );
     if (workflow === null || !workflow.supportsDispatch) {
       const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
-      const diagnostic3 = workflow === null && isNewRepository ? createWorkflowPendingWarning(operation) : createWorkflowDispatchDiagnostic(operation);
+      if (workflow === null && isNewRepository)
+        return persistManifest(
+          {
+            ...state,
+            manifest: updateActionsState(state.manifest, {
+              studentId: operation.student_id ?? "",
+              actions: { lastObservedAt: observedAt }
+            })
+          },
+          input.manifestPath
+        );
       return persistManifest(
-        (workflow === null && isNewRepository ? recordWarning : recordError)(
+        recordError(
           {
             ...state,
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
-                ...workflow === null && isNewRepository ? {} : { workflowDispatchSupported: false },
+                workflowDispatchSupported: false,
                 lastObservedAt: observedAt
               }
             })
           },
-          diagnostic3
+          createWorkflowDispatchDiagnostic(operation)
         ),
         input.manifestPath
       );
@@ -7112,21 +7121,12 @@ var executeGroupTargets = async (input) => {
           permission: target.graderTeamPermission
         });
       }
-      if (input.config.summary.gradingEnabled && input.config.course.grading.workflow !== void 0) {
-        const workflow = await input.githubClient.getWorkflow(
+      if (input.config.summary.gradingEnabled && input.config.course.grading.workflow !== void 0)
+        await input.githubClient.getWorkflow(
           repository.owner,
           repository.name,
           getWorkflowDispatchIdentifier(input.config.course.grading.workflow)
         );
-        if (workflow === null)
-          warnings.push(
-            createWarningDiagnostic(
-              "grading_workflow_pending",
-              `Grading workflow is not observable yet for newly created ${repository.name}; it may still be becoming available.`,
-              { groupId: target.groupId, repositoryName: repository.name }
-            )
-          );
-      }
       results.push({
         target,
         htmlUrl: repository.htmlUrl,

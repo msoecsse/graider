@@ -372,7 +372,7 @@ describe("group target executor", () => {
     });
   });
 
-  it("reports pending rather than missing when a new repository workflow is not observable", async () => {
+  it("omits the transient diagnostic when a new repository workflow is not observable", async () => {
     const loaded = loadGraiderConfig({
       cwd: path.resolve("tests/fixtures/plan/active-assignment"),
       assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
@@ -402,10 +402,7 @@ describe("group target executor", () => {
       targets: [target("team-pending", ["alpha"], ["alpha-gh"])]
     });
     expect(result.errors).toEqual([]);
-    expect(result.warnings[0]).toMatchObject({
-      code: "grading_workflow_pending",
-      context: { groupId: "team-pending", repositoryName: "27s1-se2030-lab04-team-pending" }
-    });
+    expect(result.warnings).toEqual([]);
   });
 
   it("returns a safe group-scoped failure when workflow lookup fails", async () => {

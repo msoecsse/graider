@@ -23,7 +23,7 @@ const isContainedPath = (root: string, target: string): boolean => {
 const runGit = async (
   repositoryFolderPath: string,
   arguments_: readonly string[]
-): Promise<boolean> => {
+): Promise<{ readonly ok: boolean; readonly stderr: string }> => {
   try {
     await execFileAsync("git", arguments_, {
       cwd: repositoryFolderPath,
@@ -31,9 +31,15 @@ const runGit = async (
       windowsHide: true,
       maxBuffer: 1024 * 1024
     });
-    return true;
-  } catch {
-    return false;
+    return { ok: true, stderr: "" };
+  } catch (error) {
+    const stderr =
+      error instanceof Error && "stderr" in error && typeof error.stderr === "string"
+        ? error.stderr.trim()
+        : error instanceof Error
+          ? error.message
+          : "";
+    return { ok: false, stderr };
   }
 };
 
@@ -69,6 +75,10 @@ export const publishStudentRepositoryAccessPage = async (
     return failure("The selected Pages repository folder is not a git repository.");
   if (readiness.status === "no_upstream")
     return failure("This Pages repository branch does not have an upstream branch configured.");
+  if (readiness.status === "behind_upstream")
+    return failure(
+      "The local Pages repository must be pulled, rebased, or synchronized with its upstream before publishing the access page."
+    );
   if (
     readiness.status === "failure" ||
     readiness.status === "pages_folder_not_selected" ||
@@ -109,15 +119,19 @@ export const publishStudentRepositoryAccessPage = async (
   if (readiness.status === "uncommitted") {
     if (
       !(await runGit(repositoryRoot, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]))
+        .ok
     )
       return failure("This Pages repository branch does not have an upstream branch configured.");
-    if (!(await runGit(repositoryRoot, ["add", "--", readiness.outputPath])))
+    if (!(await runGit(repositoryRoot, ["add", "--", readiness.outputPath])).ok)
       return failure("Unable to stage the generated student access page.");
-    if (!(await runGit(repositoryRoot, ["commit", "-m", commitMessage])))
+    if (!(await runGit(repositoryRoot, ["commit", "-m", commitMessage])).ok)
       return failure("Unable to commit the generated student access page.");
   }
-  if (!(await runGit(repositoryRoot, ["push"])))
-    return failure("Unable to push the student access page to the configured upstream branch.");
+  const push = await runGit(repositoryRoot, ["push"]);
+  if (!push.ok)
+    return failure(
+      `Unable to push the student access page to the configured upstream branch. Git reported: ${push.stderr || "No additional Git error output was available."}`
+    );
   return {
     status: "success",
     diagnostics: [

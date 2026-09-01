@@ -83,7 +83,6 @@ export const DiagnosticCode = {
   ConfirmationRequired: "confirmation_required",
   ManifestTrackedRepositoryMissing: "manifest_tracked_repository_missing",
   GradingWorkflowMissing: "grading_workflow_missing",
-  GradingWorkflowPending: "grading_workflow_pending",
   GroupRepositoryApplyNotImplemented: "group_repository_apply_not_implemented",
   WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
   WorkflowDispatchMissing: "workflow_dispatch_missing",

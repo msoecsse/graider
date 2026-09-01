@@ -25,6 +25,7 @@ const emptyChecks = (
   hasUncommittedOtherChanges: false,
   upstreamBranch: null,
   aheadCount: null,
+  behindCount: null,
   pagesUrlAvailable,
   remoteMatchesConfiguredRepository: null
 });
@@ -154,19 +155,6 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
     `git add ${quoteCommandArgument(accessPage.outputPath)}`,
     `git commit -m ${quoteCommandArgument(`Add ${label} student repository access page`)}`
   ];
-  if (hasUncommittedAccessPage)
-    return resultFromAccessPage(
-      request,
-      accessPage,
-      "uncommitted",
-      baseChecks,
-      [
-        ...accessPage.diagnostics,
-        diagnostic("The access page exists locally but has not been committed yet.")
-      ],
-      commitCommands
-    );
-
   const remoteDiagnostic =
     baseChecks.remoteMatchesConfiguredRepository === false
       ? [diagnostic("The Pages repository remote may not match the configured Pages repository.")]
@@ -184,6 +172,18 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
     "@{u}"
   ]);
   if (!upstream.ok) {
+    if (hasUncommittedAccessPage)
+      return resultFromAccessPage(
+        request,
+        accessPage,
+        "uncommitted",
+        baseChecks,
+        [
+          ...accessPage.diagnostics,
+          diagnostic("The access page exists locally but has not been committed yet.")
+        ],
+        commitCommands
+      );
     const pushCommand =
       baseChecks.currentBranch === null
         ? []
@@ -201,21 +201,48 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
       pushCommand
     );
   }
-  const ahead = await runGit(pagesFolderPath, ["rev-list", "--count", "@{u}..HEAD"]);
-  const aheadCount = ahead.ok && /^\d+$/u.test(ahead.stdout) ? Number(ahead.stdout) : null;
-  if (!ahead.ok || aheadCount === null)
+  const divergence = await runGit(pagesFolderPath, [
+    "rev-list",
+    "--left-right",
+    "--count",
+    "@{u}...HEAD"
+  ]);
+  const divergenceCounts = divergence.ok ? divergence.stdout.match(/^(\d+)\s+(\d+)$/u) : null;
+  const behindCount = divergenceCounts === null ? null : Number(divergenceCounts[1]);
+  const aheadCount = divergenceCounts === null ? null : Number(divergenceCounts[2]);
+  if (behindCount === null || aheadCount === null)
     return resultFromAccessPage(
       request,
       accessPage,
       "failure",
-      { ...baseChecks, upstreamBranch: upstream.stdout, aheadCount },
+      { ...baseChecks, upstreamBranch: upstream.stdout, aheadCount, behindCount },
       [
         ...accessPage.diagnostics,
         ...remoteDiagnostic,
         diagnostic("Unable to determine whether local commits have been pushed.")
       ]
     );
-  const checks = { ...baseChecks, upstreamBranch: upstream.stdout, aheadCount };
+  const checks = { ...baseChecks, upstreamBranch: upstream.stdout, aheadCount, behindCount };
+  if (behindCount > 0)
+    return resultFromAccessPage(request, accessPage, "behind_upstream", checks, [
+      ...accessPage.diagnostics,
+      ...remoteDiagnostic,
+      diagnostic(
+        "The local Pages repository must be pulled, rebased, or synchronized with its upstream before publishing the access page."
+      )
+    ]);
+  if (hasUncommittedAccessPage)
+    return resultFromAccessPage(
+      request,
+      accessPage,
+      "uncommitted",
+      checks,
+      [
+        ...accessPage.diagnostics,
+        diagnostic("The access page exists locally but has not been committed yet.")
+      ],
+      commitCommands
+    );
   if (aheadCount > 0)
     return resultFromAccessPage(
       request,

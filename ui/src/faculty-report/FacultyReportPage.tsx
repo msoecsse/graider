@@ -204,6 +204,12 @@ const GeneratedFilesPanel = ({
   </section>
 );
 
+const getResultStatusChipClassName = (student: FacultyReportStudentRow): string => {
+  if (student.resultStatus === "passed") return "status-chip status-chip--success";
+  if (student.resultStatus === "failed") return "status-chip status-chip--error";
+  return student.diagnostics.length > 0 ? "status-chip status-chip--attention" : "status-chip";
+};
+
 const StudentRowsPanel = ({
   students
 }: {
@@ -239,13 +245,7 @@ const StudentRowsPanel = ({
               <span className="muted-inline"> {formatNullableValue(student.repositoryStatus)}</span>
             </span>
             <span role="cell">
-              <span
-                className={
-                  student.diagnostics.length > 0
-                    ? "status-chip status-chip--attention"
-                    : "status-chip"
-                }
-              >
+              <span className={getResultStatusChipClassName(student)}>
                 {formatNullableValue(student.resultStatus)}
               </span>
               <span className="muted-inline">

@@ -2122,7 +2122,7 @@ describe("DashboardPage", () => {
     expect(screen.getByText("terms/27s1/assignments/lab02/assignment.yml")).toBeInTheDocument();
   });
 
-  it("shows all assignments with course actions and lifecycle labels", async () => {
+  it("labels a newly configured assignment as not applied while retaining blocked apply errors", async () => {
     const getAssignmentDetail = vi.fn().mockResolvedValue(createAssignmentDetailResult());
     const firstTermCard = {
       ...COURSE_TERM_CARD,
@@ -2202,9 +2202,16 @@ describe("DashboardPage", () => {
     expect(within(assignments).getByText("Lab 04")).toBeInTheDocument();
     expect(within(assignments).getByText("Practice")).toBeInTheDocument();
     expect(within(assignments).getAllByText("001")).toHaveLength(3);
-    expect(within(assignments).getAllByText("Not applied")).toHaveLength(1);
+    const notAppliedRow = within(assignments).getByText("Lab 04").closest("tr");
+    const blockedRow = within(assignments).getByText("Practice").closest("tr");
+    expect(notAppliedRow).not.toBeNull();
+    expect(blockedRow).not.toBeNull();
+    expect(
+      within(notAppliedRow as HTMLTableRowElement).getByText("Not applied")
+    ).toBeInTheDocument();
+    expect(within(notAppliedRow as HTMLTableRowElement).queryByText("Blocked")).toBeNull();
     expect(within(assignments).getAllByText("Repositories not created")).toHaveLength(2);
-    expect(within(assignments).getByText("Blocked")).toBeInTheDocument();
+    expect(within(blockedRow as HTMLTableRowElement).getByText("Blocked")).toBeInTheDocument();
     expect(within(assignments).queryByText("Set up assignment")).toBeNull();
 
     fireEvent.click(within(assignments).getByRole("button", { name: "Open Lab 04" }));

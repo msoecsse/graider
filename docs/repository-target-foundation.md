@@ -11,12 +11,12 @@ returns in-memory target identities and URLs for manifest-v2 construction. It
 does not write manifests itself.
 
 It is fail-fast: repository, collaborator, team, and workflow API failures
-stop later targets without cleanup. Workflow found succeeds; a newly-created
-repository with an unobservable workflow gets `grading_workflow_pending`; API
-failure is a safe target error. Confirmed-missing workflow is deferred to a
-future existing-target/reconcile boundary. Untracked existing repositories are
-never adopted; diagnostics identify group ID and repository name, and manual
-cleanup or future reconcile is required.
+stop later targets without cleanup. A workflow that is not observable
+immediately after repository creation is treated as transient without a
+warning; API failure is a safe target error. Confirmed-missing workflow is
+deferred to a future existing-target/reconcile boundary. Untracked existing
+repositories are never adopted; diagnostics identify group ID and repository
+name, and manual cleanup or future reconcile is required.
 
 Public group Apply now runs preflight → executor → full-success-only manifest-v2
 write. Failed group Apply writes no manifest; partial manifests, lifecycle

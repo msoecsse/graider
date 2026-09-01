@@ -195,7 +195,7 @@ describe("GradeStatusPage", () => {
     });
     expect(screen.getByText("Total repositories")).toBeInTheDocument();
     expect(screen.getAllByText("Queued").length).toBeGreaterThan(0);
-    expect(screen.getByText("Completed — success")).toBeInTheDocument();
+    expect(screen.getByText("Completed — success")).toHaveClass("status-chip--success");
     expect(screen.getByRole("link", { name: "Run 123" })).toHaveAttribute(
       "href",
       "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123"
@@ -221,6 +221,24 @@ describe("GradeStatusPage", () => {
         assignment: expect.objectContaining({ slug: "lab02" })
       })
     );
+  });
+
+  it("uses an error status pill for a completed failed run", async () => {
+    const completedFailure = {
+      ...(createGradeStatusJson().repositories[1] as Record<string, unknown>),
+      conclusion: "failure",
+      reason: "failure",
+      needsAttention: true
+    };
+    mockGraiderUI({
+      getAssignmentGradeStatus: vi
+        .fn()
+        .mockResolvedValue(createGradeStatusResult(createGradeStatusJson([completedFailure])))
+    });
+
+    renderGradeStatusPage();
+
+    expect(await screen.findByText("Completed — failure")).toHaveClass("status-chip--error");
   });
 
   it("manual refresh runs full grade status and keeps prior rows visible while refreshing", async () => {

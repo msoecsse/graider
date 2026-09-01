@@ -183,7 +183,8 @@ describe("FacultyReportPage", () => {
     expect(screen.getByText("Report summary")).toBeInTheDocument();
     expect(screen.getByText("terms/27s1/reports/lab02/faculty-summary.json")).toBeInTheDocument();
     expect(screen.getByText("ada")).toBeInTheDocument();
-    expect(screen.getByText("passed")).toBeInTheDocument();
+    expect(screen.getByText("passed")).toHaveClass("status-chip--success");
+    expect(screen.getByText("failed")).toHaveClass("status-chip--error");
     expect(
       screen.getByRole("button", { name: "Publish student reports — deferred" })
     ).toBeDisabled();

@@ -112,6 +112,14 @@ const formatGradeStatusRowLabel = (row: GradeStatusRepositoryRow): string => {
   return row.status === "blocked" ? "Blocked" : "Unknown";
 };
 
+const getGradeStatusChipClassName = (row: GradeStatusRepositoryRow): string => {
+  if (row.status === "completed" && row.conclusion === "success")
+    return "status-chip status-chip--success";
+  if (row.status === "completed" && row.conclusion === "failure")
+    return "status-chip status-chip--error";
+  return row.needsAttention ? "status-chip status-chip--attention" : "status-chip";
+};
+
 const getNotReadyReason = (status: NormalizedGradeStatus): string => {
   const parts = [
     status.summary.queued + status.summary.inProgress > 0
@@ -266,11 +274,7 @@ const RepositoryRowsPanel = ({
                 {formatNullableValue(row.repository)}
               </span>
               <span role="cell">
-                <span
-                  className={
-                    row.needsAttention ? "status-chip status-chip--attention" : "status-chip"
-                  }
-                >
+                <span className={getGradeStatusChipClassName(row)}>
                   {formatGradeStatusRowLabel(row)}
                 </span>
               </span>

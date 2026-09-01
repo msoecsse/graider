@@ -178,7 +178,9 @@ It creates/configures the selected students' repositories, records the local
 manifest, and generates or updates the student repository access page. Apply
 reports failure if the required access page cannot be generated. “Not applied”
 usually means repositories have not been created yet; it is not automatically
-an error. Apply must succeed before repository links can be shared with students.
+an error. The Dashboard presents this pre-Apply state as **Not applied**;
+**Blocked** is reserved for diagnostics that prevent Apply. Apply must succeed
+before repository links can be shared with students.
 
 ## Share Repository Links with Students Using Canvas
 
@@ -237,6 +239,7 @@ review **Publish readiness**:
 | Not a git repository | Select the intended local Pages repository clone; Graider cannot assess publishing here.           |
 | Uncommitted          | Choose **Publish Student Access Page**, review the single page-file change, then confirm.          |
 | No upstream          | Configure/push an upstream branch using the displayed manual command.                              |
+| Behind upstream      | Pull, rebase, or otherwise synchronize the local Pages repository before publishing.               |
 | Unpushed             | Choose **Publish Student Access Page**, then confirm the push.                                     |
 | Pages unknown        | Local checks are complete, but the GitHub Pages URL could not be determined from course settings.  |
 | Ready to publish     | Local file, commit, and push checks look ready. Confirm Pages is enabled before posting in Canvas. |

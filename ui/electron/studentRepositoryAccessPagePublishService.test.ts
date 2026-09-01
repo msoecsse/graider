@@ -55,6 +55,19 @@ const createFixture = (withUpstream = true): string => {
   return root;
 };
 
+const advanceUpstream = (root: string): void => {
+  const remote = path.join(root, "remotes", "csc1120", "csc1120pages");
+  const upstreamClone = path.join(root, "upstream clone");
+  git(root, ["clone", "--branch", "main", remote, upstreamClone]);
+  git(upstreamClone, ["config", "user.email", "test@example.invalid"]);
+  git(upstreamClone, ["config", "user.name", "Test User"]);
+  fs.writeFileSync(path.join(upstreamClone, "upstream.txt"), "upstream change\n", "utf8");
+  git(upstreamClone, ["add", "upstream.txt"]);
+  git(upstreamClone, ["commit", "-m", "Advance upstream"]);
+  git(upstreamClone, ["push"]);
+  git(pagesRoot(root), ["fetch", "origin"]);
+};
+
 describe("studentRepositoryAccessPagePublishService", () => {
   it("stages, commits, and pushes only the generated access page", async () => {
     const root = createFixture();
@@ -87,5 +100,33 @@ describe("studentRepositoryAccessPagePublishService", () => {
     expect(result.status).toBe("failure");
     expect(result.diagnostics[0]?.message).toMatch(/upstream/u);
     expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(headBefore);
+  });
+
+  it("blocks publishing before committing when the Pages branch is behind its upstream", async () => {
+    const root = createFixture();
+    const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
+    advanceUpstream(root);
+
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+
+    expect(result.status).toBe("failure");
+    expect(result.diagnostics[0]?.message).toMatch(/pulled.*rebased.*synchronized/u);
+    expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(headBefore);
+    expect(git(pagesRoot(root), ["status", "--porcelain"])).toContain(outputPath);
+  });
+
+  it("includes Git's failure output when the push fails", async () => {
+    const root = createFixture();
+    git(pagesRoot(root), [
+      "remote",
+      "set-url",
+      "origin",
+      path.join(root, "missing", "csc1120", "csc1120pages")
+    ]);
+
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+
+    expect(result.status).toBe("failure");
+    expect(result.diagnostics[0]?.message).toMatch(/Git reported:.*fatal:/u);
   });
 });

@@ -130,18 +130,6 @@ const createWorkflowDispatchDiagnostic = (operation: PlanOperation): Diagnostic 
     }
   );
 
-const createWorkflowPendingWarning = (operation: PlanOperation): Diagnostic =>
-  createWarningDiagnostic(
-    DiagnosticCode.GradingWorkflowPending,
-    `Grading workflow is not observable yet for newly created ${operation.repository_name ?? "repository"}; it may still be becoming available.`,
-    {
-      repositoryName: operation.repository_name,
-      student_id: operation.student_id,
-      github_username: operation.github_username,
-      section: operation.section
-    }
-  );
-
 const wasRepositoryCreatedInPlan = (
   input: ApplyExecutionInput,
   operation: PlanOperation
@@ -652,24 +640,32 @@ const executeVerifyWorkflow = async (
 
     if (workflow === null) {
       const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
-      const diagnostic = isNewRepository
-        ? createWorkflowPendingWarning(operation)
-        : createWorkflowMissingDiagnostic(operation);
+      if (isNewRepository)
+        return persistManifest(
+          {
+            ...state,
+            manifest: updateActionsState(state.manifest, {
+              studentId: operation.student_id ?? "",
+              actions: { gradingWorkflowPath: workflowPath, lastObservedAt: observedAt }
+            })
+          },
+          input.manifestPath
+        );
 
       return persistManifest(
-        (isNewRepository ? recordWarning : recordError)(
+        recordError(
           {
             ...state,
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
                 gradingWorkflowPath: workflowPath,
-                ...(isNewRepository ? {} : { gradingWorkflowFound: false }),
+                gradingWorkflowFound: false,
                 lastObservedAt: observedAt
               }
             })
           },
-          diagnostic
+          createWorkflowMissingDiagnostic(operation)
         ),
         input.manifestPath
       );
@@ -729,26 +725,31 @@ const executeVerifyDispatch = async (
 
     if (workflow === null || !workflow.supportsDispatch) {
       const isNewRepository = wasRepositoryCreatedInPlan(input, operation);
-      const diagnostic =
-        workflow === null && isNewRepository
-          ? createWorkflowPendingWarning(operation)
-          : createWorkflowDispatchDiagnostic(operation);
+      if (workflow === null && isNewRepository)
+        return persistManifest(
+          {
+            ...state,
+            manifest: updateActionsState(state.manifest, {
+              studentId: operation.student_id ?? "",
+              actions: { lastObservedAt: observedAt }
+            })
+          },
+          input.manifestPath
+        );
 
       return persistManifest(
-        (workflow === null && isNewRepository ? recordWarning : recordError)(
+        recordError(
           {
             ...state,
             manifest: updateActionsState(state.manifest, {
               studentId: operation.student_id ?? "",
               actions: {
-                ...(workflow === null && isNewRepository
-                  ? {}
-                  : { workflowDispatchSupported: false }),
+                workflowDispatchSupported: false,
                 lastObservedAt: observedAt
               }
             })
           },
-          diagnostic
+          createWorkflowDispatchDiagnostic(operation)
         ),
         input.manifestPath
       );

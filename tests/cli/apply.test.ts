@@ -454,7 +454,7 @@ describe("graider apply command", () => {
     expect(githubClient.mutations.createdRepositories).toEqual([]);
   });
 
-  it("TC-CLI-APPLY-010 existing admin student permission is preserved", async () => {
+  it("TC-CLI-APPLY-010 ignores extra collaborator accounts while preserving required access", async () => {
     const cwd = copyFixtureToTemp("grading-disabled");
     writeTrackedManifest(cwd, JONES_REPOSITORY);
     const githubClient = new FakeGitHubClient({
@@ -477,6 +477,12 @@ describe("graider apply command", () => {
           repo: JONES_REPOSITORY,
           username: "observer",
           permission: "pull"
+        },
+        {
+          owner: ORGANIZATION,
+          repo: JONES_REPOSITORY,
+          username: "organization-automation",
+          permission: "maintain"
         }
       ]
     });
@@ -489,11 +495,7 @@ describe("graider apply command", () => {
     });
 
     expect(result.exitCode).toBe(ExitCode.Success);
-    expect(result.warnings).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: "unexpected_collaborator_preserved" })
-      ])
-    );
+    expect(result.warnings).toEqual([]);
     expect(githubClient.mutations.addedCollaborators).toEqual([]);
     expect(githubClient.mutations.removedCollaborators).toEqual([]);
   });
@@ -566,7 +568,7 @@ describe("graider apply command", () => {
     ).toBeUndefined();
   });
 
-  it("new repositories with a workflow not yet observable produce a pending warning", async () => {
+  it("new repositories with a workflow not yet observable omit the transient diagnostic", async () => {
     const githubClient = new FakeGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
@@ -589,7 +591,7 @@ describe("graider apply command", () => {
     expect(result.errors).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "grading_workflow_pending" })])
     );
-    expect(result.warnings).toEqual(
+    expect(result.warnings).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "grading_workflow_pending" })])
     );
   });
