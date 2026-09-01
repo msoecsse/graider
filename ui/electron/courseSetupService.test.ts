@@ -26,11 +26,15 @@ const createRequest = (
 const ROSTER = "student_id,github_username,section,status\nS123,octocat,001,ACTIVE\n";
 
 describe("course setup service", () => {
-  it("generates course defaults and derives Fall 2026 for 27s1", () => {
+  it("generates course defaults without a Graders team and derives Fall 2026 for 27s1", () => {
     const preview = previewCourseSetup(createRequest(createRoot()));
 
     expect(preview.status).toBe("ready");
     expect(preview.files[0]?.content).toContain('code: "csc1120"');
+    expect(preview.files[0]?.content).toContain("student_permission: admin");
+    expect(preview.files[0]?.content).toContain("faculty_permission: admin");
+    expect(preview.files[0]?.content).not.toContain("grader_team:");
+    expect(preview.files[0]?.content).not.toContain("grader_permission:");
     expect(preview.files[0]?.content).toContain("timezone: America/Chicago");
     expect(preview.files[1]?.content).toContain('display_name: "Fall 2026"');
     expect(preview.files.map((file) => file.path)).toEqual(["course.yml", "terms/27s1/term.yml"]);

@@ -252,7 +252,6 @@ Coverage is intentionally split between concrete test case IDs and broader test 
 | `TC-CLI-APPLY-007`      | Manifest is updated incrementally                                                       |
 | `TC-CLI-APPLY-008`      | Confirmation required unless `--yes`                                                    |
 | `TC-CLI-APPLY-009`      | Non-interactive apply without `--yes` fails before mutations                            |
-| `TC-CLI-APPLY-010`      | Unexpected collaborators are left unchanged and warned                                  |
 | `TC-CLI-ARCHIVE-001`    | Missing target selector fails                                                           |
 | `TC-CLI-ARCHIVE-002`    | Multiple target selectors fail                                                          |
 | `TC-CLI-ARCHIVE-003`    | Confirmation required unless `--yes`                                                    |

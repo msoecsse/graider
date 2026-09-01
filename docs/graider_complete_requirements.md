@@ -506,8 +506,7 @@ The system shall not remove or downgrade permissions during `graider apply`.
 
 **Acceptance criteria**
 
-- Unexpected collaborators are left unchanged and reported.
-- Unexpected teams are left unchanged and reported.
+- Unexpected collaborators and teams are ignored and left unchanged.
 - Students with higher-than-expected permission are left unchanged and warned.
 - No collaborator or team is removed during `apply`.
 
@@ -863,7 +862,7 @@ The system shall make `graider apply` safe to re-run without duplicating reposit
 - Existing manifest-tracked repositories are treated as no-op for repository creation.
 - Missing expected additive permissions are added.
 - Existing expected permissions are treated as no-op.
-- Unexpected collaborators and teams are left unchanged and reported.
+- Unexpected collaborators and teams are ignored and left unchanged.
 - `apply` does not delete repositories, archive repositories, remove collaborators, remove teams, or downgrade permissions.
 
 ---
@@ -1078,8 +1077,7 @@ The system shall make normal synchronization additive.
 - `graider apply` does not archive repositories.
 - `graider apply` does not delete repositories.
 - `graider apply` does not downgrade permissions.
-- Unexpected collaborators are left unchanged and reported.
-- Unexpected teams are left unchanged and reported.
+- Unexpected collaborators and teams are ignored and left unchanged.
 - Higher-than-expected student permissions are left unchanged and reported.
 
 ---

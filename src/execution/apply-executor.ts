@@ -171,24 +171,6 @@ const createPermissionWarning = (
     }
   );
 
-const createUnexpectedCollaboratorWarning = (
-  operation: PlanOperation,
-  username: string,
-  permission: GitHubPermission
-): Diagnostic =>
-  createWarningDiagnostic(
-    DiagnosticCode.UnexpectedCollaboratorPreserved,
-    `Unexpected collaborator ${username} is present and was left unchanged.`,
-    {
-      repositoryName: operation.repository_name,
-      student_id: operation.student_id,
-      github_username: operation.github_username,
-      section: operation.section,
-      unexpectedUsername: username,
-      permission
-    }
-  );
-
 const createRepositoryCreationNotObservedDiagnostic = (
   operation: PlanOperation,
   owner: string,
@@ -474,26 +456,6 @@ const executeStudentCollaborator = async (
         })
       );
       nextState = incrementSummary(nextState, "verified");
-    }
-
-    const collaborators = await runGitHubOperation(input, () =>
-      input.githubClient.listCollaboratorPermissions(
-        input.config.course.github.organization,
-        repositoryName
-      )
-    );
-
-    for (const collaborator of collaborators) {
-      if (collaborator.username !== githubUsername) {
-        nextState = recordWarning(
-          nextState,
-          createUnexpectedCollaboratorWarning(
-            operation,
-            collaborator.username,
-            collaborator.permission
-          )
-        );
-      }
     }
 
     return persistManifest(

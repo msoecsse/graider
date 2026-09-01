@@ -14,7 +14,6 @@ import {
   DownloadArtifactInput,
   DownloadedArtifact,
   GitHubActionsState,
-  GitHubCollaboratorPermissionState,
   GitHubCollaboratorResult,
   GitHubFileWriteResult,
   GitHubPermission,
@@ -112,7 +111,6 @@ export interface OctokitRestClientLike {
       getCollaboratorPermissionLevel: OctokitMethodLike;
       getContent: OctokitMethodLike;
       listBranches: unknown;
-      listCollaborators: unknown;
       listCommits: OctokitMethodLike;
       removeCollaborator: OctokitMethodLike;
       update: OctokitMethodLike;
@@ -264,27 +262,6 @@ export class OctokitGitHubClient implements GitHubClient {
       pendingInvite: false,
       permission: toPermission(asString(record.permission))
     };
-  }
-
-  async listCollaboratorPermissions(
-    owner: string,
-    repo: string
-  ): Promise<GitHubCollaboratorPermissionState[]> {
-    this.ensureAuthenticated();
-    const collaborators = await this.runPaginated(this.octokit.rest.repos.listCollaborators, {
-      affiliation: "all",
-      owner,
-      repo
-    });
-
-    return collaborators
-      .map(asRecord)
-      .map((collaborator) => ({
-        pendingInvite: false,
-        permission: toCollaboratorPermission(collaborator),
-        username: asString(collaborator.login) ?? ""
-      }))
-      .filter((collaborator) => collaborator.username.length > EMPTY_LENGTH);
   }
 
   async addCollaborator(input: AddCollaboratorInput): Promise<GitHubCollaboratorResult> {
@@ -816,32 +793,6 @@ function toPermission(value: string | undefined): GitHubPermission {
   return value !== undefined && allowed.includes(value as GitHubPermission)
     ? (value as GitHubPermission)
     : "none";
-}
-
-function toCollaboratorPermission(collaborator: Record<string, unknown>): GitHubPermission {
-  const permissions = asRecord(collaborator.permissions);
-
-  if (asBoolean(permissions.admin) === true) {
-    return "admin";
-  }
-
-  if (asBoolean(permissions.maintain) === true) {
-    return "maintain";
-  }
-
-  if (asBoolean(permissions.push) === true || asBoolean(permissions.write) === true) {
-    return "push";
-  }
-
-  if (asBoolean(permissions.triage) === true) {
-    return "triage";
-  }
-
-  if (asBoolean(permissions.pull) === true || asBoolean(permissions.read) === true) {
-    return "pull";
-  }
-
-  return "none";
 }
 
 function toWorkflowStatus(value: unknown): GitHubWorkflowRunStatus {

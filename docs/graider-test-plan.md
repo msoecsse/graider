@@ -316,7 +316,6 @@ Test cases:
 | `TC-CLI-APPLY-007` | Manifest is updated incrementally                              |
 | `TC-CLI-APPLY-008` | Confirmation required unless `--yes`                           |
 | `TC-CLI-APPLY-009` | Non-interactive apply without `--yes` fails before mutations   |
-| `TC-CLI-APPLY-010` | Unexpected collaborators are left unchanged and warned         |
 
 ---
 
@@ -429,7 +428,6 @@ Mock scenarios:
 - faculty team has expected permission
 - grader team has expected permission
 - team has lower permission
-- unexpected collaborator exists
 - unexpected team exists
 
 ---

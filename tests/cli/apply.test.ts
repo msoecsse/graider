@@ -254,6 +254,8 @@ describe("graider apply command", () => {
     expect(
       githubClient.mutations.createdRepositories.map((record) => record.repository.name)
     ).toEqual([JONES_REPOSITORY, PATEL_REPOSITORY]);
+    expect(githubClient.mutations.fileWrites).toEqual([]);
+    expect(githubClient.mutations.workflowDispatches).toEqual([]);
   });
 
   it("TC-CLI-APPLY-002 re-running apply is no-op for existing state", async () => {
@@ -487,7 +489,7 @@ describe("graider apply command", () => {
     });
 
     expect(result.exitCode).toBe(ExitCode.Success);
-    expect(result.warnings).toEqual(
+    expect(result.warnings).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "unexpected_collaborator_preserved" })
       ])

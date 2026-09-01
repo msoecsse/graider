@@ -378,7 +378,6 @@ const createMockOctokit = (): OctokitRestClientLike => ({
       get: () => createRepositoryResponse(),
       createUsingTemplate: () => createRepositoryResponse(),
       listBranches: () => resolvedResponse([{ name: BRANCH }]),
-      listCollaborators: () => resolvedResponse([{ login: USERNAME, permissions: { push: true } }]),
       listCommits: () => resolvedResponse([{ sha: "latest-sha" }]),
       getContent: () =>
         resolvedResponse({

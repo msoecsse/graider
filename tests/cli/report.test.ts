@@ -308,7 +308,6 @@ const createUnusedOctokit = (): OctokitRestClientLike => {
         get: unusedMethod,
         createUsingTemplate: unusedMethod,
         listBranches: unusedMethod,
-        listCollaborators: unusedMethod,
         listCommits: unusedMethod,
         getContent: unusedMethod,
         getCollaboratorPermissionLevel: unusedMethod,

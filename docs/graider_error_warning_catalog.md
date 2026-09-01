@@ -138,8 +138,6 @@ Recommended structured shape:
 | `faculty_team_permission_added`           | info     | Faculty team permission added                                 |
 | `grader_team_permission_added`            | info     | Grader team permission added                                  |
 | `team_permission_lower_than_expected`     | warning  | Team permission is lower than expected                        |
-| `unexpected_collaborator`                 | warning  | Unexpected collaborator was found and left unchanged          |
-| `unexpected_team`                         | warning  | Unexpected team permission was found and left unchanged       |
 
 ---
 

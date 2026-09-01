@@ -819,7 +819,6 @@ TC-CLI-APPLY-006 archived assignment blocks apply
 TC-CLI-APPLY-007 manifest is updated incrementally
 TC-CLI-APPLY-008 confirmation required unless --yes
 TC-CLI-APPLY-009 non-interactive apply without --yes fails before mutations
-TC-CLI-APPLY-010 unexpected collaborators are left unchanged and warned
 TC-RECOVERY-001 interrupted after repo creation and manifest update reruns no-op
 TC-RECOVERY-002 interrupted before manifest update reruns collision
 ```

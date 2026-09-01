@@ -93,7 +93,6 @@ var DiagnosticCode = {
   WorkflowDispatchMissing: "workflow_dispatch_missing",
   WorkflowDispatchFailed: "workflow_dispatch_failed",
   PermissionNotDowngraded: "permission_not_downgraded",
-  UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved",
   GradingNotConfigured: "grading_not_configured",
   AssignmentStatusBlocksGrade: "assignment_status_blocks_grade",
   TargetSelectorMissing: "target_selector_missing",
@@ -230,7 +229,6 @@ var WORKFLOW_DISPATCH_UNSUPPORTED_CODE = DiagnosticCode.WorkflowDispatchUnsuppor
 var WORKFLOW_DISPATCH_MISSING_CODE = DiagnosticCode.WorkflowDispatchMissing;
 var WORKFLOW_DISPATCH_FAILED_CODE = DiagnosticCode.WorkflowDispatchFailed;
 var PERMISSION_NOT_DOWNGRADED_CODE = DiagnosticCode.PermissionNotDowngraded;
-var UNEXPECTED_COLLABORATOR_PRESERVED_CODE = DiagnosticCode.UnexpectedCollaboratorPreserved;
 var GRADING_NOT_CONFIGURED_CODE = DiagnosticCode.GradingNotConfigured;
 var ASSIGNMENT_STATUS_BLOCKS_GRADE_CODE = DiagnosticCode.AssignmentStatusBlocksGrade;
 var TARGET_SELECTOR_MISSING_CODE = DiagnosticCode.TargetSelectorMissing;
@@ -653,6 +651,13 @@ var checkAssignmentDetailGithubReadiness = async ({
   grading,
   githubClient
 }) => {
+  if (config.assignment.template.repository === "" && config.assignment.template.branch === "") {
+    return {
+      template: withTemplateStatus(template, STATUS_NOT_REQUIRED, STATUS_NOT_REQUIRED),
+      grading: withWorkflowStatus(grading, STATUS_NOT_REQUIRED, STATUS_NOT_REQUIRED),
+      diagnostics: []
+    };
+  }
   if (githubClient === void 0) {
     return createTokenRequiredResult(config, template, grading);
   }
@@ -793,8 +798,8 @@ var rawCourseConfigSchema = z.object({
     student_permission: z.string().min(MINIMUM_LIST_ITEMS),
     faculty_team: z.string().min(MINIMUM_LIST_ITEMS),
     faculty_permission: z.string().min(MINIMUM_LIST_ITEMS),
-    grader_team: z.string().min(MINIMUM_LIST_ITEMS),
-    grader_permission: z.string().min(MINIMUM_LIST_ITEMS)
+    grader_team: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+    grader_permission: z.string().min(MINIMUM_LIST_ITEMS).optional()
   }).strict(),
   defaults: z.object({
     timezone: z.string().min(MINIMUM_LIST_ITEMS),
@@ -815,7 +820,7 @@ var rawTermConfigSchema = z.object({
   sections: z.array(
     z.object({
       id: z.string().min(MINIMUM_LIST_ITEMS),
-      roster: z.string().min(MINIMUM_LIST_ITEMS)
+      roster: z.string().min(MINIMUM_LIST_ITEMS).optional()
     }).strict()
   ).min(MINIMUM_LIST_ITEMS)
 }).strict();
@@ -1155,7 +1160,7 @@ var validateCourseConfig = (filePath, config) => [
       }
     )
   ],
-  ...config.github.student_permission === STUDENT_PERMISSION && config.github.faculty_permission === FACULTY_PERMISSION && config.github.grader_permission === GRADER_PERMISSION ? [] : [
+  ...config.github.student_permission === STUDENT_PERMISSION && config.github.faculty_permission === FACULTY_PERMISSION && (config.github.grader_team === void 0 ? config.github.grader_permission === void 0 : config.github.grader_permission === GRADER_PERMISSION) ? [] : [
     createConfigDiagnostic(
       INVALID_PERMISSION_CODE,
       "One or more GitHub permissions are invalid.",
@@ -1424,6 +1429,14 @@ var createSummary = (repoRoot, parts, course, assignment) => ({
   assignmentSlug: parts.assignmentSlug,
   ...getGradingEnabled(course, assignment)
 });
+var resolveCourseConfig = (course) => ({
+  ...course,
+  grading: course.grading ?? { enabled: false, mode: "no-grading" }
+});
+var resolveAssignmentConfig = (assignment) => ({
+  ...assignment,
+  template: assignment.template ?? { repository: "", branch: "" }
+});
 var loadGraiderConfig = (request) => {
   const repositoryRootResult = findRepositoryRoot(request.cwd);
   if (!repositoryRootResult.found) {
@@ -1454,9 +1467,9 @@ var loadGraiderConfig = (request) => {
   return {
     status: "success",
     config: {
-      course: loadResult.course,
+      course: resolveCourseConfig(loadResult.course),
       term: loadResult.term,
-      assignment: loadResult.assignment,
+      assignment: resolveAssignmentConfig(loadResult.assignment),
       summary: createSummary(
         repositoryRootResult.repoRoot,
         parts,
@@ -2315,8 +2328,10 @@ var buildGroupApplyPreviewPlan = (config, students) => {
       plannedStudentPermission: "admin",
       facultyTeam: config.course.github.faculty_team,
       facultyTeamPermission: config.course.github.faculty_permission,
-      graderTeam: config.course.github.grader_team,
-      graderTeamPermission: config.course.github.grader_permission,
+      ...config.course.github.grader_team === void 0 || config.course.github.grader_permission === void 0 ? {} : {
+        graderTeam: config.course.github.grader_team,
+        graderTeamPermission: config.course.github.grader_permission
+      },
       diagnostics: [...repository.warnings]
     });
   }
@@ -2512,15 +2527,14 @@ var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY
 var getSectionSources = (config) => {
   const termDirectory = getTermDirectory(config.summary.termConfigPath);
   const sectionsById = new Map(
-    config.term.sections.map((section) => [
-      section.id,
-      toForwardSlashPath(path6.posix.join(termDirectory, section.roster))
-    ])
+    config.term.sections.flatMap(
+      (section) => section.roster === void 0 ? [] : [[section.id, toForwardSlashPath(path6.posix.join(termDirectory, section.roster))]]
+    )
   );
-  return config.assignment.sections.map((sectionId) => ({
-    sectionId,
-    rosterPath: sectionsById.get(sectionId) ?? ""
-  }));
+  return config.assignment.sections.flatMap((sectionId) => {
+    const rosterPath = sectionsById.get(sectionId);
+    return rosterPath === void 0 ? [] : [{ sectionId, rosterPath }];
+  });
 };
 var getColumnIndexes = (headers) => ({
   studentId: headers.indexOf(STUDENT_ID_COLUMN),
@@ -3370,7 +3384,7 @@ var createRepositoryStatusUnknownDiagnostic2 = (error, student, repository) => {
 };
 var createGradingPreview2 = (config, workflowDispatch) => {
   const grading = getEffectiveGrading(config);
-  const resolvedFrom = config.summary.gradingSource === "assignment" ? "assignment_override" : "course_default";
+  const resolvedFrom = config.summary.gradingSource === "assignment" ? "assignment_override" : config.summary.gradingSource === "course" ? "course_default" : "none";
   if (!grading.enabled) {
     return {
       enabled: false,
@@ -3833,7 +3847,7 @@ var createWorkflowRunFailedDiagnostic = (student, repository, run, workflowPath,
 );
 var createGradingStatus = (config) => {
   const grading = getEffectiveGrading2(config);
-  const resolvedFrom = config.summary.gradingSource === "assignment" ? "assignment_override" : "course_default";
+  const resolvedFrom = config.summary.gradingSource === "assignment" ? "assignment_override" : config.summary.gradingSource === "course" ? "course_default" : "none";
   if (!grading.enabled) {
     return {
       enabled: false,
@@ -4642,19 +4656,6 @@ var OctokitGitHubClient = class {
       permission: toPermission(asString(record.permission))
     };
   }
-  async listCollaboratorPermissions(owner, repo) {
-    this.ensureAuthenticated();
-    const collaborators = await this.runPaginated(this.octokit.rest.repos.listCollaborators, {
-      affiliation: "all",
-      owner,
-      repo
-    });
-    return collaborators.map(asRecord).map((collaborator) => ({
-      pendingInvite: false,
-      permission: toCollaboratorPermission(collaborator),
-      username: asString(collaborator.login) ?? ""
-    })).filter((collaborator) => collaborator.username.length > EMPTY_LENGTH2);
-  }
   async addCollaborator(input) {
     const response = await this.runResponse(
       () => this.octokit.rest.repos.addCollaborator({
@@ -5066,25 +5067,6 @@ function mapWorkflowRun(value, workflowPath) {
 function toPermission(value) {
   const allowed = ["none", "pull", "triage", "push", "maintain", "admin"];
   return value !== void 0 && allowed.includes(value) ? value : "none";
-}
-function toCollaboratorPermission(collaborator) {
-  const permissions = asRecord(collaborator.permissions);
-  if (asBoolean(permissions.admin) === true) {
-    return "admin";
-  }
-  if (asBoolean(permissions.maintain) === true) {
-    return "maintain";
-  }
-  if (asBoolean(permissions.push) === true || asBoolean(permissions.write) === true) {
-    return "push";
-  }
-  if (asBoolean(permissions.triage) === true) {
-    return "triage";
-  }
-  if (asBoolean(permissions.pull) === true || asBoolean(permissions.read) === true) {
-    return "pull";
-  }
-  return "none";
 }
 function toWorkflowStatus(value) {
   const status = asString(value);
@@ -5662,18 +5644,6 @@ var createPermissionWarning = (operation, currentPermission, expectedPermission)
     expectedPermission
   }
 );
-var createUnexpectedCollaboratorWarning = (operation, username, permission) => createWarningDiagnostic(
-  DiagnosticCode.UnexpectedCollaboratorPreserved,
-  `Unexpected collaborator ${username} is present and was left unchanged.`,
-  {
-    repositoryName: operation.repository_name,
-    student_id: operation.student_id,
-    github_username: operation.github_username,
-    section: operation.section,
-    unexpectedUsername: username,
-    permission
-  }
-);
 var createRepositoryCreationNotObservedDiagnostic = (operation, owner, repositoryName) => createConfigDiagnostic(
   DiagnosticCode.GithubApiError,
   `Repository creation did not produce an observable repository for ${owner}/${repositoryName}.`,
@@ -5880,25 +5850,6 @@ var executeStudentCollaborator = async (input, state, operation, observedAt) => 
         })
       );
       nextState = incrementSummary(nextState, "verified");
-    }
-    const collaborators = await runGitHubOperation(
-      input,
-      () => input.githubClient.listCollaboratorPermissions(
-        input.config.course.github.organization,
-        repositoryName
-      )
-    );
-    for (const collaborator of collaborators) {
-      if (collaborator.username !== githubUsername) {
-        nextState = recordWarning(
-          nextState,
-          createUnexpectedCollaboratorWarning(
-            operation,
-            collaborator.username,
-            collaborator.permission
-          )
-        );
-      }
     }
     return persistManifest(
       {
@@ -6175,11 +6126,13 @@ var executeOperation = async (input, state, operation, observedAt) => {
     );
   }
   if (operation.type === "add_grader_team_permission") {
+    const graderTeam = input.config.course.github.grader_team;
+    if (graderTeam === void 0) return state;
     return executeTeamPermission(
       input,
       state,
       operation,
-      input.config.course.github.grader_team,
+      graderTeam,
       GRADER_PERMISSION2,
       observedAt
     );
@@ -6441,7 +6394,7 @@ var validateTeams = async (courseConfig, githubClient) => {
     DiagnosticCode.FacultyTeamMissing,
     "Faculty"
   );
-  const graderTeamErrors = await validateTeam(
+  const graderTeamErrors = courseConfig.github.grader_team === void 0 ? [] : await validateTeam(
     githubClient,
     organization,
     courseConfig.github.grader_team,
@@ -6654,7 +6607,7 @@ var createIndividualRepositoryTarget = (config, student) => {
     primaryStudentId: student.studentId,
     plannedStudentPermission: "admin",
     facultyTeamPermission: config.course.github.faculty_permission,
-    graderTeamPermission: config.course.github.grader_permission,
+    ...config.course.github.grader_permission === void 0 ? {} : { graderTeamPermission: config.course.github.grader_permission },
     diagnostics: [...name.warnings, ...name.errors]
   };
 };
@@ -6812,7 +6765,7 @@ var buildPlannedProvisioningOperations = (config, student, repositoryName) => {
     }),
     createOperation(student, "add_student_collaborator", "planned", sharedInput),
     createOperation(student, "add_faculty_team_permission", "planned", sharedInput),
-    createOperation(student, "add_grader_team_permission", "planned", sharedInput),
+    ...config.course.github.grader_team === void 0 ? [] : [createOperation(student, "add_grader_team_permission", "planned", sharedInput)],
     createOperation(student, "enable_actions", "planned", sharedInput),
     ...config.summary.gradingEnabled ? [
       createOperation(student, "verify_grading_workflow", "planned", {
@@ -6860,7 +6813,7 @@ var buildTrackedRepositoryOperations = (config, student, repositoryName) => {
     }),
     createOperation(student, "add_student_collaborator", "planned", sharedInput),
     createOperation(student, "add_faculty_team_permission", "planned", sharedInput),
-    createOperation(student, "add_grader_team_permission", "planned", sharedInput),
+    ...config.course.github.grader_team === void 0 ? [] : [createOperation(student, "add_grader_team_permission", "planned", sharedInput)],
     createOperation(student, "enable_actions", "planned", sharedInput),
     ...config.summary.gradingEnabled ? [
       createOperation(student, "verify_grading_workflow", "planned", {
@@ -7151,12 +7104,14 @@ var executeGroupTargets = async (input) => {
         teamSlug: target.facultyTeam,
         permission: target.facultyTeamPermission
       });
-      await input.githubClient.addTeamPermission({
-        owner: repository.owner,
-        repo: repository.name,
-        teamSlug: target.graderTeam,
-        permission: target.graderTeamPermission
-      });
+      if (target.graderTeam !== void 0 && target.graderTeamPermission !== void 0) {
+        await input.githubClient.addTeamPermission({
+          owner: repository.owner,
+          repo: repository.name,
+          teamSlug: target.graderTeam,
+          permission: target.graderTeamPermission
+        });
+      }
       if (input.config.summary.gradingEnabled && input.config.course.grading.workflow !== void 0) {
         const workflow = await input.githubClient.getWorkflow(
           repository.owner,
@@ -9412,8 +9367,8 @@ var loadRosterSummary = (repoRoot, termSlug, termConfig) => {
       diagnostics: []
     };
   }
-  const loadedRosters = termConfig.sections.map(
-    (section) => loadRosterStudents(repoRoot, [TERMS_DIRECTORY4, termSlug, section.roster].join("/"), section.id)
+  const loadedRosters = termConfig.sections.flatMap(
+    (section) => section.roster === void 0 ? [] : [loadRosterStudents(repoRoot, [TERMS_DIRECTORY4, termSlug, section.roster].join("/"), section.id)]
   );
   const students = loadedRosters.flatMap((roster) => roster.students);
   const diagnostics = [

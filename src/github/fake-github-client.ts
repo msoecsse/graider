@@ -8,7 +8,6 @@ import type {
   DownloadArtifactInput,
   DownloadedArtifact,
   GitHubActionsState,
-  GitHubCollaboratorPermissionState,
   GitHubCollaboratorResult,
   GitHubFileWriteResult,
   GitHubPermission,
@@ -361,21 +360,6 @@ export class FakeGitHubClient implements GitHubClient {
         pendingInvite: permissionRecord.pendingInvite ?? false
       };
     });
-  }
-
-  listCollaboratorPermissions(
-    owner: string,
-    repo: string
-  ): Promise<GitHubCollaboratorPermissionState[]> {
-    return this.run("listCollaboratorPermissions", () =>
-      this.collaboratorPermissions
-        .filter((record) => repositoryKey(record.owner, record.repo) === repositoryKey(owner, repo))
-        .map((record) => ({
-          username: record.username,
-          permission: record.permission,
-          pendingInvite: record.pendingInvite ?? false
-        }))
-    );
   }
 
   addCollaborator(input: AddCollaboratorInput): Promise<GitHubCollaboratorResult> {

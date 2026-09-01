@@ -7,7 +7,6 @@ import type {
   DownloadedArtifact,
   GitHubActionsState,
   GitHubCollaboratorResult,
-  GitHubCollaboratorPermissionState,
   GitHubFileWriteResult,
   GitHubPermissionState,
   GitHubRepository,
@@ -39,11 +38,6 @@ export interface GitHubClient {
     repo: string,
     username: string
   ): Promise<GitHubPermissionState>;
-
-  listCollaboratorPermissions(
-    owner: string,
-    repo: string
-  ): Promise<GitHubCollaboratorPermissionState[]>;
 
   addCollaborator(input: AddCollaboratorInput): Promise<GitHubCollaboratorResult>;
 

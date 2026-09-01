@@ -89,7 +89,6 @@ export const DiagnosticCode = {
   WorkflowDispatchMissing: "workflow_dispatch_missing",
   WorkflowDispatchFailed: "workflow_dispatch_failed",
   PermissionNotDowngraded: "permission_not_downgraded",
-  UnexpectedCollaboratorPreserved: "unexpected_collaborator_preserved",
   GradingNotConfigured: "grading_not_configured",
   AssignmentStatusBlocksGrade: "assignment_status_blocks_grade",
   TargetSelectorMissing: "target_selector_missing",
@@ -239,8 +238,6 @@ export const WORKFLOW_DISPATCH_UNSUPPORTED_CODE = DiagnosticCode.WorkflowDispatc
 export const WORKFLOW_DISPATCH_MISSING_CODE = DiagnosticCode.WorkflowDispatchMissing;
 export const WORKFLOW_DISPATCH_FAILED_CODE = DiagnosticCode.WorkflowDispatchFailed;
 export const PERMISSION_NOT_DOWNGRADED_CODE = DiagnosticCode.PermissionNotDowngraded;
-export const UNEXPECTED_COLLABORATOR_PRESERVED_CODE =
-  DiagnosticCode.UnexpectedCollaboratorPreserved;
 export const GRADING_NOT_CONFIGURED_CODE = DiagnosticCode.GradingNotConfigured;
 export const ASSIGNMENT_STATUS_BLOCKS_GRADE_CODE = DiagnosticCode.AssignmentStatusBlocksGrade;
 export const TARGET_SELECTOR_MISSING_CODE = DiagnosticCode.TargetSelectorMissing;
