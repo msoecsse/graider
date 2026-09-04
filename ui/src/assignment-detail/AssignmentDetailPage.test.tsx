@@ -926,7 +926,7 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
   });
 
-  it("renders compact grade status rows using roster usernames, readable times, and no workflow column", async () => {
+  it("renders compact grade status rows using MSOE usernames, readable times, and no workflow column", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
     });
@@ -936,9 +936,11 @@ describe("AssignmentDetailPage", () => {
     const summary = await screen.findByLabelText("Grade status summary");
     const advancedDetails = screen.getByText("Advanced details").closest("details");
     expect(advancedDetails).not.toContainElement(summary);
-    expect(within(summary).getByText("ada.course")).toBeInTheDocument();
-    expect(within(summary).getByText("github-only")).toBeInTheDocument();
+    expect(within(summary).getByText("s001")).toBeInTheDocument();
+    expect(within(summary).getByText("Unknown student")).toBeInTheDocument();
+    expect(within(summary).queryByText("ada.course")).toBeNull();
     expect(within(summary).queryByText("adalovelace")).toBeNull();
+    expect(within(summary).queryByText("github-only")).toBeNull();
     expect(within(summary).queryByRole("columnheader", { name: "Workflow" })).toBeNull();
     expect(screen.queryByText("2026-06-12T17:33:39Z")).toBeNull();
     expect(within(summary).getAllByText(/Last completed .*Jun 12, 2026/u).length).toBeGreaterThan(
@@ -959,6 +961,49 @@ describe("AssignmentDetailPage", () => {
       "https://github.com/graider-sandbox/csc1120-lab02-ada"
     );
     expect(within(summary).getAllByText("No run link")).toHaveLength(3);
+  });
+
+  it("keeps an MSOE username distinct from its GitHub repository URL", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(
+        createAssignmentGradeStatusResult(
+          createAssignmentGradeStatusJson({
+            repositories: [
+              {
+                studentUsername: "legacy-username",
+                studentId: "jonesse",
+                githubUsername: "seanjones123",
+                section: "001",
+                repository: "graider-sandbox/csc1120-lab02-seanjones123",
+                workflow: ".github/workflows/grade.yml",
+                ref: "main",
+                runId: null,
+                runUrl: null,
+                status: "completed",
+                conclusion: "success",
+                startedAt: "2026-06-12T17:32:49Z",
+                completedAt: "2026-06-12T17:33:39Z",
+                selectionStrategy: "latest_configured_workflow_run",
+                reason: "success",
+                needsAttention: false,
+                diagnostics: []
+              }
+            ]
+          })
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const summary = await screen.findByLabelText("Grade status summary");
+    expect(within(summary).getByText("jonesse")).toBeInTheDocument();
+    expect(within(summary).queryByText("legacy-username")).toBeNull();
+    expect(within(summary).queryByText("seanjones123")).toBeNull();
+    expect(
+      within(summary).getByRole("link", { name: "csc1120-lab02-seanjones123" })
+    ).toHaveAttribute("href", "https://github.com/graider-sandbox/csc1120-lab02-seanjones123");
   });
 
   it("builds Open run links from full student repository and run id when backend runUrl is missing", async () => {
@@ -1489,7 +1534,7 @@ describe("AssignmentDetailPage", () => {
     expect(within(results).getByText("27s1-csc1120-lab02-alpha")).toBeInTheDocument();
     expect(within(results).getByText("27s1-csc1120-lab02-beta")).toBeInTheDocument();
     expect(within(results).getByText("alpha")).toBeInTheDocument();
-    expect(within(results).getByText(/\(alpha-gh\)/u)).toBeInTheDocument();
+    expect(within(results).queryByText(/alpha-gh/u)).toBeNull();
   });
 
   it("renders one shared group repository result with all group members", async () => {
@@ -1525,7 +1570,7 @@ describe("AssignmentDetailPage", () => {
     expect(within(results).getByText("27s1-csc1120-lab02-team-1")).toBeInTheDocument();
     expect(within(results).getByText(/\(team-1\)/u)).toBeInTheDocument();
     expect(within(results).getByText(/alpha, beta/u)).toBeInTheDocument();
-    expect(within(results).getByText(/alpha-gh, beta-gh/u)).toBeInTheDocument();
+    expect(within(results).queryByText(/alpha-gh, beta-gh/u)).toBeNull();
     expect(within(results).getAllByRole("listitem")).toHaveLength(1);
   });
 

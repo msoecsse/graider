@@ -63,15 +63,30 @@ npm run package
 ```
 
 `npm run package` builds `ui/dist-graider-cli`, builds the Electron main/preload
-and renderer assets, and creates an unpacked macOS app.
-Expected output on macOS:
+and renderer assets, and creates an unpacked macOS app. Expected output:
 
 ```text
 ui/release/mac-arm64/Graider.app
 ```
 
-On Intel macOS, the architecture folder may be `mac` or `mac-x64` depending on
-the local Electron/electron-builder environment.
+`npm run package:mac` is the explicit equivalent macOS-only command.
+
+To build the separate Windows x64 portable executable, run:
+
+```bash
+npm run package:win
+```
+
+Its output is:
+
+```text
+ui/release/Graider.exe
+```
+
+The Windows target is x64 only; it does not create an installer or an ARM build.
+When building the Windows portable executable from macOS, electron-builder may
+require Wine. Install Wine on the packaging host if `npm run package:win` reports
+it is required; no application-code workaround is needed.
 
 To build a DMG on macOS:
 
@@ -95,7 +110,7 @@ cd ui
 npm run release:rc1
 ```
 
-The script runs `npm run package`, locates the unpacked macOS app from
+The script runs `npm run package:mac`, locates the unpacked macOS app from
 `ui/release/`, then creates:
 
 ```text

@@ -16,7 +16,11 @@ module.exports = {
   ],
   mac: {
     category: "public.app-category.education",
-    target: ["dir"]
+    target: [{ target: "dir", arch: ["arm64"] }]
+  },
+  win: {
+    target: [{ target: "portable", arch: ["x64"] }],
+    artifactName: "Graider.${ext}"
   },
   dmg: {
     sign: false

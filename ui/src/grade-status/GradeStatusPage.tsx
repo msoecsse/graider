@@ -78,7 +78,7 @@ const getCourseTermSubtitle = (status: NormalizedGradeStatus | null): string => 
 const formatSeconds = (milliseconds: number): number => milliseconds / MILLISECONDS_PER_SECOND;
 
 const getStudentLabel = (row: GradeStatusRepositoryRow): string =>
-  row.studentUsername ?? row.studentId ?? row.githubUsername ?? "Unknown student";
+  row.studentId ?? "Unknown student";
 
 const formatGradeStatusRowLabel = (row: GradeStatusRepositoryRow): string => {
   if (row.status === "queued") {

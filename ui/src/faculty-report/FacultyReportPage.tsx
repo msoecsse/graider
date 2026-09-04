@@ -238,7 +238,7 @@ const StudentRowsPanel = ({
             role="row"
             key={`${student.studentId ?? student.githubUsername ?? "student"}-${student.section ?? "section"}`}
           >
-            <span role="cell">{student.githubUsername ?? student.studentId ?? "Unknown"}</span>
+            <span role="cell">{student.studentId ?? "Unknown"}</span>
             <span role="cell">{formatNullableValue(student.section)}</span>
             <span role="cell" className="apply-preview-table__repository">
               {formatNullableValue(student.repository)}

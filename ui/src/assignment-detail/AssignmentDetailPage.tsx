@@ -1050,9 +1050,7 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
 });
 
 const getGradeStatusStudentLabel = (row: GradeStatusRepositoryRow): string =>
-  // Prefer roster/course identity when present. Current grade-status JSON always
-  // exposes studentId, with GitHub login available as a fallback.
-  row.studentUsername ?? row.studentId ?? row.githubUsername ?? "Unknown student";
+  row.studentId ?? "Unknown student";
 
 const getRepositoryShortName = (repository: string | null): string =>
   repository?.split("/").at(-1) ?? "Not configured";
@@ -2032,9 +2030,6 @@ export const AssignmentDetailPage = ({
                 <strong>{target.repositoryName}</strong> — {target.status} — {target.localPath}
                 {target.groupId === undefined ? null : ` (${target.groupId})`}
                 <span> {target.studentIds.join(", ")}</span>
-                {target.githubUsernames.length === 0 ? null : (
-                  <span> ({target.githubUsernames.join(", ")})</span>
-                )}
                 {target.diagnostics.map((diagnostic) => (
                   <p key={diagnostic.message}>{diagnostic.message}</p>
                 ))}

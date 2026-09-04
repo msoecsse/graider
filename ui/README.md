@@ -39,12 +39,16 @@ npm run package
 ```
 
 The package script builds the bundled Graider CLI into `dist-graider-cli/`, then
-builds the Electron app. On macOS this writes an unpacked app under `release/`,
-for example:
+builds the Electron app. It produces an unpacked macOS app under `release/`:
 
 ```text
 release/mac-arm64/Graider.app
 ```
+
+`npm run package:mac` is the explicit equivalent macOS-only command. To build
+the separate Windows x64 portable executable, run `npm run package:win`; its
+output is `release/Graider.exe`. Cross-packaging that executable from macOS may
+require Wine.
 
 To make a DMG on macOS:
 

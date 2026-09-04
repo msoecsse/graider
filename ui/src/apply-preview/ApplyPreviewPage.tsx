@@ -136,7 +136,7 @@ const getCourseTermSubtitle = (preview: NormalizedApplyPreview | null): string =
 };
 
 const getStudentLabel = (row: ApplyPreviewRepositoryRow): string =>
-  row.githubUsername ?? row.studentId ?? "Unknown student";
+  row.studentId ?? "Unknown student";
 
 interface DetailItemProps {
   readonly label: string;
@@ -463,14 +463,7 @@ const GroupTargetsPanel = ({
               <span role="cell" className="apply-preview-table__repository">
                 {formatNullableValue(target.repositoryName)}
               </span>
-              <span role="cell">
-                {target.studentIds
-                  .map(
-                    (studentId, index) =>
-                      `${studentId}${target.githubUsernames[index] === undefined ? "" : ` (${target.githubUsernames[index]})`}`
-                  )
-                  .join(", ") || "—"}
-              </span>
+              <span role="cell">{target.studentIds.join(", ") || "—"}</span>
               <span role="cell">{formatNullableValue(target.plannedStudentPermission)}</span>
               <span role="cell">{`${target.facultyTeam ?? "—"} (${target.facultyTeamPermission ?? "—"}), ${target.graderTeam ?? "—"} (${target.graderTeamPermission ?? "—"})`}</span>
             </div>
@@ -620,14 +613,7 @@ const GroupApplyResultTargetsPanel = ({
                   </a>
                 )}
               </span>
-              <span role="cell">
-                {target.studentIds
-                  .map(
-                    (studentId, index) =>
-                      `${studentId}${target.githubUsernames[index] === undefined ? "" : ` (${target.githubUsernames[index]})`}`
-                  )
-                  .join(", ") || "—"}
-              </span>
+              <span role="cell">{target.studentIds.join(", ") || "—"}</span>
               <span role="cell">{formatNullableValue(target.status)}</span>
               <span role="cell">
                 <RowDiagnostics diagnostics={target.diagnostics} />
@@ -693,7 +679,7 @@ const DiagnosticsPanel = ({
 );
 
 const getApplyResultStudentLabel = (row: ApplyResultRepositoryRow): string =>
-  row.githubUsername ?? row.studentId ?? "Unknown student";
+  row.studentId ?? "Unknown student";
 
 const ConfirmationPanel = ({
   preview,

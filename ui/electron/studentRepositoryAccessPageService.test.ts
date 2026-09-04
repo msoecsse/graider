@@ -133,6 +133,44 @@ describe("studentRepositoryAccessPageService", () => {
     expect(fs.existsSync(path.join(root, "terms/27s1/manifests/lab02/manifest.yml"))).toBe(true);
   });
 
+  it("displays the MSOE username while retaining the GitHub repository URL", async () => {
+    const root = createRoot();
+    writeFixture(root);
+    fs.appendFileSync(
+      path.join(root, "terms/27s1/rosters/section-001.csv"),
+      "jonesse,seanjones123,001,active\n",
+      "utf8"
+    );
+    const result = await generateStudentRepositoryAccessPage(request(root), {
+      manifestStatus: "present",
+      diagnostics: [],
+      mappings: [
+        {
+          studentId: "z002",
+          githubUsername: "zoe",
+          targetId: "z002",
+          repositoryName: "z-repo",
+          repositoryUrl: "https://github.com/org/z-repo"
+        },
+        {
+          studentId: "jonesse",
+          githubUsername: "seanjones123",
+          targetId: "jonesse",
+          repositoryName: "lab02-seanjones123",
+          repositoryUrl: "https://github.com/org/lab02-seanjones123"
+        }
+      ]
+    });
+    const content = fs.readFileSync(path.join(root, "pages repo", result.outputPath), "utf8");
+
+    expect(content).toContain(
+      '<a class="student-repository-link" href="https://github.com/org/lab02-seanjones123">jonesse</a>'
+    );
+    expect(content).not.toContain(
+      '<a class="student-repository-link" href="https://github.com/org/lab02-seanjones123">seanjones123</a>'
+    );
+  });
+
   it("requires a configured Pages target rather than writing into the course repository", async () => {
     const root = createRoot();
     writeFixture(root, false);

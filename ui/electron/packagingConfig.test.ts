@@ -33,7 +33,23 @@ describe("packaging configuration", () => {
     expect(packageJson.scripts?.["build:cli"]).toContain(
       "tsup --config ui/scripts/tsup.graider-cli.config.mjs"
     );
-    expect(packageJson.scripts?.package).toContain("npm run build:cli");
+    const macPackageCommand =
+      "npm run build:cli && npm run build && electron-builder --mac dir --arm64 --config electron-builder.config.cjs";
+    expect(packageJson.scripts?.package).toBe(macPackageCommand);
+    expect(packageJson.scripts?.["package:mac"]).toBe(macPackageCommand);
+    expect(packageJson.scripts?.["package:win"]).toContain("electron-builder --win portable --x64");
+    expect(packageJson.scripts?.["release:rc1"]).toContain("npm run package:mac");
     expect(packageJson.scripts?.make).toContain("npm run build:cli");
+  });
+
+  it("packages explicit macOS and Windows x64 portable targets", () => {
+    const packagingConfigSource = fs.readFileSync(
+      path.join(process.cwd(), "electron-builder.config.cjs"),
+      "utf8"
+    );
+
+    expect(packagingConfigSource).toContain('target: [{ target: "dir", arch: ["arm64"] }]');
+    expect(packagingConfigSource).toContain('target: [{ target: "portable", arch: ["x64"] }]');
+    expect(packagingConfigSource).toContain('artifactName: "Graider.${ext}"');
   });
 });

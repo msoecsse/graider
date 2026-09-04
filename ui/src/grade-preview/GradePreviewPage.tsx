@@ -115,10 +115,10 @@ const getCourseTermSubtitle = (preview: NormalizedGradePreview | null): string =
 };
 
 const getStudentLabel = (row: GradePreviewRepositoryRow): string =>
-  row.githubUsername ?? row.studentId ?? "Unknown student";
+  row.studentId ?? "Unknown student";
 
 const getDispatchResultStudentLabel = (row: GradeDispatchResultRepositoryRow): string =>
-  row.githubUsername ?? row.studentId ?? "Unknown student";
+  row.studentId ?? "Unknown student";
 
 interface DetailItemProps {
   readonly label: string;

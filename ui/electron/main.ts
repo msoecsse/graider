@@ -32,14 +32,12 @@ import {
 } from "./studentRepositoryAccessPageService.js";
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService.js";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService.js";
+import { getRosterForSection, loadRosterTerms, previewRosterSave } from "./rosterManagerService.js";
 import {
-  getRosterForSection,
-  loadRosterTerms,
-  previewRosterSave,
-  removeSection,
-  removeRoster,
-  saveRoster
-} from "./rosterManagerService.js";
+  removeRosterWithStudentRepositoryAccessPageRefresh,
+  removeSectionWithStudentRepositoryAccessPageRefresh,
+  saveRosterWithStudentRepositoryAccessPageRefresh
+} from "./rosterStudentRepositoryAccessPageService.js";
 import {
   isRosterRemoveRequest,
   isRosterSaveRequest,
@@ -351,11 +349,15 @@ export const registerIpcHandlers = (): void => {
   const withRegisteredPagesFolder = (
     request: StudentRepositoryAccessPageRequest
   ): StudentRepositoryAccessPageRequest => {
-    const folder = listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).find(
-      (courseFolder) => courseFolder.id === request.courseFolderId
-    );
-    return { ...request, pagesRepositoryFolderPath: folder?.pagesRepositoryFolderPath ?? null };
+    return {
+      ...request,
+      pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+    };
   };
+  const getRegisteredPagesRepositoryFolderPath = (courseFolderId: string): string | null =>
+    listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).find(
+      (courseFolder) => courseFolder.id === courseFolderId
+    )?.pagesRepositoryFolderPath ?? null;
   const getRegisteredCourseFolderPath = (courseFolderId: unknown): string | null => {
     if (typeof courseFolderId !== "string") return null;
     return (
@@ -727,23 +729,32 @@ export const registerIpcHandlers = (): void => {
     return previewRosterSave(request);
   });
 
-  ipcMain.handle(IPC_CHANNELS.saveRoster, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.saveRoster, async (_event, request: unknown) => {
     if (!isRosterSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
-    return saveRoster(request);
+    return await saveRosterWithStudentRepositoryAccessPageRefresh(request, {
+      runner: processRunner,
+      pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+    });
   });
-  ipcMain.handle(IPC_CHANNELS.removeRoster, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.removeRoster, async (_event, request: unknown) => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
-    return removeRoster(request);
+    return await removeRosterWithStudentRepositoryAccessPageRefresh(request, {
+      runner: processRunner,
+      pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+    });
   });
-  ipcMain.handle(IPC_CHANNELS.removeSection, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.removeSection, async (_event, request: unknown) => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
-    return removeSection(request);
+    return await removeSectionWithStudentRepositoryAccessPageRefresh(request, {
+      runner: processRunner,
+      pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+    });
   });
 
   ipcMain.handle(IPC_CHANNELS.getTemplateWorkflow, async (_event, request: unknown) => {

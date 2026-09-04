@@ -182,7 +182,8 @@ describe("FacultyReportPage", () => {
     });
     expect(screen.getByText("Report summary")).toBeInTheDocument();
     expect(screen.getByText("terms/27s1/reports/lab02/faculty-summary.json")).toBeInTheDocument();
-    expect(screen.getByText("ada")).toBeInTheDocument();
+    expect(screen.getByText("s001")).toBeInTheDocument();
+    expect(screen.queryByText("ada")).toBeNull();
     expect(screen.getByText("passed")).toHaveClass("status-chip--success");
     expect(screen.getByText("failed")).toHaveClass("status-chip--error");
     expect(
@@ -274,10 +275,10 @@ describe("FacultyReportPage", () => {
     mockGraiderUI({ getFacultyReport });
     renderFacultyReportPage();
 
-    expect(await screen.findByText("ada")).toBeInTheDocument();
+    expect(await screen.findByText("s001")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh report" }));
 
-    expect(screen.getByText("ada")).toBeInTheDocument();
+    expect(screen.getByText("s001")).toBeInTheDocument();
     expect(
       screen.getByText("Refreshing report while keeping the current summary.")
     ).toBeInTheDocument();

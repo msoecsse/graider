@@ -496,7 +496,8 @@ describe("ApplyPreviewPage", () => {
       await screen.findByRole("table", { name: "Group repository targets" })
     ).toBeInTheDocument();
     expect(screen.getByText("27s2-csc1120-lab02-team-1")).toBeInTheDocument();
-    expect(screen.getByText("alpha (alpha-gh), beta (beta-gh)")).toBeInTheDocument();
+    expect(screen.getByText("alpha, beta")).toBeInTheDocument();
+    expect(screen.queryByText(/alpha-gh/u)).toBeNull();
     expect(screen.getAllByText("admin")).toHaveLength(2);
     expect(screen.getByText("2 group repositories would be affected.")).toBeInTheDocument();
     expect(screen.queryByText("graider-sandbox/csc1120-lab02-alpha")).toBeNull();
@@ -560,7 +561,8 @@ describe("ApplyPreviewPage", () => {
       "href",
       "https://github.com/csc1120/27s2-csc1120-lab02-team-1"
     );
-    expect(screen.getAllByText("alpha (alpha-gh), beta (beta-gh)")).toHaveLength(2);
+    expect(screen.getAllByText("alpha, beta")).toHaveLength(2);
+    expect(screen.queryByText(/alpha-gh/u)).toBeNull();
     expect(screen.getByText("grading_workflow_pending")).toBeInTheDocument();
     expect(screen.queryByText("Repository result rows")).toBeNull();
   });
