@@ -6163,10 +6163,45 @@ var executeApplyPlan = async (input) => {
     errors: []
   };
   const observedAt = input.clock.now().toISOString();
+  const repositoryOutcomes = /* @__PURE__ */ new Map();
   for (const operation of input.plan.operations) {
+    const errorsBefore = state.errors.length;
+    const createdBefore = state.summary.created;
+    const verifiedBefore = state.summary.verified;
     state = await executeOperation(input, state, operation, observedAt);
+    if (operation.target_id === void 0) {
+      continue;
+    }
+    const current = repositoryOutcomes.get(operation.target_id) ?? {
+      created: false,
+      updated: false,
+      failed: false
+    };
+    repositoryOutcomes.set(operation.target_id, {
+      created: current.created || operation.type === CREATE_REPOSITORY_PLAN_TYPE && state.summary.created > createdBefore,
+      updated: current.updated || [
+        "add_student_collaborator",
+        "add_faculty_team_permission",
+        "add_grader_team_permission",
+        "enable_actions"
+      ].includes(operation.type) && state.summary.verified > verifiedBefore,
+      failed: current.failed || state.errors.length > errorsBefore
+    });
   }
-  return state;
+  return {
+    ...state,
+    repositories: input.plan.targets.filter((target) => target.mode === "individual").map((target) => {
+      const outcome = repositoryOutcomes.get(target.targetId);
+      const status = outcome?.failed === true ? "failed" : outcome?.created === true ? "created" : outcome?.updated === true ? "updated" : "skipped";
+      return {
+        studentId: target.primaryStudentId ?? target.targetId,
+        githubUsername: target.githubUsernames[0] ?? "",
+        section: target.sectionIds[0] ?? "",
+        repository: target.repositoryName,
+        status
+      };
+    })
+  };
 };
 
 // src/execution/mutation-guard.ts
@@ -7542,7 +7577,14 @@ var runApplyCommand = async ({
         ...rosterResult.summary,
         githubReadinessChecked: true,
         manifestFile: manifestPath.relativePath,
-        blockedOperationCount: plan.summary.blocked_operations
+        blockedOperationCount: plan.summary.blocked_operations,
+        repositories: plan.targets.filter((target) => target.mode === "individual").map((target) => ({
+          studentId: target.primaryStudentId ?? target.targetId,
+          githubUsername: target.githubUsernames[0] ?? "",
+          section: target.sectionIds[0] ?? "",
+          repository: target.repositoryName,
+          status: "blocked"
+        }))
       }
     });
   }
@@ -7573,7 +7615,8 @@ var runApplyCommand = async ({
       manifestFile: manifestPath.relativePath,
       retryCount: retryEvents.length,
       retryDiagnostics: retryEvents.map((event) => event.diagnosticCode),
-      ...executionResult.summary
+      ...executionResult.summary,
+      repositories: executionResult.repositories
     }
   });
 };

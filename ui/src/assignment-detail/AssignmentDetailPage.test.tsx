@@ -826,7 +826,7 @@ describe("AssignmentDetailPage", () => {
     expect(getTemplateWorkflow).not.toHaveBeenCalled();
   });
 
-  it("renders the existing assignment panels with a compact grade status summary before diagnostics", async () => {
+  it("renders the existing assignment panels with the repository list outside Advanced details", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(
         createAssignmentDetailResult(
@@ -879,10 +879,7 @@ describe("AssignmentDetailPage", () => {
       level: 2,
       name: "Grade status summary"
     });
-    const diagnosticsHeading = screen.getByRole("heading", { level: 2, name: "Diagnostics" });
-    expect(
-      summaryHeading.compareDocumentPosition(diagnosticsHeading) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).not.toBe(0);
+    expect(summaryHeading.closest("details")).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
     expect(screen.getByText("assignment_detail_template_repository_missing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Publish student reports" })).toBeDisabled();
@@ -937,6 +934,8 @@ describe("AssignmentDetailPage", () => {
     renderAssignmentDetailPage();
 
     const summary = await screen.findByLabelText("Grade status summary");
+    const advancedDetails = screen.getByText("Advanced details").closest("details");
+    expect(advancedDetails).not.toContainElement(summary);
     expect(within(summary).getByText("ada.course")).toBeInTheDocument();
     expect(within(summary).getByText("github-only")).toBeInTheDocument();
     expect(within(summary).queryByText("adalovelace")).toBeNull();
@@ -954,6 +953,10 @@ describe("AssignmentDetailPage", () => {
     expect(within(summary).getByRole("link", { name: "Open run" })).toHaveAttribute(
       "href",
       "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123"
+    );
+    expect(within(summary).getByRole("link", { name: "csc1120-lab02-ada" })).toHaveAttribute(
+      "href",
+      "https://github.com/graider-sandbox/csc1120-lab02-ada"
     );
     expect(within(summary).getAllByText("No run link")).toHaveLength(3);
   });

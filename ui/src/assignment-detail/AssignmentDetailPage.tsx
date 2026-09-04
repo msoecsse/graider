@@ -1223,7 +1223,19 @@ const GradeStatusSummaryPanel = ({
                 >
                   <td>{getGradeStatusStudentLabel(row)}</td>
                   <td>{formatNullableValue(row.section)}</td>
-                  <td>{getRepositoryShortName(row.repository)}</td>
+                  <td>
+                    {row.repository === null ? (
+                      getRepositoryShortName(row.repository)
+                    ) : (
+                      <a
+                        href={`https://github.com/${row.repository}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {getRepositoryShortName(row.repository)}
+                      </a>
+                    )}
+                  </td>
                   <td>
                     <span className={getGradeStatusSummaryChipClassName(row)}>
                       {formatGradeStatusSummaryLabel(row)}
@@ -2227,17 +2239,17 @@ export const AssignmentDetailPage = ({
                     }}
                   />
                 )}
-                <GradeStatusSummaryPanel
-                  status={gradeStatus}
-                  isLoading={isLoadingGradeStatus}
-                  errorMessage={gradeStatusCommandErrorMessage}
-                  onViewFullGradeStatus={() => {
-                    onViewGradeStatus(selection, detail, loadResult);
-                  }}
-                />
                 <DiagnosticsPanel diagnostics={detail.diagnostics} />
               </details>
             </div>
+            <GradeStatusSummaryPanel
+              status={gradeStatus}
+              isLoading={isLoadingGradeStatus}
+              errorMessage={gradeStatusCommandErrorMessage}
+              onViewFullGradeStatus={() => {
+                onViewGradeStatus(selection, detail, loadResult);
+              }}
+            />
           </>
         )}
       </section>

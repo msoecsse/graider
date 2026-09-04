@@ -154,12 +154,24 @@ const renderPage = (
       .filter((value) => value !== "")
       .join(" ")
       .trim() || assignmentSlug;
-  const bodyRows = rows
-    .filter((row) => row.status === "included" && row.repositoryUrl !== null)
-    .map(
-      (row) =>
-        `          <tr>\n            <td>${escapeHtml(row.studentId)}</td>\n            <td><a href="${escapeHtml(row.repositoryUrl ?? "")}">Open repository</a></td>\n          </tr>`
-    )
+  const rowsBySection = new Map<string, StudentRepositoryAccessPageRow[]>();
+  for (const row of rows) {
+    if (row.status !== "included" || row.repositoryUrl === null) continue;
+    const sectionRows = rowsBySection.get(row.section) ?? [];
+    sectionRows.push(row);
+    rowsBySection.set(row.section, sectionRows);
+  }
+  const sectionContent = [...rowsBySection.entries()]
+    .map(([section, sectionRows]) => {
+      const sectionId = `section-${escapeHtml(section)}`;
+      const studentRows = sectionRows
+        .map(
+          (row) =>
+            `            <li><a class="student-repository-link" href="${escapeHtml(row.repositoryUrl ?? "")}">${escapeHtml(row.studentId)}</a></li>`
+        )
+        .join("\n");
+      return `        <section class="repository-section" aria-labelledby="${sectionId}">\n          <h2 id="${sectionId}">Section ${escapeHtml(section)}</h2>\n          <ul class="student-repository-list">\n${studentRows}\n          </ul>\n        </section>`;
+    })
     .join("\n");
   return `<!doctype html>
 <html lang="en">
@@ -167,6 +179,23 @@ const renderPage = (
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)} Repositories</title>
+    <style>
+      :root { color: #172033; background: #f6f8fc; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; }
+      main { width: min(100% - 2rem, 48rem); margin: 0 auto; padding: 3rem 0; }
+      h1, h2, p { margin-top: 0; }
+      h1 { margin-bottom: 0.75rem; font-size: clamp(1.75rem, 5vw, 2.25rem); letter-spacing: -0.025em; }
+      h2 { margin-bottom: 1rem; font-size: 1.125rem; }
+      p { color: #526078; line-height: 1.6; }
+      .repository-sections { display: grid; gap: 1.25rem; margin-top: 2rem; }
+      .repository-section { padding: 1.25rem; border: 1px solid #dce3ef; border-radius: 0.875rem; background: #ffffff; box-shadow: 0 1px 2px rgb(23 32 51 / 0.04); }
+      .student-repository-list { display: grid; gap: 0.625rem; margin: 0; padding: 0; list-style: none; }
+      .student-repository-link { display: block; width: 100%; padding: 0.875rem 1rem; border: 1px solid #dce3ef; border-radius: 0.625rem; color: #172033; background: #fbfcfe; font-weight: 600; line-height: 1.4; text-decoration: none; transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+      .student-repository-link:hover { border-color: #aebddb; background: #f1f5ff; transform: translateY(-1px); }
+      .student-repository-link:focus-visible { outline: 3px solid #2d6cdf; outline-offset: 3px; border-color: #2d6cdf; }
+      @media (max-width: 480px) { main { width: min(100% - 1.5rem, 48rem); padding: 2rem 0; } .repository-section { padding: 1rem; } }
+    </style>
   </head>
   <body>
     <main>
@@ -174,14 +203,9 @@ const renderPage = (
       <p>Term: ${escapeHtml(termCode)}. Assignment: ${escapeHtml(assignmentTitle)} (${escapeHtml(assignmentSlug)}).</p>
       <p>Find your MSOE username below and open your repository.</p>
       <p>If you do not see your username or cannot access your repository, contact your instructor.</p>
-      <table>
-        <thead>
-          <tr><th scope="col">MSOE username</th><th scope="col">Repository</th></tr>
-        </thead>
-        <tbody>
-${bodyRows}
-        </tbody>
-      </table>
+      <div class="repository-sections">
+${sectionContent}
+      </div>
     </main>
   </body>
 </html>
@@ -343,6 +367,7 @@ const buildResult = (
         sortableRows.push({
           section: row.section,
           row: {
+            section: row.section,
             studentId: row.studentId,
             githubUsername: row.githubUsername,
             repositoryUrl: isSafeRepositoryUrl(repository?.repositoryUrl ?? null)

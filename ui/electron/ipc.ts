@@ -356,6 +356,7 @@ export type StudentRepositoryAccessPageRowStatus =
   | "skipped_inactive";
 
 export interface StudentRepositoryAccessPageRow {
+  readonly section: string;
   readonly studentId: string;
   readonly githubUsername: string;
   readonly repositoryUrl: string | null;

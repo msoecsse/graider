@@ -93,7 +93,7 @@ describe("studentRepositoryAccessPageService", () => {
     });
   });
 
-  it("generates only active manifest-backed rows, escapes content, and safely overwrites", async () => {
+  it("generates sectioned, full-width repository links without exposing raw URLs", async () => {
     const root = createRoot();
     writeFixture(root);
     const first = await generateStudentRepositoryAccessPage(
@@ -106,6 +106,19 @@ describe("studentRepositoryAccessPageService", () => {
     expect(first.exists).toBe(true);
     expect(content).toContain("a001");
     expect(content).toContain("z002");
+    expect(content).toContain('<section class="repository-section" aria-labelledby="section-001">');
+    expect(content).toContain('<h2 id="section-001">Section 001</h2>');
+    expect(content).toContain(
+      '<a class="student-repository-link" href="https://github.com/org/a-repo">a001</a>'
+    );
+    expect(content).toContain(
+      '<a class="student-repository-link" href="https://github.com/org/z-repo?x=&lt;unsafe&gt;">z002</a>'
+    );
+    expect(content).not.toContain("Open repository");
+    expect(content).not.toContain("https://github.com/org/a-repo</");
+    expect(content).toContain(".student-repository-link:focus-visible");
+    expect(content).toContain("width: 100%;");
+    expect(content).not.toContain('<link rel="stylesheet"');
     expect(content).not.toContain("m001");
     expect(content).not.toContain("ada@example.edu");
     expect(content).not.toContain("Ada");
