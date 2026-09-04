@@ -947,8 +947,8 @@ describe("AssignmentDetailPage", () => {
     );
     expect(within(summary).getByText(/Started .*Jun 12, 2026/u)).toBeInTheDocument();
     expect(within(summary).getByText("No run time available")).toBeInTheDocument();
-    expect(within(summary).getByText("Completed — success")).toBeInTheDocument();
-    expect(within(summary).getByText("Completed — failure")).toBeInTheDocument();
+    expect(within(summary).getByText("Completed — success")).toHaveClass("status-chip--success");
+    expect(within(summary).getByText("Completed — failure")).toHaveClass("status-chip--error");
     expect(within(summary).getByText("In progress")).toBeInTheDocument();
     expect(within(summary).getByText("Missing")).toBeInTheDocument();
     expect(within(summary).getByRole("link", { name: "Open run" })).toHaveAttribute(

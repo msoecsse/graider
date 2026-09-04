@@ -97,7 +97,10 @@ export const CourseTermCard = ({
           <p className="course-card__summary">{summaryParts.join(" · ")}</p>
         ) : null}
 
-        <p className="course-card__source">{combinedCard.sourceFolderPath}</p>
+        <details className="course-card__advanced">
+          <summary>Advanced details</summary>
+          <p className="course-card__source">{combinedCard.sourceFolderPath}</p>
+        </details>
 
         <div className="course-card__assignments">
           <h3>Recent assignments</h3>

@@ -6,6 +6,7 @@ import type {
   CourseFolderRecord
 } from "../../electron/ipc";
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
+import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 
 const toIsoWithOffset = (value: string): string => {
   const date = new Date(value);
@@ -69,7 +70,7 @@ export const AssignmentSetupPage = ({
   const [lmsAssignmentId, setLmsAssignmentId] = useState("");
   const [gradingCategory, setGradingCategory] = useState("labs");
   const [preview, setPreview] = useState<AssignmentSetupPreviewResult | null>(null);
-  const [replaceExisting, setReplaceExisting] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -123,7 +124,7 @@ export const AssignmentSetupPage = ({
 
   const clearPreview = (): void => {
     setPreview(null);
-    setReplaceExisting(false);
+    setIsConfirming(false);
   };
 
   const handleTermChange = (nextTermCode: string): void => {
@@ -150,7 +151,10 @@ export const AssignmentSetupPage = ({
     setIsLoading(true);
     setMessage(null);
     try {
-      setPreview(await previewAssignmentSetup(request));
+      const nextPreview = await previewAssignmentSetup(request);
+      setPreview(nextPreview);
+      if (nextPreview.status === "ready") setIsConfirming(true);
+      else setMessage(nextPreview.diagnostics.map((item) => item.message).join(" "));
     } catch {
       setMessage("Unable to prepare the assignment setup preview.");
     } finally {
@@ -158,9 +162,14 @@ export const AssignmentSetupPage = ({
     }
   };
 
-  const handleSave = async (): Promise<void> => {
+  const handleSave = async (replaceExisting: boolean): Promise<void> => {
     const saveAssignmentSetup = window.graiderUI.saveAssignmentSetup;
-    if (saveAssignmentSetup === undefined || preview === null) return;
+    if (saveAssignmentSetup === undefined) {
+      throw new Error("Assignment setup is unavailable in this app build.");
+    }
+    if (preview === null) {
+      throw new Error("Prepare an assignment preview before saving.");
+    }
     setIsLoading(true);
     setMessage(null);
     try {
@@ -168,8 +177,7 @@ export const AssignmentSetupPage = ({
       if (result.status === "success") {
         const assignmentFile = result.writtenFiles[0];
         if (assignmentFile === undefined) {
-          setMessage("Assignment configuration was saved without a file path.");
-          return;
+          throw new Error("Assignment configuration was saved without a file path.");
         }
         onOpenAssignment({
           courseFolderId: courseFolder.id,
@@ -184,19 +192,14 @@ export const AssignmentSetupPage = ({
           termSlug: termCode.trim() || null
         });
       } else {
-        setMessage(result.diagnostics.map((item) => item.message).join(" "));
+        throw new Error(result.diagnostics.map((item) => item.message).join(" "));
       }
     } catch {
-      setMessage("Unable to save assignment.yml.");
+      throw new Error("Unable to save assignment.yml.");
     } finally {
       setIsLoading(false);
     }
   };
-
-  const canSave = preview?.status === "ready" && (!preview.hasConflicts || replaceExisting);
-  const previewFeedbackClassName =
-    preview?.status === "ready" ? "success-message" : "error-message";
-  const previewFeedbackRole = preview?.status === "ready" ? "status" : "alert";
 
   return (
     <main className="dashboard-shell" aria-labelledby="assignment-setup-title">
@@ -368,7 +371,7 @@ export const AssignmentSetupPage = ({
           </label>
         </section>
         <section className="detail-panel">
-          <h2>Preview and save</h2>
+          <h2>Create assignment</h2>
           <button
             className="primary-action"
             type="button"
@@ -377,50 +380,8 @@ export const AssignmentSetupPage = ({
               void handlePreview();
             }}
           >
-            {isLoading ? "Preparing preview..." : "Preview assignment.yml"}
+            {isLoading ? "Preparing preview..." : "Create assignment"}
           </button>
-          {preview === null ? null : (
-            <>
-              {preview.diagnostics.map((item) => (
-                <p
-                  className={previewFeedbackClassName}
-                  role={previewFeedbackRole}
-                  key={item.message}
-                >
-                  {item.message}
-                </p>
-              ))}
-              {preview.files.map((file) => (
-                <details open key={file.path}>
-                  <summary>
-                    {file.exists ? "Replace required: " : "Create: "}
-                    {file.path}
-                  </summary>
-                  <pre>{file.content}</pre>
-                </details>
-              ))}
-              {preview.hasConflicts ? (
-                <label className="assignment-setup__checkbox">
-                  <input
-                    type="checkbox"
-                    checked={replaceExisting}
-                    onChange={(event) => setReplaceExisting(event.target.checked)}
-                  />{" "}
-                  Replace the existing assignment.yml
-                </label>
-              ) : null}
-              <button
-                className="primary-action"
-                type="button"
-                disabled={!canSave || isLoading}
-                onClick={() => {
-                  void handleSave();
-                }}
-              >
-                {isLoading ? "Saving..." : "Save assignment setup"}
-              </button>
-            </>
-          )}
           {message === null ? null : (
             <p className="error-message" role="alert">
               {message}
@@ -428,6 +389,26 @@ export const AssignmentSetupPage = ({
           )}
         </section>
       </section>
+      <ConfirmationWithPreviewModal
+        acknowledgementLabel={
+          preview?.hasConflicts ? "Replace the existing assignment.yml" : undefined
+        }
+        confirmLabel="Create assignment"
+        isOpen={isConfirming && preview !== null}
+        onCancel={() => setIsConfirming(false)}
+        onConfirm={handleSave}
+        preview={
+          preview === null ? undefined : (
+            <>
+              {preview.files.map((file) => (
+                <pre key={file.path}>{file.content}</pre>
+              ))}
+            </>
+          )
+        }
+        summary={`${assignmentTitle.trim() || "This assignment"} will be created for ${sectionIds.length} section${sectionIds.length === 1 ? "" : "s"}.`}
+        title="Create assignment?"
+      />
     </main>
   );
 };

@@ -335,7 +335,16 @@ export const runApplyCommand = async ({
         ...rosterResult.summary,
         githubReadinessChecked: true,
         manifestFile: manifestPath.relativePath,
-        blockedOperationCount: plan.summary.blocked_operations
+        blockedOperationCount: plan.summary.blocked_operations,
+        repositories: plan.targets
+          .filter((target) => target.mode === "individual")
+          .map((target) => ({
+            studentId: target.primaryStudentId ?? target.targetId,
+            githubUsername: target.githubUsernames[0] ?? "",
+            section: target.sectionIds[0] ?? "",
+            repository: target.repositoryName,
+            status: "blocked"
+          }))
       }
     });
   }
@@ -370,7 +379,8 @@ export const runApplyCommand = async ({
       manifestFile: manifestPath.relativePath,
       retryCount: retryEvents.length,
       retryDiagnostics: retryEvents.map((event) => event.diagnosticCode),
-      ...executionResult.summary
+      ...executionResult.summary,
+      repositories: executionResult.repositories
     }
   });
 };

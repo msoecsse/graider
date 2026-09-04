@@ -213,6 +213,8 @@ export const DashboardPage = (): ReactElement => {
   } | null>(null);
   const hasStartedStartupRefresh = useRef(false);
   const isRefreshingAllRef = useRef(false);
+  const githubAuthNeedsAttention =
+    githubAuthState.status === "not_connected" || githubAuthState.status === "check_failed";
 
   const runGitHubAuthCheck = async (): Promise<void> => {
     setGithubAuthState({
@@ -780,9 +782,19 @@ export const DashboardPage = (): ReactElement => {
           }}
         />
 
-        <section className="github-auth-status" aria-labelledby="github-auth-title">
-          <div>
-            <h2 id="github-auth-title">
+        <details className="github-auth-status" open={githubAuthNeedsAttention}>
+          <summary>
+            GitHub authentication:{" "}
+            {githubAuthState.status === "connected"
+              ? "Connected"
+              : githubAuthState.status === "not_connected"
+                ? "Not connected"
+                : githubAuthState.status === "check_failed"
+                  ? "Check failed"
+                  : "Checking"}
+          </summary>
+          <div className="github-auth-status__content">
+            <h2 className="visually-hidden">
               GitHub authentication:{" "}
               {githubAuthState.status === "connected"
                 ? "Connected"
@@ -831,7 +843,7 @@ export const DashboardPage = (): ReactElement => {
           >
             {githubAuthState.status === "checking" ? "Checking..." : "Check GitHub auth"}
           </button>
-        </section>
+        </details>
 
         {courseFolders.map((courseFolder) => {
           const publishStatus = coursePublishStatuses[courseFolder.id];
@@ -916,21 +928,24 @@ export const DashboardPage = (): ReactElement => {
               </section>
             ) : null}
 
-            <CourseFolderList
-              courseFolders={courseFolders}
-              refreshResults={refreshResults}
-              refreshingId={refreshingId}
-              isRefreshingAll={isRefreshingAll}
-              removingId={removingId}
-              onRefresh={(id) => {
-                void handleRefreshCourseFolder(id);
-              }}
-              onRemove={(id) => {
-                void handleRemoveCourseFolder(id);
-              }}
-              onSetupAssignment={handleOpenAssignmentSetup}
-              onManageRosters={handleOpenRosterManager}
-            />
+            <details className="dashboard-advanced">
+              <summary>Advanced details</summary>
+              <CourseFolderList
+                courseFolders={courseFolders}
+                refreshResults={refreshResults}
+                refreshingId={refreshingId}
+                isRefreshingAll={isRefreshingAll}
+                removingId={removingId}
+                onRefresh={(id) => {
+                  void handleRefreshCourseFolder(id);
+                }}
+                onRemove={(id) => {
+                  void handleRemoveCourseFolder(id);
+                }}
+                onSetupAssignment={handleOpenAssignmentSetup}
+                onManageRosters={handleOpenRosterManager}
+              />
+            </details>
           </>
         ) : null}
       </section>

@@ -67,9 +67,20 @@ export interface ApplySummary {
   errors: number;
 }
 
+export type ApplyRepositoryOutcomeStatus = "created" | "updated" | "skipped" | "failed";
+
+export interface ApplyRepositoryOutcome {
+  studentId: string;
+  githubUsername: string;
+  section: string;
+  repository: string;
+  status: ApplyRepositoryOutcomeStatus;
+}
+
 export interface ApplyExecutionResult {
   manifest: Manifest;
   summary: ApplySummary;
+  repositories: readonly ApplyRepositoryOutcome[];
   warnings: Diagnostic[];
   errors: Diagnostic[];
 }
@@ -849,10 +860,64 @@ export const executeApplyPlan = async (
     errors: []
   };
   const observedAt = input.clock.now().toISOString();
+  const repositoryOutcomes = new Map<
+    string,
+    { created: boolean; updated: boolean; failed: boolean }
+  >();
 
   for (const operation of input.plan.operations) {
+    const errorsBefore = state.errors.length;
+    const createdBefore = state.summary.created;
+    const verifiedBefore = state.summary.verified;
     state = await executeOperation(input, state, operation, observedAt);
+
+    if (operation.target_id === undefined) {
+      continue;
+    }
+
+    const current = repositoryOutcomes.get(operation.target_id) ?? {
+      created: false,
+      updated: false,
+      failed: false
+    };
+    repositoryOutcomes.set(operation.target_id, {
+      created:
+        current.created ||
+        (operation.type === CREATE_REPOSITORY_PLAN_TYPE && state.summary.created > createdBefore),
+      updated:
+        current.updated ||
+        ([
+          "add_student_collaborator",
+          "add_faculty_team_permission",
+          "add_grader_team_permission",
+          "enable_actions"
+        ] as const).includes(operation.type) && state.summary.verified > verifiedBefore,
+      failed: current.failed || state.errors.length > errorsBefore
+    });
   }
 
-  return state;
+  return {
+    ...state,
+    repositories: input.plan.targets
+      .filter((target) => target.mode === "individual")
+      .map((target) => {
+        const outcome = repositoryOutcomes.get(target.targetId);
+        const status: ApplyRepositoryOutcomeStatus =
+          outcome?.failed === true
+            ? "failed"
+            : outcome?.created === true
+              ? "created"
+              : outcome?.updated === true
+                ? "updated"
+                : "skipped";
+
+        return {
+          studentId: target.primaryStudentId ?? target.targetId,
+          githubUsername: target.githubUsernames[0] ?? "",
+          section: target.sectionIds[0] ?? "",
+          repository: target.repositoryName,
+          status
+        };
+      })
+  };
 };

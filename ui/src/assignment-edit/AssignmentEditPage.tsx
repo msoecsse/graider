@@ -5,6 +5,7 @@ import type {
   AssignmentEditRequest
 } from "../../electron/ipc";
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
+import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 
 const toDateTimeLocal = (value: string): string => value.replace(/(?:Z|[+-]\d{2}:\d{2})$/u, "");
 const toIsoWithOffset = (value: string): string => {
@@ -32,6 +33,7 @@ export const AssignmentEditPage = ({
   >([]);
   const [message, setMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<AssignmentEditPreviewResult | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [sections, setSections] = useState<readonly string[]>([]);
@@ -120,30 +122,39 @@ export const AssignmentEditPage = ({
       title
     ]
   );
-  const clear = (): void => setPreview(null);
+  const clear = (): void => {
+    setPreview(null);
+    setIsConfirming(false);
+  };
   const selectedTerm =
     model === null ? null : (terms.find((term) => term.code === model.termCode) ?? null);
-  const previewFeedbackClassName =
-    preview?.status === "ready" ? "success-message" : "error-message";
-  const previewFeedbackRole = preview?.status === "ready" ? "status" : "alert";
   const save = async (): Promise<void> => {
-    if (
-      request === null ||
-      preview?.status !== "ready" ||
-      window.graiderUI.saveAssignmentEdit === undefined
-    )
-      return;
+    if (request === null || preview?.status !== "ready") {
+      throw new Error("Prepare an assignment preview before saving.");
+    }
+    if (window.graiderUI.saveAssignmentEdit === undefined) {
+      throw new Error("Assignment editing is unavailable in this app build.");
+    }
     setLoading(true);
-    const result = await window.graiderUI.saveAssignmentEdit({ ...request, confirmed: true });
-    setLoading(false);
-    if (result.status === "success") onSaved();
-    else setMessage(result.diagnostics.map((item) => item.message).join(" "));
+    try {
+      const result = await window.graiderUI.saveAssignmentEdit({ ...request, confirmed: true });
+      if (result.status === "success") onSaved();
+      else throw new Error(result.diagnostics.map((item) => item.message).join(" "));
+    } finally {
+      setLoading(false);
+    }
   };
   const previewSave = async (): Promise<void> => {
     if (request === null || window.graiderUI.previewAssignmentEdit === undefined) return;
     setLoading(true);
-    setPreview(await window.graiderUI.previewAssignmentEdit(request));
-    setLoading(false);
+    try {
+      const nextPreview = await window.graiderUI.previewAssignmentEdit(request);
+      setPreview(nextPreview);
+      if (nextPreview.status === "ready") setIsConfirming(true);
+      else setMessage(nextPreview.diagnostics.map((item) => item.message).join(" "));
+    } finally {
+      setLoading(false);
+    }
   };
   return (
     <main className="dashboard-shell" aria-labelledby="assignment-edit-title">
@@ -326,47 +337,28 @@ export const AssignmentEditPage = ({
               </label>
             </section>
             <section className="detail-panel">
-              <h2>Preview and save</h2>
+              <h2>Save assignment</h2>
               <button
                 className="primary-action"
                 type="button"
                 disabled={loading}
                 onClick={() => void previewSave()}
               >
-                Preview assignment.yml
+                Save assignment changes
               </button>
-              {preview === null ? null : (
-                <>
-                  <p>
-                    {preview.status === "ready" ? "Ready to save." : "Preview cannot be saved."}
-                  </p>
-                  {preview.diagnostics.map((item) => (
-                    <p
-                      className={previewFeedbackClassName}
-                      role={previewFeedbackRole}
-                      key={item.message}
-                    >
-                      {item.message}
-                    </p>
-                  ))}
-                  <details open>
-                    <summary>{preview.path}</summary>
-                    <pre>{preview.content}</pre>
-                  </details>
-                  <button
-                    className="primary-action"
-                    type="button"
-                    disabled={loading || preview.status !== "ready"}
-                    onClick={() => void save()}
-                  >
-                    Save assignment changes
-                  </button>
-                </>
-              )}
             </section>
           </>
         )}
       </section>
+      <ConfirmationWithPreviewModal
+        confirmLabel="Save assignment changes"
+        isOpen={isConfirming && preview !== null}
+        onCancel={() => setIsConfirming(false)}
+        onConfirm={save}
+        preview={preview === null ? undefined : <pre>{preview.content}</pre>}
+        summary={`${title.trim() || "This assignment"} will be updated.`}
+        title="Save assignment changes?"
+      />
     </main>
   );
 };

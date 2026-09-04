@@ -1097,6 +1097,18 @@ const formatGradeStatusSummaryLabel = (row: GradeStatusRepositoryRow): string =>
   return row.status === "blocked" ? "Blocked" : "Unknown";
 };
 
+const getGradeStatusSummaryChipClassName = (row: GradeStatusRepositoryRow): string => {
+  if (row.status === "completed" && row.conclusion === "success") {
+    return "status-chip status-chip--success";
+  }
+
+  if (row.status === "completed" && row.conclusion === "failure") {
+    return "status-chip status-chip--error";
+  }
+
+  return row.needsAttention ? "status-chip status-chip--attention" : "status-chip";
+};
+
 const formatReadableDateTime = (timestamp: string | null): string | null => {
   if (timestamp === null) {
     return null;
@@ -1213,11 +1225,7 @@ const GradeStatusSummaryPanel = ({
                   <td>{formatNullableValue(row.section)}</td>
                   <td>{getRepositoryShortName(row.repository)}</td>
                   <td>
-                    <span
-                      className={
-                        row.needsAttention ? "status-chip status-chip--attention" : "status-chip"
-                      }
-                    >
+                    <span className={getGradeStatusSummaryChipClassName(row)}>
                       {formatGradeStatusSummaryLabel(row)}
                     </span>
                   </td>
@@ -2025,10 +2033,6 @@ export const AssignmentDetailPage = ({
       )}
 
       <section className="dashboard-content assignment-detail" aria-label="Assignment detail">
-        <p className="assignment-detail__path">
-          Assignment file: {detail?.assignment.file ?? selection.assignmentFile}
-        </p>
-
         {isLoading ? <p className="loading-state">Loading assignment detail...</p> : null}
 
         {commandErrorMessage === null ? null : (
@@ -2056,7 +2060,9 @@ export const AssignmentDetailPage = ({
           </section>
         ) : (
           <>
-            <ReadinessPanel detail={detail} needsAttentionItems={needsAttentionItems} />
+            {needsAttentionItems.length === 0 ? null : (
+              <ReadinessPanel detail={detail} needsAttentionItems={needsAttentionItems} />
+            )}
 
             <div className="assignment-detail__badges" aria-label="Assignment status">
               {getStatusBadges(detail).map((badge) => (
@@ -2073,93 +2079,6 @@ export const AssignmentDetailPage = ({
                 copyState={copyState}
                 onCopy={handleCopy}
               />
-              <TemplatePanel detail={detail} copyState={copyState} onCopy={handleCopy} />
-              <GradingPanel detail={detail} copyState={copyState} onCopy={handleCopy} />
-              <GradeWorkflowPanel
-                detail={detail}
-                workflowResult={workflowResult}
-                draft={workflowDraft}
-                preview={workflowPreview}
-                isLoading={isLoadingWorkflow}
-                isPushing={isPushingWorkflow}
-                onViewWorkflow={() => {
-                  void loadTemplateWorkflow();
-                }}
-                onDraftChange={(value) => {
-                  setWorkflowDraft(value);
-                  setWorkflowPreview(null);
-                  setWorkflowSaveResult(null);
-                }}
-                onPreview={() => {
-                  void previewWorkflowSave();
-                }}
-                onPush={() => {
-                  void pushWorkflow();
-                }}
-              />
-              {workflowSaveResult?.status === "success" ? (
-                <p role="status">
-                  Workflow pushed
-                  {workflowSaveResult.commitSha === null
-                    ? "."
-                    : `: ${workflowSaveResult.commitSha}`}
-                </p>
-              ) : null}
-              <StudentReportsPanel detail={detail} />
-              {groupConfig === null ? null : (
-                <section className="detail-panel" aria-labelledby="repository-mode-title">
-                  <h2 id="repository-mode-title">Repository mode</h2>
-                  <label>
-                    Repository mode
-                    <select
-                      value={groupMode}
-                      onChange={(event) =>
-                        setGroupMode(event.target.value as "individual" | "group")
-                      }
-                    >
-                      <option value="individual">Individual repositories</option>
-                      <option value="group">Group repositories</option>
-                    </select>
-                  </label>
-                  {groupMode === "group" ? (
-                    <>
-                      <p className="detail-panel__note">
-                        Apply creates one shared repository per group. Use Preview apply to verify
-                        group membership and repository targets before applying changes.
-                      </p>
-                      <label>
-                        Group membership CSV
-                        <textarea
-                          aria-label="Group membership CSV"
-                          value={groupsCsv}
-                          rows={8}
-                          onChange={(event) => setGroupsCsv(event.target.value)}
-                        />
-                      </label>
-                      <p className="detail-panel__note">
-                        {String(groupConfig.groupCount)} groups,{" "}
-                        {String(groupConfig.groupedStudentCount)}
-                        {" grouped students, "}
-                        {String(groupConfig.ungroupedActiveStudentCount)} ungrouped active students.
-                      </p>
-                    </>
-                  ) : groupConfig.groupsCsv.trim() !== "group_id,student_id" ? (
-                    <p className="detail-panel__note">
-                      Existing groups.csv is retained and ignored while Individual repositories is
-                      selected.
-                    </p>
-                  ) : null}
-                  <button
-                    className="primary-action"
-                    type="button"
-                    disabled={isSavingGroupConfig}
-                    onClick={() => void saveAssignmentGroupConfig()}
-                  >
-                    {isSavingGroupConfig ? "Saving repository mode..." : "Save repository mode"}
-                  </button>
-                  {groupConfigFeedback === null ? null : <p role="status">{groupConfigFeedback}</p>}
-                </section>
-              )}
               {accessPage === null ? null : (
                 <StudentRepositoryAccessPagePanel
                   result={accessPage}
@@ -2169,9 +2088,7 @@ export const AssignmentDetailPage = ({
                   onGenerate={() => {
                     void generateStudentRepositoryAccessPage();
                   }}
-                  onSelectPagesFolder={() => {
-                    return selectStudentAccessPagesRepositoryFolder();
-                  }}
+                  onSelectPagesFolder={() => selectStudentAccessPagesRepositoryFolder()}
                   onSaveConfig={saveStudentAccessPagesConfig}
                   isSavingConfig={isSavingAccessPagesConfig}
                   configFeedback={accessPagesConfigFeedback}
@@ -2185,30 +2102,7 @@ export const AssignmentDetailPage = ({
                   }}
                 />
               )}
-              {accessPagePublishStatus === null ? null : (
-                <StudentRepositoryAccessPagePublishPanel
-                  result={accessPagePublishStatus}
-                  copyFeedback={getCopyStateText(copyState, "publish-commands")}
-                  onPublish={() => {
-                    void publishStudentRepositoryAccessPage();
-                  }}
-                  isPublishing={isPublishingAccessPage}
-                  publishResult={accessPagePublishResult}
-                  onCopy={(value) => {
-                    handleCopy("publish-commands", value);
-                  }}
-                />
-              )}
               <RosterPanel detail={detail} />
-              <GradeStatusSummaryPanel
-                status={gradeStatus}
-                isLoading={isLoadingGradeStatus}
-                errorMessage={gradeStatusCommandErrorMessage}
-                onViewFullGradeStatus={() => {
-                  onViewGradeStatus(selection, detail, loadResult);
-                }}
-              />
-              <DiagnosticsPanel diagnostics={detail.diagnostics} />
               <ActionsPanel
                 detail={detail}
                 isLoading={isLoading}
@@ -2226,6 +2120,123 @@ export const AssignmentDetailPage = ({
                 }}
                 canGenerateFacultyReport={canGenerateFacultyReport}
               />
+              <details className="detail-panel assignment-detail__advanced">
+                <summary>Advanced details</summary>
+                <p className="assignment-detail__path">Assignment file: {detail.assignment.file}</p>
+                <TemplatePanel detail={detail} copyState={copyState} onCopy={handleCopy} />
+                <GradingPanel detail={detail} copyState={copyState} onCopy={handleCopy} />
+                <GradeWorkflowPanel
+                  detail={detail}
+                  workflowResult={workflowResult}
+                  draft={workflowDraft}
+                  preview={workflowPreview}
+                  isLoading={isLoadingWorkflow}
+                  isPushing={isPushingWorkflow}
+                  onViewWorkflow={() => {
+                    void loadTemplateWorkflow();
+                  }}
+                  onDraftChange={(value) => {
+                    setWorkflowDraft(value);
+                    setWorkflowPreview(null);
+                    setWorkflowSaveResult(null);
+                  }}
+                  onPreview={() => {
+                    void previewWorkflowSave();
+                  }}
+                  onPush={() => {
+                    void pushWorkflow();
+                  }}
+                />
+                {workflowSaveResult?.status === "success" ? (
+                  <p role="status">
+                    Workflow pushed
+                    {workflowSaveResult.commitSha === null
+                      ? "."
+                      : `: ${workflowSaveResult.commitSha}`}
+                  </p>
+                ) : null}
+                <StudentReportsPanel detail={detail} />
+                {groupConfig === null ? null : (
+                  <section className="detail-panel" aria-labelledby="repository-mode-title">
+                    <h2 id="repository-mode-title">Repository mode</h2>
+                    <label>
+                      Repository mode
+                      <select
+                        value={groupMode}
+                        onChange={(event) =>
+                          setGroupMode(event.target.value as "individual" | "group")
+                        }
+                      >
+                        <option value="individual">Individual repositories</option>
+                        <option value="group">Group repositories</option>
+                      </select>
+                    </label>
+                    {groupMode === "group" ? (
+                      <>
+                        <p className="detail-panel__note">
+                          Apply creates one shared repository per group. Use Preview apply to verify
+                          group membership and repository targets before applying changes.
+                        </p>
+                        <label>
+                          Group membership CSV
+                          <textarea
+                            aria-label="Group membership CSV"
+                            value={groupsCsv}
+                            rows={8}
+                            onChange={(event) => setGroupsCsv(event.target.value)}
+                          />
+                        </label>
+                        <p className="detail-panel__note">
+                          {String(groupConfig.groupCount)} groups,{" "}
+                          {String(groupConfig.groupedStudentCount)}
+                          {" grouped students, "}
+                          {String(groupConfig.ungroupedActiveStudentCount)} ungrouped active
+                          students.
+                        </p>
+                      </>
+                    ) : groupConfig.groupsCsv.trim() !== "group_id,student_id" ? (
+                      <p className="detail-panel__note">
+                        Existing groups.csv is retained and ignored while Individual repositories is
+                        selected.
+                      </p>
+                    ) : null}
+                    <button
+                      className="primary-action"
+                      type="button"
+                      disabled={isSavingGroupConfig}
+                      onClick={() => void saveAssignmentGroupConfig()}
+                    >
+                      {isSavingGroupConfig ? "Saving repository mode..." : "Save repository mode"}
+                    </button>
+                    {groupConfigFeedback === null ? null : (
+                      <p role="status">{groupConfigFeedback}</p>
+                    )}
+                  </section>
+                )}
+                {accessPagePublishStatus === null ? null : (
+                  <StudentRepositoryAccessPagePublishPanel
+                    result={accessPagePublishStatus}
+                    copyFeedback={getCopyStateText(copyState, "publish-commands")}
+                    onPublish={() => {
+                      void publishStudentRepositoryAccessPage();
+                    }}
+                    isPublishing={isPublishingAccessPage}
+                    publishResult={accessPagePublishResult}
+                    onCopy={(value) => {
+                      handleCopy("publish-commands", value);
+                    }}
+                  />
+                )}
+                <GradeStatusSummaryPanel
+                  status={gradeStatus}
+                  isLoading={isLoadingGradeStatus}
+                  errorMessage={gradeStatusCommandErrorMessage}
+                  onViewFullGradeStatus={() => {
+                    onViewGradeStatus(selection, detail, loadResult);
+                  }}
+                />
+                <DiagnosticsPanel diagnostics={detail.diagnostics} />
+              </details>
             </div>
           </>
         )}

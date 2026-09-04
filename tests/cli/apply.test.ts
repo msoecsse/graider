@@ -256,6 +256,16 @@ describe("graider apply command", () => {
     ).toEqual([JONES_REPOSITORY, PATEL_REPOSITORY]);
     expect(githubClient.mutations.fileWrites).toEqual([]);
     expect(githubClient.mutations.workflowDispatches).toEqual([]);
+    expect(result.summary.repositories).toEqual([
+      expect.objectContaining({
+        repository: JONES_REPOSITORY,
+        status: "created"
+      }),
+      expect.objectContaining({
+        repository: PATEL_REPOSITORY,
+        status: "created"
+      })
+    ]);
   });
 
   it("TC-CLI-APPLY-002 re-running apply is no-op for existing state", async () => {

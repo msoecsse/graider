@@ -616,9 +616,8 @@ describe("DashboardPage", () => {
     mockGraiderUI({ checkGitHubAuth });
     render(<DashboardPage />);
 
-    expect(
-      await screen.findByRole("heading", { level: 2, name: "GitHub authentication: Connected" })
-    ).toBeInTheDocument();
+    const authLabels = await screen.findAllByText("GitHub authentication: Connected");
+    expect(authLabels[0]?.closest("details")).not.toHaveAttribute("open");
     expect(checkGitHubAuth).toHaveBeenCalledTimes(1);
   });
 
@@ -1148,20 +1147,17 @@ describe("DashboardPage", () => {
     fireEvent.change(screen.getByLabelText("Due date and time"), {
       target: { value: "2027-06-15T23:59" }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Preview assignment.yml" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create assignment" }));
 
     await waitFor(() => expect(previewAssignmentSetup).toHaveBeenCalledTimes(1));
     expect(previewAssignmentSetup).toHaveBeenCalledWith(
       expect.objectContaining({ sectionIds: ["001"] })
     );
-    expect(await screen.findByText(/assignments\/lab03\/assignment\.yml/u)).toBeInTheDocument();
-    const templateValidation = screen.getByText(
-      "Template repository validated. Using default branch: master."
-    );
-    expect(templateValidation).toHaveClass("success-message");
-    expect(templateValidation).not.toHaveClass("error-message");
-    expect(templateValidation).toHaveAttribute("role", "status");
-    fireEvent.click(screen.getByRole("button", { name: "Save assignment setup" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Create assignment?" });
+    expect(
+      within(confirmation).getByText("Lab 03 will be created for 1 section.")
+    ).toBeInTheDocument();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Create assignment" }));
 
     await waitFor(() =>
       expect(getAssignmentDetail).toHaveBeenCalledWith({
@@ -1195,7 +1191,7 @@ describe("DashboardPage", () => {
         name: `Create a new assignment in ${COURSE_FOLDER.path}`
       })
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Preview assignment.yml" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create assignment" }));
 
     const templateValidation = await screen.findByText(
       "Template repository exists, but branch main was not found."
@@ -1203,7 +1199,7 @@ describe("DashboardPage", () => {
     expect(templateValidation).toHaveClass("error-message");
     expect(templateValidation).not.toHaveClass("success-message");
     expect(templateValidation).toHaveAttribute("role", "alert");
-    expect(screen.getByRole("button", { name: "Save assignment setup" })).toBeDisabled();
+    expect(screen.queryByRole("dialog", { name: "Create assignment?" })).toBeNull();
   });
 
   it("manages a roster through the typed preload APIs", async () => {
@@ -1259,14 +1255,15 @@ describe("DashboardPage", () => {
     expect(screen.queryByLabelText("student_id row 1")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Add Student" }));
     fireEvent.change(screen.getByLabelText("student_id row 1"), { target: { value: "S001" } });
-    fireEvent.click(screen.getByRole("button", { name: "Preview roster CSV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save roster" }));
     await waitFor(() => expect(previewRosterSave).toHaveBeenCalledTimes(1));
-    expect(await screen.findAllByText(/rosters\/section-001\.csv/u)).toHaveLength(2);
-    fireEvent.click(screen.getByRole("button", { name: "Save Roster" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Save roster changes?" });
+    expect(
+      within(confirmation).getByText("Create roster with 1 student record.")
+    ).toBeInTheDocument();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Save roster" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "Saved terms/27s1/rosters/section-001.csv"
-    );
+    expect(await screen.findByText("Saved terms/27s1/rosters/section-001.csv")).toBeInTheDocument();
     await waitFor(() => expect(refreshCourseFolder).toHaveBeenCalledWith(COURSE_FOLDER.id));
   });
 
@@ -1349,10 +1346,10 @@ describe("DashboardPage", () => {
     fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
     fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
     await screen.findByRole("button", { name: "Add Student" });
-    fireEvent.click(screen.getByRole("button", { name: "Preview roster CSV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save roster" }));
 
     expect(await screen.findByText("Roster row 2 is missing email.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Roster" })).toBeDisabled();
+    expect(screen.queryByRole("dialog", { name: "Save roster changes?" })).toBeNull();
     expect(saveRoster).not.toHaveBeenCalled();
   });
 
@@ -1889,11 +1886,49 @@ describe("DashboardPage", () => {
     render(<DashboardPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
-    fireEvent.click(await screen.findByText("View diagnostics"));
 
+    const diagnostics = (await screen.findByText("View diagnostics")).closest("details");
+    expect(diagnostics).toHaveAttribute("open");
     expect(screen.getByText("Configured grading workflow was not found.")).toBeInTheDocument();
     expect(screen.getByText("Could not parse assignment.yml.")).toBeInTheDocument();
     expect(screen.queryByText(/secret-token-value/u)).toBeNull();
+  });
+
+  it("keeps healthy source paths and informational diagnostics behind Advanced details", async () => {
+    const card = {
+      ...COURSE_TERM_CARD,
+      diagnostics: [
+        {
+          code: "dashboard_info",
+          severity: "info",
+          message: "Repository settings were read successfully."
+        }
+      ]
+    };
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(createCombinedDashboardResult([createDashboardResult({}, [card])]))
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+
+    await screen.findByText("1 course-term loaded");
+    const sourceDetails = document.querySelectorAll<HTMLElement>(
+      "details.course-dashboard__advanced, details.course-card__advanced"
+    );
+    expect(sourceDetails.length).toBeGreaterThan(0);
+    for (const details of sourceDetails) {
+      expect(details).toHaveTextContent(COURSE_FOLDER.path);
+      expect(details).not.toHaveAttribute("open");
+    }
+    expect(document.querySelector("details.dashboard-advanced")).not.toHaveAttribute("open");
+    expect(
+      screen.getByText("Repository settings were read successfully.").closest("details")
+    ).not.toHaveAttribute("open");
   });
 
   it("shows no-card state when refresh succeeds with empty cards", async () => {

@@ -131,6 +131,59 @@ h1 {
   padding: 0 16px;
 }
 
+.confirmation-modal__backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(27 31 35 / 45%);
+  padding: 24px;
+}
+
+.confirmation-modal {
+  width: min(640px, 100%);
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgb(140 149 159 / 20%);
+  padding: 24px;
+}
+
+.confirmation-modal h2 {
+  margin-bottom: 8px;
+  font-size: 1.2rem;
+}
+
+.confirmation-modal__summary {
+  color: #57606a;
+}
+
+.confirmation-modal__preview {
+  margin: 18px 0;
+}
+
+.confirmation-modal__preview summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.confirmation-modal__supplemental {
+  margin: 18px 0;
+}
+
+.confirmation-modal__preview pre {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid #d8dee4;
+  border-radius: 6px;
+  background: #f6f8fa;
+  margin: 10px 0 0;
+  padding: 12px;
+}
+
 .primary-action {
   border: 1px solid #1f883d;
   background: #1f883d;
@@ -144,15 +197,25 @@ h1 {
 }
 
 .github-auth-status {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
   border: 1px solid #d0d7de;
   border-radius: 8px;
   background: #ffffff;
   margin: 0 0 22px;
   padding: 16px 18px;
+}
+
+.github-auth-status summary {
+  cursor: pointer;
+  color: #24292f;
+  font-weight: 600;
+}
+
+.github-auth-status__content {
+  margin-top: 12px;
+}
+
+.github-auth-status__content + button {
+  margin-top: 12px;
 }
 
 .github-auth-status h2 {
@@ -188,6 +251,20 @@ h1 {
 
 .github-auth-status__diagnostic {
   font-size: 0.875rem;
+}
+
+.dashboard-advanced {
+  margin-top: 22px;
+}
+
+.dashboard-advanced > summary {
+  cursor: pointer;
+  color: #57606a;
+  font-weight: 600;
+}
+
+.dashboard-advanced[open] > summary {
+  margin-bottom: 12px;
 }
 
 .danger-action {

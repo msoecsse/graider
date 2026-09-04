@@ -7,6 +7,7 @@ import type {
   RosterRow,
   RosterSaveRequest
 } from "../../electron/ipc";
+import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 
 const HEADERS = [
   ["studentId", "student_id"],
@@ -66,6 +67,7 @@ export const RosterManagerPage = ({
   const [isExisting, setIsExisting] = useState(false);
   const [changeDescription, setChangeDescription] = useState<string | null>(null);
   const [preview, setPreview] = useState<RosterPreviewResult | null>(null);
+  const [isConfirmingSave, setIsConfirmingSave] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isConfirmingRosterRemoval, setIsConfirmingRosterRemoval] = useState(false);
   const [isRosterRemovalConfirmed, setIsRosterRemovalConfirmed] = useState(false);
@@ -103,7 +105,10 @@ export const RosterManagerPage = ({
     [courseFolder.id, courseFolder.path, isCreatingSection, rows, sectionId, termCode]
   );
 
-  const clearPreview = (): void => setPreview(null);
+  const clearPreview = (): void => {
+    setPreview(null);
+    setIsConfirmingSave(false);
+  };
 
   const handleTermChange = (value: string): void => {
     setTermCode(value);
@@ -172,11 +177,17 @@ export const RosterManagerPage = ({
     const previewRosterSave = window.graiderUI.previewRosterSave;
     if (previewRosterSave === undefined) return;
     setIsLoading(true);
-    setMessage(null);
+    setLoadMessage(null);
     try {
-      setPreview(await previewRosterSave(request));
+      const nextPreview = await previewRosterSave(request);
+      setPreview(nextPreview);
+      if (nextPreview.status === "ready") {
+        setIsConfirmingSave(true);
+      } else {
+        setLoadMessage(nextPreview.diagnostics.map((item) => item.message).join(" "));
+      }
     } catch {
-      setMessage("Unable to prepare roster preview.");
+      setLoadMessage("Unable to prepare roster preview.");
     } finally {
       setIsLoading(false);
     }
@@ -184,7 +195,10 @@ export const RosterManagerPage = ({
 
   const handleSave = async (): Promise<void> => {
     const saveRoster = window.graiderUI.saveRoster;
-    if (saveRoster === undefined || preview?.status !== "ready") return;
+    if (saveRoster === undefined)
+      throw new Error("Roster management is unavailable in this app build.");
+    if (preview?.status !== "ready")
+      throw new Error("Prepare a valid roster preview before saving.");
     setIsLoading(true);
     try {
       const result = await saveRoster({ ...request, confirmed: true });
@@ -201,10 +215,10 @@ export const RosterManagerPage = ({
         }
         onSaved();
       } else {
-        setMessage(result.diagnostics.map((item) => item.message).join(" "));
+        throw new Error(result.diagnostics.map((item) => item.message).join(" "));
       }
-    } catch {
-      setMessage("Unable to save roster CSV.");
+    } catch (error) {
+      throw error instanceof Error ? error : new Error("Unable to save roster CSV.");
     } finally {
       setIsLoading(false);
     }
@@ -404,7 +418,7 @@ export const RosterManagerPage = ({
                 type="button"
                 onClick={() => {
                   setRows((current) => [...current, emptyRow(sectionId)]);
-                  setChangeDescription(null);
+                  setChangeDescription("This change adds a student row to the roster.");
                   clearPreview();
                 }}
               >
@@ -601,7 +615,7 @@ export const RosterManagerPage = ({
         )}
         {sectionId.length === 0 ? null : (
           <section className="detail-panel">
-            <h2>Preview and save</h2>
+            <h2>Save roster</h2>
             <button
               className="primary-action"
               type="button"
@@ -610,37 +624,8 @@ export const RosterManagerPage = ({
                 void handlePreview();
               }}
             >
-              {isLoading ? "Preparing preview..." : "Preview roster CSV"}
+              {isLoading ? "Preparing preview..." : "Save roster"}
             </button>
-            {preview === null ? null : (
-              <>
-                {changeDescription === null ? null : (
-                  <p className="detail-panel__note">{changeDescription}</p>
-                )}
-                {preview.diagnostics.map((item) => (
-                  <p className="error-message" role="alert" key={item.message}>
-                    {item.message}
-                  </p>
-                ))}
-                <details open>
-                  <summary>
-                    {preview.exists ? "Update: " : "Create: "}
-                    {preview.path}
-                  </summary>
-                  <pre>{preview.content}</pre>
-                </details>
-                <button
-                  className="primary-action"
-                  type="button"
-                  disabled={preview.status !== "ready" || isLoading}
-                  onClick={() => {
-                    void handleSave();
-                  }}
-                >
-                  {isLoading ? "Saving..." : "Save Roster"}
-                </button>
-              </>
-            )}
             {message === null ? null : (
               <p className="success-message" role="status">
                 {message}
@@ -649,6 +634,18 @@ export const RosterManagerPage = ({
           </section>
         )}
       </section>
+      <ConfirmationWithPreviewModal
+        confirmLabel="Save roster"
+        isOpen={isConfirmingSave && preview !== null}
+        onCancel={() => setIsConfirmingSave(false)}
+        onConfirm={handleSave}
+        preview={preview === null ? undefined : <pre>{preview.content}</pre>}
+        summary={
+          changeDescription ??
+          `${preview?.exists === true || isExisting ? "Update" : "Create"} roster with ${rows.length} student record${rows.length === 1 ? "" : "s"}.`
+        }
+        title="Save roster changes?"
+      />
     </main>
   );
 };

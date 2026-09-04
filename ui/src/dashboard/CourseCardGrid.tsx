@@ -150,7 +150,10 @@ export const CourseCardGrid = ({
               <div>
                 <p className="course-dashboard__eyebrow">Course</p>
                 <h3>{getCourseLabel(firstCard)}</h3>
-                <p className="course-dashboard__path">{group.sourceFolderPath}</p>
+                <details className="course-dashboard__advanced">
+                  <summary>Advanced details</summary>
+                  <p className="course-dashboard__path">{group.sourceFolderPath}</p>
+                </details>
               </div>
               <div
                 className="course-dashboard__actions"

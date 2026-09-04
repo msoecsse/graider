@@ -22,13 +22,17 @@ export const getCardDiagnosticCount = (card: DashboardCard): number =>
 
 export const DiagnosticsPanel = ({ card }: DiagnosticsPanelProps): ReactElement | null => {
   const diagnosticCount = getCardDiagnosticCount(card);
+  const hasActionableDiagnostic = [
+    ...card.diagnostics,
+    ...card.assignments.flatMap((assignment) => assignment.diagnostics)
+  ].some((diagnostic) => diagnostic.severity === "error" || diagnostic.severity === "warning");
 
   if (diagnosticCount === 0) {
     return null;
   }
 
   return (
-    <details className="diagnostics-panel">
+    <details className="diagnostics-panel" open={hasActionableDiagnostic}>
       <summary>View diagnostics</summary>
       <div className="diagnostics-panel__content">
         {card.diagnostics.length > 0 ? (
