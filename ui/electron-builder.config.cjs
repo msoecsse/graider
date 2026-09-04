@@ -20,7 +20,8 @@ module.exports = {
   },
   win: {
     target: [{ target: "portable", arch: ["x64"] }],
-    artifactName: "Graider.${ext}"
+    artifactName: "Graider.${ext}",
+    signExecutable: false
   },
   dmg: {
     sign: false

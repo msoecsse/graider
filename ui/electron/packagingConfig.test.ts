@@ -33,16 +33,24 @@ describe("packaging configuration", () => {
     expect(packageJson.scripts?.["build:cli"]).toContain(
       "tsup --config ui/scripts/tsup.graider-cli.config.mjs"
     );
+    const genericPackageCommand =
+      "npm run build:cli && npm run build && electron-builder --config electron-builder.config.cjs";
     const macPackageCommand =
       "npm run build:cli && npm run build && electron-builder --mac dir --arm64 --config electron-builder.config.cjs";
-    expect(packageJson.scripts?.package).toBe(macPackageCommand);
+    expect(packageJson.scripts?.package).toBe(genericPackageCommand);
+    expect(packageJson.scripts?.package).not.toContain("--mac");
+    expect(packageJson.scripts?.package).not.toContain("--win");
     expect(packageJson.scripts?.["package:mac"]).toBe(macPackageCommand);
-    expect(packageJson.scripts?.["package:win"]).toContain("electron-builder --win portable --x64");
+    expect(packageJson.scripts?.["package:mac"]).not.toContain("--win");
+    expect(packageJson.scripts?.["package:win"]).toBe(
+      "npm run build:cli && npm run build && electron-builder --win portable --x64 --config electron-builder.config.cjs"
+    );
+    expect(packageJson.scripts?.["package:win"]).not.toContain("--mac");
     expect(packageJson.scripts?.["release:rc1"]).toContain("npm run package:mac");
     expect(packageJson.scripts?.make).toContain("npm run build:cli");
   });
 
-  it("packages explicit macOS and Windows x64 portable targets", () => {
+  it("packages explicit macOS and unsigned Windows x64 portable targets", () => {
     const packagingConfigSource = fs.readFileSync(
       path.join(process.cwd(), "electron-builder.config.cjs"),
       "utf8"
@@ -51,5 +59,7 @@ describe("packaging configuration", () => {
     expect(packagingConfigSource).toContain('target: [{ target: "dir", arch: ["arm64"] }]');
     expect(packagingConfigSource).toContain('target: [{ target: "portable", arch: ["x64"] }]');
     expect(packagingConfigSource).toContain('artifactName: "Graider.${ext}"');
+    expect(packagingConfigSource).toContain("signExecutable: false");
+    expect(packagingConfigSource).not.toContain("signAndEditExecutable: false");
   });
 });
