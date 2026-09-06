@@ -8,6 +8,10 @@ import {
   type AssignmentApplyPreviewResult,
   type AssignmentDetailRequest,
   type AssignmentDetailResult,
+  type AssignmentTemplateSyncAvailability,
+  type AssignmentTemplateSyncExecuteRequest,
+  type AssignmentTemplateSyncExecutionResult,
+  type AssignmentTemplateSyncRequest,
   type AssignmentGradeRequest,
   type AssignmentGradeResult,
   type AssignmentGradePreviewRequest,
@@ -194,6 +198,20 @@ const graiderUI: GraiderUIApi = {
     await invoke<CombinedDashboardResult>(IPC_CHANNELS.refreshDashboard),
   getAssignmentDetail: async (request: AssignmentDetailRequest): Promise<AssignmentDetailResult> =>
     await invoke<AssignmentDetailResult>(IPC_CHANNELS.getAssignmentDetail, request),
+  prepareAssignmentTemplateSync: async (
+    request: AssignmentTemplateSyncRequest
+  ): Promise<AssignmentTemplateSyncAvailability> =>
+    await invoke<AssignmentTemplateSyncAvailability>(
+      IPC_CHANNELS.prepareAssignmentTemplateSync,
+      request
+    ),
+  executeAssignmentTemplateSync: async (
+    request: AssignmentTemplateSyncExecuteRequest
+  ): Promise<AssignmentTemplateSyncExecutionResult> =>
+    await invoke<AssignmentTemplateSyncExecutionResult>(
+      IPC_CHANNELS.executeAssignmentTemplateSync,
+      request
+    ),
   getAssignmentApplyPreview: async (
     request: AssignmentApplyPreviewRequest
   ): Promise<AssignmentApplyPreviewResult> =>

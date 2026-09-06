@@ -251,6 +251,16 @@ describe("graider apply command", () => {
         (repository) => repository.actions.gradingWorkflowFound === true
       )
     ).toBe(true);
+    expect(manifestResult.manifest?.repositories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          repository: expect.objectContaining({
+            templateCommitSha: "template-sha",
+            studentDefaultBranchCommitSha: expect.any(String)
+          })
+        })
+      ])
+    );
     expect(
       githubClient.mutations.createdRepositories.map((record) => record.repository.name)
     ).toEqual([JONES_REPOSITORY, PATEL_REPOSITORY]);

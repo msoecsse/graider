@@ -109,6 +109,10 @@ const repositoryIdentitySchema = z
     created_from_template: z.boolean(),
     template_repository: z.string().min(MINIMUM_ITEMS),
     template_commit_sha: z.string().optional(),
+    student_default_branch_commit_sha: z.string().optional(),
+    template_sync_baseline_status: z
+      .union([z.literal("initialized"), z.literal("baseline_required")])
+      .optional(),
     created_at: z.string().optional(),
     last_observed_at: z.string().optional()
   })
@@ -417,6 +421,15 @@ const normalizeRepositoryIdentity = (
   ...(repository.template_commit_sha === undefined
     ? {}
     : { templateCommitSha: repository.template_commit_sha }),
+  ...(repository.student_default_branch_commit_sha === undefined
+    ? {}
+    : { studentDefaultBranchCommitSha: repository.student_default_branch_commit_sha }),
+  templateSyncBaselineStatus:
+    repository.template_sync_baseline_status ??
+    (repository.template_commit_sha !== undefined &&
+    repository.student_default_branch_commit_sha !== undefined
+      ? "initialized"
+      : "baseline_required"),
   ...(repository.created_at === undefined ? {} : { createdAt: repository.created_at }),
   ...(repository.last_observed_at === undefined
     ? {}

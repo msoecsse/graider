@@ -20,7 +20,9 @@ import type {
   GitHubWorkflowRun,
   ListWorkflowRunsInput,
   RemoveCollaboratorInput,
-  WriteRepositoryFileInput
+  WriteRepositoryFileInput,
+  CreatePullRequestInput,
+  GitHubPullRequest
 } from "./github-models.js";
 
 enum FakeGitHubNumber {
@@ -212,6 +214,7 @@ export class FakeGitHubClient implements GitHubClient {
   private readonly workflowRuns: FakeWorkflowRunRecord[];
   private readonly artifacts: FakeArtifactRecord[];
   private readonly repositoryFiles: FakeRepositoryFileRecord[];
+  private readonly defaultBranchCommitShas = new Map<string, string>();
   private readonly failures: FakeGitHubFailure[];
   private nextRepositoryId: number;
   private nextCommitNumber: number;
@@ -222,6 +225,12 @@ export class FakeGitHubClient implements GitHubClient {
     this.teams = [...(state.teams ?? [])];
     this.repositories = [...(state.repositories ?? [])];
     this.templateRepositories = [...(state.templateRepositories ?? [])];
+    for (const repository of this.templateRepositories) {
+      this.defaultBranchCommitShas.set(
+        repositoryKey(repository.owner, repository.name),
+        repository.latestCommitSha
+      );
+    }
     this.collaboratorPermissions = [...(state.collaboratorPermissions ?? [])];
     this.teamPermissions = [...(state.teamPermissions ?? [])];
     this.actionsStates = [...(state.actionsStates ?? [])];
@@ -284,6 +293,12 @@ export class FakeGitHubClient implements GitHubClient {
     );
   }
 
+  getDefaultBranchCommitSha(owner: string, repo: string): Promise<string | undefined> {
+    return this.run("getDefaultBranchCommitSha", () =>
+      this.defaultBranchCommitShas.get(repositoryKey(owner, repo))
+    );
+  }
+
   getTemplateRepository(owner: string, repo: string): Promise<GitHubTemplateRepository | null> {
     return this.run(
       "getTemplateRepository",
@@ -315,6 +330,13 @@ export class FakeGitHubClient implements GitHubClient {
       };
 
       this.repositories.push(repository);
+      const templateCommitSha = templateRepository?.latestCommitSha;
+      if (templateCommitSha !== undefined) {
+        this.defaultBranchCommitShas.set(
+          repositoryKey(repository.owner, repository.name),
+          templateCommitSha
+        );
+      }
       this.mutations.createdRepositories.push({
         input,
         repository
@@ -602,6 +624,35 @@ export class FakeGitHubClient implements GitHubClient {
         path: input.path,
         commitSha
       };
+    });
+  }
+
+  findPullRequest(
+    _owner: string,
+    _repo: string,
+    _head: string,
+    _base: string
+  ): Promise<GitHubPullRequest | null> {
+    return this.run("findPullRequest", () => null);
+  }
+
+  createPullRequest(input: CreatePullRequestInput): Promise<GitHubPullRequest> {
+    return this.run("createPullRequest", () => ({
+      number: this.consumeRepositoryId(),
+      url: `https://github.test/${input.owner}/${input.repo}/pull/1`,
+      state: "open",
+      merged: false
+    }));
+  }
+
+  deleteRepositoryBranch(
+    _owner: string,
+    _repo: string,
+    branch: string,
+    defaultBranch: string
+  ): Promise<void> {
+    return this.run("deleteRepositoryBranch", () => {
+      if (branch === defaultBranch) throw new Error("Refusing to delete the default branch.");
     });
   }
 

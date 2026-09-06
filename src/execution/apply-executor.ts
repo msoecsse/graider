@@ -219,7 +219,8 @@ const createManifestRecord = (
   student: RosterStudent,
   repository: GitHubRepository,
   observedAt: string,
-  templateCommitSha?: string
+  templateCommitSha?: string,
+  studentDefaultBranchCommitSha?: string
 ): ManifestRepositoryRecord => ({
   studentId: student.studentId,
   githubUsername: student.githubUsername,
@@ -234,6 +235,11 @@ const createManifestRecord = (
     createdFromTemplate: true,
     templateRepository: config.assignment.template.repository,
     ...(templateCommitSha === undefined ? {} : { templateCommitSha }),
+    ...(studentDefaultBranchCommitSha === undefined ? {} : { studentDefaultBranchCommitSha }),
+    templateSyncBaselineStatus:
+      templateCommitSha === undefined || studentDefaultBranchCommitSha === undefined
+        ? "baseline_required"
+        : "initialized",
     createdAt: observedAt,
     lastObservedAt: observedAt
   },
@@ -383,6 +389,24 @@ const executeCreateRepository = async (
       );
     }
 
+    const studentDefaultBranchCommitSha = await runGitHubOperation(input, () =>
+      input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+    );
+
+    if (
+      state.manifest.template.commitSha === undefined ||
+      studentDefaultBranchCommitSha === undefined
+    ) {
+      return recordError(
+        state,
+        createConfigDiagnostic(
+          DiagnosticCode.GithubApiError,
+          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
+          { repository: repository.fullName, operation: CREATE_REPOSITORY_OPERATION }
+        )
+      );
+    }
+
     const manifest = upsertRepositoryRecord(
       state.manifest,
       createManifestRecord(
@@ -390,7 +414,8 @@ const executeCreateRepository = async (
         student,
         repository,
         observedAt,
-        state.manifest.template.commitSha
+        state.manifest.template.commitSha,
+        studentDefaultBranchCommitSha
       )
     );
 

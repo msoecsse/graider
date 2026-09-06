@@ -9,6 +9,7 @@ import type {
   GitHubCollaboratorResult,
   GitHubFileWriteResult,
   GitHubPermissionState,
+  GitHubPullRequest,
   GitHubRepository,
   GitHubTeam,
   GitHubTemplateRepository,
@@ -17,13 +18,16 @@ import type {
   GitHubWorkflowRun,
   ListWorkflowRunsInput,
   RemoveCollaboratorInput,
-  WriteRepositoryFileInput
+  WriteRepositoryFileInput,
+  CreatePullRequestInput
 } from "./github-models.js";
 
 export interface GitHubClient {
   getAuthenticatedUser(): Promise<GitHubUser>;
 
   getRepository(owner: string, repo: string): Promise<GitHubRepository | null>;
+
+  getDefaultBranchCommitSha(owner: string, repo: string): Promise<string | undefined>;
 
   getTemplateRepository(owner: string, repo: string): Promise<GitHubTemplateRepository | null>;
 
@@ -69,6 +73,19 @@ export interface GitHubClient {
   archiveRepository(owner: string, repo: string): Promise<void>;
 
   writeRepositoryFile(input: WriteRepositoryFileInput): Promise<GitHubFileWriteResult>;
+  findPullRequest(
+    owner: string,
+    repo: string,
+    head: string,
+    base: string
+  ): Promise<GitHubPullRequest | null>;
+  createPullRequest(input: CreatePullRequestInput): Promise<GitHubPullRequest>;
+  deleteRepositoryBranch(
+    owner: string,
+    repo: string,
+    branch: string,
+    defaultBranch: string
+  ): Promise<void>;
 }
 
 export type GitHubClientMethodName = keyof GitHubClient;

@@ -74,6 +74,8 @@ describe("UI security boundary", () => {
       "graider-ui:dashboard:refresh-course-folder",
       "graider-ui:dashboard:refresh-all",
       "graider-ui:assignment-detail:get",
+      "graider-ui:assignment-template-sync:prepare",
+      "graider-ui:assignment-template-sync:execute",
       "graider-ui:assignment-apply-preview:get",
       "graider-ui:assignment-grade-preview:get",
       "graider-ui:assignment-grade-status:get",
@@ -94,6 +96,8 @@ describe("UI security boundary", () => {
     const preloadSource = fs.readFileSync(PRELOAD_SOURCE, "utf8");
 
     expect(preloadSource).toContain('exposeInMainWorld("graiderUI"');
+    expect(preloadSource).toContain("prepareAssignmentTemplateSync:");
+    expect(preloadSource).toContain("executeAssignmentTemplateSync:");
     expect(preloadSource).not.toContain('exposeInMainWorld("process"');
     expect(preloadSource).not.toContain('exposeInMainWorld("fs"');
   });

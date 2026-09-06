@@ -124,4 +124,58 @@ describe("manifest renderer", () => {
     expect(renderManifestYaml(loadResult.manifest)).toBe(renderManifestYaml(loadResult.manifest));
     expect(renderManifestYaml(loadResult.manifest)).toContain(`created_at: ${CREATED_AT}`);
   });
+
+  it("round-trips repository template-sync anchors without changing their values", () => {
+    const manifest = createManifest();
+    manifest.repositories.push({
+      studentId: "jones",
+      githubUsername: "seanjones",
+      section: "001",
+      rosterStatus: "active",
+      repository: {
+        owner: "example-org",
+        name: "lab04-seanjones",
+        fullName: "example-org/lab04-seanjones",
+        createdFromTemplate: true,
+        templateRepository: "example-org/lab04-template",
+        templateCommitSha: "template-sync-sha",
+        studentDefaultBranchCommitSha: "student-sync-sha"
+      },
+      permissions: {},
+      actions: { enabled: false },
+      lifecycle: { repositoryArchived: false, studentAccessRemoved: false, status: "created" },
+      warnings: [],
+      errors: []
+    });
+
+    const yaml = renderManifestYaml(manifest);
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "graider-manifest-sync-"));
+    const manifestPath = createManifestPath(repoRoot, "27s1", "lab04");
+    fs.mkdirSync(path.dirname(manifestPath.absolutePath), { recursive: true });
+    fs.writeFileSync(manifestPath.absolutePath, yaml, "utf8");
+    const loaded = loadManifest(manifestPath.absolutePath);
+
+    expect(yaml).toContain("student_default_branch_commit_sha: student-sync-sha");
+    expect(loaded.status).toBe("loaded");
+    if (loaded.status === "loaded") {
+      expect(loaded.manifest.repositories[0]?.repository).toMatchObject({
+        templateCommitSha: "template-sync-sha",
+        studentDefaultBranchCommitSha: "student-sync-sha",
+        templateSyncBaselineStatus: "initialized"
+      });
+      expect(renderManifestYaml(loaded.manifest)).toBe(yaml);
+    }
+  });
+
+  it("loads legacy repository state without a template-sync baseline", () => {
+    const result = loadManifest(path.resolve("tests/fixtures/manifest/valid-manifest/manifest.yml"));
+
+    expect(result.status).toBe("loaded");
+    if (result.status === "loaded") {
+      expect(result.manifest.repositories[0]?.repository.studentDefaultBranchCommitSha).toBeUndefined();
+      expect(result.manifest.repositories[0]?.repository.templateSyncBaselineStatus).toBe(
+        "baseline_required"
+      );
+    }
+  });
 });

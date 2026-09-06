@@ -93,7 +93,15 @@ export interface ManifestRepositoryIdentity {
   htmlUrl?: string;
   createdFromTemplate: boolean;
   templateRepository: string;
+  /**
+   * The template default-branch revision copied into this repository. Together
+   * with studentDefaultBranchCommitSha, this is the template-sync baseline.
+   */
   templateCommitSha?: string;
+  /** The student's default-branch revision at the template-sync baseline. */
+  studentDefaultBranchCommitSha?: string;
+  /** Missing anchors are explicitly unsafe for future template propagation. */
+  templateSyncBaselineStatus?: "initialized" | "baseline_required";
   createdAt?: string;
   lastObservedAt?: string;
 }

@@ -279,6 +279,13 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshCourseFolder: vi.fn(),
     refreshDashboard: vi.fn(),
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
+    prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
+      available: false,
+      repositoryCount: 0,
+      templateRepository: null,
+      recordedTemplateRevision: null
+    }),
+    executeAssignmentTemplateSync: vi.fn(),
     getAssignmentApplyPreview: vi.fn(),
     getAssignmentGradePreview: vi.fn(),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
@@ -371,6 +378,161 @@ const renderAssignmentDetailPage = (
   );
 
 describe("AssignmentDetailPage", () => {
+  it("uses template-sync preparation to control action availability and show a blocker", async () => {
+    const prepareAssignmentTemplateSync = vi.fn().mockResolvedValue({
+      available: false,
+      repositoryCount: 0,
+      templateRepository: "graider-sandbox/csc1120L2Template",
+      recordedTemplateRevision: null,
+      blocker: {
+        code: "manifest_missing",
+        message: "Apply this assignment before updating student repositories."
+      }
+    });
+    mockGraiderUI({ prepareAssignmentTemplateSync });
+    renderAssignmentDetailPage();
+
+    const action = await screen.findByRole("button", {
+      name: "Update Student Repositories"
+    });
+    expect(action).toBeDisabled();
+    expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1);
+    expect(prepareAssignmentTemplateSync).toHaveBeenCalledWith({
+      courseFolderId: SELECTION.courseFolderId,
+      courseFolderPath: SELECTION.courseFolderPath,
+      assignmentFile: SELECTION.assignmentFile
+    });
+    expect(
+      screen.getByText("Apply this assignment before updating student repositories.")
+    ).toBeInTheDocument();
+  });
+
+  it("opens template-sync confirmation with preview details and cancel never executes", async () => {
+    const executeAssignmentTemplateSync = vi.fn();
+    mockGraiderUI({
+      prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
+        available: true,
+        repositoryCount: 3,
+        templateRepository: "graider-sandbox/csc1120L2Template",
+        recordedTemplateRevision: "0123456789abcdef"
+      }),
+      executeAssignmentTemplateSync
+    });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update Student Repositories" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Update Student Repositories" });
+    expect(within(dialog).getByText(/3 student repositories/u)).toBeInTheDocument();
+    expect(within(dialog).getByText("graider-sandbox/csc1120L2Template")).toBeInTheDocument();
+    expect(within(dialog).getByText("0123456789abcdef")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/clean template changes are applied automatically/iu)
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(/conflicts create a pull request/iu)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(executeAssignmentTemplateSync).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Update Student Repositories" })).toBeNull();
+  });
+
+  it("executes template sync once, prevents duplicate confirmation, and renders mixed student results", async () => {
+    let resolveExecution: (
+      value: Awaited<ReturnType<GraiderUIApi["executeAssignmentTemplateSync"]>>
+    ) => void = () => undefined;
+    const executeAssignmentTemplateSync = vi.fn(
+      async () =>
+        await new Promise<Awaited<ReturnType<GraiderUIApi["executeAssignmentTemplateSync"]>>>(
+          (resolve) => {
+            resolveExecution = resolve;
+          }
+        )
+    );
+    mockGraiderUI({
+      prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
+        available: true,
+        repositoryCount: 6,
+        templateRepository: "graider-sandbox/csc1120L2Template",
+        recordedTemplateRevision: "0123456789abcdef"
+      }),
+      executeAssignmentTemplateSync
+    });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update Student Repositories" }));
+    const dialog = screen.getByRole("dialog", { name: "Update Student Repositories" });
+    fireEvent.click(
+      within(dialog).getByLabelText(
+        "I understand this will update student repositories or create pull requests."
+      )
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Update repositories" }));
+
+    const confirming = within(dialog).getByRole("button", { name: "Confirming…" });
+    expect(confirming).toBeDisabled();
+    fireEvent.click(confirming);
+    expect(executeAssignmentTemplateSync).toHaveBeenCalledTimes(1);
+    expect(executeAssignmentTemplateSync).toHaveBeenCalledWith({
+      courseFolderId: SELECTION.courseFolderId,
+      courseFolderPath: SELECTION.courseFolderPath,
+      assignmentFile: SELECTION.assignmentFile,
+      confirmed: true
+    });
+
+    resolveExecution({
+      status: "partial_success",
+      outcomes: [
+        { studentId: "s001", status: "updated" },
+        { studentId: "s002", status: "already_current" },
+        {
+          studentId: "s003",
+          status: "pull_request_created",
+          pullRequest: { number: 31, url: "https://github.com/org/repo/pull/31" }
+        },
+        {
+          studentId: "s004",
+          status: "pull_request_pending",
+          pullRequest: { number: 32, url: "https://github.com/org/repo/pull/32" }
+        },
+        { studentId: "s005", status: "baseline_required" },
+        {
+          studentId: "s006",
+          status: "failed",
+          message: "Check that Graider can access this repository."
+        }
+      ]
+    });
+
+    const results = await screen.findByLabelText("Template update results");
+    expect(within(results).getByText("s001")).toBeInTheDocument();
+    expect(within(results).getByText("Updated")).toBeInTheDocument();
+    expect(within(results).getByText("Already current")).toBeInTheDocument();
+    expect(
+      within(results).getByText("Pull request created — student action required")
+    ).toBeInTheDocument();
+    expect(
+      within(results).getByText("Pull request pending — student action required")
+    ).toBeInTheDocument();
+    expect(within(results).getByText("Baseline required")).toBeInTheDocument();
+    expect(
+      within(results).getByText(
+        /cannot safely update this older repository until a synchronization baseline is established/u
+      )
+    ).toBeInTheDocument();
+    expect(within(results).getByText("Failed")).toBeInTheDocument();
+    expect(
+      within(results).getByText("Check that Graider can access this repository.")
+    ).toBeInTheDocument();
+    expect(within(results).getByRole("link", { name: "Open pull request #31" })).toHaveAttribute(
+      "href",
+      "https://github.com/org/repo/pull/31"
+    );
+    expect(within(results).queryByText(/graider\/template-update/u)).toBeNull();
+    expect(screen.getByLabelText("Grade status summary")).toBeInTheDocument();
+    expect(screen.getByText("s003", { selector: "td" })).toBeInTheDocument();
+  });
+
   it("requires confirmation before deleting the local assignment and returns to the dashboard", async () => {
     const deleteAssignment = vi.fn().mockResolvedValue({
       status: "success",

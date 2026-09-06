@@ -86,6 +86,22 @@ export interface GitHubFileWriteResult {
   commitSha: string;
 }
 
+export interface GitHubPullRequest {
+  number: number;
+  url: string;
+  state: "open" | "closed";
+  merged: boolean;
+}
+
+export interface CreatePullRequestInput {
+  owner: string;
+  repo: string;
+  head: string;
+  base: string;
+  title: string;
+  body: string;
+}
+
 export interface CreateFromTemplateInput {
   templateOwner: string;
   templateRepo: string;

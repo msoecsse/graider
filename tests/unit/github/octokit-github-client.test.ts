@@ -393,6 +393,19 @@ const createMockOctokit = (): OctokitRestClientLike => ({
       createOrUpdateFileContents: () =>
         resolvedResponse({ commit: { sha: CREATED_SHA }, content: { path: CONTENT_PATH } })
     },
+    pulls: {
+      create: () =>
+        resolvedResponse({
+          number: 1,
+          html_url: "https://github.test/pr/1",
+          state: "open",
+          merged: false
+        }),
+      list: () => resolvedResponse([])
+    },
+    git: {
+      deleteRef: () => resolvedResponse({})
+    },
     teams: {
       getByName: () =>
         resolvedResponse({ id: OctokitTestNumber.TeamId, slug: TEAM_SLUG, name: TEAM_SLUG }),
@@ -451,6 +464,37 @@ const expectGitHubError = async (
 };
 
 describe("OctokitGitHubClient", () => {
+  it("finds PR state, creates a PR, and safely deletes a managed branch", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.pulls.list = () =>
+      resolvedResponse([
+        { number: 7, html_url: "https://github.test/pr/7", state: "closed", merged: true }
+      ]);
+    const client = new OctokitGitHubClient({ octokit, token: TOKEN });
+
+    await expect(client.findPullRequest(OWNER, REPO, "graider/update", BRANCH)).resolves.toEqual({
+      number: 7,
+      url: "https://github.test/pr/7",
+      state: "closed",
+      merged: true
+    });
+    await expect(
+      client.createPullRequest({
+        owner: OWNER,
+        repo: REPO,
+        head: "graider/update",
+        base: BRANCH,
+        title: "Template update",
+        body: "Resolve conflicts"
+      })
+    ).resolves.toMatchObject({ number: 1, state: "open" });
+    await expect(
+      client.deleteRepositoryBranch(OWNER, REPO, "graider/update", BRANCH)
+    ).resolves.toBeUndefined();
+    await expect(client.deleteRepositoryBranch(OWNER, REPO, BRANCH, BRANCH)).rejects.toThrow(
+      "default branch"
+    );
+  });
   it("maps authenticated user response", async () => {
     const client = new OctokitGitHubClient({ token: TOKEN, octokit: createMockOctokit() });
 

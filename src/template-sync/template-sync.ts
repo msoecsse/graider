@@ -1,0 +1,323 @@
+/** A file tree keyed by repository-relative POSIX path. Blob identifiers are opaque to this layer. */
+export type TemplateTree = Readonly<Record<string, string>>;
+
+export interface TemplateRepositoryRef {
+  owner: string;
+  name: string;
+}
+
+export interface StudentRepositoryRef extends TemplateRepositoryRef {
+  defaultBranch: string;
+}
+
+export interface TemplateSyncAnchors {
+  templateCommitSha?: string;
+  studentDefaultBranchCommitSha?: string;
+  templateSyncBaselineStatus: "initialized" | "baseline_required";
+}
+
+export type TemplateFileChange =
+  | { path: string; status: "added"; after: string }
+  | { path: string; status: "deleted"; before: string }
+  | { path: string; status: "modified"; before: string; after: string };
+
+export interface ApplyTemplateDeltaInput {
+  templateRepository: TemplateRepositoryRef;
+  studentRepository: StudentRepositoryRef;
+  /** The template-side merge base, never the student's whole repository tree. */
+  templateBaseCommitSha: string;
+  templateTargetCommitSha: string;
+  /** The student-side baseline is provided for a proper three-way Git application. */
+  studentBaseCommitSha: string;
+  studentCurrentCommitSha: string;
+  changes: readonly TemplateFileChange[];
+}
+
+export type ApplyTemplateDeltaResult =
+  | { status: "clean"; commitSha: string }
+  | { status: "conflict" };
+
+export interface PrepareConflictBranchInput extends ApplyTemplateDeltaInput {
+  branchName: string;
+}
+
+export interface TemplatePullRequest {
+  number: number;
+  url: string;
+}
+
+export interface TemplatePullRequestRecord extends TemplatePullRequest {
+  state: "open" | "closed";
+  merged: boolean;
+}
+
+export interface TemplateSyncPullRequestGateway {
+  createPullRequest(input: {
+    repository: StudentRepositoryRef;
+    sourceBranch: string;
+    targetBranch: string;
+    title: string;
+    body: string;
+  }): Promise<TemplatePullRequest>;
+  findPullRequest(input: {
+    repository: StudentRepositoryRef;
+    sourceBranch: string;
+    targetBranch: string;
+  }): Promise<TemplatePullRequestRecord | null>;
+}
+
+/**
+ * The infrastructure boundary for this operation. Its implementation must use
+ * Git's three-way merge/apply machinery, create one ordinary commit on the
+ * default branch, and push with force disabled. On conflict it must abort its
+ * worktree/index before returning.
+ */
+export interface TemplateSyncGitGateway {
+  getTree(repository: TemplateRepositoryRef, commitSha: string): Promise<TemplateTree>;
+  getDefaultBranchCommitSha(repository: StudentRepositoryRef): Promise<string>;
+  applyAndPushTemplateDelta(input: ApplyTemplateDeltaInput): Promise<ApplyTemplateDeltaResult>;
+  /** Creates and non-force pushes a branch from studentBaseCommitSha, never main. */
+  prepareConflictBranch(input: PrepareConflictBranchInput): Promise<void>;
+  deleteRemoteBranch(repository: StudentRepositoryRef, branchName: string): Promise<void>;
+}
+
+export interface TemplateSyncInput {
+  templateRepository: TemplateRepositoryRef;
+  studentRepository: StudentRepositoryRef;
+  currentTemplateCommitSha: string;
+  anchors: TemplateSyncAnchors;
+  gateway: TemplateSyncGitGateway;
+  pullRequests: TemplateSyncPullRequestGateway;
+  /** Persists anchors only after the gateway confirms its non-force push. */
+  updateAnchors(anchors: Required<TemplateSyncAnchors>): Promise<void>;
+}
+
+export type TemplateSyncResult =
+  | { status: "updated"; commitSha: string }
+  | { status: "already_current" }
+  | { status: "baseline_required" }
+  | { status: "conflict" }
+  | {
+      status: "pull_request_created";
+      pullRequest: TemplatePullRequest;
+      branchName: string;
+      templateCommitSha: string;
+    }
+  | {
+      status: "pull_request_pending";
+      pullRequest: TemplatePullRequest;
+      branchName: string;
+      templateCommitSha: string;
+    }
+  | {
+      status: "pull_request_reconciled";
+      pullRequest: TemplatePullRequest;
+      branchName: string;
+      templateCommitSha: string;
+      branchCleanup: "deleted" | "failed";
+      cleanupError?: unknown;
+    }
+  | {
+      status: "pull_request_closed";
+      pullRequest: TemplatePullRequest;
+      branchName: string;
+      templateCommitSha: string;
+      branchCleanup: "deleted" | "failed";
+      cleanupError?: unknown;
+    }
+  | { status: "failure"; error: unknown };
+
+export type TemplateSyncReconciliationResult =
+  | { status: "already_current" }
+  | { status: "baseline_required" }
+  | {
+      status: "pull_request_pending";
+      pullRequest: TemplatePullRequest;
+      branchName: string;
+      templateCommitSha: string;
+    }
+  | {
+      status: "pull_request_reconciled";
+      pullRequest: TemplatePullRequest;
+      branchName: string;
+      templateCommitSha: string;
+      branchCleanup: "deleted" | "failed";
+      cleanupError?: unknown;
+    }
+  | {
+      status: "pull_request_closed";
+      pullRequest: TemplatePullRequest;
+      branchName: string;
+      templateCommitSha: string;
+      branchCleanup: "deleted" | "failed";
+      cleanupError?: unknown;
+    }
+  | { status: "not_found" }
+  | { status: "failure"; error: unknown };
+
+const TEMPLATE_UPDATE_BRANCH_PREFIX = "graider/template-update-";
+const TEMPLATE_UPDATE_TITLE = "Template update";
+const TEMPLATE_UPDATE_BODY =
+  "Graider could not merge this faculty template update automatically. Please resolve the conflicts and merge this pull request.";
+
+export const createTemplateUpdateBranchName = (templateCommitSha: string): string =>
+  `${TEMPLATE_UPDATE_BRANCH_PREFIX}${templateCommitSha.slice(0, 12)}`;
+
+const hasInitializedAnchors = (
+  anchors: TemplateSyncAnchors
+): anchors is Required<TemplateSyncAnchors> =>
+  anchors.templateSyncBaselineStatus === "initialized" &&
+  anchors.templateCommitSha !== undefined &&
+  anchors.studentDefaultBranchCommitSha !== undefined;
+
+export const computeTemplateDelta = (
+  base: TemplateTree,
+  target: TemplateTree
+): TemplateFileChange[] => {
+  const paths = new Set([...Object.keys(base), ...Object.keys(target)]);
+
+  return [...paths]
+    .sort((left, right) => left.localeCompare(right))
+    .flatMap((path): TemplateFileChange[] => {
+      const before = base[path];
+      const after = target[path];
+      if (before === after) return [];
+      if (before === undefined && after !== undefined) return [{ path, status: "added", after }];
+      if (before !== undefined && after === undefined) return [{ path, status: "deleted", before }];
+      if (before !== undefined && after !== undefined)
+        return [{ path, status: "modified", before, after }];
+      return [];
+    });
+};
+
+export const syncTemplateUpdate = async (input: TemplateSyncInput): Promise<TemplateSyncResult> => {
+  if (!hasInitializedAnchors(input.anchors)) return { status: "baseline_required" };
+  if (input.anchors.templateCommitSha === input.currentTemplateCommitSha) {
+    return { status: "already_current" };
+  }
+
+  const reconciliation = await reconcileTemplateUpdatePullRequest(input);
+  if (reconciliation.status !== "not_found") return reconciliation;
+
+  try {
+    const [baseTree, targetTree, studentCurrentCommitSha] = await Promise.all([
+      input.gateway.getTree(input.templateRepository, input.anchors.templateCommitSha),
+      input.gateway.getTree(input.templateRepository, input.currentTemplateCommitSha),
+      input.gateway.getDefaultBranchCommitSha(input.studentRepository)
+    ]);
+    const changes = computeTemplateDelta(baseTree, targetTree);
+    const applied = await input.gateway.applyAndPushTemplateDelta({
+      templateRepository: input.templateRepository,
+      studentRepository: input.studentRepository,
+      templateBaseCommitSha: input.anchors.templateCommitSha,
+      templateTargetCommitSha: input.currentTemplateCommitSha,
+      studentBaseCommitSha: input.anchors.studentDefaultBranchCommitSha,
+      studentCurrentCommitSha,
+      changes
+    });
+
+    if (applied.status === "conflict") {
+      const branchName = createTemplateUpdateBranchName(input.currentTemplateCommitSha);
+      await input.gateway.prepareConflictBranch({
+        templateRepository: input.templateRepository,
+        studentRepository: input.studentRepository,
+        templateBaseCommitSha: input.anchors.templateCommitSha,
+        templateTargetCommitSha: input.currentTemplateCommitSha,
+        studentBaseCommitSha: input.anchors.studentDefaultBranchCommitSha,
+        studentCurrentCommitSha,
+        changes,
+        branchName
+      });
+      const pullRequest = await input.pullRequests.createPullRequest({
+        repository: input.studentRepository,
+        sourceBranch: branchName,
+        targetBranch: input.studentRepository.defaultBranch,
+        title: TEMPLATE_UPDATE_TITLE,
+        body: TEMPLATE_UPDATE_BODY
+      });
+      return {
+        status: "pull_request_created",
+        pullRequest,
+        branchName,
+        templateCommitSha: input.currentTemplateCommitSha
+      };
+    }
+
+    await input.updateAnchors({
+      templateCommitSha: input.currentTemplateCommitSha,
+      studentDefaultBranchCommitSha: applied.commitSha,
+      templateSyncBaselineStatus: "initialized"
+    });
+    return { status: "updated", commitSha: applied.commitSha };
+  } catch (error: unknown) {
+    return { status: "failure", error };
+  }
+};
+
+const cleanupTemplateUpdateBranch = async (
+  input: TemplateSyncInput,
+  branchName: string
+): Promise<{ branchCleanup: "deleted" | "failed"; cleanupError?: unknown }> => {
+  try {
+    await input.gateway.deleteRemoteBranch(input.studentRepository, branchName);
+    return { branchCleanup: "deleted" };
+  } catch (cleanupError: unknown) {
+    return { branchCleanup: "failed", cleanupError };
+  }
+};
+
+/** Reconciles only the deterministic Graider PR for the supplied template revision. */
+export const reconcileTemplateUpdatePullRequest = async (
+  input: TemplateSyncInput
+): Promise<TemplateSyncReconciliationResult> => {
+  if (!hasInitializedAnchors(input.anchors)) return { status: "baseline_required" };
+  if (input.anchors.templateCommitSha === input.currentTemplateCommitSha) {
+    return { status: "already_current" };
+  }
+
+  const branchName = createTemplateUpdateBranchName(input.currentTemplateCommitSha);
+  try {
+    const pullRequest = await input.pullRequests.findPullRequest({
+      repository: input.studentRepository,
+      sourceBranch: branchName,
+      targetBranch: input.studentRepository.defaultBranch
+    });
+    if (pullRequest === null) return { status: "not_found" };
+    if (pullRequest.state === "open") {
+      return {
+        status: "pull_request_pending",
+        pullRequest: { number: pullRequest.number, url: pullRequest.url },
+        branchName,
+        templateCommitSha: input.currentTemplateCommitSha
+      };
+    }
+
+    if (!pullRequest.merged) {
+      return {
+        status: "pull_request_closed",
+        pullRequest: { number: pullRequest.number, url: pullRequest.url },
+        branchName,
+        templateCommitSha: input.currentTemplateCommitSha,
+        ...(await cleanupTemplateUpdateBranch(input, branchName))
+      };
+    }
+
+    const studentDefaultBranchCommitSha = await input.gateway.getDefaultBranchCommitSha(
+      input.studentRepository
+    );
+    await input.updateAnchors({
+      templateCommitSha: input.currentTemplateCommitSha,
+      studentDefaultBranchCommitSha,
+      templateSyncBaselineStatus: "initialized"
+    });
+    return {
+      status: "pull_request_reconciled",
+      pullRequest: { number: pullRequest.number, url: pullRequest.url },
+      branchName,
+      templateCommitSha: input.currentTemplateCommitSha,
+      ...(await cleanupTemplateUpdateBranch(input, branchName))
+    };
+  } catch (error: unknown) {
+    return { status: "failure", error };
+  }
+};

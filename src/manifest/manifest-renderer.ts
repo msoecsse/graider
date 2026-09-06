@@ -43,6 +43,13 @@ const toRawRepositoryIdentity = (repository: ManifestRepositoryIdentity) => ({
   template_repository: repository.templateRepository,
   ...optionalEntries({
     template_commit_sha: repository.templateCommitSha,
+    student_default_branch_commit_sha: repository.studentDefaultBranchCommitSha,
+    template_sync_baseline_status:
+      repository.templateSyncBaselineStatus ??
+      (repository.templateCommitSha !== undefined &&
+      repository.studentDefaultBranchCommitSha !== undefined
+        ? "initialized"
+        : "baseline_required"),
     created_at: repository.createdAt,
     last_observed_at: repository.lastObservedAt
   })

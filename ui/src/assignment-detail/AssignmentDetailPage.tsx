@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type {
+  AssignmentTemplateSyncAvailability,
+  AssignmentTemplateSyncExecutionResult,
+  AssignmentTemplateSyncOutcome,
   StudentAccessPagesConfigResult,
   AssignmentGroupConfigResult,
   StudentRepositoryAccessPagePublishResult,
@@ -9,6 +12,7 @@ import type {
   TemplateWorkflowSavePreview,
   TemplateWorkflowSaveResult
 } from "../../electron/ipc";
+import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { copyTextToClipboard } from "./assignmentDetailClipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
 import { normalizeGradeStatus } from "../grade-status/gradeStatusNormalization";
@@ -1273,6 +1277,74 @@ const GradeStatusSummaryPanel = ({
   </section>
 );
 
+const getTemplateSyncOutcomeLabel = (status: AssignmentTemplateSyncOutcome["status"]): string => {
+  switch (status) {
+    case "updated":
+      return "Updated";
+    case "already_current":
+      return "Already current";
+    case "pull_request_created":
+      return "Pull request created — student action required";
+    case "pull_request_pending":
+      return "Pull request pending — student action required";
+    case "baseline_required":
+      return "Baseline required";
+    case "failed":
+    case "pull_request_closed":
+      return "Failed";
+  }
+};
+
+const TemplateSyncResultsPanel = ({
+  result
+}: {
+  readonly result: AssignmentTemplateSyncExecutionResult;
+}): ReactElement => (
+  <section
+    className="detail-panel template-sync-results-panel"
+    aria-labelledby="template-sync-results-title"
+    aria-label="Template update results"
+  >
+    <h2 id="template-sync-results-title">Template update results</h2>
+    <p className="detail-panel__note">
+      {result.outcomes.length} student{" "}
+      {result.outcomes.length === 1 ? "repository" : "repositories"} processed.
+    </p>
+    {result.blocker === undefined ? null : (
+      <p className="error-message" role="alert">
+        {result.blocker.message}
+      </p>
+    )}
+    <ul className="template-sync-results-list">
+      {result.outcomes.map((outcome) => (
+        <li key={outcome.studentId}>
+          <div className="template-sync-results-list__heading">
+            <strong>{outcome.studentId}</strong>
+            <span className="status-chip">{getTemplateSyncOutcomeLabel(outcome.status)}</span>
+          </div>
+          {outcome.status === "baseline_required" ? (
+            <p>
+              Graider cannot safely update this older repository until a synchronization baseline is
+              established.
+            </p>
+          ) : null}
+          {outcome.status === "failed" || outcome.status === "pull_request_closed" ? (
+            <p>
+              {outcome.message ??
+                "Try again. If the problem continues, check GitHub access and repository settings."}
+            </p>
+          ) : null}
+          {outcome.pullRequest === undefined ? null : (
+            <a href={outcome.pullRequest.url} target="_blank" rel="noreferrer">
+              Open pull request #{outcome.pullRequest.number}
+            </a>
+          )}
+        </li>
+      ))}
+    </ul>
+  </section>
+);
+
 const CollapsibleDiagnosticsPanel = ({
   diagnostics
 }: {
@@ -1452,6 +1524,15 @@ export const AssignmentDetailPage = ({
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [templateSyncAvailability, setTemplateSyncAvailability] =
+    useState<AssignmentTemplateSyncAvailability | null>(null);
+  const [isPreparingTemplateSync, setIsPreparingTemplateSync] = useState(false);
+  const [isTemplateSyncModalOpen, setIsTemplateSyncModalOpen] = useState(false);
+  const [isExecutingTemplateSync, setIsExecutingTemplateSync] = useState(false);
+  const [templateSyncResult, setTemplateSyncResult] =
+    useState<AssignmentTemplateSyncExecutionResult | null>(null);
+  const [templateSyncError, setTemplateSyncError] = useState<string | null>(null);
+  const templateSyncExecutionRef = useRef(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
 
@@ -1587,6 +1668,32 @@ export const AssignmentDetailPage = ({
       }));
     } finally {
       setIsLoadingGradeStatus(false);
+    }
+  };
+
+  const executeTemplateSync = async (confirmed: boolean): Promise<void> => {
+    if (!confirmed || templateSyncExecutionRef.current) return;
+
+    templateSyncExecutionRef.current = true;
+    setIsExecutingTemplateSync(true);
+    setTemplateSyncError(null);
+    try {
+      const result = await window.graiderUI.executeAssignmentTemplateSync({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        assignmentFile: selection.assignmentFile,
+        confirmed: true
+      });
+      setTemplateSyncResult(result);
+      setIsTemplateSyncModalOpen(false);
+    } catch {
+      setTemplateSyncError(
+        "Unable to update student repositories. Check GitHub access and try again."
+      );
+      throw new Error("Unable to update student repositories. Check GitHub access and try again.");
+    } finally {
+      templateSyncExecutionRef.current = false;
+      setIsExecutingTemplateSync(false);
     }
   };
 
@@ -1837,6 +1944,59 @@ export const AssignmentDetailPage = ({
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   useEffect(() => {
+    let isCurrent = true;
+    const prepareTemplateSync = window.graiderUI.prepareAssignmentTemplateSync;
+    setTemplateSyncAvailability(null);
+    setTemplateSyncResult(null);
+    setTemplateSyncError(null);
+    setIsTemplateSyncModalOpen(false);
+    setIsPreparingTemplateSync(true);
+
+    if (prepareTemplateSync === undefined) {
+      setTemplateSyncAvailability({
+        available: false,
+        repositoryCount: 0,
+        templateRepository: null,
+        recordedTemplateRevision: null
+      });
+      setIsPreparingTemplateSync(false);
+      return () => {
+        isCurrent = false;
+      };
+    }
+
+    void prepareTemplateSync({
+      courseFolderId: selection.courseFolderId,
+      courseFolderPath: selection.courseFolderPath,
+      assignmentFile: selection.assignmentFile
+    })
+      .then((availability) => {
+        if (isCurrent) setTemplateSyncAvailability(availability);
+      })
+      .catch(() => {
+        if (isCurrent) {
+          setTemplateSyncAvailability({
+            available: false,
+            repositoryCount: 0,
+            templateRepository: null,
+            recordedTemplateRevision: null,
+            blocker: {
+              code: "template_sync_preview_failed",
+              message: "Template updates could not be prepared. Check the assignment and try again."
+            }
+          });
+        }
+      })
+      .finally(() => {
+        if (isCurrent) setIsPreparingTemplateSync(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
+
+  useEffect(() => {
     setGroupConfig(null);
     void loadAssignmentGroupConfig();
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
@@ -1947,6 +2107,25 @@ export const AssignmentDetailPage = ({
             <button
               className="secondary-action"
               type="button"
+              disabled={
+                detail === null ||
+                isPreparingTemplateSync ||
+                isExecutingTemplateSync ||
+                templateSyncAvailability?.available !== true ||
+                templateSyncAvailability.repositoryCount === 0
+              }
+              onClick={() => {
+                setTemplateSyncError(null);
+                setIsTemplateSyncModalOpen(true);
+              }}
+            >
+              {isExecutingTemplateSync
+                ? "Updating Student Repositories..."
+                : "Update Student Repositories"}
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
               disabled={detail === null}
               onClick={() => {
                 onViewGradeStatus(selection, detail, loadResult);
@@ -1967,6 +2146,42 @@ export const AssignmentDetailPage = ({
           </div>
         </div>
       </header>
+      <ConfirmationWithPreviewModal
+        isOpen={isTemplateSyncModalOpen}
+        title="Update Student Repositories"
+        summary={
+          <>
+            <p>
+              Clean template changes are applied automatically. Conflicts create a pull request that
+              the student must resolve and merge.
+            </p>
+            <p>
+              This will process {templateSyncAvailability?.repositoryCount ?? 0} student
+              repositories.
+            </p>
+          </>
+        }
+        preview={
+          <dl className="detail-grid">
+            <DetailItem
+              label="Template"
+              value={templateSyncAvailability?.templateRepository ?? null}
+            />
+            <DetailItem
+              label="Recorded revision"
+              value={templateSyncAvailability?.recordedTemplateRevision ?? null}
+            />
+          </dl>
+        }
+        acknowledgementLabel="I understand this will update student repositories or create pull requests."
+        confirmDisabled={isExecutingTemplateSync}
+        confirmLabel="Update repositories"
+        successMessage="Student repositories updated."
+        onConfirm={executeTemplateSync}
+        onCancel={() => {
+          if (!isExecutingTemplateSync) setIsTemplateSyncModalOpen(false);
+        }}
+      />
       {!isConfirmingDelete ? null : (
         <section className="detail-panel" role="dialog" aria-labelledby="delete-assignment-title">
           <h2 id="delete-assignment-title">Delete assignment</h2>
@@ -2051,6 +2266,17 @@ export const AssignmentDetailPage = ({
           <p className="error-message" role="alert">
             {repositoryDownloadError}
           </p>
+        )}
+        {templateSyncError === null ? null : (
+          <p className="error-message" role="alert">
+            {templateSyncError}
+          </p>
+        )}
+        {templateSyncAvailability?.blocker === undefined ? null : (
+          <section className="detail-guidance" aria-label="Template update guidance">
+            <h2>Student repository updates unavailable</h2>
+            <p>{templateSyncAvailability.blocker.message}</p>
+          </section>
         )}
 
         {showTokenGuidance ? (
@@ -2237,6 +2463,9 @@ export const AssignmentDetailPage = ({
                 <DiagnosticsPanel diagnostics={detail.diagnostics} />
               </details>
             </div>
+            {templateSyncResult === null ? null : (
+              <TemplateSyncResultsPanel result={templateSyncResult} />
+            )}
             <GradeStatusSummaryPanel
               status={gradeStatus}
               isLoading={isLoadingGradeStatus}

@@ -1300,6 +1300,45 @@ h1 {
   grid-column: 1 / -1;
 }
 
+.template-sync-results-panel {
+  margin-top: 18px;
+}
+
+.template-sync-results-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.template-sync-results-list li {
+  border-top: 1px solid #d8dee4;
+  padding-top: 12px;
+}
+
+.template-sync-results-list li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.template-sync-results-list__heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.template-sync-results-list p {
+  color: #57606a;
+  margin: 8px 0 0;
+}
+
+.template-sync-results-list a {
+  display: inline-block;
+  margin-top: 8px;
+}
+
 .grade-status-summary-panel__header {
   display: flex;
   align-items: flex-start;

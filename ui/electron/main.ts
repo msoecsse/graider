@@ -6,6 +6,8 @@ import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
 import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
+import { registerAssignmentTemplateSyncIpc } from "./assignmentTemplateSyncIpc.js";
+import { assignmentTemplateSyncService } from "./assignmentTemplateSyncService.js";
 import { saveStudentAccessPagesConfig } from "./studentAccessPagesConfigService.js";
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService.js";
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
@@ -805,6 +807,12 @@ export const registerIpcHandlers = (): void => {
       env: process.env
     });
   });
+
+  registerAssignmentTemplateSyncIpc(
+    ipcMain,
+    assignmentTemplateSyncService,
+    isRegisteredAssignmentSetupCourse
+  );
 
   ipcMain.handle(IPC_CHANNELS.getAssignmentApplyPreview, async (_event, request: unknown) => {
     if (!isAssignmentApplyPreviewRequest(request)) {

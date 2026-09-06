@@ -39,6 +39,8 @@ export const IPC_CHANNELS = {
   refreshCourseFolder: "graider-ui:dashboard:refresh-course-folder",
   refreshDashboard: "graider-ui:dashboard:refresh-all",
   getAssignmentDetail: "graider-ui:assignment-detail:get",
+  prepareAssignmentTemplateSync: "graider-ui:assignment-template-sync:prepare",
+  executeAssignmentTemplateSync: "graider-ui:assignment-template-sync:execute",
   getAssignmentApplyPreview: "graider-ui:assignment-apply-preview:get",
   getAssignmentGradePreview: "graider-ui:assignment-grade-preview:get",
   getAssignmentGradeStatus: "graider-ui:assignment-grade-status:get",
@@ -571,6 +573,15 @@ export interface AssignmentDetailRequest {
   readonly assignmentFile: string;
 }
 
+export type {
+  AssignmentTemplateSyncAvailability,
+  AssignmentTemplateSyncExecuteRequest,
+  AssignmentTemplateSyncExecutionResult,
+  AssignmentTemplateSyncOutcome,
+  AssignmentTemplateSyncRequest,
+  TemplateSyncBlocker
+} from "./assignmentTemplateSyncService.js";
+
 export type AssignmentApplyPreviewRequest = AssignmentDetailRequest;
 
 export type AssignmentGradePreviewRequest = AssignmentDetailRequest;
@@ -859,6 +870,12 @@ export interface GraiderUIApi {
   readonly getAssignmentDetail: (
     request: AssignmentDetailRequest
   ) => Promise<AssignmentDetailResult>;
+  readonly prepareAssignmentTemplateSync: (
+    request: import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncRequest
+  ) => Promise<import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncAvailability>;
+  readonly executeAssignmentTemplateSync: (
+    request: import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncExecuteRequest
+  ) => Promise<import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncExecutionResult>;
   readonly getAssignmentApplyPreview: (
     request: AssignmentApplyPreviewRequest
   ) => Promise<AssignmentApplyPreviewResult>;

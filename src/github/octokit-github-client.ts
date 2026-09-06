@@ -18,6 +18,7 @@ import {
   GitHubFileWriteResult,
   GitHubPermission,
   GitHubPermissionState,
+  GitHubPullRequest,
   GitHubRepository,
   GitHubTeam,
   GitHubTemplateRepository,
@@ -28,7 +29,8 @@ import {
   GitHubWorkflowRunStatus,
   ListWorkflowRunsInput,
   RemoveCollaboratorInput,
-  WriteRepositoryFileInput
+  WriteRepositoryFileInput,
+  CreatePullRequestInput
 } from "./github-models.js";
 
 const HTTP_STATUS_UNAUTHORIZED = 401;
@@ -115,6 +117,8 @@ export interface OctokitRestClientLike {
       removeCollaborator: OctokitMethodLike;
       update: OctokitMethodLike;
     };
+    pulls: { create: OctokitMethodLike; list: OctokitMethodLike };
+    git: { deleteRef: OctokitMethodLike };
     teams: {
       addOrUpdateRepoPermissionsInOrg: OctokitMethodLike;
       checkPermissionsForRepoInOrg: OctokitMethodLike;
@@ -197,6 +201,13 @@ export class OctokitGitHubClient implements GitHubClient {
       isTemplate: asBoolean(repoRecord.is_template) ?? false,
       latestCommitSha
     };
+  }
+
+  async getDefaultBranchCommitSha(owner: string, repo: string): Promise<string | undefined> {
+    const repository = await this.getRepository(owner, repo);
+    return repository === null
+      ? undefined
+      : await this.getCommitSha(owner, repo, repository.defaultBranch);
   }
 
   async createRepositoryFromTemplate(input: CreateFromTemplateInput): Promise<GitHubRepository> {
@@ -520,6 +531,35 @@ export class OctokitGitHubClient implements GitHubClient {
     return withGitHubRetry(() => this.writeRepositoryFileOnce(input));
   }
 
+  async findPullRequest(
+    owner: string,
+    repo: string,
+    head: string,
+    base: string
+  ): Promise<GitHubPullRequest | null> {
+    const data = await this.run(() =>
+      this.octokit.rest.pulls.list({ owner, repo, head: `${owner}:${head}`, base, state: "all" })
+    );
+    const first = Array.isArray(data) ? data[0] : undefined;
+    return first === undefined ? null : mapPullRequest(first);
+  }
+
+  async createPullRequest(input: CreatePullRequestInput): Promise<GitHubPullRequest> {
+    return mapPullRequest(await this.run(() => this.octokit.rest.pulls.create(input)));
+  }
+
+  async deleteRepositoryBranch(
+    owner: string,
+    repo: string,
+    branch: string,
+    defaultBranch: string
+  ): Promise<void> {
+    if (branch === defaultBranch) throw new Error("Refusing to delete the default branch.");
+    await this.runNullable(() =>
+      this.octokit.rest.git.deleteRef({ owner, repo, ref: `heads/${branch}` })
+    );
+  }
+
   private async writeRepositoryFileOnce(
     input: WriteRepositoryFileInput
   ): Promise<GitHubFileWriteResult> {
@@ -573,6 +613,14 @@ export class OctokitGitHubClient implements GitHubClient {
   }
 
   private async getLatestCommitSha(owner: string, repo: string, branch: string): Promise<string> {
+    return (await this.getCommitSha(owner, repo, branch)) ?? UNKNOWN_COMMIT_SHA;
+  }
+
+  private async getCommitSha(
+    owner: string,
+    repo: string,
+    branch: string
+  ): Promise<string | undefined> {
     const data = await this.runNullable(() =>
       this.octokit.rest.repos.listCommits({
         owner,
@@ -583,7 +631,7 @@ export class OctokitGitHubClient implements GitHubClient {
     );
 
     const commit = asArray(data).map(asRecord).at(0);
-    return commit === undefined ? UNKNOWN_COMMIT_SHA : (asString(commit.sha) ?? UNKNOWN_COMMIT_SHA);
+    return commit === undefined ? undefined : asString(commit.sha);
   }
 
   private async getExistingFileSha(input: WriteRepositoryFileInput): Promise<string | undefined> {
@@ -1160,4 +1208,14 @@ function asNumber(value: unknown): number | undefined {
 
 function asBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function mapPullRequest(value: unknown): GitHubPullRequest {
+  const record = asRecord(value);
+  return {
+    number: asNumber(record.number) ?? UNKNOWN_ID,
+    url: asString(record.html_url) ?? "",
+    state: record.state === "open" ? "open" : "closed",
+    merged: asBoolean(record.merged) ?? false
+  };
 }
