@@ -45,6 +45,7 @@ const projectOutcome = (outcome: AssignmentTemplateSyncOutcome): AssignmentTempl
   ...(outcome.pullRequest === undefined
     ? {}
     : { pullRequest: { number: outcome.pullRequest.number, url: outcome.pullRequest.url } }),
+  ...(outcome.failureStage === undefined ? {} : { failureStage: outcome.failureStage }),
   ...(outcome.message === undefined ? {} : { message: outcome.message })
 });
 

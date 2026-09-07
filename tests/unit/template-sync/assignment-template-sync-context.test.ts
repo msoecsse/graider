@@ -30,6 +30,7 @@ const setup = () => {
     loadManifest: vi.fn(() => manifest),
     writeManifest: vi.fn(() => ({ status: "success" as const })),
     createClient: vi.fn(() => new FakeGitHubClient()),
+    resolveToken: vi.fn(() => "resolved-token"),
     runSync: vi.fn<AssignmentTemplateSyncContextDependencies["runSync"]>(async () => ({
       status: "success" as const,
       result: {
@@ -65,6 +66,7 @@ describe("assignment template-sync main-process context", () => {
       { required: true }
     );
     expect(dependencies.createClient).not.toHaveBeenCalled();
+    expect(dependencies.resolveToken).not.toHaveBeenCalled();
     expect(dependencies.runSync).not.toHaveBeenCalled();
     expect(dependencies.writeManifest).not.toHaveBeenCalled();
   });
@@ -110,6 +112,7 @@ describe("assignment template-sync main-process context", () => {
     });
     expect(dependencies.loadConfig).not.toHaveBeenCalled();
     expect(dependencies.createClient).not.toHaveBeenCalled();
+    expect(dependencies.resolveToken).not.toHaveBeenCalled();
     expect(dependencies.runSync).not.toHaveBeenCalled();
   });
 
@@ -118,10 +121,12 @@ describe("assignment template-sync main-process context", () => {
     const result = await service.execute({ ...request, confirmed: true });
     expect(dependencies.runSync).toHaveBeenCalledTimes(1);
     expect(dependencies.createClient).toHaveBeenCalledTimes(1);
+    expect(dependencies.resolveToken).toHaveBeenCalledTimes(1);
     const input = dependencies.runSync.mock.calls[0]![0];
     expect(input).toMatchObject({
       configuredOrganization: "example-org",
       configuredTemplateRepository: "example-org/lab04-template",
+      resolvedToken: "resolved-token",
       options: { yes: true },
       workspace: { githubClient: dependencies.createClient.mock.results[0]!.value }
     });
@@ -167,7 +172,14 @@ describe("assignment template-sync main-process context", () => {
           {
             studentId: "jones",
             repository: "example/repo",
-            result: { status: "failure", error: new Error("secret-token /tmp/workspace") }
+            result: {
+              status: "failure",
+              error: new Error("secret-token /tmp/workspace"),
+              failure: {
+                stage: "push_failed",
+                message: "Push to student repository was rejected."
+              }
+            }
           },
           {
             studentId: "smith",
@@ -178,6 +190,15 @@ describe("assignment template-sync main-process context", () => {
               templateCommitSha: "next",
               pullRequest: { number: 7, url: "https://github.com/example/another/pull/7" }
             }
+          },
+          {
+            studentId: "legacy",
+            repository: "example/legacy",
+            result: {
+              status: "baseline_required",
+              reason: "no_reliable_match",
+              message: "No exact historical match was found. Initialize the baseline manually."
+            }
           }
         ]
       }
@@ -185,8 +206,18 @@ describe("assignment template-sync main-process context", () => {
     const result = await service.execute({ ...request, confirmed: true });
     expect(result.status).toBe("partial_success");
     expect(result.outcomes).toMatchObject([
-      { studentId: "jones", status: "failed" },
-      { studentId: "smith", status: "pull_request_pending", pullRequest: { number: 7 } }
+      {
+        studentId: "jones",
+        status: "failed",
+        failureStage: "push_failed",
+        message: "Push to student repository was rejected."
+      },
+      { studentId: "smith", status: "pull_request_pending", pullRequest: { number: 7 } },
+      {
+        studentId: "legacy",
+        status: "baseline_required",
+        message: "No exact historical match was found. Initialize the baseline manually."
+      }
     ]);
     expect(JSON.stringify(result)).not.toMatch(
       /secret-token|workspace|graider\/internal|githubUsername|manifest/
@@ -206,6 +237,19 @@ describe("assignment template-sync main-process context", () => {
     const result = await service.execute({ ...request, confirmed: true });
     expect(result.status).toBe("failure");
     expect(JSON.stringify(result)).not.toMatch(/secret|workspace/);
+  });
+
+  it("preserves github_token_required when every shared token source fails", async () => {
+    const { dependencies } = setup();
+    dependencies.resolveToken.mockReturnValueOnce(undefined);
+    const service = createAssignmentTemplateSyncContextService(dependencies);
+
+    expect(await service.execute({ ...request, confirmed: true })).toMatchObject({
+      status: "failure",
+      blocker: { code: "github_token_required" }
+    });
+    expect(dependencies.createClient).not.toHaveBeenCalled();
+    expect(dependencies.runSync).not.toHaveBeenCalled();
   });
 
   it("blocks mismatched and unsupported manifests before production execution", async () => {

@@ -495,11 +495,16 @@ describe("AssignmentDetailPage", () => {
           status: "pull_request_pending",
           pullRequest: { number: 32, url: "https://github.com/org/repo/pull/32" }
         },
-        { studentId: "s005", status: "baseline_required" },
+        {
+          studentId: "s005",
+          status: "baseline_required",
+          message: "No exact historical match was found. Initialize the baseline manually."
+        },
         {
           studentId: "s006",
           status: "failed",
-          message: "Check that Graider can access this repository."
+          failureStage: "push_failed",
+          message: "Push to student repository was rejected."
         }
       ]
     });
@@ -517,12 +522,12 @@ describe("AssignmentDetailPage", () => {
     expect(within(results).getByText("Baseline required")).toBeInTheDocument();
     expect(
       within(results).getByText(
-        /cannot safely update this older repository until a synchronization baseline is established/u
+        "No exact historical match was found. Initialize the baseline manually."
       )
     ).toBeInTheDocument();
     expect(within(results).getByText("Failed")).toBeInTheDocument();
     expect(
-      within(results).getByText("Check that Graider can access this repository.")
+      within(results).getByText("Push to student repository was rejected.")
     ).toBeInTheDocument();
     expect(within(results).getByRole("link", { name: "Open pull request #31" })).toHaveAttribute(
       "href",

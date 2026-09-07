@@ -3,6 +3,8 @@ import { evaluateMutationGuard, type MutationGuardResult } from "../execution/mu
 import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import { updateRepositoryIdentity } from "../manifest/manifest-updater.js";
 import type { TemplateSyncAnchors, TemplateSyncResult } from "./template-sync.js";
+import { getTemplateSyncFailure } from "./template-sync-failure.js";
+import type { TemplateSyncFailure } from "./template-sync-failure.js";
 
 export interface AssignmentTemplateSyncInput {
   manifest: Manifest;
@@ -30,7 +32,12 @@ export type AssignmentTemplateSyncResult =
       manifest: Manifest;
       persistenceError?: unknown;
     }
-  | { status: "failure"; error: unknown; outcomes: AssignmentTemplateSyncRepositoryOutcome[] };
+  | {
+      status: "failure";
+      error: unknown;
+      failure?: TemplateSyncFailure;
+      outcomes: AssignmentTemplateSyncRepositoryOutcome[];
+    };
 
 export const isApplicableRepository = (
   repository: ManifestRepositoryRecord,
@@ -55,7 +62,13 @@ export const syncAssignmentTemplate = async (
   try {
     templateCommitSha = await input.resolveCurrentTemplateCommitSha();
   } catch (error: unknown) {
-    return { status: "failure", error, outcomes: [] };
+    const failure = getTemplateSyncFailure(error);
+    return {
+      status: "failure",
+      error,
+      outcomes: [],
+      ...(failure === undefined ? {} : { failure })
+    };
   }
 
   let manifest = input.manifest;
@@ -81,10 +94,15 @@ export const syncAssignmentTemplate = async (
         result
       });
     } catch (error: unknown) {
+      const failure = getTemplateSyncFailure(error);
       outcomes.push({
         studentId: repository.studentId,
         repository: repository.repository.fullName,
-        result: { status: "failure", error }
+        result: {
+          status: "failure",
+          error,
+          ...(failure === undefined ? {} : { failure })
+        }
       });
     }
   }

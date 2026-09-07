@@ -22,6 +22,9 @@ class Gateway implements TemplateSyncGitGateway {
   async getDefaultBranchCommitSha(input: { name: string }): Promise<string> {
     return `${input.name}-head`;
   }
+  async recoverStudentBaseline() {
+    return { status: "not_found" as const };
+  }
   async applyAndPushTemplateDelta(
     input: Parameters<TemplateSyncGitGateway["applyAndPushTemplateDelta"]>[0]
   ) {

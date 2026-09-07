@@ -577,6 +577,7 @@ export type {
   AssignmentTemplateSyncAvailability,
   AssignmentTemplateSyncExecuteRequest,
   AssignmentTemplateSyncExecutionResult,
+  AssignmentTemplateSyncFailureStage,
   AssignmentTemplateSyncOutcome,
   AssignmentTemplateSyncRequest,
   TemplateSyncBlocker

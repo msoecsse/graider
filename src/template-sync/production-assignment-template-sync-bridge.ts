@@ -6,6 +6,7 @@ import {
 import { runProductionRepositoryTemplateSync } from "./production-repository-sync-executor.js";
 import { resolveStudentCloneUrl } from "./repository-clone-url.js";
 import type { TemplateSyncResult } from "./template-sync.js";
+import { createTemplateSyncOperationError } from "./template-sync-failure.js";
 
 type RepositoryExecutor = typeof runProductionRepositoryTemplateSync;
 
@@ -31,8 +32,17 @@ export const runProductionAssignmentTemplateSync = async (
     runRepositorySync: async (repository, targetTemplateCommitSha) => {
       const student = resolveStudentCloneUrl(repository.repository);
       if (student.status === "failure") {
+        const error = createTemplateSyncOperationError(
+          "invalid_repository",
+          "Student repository identity is invalid.",
+          new Error(student.message)
+        );
         return {
-          result: { status: "failure", error: new Error(student.message) } as TemplateSyncResult
+          result: {
+            status: "failure",
+            error,
+            failure: error.templateSyncFailure
+          } as TemplateSyncResult
         };
       }
       return await executor(repository, targetTemplateCommitSha, {

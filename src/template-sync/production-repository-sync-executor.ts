@@ -8,6 +8,7 @@ import {
   type TemplateSyncAnchors,
   type TemplateSyncResult
 } from "./template-sync.js";
+import { getTemplateSyncFailure } from "./template-sync-failure.js";
 
 export const runProductionRepositoryTemplateSync = async (
   repository: ManifestRepositoryRecord,
@@ -18,32 +19,42 @@ export const runProductionRepositoryTemplateSync = async (
   >
 ): Promise<{ result: TemplateSyncResult; anchors?: Required<TemplateSyncAnchors> }> => {
   let anchors: Required<TemplateSyncAnchors> | undefined;
-  const result = await withProductionTemplateSyncWorkspace(
-    { ...workspace, templateCommitSha: targetTemplateCommitSha, studentDefaultBranch: "main" },
-    async ({ gateway, pullRequests }) =>
-      await syncTemplateUpdate({
-        templateRepository: {
-          owner: repository.repository.owner,
-          name: repository.repository.templateRepository.split("/").at(-1) ?? "template"
-        },
-        studentRepository: {
-          owner: repository.repository.owner,
-          name: repository.repository.name,
-          defaultBranch: "main"
-        },
-        currentTemplateCommitSha: targetTemplateCommitSha,
-        anchors: {
-          templateCommitSha: repository.repository.templateCommitSha,
-          studentDefaultBranchCommitSha: repository.repository.studentDefaultBranchCommitSha,
-          templateSyncBaselineStatus:
-            repository.repository.templateSyncBaselineStatus ?? "baseline_required"
-        },
-        gateway,
-        pullRequests,
-        updateAnchors: async (updated) => {
-          anchors = updated;
-        }
-      })
-  );
+  let result: TemplateSyncResult;
+  try {
+    result = await withProductionTemplateSyncWorkspace(
+      { ...workspace, templateCommitSha: targetTemplateCommitSha },
+      async ({ gateway, pullRequests, studentDefaultBranch }) =>
+        await syncTemplateUpdate({
+          templateRepository: {
+            owner: repository.repository.owner,
+            name: repository.repository.templateRepository.split("/").at(-1) ?? "template"
+          },
+          studentRepository: {
+            owner: repository.repository.owner,
+            name: repository.repository.name,
+            defaultBranch: studentDefaultBranch
+          },
+          currentTemplateCommitSha: targetTemplateCommitSha,
+          anchors: {
+            templateCommitSha: repository.repository.templateCommitSha,
+            studentDefaultBranchCommitSha: repository.repository.studentDefaultBranchCommitSha,
+            templateSyncBaselineStatus:
+              repository.repository.templateSyncBaselineStatus ?? "baseline_required"
+          },
+          gateway,
+          pullRequests,
+          updateAnchors: async (updated) => {
+            anchors = updated;
+          }
+        })
+    );
+  } catch (error: unknown) {
+    const failure = getTemplateSyncFailure(error);
+    result = {
+      status: "failure",
+      error,
+      ...(failure === undefined ? {} : { failure })
+    };
+  }
   return anchors === undefined ? { result } : { result, anchors };
 };

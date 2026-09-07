@@ -1,3 +1,5 @@
+import { getTemplateSyncFailure, type TemplateSyncFailure } from "./template-sync-failure.js";
+
 /** A file tree keyed by repository-relative POSIX path. Blob identifiers are opaque to this layer. */
 export type TemplateTree = Readonly<Record<string, string>>;
 
@@ -41,6 +43,17 @@ export interface PrepareConflictBranchInput extends ApplyTemplateDeltaInput {
   branchName: string;
 }
 
+export interface RecoverStudentBaselineInput {
+  templateRepository: TemplateRepositoryRef;
+  studentRepository: StudentRepositoryRef;
+  templateCommitSha: string;
+}
+
+export type TemplateSyncBaselineRecoveryResult =
+  | { status: "recovered"; studentDefaultBranchCommitSha: string }
+  | { status: "not_found" }
+  | { status: "ambiguous" };
+
 export interface TemplatePullRequest {
   number: number;
   url: string;
@@ -75,6 +88,9 @@ export interface TemplateSyncPullRequestGateway {
 export interface TemplateSyncGitGateway {
   getTree(repository: TemplateRepositoryRef, commitSha: string): Promise<TemplateTree>;
   getDefaultBranchCommitSha(repository: StudentRepositoryRef): Promise<string>;
+  recoverStudentBaseline(
+    input: RecoverStudentBaselineInput
+  ): Promise<TemplateSyncBaselineRecoveryResult>;
   applyAndPushTemplateDelta(input: ApplyTemplateDeltaInput): Promise<ApplyTemplateDeltaResult>;
   /** Creates and non-force pushes a branch from studentBaseCommitSha, never main. */
   prepareConflictBranch(input: PrepareConflictBranchInput): Promise<void>;
@@ -88,14 +104,20 @@ export interface TemplateSyncInput {
   anchors: TemplateSyncAnchors;
   gateway: TemplateSyncGitGateway;
   pullRequests: TemplateSyncPullRequestGateway;
-  /** Persists anchors only after the gateway confirms its non-force push. */
+  /** Persists anchors after reliable recovery or a confirmed non-force push. */
   updateAnchors(anchors: Required<TemplateSyncAnchors>): Promise<void>;
+}
+
+export interface TemplateSyncBaselineRequiredResult {
+  status: "baseline_required";
+  reason?: "no_reliable_match" | "ambiguous_matches";
+  message?: string;
 }
 
 export type TemplateSyncResult =
   | { status: "updated"; commitSha: string }
   | { status: "already_current" }
-  | { status: "baseline_required" }
+  | TemplateSyncBaselineRequiredResult
   | { status: "conflict" }
   | {
       status: "pull_request_created";
@@ -125,7 +147,7 @@ export type TemplateSyncResult =
       branchCleanup: "deleted" | "failed";
       cleanupError?: unknown;
     }
-  | { status: "failure"; error: unknown };
+  | { status: "failure"; error: unknown; failure?: TemplateSyncFailure };
 
 export type TemplateSyncReconciliationResult =
   | { status: "already_current" }
@@ -153,7 +175,7 @@ export type TemplateSyncReconciliationResult =
       cleanupError?: unknown;
     }
   | { status: "not_found" }
-  | { status: "failure"; error: unknown };
+  | { status: "failure"; error: unknown; failure?: TemplateSyncFailure };
 
 const TEMPLATE_UPDATE_BRANCH_PREFIX = "graider/template-update-";
 const TEMPLATE_UPDATE_TITLE = "Template update";
@@ -191,47 +213,99 @@ export const computeTemplateDelta = (
 };
 
 export const syncTemplateUpdate = async (input: TemplateSyncInput): Promise<TemplateSyncResult> => {
-  if (!hasInitializedAnchors(input.anchors)) return { status: "baseline_required" };
-  if (input.anchors.templateCommitSha === input.currentTemplateCommitSha) {
+  let anchors = input.anchors;
+  if (!hasInitializedAnchors(anchors)) {
+    if (
+      anchors.templateSyncBaselineStatus !== "baseline_required" ||
+      anchors.templateCommitSha === undefined ||
+      anchors.studentDefaultBranchCommitSha !== undefined
+    )
+      return { status: "baseline_required" };
+    const recordedTemplateCommitSha = anchors.templateCommitSha;
+
+    let recovery: TemplateSyncBaselineRecoveryResult;
+    try {
+      recovery = await input.gateway.recoverStudentBaseline({
+        templateRepository: input.templateRepository,
+        studentRepository: input.studentRepository,
+        templateCommitSha: recordedTemplateCommitSha
+      });
+    } catch (error: unknown) {
+      const failure = getTemplateSyncFailure(error);
+      return { status: "failure", error, ...(failure === undefined ? {} : { failure }) };
+    }
+    if (recovery.status === "not_found")
+      return {
+        status: "baseline_required",
+        reason: "no_reliable_match",
+        message:
+          "No student history commit exactly matches the recorded template revision. Initialize the synchronization baseline manually."
+      };
+    if (recovery.status === "ambiguous")
+      return {
+        status: "baseline_required",
+        reason: "ambiguous_matches",
+        message:
+          "Multiple student history commits match the recorded template revision. Initialize the synchronization baseline manually."
+      };
+
+    const recoveredAnchors: Required<TemplateSyncAnchors> = {
+      templateCommitSha: recordedTemplateCommitSha,
+      studentDefaultBranchCommitSha: recovery.studentDefaultBranchCommitSha,
+      templateSyncBaselineStatus: "initialized"
+    };
+    try {
+      await input.updateAnchors(recoveredAnchors);
+    } catch (error: unknown) {
+      const failure = getTemplateSyncFailure(error);
+      return { status: "failure", error, ...(failure === undefined ? {} : { failure }) };
+    }
+    anchors = recoveredAnchors;
+  }
+
+  if (!hasInitializedAnchors(anchors)) return { status: "baseline_required" };
+  const initializedAnchors = anchors;
+  const syncInput: TemplateSyncInput = { ...input, anchors: initializedAnchors };
+  if (initializedAnchors.templateCommitSha === syncInput.currentTemplateCommitSha) {
     return { status: "already_current" };
   }
 
-  const reconciliation = await reconcileTemplateUpdatePullRequest(input);
+  const reconciliation = await reconcileTemplateUpdatePullRequest(syncInput);
   if (reconciliation.status !== "not_found") return reconciliation;
 
   try {
     const [baseTree, targetTree, studentCurrentCommitSha] = await Promise.all([
-      input.gateway.getTree(input.templateRepository, input.anchors.templateCommitSha),
-      input.gateway.getTree(input.templateRepository, input.currentTemplateCommitSha),
-      input.gateway.getDefaultBranchCommitSha(input.studentRepository)
+      syncInput.gateway.getTree(syncInput.templateRepository, initializedAnchors.templateCommitSha),
+      syncInput.gateway.getTree(syncInput.templateRepository, syncInput.currentTemplateCommitSha),
+      syncInput.gateway.getDefaultBranchCommitSha(syncInput.studentRepository)
     ]);
     const changes = computeTemplateDelta(baseTree, targetTree);
-    const applied = await input.gateway.applyAndPushTemplateDelta({
-      templateRepository: input.templateRepository,
-      studentRepository: input.studentRepository,
-      templateBaseCommitSha: input.anchors.templateCommitSha,
-      templateTargetCommitSha: input.currentTemplateCommitSha,
-      studentBaseCommitSha: input.anchors.studentDefaultBranchCommitSha,
+    const applied = await syncInput.gateway.applyAndPushTemplateDelta({
+      templateRepository: syncInput.templateRepository,
+      studentRepository: syncInput.studentRepository,
+      templateBaseCommitSha: initializedAnchors.templateCommitSha,
+      templateTargetCommitSha: syncInput.currentTemplateCommitSha,
+      studentBaseCommitSha: initializedAnchors.studentDefaultBranchCommitSha,
       studentCurrentCommitSha,
       changes
     });
 
     if (applied.status === "conflict") {
-      const branchName = createTemplateUpdateBranchName(input.currentTemplateCommitSha);
-      await input.gateway.prepareConflictBranch({
-        templateRepository: input.templateRepository,
-        studentRepository: input.studentRepository,
-        templateBaseCommitSha: input.anchors.templateCommitSha,
-        templateTargetCommitSha: input.currentTemplateCommitSha,
-        studentBaseCommitSha: input.anchors.studentDefaultBranchCommitSha,
+      const branchName = createTemplateUpdateBranchName(syncInput.currentTemplateCommitSha);
+      await syncInput.gateway.prepareConflictBranch({
+        templateRepository: syncInput.templateRepository,
+        studentRepository: syncInput.studentRepository,
+        templateBaseCommitSha: initializedAnchors.templateCommitSha,
+        templateTargetCommitSha: syncInput.currentTemplateCommitSha,
+        studentBaseCommitSha: initializedAnchors.studentDefaultBranchCommitSha,
         studentCurrentCommitSha,
         changes,
         branchName
       });
-      const pullRequest = await input.pullRequests.createPullRequest({
-        repository: input.studentRepository,
+      const pullRequest = await syncInput.pullRequests.createPullRequest({
+        repository: syncInput.studentRepository,
         sourceBranch: branchName,
-        targetBranch: input.studentRepository.defaultBranch,
+        targetBranch: syncInput.studentRepository.defaultBranch,
         title: TEMPLATE_UPDATE_TITLE,
         body: TEMPLATE_UPDATE_BODY
       });
@@ -239,18 +313,19 @@ export const syncTemplateUpdate = async (input: TemplateSyncInput): Promise<Temp
         status: "pull_request_created",
         pullRequest,
         branchName,
-        templateCommitSha: input.currentTemplateCommitSha
+        templateCommitSha: syncInput.currentTemplateCommitSha
       };
     }
 
-    await input.updateAnchors({
-      templateCommitSha: input.currentTemplateCommitSha,
+    await syncInput.updateAnchors({
+      templateCommitSha: syncInput.currentTemplateCommitSha,
       studentDefaultBranchCommitSha: applied.commitSha,
       templateSyncBaselineStatus: "initialized"
     });
     return { status: "updated", commitSha: applied.commitSha };
   } catch (error: unknown) {
-    return { status: "failure", error };
+    const failure = getTemplateSyncFailure(error);
+    return { status: "failure", error, ...(failure === undefined ? {} : { failure }) };
   }
 };
 
@@ -318,6 +393,7 @@ export const reconcileTemplateUpdatePullRequest = async (
       ...(await cleanupTemplateUpdateBranch(input, branchName))
     };
   } catch (error: unknown) {
-    return { status: "failure", error };
+    const failure = getTemplateSyncFailure(error);
+    return { status: "failure", error, ...(failure === undefined ? {} : { failure }) };
   }
 };

@@ -4,6 +4,7 @@ import {
   syncTemplateUpdate,
   type TemplateSyncGitGateway,
   type TemplateSyncInput,
+  type TemplateSyncBaselineRecoveryResult,
   type TemplateSyncPullRequestGateway,
   type TemplateTree
 } from "../../../src/template-sync/template-sync.js";
@@ -21,6 +22,8 @@ class FakeGateway implements TemplateSyncGitGateway {
   result: "clean" | "conflict" | "failure" = "clean";
   deletedBranches: string[] = [];
   failBranchCleanup = false;
+  recoveryResult: TemplateSyncBaselineRecoveryResult = { status: "not_found" };
+  readonly recoveryAttempts: Parameters<TemplateSyncGitGateway["recoverStudentBaseline"]>[0][] = [];
 
   async getTree(
     _repository: { owner: string; name: string },
@@ -33,6 +36,13 @@ class FakeGateway implements TemplateSyncGitGateway {
 
   async getDefaultBranchCommitSha(): Promise<string> {
     return "student-current";
+  }
+
+  async recoverStudentBaseline(
+    input: Parameters<TemplateSyncGitGateway["recoverStudentBaseline"]>[0]
+  ): Promise<TemplateSyncBaselineRecoveryResult> {
+    this.recoveryAttempts.push(input);
+    return this.recoveryResult;
   }
 
   async applyAndPushTemplateDelta(
@@ -170,7 +180,14 @@ describe("syncTemplateUpdate", () => {
     const pullRequests = new FakePullRequests();
 
     await expect(
-      syncTemplateUpdate({ ...input({ updateAnchors, pullRequests }), gateway })
+      syncTemplateUpdate({
+        ...input({
+          studentRepository: { ...studentRepository, defaultBranch: "release/course" },
+          updateAnchors,
+          pullRequests
+        }),
+        gateway
+      })
     ).resolves.toEqual({
       status: "pull_request_created",
       pullRequest: { number: 42, url: "https://github.test/course/student/pull/42" },
@@ -186,7 +203,7 @@ describe("syncTemplateUpdate", () => {
     expect(pullRequests.created).toEqual([
       expect.objectContaining({
         sourceBranch: "graider/template-update-template-new",
-        targetBranch: "main",
+        targetBranch: "release/course",
         title: "Template update"
       })
     ]);
@@ -228,7 +245,136 @@ describe("syncTemplateUpdate", () => {
         gateway
       })
     ).resolves.toEqual({ status: "baseline_required" });
+    expect(gateway.recoveryAttempts).toEqual([]);
     expect(gateway.applied).toEqual([]);
+  });
+
+  it.each([
+    {
+      templateCommitSha: "template-base",
+      templateSyncBaselineStatus: "initialized" as const
+    },
+    {
+      templateCommitSha: "template-base",
+      studentDefaultBranchCommitSha: "student-base",
+      templateSyncBaselineStatus: "baseline_required" as const
+    }
+  ])("does not attempt recovery outside the exact legacy anchor state", async (anchors) => {
+    const gateway = gatewayWithTrees();
+
+    await expect(syncTemplateUpdate({ ...input({ anchors }), gateway })).resolves.toEqual({
+      status: "baseline_required"
+    });
+    expect(gateway.recoveryAttempts).toEqual([]);
+  });
+
+  it("recovers an eligible legacy baseline and continues with a clean update", async () => {
+    const gateway = gatewayWithTrees();
+    gateway.recoveryResult = {
+      status: "recovered",
+      studentDefaultBranchCommitSha: "student-historical"
+    };
+    const anchors: Required<TemplateSyncInput["anchors"]>[] = [];
+
+    await expect(
+      syncTemplateUpdate({
+        ...input({
+          anchors: {
+            templateCommitSha: "template-base",
+            templateSyncBaselineStatus: "baseline_required"
+          },
+          updateAnchors: async (updated) => {
+            anchors.push(updated);
+          }
+        }),
+        gateway
+      })
+    ).resolves.toEqual({ status: "updated", commitSha: "student-after-push" });
+
+    expect(gateway.recoveryAttempts).toEqual([
+      {
+        templateRepository,
+        studentRepository,
+        templateCommitSha: "template-base"
+      }
+    ]);
+    expect(gateway.applied[0]?.studentBaseCommitSha).toBe("student-historical");
+    expect(anchors).toEqual([
+      {
+        templateCommitSha: "template-base",
+        studentDefaultBranchCommitSha: "student-historical",
+        templateSyncBaselineStatus: "initialized"
+      },
+      {
+        templateCommitSha: "template-new",
+        studentDefaultBranchCommitSha: "student-after-push",
+        templateSyncBaselineStatus: "initialized"
+      }
+    ]);
+  });
+
+  it.each([
+    ["not_found", "no_reliable_match"],
+    ["ambiguous", "ambiguous_matches"]
+  ] as const)(
+    "keeps an eligible legacy repository baseline-required when recovery is %s",
+    async (recoveryStatus, reason) => {
+      const gateway = gatewayWithTrees();
+      gateway.recoveryResult = { status: recoveryStatus };
+      const updateAnchors = async () => expect.unreachable("anchors must not advance");
+
+      await expect(
+        syncTemplateUpdate({
+          ...input({
+            anchors: {
+              templateCommitSha: "template-base",
+              templateSyncBaselineStatus: "baseline_required"
+            },
+            updateAnchors
+          }),
+          gateway
+        })
+      ).resolves.toMatchObject({ status: "baseline_required", reason });
+      expect(gateway.applied).toEqual([]);
+      expect(gateway.preparedBranches).toEqual([]);
+    }
+  );
+
+  it("recovers an eligible legacy baseline and uses it for the normal conflict PR", async () => {
+    const gateway = gatewayWithTrees();
+    gateway.recoveryResult = {
+      status: "recovered",
+      studentDefaultBranchCommitSha: "student-historical"
+    };
+    gateway.result = "conflict";
+    const pullRequests = new FakePullRequests();
+    const anchors: Required<TemplateSyncInput["anchors"]>[] = [];
+
+    await expect(
+      syncTemplateUpdate({
+        ...input({
+          anchors: {
+            templateCommitSha: "template-base",
+            templateSyncBaselineStatus: "baseline_required"
+          },
+          pullRequests,
+          updateAnchors: async (updated) => {
+            anchors.push(updated);
+          }
+        }),
+        gateway
+      })
+    ).resolves.toMatchObject({ status: "pull_request_created" });
+
+    expect(gateway.preparedBranches[0]?.studentBaseCommitSha).toBe("student-historical");
+    expect(pullRequests.created).toHaveLength(1);
+    expect(anchors).toEqual([
+      {
+        templateCommitSha: "template-base",
+        studentDefaultBranchCommitSha: "student-historical",
+        templateSyncBaselineStatus: "initialized"
+      }
+    ]);
   });
 
   it("does not advance stored anchors when push fails", async () => {

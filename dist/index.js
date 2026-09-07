@@ -1621,6 +1621,8 @@ var repositoryIdentitySchema = z2.object({
   created_from_template: z2.boolean(),
   template_repository: z2.string().min(MINIMUM_ITEMS),
   template_commit_sha: z2.string().optional(),
+  student_default_branch_commit_sha: z2.string().optional(),
+  template_sync_baseline_status: z2.union([z2.literal("initialized"), z2.literal("baseline_required")]).optional(),
   created_at: z2.string().optional(),
   last_observed_at: z2.string().optional()
 }).strict();
@@ -1857,6 +1859,8 @@ var normalizeRepositoryIdentity = (repository) => ({
   createdFromTemplate: repository.created_from_template,
   templateRepository: repository.template_repository,
   ...repository.template_commit_sha === void 0 ? {} : { templateCommitSha: repository.template_commit_sha },
+  ...repository.student_default_branch_commit_sha === void 0 ? {} : { studentDefaultBranchCommitSha: repository.student_default_branch_commit_sha },
+  templateSyncBaselineStatus: repository.template_sync_baseline_status ?? (repository.template_commit_sha !== void 0 && repository.student_default_branch_commit_sha !== void 0 ? "initialized" : "baseline_required"),
   ...repository.created_at === void 0 ? {} : { createdAt: repository.created_at },
   ...repository.last_observed_at === void 0 ? {} : { lastObservedAt: repository.last_observed_at }
 });
@@ -4604,6 +4608,10 @@ var OctokitGitHubClient = class {
       latestCommitSha
     };
   }
+  async getDefaultBranchCommitSha(owner, repo) {
+    const repository = await this.getRepository(owner, repo);
+    return repository === null ? void 0 : await this.getCommitSha(owner, repo, repository.defaultBranch);
+  }
   async createRepositoryFromTemplate(input) {
     const data = await this.run(
       () => this.octokit.rest.repos.createUsingTemplate({
@@ -4856,6 +4864,22 @@ var OctokitGitHubClient = class {
   async writeRepositoryFile(input) {
     return withGitHubRetry(() => this.writeRepositoryFileOnce(input));
   }
+  async findPullRequest(owner, repo, head, base) {
+    const data = await this.run(
+      () => this.octokit.rest.pulls.list({ owner, repo, head: `${owner}:${head}`, base, state: "all" })
+    );
+    const first = Array.isArray(data) ? data[0] : void 0;
+    return first === void 0 ? null : mapPullRequest(first);
+  }
+  async createPullRequest(input) {
+    return mapPullRequest(await this.run(() => this.octokit.rest.pulls.create(input)));
+  }
+  async deleteRepositoryBranch(owner, repo, branch, defaultBranch) {
+    if (branch === defaultBranch) throw new Error("Refusing to delete the default branch.");
+    await this.runNullable(
+      () => this.octokit.rest.git.deleteRef({ owner, repo, ref: `heads/${branch}` })
+    );
+  }
   async writeRepositoryFileOnce(input) {
     const existingSha = await this.getExistingFileSha(input);
     const response = await this.run(
@@ -4895,6 +4919,9 @@ var OctokitGitHubClient = class {
     return asArray(data).map(asRecord).map((file) => asString(file.name)).filter((name) => name !== void 0);
   }
   async getLatestCommitSha(owner, repo, branch) {
+    return await this.getCommitSha(owner, repo, branch) ?? UNKNOWN_COMMIT_SHA;
+  }
+  async getCommitSha(owner, repo, branch) {
     const data = await this.runNullable(
       () => this.octokit.rest.repos.listCommits({
         owner,
@@ -4904,7 +4931,7 @@ var OctokitGitHubClient = class {
       })
     );
     const commit = asArray(data).map(asRecord).at(0);
-    return commit === void 0 ? UNKNOWN_COMMIT_SHA : asString(commit.sha) ?? UNKNOWN_COMMIT_SHA;
+    return commit === void 0 ? void 0 : asString(commit.sha);
   }
   async getExistingFileSha(input) {
     const data = await this.runNullable(
@@ -5318,6 +5345,15 @@ function asNumber(value) {
 function asBoolean(value) {
   return typeof value === "boolean" ? value : void 0;
 }
+function mapPullRequest(value) {
+  const record = asRecord(value);
+  return {
+    number: asNumber(record.number) ?? UNKNOWN_ID,
+    url: asString(record.html_url) ?? "",
+    state: record.state === "open" ? "open" : "closed",
+    merged: asBoolean(record.merged) ?? false
+  };
+}
 
 // src/github/github-client-factory.ts
 var GRAIDER_GITHUB_TOKEN_ENV = "GRAIDER_GITHUB_TOKEN";
@@ -5445,6 +5481,8 @@ var toRawRepositoryIdentity = (repository) => ({
   template_repository: repository.templateRepository,
   ...optionalEntries({
     template_commit_sha: repository.templateCommitSha,
+    student_default_branch_commit_sha: repository.studentDefaultBranchCommitSha,
+    template_sync_baseline_status: repository.templateSyncBaselineStatus ?? (repository.templateCommitSha !== void 0 && repository.studentDefaultBranchCommitSha !== void 0 ? "initialized" : "baseline_required"),
     created_at: repository.createdAt,
     last_observed_at: repository.lastObservedAt
   })
@@ -5652,7 +5690,7 @@ var findStudent = (input, students, operation) => students.find(
 var findManifestRecord4 = (input, manifest, operation) => manifest.repositories.find(
   (record) => record.studentId === (findTarget(input, operation)?.primaryStudentId ?? operation.student_id)
 );
-var createManifestRecord = (config, student, repository, observedAt, templateCommitSha) => ({
+var createManifestRecord = (config, student, repository, observedAt, templateCommitSha, studentDefaultBranchCommitSha) => ({
   studentId: student.studentId,
   githubUsername: student.githubUsername,
   section: student.section,
@@ -5666,6 +5704,8 @@ var createManifestRecord = (config, student, repository, observedAt, templateCom
     createdFromTemplate: true,
     templateRepository: config.assignment.template.repository,
     ...templateCommitSha === void 0 ? {} : { templateCommitSha },
+    ...studentDefaultBranchCommitSha === void 0 ? {} : { studentDefaultBranchCommitSha },
+    templateSyncBaselineStatus: templateCommitSha === void 0 || studentDefaultBranchCommitSha === void 0 ? "baseline_required" : "initialized",
     createdAt: observedAt,
     lastObservedAt: observedAt
   },
@@ -5777,6 +5817,20 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
         )
       );
     }
+    const studentDefaultBranchCommitSha = await runGitHubOperation(
+      input,
+      () => input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+    );
+    if (state.manifest.template.commitSha === void 0 || studentDefaultBranchCommitSha === void 0) {
+      return recordError(
+        state,
+        createConfigDiagnostic(
+          DiagnosticCode.GithubApiError,
+          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
+          { repository: repository.fullName, operation: CREATE_REPOSITORY_OPERATION }
+        )
+      );
+    }
     const manifest = upsertRepositoryRecord(
       state.manifest,
       createManifestRecord(
@@ -5784,7 +5838,8 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
         student,
         repository,
         observedAt,
-        state.manifest.template.commitSha
+        state.manifest.template.commitSha,
+        studentDefaultBranchCommitSha
       )
     );
     return persistManifest(

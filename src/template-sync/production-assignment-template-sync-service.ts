@@ -7,7 +7,7 @@ import { resolveTemplateCloneUrl } from "./repository-clone-url.js";
 
 export type ProductionAssignmentTemplateSyncServiceResult<T> =
   | { status: "success"; result: T }
-  | { status: "failure"; message: string };
+  | { status: "failure"; code: string; message: string };
 
 export interface ProductionAssignmentTemplateSyncServiceInput extends Omit<
   ProductionAssignmentTemplateSyncBridgeInput,
@@ -17,6 +17,8 @@ export interface ProductionAssignmentTemplateSyncServiceInput extends Omit<
   configuredTemplateRepository: string;
   env?: Record<string, string | undefined>;
   bridge?: typeof runProductionAssignmentTemplateSync;
+  /** Internal pre-resolved token used when composition also needs a GitHub client. */
+  resolvedToken?: string;
 }
 
 export const runProductionAssignmentTemplateSyncService = async (
@@ -26,14 +28,29 @@ export const runProductionAssignmentTemplateSyncService = async (
     Awaited<ReturnType<typeof runProductionAssignmentTemplateSync>>
   >
 > => {
-  const token = readGitHubToken(input.env);
-  if (token === undefined) return { status: "failure", message: "GitHub token is required." };
+  const injectedToken = input.resolvedToken?.trim();
+  const environmentToken = readGitHubToken(input.env);
+  const token =
+    injectedToken !== undefined && injectedToken.length > 0 ? injectedToken : environmentToken;
+  if (token === undefined || token.length === 0)
+    return {
+      status: "failure",
+      code: "github_token_required",
+      message: "GitHub authentication is required. Configure a token or sign in with GitHub CLI."
+    };
   const template = resolveTemplateCloneUrl(
     input.configuredOrganization,
     input.configuredTemplateRepository
   );
-  if (template.status === "failure") return { status: "failure", message: template.message };
-  const bridge = input.bridge ?? runProductionAssignmentTemplateSync;
-  const result = await bridge({ ...input, token, templateCloneUrl: template.cloneUrl });
+  if (template.status === "failure")
+    return { status: "failure", code: "invalid_template_repository", message: template.message };
+  const {
+    bridge: injectedBridge,
+    env: _env,
+    resolvedToken: _resolvedToken,
+    ...bridgeInput
+  } = input;
+  const bridge = injectedBridge ?? runProductionAssignmentTemplateSync;
+  const result = await bridge({ ...bridgeInput, token, templateCloneUrl: template.cloneUrl });
   return { status: "success", result };
 };

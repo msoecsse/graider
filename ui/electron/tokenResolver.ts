@@ -107,8 +107,12 @@ export const resolveGithubToken = async ({
   platform = process.platform,
   runner
 }: GithubTokenResolverOptions): Promise<GithubTokenResolution> => {
+  const graiderEnvironmentToken = env[GITHUB_TOKEN_ENV_NAME]?.trim();
+  const fallbackEnvironmentToken = env[GITHUB_TOKEN_FALLBACK_ENV_NAME]?.trim();
   const environmentToken =
-    env[GITHUB_TOKEN_ENV_NAME]?.trim() ?? env[GITHUB_TOKEN_FALLBACK_ENV_NAME]?.trim();
+    graiderEnvironmentToken !== undefined && graiderEnvironmentToken.length > 0
+      ? graiderEnvironmentToken
+      : fallbackEnvironmentToken;
 
   if (environmentToken !== undefined && environmentToken.length > 0) {
     logAuthResolution(env, "env token present.");

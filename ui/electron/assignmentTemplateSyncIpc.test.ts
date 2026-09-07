@@ -69,7 +69,9 @@ describe("assignment template-sync IPC", () => {
       outcomes: [
         {
           studentId: "S001",
-          status: "pull_request_created",
+          status: "failed",
+          failureStage: "permission_denied",
+          message: "GitHub denied access to the repository.",
           pullRequest: { number: 7, url: "https://github.com/course/student/pull/7" },
           githubUsername: "octocat",
           branchName: "graider/template-update-secret",
@@ -86,7 +88,9 @@ describe("assignment template-sync IPC", () => {
       outcomes: [
         {
           studentId: "S001",
-          status: "pull_request_created",
+          status: "failed",
+          failureStage: "permission_denied",
+          message: "GitHub denied access to the repository.",
           pullRequest: { number: 7, url: "https://github.com/course/student/pull/7" }
         }
       ]

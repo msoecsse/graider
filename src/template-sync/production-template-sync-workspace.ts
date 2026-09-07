@@ -6,6 +6,11 @@ import { promisify } from "node:util";
 
 import type { GitHubClient } from "../github/github-client.js";
 import { LocalGitTemplateSyncGateway } from "./local-git-template-sync-gateway.js";
+import {
+  createGitHubTemplateSyncOperationError,
+  createTemplateSyncOperationError,
+  type TemplateSyncFailureStage
+} from "./template-sync-failure.js";
 import type {
   StudentRepositoryRef,
   TemplatePullRequest,
@@ -19,7 +24,8 @@ export interface ProductionTemplateSyncWorkspaceInput {
   templateCloneUrl: string;
   studentCloneUrl: string;
   templateCommitSha: string;
-  studentDefaultBranch: string;
+  /** Legacy caller hint; origin/HEAD is authoritative after clone. */
+  studentDefaultBranch?: string;
   token: string | null;
   githubClient: GitHubClient;
 }
@@ -27,12 +33,34 @@ export interface ProductionTemplateSyncWorkspaceInput {
 export interface PreparedTemplateSyncWorkspace {
   gateway: LocalGitTemplateSyncGateway;
   pullRequests: TemplateSyncPullRequestGateway;
+  studentDefaultBranch: string;
 }
+
+export interface ProductionTemplateSyncWorkspaceDependencies {
+  runGit(
+    directory: string | undefined,
+    args: string[],
+    token: string | null
+  ): Promise<{ stdout: string }>;
+}
+
+const runWorkspaceStage = async (
+  stage: TemplateSyncFailureStage,
+  message: string,
+  operation: () => Promise<unknown>
+): Promise<void> => {
+  try {
+    await operation();
+  } catch (error: unknown) {
+    throw createTemplateSyncOperationError(stage, message, error);
+  }
+};
 
 /** Creates disposable clones for exactly one template-sync operation. */
 export const withProductionTemplateSyncWorkspace = async <T>(
   input: ProductionTemplateSyncWorkspaceInput,
-  operation: (workspace: PreparedTemplateSyncWorkspace) => Promise<T>
+  operation: (workspace: PreparedTemplateSyncWorkspace) => Promise<T>,
+  overrides: Partial<ProductionTemplateSyncWorkspaceDependencies> = {}
 ): Promise<T> => {
   const directory = await mkdtemp(join(tmpdir(), "graider-template-sync-"));
   let result: T | undefined;
@@ -41,13 +69,50 @@ export const withProductionTemplateSyncWorkspace = async <T>(
   try {
     const templateDirectory = join(directory, "template");
     const studentDirectory = join(directory, "student");
-    await clone(input.templateCloneUrl, templateDirectory, input.token);
-    await clone(input.studentCloneUrl, studentDirectory, input.token);
-    await git(templateDirectory, ["checkout", "--detach", input.templateCommitSha], input.token);
-    await git(studentDirectory, ["switch", input.studentDefaultBranch], input.token);
+    const runGit = overrides.runGit ?? git;
+    await runWorkspaceStage(
+      "template_clone_failed",
+      "Unable to clone template repository.",
+      async () => {
+        await clone(input.templateCloneUrl, templateDirectory, input.token, runGit);
+      }
+    );
+    await runWorkspaceStage(
+      "student_clone_failed",
+      "Unable to clone student repository.",
+      async () => {
+        await clone(input.studentCloneUrl, studentDirectory, input.token, runGit);
+      }
+    );
+    await runWorkspaceStage(
+      "template_checkout_failed",
+      "Unable to check out the requested template revision.",
+      async () =>
+        await runGit(
+          templateDirectory,
+          ["checkout", "--detach", input.templateCommitSha],
+          input.token
+        )
+    );
+    const studentDefaultBranch = await resolveRemoteDefaultBranch(
+      studentDirectory,
+      input.token,
+      runGit
+    );
+    await runWorkspaceStage(
+      "student_checkout_failed",
+      "Unable to check out the student default branch.",
+      async () =>
+        await runGit(
+          studentDirectory,
+          ["checkout", "-B", studentDefaultBranch, `origin/${studentDefaultBranch}`],
+          input.token
+        )
+    );
     result = await operation({
       gateway: new LocalGitTemplateSyncGateway({ templateDirectory, studentDirectory }),
-      pullRequests: createGitHubPullRequestGateway(input.githubClient)
+      pullRequests: createGitHubPullRequestGateway(input.githubClient),
+      studentDefaultBranch
     });
   } catch (error: unknown) {
     operationError = error;
@@ -58,15 +123,57 @@ export const withProductionTemplateSyncWorkspace = async <T>(
   } catch {
     // Temporary cleanup must never replace the template-sync operation result.
   }
-  if (operationError !== undefined) throw operationError;
+  if (operationError !== undefined) {
+    if (operationError instanceof Error) throw operationError;
+    throw new Error("Template-sync workspace operation failed.", { cause: operationError });
+  }
   return result as T;
 };
 
-const clone = async (url: string, directory: string, token: string | null): Promise<void> => {
-  await git(undefined, ["clone", "--no-checkout", url, directory], token);
+const resolveRemoteDefaultBranch = async (
+  studentDirectory: string,
+  token: string | null,
+  runGit: ProductionTemplateSyncWorkspaceDependencies["runGit"]
+): Promise<string> => {
+  let branch = "";
+  await runWorkspaceStage(
+    "student_checkout_failed",
+    "Graider could not determine the repository default branch.",
+    async () => {
+      const result = await runGit(
+        studentDirectory,
+        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        token
+      );
+      const symbolicRef = result.stdout.trim();
+      if (!symbolicRef.startsWith("origin/") || symbolicRef.length === "origin/".length) {
+        throw new Error("The origin default-branch symbolic ref is invalid.");
+      }
+      branch = symbolicRef.slice("origin/".length);
+      await runGit(
+        studentDirectory,
+        ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`],
+        token
+      );
+    }
+  );
+  return branch;
 };
 
-const git = async (directory: string | undefined, args: string[], token: string | null) => {
+const clone = async (
+  url: string,
+  directory: string,
+  token: string | null,
+  runGit: ProductionTemplateSyncWorkspaceDependencies["runGit"]
+): Promise<void> => {
+  await runGit(undefined, ["clone", "--no-checkout", url, directory], token);
+};
+
+const git = async (
+  directory: string | undefined,
+  args: string[],
+  token: string | null
+): Promise<{ stdout: string }> => {
   const authorization =
     token === null
       ? []
@@ -74,36 +181,46 @@ const git = async (directory: string | undefined, args: string[], token: string 
           "-c",
           `http.extraHeader=AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`
         ];
-  await execFile(
+  const { stdout } = await execFile(
     GIT,
     [...authorization, ...(directory === undefined ? [] : ["-C", directory]), ...args],
     {
+      encoding: "utf8",
       maxBuffer: 10 * 1024 * 1024
     }
   );
+  return { stdout };
 };
 
-const createGitHubPullRequestGateway = (
+export const createGitHubPullRequestGateway = (
   githubClient: GitHubClient
 ): TemplateSyncPullRequestGateway => ({
   async createPullRequest(input): Promise<TemplatePullRequest> {
-    const created = await githubClient.createPullRequest({
-      owner: input.repository.owner,
-      repo: input.repository.name,
-      head: input.sourceBranch,
-      base: input.targetBranch,
-      title: input.title,
-      body: input.body
-    });
-    return { number: created.number, url: created.url };
+    try {
+      const created = await githubClient.createPullRequest({
+        owner: input.repository.owner,
+        repo: input.repository.name,
+        head: input.sourceBranch,
+        base: input.targetBranch,
+        title: input.title,
+        body: input.body
+      });
+      return { number: created.number, url: created.url };
+    } catch (error: unknown) {
+      throw createGitHubTemplateSyncOperationError(error);
+    }
   },
   async findPullRequest(input) {
-    return await githubClient.findPullRequest(
-      input.repository.owner,
-      input.repository.name,
-      input.sourceBranch,
-      input.targetBranch
-    );
+    try {
+      return await githubClient.findPullRequest(
+        input.repository.owner,
+        input.repository.name,
+        input.sourceBranch,
+        input.targetBranch
+      );
+    } catch (error: unknown) {
+      throw createGitHubTemplateSyncOperationError(error);
+    }
   }
 });
 

@@ -1324,8 +1324,8 @@ const TemplateSyncResultsPanel = ({
           </div>
           {outcome.status === "baseline_required" ? (
             <p>
-              Graider cannot safely update this older repository until a synchronization baseline is
-              established.
+              {outcome.message ??
+                "Graider cannot safely update this older repository until a synchronization baseline is established."}
             </p>
           ) : null}
           {outcome.status === "failed" || outcome.status === "pull_request_closed" ? (

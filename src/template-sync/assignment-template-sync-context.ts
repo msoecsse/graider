@@ -3,7 +3,7 @@ import { loadGraiderConfig } from "../config/config-loader.js";
 import { parseTemplateRepository } from "../config/github-config-validation.js";
 import { resolveAssignmentPath, toRepositoryRelativePath } from "../core/paths.js";
 import { evaluateMutationGuard } from "../execution/mutation-guard.js";
-import { createGitHubClient } from "../github/github-client-factory.js";
+import { createGitHubClient, readGitHubToken } from "../github/github-client-factory.js";
 import { loadManifest } from "../manifest/manifest-loader.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
 import { writeManifest } from "../manifest/manifest-renderer.js";
@@ -22,6 +22,7 @@ export interface AssignmentTemplateSyncContextDependencies {
   loadManifest: typeof loadManifest;
   writeManifest: typeof writeManifest;
   createClient: typeof createGitHubClient;
+  resolveToken: (request: AssignmentTemplateSyncRequest) => string | undefined;
   runSync: typeof runProductionAssignmentTemplateSyncService;
 }
 
@@ -30,6 +31,12 @@ const defaults: AssignmentTemplateSyncContextDependencies = {
   loadManifest,
   writeManifest,
   createClient: createGitHubClient,
+  resolveToken: (request) => {
+    const injected = (
+      request as AssignmentTemplateSyncRequest & { readonly resolvedGithubToken?: string }
+    ).resolvedGithubToken?.trim();
+    return injected === undefined || injected.length === 0 ? readGitHubToken() : injected;
+  },
   runSync: runProductionAssignmentTemplateSyncService
 };
 
@@ -182,22 +189,26 @@ export const createAssignmentTemplateSyncContextService = (
             outcomes: [],
             ...(preview.blocker === undefined ? {} : { blocker: preview.blocker })
           };
+        let token: string | undefined;
         let client: ReturnType<typeof createGitHubClient>;
         try {
-          client = dependencies.createClient();
+          token = dependencies.resolveToken(request);
+          if (token === undefined) throw new Error("GitHub token is required.");
+          client = dependencies.createClient({ token });
         } catch {
           return {
             status: "failure",
             outcomes: [],
             blocker: {
               code: "github_token_required",
-              message: "Configure a GitHub token before updating repositories."
+              message: "Configure a token or sign in with GitHub CLI before updating repositories."
             }
           };
         }
         const response = await dependencies.runSync({
           configuredOrganization: context.config.course.github.organization,
           configuredTemplateRepository: context.config.assignment.template.repository,
+          resolvedToken: token,
           manifest: context.manifest,
           options,
           workspace: { githubClient: client },
@@ -241,6 +252,7 @@ export const createAssignmentTemplateSyncContextService = (
                 : item.status === "pull_request_reconciled"
                   ? "updated"
                   : item.status;
+            const failure = item.status === "failure" ? item.failure : undefined;
             return {
               studentId,
               status,
@@ -249,19 +261,28 @@ export const createAssignmentTemplateSyncContextService = (
                 : {}),
               ...(status === "failed"
                 ? {
+                    ...(failure === undefined ? {} : { failureStage: failure.stage }),
                     message:
-                      "Update failed. Check repository access and GitHub permissions, then retry."
+                      failure?.message ??
+                      "Unable to update this repository. Retry, then check the assignment configuration if it continues."
                   }
-                : {})
+                : item.status === "baseline_required" && item.message !== undefined
+                  ? { message: item.message }
+                  : {})
             };
           }
         );
         const blocker: TemplateSyncBlocker | undefined =
           result.status === "failure" || result.status === "blocked"
             ? {
-                code: "template_sync_failed",
+                code:
+                  result.status === "failure" && result.failure !== undefined
+                    ? result.failure.stage
+                    : "template_sync_failed",
                 message:
-                  "Unable to synchronize repositories. Check template configuration and repository access."
+                  result.status === "failure" && result.failure !== undefined
+                    ? result.failure.message
+                    : "Unable to synchronize repositories. Check template configuration and repository access."
               }
             : result.persistenceError !== undefined
               ? {

@@ -3,6 +3,7 @@ import type { ProcessRunner } from "./commandRunner.js";
 import {
   GITHUB_CLI_AUTH_FAILED_CODE,
   GITHUB_CLI_NOT_FOUND_CODE,
+  GITHUB_TOKEN_FALLBACK_ENV_NAME,
   GITHUB_TOKEN_ENV_NAME,
   getCommonGithubCliPaths,
   resolveGithubToken
@@ -14,7 +15,7 @@ const FAILURE_EXIT_CODE = 1;
 const createRunner = (runner: ProcessRunner): ProcessRunner => vi.fn(runner);
 
 describe("tokenResolver", () => {
-  it("uses GRAIDER_GITHUB_TOKEN when present", async () => {
+  it("uses GRAIDER_GITHUB_TOKEN before GITHUB_TOKEN and GitHub CLI", async () => {
     const runner = createRunner(async () => ({
       stdout: "",
       stderr: "",
@@ -23,11 +24,34 @@ describe("tokenResolver", () => {
     }));
 
     const result = await resolveGithubToken({
-      env: { [GITHUB_TOKEN_ENV_NAME]: " token-from-env " },
+      env: {
+        [GITHUB_TOKEN_ENV_NAME]: " token-from-env ",
+        [GITHUB_TOKEN_FALLBACK_ENV_NAME]: "fallback-token"
+      },
       runner
     });
 
     expect(result).toEqual({ status: "success", token: "token-from-env" });
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("uses GITHUB_TOKEN before GitHub CLI when the Graider token is blank", async () => {
+    const runner = createRunner(async () => ({
+      stdout: "token-from-gh",
+      stderr: "",
+      exitCode: SUCCESS_EXIT_CODE,
+      error: null
+    }));
+
+    const result = await resolveGithubToken({
+      env: {
+        [GITHUB_TOKEN_ENV_NAME]: "  ",
+        [GITHUB_TOKEN_FALLBACK_ENV_NAME]: " fallback-token "
+      },
+      runner
+    });
+
+    expect(result).toEqual({ status: "success", token: "fallback-token" });
     expect(runner).not.toHaveBeenCalled();
   });
 
@@ -123,6 +147,22 @@ describe("tokenResolver", () => {
     expect(result.status === "failure" ? result.error.code : "").toBe(GITHUB_CLI_AUTH_FAILED_CODE);
     expect(result.status === "failure" ? result.error.exitCode : null).toBe(FAILURE_EXIT_CODE);
     expect(JSON.stringify(result)).not.toContain("not authenticated");
+  });
+
+  it("fails safely when the gh command cannot run", async () => {
+    const runner = createRunner(async () => ({
+      stdout: "ghp_secret_token",
+      stderr: "permission denied",
+      exitCode: null,
+      error: { code: "EACCES", message: "permission denied: ghp_secret_token" }
+    }));
+
+    const result = await resolveGithubToken({ env: {}, runner });
+
+    expect(result.status).toBe("failure");
+    expect(result.status === "failure" ? result.error.code : "").toBe(GITHUB_CLI_AUTH_FAILED_CODE);
+    expect(JSON.stringify(result)).not.toContain("ghp_secret_token");
+    expect(JSON.stringify(result)).not.toContain("permission denied");
   });
 
   it("fails safely when gh returns blank stdout", async () => {
