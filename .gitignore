@@ -1,0 +1,8 @@
+
+# Local dependency/build artifacts
+node_modules/.vite/
+node_modules/fsevents/
+ui/dist-graider-cli/
+ui/release/
+ui/dist-release/
+node_modules/
