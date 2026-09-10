@@ -1,5 +1,8 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
+
+const COURSE_FOLDER_PATH = "/tmp/Course Folder";
 
 const response = JSON.stringify({
   schemaVersion: 1,
@@ -23,7 +26,7 @@ describe("assignment repository mappings runner", () => {
       .fn()
       .mockResolvedValue({ stdout: response, stderr: "", exitCode: 0, error: null });
     const result = await getAssignmentRepositoryMappings({
-      courseFolderPath: "/tmp/Course Folder",
+      courseFolderPath: COURSE_FOLDER_PATH,
       assignmentFile: "terms/27s1/assignments/lab/assignment.yml",
       runner
     });
@@ -36,7 +39,8 @@ describe("assignment repository mappings runner", () => {
           "terms/27s1/assignments/lab/assignment.yml",
           "--json"
         ],
-        cwd: "/tmp/Course Folder"
+        // The runner resolves the course folder for the host before spawning.
+        cwd: path.resolve(COURSE_FOLDER_PATH)
       })
     );
     expect(result.mappings[0]?.repositoryUrl).toContain("lab-ada");

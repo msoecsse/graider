@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ProcessRunner } from "./commandRunner.js";
 import {
@@ -229,6 +230,10 @@ describe("tokenResolver", () => {
         ProgramFiles: "C:\\Program Files",
         "ProgramFiles(x86)": "C:\\Program Files (x86)"
       })
-    ).toEqual(["C:\\Program Files/GitHub CLI/gh.exe", "C:\\Program Files (x86)/GitHub CLI/gh.exe"]);
+      // The resolver joins these with path.join, so the separator is the host's, not "/".
+    ).toEqual([
+      path.join("C:\\Program Files", "GitHub CLI", "gh.exe"),
+      path.join("C:\\Program Files (x86)", "GitHub CLI", "gh.exe")
+    ]);
   });
 });

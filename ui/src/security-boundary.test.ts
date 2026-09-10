@@ -37,6 +37,7 @@ describe("UI security boundary", () => {
 
     expect(channelNames).toEqual([
       "graider-ui:get-app-info",
+      "graider-ui:graider-cli:status",
       "graider-ui:github-auth:check",
       "graider-ui:course-registry:list",
       "graider-ui:course-registry:select-folder",

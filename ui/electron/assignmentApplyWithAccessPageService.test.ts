@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProcessRunner } from "./commandRunner.js";
 import type { AssignmentApplyRequest } from "./ipc.js";
 import { applyAssignmentWithStudentRepositoryAccessPage } from "./assignmentApplyWithAccessPageService.js";
+import { toGitFileRemote } from "./testSupport/gitFileRemote.js";
+import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
 
 const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-apply-page-"));
@@ -55,7 +57,7 @@ const initializePagesRepository = (root: string): void => {
   git(pages, ["add", "."]);
   git(pages, ["commit", "--allow-empty", "-m", "Initial"]);
   git(remote, ["init", "--bare"]);
-  git(pages, ["remote", "add", "origin", remote]);
+  git(pages, ["remote", "add", "origin", toGitFileRemote(remote)]);
   git(pages, ["push", "-u", "origin", "HEAD"]);
 };
 
@@ -97,7 +99,7 @@ const runner = (): ProcessRunner =>
     return { stdout: JSON.stringify(mappingsJson), stderr: "", exitCode: 0, error: null };
   });
 
-describe("assignmentApplyWithAccessPageService", () => {
+describe("assignmentApplyWithAccessPageService", { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it("generates and publishes the student repository access page after a successful apply", async () => {
     const root = createRoot();
     writeFixture(root);
@@ -188,11 +190,13 @@ describe("assignmentApplyWithAccessPageService", () => {
     const root = createRoot();
     writeFixture(root);
     initializePagesRepository(root);
+    // Still a well-formed remote for the configured repository, so the failure comes from the
+    // push rather than from the remote-matches-configured-repository check.
     git(pagesRoot(root), [
       "remote",
       "set-url",
       "origin",
-      path.join(root, "missing", "csc1120", "csc1120pages")
+      toGitFileRemote(path.join(root, "missing", "csc1120", "csc1120pages"))
     ]);
 
     const result = await applyAssignmentWithStudentRepositoryAccessPage(request(root), {

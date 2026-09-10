@@ -12,5 +12,8 @@
     "skipLibCheck": true,
     "types": ["node", "electron"]
   },
-  "include": ["electron/**/*.ts"]
+  "include": ["electron/**/*.ts"],
+  // Test files and their helpers are type-checked by tsconfig.electron-test.json; emitting them
+  // here shipped roughly half of dist-electron (and the packaged app) as compiled test code.
+  "exclude": ["electron/**/*.test.ts", "electron/testSupport/**/*.ts"]
 }

@@ -153,6 +153,16 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getFacultyReport: vi.fn(),
     applyAssignment: vi.fn(),
     gradeAssignment: vi.fn(),
+    prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
+      available: false,
+      repositoryCount: 0,
+      templateRepository: null,
+      recordedTemplateRevision: null
+    }),
+    executeAssignmentTemplateSync: vi.fn().mockResolvedValue({
+      status: "failure",
+      outcomes: []
+    }),
     ...api
   };
 

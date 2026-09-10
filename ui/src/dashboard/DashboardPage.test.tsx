@@ -518,6 +518,16 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getFacultyReport: vi.fn().mockResolvedValue(createFacultyReportResult()),
     applyAssignment: vi.fn(),
     gradeAssignment: vi.fn().mockResolvedValue(createAssignmentGradeResult()),
+    prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
+      available: false,
+      repositoryCount: 0,
+      templateRepository: null,
+      recordedTemplateRevision: null
+    }),
+    executeAssignmentTemplateSync: vi.fn().mockResolvedValue({
+      status: "failure",
+      outcomes: []
+    }),
     ...api
   };
 
@@ -601,7 +611,9 @@ describe("DashboardPage", () => {
     expect(screen.getByText("terms/27s1/rosters/section-001.csv")).toBeInTheDocument();
     expect(screen.getByText("Publish Graider course changes")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Course Changes" }));
-    await waitFor(() => expect(publishCourseChanges).toHaveBeenCalledWith(COURSE_FOLDER.id));
+    await waitFor(() => {
+      expect(publishCourseChanges).toHaveBeenCalledWith(COURSE_FOLDER.id);
+    });
     expect(await screen.findByText(/committed and pushed/u)).toBeInTheDocument();
   });
 
@@ -1149,7 +1161,9 @@ describe("DashboardPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Create assignment" }));
 
-    await waitFor(() => expect(previewAssignmentSetup).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(previewAssignmentSetup).toHaveBeenCalledTimes(1);
+    });
     expect(previewAssignmentSetup).toHaveBeenCalledWith(
       expect.objectContaining({ sectionIds: ["001"] })
     );
@@ -1159,13 +1173,13 @@ describe("DashboardPage", () => {
     ).toBeInTheDocument();
     fireEvent.click(within(confirmation).getByRole("button", { name: "Create assignment" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(getAssignmentDetail).toHaveBeenCalledWith({
         courseFolderId: COURSE_FOLDER.id,
         courseFolderPath: COURSE_FOLDER.path,
         assignmentFile: "terms/27s1/assignments/lab03/assignment.yml"
-      })
-    );
+      });
+    });
   });
 
   it("shows failed template validation as an error in Assignment Setup", async () => {
@@ -1246,7 +1260,9 @@ describe("DashboardPage", () => {
     ).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
     fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
-    await waitFor(() => expect(getRosterForSection).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(getRosterForSection).toHaveBeenCalledTimes(1);
+    });
     expect(screen.getByText("A new roster will be created.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Add Student" }));
@@ -1256,7 +1272,9 @@ describe("DashboardPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Student" }));
     fireEvent.change(screen.getByLabelText("student_id row 1"), { target: { value: "S001" } });
     fireEvent.click(screen.getByRole("button", { name: "Save roster" }));
-    await waitFor(() => expect(previewRosterSave).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(previewRosterSave).toHaveBeenCalledTimes(1);
+    });
     const confirmation = await screen.findByRole("dialog", { name: "Save roster changes?" });
     expect(
       within(confirmation).getByText("Create roster with 1 student record.")
@@ -1264,7 +1282,9 @@ describe("DashboardPage", () => {
     fireEvent.click(within(confirmation).getByRole("button", { name: "Save roster" }));
 
     expect(await screen.findByText("Saved terms/27s1/rosters/section-001.csv")).toBeInTheDocument();
-    await waitFor(() => expect(refreshCourseFolder).toHaveBeenCalledWith(COURSE_FOLDER.id));
+    await waitFor(() => {
+      expect(refreshCourseFolder).toHaveBeenCalledWith(COURSE_FOLDER.id);
+    });
   });
 
   it("removes a selected section through the confirmed section action", async () => {
@@ -1301,15 +1321,15 @@ describe("DashboardPage", () => {
     fireEvent.click(screen.getByLabelText("I understand this removes the entire section."));
     fireEvent.click(screen.getByRole("button", { name: "Remove section" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(removeSection).toHaveBeenCalledWith({
         courseFolderId: COURSE_FOLDER.id,
         courseFolderPath: COURSE_FOLDER.path,
         termCode: "27s1",
         sectionId: "001",
         confirmed: true
-      })
-    );
+      });
+    });
     expect(screen.queryByRole("option", { name: "001" })).toBeNull();
   });
 
@@ -1390,18 +1410,18 @@ describe("DashboardPage", () => {
     fireEvent.click(screen.getByLabelText("I understand this removes the entire roster."));
     fireEvent.click(screen.getByRole("button", { name: "Remove roster" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(removeRoster).toHaveBeenCalledWith({
         courseFolderId: COURSE_FOLDER.id,
         courseFolderPath: COURSE_FOLDER.path,
         termCode: "27s1",
         sectionId: "001",
         confirmed: true
-      })
-    );
-    await waitFor(() =>
-      expect(screen.queryByRole("option", { name: "001" })).not.toBeInTheDocument()
-    );
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("option", { name: "001" })).not.toBeInTheDocument();
+    });
   });
 
   it("successful folder selection updates the visible list", async () => {

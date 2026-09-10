@@ -89,7 +89,7 @@ describe("roster manager service", () => {
     createTerm(root);
     const preview = previewRosterSave(
       request(root, {
-        rows: [{ ...request(root).rows[0]!, githubUsername: "octocat" }]
+        rows: [{ ...request(root).rows[0], githubUsername: "octocat" }]
       })
     );
 
@@ -102,7 +102,7 @@ describe("roster manager service", () => {
   it("rejects missing retained fields, invalid statuses, duplicates, and wrong sections", () => {
     const root = createRoot();
     createTerm(root);
-    const first = request(root).rows[0]!;
+    const first = request(root).rows[0];
     const preview = previewRosterSave(
       request(root, {
         rows: [
@@ -216,7 +216,7 @@ describe("roster manager service", () => {
     const root = createRoot();
     createTerm(root);
     const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
-    const first = request(root).rows[0]!;
+    const first = request(root).rows[0];
     const second = { ...first, studentId: "S002", githubUsername: "hubot" };
 
     expect(saveRoster(request(root, { rows: [first, second], confirmed: true })).status).toBe(
@@ -281,7 +281,7 @@ describe("roster manager service", () => {
     const canonical = request(root, {
       sectionId: "121",
       createSection: true,
-      rows: [{ ...request(root).rows[0]!, section: "121" }]
+      rows: [{ ...request(root).rows[0], section: "121" }]
     });
     expect(saveRoster({ ...canonical, confirmed: true }).status).toBe("success");
     expect(
@@ -297,7 +297,7 @@ describe("roster manager service", () => {
         request(root, {
           sectionId: "111",
           createSection: true,
-          rows: [{ ...request(root).rows[0]!, section: "999" }]
+          rows: [{ ...request(root).rows[0], section: "999" }]
         })
       )
         .diagnostics.map((item) => item.message)

@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { StudentRepositoryAccessPageRequest } from "./ipc";
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService";
+import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
 
 const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 const outputPath = "terms/27s1/notifications/lab02/student-repositories.html";
@@ -49,65 +50,69 @@ const commitAll = (root: string): void => {
   git(root, ["commit", "-m", "Initial"]);
 };
 
-describe("studentRepositoryAccessPagePublishStatusService", () => {
-  const mappings = { manifestStatus: "not_applied" as const, mappings: [], diagnostics: [] };
-  it("reports a missing generated page without running publish actions", async () => {
-    const root = createRoot();
-    writeFixture(root, false);
-    const result = await getStudentRepositoryAccessPagePublishStatus(request(root), mappings);
-    expect(result.status).toBe("not_generated");
-    expect(result.checks.fileExists).toBe(false);
-    expect(result.suggestedCommands).toEqual([]);
-  });
+describe(
+  "studentRepositoryAccessPagePublishStatusService",
+  { timeout: GIT_TEST_TIMEOUT_MS },
+  () => {
+    const mappings = { manifestStatus: "not_applied" as const, mappings: [], diagnostics: [] };
+    it("reports a missing generated page without running publish actions", async () => {
+      const root = createRoot();
+      writeFixture(root, false);
+      const result = await getStudentRepositoryAccessPagePublishStatus(request(root), mappings);
+      expect(result.status).toBe("not_generated");
+      expect(result.checks.fileExists).toBe(false);
+      expect(result.suggestedCommands).toEqual([]);
+    });
 
-  it("reports non-git folders and uncommitted generated files using the exact output path", async () => {
-    const nonGitRoot = createRoot();
-    writeFixture(nonGitRoot);
-    expect(
-      (await getStudentRepositoryAccessPagePublishStatus(request(nonGitRoot), mappings)).status
-    ).toBe("not_git_repo");
+    it("reports non-git folders and uncommitted generated files using the exact output path", async () => {
+      const nonGitRoot = createRoot();
+      writeFixture(nonGitRoot);
+      expect(
+        (await getStudentRepositoryAccessPagePublishStatus(request(nonGitRoot), mappings)).status
+      ).toBe("not_git_repo");
 
-    const root = createRoot();
-    writeFixture(root);
-    initializeRepository(pagesRoot(root));
-    const result = await getStudentRepositoryAccessPagePublishStatus(request(root), mappings);
-    expect(result.status).toBe("uncommitted");
-    expect(result.checks.hasUncommittedAccessPage).toBe(true);
-    expect(result.suggestedCommands.join(" ")).toContain(outputPath);
-  });
+      const root = createRoot();
+      writeFixture(root);
+      initializeRepository(pagesRoot(root));
+      const result = await getStudentRepositoryAccessPagePublishStatus(request(root), mappings);
+      expect(result.status).toBe("uncommitted");
+      expect(result.checks.hasUncommittedAccessPage).toBe(true);
+      expect(result.suggestedCommands.join(" ")).toContain(outputPath);
+    });
 
-  it("distinguishes no upstream, unpushed commits, and ready local checks without a network remote", async () => {
-    const root = createRoot();
-    writeFixture(root);
-    initializeRepository(pagesRoot(root));
-    commitAll(pagesRoot(root));
-    expect(
-      (await getStudentRepositoryAccessPagePublishStatus(request(root), mappings)).status
-    ).toBe("no_upstream");
+    it("distinguishes no upstream, unpushed commits, and ready local checks without a network remote", async () => {
+      const root = createRoot();
+      writeFixture(root);
+      initializeRepository(pagesRoot(root));
+      commitAll(pagesRoot(root));
+      expect(
+        (await getStudentRepositoryAccessPagePublishStatus(request(root), mappings)).status
+      ).toBe("no_upstream");
 
-    const remote = fs.mkdtempSync(path.join(os.tmpdir(), "graider-publish-remote-"));
-    git(remote, ["init", "--bare"]);
-    git(pagesRoot(root), ["remote", "add", "origin", remote]);
-    git(pagesRoot(root), ["commit", "--allow-empty", "-m", "Ahead"]);
-    git(pagesRoot(root), ["push", "-u", "origin", "HEAD"]);
-    git(pagesRoot(root), ["commit", "--allow-empty", "-m", "Unpushed"]);
-    expect(
-      (await getStudentRepositoryAccessPagePublishStatus(request(root), mappings)).status
-    ).toBe("unpushed");
-    git(pagesRoot(root), ["push"]);
-    expect(
-      (await getStudentRepositoryAccessPagePublishStatus(request(root), mappings)).status
-    ).toBe("ready_to_publish");
-  });
+      const remote = fs.mkdtempSync(path.join(os.tmpdir(), "graider-publish-remote-"));
+      git(remote, ["init", "--bare"]);
+      git(pagesRoot(root), ["remote", "add", "origin", remote]);
+      git(pagesRoot(root), ["commit", "--allow-empty", "-m", "Ahead"]);
+      git(pagesRoot(root), ["push", "-u", "origin", "HEAD"]);
+      git(pagesRoot(root), ["commit", "--allow-empty", "-m", "Unpushed"]);
+      expect(
+        (await getStudentRepositoryAccessPagePublishStatus(request(root), mappings)).status
+      ).toBe("unpushed");
+      git(pagesRoot(root), ["push"]);
+      expect(
+        (await getStudentRepositoryAccessPagePublishStatus(request(root), mappings)).status
+      ).toBe("ready_to_publish");
+    });
 
-  it("does not guess a Pages URL when course settings are incomplete", async () => {
-    const root = createRoot();
-    writeFixture(root, true, false);
-    initializeRepository(pagesRoot(root));
-    commitAll(pagesRoot(root));
-    const result = await getStudentRepositoryAccessPagePublishStatus(request(root), mappings);
-    expect(result.pagesUrl).toBeNull();
-    expect(result.status).toBe("failure");
-    expect(result.diagnostics.map((item) => item.message).join(" ")).toContain("not configured");
-  });
-});
+    it("does not guess a Pages URL when course settings are incomplete", async () => {
+      const root = createRoot();
+      writeFixture(root, true, false);
+      initializeRepository(pagesRoot(root));
+      commitAll(pagesRoot(root));
+      const result = await getStudentRepositoryAccessPagePublishStatus(request(root), mappings);
+      expect(result.pagesUrl).toBeNull();
+      expect(result.status).toBe("failure");
+      expect(result.diagnostics.map((item) => item.message).join(" ")).toContain("not configured");
+    });
+  }
+);

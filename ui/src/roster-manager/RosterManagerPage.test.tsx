@@ -1,6 +1,16 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { CourseFolderRecord } from "../../electron/ipc";
 import { RosterManagerPage } from "./RosterManagerPage";
+
+const COURSE_FOLDER: CourseFolderRecord = {
+  id: "course",
+  path: "/course",
+  displayAlias: null,
+  lastOpenedAt: "2026-06-09T19:30:00.000Z",
+  lastRefreshedAt: null,
+  lastDashboardStatus: null
+};
 
 describe("RosterManagerPage", () => {
   it("validates a roster then confirms its save in the shared preview modal", async () => {
@@ -32,13 +42,7 @@ describe("RosterManagerPage", () => {
       saveRoster
     });
 
-    render(
-      <RosterManagerPage
-        courseFolder={{ id: "course", path: "/course", label: "Course" }}
-        onBack={vi.fn()}
-        onSaved={vi.fn()}
-      />
-    );
+    render(<RosterManagerPage courseFolder={COURSE_FOLDER} onBack={vi.fn()} onSaved={vi.fn()} />);
 
     fireEvent.change(await screen.findByLabelText("Term"), { target: { value: "27s1" } });
     fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
@@ -49,8 +53,8 @@ describe("RosterManagerPage", () => {
     expect(dialog).toBeInTheDocument();
     expect(screen.getByText("Update roster with 1 student record.")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Save roster" }));
-    await waitFor(() =>
-      expect(saveRoster).toHaveBeenCalledWith(expect.objectContaining({ confirmed: true }))
-    );
+    await waitFor(() => {
+      expect(saveRoster).toHaveBeenCalledWith(expect.objectContaining({ confirmed: true }));
+    });
   });
 });

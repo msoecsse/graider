@@ -109,7 +109,7 @@ const resolve = async (
     ]);
   return {
     token: tokenResult.token,
-    fetchImplementation: options.fetchImplementation ?? (globalThis.fetch as FetchImplementation),
+    fetchImplementation: options.fetchImplementation ?? globalThis.fetch,
     owner,
     repo
   };

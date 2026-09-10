@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import type { StudentRepositoryAccessPageRequest } from "./ipc";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService";
+import { toGitFileRemote } from "./testSupport/gitFileRemote.js";
+import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
 
 const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 const outputPath = "terms/27s1/notifications/lab02/student-repositories.html";
@@ -45,7 +47,7 @@ const createFixture = (withUpstream = true): string => {
     const remote = path.join(root, "remotes", "csc1120", "csc1120pages");
     fs.mkdirSync(remote, { recursive: true });
     git(remote, ["init", "--bare"]);
-    git(pagesRoot(root), ["remote", "add", "origin", remote]);
+    git(pagesRoot(root), ["remote", "add", "origin", toGitFileRemote(remote)]);
     git(pagesRoot(root), ["push", "-u", "origin", "HEAD"]);
   }
   fs.writeFileSync(
@@ -68,7 +70,7 @@ const advanceUpstream = (root: string): void => {
   git(pagesRoot(root), ["fetch", "origin"]);
 };
 
-describe("studentRepositoryAccessPagePublishService", () => {
+describe("studentRepositoryAccessPagePublishService", { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it("stages, commits, and pushes only the generated access page", async () => {
     const root = createFixture();
     fs.writeFileSync(path.join(pagesRoot(root), "unrelated.txt"), "do not publish\n", "utf8");
@@ -117,11 +119,13 @@ describe("studentRepositoryAccessPagePublishService", () => {
 
   it("includes Git's failure output when the push fails", async () => {
     const root = createFixture();
+    // Still a well-formed remote for the configured repository, so the failure comes from the
+    // push rather than from the remote-matches-configured-repository check.
     git(pagesRoot(root), [
       "remote",
       "set-url",
       "origin",
-      path.join(root, "missing", "csc1120", "csc1120pages")
+      toGitFileRemote(path.join(root, "missing", "csc1120", "csc1120pages"))
     ]);
 
     const result = await publishStudentRepositoryAccessPage(request(root), mappings);

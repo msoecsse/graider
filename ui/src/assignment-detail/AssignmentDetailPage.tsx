@@ -550,7 +550,9 @@ const GradeWorkflowPanel = ({
             <textarea
               aria-label="Grade workflow draft"
               value={draft}
-              onChange={(event) => onDraftChange(event.target.value)}
+              onChange={(event) => {
+                onDraftChange(event.target.value);
+              }}
               rows={16}
             />
           ) : null}
@@ -696,7 +698,13 @@ const StudentRepositoryAccessPagePanel = ({
             A Pages repository must be configured before Graider can generate a public student
             access page.
           </p>
-          <button className="secondary-action" type="button" onClick={() => setIsConfiguring(true)}>
+          <button
+            className="secondary-action"
+            type="button"
+            onClick={() => {
+              setIsConfiguring(true);
+            }}
+          >
             Configure Student Access Pages
           </button>
         </>
@@ -737,7 +745,13 @@ const StudentRepositoryAccessPagePanel = ({
         </div>
       )}
       {result.pagesRepository !== null ? (
-        <button className="secondary-action" type="button" onClick={() => setIsConfiguring(true)}>
+        <button
+          className="secondary-action"
+          type="button"
+          onClick={() => {
+            setIsConfiguring(true);
+          }}
+        >
           Edit Student Access Pages Settings
         </button>
       ) : null}
@@ -755,16 +769,28 @@ const StudentRepositoryAccessPagePanel = ({
               Pages repository
               <input
                 value={repository}
-                onChange={(event) => updateRepository(event.target.value)}
+                onChange={(event) => {
+                  updateRepository(event.target.value);
+                }}
               />
             </label>
             <label>
               Base URL
-              <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+              <input
+                value={baseUrl}
+                onChange={(event) => {
+                  setBaseUrl(event.target.value);
+                }}
+              />
             </label>
             <label>
               Branch
-              <input value={branch} onChange={(event) => setBranch(event.target.value)} />
+              <input
+                value={branch}
+                onChange={(event) => {
+                  setBranch(event.target.value);
+                }}
+              />
             </label>
           </div>
           <div className="student-access-pages-settings__folder">
@@ -905,7 +931,9 @@ const StudentRepositoryAccessPagePublishPanel = ({
         <button
           className="primary-action"
           type="button"
-          onClick={() => setIsReviewingPublish(true)}
+          onClick={() => {
+            setIsReviewingPublish(true);
+          }}
         >
           Publish Student Access Page
         </button>
@@ -938,7 +966,9 @@ const StudentRepositoryAccessPagePublishPanel = ({
             className="secondary-action"
             type="button"
             disabled={isPublishing}
-            onClick={() => setIsReviewingPublish(false)}
+            onClick={() => {
+              setIsReviewingPublish(false);
+            }}
           >
             Cancel
           </button>
@@ -959,7 +989,9 @@ const StudentRepositoryAccessPagePublishPanel = ({
           <button
             className="secondary-action"
             type="button"
-            onClick={() => onCopy(result.suggestedCommands.join("\n"))}
+            onClick={() => {
+              onCopy(result.suggestedCommands.join("\n"));
+            }}
           >
             Copy commands
           </button>
@@ -2194,7 +2226,9 @@ export const AssignmentDetailPage = ({
             <input
               type="checkbox"
               checked={isDeleteConfirmed}
-              onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
+              onChange={(event) => {
+                setIsDeleteConfirmed(event.target.checked);
+              }}
             />
             I understand this deletes the local assignment configuration.
           </label>
@@ -2396,9 +2430,9 @@ export const AssignmentDetailPage = ({
                       Repository mode
                       <select
                         value={groupMode}
-                        onChange={(event) =>
-                          setGroupMode(event.target.value as "individual" | "group")
-                        }
+                        onChange={(event) => {
+                          setGroupMode(event.target.value as "individual" | "group");
+                        }}
                       >
                         <option value="individual">Individual repositories</option>
                         <option value="group">Group repositories</option>
@@ -2416,7 +2450,9 @@ export const AssignmentDetailPage = ({
                             aria-label="Group membership CSV"
                             value={groupsCsv}
                             rows={8}
-                            onChange={(event) => setGroupsCsv(event.target.value)}
+                            onChange={(event) => {
+                              setGroupsCsv(event.target.value);
+                            }}
                           />
                         </label>
                         <p className="detail-panel__note">

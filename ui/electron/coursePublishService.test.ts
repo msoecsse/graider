@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService";
+import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
 
 const git = (root: string, arguments_: readonly string[]): string =>
   execFileSync("git", arguments_, { cwd: root, encoding: "utf8" }).trim();
@@ -30,7 +31,7 @@ const fixture = (withUpstream = true): string => {
   return root;
 };
 
-describe("coursePublishService", () => {
+describe("coursePublishService", { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it("stages and commits only allowlisted Graider course files", async () => {
     const root = fixture();
     const roster = path.join(root, "terms", "27s1", "rosters", "section-001.csv");

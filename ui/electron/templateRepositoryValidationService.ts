@@ -69,8 +69,7 @@ export const validateTemplateRepository = async (
     Authorization: `Bearer ${tokenResult.token}`,
     "X-GitHub-Api-Version": "2022-11-28"
   };
-  const fetchImplementation =
-    options.fetchImplementation ?? (globalThis.fetch as FetchImplementation);
+  const fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
   try {
     const repositoryResponse = await fetchImplementation(
       `${GITHUB_API_ROOT}/repos/${encodeURIComponent(owner ?? "")}/${encodeURIComponent(repo ?? "")}`,

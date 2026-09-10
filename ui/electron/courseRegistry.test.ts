@@ -9,6 +9,7 @@ import {
   createEmptyCourseRegistry,
   getCourseRegistryPath,
   loadCourseRegistry,
+  normalizeCourseFolderPath,
   removeCourseFolder,
   removeCourseFolderFromRegistry,
   saveCourseRegistry,
@@ -80,7 +81,9 @@ describe("course registry", () => {
 
     expect(addResult.courseFolder).toMatchObject({
       id: expect.stringMatching(/^course-folder-[a-f0-9]+$/),
-      path: "/Users/sean/dev/csc1120",
+      // The record stores the path normalized for the host, so `..` is resolved away here
+      // whether the separator is "/" or "\".
+      path: normalizeCourseFolderPath("/Users/sean/dev/csc1120"),
       displayAlias: null,
       lastOpenedAt: "2026-06-09T19:30:00.000Z",
       lastRefreshedAt: null,

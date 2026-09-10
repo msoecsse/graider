@@ -46,7 +46,9 @@ describe("ConfirmationWithPreviewModal", () => {
     fireEvent.click(screen.getByLabelText("I understand this replaces the existing roster."));
     fireEvent.click(confirm);
 
-    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledTimes(1);
+    });
     expect(onConfirm).toHaveBeenCalledWith(true);
     expect(await screen.findByRole("status")).toHaveTextContent("Changes saved.");
     expect(screen.getByRole("dialog")).toBeInTheDocument();

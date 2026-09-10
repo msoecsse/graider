@@ -85,7 +85,9 @@ export const AssignmentSetupPage = ({
         setTerms(result.terms);
         setTermMessage(result.diagnostics.map((item) => item.message).join(" ") || null);
       })
-      .catch(() => setTermMessage("Unable to load terms for this course."));
+      .catch(() => {
+        setTermMessage("Unable to load terms for this course.");
+      });
   }, [courseFolder.id, courseFolder.path]);
 
   const selectedTerm = terms.find((term) => term.code === termCode) ?? null;
@@ -259,7 +261,12 @@ export const AssignmentSetupPage = ({
           <h2>Sections</h2>
           <label>
             Term
-            <select value={termCode} onChange={(event) => handleTermChange(event.target.value)}>
+            <select
+              value={termCode}
+              onChange={(event) => {
+                handleTermChange(event.target.value);
+              }}
+            >
               <option value="">Select a term</option>
               {terms.map((term) => (
                 <option key={term.code} value={term.code}>
@@ -281,7 +288,9 @@ export const AssignmentSetupPage = ({
                   <input
                     type="checkbox"
                     checked={sectionIds.includes(sectionId)}
-                    onChange={() => toggleSection(sectionId)}
+                    onChange={() => {
+                      toggleSection(sectionId);
+                    }}
                   />
                   Section {sectionId}
                 </label>
@@ -390,12 +399,14 @@ export const AssignmentSetupPage = ({
         </section>
       </section>
       <ConfirmationWithPreviewModal
-        acknowledgementLabel={
-          preview?.hasConflicts ? "Replace the existing assignment.yml" : undefined
-        }
+        {...(preview?.hasConflicts === true
+          ? { acknowledgementLabel: "Replace the existing assignment.yml" }
+          : {})}
         confirmLabel="Create assignment"
         isOpen={isConfirming && preview !== null}
-        onCancel={() => setIsConfirming(false)}
+        onCancel={() => {
+          setIsConfirming(false);
+        }}
         onConfirm={handleSave}
         preview={
           preview === null ? undefined : (

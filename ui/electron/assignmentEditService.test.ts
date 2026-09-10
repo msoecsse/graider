@@ -43,7 +43,7 @@ const removePoints = (root: string): void => {
   const filePath = path.join(root, assignmentFile);
   fs.writeFileSync(
     filePath,
-    fs.readFileSync(filePath, "utf8").replace(/^  points: .*\n/mu, ""),
+    fs.readFileSync(filePath, "utf8").replace(/^ {2}points: .*\n/mu, ""),
     "utf8"
   );
 };
@@ -54,8 +54,8 @@ const removeFacultyOwnerAndGradingCategory = (root: string): void => {
     filePath,
     fs
       .readFileSync(filePath, "utf8")
-      .replace(/^  faculty_owner: .*\n/mu, "")
-      .replace(/^  grading_category: .*\n/mu, ""),
+      .replace(/^ {2}faculty_owner: .*\n/mu, "")
+      .replace(/^ {2}grading_category: .*\n/mu, ""),
     "utf8"
   );
 };
@@ -64,7 +64,7 @@ const removeLmsAssignmentId = (root: string): void => {
   const filePath = path.join(root, assignmentFile);
   fs.writeFileSync(
     filePath,
-    fs.readFileSync(filePath, "utf8").replace(/^  lms_assignment_id: .*\n/mu, ""),
+    fs.readFileSync(filePath, "utf8").replace(/^ {2}lms_assignment_id: .*\n/mu, ""),
     "utf8"
   );
 };

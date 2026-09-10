@@ -160,7 +160,9 @@ export const ConfirmationWithPreviewModal = ({
             <input
               checked={acknowledged}
               disabled={isConfirming}
-              onChange={(event) => setAcknowledged(event.currentTarget.checked)}
+              onChange={(event) => {
+                setAcknowledged(event.currentTarget.checked);
+              }}
               type="checkbox"
             />
             {acknowledgementLabel}

@@ -557,14 +557,14 @@ describe("AssignmentDetailPage", () => {
     );
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete assignment" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(deleteAssignment).toHaveBeenCalledWith({
         courseFolderId: SELECTION.courseFolderId,
         courseFolderPath: SELECTION.courseFolderPath,
         assignmentFile: ASSIGNMENT_FILE,
         confirmed: true
-      })
-    );
+      });
+    });
     expect(onDeleted).toHaveBeenCalledTimes(1);
   });
 
@@ -581,7 +581,9 @@ describe("AssignmentDetailPage", () => {
     renderAssignmentDetailPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "View workflow" }));
-    await waitFor(() => expect(getTemplateWorkflow).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(getTemplateWorkflow).toHaveBeenCalledTimes(1);
+    });
     expect(await screen.findByLabelText("Grade workflow draft")).toHaveValue("name: Grade\n");
     expect(screen.getByText(/Workflow changes are not saved/u)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save workflow|push workflow/u })).toBeNull();
@@ -613,9 +615,13 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByText(/GitHub Pages to be enabled/u)).toBeInTheDocument();
     expect(screen.getByText(/missing repository links/u)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Copy Canvas link" }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Generate student access page" }));
-    await waitFor(() => expect(generateStudentRepositoryAccessPage).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(generateStudentRepositoryAccessPage).toHaveBeenCalledTimes(1);
+    });
     expect(
       await screen.findByRole("button", { name: "Regenerate student access page" })
     ).toBeInTheDocument();
@@ -667,19 +673,21 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByLabelText("Branch")).toHaveValue("main");
     expect(screen.getByText("Not selected")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Select Pages repository folder" }));
-    await waitFor(() => expect(screen.getByText("/tmp/csc1120pages")).toBeInTheDocument());
+    await waitFor(() => {
+      expect(screen.getByText("/tmp/csc1120pages")).toBeInTheDocument();
+    });
     expect(selectStudentAccessPagesRepositoryFolder).toHaveBeenCalledWith(SELECTION.courseFolderId);
     fireEvent.click(screen.getByRole("button", { name: "Save Student Access Pages Settings" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(saveStudentAccessPagesConfig).toHaveBeenCalledWith({
         courseFolderId: SELECTION.courseFolderId,
         courseFolderPath: COURSE_FOLDER_PATH,
         repository: "csc1120/csc1120pages",
         baseUrl: "https://csc1120.github.io/csc1120pages",
         branch: "main"
-      })
-    );
+      });
+    });
     expect(getStudentRepositoryAccessPageStatus).toHaveBeenCalledTimes(3);
     expect(getStudentRepositoryAccessPagePublishStatus).toHaveBeenCalledTimes(3);
     expect(
@@ -751,15 +759,15 @@ describe("AssignmentDetailPage", () => {
       target: { value: "group_id,student_id\nteam-1,s001\n" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Save repository mode" }));
-    await waitFor(() =>
+    await waitFor(() => {
       expect(saveAssignmentGroupConfig).toHaveBeenCalledWith({
         courseFolderId: SELECTION.courseFolderId,
         courseFolderPath: COURSE_FOLDER_PATH,
         assignmentFile: ASSIGNMENT_FILE,
         repositoryMode: "group",
         groupsCsv: "group_id,student_id\nteam-1,s001\n"
-      })
-    );
+      });
+    });
     expect(
       await screen.findByText(/Group assignment settings were saved locally/u)
     ).toBeInTheDocument();
@@ -783,7 +791,9 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByRole("button", { name: "Copy commands" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /commit|push/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Copy commands" }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("confirms and publishes a generated student access page through the narrow API", async () => {
@@ -810,13 +820,13 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByText(/Graider does not check live GitHub Pages/u)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Student Access Page" }));
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(publishStudentRepositoryAccessPage).toHaveBeenCalledWith({
         courseFolderId: SELECTION.courseFolderId,
         courseFolderPath: COURSE_FOLDER_PATH,
         assignmentFile: ASSIGNMENT_FILE
-      })
-    );
+      });
+    });
     expect(await screen.findByText(/committed and pushed/u)).toBeInTheDocument();
     expect(getStudentRepositoryAccessPageStatus).toHaveBeenCalledTimes(2);
     expect(getStudentRepositoryAccessPagePublishStatus).toHaveBeenCalledTimes(2);
@@ -960,10 +970,14 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByRole("button", { name: "Confirm push" })).toBeDisabled();
     fireEvent.change(draft, { target: { value: "name: Updated\n" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview save" }));
-    await waitFor(() => expect(previewTemplateWorkflowSave).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(previewTemplateWorkflowSave).toHaveBeenCalledTimes(1);
+    });
     expect(screen.getByText("Update grading workflow for lab02")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Confirm push" }));
-    await waitFor(() => expect(saveTemplateWorkflow).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(saveTemplateWorkflow).toHaveBeenCalledTimes(1);
+    });
     expect(await screen.findByRole("status")).toHaveTextContent("commit-sha");
   });
 
@@ -1646,7 +1660,9 @@ describe("AssignmentDetailPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
 
-    await waitFor(() => expect(downloadAssignmentRepositories).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(downloadAssignmentRepositories).toHaveBeenCalledTimes(1);
+    });
     expect(selectRepositoryDownloadFolder).toHaveBeenCalledTimes(1);
     expect(downloadAssignmentRepositories).toHaveBeenCalledWith({
       ...SELECTION,
@@ -1664,7 +1680,9 @@ describe("AssignmentDetailPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
 
-    await waitFor(() => expect(selectRepositoryDownloadFolder).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(selectRepositoryDownloadFolder).toHaveBeenCalledTimes(1);
+    });
     expect(downloadAssignmentRepositories).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("Repository download results")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();

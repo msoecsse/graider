@@ -197,7 +197,9 @@ export const CourseSetupPage = ({
               }
               type="button"
               key={step}
-              onClick={() => setActiveStep(step)}
+              onClick={() => {
+                setActiveStep(step);
+              }}
             >
               {step}
             </button>
@@ -317,7 +319,9 @@ export const CourseSetupPage = ({
                   Section ID
                   <input
                     value={sectionId}
-                    onChange={(event) => updateSection(index, event.target.value)}
+                    onChange={(event) => {
+                      updateSection(index, event.target.value);
+                    }}
                   />
                 </label>
                 <label>
@@ -335,7 +339,9 @@ export const CourseSetupPage = ({
             <button
               className="secondary-action"
               type="button"
-              onClick={() => setSectionIds((currentSections) => [...currentSections, ""])}
+              onClick={() => {
+                setSectionIds((currentSections) => [...currentSections, ""]);
+              }}
             >
               Add section
             </button>
@@ -382,7 +388,9 @@ export const CourseSetupPage = ({
                 <input
                   type="checkbox"
                   checked={replaceExisting}
-                  onChange={(event) => setReplaceExisting(event.target.checked)}
+                  onChange={(event) => {
+                    setReplaceExisting(event.target.checked);
+                  }}
                 />{" "}
                 Replace the existing previewed files
               </label>

@@ -185,7 +185,9 @@ const CoursePublishPanel = ({
               className="secondary-action"
               type="button"
               disabled={isPublishing}
-              onClick={() => setIsReviewing(false)}
+              onClick={() => {
+                setIsReviewing(false);
+              }}
             >
               Cancel
             </button>
@@ -201,7 +203,13 @@ const CoursePublishPanel = ({
         )}
       </div>
       {canPublish && !isReviewing ? (
-        <button className="primary-action" type="button" onClick={() => setIsReviewing(true)}>
+        <button
+          className="primary-action"
+          type="button"
+          onClick={() => {
+            setIsReviewing(true);
+          }}
+        >
           Publish Course Changes
         </button>
       ) : null}
@@ -749,7 +757,9 @@ export const DashboardPage = (): ReactElement => {
       return (
         <AssignmentEditPage
           selection={selectedAssignment}
-          onBack={() => setIsEditingAssignment(false)}
+          onBack={() => {
+            setIsEditingAssignment(false);
+          }}
           onSaved={() => {
             setIsEditingAssignment(false);
             setSelectedAssignmentDetailResult(null);

@@ -10,6 +10,8 @@ import {
   removeRosterWithStudentRepositoryAccessPageRefresh,
   saveRosterWithStudentRepositoryAccessPageRefresh
 } from "./rosterStudentRepositoryAccessPageService.js";
+import { toGitFileRemote } from "./testSupport/gitFileRemote.js";
+import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
 
 const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-roster-page-"));
 const pagesRoot = (root: string): string => path.join(root, "pages");
@@ -68,7 +70,7 @@ const initializePagesRepository = (root: string): void => {
   git(pages, ["config", "user.name", "Test User"]);
   git(pages, ["commit", "--allow-empty", "-m", "Initial"]);
   git(remote, ["init", "--bare"]);
-  git(pages, ["remote", "add", "origin", remote]);
+  git(pages, ["remote", "add", "origin", toGitFileRemote(remote)]);
   git(pages, ["push", "-u", "origin", "HEAD"]);
 };
 
@@ -129,125 +131,136 @@ const options = (root: string) => ({
   pagesRepositoryFolderPath: pagesRoot(root)
 });
 
-describe("roster student repository access page lifecycle", () => {
-  it("regenerates and publishes the affected page for student add/update and replacement", async () => {
-    const root = createRoot();
-    writeFixture(root);
-    initializePagesRepository(root);
+describe(
+  "roster student repository access page lifecycle",
+  { timeout: GIT_TEST_TIMEOUT_MS },
+  () => {
+    it("regenerates and publishes the affected page for student add/update and replacement", async () => {
+      const root = createRoot();
+      writeFixture(root);
+      initializePagesRepository(root);
 
-    const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
-      saveRequest(root, [
-        { studentId: "a001", githubUsername: "ada", section: "001", status: "active" },
-        { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
-      ]),
-      options(root)
-    );
+      const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
+        saveRequest(root, [
+          { studentId: "a001", githubUsername: "ada", section: "001", status: "active" },
+          { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
+        ]),
+        options(root)
+      );
 
-    expect(result.status).toBe("success");
-    expect(fs.readFileSync(path.join(pagesRoot(root), pagePath("lab02")), "utf8")).toContain(
-      "a002"
-    );
-    expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab03")))).toBe(false);
-  });
+      expect(result.status).toBe("success");
+      expect(fs.readFileSync(path.join(pagesRoot(root), pagePath("lab02")), "utf8")).toContain(
+        "a002"
+      );
+      expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab03")))).toBe(false);
+    });
 
-  it("regenerates and publishes when students are removed or the roster is replaced", async () => {
-    const root = createRoot();
-    writeFixture(root);
-    initializePagesRepository(root);
-    const lifecycleOptions = options(root);
+    it("regenerates and publishes when students are removed or the roster is replaced", async () => {
+      const root = createRoot();
+      writeFixture(root);
+      initializePagesRepository(root);
+      const lifecycleOptions = options(root);
 
-    await saveRosterWithStudentRepositoryAccessPageRefresh(
-      saveRequest(root, [
-        { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
-      ]),
-      lifecycleOptions
-    );
-    const firstHead = git(pagesRoot(root), ["rev-parse", "HEAD"]);
-    const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
-      saveRequest(root, []),
-      lifecycleOptions
-    );
+      await saveRosterWithStudentRepositoryAccessPageRefresh(
+        saveRequest(root, [
+          { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
+        ]),
+        lifecycleOptions
+      );
+      const firstHead = git(pagesRoot(root), ["rev-parse", "HEAD"]);
+      const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
+        saveRequest(root, []),
+        lifecycleOptions
+      );
 
-    expect(result.status).toBe("success");
-    expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).not.toBe(firstHead);
-  });
+      expect(result.status).toBe("success");
+      expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).not.toBe(firstHead);
+    });
 
-  it("handles unchanged output without another commit and leaves unrelated assignments/files untouched", async () => {
-    const root = createRoot();
-    writeFixture(root);
-    initializePagesRepository(root);
-    fs.writeFileSync(path.join(pagesRoot(root), "unrelated.txt"), "keep", "utf8");
-    const lifecycleOptions = options(root);
-    const roster = [{ studentId: "a001", githubUsername: "ada", section: "001", status: "active" }];
+    it("handles unchanged output without another commit and leaves unrelated assignments/files untouched", async () => {
+      const root = createRoot();
+      writeFixture(root);
+      initializePagesRepository(root);
+      fs.writeFileSync(path.join(pagesRoot(root), "unrelated.txt"), "keep", "utf8");
+      const lifecycleOptions = options(root);
+      const roster = [
+        { studentId: "a001", githubUsername: "ada", section: "001", status: "active" }
+      ];
 
-    await saveRosterWithStudentRepositoryAccessPageRefresh(
-      saveRequest(root, roster),
-      lifecycleOptions
-    );
-    const firstHead = git(pagesRoot(root), ["rev-parse", "HEAD"]);
-    const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
-      saveRequest(root, roster),
-      lifecycleOptions
-    );
+      await saveRosterWithStudentRepositoryAccessPageRefresh(
+        saveRequest(root, roster),
+        lifecycleOptions
+      );
+      const firstHead = git(pagesRoot(root), ["rev-parse", "HEAD"]);
+      const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
+        saveRequest(root, roster),
+        lifecycleOptions
+      );
 
-    expect(result.status).toBe("success");
-    expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(firstHead);
-    expect(fs.readFileSync(path.join(pagesRoot(root), "unrelated.txt"), "utf8")).toBe("keep");
-    expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab03")))).toBe(false);
-  });
+      expect(result.status).toBe("success");
+      expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(firstHead);
+      expect(fs.readFileSync(path.join(pagesRoot(root), "unrelated.txt"), "utf8")).toBe("keep");
+      expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab03")))).toBe(false);
+    });
 
-  it("keeps a roster mutation successful when no Student Repository Page is configured", async () => {
-    const root = createRoot();
-    writeFixture(root, false);
+    it("keeps a roster mutation successful when no Student Repository Page is configured", async () => {
+      const root = createRoot();
+      writeFixture(root, false);
 
-    const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
-      saveRequest(root, [
-        { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
-      ]),
-      options(root)
-    );
+      const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
+        saveRequest(root, [
+          { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
+        ]),
+        options(root)
+      );
 
-    expect(result.status).toBe("success");
-  });
+      expect(result.status).toBe("success");
+    });
 
-  it("surfaces publication failures after a successful roster mutation", async () => {
-    const root = createRoot();
-    writeFixture(root);
-    initializePagesRepository(root);
-    git(pagesRoot(root), [
-      "remote",
-      "set-url",
-      "origin",
-      path.join(root, "missing", "csc1120", "csc1120pages")
-    ]);
+    it("surfaces publication failures after a successful roster mutation", async () => {
+      const root = createRoot();
+      writeFixture(root);
+      initializePagesRepository(root);
+      // Still a well-formed remote for the configured repository, so the failure comes from the
+      // push rather than from the remote-matches-configured-repository check.
+      git(pagesRoot(root), [
+        "remote",
+        "set-url",
+        "origin",
+        toGitFileRemote(path.join(root, "missing", "csc1120", "csc1120pages"))
+      ]);
 
-    const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
-      saveRequest(root, [
-        { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
-      ]),
-      options(root)
-    );
+      const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
+        saveRequest(root, [
+          { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
+        ]),
+        options(root)
+      );
 
-    expect(result.status).toBe("failure");
-    expect(result.diagnostics.map((item) => item.message).join(" ")).toMatch(/publish.*push/u);
-  });
+      expect(result.status).toBe("failure");
+      expect(result.diagnostics.map((item) => item.message).join(" ")).toMatch(/publish.*push/u);
+    });
 
-  it("regenerates affected pages when a roster section is removed", async () => {
-    const root = createRoot();
-    writeFixture(root);
-    initializePagesRepository(root);
-    const request: RosterRemoveRequest = {
-      courseFolderId: "course",
-      courseFolderPath: root,
-      termCode: "27s1",
-      sectionId: "001",
-      confirmed: true
-    };
+    it("regenerates affected pages when a roster section is removed", async () => {
+      const root = createRoot();
+      writeFixture(root);
+      initializePagesRepository(root);
+      const request: RosterRemoveRequest = {
+        courseFolderId: "course",
+        courseFolderPath: root,
+        termCode: "27s1",
+        sectionId: "001",
+        confirmed: true
+      };
 
-    const result = await removeRosterWithStudentRepositoryAccessPageRefresh(request, options(root));
+      const result = await removeRosterWithStudentRepositoryAccessPageRefresh(
+        request,
+        options(root)
+      );
 
-    expect(result.status).toBe("success");
-    expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab02")))).toBe(true);
-    expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab03")))).toBe(false);
-  });
-});
+      expect(result.status).toBe("success");
+      expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab02")))).toBe(true);
+      expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab03")))).toBe(false);
+    });
+  }
+);

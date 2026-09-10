@@ -79,8 +79,12 @@ export const AssignmentEditPage = ({
           setGradingCategory(value.gradingCategory);
         }
       })
-      .catch(() => setMessage("Unable to load assignment.yml for editing."))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        setMessage("Unable to load assignment.yml for editing.");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [selection]);
   const request = useMemo<AssignmentEditRequest | null>(
     () =>
@@ -353,7 +357,9 @@ export const AssignmentEditPage = ({
       <ConfirmationWithPreviewModal
         confirmLabel="Save assignment changes"
         isOpen={isConfirming && preview !== null}
-        onCancel={() => setIsConfirming(false)}
+        onCancel={() => {
+          setIsConfirming(false);
+        }}
         onConfirm={save}
         preview={preview === null ? undefined : <pre>{preview.content}</pre>}
         summary={`${title.trim() || "This assignment"} will be updated.`}

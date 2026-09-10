@@ -38,7 +38,7 @@ const setup = () => {
       ]
     }))
   };
-  registerAssignmentTemplateSyncIpc(ipc as never, service, () => true);
+  registerAssignmentTemplateSyncIpc(ipc, service, () => true);
   const invoke = async (channel: string, request: unknown): Promise<unknown> => {
     const handler = handlers.get(channel);
     if (handler === undefined) throw new Error("Handler missing");

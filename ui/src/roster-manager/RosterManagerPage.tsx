@@ -88,7 +88,9 @@ export const RosterManagerPage = ({
         setTerms(result.terms);
         setLoadMessage(result.diagnostics.map((item) => item.message).join(" ") || null);
       })
-      .catch(() => setLoadMessage("Unable to load terms for this course."));
+      .catch(() => {
+        setLoadMessage("Unable to load terms for this course.");
+      });
   }, [courseFolder.id, courseFolder.path]);
 
   const selectedTerm = terms.find((term) => term.code === termCode) ?? null;
@@ -329,7 +331,12 @@ export const RosterManagerPage = ({
         <section className="detail-panel roster-manager__selection">
           <label>
             Term
-            <select value={termCode} onChange={(event) => handleTermChange(event.target.value)}>
+            <select
+              value={termCode}
+              onChange={(event) => {
+                handleTermChange(event.target.value);
+              }}
+            >
               <option value="">Select a term</option>
               {terms.map((term) => (
                 <option key={term.code} value={term.code}>
@@ -452,7 +459,9 @@ export const RosterManagerPage = ({
                             <select
                               aria-label={`${label} row ${String(index + 1)}`}
                               value={row.status}
-                              onChange={(event) => updateRow(index, field, event.target.value)}
+                              onChange={(event) => {
+                                updateRow(index, field, event.target.value);
+                              }}
                             >
                               <option value="active">active</option>
                               <option value="dropped">dropped</option>
@@ -462,7 +471,9 @@ export const RosterManagerPage = ({
                             <input
                               aria-label={`${label} row ${String(index + 1)}`}
                               value={row[field]}
-                              onChange={(event) => updateRow(index, field, event.target.value)}
+                              onChange={(event) => {
+                                updateRow(index, field, event.target.value);
+                              }}
                             />
                           )}
                         </td>
@@ -548,7 +559,9 @@ export const RosterManagerPage = ({
               <input
                 type="checkbox"
                 checked={isRosterRemovalConfirmed}
-                onChange={(event) => setIsRosterRemovalConfirmed(event.target.checked)}
+                onChange={(event) => {
+                  setIsRosterRemovalConfirmed(event.target.checked);
+                }}
               />
               I understand this removes the entire roster.
             </label>
@@ -586,7 +599,9 @@ export const RosterManagerPage = ({
               <input
                 type="checkbox"
                 checked={isSectionRemovalConfirmed}
-                onChange={(event) => setIsSectionRemovalConfirmed(event.target.checked)}
+                onChange={(event) => {
+                  setIsSectionRemovalConfirmed(event.target.checked);
+                }}
               />
               I understand this removes the entire section.
             </label>
@@ -637,7 +652,9 @@ export const RosterManagerPage = ({
       <ConfirmationWithPreviewModal
         confirmLabel="Save roster"
         isOpen={isConfirmingSave && preview !== null}
-        onCancel={() => setIsConfirmingSave(false)}
+        onCancel={() => {
+          setIsConfirmingSave(false);
+        }}
         onConfirm={handleSave}
         preview={preview === null ? undefined : <pre>{preview.content}</pre>}
         summary={

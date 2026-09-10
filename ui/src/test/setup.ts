@@ -1,6 +1,16 @@
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, vi } from "vitest";
+
+/**
+ * Testing Library retries `findBy*` and `waitFor` for 1s by default. These pages render behind
+ * mocked IPC promises, which resolve in well under 200ms in isolation but can miss a 1s deadline
+ * under the parallel load of a full run -- surfacing as a misleading "Unable to find role" rather
+ * than a timeout. This deadline absorbs the load without masking a query that will never match.
+ */
+const ASYNC_QUERY_TIMEOUT_MS = 10000;
+
+configure({ asyncUtilTimeout: ASYNC_QUERY_TIMEOUT_MS });
 
 afterEach(() => {
   cleanup();
