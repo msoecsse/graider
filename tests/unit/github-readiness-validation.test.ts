@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type {
-  RawAssignmentConfig,
-  RawCourseConfig,
-  RawTermConfig
+  RawTermConfig,
+  ResolvedAssignmentConfig,
+  ResolvedCourseConfig
 } from "../../src/config/config-models.js";
 import { FakeGitHubClient } from "../../src/github/fake-github-client.js";
 import { validateGitHubReadiness } from "../../src/github/github-readiness-validation.js";
@@ -26,7 +26,7 @@ const README_FILE = "README.md";
 const STUDENT_ID = "jones";
 const GITHUB_USERNAME = "seanjones";
 
-const courseConfig: RawCourseConfig = {
+const courseConfig: ResolvedCourseConfig = {
   schema_version: 1,
   course: {
     code: "se2030",
@@ -74,7 +74,7 @@ const termConfig: RawTermConfig = {
   ]
 };
 
-const assignmentConfig: RawAssignmentConfig = {
+const assignmentConfig: ResolvedAssignmentConfig = {
   schema_version: 1,
   assignment: {
     slug: "lab04",
@@ -152,7 +152,7 @@ const createReadyClient = (
 
 const validateWith = async (
   githubClient: FakeGitHubClient,
-  assignment: RawAssignmentConfig = assignmentConfig
+  assignment: ResolvedAssignmentConfig = assignmentConfig
 ) =>
   validateGitHubReadiness({
     courseConfig,
@@ -165,7 +165,7 @@ const validateWith = async (
 const expectErrorCode = async (
   githubClient: FakeGitHubClient,
   code: string,
-  assignment: RawAssignmentConfig = assignmentConfig
+  assignment: ResolvedAssignmentConfig = assignmentConfig
 ): Promise<void> => {
   const result = await validateWith(githubClient, assignment);
 

@@ -316,6 +316,13 @@ const createUnusedOctokit = (): OctokitRestClientLike => {
         update: unusedMethod,
         createOrUpdateFileContents: unusedMethod
       },
+      pulls: {
+        create: unusedMethod,
+        list: unusedMethod
+      },
+      git: {
+        deleteRef: unusedMethod
+      },
       teams: {
         getByName: unusedMethod,
         checkPermissionsForRepoInOrg: unusedMethod,

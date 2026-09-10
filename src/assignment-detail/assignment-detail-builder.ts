@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { loadGraiderConfig } from "../config/config-loader.js";
-import type { LoadedGraiderConfig, RawCourseConfig } from "../config/config-models.js";
+import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { getEffectiveGrading } from "../config/effective-grading.js";
 import { DISABLED_GRADING_MODE, DISABLED_STUDENT_PUBLISH_MODE } from "../config/config-schemas.js";
 import type { CommandStatus } from "../core/command-result.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
@@ -75,9 +76,6 @@ export const createEmptyAssignmentDetailResult = (
 
 const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
-
-const getEffectiveGrading = (config: LoadedGraiderConfig): RawCourseConfig["grading"] =>
-  config.assignment.grading ?? config.course.grading;
 
 const createRosterSummary = (
   config: LoadedGraiderConfig

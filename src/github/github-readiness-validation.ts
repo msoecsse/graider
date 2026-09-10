@@ -1,8 +1,10 @@
 import type {
-  RawAssignmentConfig,
   RawCourseConfig,
-  RawTermConfig
+  RawTermConfig,
+  ResolvedAssignmentConfig,
+  ResolvedCourseConfig
 } from "../config/config-models.js";
+import { resolveEffectiveGrading } from "../config/effective-grading.js";
 import { parseTemplateRepository } from "../config/github-config-validation.js";
 import { DiagnosticCode, createConfigDiagnostic } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
@@ -21,9 +23,9 @@ const README_FILE = "README.md";
 const EMPTY_COUNT = 0;
 
 export interface GitHubReadinessValidationInput {
-  courseConfig: RawCourseConfig;
+  courseConfig: ResolvedCourseConfig;
   termConfig: RawTermConfig;
-  assignmentConfig: RawAssignmentConfig;
+  assignmentConfig: ResolvedAssignmentConfig;
   students: RosterStudent[];
   githubClient: GitHubClient;
   validateTemplateWorkflow?: boolean;
@@ -148,8 +150,8 @@ const validateTemplateRepositoryFields = (
 ];
 
 const validateTemplateRepository = async (
-  courseConfig: RawCourseConfig,
-  assignmentConfig: RawAssignmentConfig,
+  courseConfig: ResolvedCourseConfig,
+  assignmentConfig: ResolvedAssignmentConfig,
   githubClient: GitHubClient
 ): Promise<Diagnostic[]> => {
   const parsedRepository = parseTemplateRepository(
@@ -190,11 +192,6 @@ const validateTemplateRepository = async (
     return [normalizeGitHubError(error)];
   }
 };
-
-const getEffectiveGrading = (
-  courseConfig: RawCourseConfig,
-  assignmentConfig: RawAssignmentConfig
-): RawCourseConfig["grading"] => assignmentConfig.grading ?? courseConfig.grading;
 
 const createTemplateWorkflowMissingDiagnostic = (
   reference: TemplateRepositoryReference,
@@ -244,11 +241,11 @@ const validateTemplateWorkflowContent = (
 };
 
 const validateTemplateWorkflow = async (
-  courseConfig: RawCourseConfig,
-  assignmentConfig: RawAssignmentConfig,
+  courseConfig: ResolvedCourseConfig,
+  assignmentConfig: ResolvedAssignmentConfig,
   githubClient: GitHubClient
 ): Promise<Diagnostic[]> => {
-  const grading = getEffectiveGrading(courseConfig, assignmentConfig);
+  const grading = resolveEffectiveGrading(courseConfig, assignmentConfig);
 
   if (!grading.enabled || grading.workflow === undefined) {
     return [];

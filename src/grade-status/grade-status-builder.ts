@@ -1,4 +1,5 @@
-import type { LoadedGraiderConfig, RawCourseConfig } from "../config/config-models.js";
+import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { getEffectiveGrading } from "../config/effective-grading.js";
 import { DISABLED_GRADING_MODE } from "../config/config-schemas.js";
 import { loadGraiderConfig } from "../config/config-loader.js";
 import type { CommandStatus } from "../core/command-result.js";
@@ -90,9 +91,6 @@ export const createEmptyAssignmentGradeStatusResult = (
   repositories: [],
   actions: null
 });
-
-const getEffectiveGrading = (config: LoadedGraiderConfig): RawCourseConfig["grading"] =>
-  config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
 
 const createGradingNotConfiguredWarning = (): Diagnostic =>
   createWarningDiagnostic(

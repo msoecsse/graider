@@ -544,7 +544,7 @@ export class OctokitGitHubClient implements GitHubClient {
   }
 
   async createPullRequest(input: CreatePullRequestInput): Promise<GitHubPullRequest> {
-    return mapPullRequest(await this.run(() => this.octokit.rest.pulls.create(input)));
+    return mapPullRequest(await this.run(() => this.octokit.rest.pulls.create({ ...input })));
   }
 
   async deleteRepositoryBranch(

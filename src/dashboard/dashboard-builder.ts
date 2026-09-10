@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type {
-  RawAssignmentConfig,
-  RawCourseConfig,
-  RawTermConfig
+  RawTermConfig,
+  ResolvedAssignmentConfig,
+  ResolvedCourseConfig
 } from "../config/config-models.js";
+import { resolveAssignmentConfig, resolveCourseConfig } from "../config/config-loader.js";
+import { resolveEffectiveGrading } from "../config/effective-grading.js";
 import { parseTemplateRepository } from "../config/github-config-validation.js";
 import { loadAssignmentConfig } from "../config/load-assignment-config.js";
 import { loadCourseConfig } from "../config/load-course-config.js";
@@ -110,7 +112,7 @@ export interface BuildDashboardInput {
 
 interface LoadedCourse {
   readonly repoRoot: string;
-  readonly config: RawCourseConfig;
+  readonly config: ResolvedCourseConfig;
   readonly diagnostics: Diagnostic[];
 }
 
@@ -123,7 +125,7 @@ interface LoadedTerm {
 
 interface LoadedAssignmentSummary {
   readonly summary: DashboardAssignmentSummary;
-  readonly config?: RawAssignmentConfig;
+  readonly config?: ResolvedAssignmentConfig;
 }
 
 interface DashboardGithubCheckCache {
@@ -230,7 +232,7 @@ const loadCourse = (cwd: string): LoadedCourse | { diagnostics: Diagnostic[] } =
 
   return {
     repoRoot: rootResult.repoRoot,
-    config: loadResult.value,
+    config: resolveCourseConfig(loadResult.value),
     diagnostics: validateCourseConfig(COURSE_CONFIG_PATH, loadResult.value)
   };
 };
@@ -509,11 +511,6 @@ const compareRecentAssignments = (
   return titleComparison === SORT_EQUAL ? left.slug.localeCompare(right.slug) : titleComparison;
 };
 
-const getEffectiveGrading = (
-  courseConfig: RawCourseConfig,
-  assignmentConfig: RawAssignmentConfig
-): RawCourseConfig["grading"] => assignmentConfig.grading ?? courseConfig.grading;
-
 const getAssignmentApplyState = (
   repoRoot: string,
   termSlug: string,
@@ -526,13 +523,13 @@ const getAssignmentApplyState = (
 
 const createAssignmentSummary = (
   repoRoot: string,
-  courseConfig: RawCourseConfig,
-  assignmentConfig: RawAssignmentConfig,
+  courseConfig: ResolvedCourseConfig,
+  assignmentConfig: ResolvedAssignmentConfig,
   assignmentFile: string,
   expectedSlug: string,
   diagnostics: Diagnostic[]
 ): DashboardAssignmentSummary => {
-  const grading = getEffectiveGrading(courseConfig, assignmentConfig);
+  const grading = resolveEffectiveGrading(courseConfig, assignmentConfig);
   const assignmentStatus = mapAssignmentStatus(assignmentConfig.assignment.status);
 
   return {
@@ -700,7 +697,7 @@ const checkWorkflowReadiness = async (
 const checkAssignmentGithubReadiness = async (
   cache: DashboardGithubCheckCache,
   githubClient: GitHubClient,
-  courseConfig: RawCourseConfig,
+  courseConfig: ResolvedCourseConfig,
   loadedAssignment: LoadedAssignmentSummary
 ): Promise<LoadedAssignmentSummary> => {
   const assignment = loadedAssignment.summary;
@@ -812,7 +809,7 @@ const checkAssignmentGithubReadiness = async (
 
 const loadAssignmentSummary = (
   repoRoot: string,
-  courseConfig: RawCourseConfig,
+  courseConfig: ResolvedCourseConfig,
   termSlug: string,
   assignmentSlug: string
 ): LoadedAssignmentSummary => {
@@ -832,13 +829,14 @@ const loadAssignmentSummary = (
   }
 
   const diagnostics = validateAssignmentConfig(assignmentFile, loadResult.value, assignmentSlug);
+  const assignmentConfig = resolveAssignmentConfig(loadResult.value);
 
   return {
-    config: loadResult.value,
+    config: assignmentConfig,
     summary: createAssignmentSummary(
       repoRoot,
       courseConfig,
-      loadResult.value,
+      assignmentConfig,
       assignmentFile,
       assignmentSlug,
       diagnostics
@@ -848,7 +846,7 @@ const loadAssignmentSummary = (
 
 const loadAssignmentSummaries = (
   repoRoot: string,
-  courseConfig: RawCourseConfig,
+  courseConfig: ResolvedCourseConfig,
   termSlug: string
 ): LoadedAssignmentSummary[] => {
   const assignmentsDirectory = path.join(
@@ -1034,7 +1032,7 @@ const buildCard = async (
   repoRoot: string,
   githubClient: GitHubClient,
   githubCache: DashboardGithubCheckCache,
-  courseConfig: RawCourseConfig,
+  courseConfig: ResolvedCourseConfig,
   courseDiagnostics: readonly Diagnostic[],
   term: LoadedTerm
 ): Promise<DashboardCard> => {

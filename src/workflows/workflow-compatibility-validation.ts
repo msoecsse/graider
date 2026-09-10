@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { LoadedGraiderConfig, RawCourseConfig } from "../config/config-models.js";
+import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { type EffectiveGradingConfig, getEffectiveGrading } from "../config/effective-grading.js";
 import {
   GRADING_WORKFLOW_MISSING_CODE,
   WORKFLOW_DISPATCH_UNSUPPORTED_CODE,
@@ -19,7 +20,7 @@ import {
 
 const PRESET_GRADING_MODE = "preset";
 
-type GradingConfig = RawCourseConfig["grading"];
+type GradingConfig = EffectiveGradingConfig;
 
 interface WorkflowCandidate {
   readonly absolutePath: string;
@@ -31,9 +32,6 @@ export interface WorkflowCompatibilityValidationResult {
   readonly errors: Diagnostic[];
   readonly workflowStatus: "not_required" | "found" | "missing" | "invalid";
 }
-
-const getEffectiveGrading = (config: LoadedGraiderConfig): GradingConfig =>
-  config.assignment.grading ?? config.course.grading;
 
 const createConfiguredWorkflowCandidate = (
   repoRoot: string,

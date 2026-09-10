@@ -30,7 +30,9 @@ const setup = () => {
     loadManifest: vi.fn(() => manifest),
     writeManifest: vi.fn(() => ({ status: "success" as const })),
     createClient: vi.fn(() => new FakeGitHubClient()),
-    resolveToken: vi.fn(() => "resolved-token"),
+    resolveToken: vi.fn<AssignmentTemplateSyncContextDependencies["resolveToken"]>(
+      () => "resolved-token"
+    ),
     runSync: vi.fn<AssignmentTemplateSyncContextDependencies["runSync"]>(async () => ({
       status: "success" as const,
       result: {

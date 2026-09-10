@@ -388,7 +388,7 @@ test, a lint error, or a typecheck error.
 
 ---
 
-## Task 14 — Fix the 97 typecheck errors so `npm run typecheck` passes — OPEN
+## Task 14 — Fix the 97 typecheck errors so `npm run typecheck` passes — DONE 2026-09-10
 
 Analyzed 2026-09-10. All 97 predate this work (verified with every local change stashed). They are
 not 97 independent problems: **79 of them come from one pattern**, and the remaining 18 sit in two
@@ -417,16 +417,28 @@ carries `| undefined` — and helpers annotated with the **Raw** type throw the 
 annotation re-widens it. Every caller then reads `grading.enabled` / `grading.workflow` and trips
 TS18048.
 
-- [ ] Consolidate the 10 copies into one exported helper (suggest
-      `src/config/effective-grading.ts`) returning `NonNullable<RawCourseConfig["grading"]>`, and
-      delete the local copies. `grep -rn "getEffectiveGrading = " src/` lists them.
-- [ ] Narrow the parameters that take a loaded assignment from `RawAssignmentConfig` to
-      `ResolvedAssignmentConfig` — that clears the 8 `template` errors
-      (`src/github/github-readiness-validation.ts:157,166` and the `loadedAssignment.config.template`
-      pair).
-- [ ] Do **not** silence these with `?.` or non-null assertions. The types already encode the
-      invariant; the fix is to stop widening it. Where a genuinely raw, unvalidated config is being
-      inspected (`src/config/config-validation.ts`, 14 errors) the optionality is real — guard there.
+- [x] Consolidated into `src/config/effective-grading.ts`, which exports
+      `EffectiveGradingConfig = NonNullable<RawCourseConfig["grading"]>` plus two entry points:
+      `getEffectiveGrading(config)` for the seven `LoadedGraiderConfig` callers and
+      `resolveEffectiveGrading(courseConfig, assignmentConfig)` for the two that hold the two
+      configs separately. All 10 local copies deleted. `workflow.command.ts` had a third shape
+      (it passed the two `grading` blocks) and now passes the loaded config like everyone else.
+- [x] `GitHubReadinessValidationInput` now takes `ResolvedCourseConfig`/`ResolvedAssignmentConfig`.
+      All three production callers (`apply`, `plan`, `validate`) already passed
+      `configResult.config.course`/`.assignment`, so this is a narrowing with no call-site change.
+      `validateTeams` keeps `RawCourseConfig` — it only reads `github`.
+- [x] No `?.` or non-null assertions were added anywhere. Two places needed more than an
+      annotation change: - `config-validation.ts` already had the guard: `validateGradingConfig` returns early on
+      `grading === undefined`, then handed the value to six helpers each annotated
+      `RawCourseConfig["grading"]`, re-widening it. Those six now take `EffectiveGradingConfig`;
+      the dispatcher keeps the optional parameter and the guard. - `dashboard-builder.ts` reads `loadCourseConfig`/`loadAssignmentConfig` directly rather
+      than through `loadGraiderConfig`, so its configs genuinely were raw. Rather than guard in
+      a dozen places, `resolveCourseConfig`/`resolveAssignmentConfig` are now exported from
+      `config-loader.ts` and applied at both load sites, so the dashboard gets the same
+      defaults (`{ enabled: false, mode: "no-grading" }`, `{ repository: "", branch: "" }`) the
+      CLI path gets. This is also a runtime fix: `createAssignmentSummary` read
+      `assignmentConfig.template.repository` unguarded, which threw on a config missing the
+      block. The missing block is still reported through `validateAssignmentConfig`.
 
 **Verified:** dropping the return annotation in `assignment-detail-builder.ts` took that file from
 6 errors to 0, with no other change.
@@ -438,30 +450,47 @@ TS18048.
 
 ### 14b — Template-sync test types under `exactOptionalPropertyTypes` (14 errors)
 
-- [ ] `TemplateSyncAnchors` is built with `string | undefined` fields but declared with required
-      `string` (`src/template-sync/production-repository-sync-executor.ts:38`, plus
-      `tests/unit/template-sync/assignment-template-sync.test.ts:119`). Decide whether an anchor
-      can legitimately be absent: if yes, declare the fields optional; if no, build them only once
-      both shas are known.
-- [ ] `tests/unit/template-sync/assignment-template-sync.test.ts` (7) and
-      `production-assignment-template-sync-service.test.ts` (6) fail on fake `runRepositorySync`
-      return shapes that are unions rather than the declared
-      `{ result; anchors?: Required<TemplateSyncAnchors> }`. Give the fakes the declared type.
-- [ ] `assignment-template-sync-context.test.ts:244` passes `undefined` for a `string` parameter.
+- [x] An anchor can legitimately be absent — that is exactly what
+      `templateSyncBaselineStatus: "baseline_required"` and the `hasRequiredAnchors` type guard
+      describe — and `TemplateSyncAnchors` already declares both shas `?: string`. The errors
+      were the two construction sites explicitly assigning `undefined`, which
+      `exactOptionalPropertyTypes` rejects. Both now build the object with the conditional
+      spread the rest of the repo uses, so the declared type is unchanged and
+      `Required<TemplateSyncAnchors>` keeps meaning "both shas known".
+- [x] `assignment-template-sync.test.ts`: `batchInput` is now annotated
+      `AssignmentTemplateSyncInput`, which forced the two real mismatches into the open — the
+      local `anchors` variable was typed `TemplateSyncAnchors` where `updateAnchors` supplies
+      `Required<TemplateSyncAnchors>`, and the `persistManifest` fake took an implicit `any`.
+- [x] `production-assignment-template-sync-service.test.ts` rewritten against the real
+      interfaces: typed `Manifest` and `AssignmentTemplateSyncResult` fixtures, `Bridge` derived
+      from `ProductionAssignmentTemplateSyncServiceInput["bridge"]`, and a real
+      `FakeGitHubClient` for the workspace. This removed all 12 of its `any`/unsafe-value lint
+      errors as well (15b).
+- [x] `assignment-template-sync-context.test.ts:244`: the `resolveToken` fake was
+      `vi.fn(() => "resolved-token")`, inferred as `() => string`, so
+      `mockReturnValueOnce(undefined)` was rejected even though the dependency returns
+      `string | undefined`. Typed the fake with
+      `vi.fn<AssignmentTemplateSyncContextDependencies["resolveToken"]>`.
 
 ### 14c — Three one-off signature mismatches (3 errors)
 
-- [ ] `src/execution/apply-executor.ts:971` — a `PlanOperationType` union is passed to a parameter
-      that only accepts the four permission/actions operations. Narrow the argument (or widen the
-      parameter) rather than casting.
-- [ ] `src/github/octokit-github-client.ts:547` — `CreatePullRequestInput` has no index signature,
-      so it is not assignable to `OctokitParameters` (`Record<string, unknown>`). Spread it into a
-      fresh object literal at the call, or give `OctokitParameters` a compatible shape.
-- [ ] `tests/cli/report.test.ts:302` — the mock Octokit is missing `pulls` and `git`. Add them (a
-      shared mock factory would stop this recurring; `tests/unit/github/octokit-github-client.test.ts`
-      already has `createMockOctokit`).
+- [x] `apply-executor.ts` — the inline `[...] as const` tuple is now a module-level
+      `REPOSITORY_UPDATE_PLAN_TYPES: readonly PlanOperationType[]`, so `.includes(operation.type)`
+      typechecks without a cast and the list is named.
+- [x] `octokit-github-client.ts:547` — spread into a fresh literal at the call
+      (`pulls.create({ ...input })`), leaving `CreatePullRequestInput` and `OctokitParameters`
+      alone.
+- [x] `tests/cli/report.test.ts` — added `pulls` (`create`, `list`) and `git` (`deleteRef`) to
+      `createUnusedOctokit`, wired to the same `unusedMethod` as its siblings. Did not extract a
+      shared factory: the two mocks differ in purpose (this one asserts nothing is called, the
+      other returns fixtures), so sharing would need parameterization that buys little here.
 
-**Acceptance:** `npx tsc --noEmit` reports zero errors, and `npm run typecheck` passes.
+**Acceptance met:** `npx tsc --noEmit` reports 0 errors (was 97) and `npm run typecheck` passes.
+Verified green afterwards: `tests/unit/config`, `tests/unit/github`,
+`tests/unit/github-readiness-validation.test.ts`, `tests/unit/execution`, `tests/unit/planning`,
+`tests/unit/manifest`, `tests/recovery`, `tests/unit/template-sync`, `tests/cli/report.test.ts`
+and the three `assignment-*` preview suites. `tests/unit/workflows/result-writer.test.ts` still
+fails 20 cases, unchanged — confirmed identical against a stashed baseline (Task 13 flakiness).
 
 ---
 

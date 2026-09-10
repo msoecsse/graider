@@ -1,4 +1,5 @@
 import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { getEffectiveGrading } from "../config/effective-grading.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { createGitHubDiagnostic, GitHubClientError } from "../github/github-errors.js";
 import type { GitHubClient } from "../github/github-client.js";
@@ -93,9 +94,6 @@ const normalizeGitHubError = (error: unknown): Diagnostic =>
         severity: "error",
         message: "Unexpected GitHub client failure during report collection."
       };
-
-const getEffectiveGrading = (config: LoadedGraiderConfig) =>
-  config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
 
 const getWorkflowRunStatus = (run: GitHubWorkflowRun | undefined): WorkflowRunStatus | undefined =>
   run === undefined ? undefined : run.status;

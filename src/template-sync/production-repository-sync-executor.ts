@@ -36,8 +36,14 @@ export const runProductionRepositoryTemplateSync = async (
           },
           currentTemplateCommitSha: targetTemplateCommitSha,
           anchors: {
-            templateCommitSha: repository.repository.templateCommitSha,
-            studentDefaultBranchCommitSha: repository.repository.studentDefaultBranchCommitSha,
+            ...(repository.repository.templateCommitSha === undefined
+              ? {}
+              : { templateCommitSha: repository.repository.templateCommitSha }),
+            ...(repository.repository.studentDefaultBranchCommitSha === undefined
+              ? {}
+              : {
+                  studentDefaultBranchCommitSha: repository.repository.studentDefaultBranchCommitSha
+                }),
             templateSyncBaselineStatus:
               repository.repository.templateSyncBaselineStatus ?? "baseline_required"
           },

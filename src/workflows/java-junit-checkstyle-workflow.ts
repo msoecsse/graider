@@ -1,4 +1,4 @@
-import type { RawCourseConfig } from "../config/config-models.js";
+import type { EffectiveGradingConfig } from "../config/effective-grading.js";
 import {
   RESULT_WRITER_SCRIPT_PATH,
   renderGradingResultWriterScript
@@ -18,7 +18,7 @@ const JAVAFX_VERSION = "25";
 const OUTPUT_DIRECTORY = "graider-output";
 
 export interface JavaJunitCheckstyleWorkflowInput {
-  readonly grading: RawCourseConfig["grading"];
+  readonly grading: EffectiveGradingConfig;
 }
 
 const indentWorkflowRunLine = (line: string): string => `          ${line}`;

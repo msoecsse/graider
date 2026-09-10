@@ -27,6 +27,7 @@ import {
 } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { RawAssignmentConfig, RawCourseConfig, RawTermConfig } from "./config-models.js";
+import type { EffectiveGradingConfig } from "./effective-grading.js";
 import {
   DISABLED_GRADING_MODE,
   DISABLED_STUDENT_PUBLISH_MODE,
@@ -118,10 +119,10 @@ const validateSchemaVersion = (filePath: string, schemaVersion: number): Diagnos
     ? []
     : [createInvalidSchemaVersionDiagnostic(filePath, schemaVersion)];
 
-const hasAnyWorkflowField = (grading: RawCourseConfig["grading"]): boolean =>
+const hasAnyWorkflowField = (grading: EffectiveGradingConfig): boolean =>
   WORKFLOW_GRADING_FIELDS.some((field) => grading[field] !== undefined);
 
-const hasAllWorkflowFields = (grading: RawCourseConfig["grading"]): boolean =>
+const hasAllWorkflowFields = (grading: EffectiveGradingConfig): boolean =>
   WORKFLOW_GRADING_FIELDS.every((field) => grading[field] !== undefined);
 
 const createMissingGradingFieldDiagnostic = (
@@ -138,7 +139,7 @@ const createMissingGradingFieldDiagnostic = (
 
 const validateEnabledGradingFields = (
   filePath: string,
-  grading: RawCourseConfig["grading"],
+  grading: EffectiveGradingConfig,
   owner: string
 ): Diagnostic[] => {
   if (grading.workflow === undefined) {
@@ -179,7 +180,7 @@ const validateEnabledGradingFields = (
 
 const validatePresetGrading = (
   filePath: string,
-  grading: RawCourseConfig["grading"],
+  grading: EffectiveGradingConfig,
   owner: string
 ): Diagnostic[] => {
   if (grading.preset === undefined) {
@@ -213,7 +214,7 @@ const validatePresetGrading = (
 
 const validateEnabledGradingConfig = (
   filePath: string,
-  grading: RawCourseConfig["grading"],
+  grading: EffectiveGradingConfig,
   owner: string
 ): Diagnostic[] => {
   const mode = grading.mode ?? LEGACY_GRADING_MODE;
@@ -257,7 +258,7 @@ const validateEnabledGradingConfig = (
 
 const validateDisabledGradingConfig = (
   filePath: string,
-  grading: RawCourseConfig["grading"],
+  grading: EffectiveGradingConfig,
   owner: string
 ): Diagnostic[] => {
   if (grading.mode !== undefined && grading.mode !== DISABLED_GRADING_MODE) {

@@ -1,25 +1,61 @@
 import { describe, expect, it, vi } from "vitest";
-import { runProductionAssignmentTemplateSyncService } from "../../../src/template-sync/production-assignment-template-sync-service.js";
+import type { Manifest } from "../../../src/manifest/manifest-models.js";
+import type { ProductionAssignmentTemplateSyncBridgeInput } from "../../../src/template-sync/production-assignment-template-sync-bridge.js";
+import {
+  runProductionAssignmentTemplateSyncService,
+  type ProductionAssignmentTemplateSyncServiceInput
+} from "../../../src/template-sync/production-assignment-template-sync-service.js";
+import type { AssignmentTemplateSyncResult } from "../../../src/template-sync/assignment-template-sync.js";
+import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
 
-const base = (bridge: any, env?: Record<string, string>) => ({
+type Bridge = NonNullable<ProductionAssignmentTemplateSyncServiceInput["bridge"]>;
+
+const manifest: Manifest = {
+  schemaVersion: 2,
+  assignment: {
+    termCode: "27s1",
+    courseCode: "se2030",
+    assignmentSlug: "lab04",
+    assignmentTitle: "Lab 04"
+  },
+  source: { sourceFiles: [], inputFingerprint: "fingerprint" },
+  template: { repository: "course/template", branch: "main" },
+  repositories: [],
+  operationHistory: [],
+  warnings: [],
+  errors: []
+};
+
+const completed: AssignmentTemplateSyncResult = {
+  status: "completed",
+  templateCommitSha: "sha",
+  outcomes: [],
+  manifest
+};
+
+const base = (
+  bridge: Bridge,
+  env?: Record<string, string>
+): ProductionAssignmentTemplateSyncServiceInput => ({
   configuredOrganization: "course",
   configuredTemplateRepository: "course/template",
-  env,
+  ...(env === undefined ? {} : { env }),
   bridge,
-  manifest: {} as any,
-  options: {} as any,
-  resolveCurrentTemplateCommitSha: async () => "sha",
-  persistManifest: async () => undefined,
-  workspace: { githubClient: {} as any }
+  manifest,
+  options: { yes: true, json: false, verbose: false },
+  resolveCurrentTemplateCommitSha: () => Promise.resolve("sha"),
+  persistManifest: () => Promise.resolve(undefined),
+  workspace: { githubClient: new FakeGitHubClient() }
 });
+
 describe("production assignment template-sync service", () => {
   it("uses Graider token precedence and never returns it", async () => {
-    const calls: any[] = [];
+    const calls: ProductionAssignmentTemplateSyncBridgeInput[] = [];
     const result = await runProductionAssignmentTemplateSyncService({
       ...base(
-        async (input: any) => {
+        (input) => {
           calls.push(input);
-          return { status: "completed" };
+          return Promise.resolve(completed);
         },
         { GRAIDER_GITHUB_TOKEN: "graider", GITHUB_TOKEN: "github" }
       )
@@ -32,7 +68,7 @@ describe("production assignment template-sync service", () => {
   });
 
   it("uses a token resolved by the trusted production caller and never returns it", async () => {
-    const bridge = vi.fn(async () => ({ status: "completed" }) as any);
+    const bridge = vi.fn<Bridge>(() => Promise.resolve(completed));
     const result = await runProductionAssignmentTemplateSyncService({
       ...base(bridge, { GRAIDER_GITHUB_TOKEN: " ", GITHUB_TOKEN: "" }),
       resolvedToken: " cli-secret "
@@ -43,7 +79,7 @@ describe("production assignment template-sync service", () => {
   });
 
   it("preserves github_token_required when no authentication source is available", async () => {
-    const bridge = vi.fn(async () => ({ status: "completed" }) as any);
+    const bridge = vi.fn<Bridge>(() => Promise.resolve(completed));
     const result = await runProductionAssignmentTemplateSyncService({
       ...base(bridge, {})
     });
@@ -53,7 +89,7 @@ describe("production assignment template-sync service", () => {
   });
 
   it("uses environment fallback and blocks invalid prerequisites", async () => {
-    const bridge = async () => ({ status: "completed" }) as any;
+    const bridge: Bridge = () => Promise.resolve(completed);
     await expect(
       runProductionAssignmentTemplateSyncService(base(bridge, { GITHUB_TOKEN: "fallback" }))
     ).resolves.toMatchObject({ status: "success" });

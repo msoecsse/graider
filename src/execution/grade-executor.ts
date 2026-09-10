@@ -1,4 +1,5 @@
 import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { getEffectiveGrading } from "../config/effective-grading.js";
 import {
   DiagnosticCode,
   createConfigDiagnostic,
@@ -71,9 +72,6 @@ const createInitialSummary = (targetsSelected: number): GradeExecutionSummary =>
   warnings: EMPTY_COUNT,
   errors: EMPTY_COUNT
 });
-
-const getEffectiveGrading = (config: LoadedGraiderConfig) =>
-  config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
 
 const normalizeGitHubError = (error: unknown, target: GradingRepositoryTarget): Diagnostic =>
   error instanceof GitHubClientError

@@ -138,12 +138,14 @@ const createSummary = (
   ...getGradingEnabled(course, assignment)
 });
 
-const resolveCourseConfig = (course: RawCourseConfig): ResolvedCourseConfig => ({
+export const resolveCourseConfig = (course: RawCourseConfig): ResolvedCourseConfig => ({
   ...course,
   grading: course.grading ?? { enabled: false, mode: "no-grading" }
 });
 
-const resolveAssignmentConfig = (assignment: RawAssignmentConfig): ResolvedAssignmentConfig => ({
+export const resolveAssignmentConfig = (
+  assignment: RawAssignmentConfig
+): ResolvedAssignmentConfig => ({
   ...assignment,
   template: assignment.template ?? { repository: "", branch: "" }
 });

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { syncAssignmentTemplate } from "../../../src/template-sync/assignment-template-sync.js";
+import {
+  syncAssignmentTemplate,
+  type AssignmentTemplateSyncInput
+} from "../../../src/template-sync/assignment-template-sync.js";
 import type { Manifest, ManifestRepositoryRecord } from "../../../src/manifest/manifest-models.js";
 import type {
+  TemplateSyncAnchors,
   TemplateSyncGitGateway,
-  TemplateSyncInput,
   TemplateSyncPullRequestGateway,
   TemplateTree
 } from "../../../src/template-sync/template-sync.js";
@@ -100,14 +103,15 @@ const batchInput = (
   currentManifest: Manifest,
   gateway: Gateway,
   pullRequests: PullRequests,
-  persistManifest = async () => undefined,
+  persistManifest: AssignmentTemplateSyncInput["persistManifest"] = () =>
+    Promise.resolve(undefined),
   yes = true
-) => ({
+): AssignmentTemplateSyncInput => ({
   manifest: currentManifest,
   options: { yes, json: false, verbose: false },
   resolveCurrentTemplateCommitSha: async () => "template-new",
   runRepositorySync: async (record: ManifestRepositoryRecord, currentTemplateCommitSha: string) => {
-    let anchors: TemplateSyncInput["anchors"] | undefined;
+    let anchors: Required<TemplateSyncAnchors> | undefined;
     const result = await syncTemplateUpdate({
       templateRepository: template,
       studentRepository: {
@@ -117,8 +121,14 @@ const batchInput = (
       },
       currentTemplateCommitSha,
       anchors: {
-        templateCommitSha: record.repository.templateCommitSha,
-        studentDefaultBranchCommitSha: record.repository.studentDefaultBranchCommitSha,
+        ...(record.repository.templateCommitSha === undefined
+          ? {}
+          : { templateCommitSha: record.repository.templateCommitSha }),
+        ...(record.repository.studentDefaultBranchCommitSha === undefined
+          ? {}
+          : {
+              studentDefaultBranchCommitSha: record.repository.studentDefaultBranchCommitSha
+            }),
         templateSyncBaselineStatus:
           record.repository.templateSyncBaselineStatus ?? "baseline_required"
       },
@@ -149,8 +159,9 @@ describe("syncAssignmentTemplate", () => {
         ]),
         gateway,
         pullRequests,
-        async (next) => {
+        (next) => {
           persisted = next;
+          return Promise.resolve(undefined);
         }
       )
     );
@@ -187,7 +198,7 @@ describe("syncAssignmentTemplate", () => {
         manifest([repository("updated", "updated")]),
         gateway,
         pullRequests,
-        async () => undefined,
+        () => Promise.resolve(undefined),
         false
       )
     );

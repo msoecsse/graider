@@ -19,7 +19,7 @@ import {
   updatePermissionState,
   upsertRepositoryRecord
 } from "../manifest/manifest-updater.js";
-import type { PlanOperation } from "../planning/operation-models.js";
+import type { PlanOperation, PlanOperationType } from "../planning/operation-models.js";
 import type { Plan } from "../planning/plan-models.js";
 import type { ApplyRepositoryTarget } from "../planning/repository-targets.js";
 import type { RosterStudent } from "../roster/roster-models.js";
@@ -37,6 +37,12 @@ const FACULTY_PERMISSION: Exclude<GitHubPermission, "none"> = "admin";
 const GRADER_PERMISSION: Exclude<GitHubPermission, "none"> = "maintain";
 const CREATE_REPOSITORY_OPERATION = "createRepositoryFromTemplate";
 const CREATE_REPOSITORY_PLAN_TYPE = "create_repository_from_template";
+const REPOSITORY_UPDATE_PLAN_TYPES: readonly PlanOperationType[] = [
+  "add_student_collaborator",
+  "add_faculty_team_permission",
+  "add_grader_team_permission",
+  "enable_actions"
+];
 
 const PERMISSION_RANK = {
   none: 0,
@@ -961,14 +967,7 @@ export const executeApplyPlan = async (
         (operation.type === CREATE_REPOSITORY_PLAN_TYPE && state.summary.created > createdBefore),
       updated:
         current.updated ||
-        ((
-          [
-            "add_student_collaborator",
-            "add_faculty_team_permission",
-            "add_grader_team_permission",
-            "enable_actions"
-          ] as const
-        ).includes(operation.type) &&
+        (REPOSITORY_UPDATE_PLAN_TYPES.includes(operation.type) &&
           state.summary.verified > verifiedBefore),
       failed: current.failed || state.errors.length > errorsBefore
     });
