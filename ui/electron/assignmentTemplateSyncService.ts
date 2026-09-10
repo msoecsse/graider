@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { AssignmentDetailRequest } from "./ipc.js";
-import { createNodeProcessRunner } from "./commandRunner.js";
+import type { ProcessRunner } from "./commandRunner.js";
 import { resolveGithubToken, type GithubTokenResolution } from "./tokenResolver.js";
 
 export type AssignmentTemplateSyncRequest = AssignmentDetailRequest;
@@ -79,9 +79,8 @@ const loadBackend = (): AssignmentTemplateSyncBackend =>
   ).assignmentTemplateSyncContextService;
 
 export const createAssignmentTemplateSyncService = (
-  backend: () => AssignmentTemplateSyncBackend = loadBackend,
-  resolveToken: ResolveGithubToken = async () =>
-    await resolveGithubToken({ runner: createNodeProcessRunner() })
+  backend: () => AssignmentTemplateSyncBackend,
+  resolveToken: ResolveGithubToken
 ): AssignmentTemplateSyncService => ({
   prepare: async (request) => backend().prepare(request),
   execute: async (request) => {
@@ -106,4 +105,15 @@ export const createAssignmentTemplateSyncService = (
   }
 });
 
-export const assignmentTemplateSyncService = createAssignmentTemplateSyncService();
+/**
+ * Builds the service against a caller-supplied runner. The runner carries the Graider CLI
+ * resolution options, so sharing the one the app already built keeps a single resolution path
+ * instead of a second, unconfigured one that would fall back to a bare PATH lookup.
+ */
+export const createAssignmentTemplateSyncServiceWithRunner = (
+  runner: ProcessRunner
+): AssignmentTemplateSyncService =>
+  createAssignmentTemplateSyncService(
+    loadBackend,
+    async () => await resolveGithubToken({ runner })
+  );

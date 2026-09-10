@@ -5,9 +5,10 @@ import { getAssignmentApplyPreview } from "./assignmentApplyPreviewRunner.js";
 import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
 import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
+import { runGraiderCliPreflight } from "./graiderCliPreflight.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
 import { registerAssignmentTemplateSyncIpc } from "./assignmentTemplateSyncIpc.js";
-import { assignmentTemplateSyncService } from "./assignmentTemplateSyncService.js";
+import { createAssignmentTemplateSyncServiceWithRunner } from "./assignmentTemplateSyncService.js";
 import { saveStudentAccessPagesConfig } from "./studentAccessPagesConfigService.js";
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService.js";
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
@@ -366,6 +367,10 @@ export const registerIpcHandlers = (): void => {
   };
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
+  ipcMain.handle(
+    IPC_CHANNELS.getGraiderCliStatus,
+    async () => await runGraiderCliPreflight({ runner: processRunner })
+  );
   ipcMain.handle(IPC_CHANNELS.getCoursePublishStatus, async (_event, courseFolderId: unknown) => {
     const courseFolderPath = getRegisteredCourseFolderPath(courseFolderId);
     if (courseFolderPath === null) throw new Error("A registered course folder is required.");
@@ -806,7 +811,7 @@ export const registerIpcHandlers = (): void => {
 
   registerAssignmentTemplateSyncIpc(
     ipcMain,
-    assignmentTemplateSyncService,
+    createAssignmentTemplateSyncServiceWithRunner(processRunner),
     isRegisteredAssignmentSetupCourse
   );
 

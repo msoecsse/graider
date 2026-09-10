@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE,
   BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE,
+  getGraiderCliStartError,
   createNodeProcessRunner,
   getBundledGraiderCliPath,
   getDevelopmentGraiderCliPath,
@@ -15,6 +16,10 @@ import {
 const COMMAND_RUNNER_SOURCE = path.join(__dirname, "commandRunner.ts");
 const SUCCESS_EXIT_CODE = 0;
 const WINDOWS_EXEC_PATH = "C:\\Program Files\\Graider\\Graider.exe";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("commandRunner", () => {
   it("runs a command with an argument array and captures stdout, stderr, and exit code", async () => {
@@ -569,5 +574,55 @@ describe("commandRunner", () => {
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("names the location that was tried in the start error", () => {
+    const helperPath = path.join("C:\Program Files", "Graider", "dist-graider-cli", "index.js");
+
+    expect(
+      getGraiderCliStartError(BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE, {
+        runnerMode: "bundled",
+        command: "graider",
+        args: ["dashboard", "--json"],
+        cwd: null,
+        executablePath: WINDOWS_EXEC_PATH,
+        helperPath,
+        resolutionSource: null
+      })?.message
+    ).toBe(`${BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE} (tried unresolved: ${helperPath})`);
+  });
+
+  it("keeps the bare start-error message when no diagnostic is available", () => {
+    expect(getGraiderCliStartError(BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE)?.message).toBe(
+      BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE
+    );
+  });
+
+  it("logs the attempted CLI location under GRAIDER_UI_DEBUG", async () => {
+    const logged: string[] = [];
+    vi.stubEnv("GRAIDER_UI_DEBUG", "1");
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation((message: unknown) => {
+      logged.push(String(message));
+    });
+
+    try {
+      const runner = createNodeProcessRunner({
+        graiderCli: {
+          mode: "bundled",
+          appPath: path.join(process.cwd(), "missing-packaged-app"),
+          execPath: process.execPath
+        }
+      });
+
+      await runner({ command: "graider", args: ["dashboard", "--json"] });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    expect(logged.join(" ")).toContain("Graider CLI launch failed");
+    expect(logged.join(" ")).toContain("mode=bundled");
+    expect(logged.join(" ")).toContain(
+      getBundledGraiderCliPath(path.join(process.cwd(), "missing-packaged-app"))
+    );
   });
 });

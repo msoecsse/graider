@@ -402,6 +402,8 @@ var GitHubClientError = class extends Error {
   diagnosticCode;
   retryAfterSeconds;
   retryable;
+  status;
+  githubMessage;
   constructor(kind, message, options) {
     super(redactString(message));
     this.name = "GitHubClientError";
@@ -411,17 +413,32 @@ var GitHubClientError = class extends Error {
     if (options?.retryAfterSeconds !== void 0) {
       this.retryAfterSeconds = options.retryAfterSeconds;
     }
+    if (options?.status !== void 0) {
+      this.status = options.status;
+    }
+    if (options?.githubMessage !== void 0) {
+      this.githubMessage = redactString(options.githubMessage);
+    }
     Object.setPrototypeOf(this, new.target.prototype);
   }
 };
 var isRetryableGitHubError = (error) => error.retryable;
+var describeGitHubError = (error) => {
+  const details = [
+    ...error.status === void 0 ? [] : [String(error.status)],
+    ...error.githubMessage === void 0 || error.githubMessage === error.message ? [] : [error.githubMessage]
+  ];
+  return details.length === 0 ? error.message : `${error.message} (${details.join(": ")})`;
+};
 var createGitHubDiagnostic = (error) => ({
   code: error.diagnosticCode,
   severity: "error",
-  message: error.message,
+  message: describeGitHubError(error),
   context: {
     kind: error.kind,
     retryable: error.retryable,
+    ...error.status === void 0 ? {} : { status: error.status },
+    ...error.githubMessage === void 0 ? {} : { githubMessage: error.githubMessage },
     ...error.retryAfterSeconds === void 0 ? {} : { retryAfterSeconds: error.retryAfterSeconds }
   }
 });
@@ -4532,7 +4549,6 @@ var HTTP_STATUS_FOUND = 302;
 var HTTP_STATUS_FORBIDDEN = 403;
 var HTTP_STATUS_NOT_FOUND = 404;
 var HTTP_STATUS_TOO_MANY_REQUESTS = 429;
-var HTTP_STATUS_SERVER_ERROR_MIN = 500;
 var DEFAULT_BRANCH_FALLBACK = "main";
 var ROOT_CONTENT_PATH = "";
 var FIRST_PAGE_LIMIT = 1;
@@ -4995,23 +5011,31 @@ function normalizeOctokitError(error) {
   }
   const status = getErrorStatus(error);
   const retryAfterSeconds = getRetryAfterSeconds(error);
+  const githubMessage = getErrorMessage(error);
+  const details = {
+    ...status === void 0 ? {} : { status },
+    ...githubMessage === void 0 ? {} : { githubMessage }
+  };
   if (status === HTTP_STATUS_UNAUTHORIZED) {
-    return new GitHubClientError("auth_failed", "GitHub authentication failed.");
+    return new GitHubClientError("auth_failed", "GitHub authentication failed.", details);
   }
   if (status === HTTP_STATUS_TOO_MANY_REQUESTS || status === HTTP_STATUS_FORBIDDEN && isRateLimitError(error)) {
-    const options = retryAfterSeconds === void 0 ? {} : { retryAfterSeconds };
-    return new GitHubClientError("rate_limited", "GitHub rate limit was reached.", options);
+    return new GitHubClientError("rate_limited", "GitHub rate limit was reached.", {
+      ...details,
+      ...retryAfterSeconds === void 0 ? {} : { retryAfterSeconds }
+    });
   }
   if (status === HTTP_STATUS_FORBIDDEN) {
-    return new GitHubClientError("permission_denied", "GitHub permission was denied.");
-  }
-  if (status !== void 0 && status >= HTTP_STATUS_SERVER_ERROR_MIN) {
-    return new GitHubClientError("api_error", "GitHub API request failed.");
+    return new GitHubClientError("permission_denied", "GitHub permission was denied.", details);
   }
   if (status !== void 0) {
-    return new GitHubClientError("api_error", "GitHub API request failed.");
+    return new GitHubClientError("api_error", "GitHub API request failed.", details);
   }
-  return new GitHubClientError("network_error", "GitHub network request failed.");
+  return new GitHubClientError("network_error", "GitHub network request failed.", details);
+}
+function getErrorMessage(error) {
+  const message = asRecord(error).message;
+  return typeof message === "string" && message.length > EMPTY_LENGTH2 ? message : void 0;
 }
 function createArtifactDecodeError() {
   return new GitHubClientError("api_error", "GitHub artifact download could not be decoded.");
@@ -5603,6 +5627,48 @@ var writeManifest = (manifestPath, manifest) => {
   }
 };
 
+// src/execution/template-content-wait.ts
+var DEFAULT_TEMPLATE_CONTENT_ATTEMPTS = 10;
+var DEFAULT_TEMPLATE_CONTENT_INITIAL_BACKOFF_MS = 1e3;
+var DEFAULT_TEMPLATE_CONTENT_BACKOFF_MULTIPLIER = 2;
+var DEFAULT_TEMPLATE_CONTENT_MAX_BACKOFF_MS = 4e3;
+var FIRST_ATTEMPT = 1;
+var defaultSleep2 = async (milliseconds) => new Promise((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
+var normalizeOptions = (options = {}) => ({
+  maxAttempts: DEFAULT_TEMPLATE_CONTENT_ATTEMPTS,
+  initialBackoffMs: DEFAULT_TEMPLATE_CONTENT_INITIAL_BACKOFF_MS,
+  backoffMultiplier: DEFAULT_TEMPLATE_CONTENT_BACKOFF_MULTIPLIER,
+  maxBackoffMs: DEFAULT_TEMPLATE_CONTENT_MAX_BACKOFF_MS,
+  sleep: defaultSleep2,
+  ...options
+});
+var isNotReadyYet = (error) => error instanceof GitHubClientError && isRetryableGitHubError(error);
+var waitForTemplateContentSha = async (readCommitSha, options) => {
+  const { maxAttempts, initialBackoffMs, backoffMultiplier, maxBackoffMs, sleep } = normalizeOptions(options);
+  let nextBackoffMs = initialBackoffMs;
+  for (let attempt = FIRST_ATTEMPT; attempt <= maxAttempts; attempt += 1) {
+    const isFinalAttempt = attempt >= maxAttempts;
+    try {
+      const commitSha = await readCommitSha();
+      if (commitSha !== void 0) {
+        return commitSha;
+      }
+      if (isFinalAttempt) {
+        return void 0;
+      }
+    } catch (error) {
+      if (!isNotReadyYet(error) || isFinalAttempt) {
+        throw error;
+      }
+    }
+    await sleep(nextBackoffMs);
+    nextBackoffMs = Math.min(nextBackoffMs * backoffMultiplier, maxBackoffMs);
+  }
+  return void 0;
+};
+
 // src/execution/apply-executor.ts
 var EMPTY_COUNT6 = 0;
 var PRIVATE_REPOSITORY = true;
@@ -5779,12 +5845,23 @@ var incrementSummary = (state, key) => ({
 });
 var hasAtLeastPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] >= PERMISSION_RANK[expectedPermission];
 var hasHigherPermission = (currentPermission, expectedPermission) => PERMISSION_RANK[currentPermission] > PERMISSION_RANK[expectedPermission];
+var recordCreatedRepository = (state, input, student, repository, observedAt) => persistManifest(
+  {
+    ...state,
+    manifest: upsertRepositoryRecord(
+      state.manifest,
+      createManifestRecord(input.config, student, repository, observedAt)
+    )
+  },
+  input.manifestPath
+);
 var executeCreateRepository = async (input, state, operation, observedAt) => {
   const student = findStudent(input, input.students, operation);
   if (student === void 0 || operation.repository_name === void 0) {
     return state;
   }
   const repositoryName = operation.repository_name;
+  let createdRepository = null;
   try {
     const parsedTemplate = parseTemplateRepository(
       input.config.course.github.organization,
@@ -5817,18 +5894,28 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
         )
       );
     }
-    const studentDefaultBranchCommitSha = await runGitHubOperation(
-      input,
-      () => input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+    createdRepository = repository;
+    const studentDefaultBranchCommitSha = await waitForTemplateContentSha(
+      async () => await runGitHubOperation(
+        input,
+        () => input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+      ),
+      input.templateContentWait ?? (input.retryOptions?.sleep === void 0 ? {} : { sleep: input.retryOptions.sleep })
     );
     if (state.manifest.template.commitSha === void 0 || studentDefaultBranchCommitSha === void 0) {
-      return recordError(
-        state,
-        createConfigDiagnostic(
-          DiagnosticCode.GithubApiError,
-          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
-          { repository: repository.fullName, operation: CREATE_REPOSITORY_OPERATION }
-        )
+      return recordCreatedRepository(
+        recordError(
+          state,
+          createConfigDiagnostic(
+            DiagnosticCode.GithubApiError,
+            `Unable to establish a template-sync baseline for ${repository.fullName}.`,
+            { repository: repository.fullName, operation: CREATE_REPOSITORY_OPERATION }
+          )
+        ),
+        input,
+        student,
+        repository,
+        observedAt
       );
     }
     const manifest = upsertRepositoryRecord(
@@ -5853,7 +5940,8 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
       input.manifestPath
     );
   } catch (error) {
-    return recordError(state, normalizeGitHubError(error));
+    const failedState = recordError(state, normalizeGitHubError(error));
+    return createdRepository === null ? failedState : recordCreatedRepository(failedState, input, student, createdRepository, observedAt);
   }
 };
 var executeStudentCollaborator = async (input, state, operation, observedAt) => {
@@ -7385,6 +7473,7 @@ var runApplyCommand = async ({
   githubClient,
   clock = systemClock,
   retryOptions,
+  templateContentWait,
   groupTargetExecutor = executeGroupTargets,
   groupManifestWriter = writeGroupApplyManifestV2
 }) => {
@@ -7652,7 +7741,8 @@ var runApplyCommand = async ({
     students: rosterResult.students,
     githubClient: effectiveGitHubClient,
     clock,
-    retryOptions: effectiveRetryOptions
+    retryOptions: effectiveRetryOptions,
+    ...templateContentWait === void 0 ? {} : { templateContentWait }
   });
   const generatedFiles = fs8.existsSync(manifestPath.absolutePath) ? [manifestPath.relativePath] : [];
   return createCommandResult({

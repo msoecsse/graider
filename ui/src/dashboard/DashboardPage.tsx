@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import type {
+  GraiderCliStatus,
   AssignmentDetailResult,
   CombinedDashboardResult,
   CourseFolderDashboardResult,
@@ -57,10 +58,62 @@ type GitHubAuthViewState =
       readonly errorMessage: string;
     };
 
+const CLI_RESOLUTION_SOURCE_LABELS: Record<string, string> = {
+  env_override: "the GRAIDER_CLI_PATH override",
+  bundled: "the copy bundled with the app",
+  development: "the repository build",
+  path_shim: "a PATH lookup"
+};
+
+const formatCliResolutionSource = (source: string | null): string =>
+  source === null ? "an unknown location" : (CLI_RESOLUTION_SOURCE_LABELS[source] ?? source);
+
 const GITHUB_AUTH_GUIDANCE =
   "GitHub authentication is required for repository checks and grading actions.";
 const GITHUB_BROWSER_404_NOTE =
   "If GitHub opens a 404 page for a private course repository, make sure you are signed into GitHub in your browser with the same account.";
+
+/**
+ * Reports where the CLI was found. A launch failure otherwise names no path, which makes a
+ * missing install indistinguishable from resolution picking somewhere unexpected.
+ */
+const GraiderCliStatusPanel = ({
+  status,
+  onRecheck
+}: {
+  readonly status: GraiderCliStatus | null;
+  readonly onRecheck: () => void;
+}): ReactElement => {
+  const isFailure = status?.status === "failure";
+  const cliPath = status?.helperPath ?? status?.executablePath ?? null;
+
+  return (
+    <details className="github-auth-status" open={isFailure}>
+      <summary>
+        Graider CLI:{" "}
+        {status === null
+          ? "Checking"
+          : status.status === "ok"
+            ? `Ready${status.version === null ? "" : ` (${status.version})`}`
+            : "Not available"}
+      </summary>
+      <div className="github-auth-status__content">
+        {status === null ? <p>Checking the Graider CLI...</p> : null}
+        {status?.status === "ok" ? (
+          <p>
+            Running the CLI found by {formatCliResolutionSource(status.resolutionSource)}
+            {cliPath === null ? "." : ":"}
+          </p>
+        ) : null}
+        {isFailure ? <p className="error-message">{status?.errorMessage}</p> : null}
+        {cliPath === null ? null : <pre>{cliPath}</pre>}
+      </div>
+      <button className="secondary-action" type="button" onClick={onRecheck}>
+        Re-check Graider CLI
+      </button>
+    </details>
+  );
+};
 
 const CoursePublishPanel = ({
   courseFolder,
@@ -211,6 +264,7 @@ export const DashboardPage = (): ReactElement => {
     readonly detail: NormalizedAssignmentDetail | null;
     readonly gradeStatus: NormalizedGradeStatus | null;
   } | null>(null);
+  const [graiderCliStatus, setGraiderCliStatus] = useState<GraiderCliStatus | null>(null);
   const hasStartedStartupRefresh = useRef(false);
   const isRefreshingAllRef = useRef(false);
   const githubAuthNeedsAttention =
@@ -242,6 +296,30 @@ export const DashboardPage = (): ReactElement => {
 
   useEffect(() => {
     void runGitHubAuthCheck();
+  }, []);
+
+  const runGraiderCliPreflight = async (): Promise<void> => {
+    if (window.graiderUI.getGraiderCliStatus === undefined) {
+      return;
+    }
+
+    try {
+      setGraiderCliStatus(await window.graiderUI.getGraiderCliStatus());
+    } catch {
+      setGraiderCliStatus({
+        status: "failure",
+        version: null,
+        resolutionSource: null,
+        executablePath: null,
+        helperPath: null,
+        errorCode: "graider_cli_preflight_failed",
+        errorMessage: "Graider CLI check could not be run."
+      });
+    }
+  };
+
+  useEffect(() => {
+    void runGraiderCliPreflight();
   }, []);
 
   const loadCoursePublishStatus = async (courseFolderId: string): Promise<void> => {
@@ -844,6 +922,14 @@ export const DashboardPage = (): ReactElement => {
             {githubAuthState.status === "checking" ? "Checking..." : "Check GitHub auth"}
           </button>
         </details>
+
+        <GraiderCliStatusPanel
+          status={graiderCliStatus}
+          onRecheck={() => {
+            setGraiderCliStatus(null);
+            void runGraiderCliPreflight();
+          }}
+        />
 
         {courseFolders.map((courseFolder) => {
           const publishStatus = coursePublishStatuses[courseFolder.id];

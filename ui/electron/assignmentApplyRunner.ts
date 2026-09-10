@@ -120,7 +120,7 @@ export const runAssignmentApplyCommand = async ({
   });
 
   if (result.error !== null) {
-    const cliStartError = getGraiderCliStartError(result.error.code);
+    const cliStartError = getGraiderCliStartError(result.error.code, result.diagnostic);
     const code = cliStartError?.code ?? "assignment_apply_failed";
     const message = cliStartError?.message ?? "Graider assignment apply could not be started.";
 

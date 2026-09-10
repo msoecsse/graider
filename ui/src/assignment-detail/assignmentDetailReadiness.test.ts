@@ -4,9 +4,13 @@ import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
 import {
   collectNeedsAttentionItems,
   deriveAssignmentReadiness,
+  getDiagnosticCategory,
   groupDiagnostics
 } from "./assignmentDetailReadiness";
-import type { AssignmentDetailSelection } from "./assignmentDetailTypes";
+import type {
+  AssignmentDetailDiagnostic,
+  AssignmentDetailSelection
+} from "./assignmentDetailTypes";
 
 const SELECTION: AssignmentDetailSelection = {
   courseFolderId: "course-folder-csc1120",
@@ -196,5 +200,32 @@ describe("assignment detail readiness helpers", () => {
     ]);
     expect(JSON.stringify(detail.diagnostics)).not.toContain("secret-token-value");
     expect(JSON.stringify(detail.diagnostics)).not.toContain("Authorization: Bearer");
+  });
+});
+
+describe("getDiagnosticCategory", () => {
+  const diagnostic = (code: string, message: string): AssignmentDetailDiagnostic => ({
+    code,
+    severity: "error",
+    message,
+    context: {}
+  });
+
+  it("labels apply-gate codes as blocked apply rather than the generic bucket", () => {
+    expect(getDiagnosticCategory(diagnostic("mutation_blocked", "Apply is blocked."))).toBe(
+      "Apply blocked"
+    );
+    expect(
+      getDiagnosticCategory(diagnostic("plan_contains_blocked_operations", "Plan is blocked."))
+    ).toBe("Apply blocked");
+  });
+
+  it("still routes subsystem diagnostics to their own category", () => {
+    expect(getDiagnosticCategory(diagnostic("repo_name_collision", "Repository exists."))).toBe(
+      "Assignment detail"
+    );
+    expect(getDiagnosticCategory(diagnostic("github_api_error", "GitHub API failed."))).toBe(
+      "GitHub readiness"
+    );
   });
 });

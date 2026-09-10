@@ -8,6 +8,7 @@ import {
 } from "../../../src/github/octokit-github-client.js";
 import { createGitHubClient, readGitHubToken } from "../../../src/github/github-client-factory.js";
 import { DiagnosticCode } from "../../../src/diagnostics/error-catalog.js";
+import { GitHubClientError, createGitHubDiagnostic } from "../../../src/github/github-errors.js";
 
 enum OctokitTestNumber {
   UserId = 101,
@@ -25,7 +26,8 @@ enum OctokitTestNumber {
   ServerErrorStatus = 500,
   BadGatewayStatus = 502,
   ServiceUnavailableStatus = 503,
-  GatewayTimeoutStatus = 504
+  GatewayTimeoutStatus = 504,
+  ConflictStatus = 409
 }
 
 const TOKEN = "ghp_testtoken1234567890";
@@ -580,6 +582,71 @@ describe("OctokitGitHubClient", () => {
     const client = new OctokitGitHubClient({ token: TOKEN, octokit });
 
     await expectGitHubError(() => client.getRepository(OWNER, REPO), DiagnosticCode.GithubApiError);
+  });
+
+  it("keeps the HTTP status and GitHub's message so an api_error names its cause", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.listCommits = () =>
+      rejectedResponse(
+        createRequestError({
+          status: OctokitTestNumber.ConflictStatus,
+          message: "Git Repository is empty."
+        })
+      );
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(client.getDefaultBranchCommitSha(OWNER, REPO)).rejects.toMatchObject({
+      diagnosticCode: DiagnosticCode.GithubApiError,
+      kind: "api_error",
+      status: OctokitTestNumber.ConflictStatus,
+      githubMessage: "Git Repository is empty."
+    });
+  });
+
+  it("reports the status and GitHub message in the diagnostic, not just the generic text", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.get = () =>
+      rejectedResponse(
+        createRequestError({
+          status: OctokitTestNumber.ServerErrorStatus,
+          message: "Server Error"
+        })
+      );
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    const diagnostic = await client
+      .getRepository(OWNER, REPO)
+      .then(() => null)
+      .catch((error: unknown) =>
+        error instanceof GitHubClientError ? createGitHubDiagnostic(error) : null
+      );
+
+    expect(diagnostic?.message).toBe("GitHub API request failed. (500: Server Error)");
+    expect(diagnostic?.context).toMatchObject({
+      kind: "api_error",
+      status: OctokitTestNumber.ServerErrorStatus,
+      githubMessage: "Server Error"
+    });
+  });
+
+  it("redacts a token embedded in GitHub's own error message", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.get = () =>
+      rejectedResponse(
+        createRequestError({
+          status: OctokitTestNumber.ServerErrorStatus,
+          message: `Bad credentials for ${TOKEN}`
+        })
+      );
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    const error = await client
+      .getRepository(OWNER, REPO)
+      .then(() => null)
+      .catch((caught: unknown) => (caught instanceof GitHubClientError ? caught : null));
+
+    expect(error?.githubMessage).not.toContain(TOKEN);
+    expect(error?.githubMessage).toContain("[REDACTED]");
   });
 
   it("network failure maps to github_network_error", async () => {

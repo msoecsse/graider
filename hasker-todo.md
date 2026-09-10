@@ -63,127 +63,104 @@ That is the loop: delete repos -> apply -> race -> orphaned repos -> blocked -> 
 
 ---
 
-## Task 1 — Unblock io2 now (operational, do first)
+## Task 1 — Unblock io2 now — ALREADY RESOLVED, no action taken (verified 2026-09-10)
 
-Delete the two orphaned repos, then re-run Apply. They hold only template content and no student
-has access yet, so nothing is lost. **Confirm with Dr. Hasker before deleting.**
+Re-verified before touching anything, and the orphans described above no longer exist. **Nothing
+was deleted.** An apply run overnight (repos re-created 2026-09-10T02:50Z) healed the assignment:
 
-- [ ] Re-verify each repo is still orphaned before deleting (no student collaborator, no invite,
-      absent from `terms/27s1/manifests/io2/manifest.yml`):
+- Roster `terms/27s1/rosters/section-121.csv` now has **21** active students (it grew from 14).
+- `terms/27s1/manifests/io2/manifest.yml` has **21** repository records, updated 2026-09-10 10:20,
+  including `gonzalezem` and `lenskyg` — the two that were untracked.
+- `gonzeman0-io2-swe4211-27s1` and `lenskyg-io2-swe4211-27s1` now carry template content and a
+  **pending student invitation** each. Deleting them would have destroyed live provisioning.
+- `graider assignment apply-preview` reports `wouldCreateRepositories: 0`,
+  `wouldUpdateRepositories: 21`, `blockedRepositories: 0`, with no diagnostics — nothing is blocked.
 
-      gh api repos/msoecsse/gonzeman0-io2-swe4211-27s1/collaborators --jq ".[].login"
-      gh api repos/msoecsse/gonzeman0-io2-swe4211-27s1/invitations  --jq ".[].invitee.login"
-      gh api repos/msoecsse/lenskyg-io2-swe4211-27s1/collaborators  --jq ".[].login"
-      gh api repos/msoecsse/lenskyg-io2-swe4211-27s1/invitations    --jq ".[].invitee.login"
+Re-running Apply was unnecessary as well. Tasks 2 and 3 still matter: they stop the race that
+created the original orphans from recurring on the next apply that creates repositories.
 
-- [ ] Delete them:
+## Task 2 — Wait for template generation before reading the baseline — DONE 2026-09-10
 
-      gh repo delete msoecsse/gonzeman0-io2-swe4211-27s1 --yes
-      gh repo delete msoecsse/lenskyg-io2-swe4211-27s1 --yes
+**Added:** `src/execution/template-content-wait.ts`. **Changed:** `src/execution/apply-executor.ts`,
+`src/cli/commands/apply.command.ts`.
 
-- [ ] Re-run Apply from the UI, or from `C:\apps\classrooms\swe4211-rwh-classroom`:
+- [x] `executeCreateRepository` now calls `waitForTemplateContentSha`, which polls
+      `getDefaultBranchCommitSha` instead of reading it once: 10 attempts, 1s initial backoff,
+      doubling to a 4s cap (about 31s total).
+- [x] Both "not ready yet" shapes are tolerated — an `undefined` commit sha, and the retryable
+      `api_error` an empty repository throws (the 409). A non-retryable failure (auth, permissions)
+      is rethrown at once; a retryable one that never clears is rethrown after the final attempt so
+      the real cause is reported instead of a bare "no baseline".
+- [x] The generic `withGitHubRetry` budget is untouched; this is a separate, longer wait that only
+      applies after template creation. `ApplyExecutionInput.templateContentWait` (threaded through
+      `ApplyCommandRequest`) overrides it so tests run instantly.
+- [x] Tests: `tests/unit/execution/template-content-wait.test.ts` (6 cases: empty-then-ready,
+      retryable-then-ready, non-retryable rethrow, exhausted, persistent-retryable rethrow, backoff
+      schedule) and `TC-RECOVERY-011` in `tests/recovery/apply-recovery.test.ts`, which injects more
+      failures than the per-request retry budget so it can only pass if the outer wait polls again.
 
-      node C:/apps/graider/dist/index.js assignment apply terms/27s1/assignments/io2/assignment.yml --json --yes
-
-      (The UI runs exactly this — see `ui/electron/assignmentApplyRunner.ts:108-118`.)
-
-- [ ] Confirm the manifest ends with 14 records and every student has a collaborator or pending
-      invite. If a _different_ student now races and orphans, repeat this cleanup for that name —
-      or land Task 2 first, which removes the race.
-
-Read-only commands useful while verifying (neither mutates GitHub):
-
-    node C:/apps/graider/dist/index.js validate terms/27s1/assignments/io2/assignment.yml --json
-    node C:/apps/graider/dist/index.js assignment apply-preview terms/27s1/assignments/io2/assignment.yml --json
-
----
-
-## Task 2 — Wait for template generation before reading the baseline (highest value)
-
-**File:** `src/execution/apply-executor.ts` (`executeCreateRepository`, ~lines 344-433), with
-support in `src/github/octokit-github-client.ts`.
-
-- [ ] After `createRepositoryFromTemplate` succeeds, poll for the generated content instead of
-      reading it immediately: retry `getDefaultBranchCommitSha` until a commit sha is returned,
-      with a real budget (suggest ~10 attempts / ~30s total, exponential backoff seeded around 1s).
-- [ ] Treat the empty-repository condition as "not ready yet", not as a hard failure. There is
-      currently **no** handling of 409 / empty repositories anywhere in
-      `octokit-github-client.ts` or `apply-executor.ts` — grep confirms it.
-- [ ] Keep the existing generic retry (`withGitHubRetry`, 3 attempts / 250ms) for ordinary calls;
-      this is a distinct, longer wait specific to post-template-generation readiness. Do not
-      globally lengthen `DEFAULT_GITHUB_RETRY_ATTEMPTS` / `DEFAULT_INITIAL_BACKOFF_MS` in
-      `src/github/github-retry.ts` — that would slow every failure path.
-- [ ] Tests: `tests/unit/github/octokit-github-client.test.ts` plus the apply executor tests under
-      `tests/cli/apply.test.ts` / `tests/recovery/apply-recovery.test.ts`. Use the fake client
-      (`src/github/fake-github-client.ts`, which supports injected failures) to simulate a repo
-      that returns empty/409 for the first N `listCommits` calls and then succeeds; assert apply
-      completes and writes the manifest record.
-
-**Acceptance:** an apply where the first few `listCommits` calls report an empty repository still
-finishes successfully and records the student in the manifest.
+**Acceptance met:** `TC-RECOVERY-011` — an apply whose first commit lookups report an empty
+repository exits `Success` and records `templateSyncBaselineStatus: initialized`.
 
 ---
 
-## Task 3 — Never orphan a repository that was just created
+## Task 3 — Never orphan a repository that was just created — DONE 2026-09-10
 
-**File:** `src/execution/apply-executor.ts` (`executeCreateRepository`, the failure paths at
-~lines 380-433, including the `recordError` for a missing template-sync baseline and the outer
-`catch (error) { return recordError(state, normalizeGitHubError(error)); }`).
+**Changed:** `src/execution/apply-executor.ts`.
 
-- [ ] If the repo was created but a later step in the same operation fails, do not return without
-      recording it. Either upsert the manifest record with the baseline marked incomplete/unknown
-      (so a later apply can heal it), or delete the repo that was just created so the retry starts
-      clean. Prefer recording it — deleting risks destroying content if the failure was only in
-      reading state.
-- [ ] Whichever path is chosen, the error must still be reported; this is about not leaving GitHub
-      and the manifest out of sync, not about hiding the failure.
-- [ ] Make sure the recorded state cannot be mistaken for a fully provisioned repo — a subsequent
-      apply must still finish the remaining steps (collaborator, team permissions, actions,
-      template-sync baseline).
-- [ ] Tests: extend `tests/recovery/apply-recovery.test.ts` — inject a failure after creation and
-      assert (a) the run reports the error, and (b) a second apply against the same state is NOT
-      blocked by `repo_name_collision`.
+- [x] New `recordCreatedRepository` helper. `executeCreateRepository` tracks the repository it
+      created and, on both post-creation failure paths (the missing-baseline `recordError` and the
+      outer `catch`), upserts the manifest record and persists it. Recording was chosen over
+      deleting: deleting risks destroying content when the failure was only in _reading_ state.
+- [x] The error is still recorded and the run still fails; only the GitHub/manifest divergence is
+      fixed.
+- [x] The record cannot pass for finished work. `createManifestRecord` already writes
+      `templateSyncBaselineStatus: "baseline_required"` when no commit sha is known
+      (`src/execution/apply-executor.ts`), permissions and actions stay empty, and
+      `src/template-sync/template-sync.ts` already knows how to heal a `baseline_required` record.
+- [x] Tests: `TC-RECOVERY-012` — a persistent post-creation failure leaves the record present with
+      `baseline_required`, and the second apply is **not** blocked by `repo_name_collision`.
+      `TC-RECOVERY-002` still passes, so a genuinely untracked repository is still a collision.
 
-**Acceptance:** a mid-operation failure after repo creation never produces a
-`repo_name_collision` / `mutation_blocked` on the next apply.
+**Acceptance met:** `TC-RECOVERY-012`.
 
 ---
 
-## Task 4 — Stop discarding the HTTP status and GitHub's message
+## Task 4 — Stop discarding the HTTP status and GitHub's message — DONE 2026-09-10
 
-**Files:** `src/github/octokit-github-client.ts:707-740`, `src/github/github-errors.ts`.
+**Changed:** `src/github/octokit-github-client.ts`, `src/github/github-errors.ts`.
 
-- [ ] In `normalizeOctokitError`, carry the HTTP `status` and GitHub's response `message` through
-      to `GitHubClientError`. Note the two branches at lines 733 and 737 are byte-identical
-      (`>= 500` and "any other defined status") and exist only to throw the status away — collapse
-      them and keep the status.
-- [ ] In `createGitHubDiagnostic` (`src/github/github-errors.ts`), include `status` (and the
-      GitHub message, when present) in the diagnostic `context` alongside the existing
-      `kind` / `retryable` / `retryAfterSeconds`. The UI already renders every context key as a
-      definition list (`ui/src/assignment-detail/AssignmentDetailPage.tsx:1006-1014`), so this
-      surfaces with no UI change.
-- [ ] Keep redaction intact — `GitHubClientError` runs messages through `redactString`
-      (`src/diagnostics/redaction.ts`); any GitHub-supplied message must go through it too, and
-      tokens must never reach a diagnostic.
-- [ ] Tests: `tests/unit/github/octokit-github-client.test.ts` — assert a 409 and a 500 each
-      produce a diagnostic whose context carries the status; assert a token embedded in a GitHub
-      error message is redacted.
+- [x] `normalizeOctokitError` now carries the HTTP `status` and GitHub's `message` into
+      `GitHubClientError`. The two byte-identical branches were collapsed into one, and the
+      now-unused `HTTP_STATUS_SERVER_ERROR_MIN` constant removed.
+- [x] `createGitHubDiagnostic` puts `status` and `githubMessage` into the diagnostic `context`
+      alongside `kind` / `retryable` / `retryAfterSeconds`, and `describeGitHubError` appends them
+      to the message. The UI already renders every context key as a definition list
+      (`ui/src/assignment-detail/AssignmentDetailPage.tsx`), so no UI change was needed.
+- [x] Redaction intact: the constructor runs `githubMessage` through `redactString`, as it already
+      did for the message.
+- [x] Tests: three new cases in `tests/unit/github/octokit-github-client.test.ts` — a 409 carries
+      `status` and `githubMessage`, a 500 produces the described message and context, and a token
+      embedded in GitHub's own message is redacted to `[REDACTED]`.
 
-**Acceptance:** a failure like this one reads "GitHub API request failed (409: Git Repository is
-empty)" instead of an opaque `api_error`.
+**Acceptance met:** the diagnostic now reads
+`GitHub API request failed. (409: Git Repository is empty.)` rather than an opaque `api_error`.
 
 ---
 
-## Task 5 (optional) — Make `mutation_blocked` self-explanatory in the UI
+## Task 5 — Make `mutation_blocked` self-explanatory in the UI — DONE 2026-09-10
 
-Lower priority; only if Tasks 2-4 leave the diagnostic still confusing.
+**Changed:** `ui/src/assignment-detail/assignmentDetailReadiness.ts`.
 
-- [ ] `mutation_blocked` (`src/execution/mutation-guard.ts:19-23`) is a gate, not a cause. The
-      guard already returns the real diagnostics right after it, but the UI gives them equal
-      weight in the Diagnostics panel and labels the guard row "Assignment detail" (the fallback
-      bucket in `ui/src/assignment-detail/assignmentDetailReadiness.ts:261-289`).
-- [ ] Consider rendering the guard row as a header for the causes beneath it, and/or add
-      `mutation_blocked` to the category map so it is not labelled "Assignment detail".
+- [x] Took the category half of the task's "and/or". `getDiagnosticCategory` now maps
+      `mutation_blocked`, `confirmation_required` and `plan_contains_blocked_operations` to
+      **"Apply blocked"** instead of letting them fall into the generic "Assignment detail" bucket,
+      which read as though Assignment detail itself had failed.
+- [x] Left the structural change (rendering the guard row as a header over its causes) undone. It
+      is a layout decision rather than a defect, and with Task 4 giving each cause a status and a
+      GitHub message the remaining confusion was the mislabelling.
+- [x] Tests: two cases in `ui/src/assignment-detail/assignmentDetailReadiness.test.ts` — gate codes
+      map to "Apply blocked", and subsystem codes still reach their own categories.
 
 ---
 
@@ -222,11 +199,15 @@ so **do not implement Task 7 unless asked** — it may prove unnecessary.
 
 ---
 
-## Task 6 — Commit the CLI-resolution work (do first, independent of the rebuild)
+## Task 6 — Commit the CLI-resolution work — DONE 2026-09-10 (by Dr. Hasker)
 
-- [ ] Commit the five files listed above. Until then the fix exists only in this working tree and
-      in `ui/dist-electron`, which is why "we fixed it earlier" did not survive.
-- [ ] Confirm `ui/electron/windowsGraiderCliResolver.test.ts` runs in `npm --prefix ui test`.
+- [x] Already committed as `daf44d3` ("Resolve the graider CLI without relying on PATH; untrack
+      node_modules") at 2026-09-10 10:21, before this pass started. It carries all seven files:
+      `commandRunner.ts`, `commandRunner.test.ts`, `main.ts`, `dashboardRunner.test.ts`,
+      `windowsGraiderCliResolver.ts`, `windowsGraiderCliResolver.test.ts`, and
+      `ui/scripts/start-electron-dev.cjs`.
+- [x] `windowsGraiderCliResolver.test.ts` runs under `npm --prefix ui test` (verified: 31 tests
+      across the two resolver files).
 
 ---
 
@@ -269,51 +250,140 @@ shim pointed at, so this changes how it is found, not how fresh it is.
 
 ---
 
-## Task 8 — Surface the run diagnostic that is already being computed
+## Task 8 — Surface the run diagnostic that is already being computed — DONE 2026-09-10
 
-**File:** `ui/electron/commandRunner.ts:161-184` (`createProcessRunDiagnostic`).
+**Changed:** `ui/electron/commandRunner.ts` plus the nine runners that map start errors.
 
-- [ ] `ProcessRunDiagnostic` records `runnerMode`, `command`, `args`, `cwd`, `executablePath`,
-      `helperPath` and — since Task 7 — `resolutionSource` (`env_override` | `bundled` |
-      `development` | `path_shim`, or `null` when nothing resolved) on **every**
-      `ProcessRunResult`, and no runner ever reads it — it is still dead data. Fold it into the
-      start-error message so the failure reads like
-      "tried bundled -> `...\dist-graider-cli\index.js` (missing)" instead of a generic
-      "not found on PATH". Task 7 added the field; surfacing it is what remains.
-- [ ] Log it to stderr when `GRAIDER_UI_DEBUG=1`, matching the existing convention in
-      `ui/electron/tokenResolver.ts:55-62`.
+- [x] New `describeGraiderCliAttempt` appends the location actually tried to both start-error
+      messages, e.g. `Bundled Graider CLI could not be started. Rebuild or reinstall the Graider
+app. (tried bundled: C:\...\dist-graider-cli\index.js)`. `getGraiderCliStartError` takes the
+      diagnostic as a second argument, and all nine call sites now pass `result.diagnostic`
+      (`assignmentApplyPreviewRunner`, `assignmentApplyRunner`, `assignmentDetailRunner`,
+      `assignmentGradePreviewRunner`, `assignmentGradeRunner`, `assignmentGradeStatusRunner`,
+      `assignmentRepositoryMappingsRunner`, `dashboardRunner`, `facultyReportRunner`).
+- [x] `logGraiderCliDiagnostic` logs `code`, `mode`, `source`, `executable`, `helper` and `cwd` to
+      stderr when `GRAIDER_UI_DEBUG=1`, on both the missing-bundled-CLI path and a spawn error —
+      matching the convention in `ui/electron/tokenResolver.ts`.
+- [x] Tests: three cases in `ui/electron/commandRunner.test.ts` — the message names the attempted
+      location, stays bare when no diagnostic is available, and the debug log fires under
+      `GRAIDER_UI_DEBUG`.
 
-**Acceptance:** one failed run tells you which mode was used and which absolute path was tried.
-
----
-
-## Task 9 — Startup preflight for the CLI
-
-- [ ] On app start, run `graider --version` once through the resolved path and record the outcome.
-- [ ] Show the resolved mode and absolute path in the UI (settings or a diagnostics panel), so a
-      failure reads as "it is looking here" rather than "it is broken".
+**Acceptance met**, with one caveat worth knowing: the renderer maps error _codes_ to its own
+hardcoded sentences, so the appended path shows up in logs, IPC results and JSON — not on screen.
+Task 9's panel is what puts a path in front of the user.
 
 ---
 
-## Task 10 — Rebuild the bundled CLI; it is stale
+## Task 9 — Startup preflight for the CLI — DONE 2026-09-10
 
-- [ ] `ui/dist-graider-cli/index.js` is dated 2026-09-08 08:47 while `src/` has changed since, so
-      the packaged app runs an out-of-date CLI even once it finds one. `npm run build:cli` is part
-      of `npm run package:win`, so a full repackage covers it — just do not ship a UI build without
-      re-running `build:cli`.
+**Added:** `ui/electron/graiderCliPreflight.ts`, `ui/electron/graiderCliPreflight.test.ts`.
+**Changed:** `ui/electron/ipc.ts`, `ui/electron/preload.ts`, `ui/electron/main.ts`,
+`ui/src/dashboard/DashboardPage.tsx`.
+
+- [x] `runGraiderCliPreflight` runs `graider --version` through the shared runner and returns
+      `{ status, version, resolutionSource, executablePath, helperPath, errorCode, errorMessage }`.
+      A nonzero exit or empty output counts as a failure, and a start error is described with the
+      attempted path from Task 8.
+- [x] Exposed as the `graider-ui:graider-cli:status` IPC channel and `getGraiderCliStatus()` on the
+      preload API (optional on `GraiderUIApi`, so older renderers keep working).
+- [x] The dashboard shows a `Graider CLI: Ready (0.1.0)` / `Not available` panel next to the GitHub
+      auth panel, auto-expanded on failure, naming the tier in prose ("the repository build", "the
+      copy bundled with the app", "the GRAIDER_CLI_PATH override", "a PATH lookup") with the
+      absolute path in a `<pre>`, plus a Re-check button.
+- [x] Tests: `ui/electron/graiderCliPreflight.test.ts` (version and tier reported; attempted path
+      reported on failure; nonzero exit and empty output both fail).
 
 ---
 
-## Task 11 — `assignmentTemplateSyncService` builds a runner with no CLI options
+## Task 10 — Rebuild the bundled CLI; it is stale — DONE 2026-09-10
 
-**File:** `ui/electron/assignmentTemplateSyncService.ts:84`.
+- [x] Rebuilt both CLI artifacts, since Tasks 2-4 changed the CLI and the development tier of the
+      resolution chain runs `dist/index.js`:
+      `npm run build` (root) and `npm --prefix ui run build:cli`.
+      Both are now 2026-09-10 10:46 and both answer `--version` with `0.1.0`.
+- [x] Standing rule unchanged: never ship a UI build without re-running `build:cli`
+      (`npm run package:win` already includes it).
 
-- [ ] `createNodeProcessRunner()` is called there with **no** `graiderCli` options, so
-      `resolveProcessRunRequest` passes requests through untouched. Today it only spawns `gh`
-      (via `resolveGithubToken`), so it is not the current bug — but any `graider` invocation added
-      there would spawn the bare command and fail with this exact ENOENT message.
-- [ ] Pass the shared `processRunner` from `ui/electron/main.ts` in, or give this service the same
-      `graiderCli` options, so there is one resolution path rather than two.
+---
+
+## Task 11 — `assignmentTemplateSyncService` builds a runner with no CLI options — DONE 2026-09-10
+
+**Changed:** `ui/electron/assignmentTemplateSyncService.ts`, `ui/electron/main.ts`.
+
+- [x] Added `createAssignmentTemplateSyncServiceWithRunner(runner)`, and `main.ts` now builds the
+      service from the shared `processRunner` instead of importing a module-level singleton that
+      constructed its own unconfigured runner.
+- [x] Went one step further than the task asked: `createAssignmentTemplateSyncService` no longer
+      defaults its `backend` and `resolveToken` parameters, so no caller can silently get an
+      unconfigured runner. `createNodeProcessRunner()` with no options now appears nowhere outside
+      its own definition — there is exactly one resolution path.
+- [x] `assignmentTemplateSyncService.test.ts` and `assignmentTemplateSyncIpc.test.ts` still pass
+      unchanged (they already supplied both arguments).
+
+---
+
+## Task 12 — A missing course folder reports itself as a missing CLI — OPEN
+
+Found 2026-09-09 while chasing the persistent "Graider CLI not found" report, and **not yet fixed**.
+It is a separate cause from Part 2's resolution problem, and it was the actual cause of the message
+Dr. Hasker kept seeing: three of the five registered course folders did not exist on disk
+(`C:\m4\subrepos\swe2410-classroom`, `C:\m2\subrepos\swe2410-classroom`,
+`C:\apps\classrooms\swe4211-hasker-classroom`) and were the three with
+`lastDashboardStatus: "failure"`. They have since been removed from the registry, so the symptom is
+gone, but the misreporting remains.
+
+On Windows `spawn` returns `ENOENT` when the **`cwd`** does not exist, even when the executable is
+fine, and the error text names the executable. Reproduced with the CLI correctly resolved:
+
+    spawn error code : ENOENT
+    spawn error msg  : spawn C:\Program Files\nodejs\node.exe ENOENT
+    resolutionSource : development
+    helperPath       : C:\apps\graider\dist\index.js
+    mapped to        : graider_cli_not_found / "Graider CLI not found. Install Graider or make
+                       sure graider is available on PATH."
+
+- [ ] Check `cwd` before spawning in `createNodeProcessRunner`: if `request.cwd` is set and does
+      not exist, return a distinct `course_folder_missing` code with a message naming the path.
+- [ ] Narrow the ENOENT mapping in `getGraiderCliStartError`. Since Task 7 the CLI is resolved to
+      an absolute path whose existence is verified before spawn, so a post-resolution ENOENT can
+      never legitimately mean "CLI missing" — when `diagnostic.resolutionSource` is non-null it
+      should not map to `graider_cli_not_found`.
+- [ ] Centralize the message. `"Graider CLI not found. Install Graider or make sure graider is
+available on PATH."` is hardcoded in eight renderer files (`dashboardAggregation.ts`,
+      `CourseFolderList.tsx`, `AssignmentDetailPage.tsx`, `ApplyPreviewPage.tsx`,
+      `GradePreviewPage.tsx`, `GradeStatusPage.tsx`, `FacultyReportPage.tsx`) plus the main-process
+      constant. Any new code needs a mapping in each, or unknown codes fall back to "Could not
+      refresh this course folder."
+
+---
+
+## Task 13 — Repository health that predates this work — OPEN, informational
+
+Measured 2026-09-10 while verifying Tasks 2-11. None of it was introduced by these changes, and
+none of it was fixed by them; recorded so it is not mistaken for new breakage.
+
+- [ ] `npm run typecheck` reports **97 errors at HEAD**, mostly `'grading' is possibly 'undefined'`
+      across `src/config`, `src/cli/commands/workflow.command.ts` and
+      `src/assignment-detail`. Verified identical with all local work stashed, so `npm run check`
+      cannot pass today regardless of these tasks.
+- [ ] `npx eslint .` reports **119 errors at HEAD** (identical before and after this work).
+- [ ] The test suites are flaky on Windows. Full CLI-suite failures swung between 36 and 53 across
+      identical back-to-back runs. Three families account for it: tests that assert a missing token
+      while `GRAIDER_GITHUB_TOKEN` is set in the shell; template-sync tests that drive real `git`
+      in temp directories; and CLI-shell tests that spawn the built CLI as a subprocess and time
+      out under parallel load. A fourth family — POSIX-vs-Windows path assertions such as
+      `/Users/sean/...` vs `C:\Users\...` — fails deterministically in `ui/electron`
+      (`tokenResolver`, `courseRegistry`, `dashboardRunner`, the access-page services).
+- [ ] `npx tsc --noEmit --project ui/tsconfig.json` reports 7 pre-existing errors
+      (`prepareAssignmentTemplateSync` optionality in test mocks, `exactOptionalPropertyTypes`).
+
+Because of the flakiness, verification for Tasks 2-11 used targeted runs, all green:
+`tests/unit/execution tests/unit/github tests/recovery tests/cli/apply.test.ts
+tests/cli/assignment-apply.test.ts tests/unit/manifest` (142 passed) and, in `ui`,
+`src/dashboard electron/commandRunner.test.ts electron/graiderCliPreflight.test.ts
+electron/windowsGraiderCliResolver.test.ts src/assignment-detail
+electron/assignmentTemplateSyncService.test.ts` (162 passed). Neither project gained a failing
+test, a lint error, or a typecheck error.
 
 ---
 
@@ -327,4 +397,8 @@ For Part 2 also:
     npm --prefix ui run typecheck
     npm --prefix ui test
 
-Then re-run the Task 1 apply against io2 and confirm 14/14 tracked.
+Note that `npm run check` cannot pass today for reasons that predate this work — see Task 13. Until
+that is addressed, compare failure sets against a stashed baseline rather than expecting zero, and
+lean on the targeted runs listed in Task 13.
+
+io2 itself needs no further action: 21/21 students tracked as of 2026-09-10 (Task 1).

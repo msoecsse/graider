@@ -148,7 +148,7 @@ export const runAssignmentGradeStatusCommand = async ({
   });
 
   if (result.error !== null) {
-    const cliStartError = getGraiderCliStartError(result.error.code);
+    const cliStartError = getGraiderCliStartError(result.error.code, result.diagnostic);
     const code = cliStartError?.code ?? "assignment_grade_status_failed";
     const message =
       cliStartError?.message ?? "Graider assignment grade status could not be started.";

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type GraiderCliStatus,
   type AssignmentApplyRequest,
   type AssignmentApplyResult,
   type AssignmentApplyPreviewRequest,
@@ -75,6 +76,8 @@ const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<
 
 const graiderUI: GraiderUIApi = {
   getAppInfo: async (): Promise<AppInfo> => await invoke<AppInfo>(IPC_CHANNELS.getAppInfo),
+  getGraiderCliStatus: async (): Promise<GraiderCliStatus> =>
+    await invoke<GraiderCliStatus>(IPC_CHANNELS.getGraiderCliStatus),
   checkGitHubAuth: async (): Promise<GitHubAuthResult> =>
     await invoke<GitHubAuthResult>(IPC_CHANNELS.checkGitHubAuth),
   selectCourseFolder: async (): Promise<SelectCourseFolderResult> =>

@@ -39,7 +39,6 @@ const HTTP_STATUS_FOUND = 302;
 const HTTP_STATUS_FORBIDDEN = 403;
 const HTTP_STATUS_NOT_FOUND = 404;
 const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
-const HTTP_STATUS_SERVER_ERROR_MIN = 500;
 const DEFAULT_BRANCH_FALLBACK = "main";
 const ROOT_CONTENT_PATH = "";
 const FIRST_PAGE_LIMIT = 1;
@@ -712,32 +711,42 @@ function normalizeOctokitError(error: unknown): GitHubClientError {
 
   const status = getErrorStatus(error);
   const retryAfterSeconds = getRetryAfterSeconds(error);
+  const githubMessage = getErrorMessage(error);
+  const details = {
+    ...(status === undefined ? {} : { status }),
+    ...(githubMessage === undefined ? {} : { githubMessage })
+  };
 
   if (status === HTTP_STATUS_UNAUTHORIZED) {
-    return new GitHubClientError("auth_failed", "GitHub authentication failed.");
+    return new GitHubClientError("auth_failed", "GitHub authentication failed.", details);
   }
 
   if (
     status === HTTP_STATUS_TOO_MANY_REQUESTS ||
     (status === HTTP_STATUS_FORBIDDEN && isRateLimitError(error))
   ) {
-    const options = retryAfterSeconds === undefined ? {} : { retryAfterSeconds };
-    return new GitHubClientError("rate_limited", "GitHub rate limit was reached.", options);
+    return new GitHubClientError("rate_limited", "GitHub rate limit was reached.", {
+      ...details,
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds })
+    });
   }
 
   if (status === HTTP_STATUS_FORBIDDEN) {
-    return new GitHubClientError("permission_denied", "GitHub permission was denied.");
-  }
-
-  if (status !== undefined && status >= HTTP_STATUS_SERVER_ERROR_MIN) {
-    return new GitHubClientError("api_error", "GitHub API request failed.");
+    return new GitHubClientError("permission_denied", "GitHub permission was denied.", details);
   }
 
   if (status !== undefined) {
-    return new GitHubClientError("api_error", "GitHub API request failed.");
+    return new GitHubClientError("api_error", "GitHub API request failed.", details);
   }
 
-  return new GitHubClientError("network_error", "GitHub network request failed.");
+  return new GitHubClientError("network_error", "GitHub network request failed.", details);
+}
+
+/** GitHub puts the actionable text in the error message; Octokit exposes it as `message`. */
+function getErrorMessage(error: unknown): string | undefined {
+  const message = asRecord(error).message;
+
+  return typeof message === "string" && message.length > EMPTY_LENGTH ? message : undefined;
 }
 
 function createArtifactDecodeError(): GitHubClientError {

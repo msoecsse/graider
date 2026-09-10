@@ -13,6 +13,7 @@ import {
   type CommandStatus
 } from "../../core/command-result.js";
 import { executeApplyPlan } from "../../execution/apply-executor.js";
+import type { TemplateContentWaitOptions } from "../../execution/template-content-wait.js";
 import { evaluateMutationGuard } from "../../execution/mutation-guard.js";
 import type { GitHubClient } from "../../github/github-client.js";
 import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
@@ -45,6 +46,7 @@ export interface ApplyCommandRequest {
   githubClient?: GitHubClient;
   clock?: Clock;
   retryOptions?: Partial<RetryOptions>;
+  templateContentWait?: Partial<TemplateContentWaitOptions>;
   groupTargetExecutor?: typeof executeGroupTargets;
   groupManifestWriter?: typeof writeGroupApplyManifestV2;
 }
@@ -77,6 +79,7 @@ export const runApplyCommand = async ({
   githubClient,
   clock = systemClock,
   retryOptions,
+  templateContentWait,
   groupTargetExecutor = executeGroupTargets,
   groupManifestWriter = writeGroupApplyManifestV2
 }: ApplyCommandRequest): Promise<CommandResult> => {
@@ -358,7 +361,8 @@ export const runApplyCommand = async ({
     students: rosterResult.students,
     githubClient: effectiveGitHubClient,
     clock,
-    retryOptions: effectiveRetryOptions
+    retryOptions: effectiveRetryOptions,
+    ...(templateContentWait === undefined ? {} : { templateContentWait })
   });
   const generatedFiles = fs.existsSync(manifestPath.absolutePath)
     ? [manifestPath.relativePath]

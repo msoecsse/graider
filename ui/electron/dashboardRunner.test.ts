@@ -361,7 +361,7 @@ describe("dashboardRunner", () => {
     expect(vi.mocked(runner).mock.calls[1]?.[0]).toEqual({
       command: "graider",
       args: ["dashboard", "--json"],
-      cwd: COURSE_FOLDER.path,
+      cwd: courseFolder.path,
       env: {
         [GITHUB_TOKEN_ENV_NAME]: "secret-gh-token"
       }

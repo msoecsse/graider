@@ -24,6 +24,10 @@ import type { Plan } from "../planning/plan-models.js";
 import type { ApplyRepositoryTarget } from "../planning/repository-targets.js";
 import type { RosterStudent } from "../roster/roster-models.js";
 import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
+import {
+  type TemplateContentWaitOptions,
+  waitForTemplateContentSha
+} from "./template-content-wait.js";
 
 const EMPTY_COUNT = 0;
 const PRIVATE_REPOSITORY = true;
@@ -53,6 +57,8 @@ export interface ApplyExecutionInput {
   githubClient: GitHubClient;
   clock: Clock;
   retryOptions?: Partial<RetryOptions>;
+  /** Overrides the wait for GitHub to finish copying template content into a new repository. */
+  templateContentWait?: Partial<TemplateContentWaitOptions>;
 }
 
 export interface ApplySummary {
@@ -341,6 +347,32 @@ const hasHigherPermission = (
   expectedPermission: Exclude<GitHubPermission, "none">
 ): boolean => PERMISSION_RANK[currentPermission] > PERMISSION_RANK[expectedPermission];
 
+/**
+ * Records a repository that was created on GitHub but whose provisioning did not finish, so the
+ * manifest never falls behind the organization. Leaving it out would make the next plan see an
+ * existing repository with no manifest entry, report `repo_name_collision`, and block every
+ * later apply over a failure this run caused itself. The record is written with a
+ * `baseline_required` template-sync status (see `createManifestRecord`), which a later apply or
+ * template sync heals.
+ */
+const recordCreatedRepository = (
+  state: ApplyState,
+  input: ApplyExecutionInput,
+  student: RosterStudent,
+  repository: GitHubRepository,
+  observedAt: string
+): ApplyState =>
+  persistManifest(
+    {
+      ...state,
+      manifest: upsertRepositoryRecord(
+        state.manifest,
+        createManifestRecord(input.config, student, repository, observedAt)
+      )
+    },
+    input.manifestPath
+  );
+
 const executeCreateRepository = async (
   input: ApplyExecutionInput,
   state: ApplyState,
@@ -354,6 +386,7 @@ const executeCreateRepository = async (
   }
 
   const repositoryName = operation.repository_name;
+  let createdRepository: GitHubRepository | null = null;
 
   try {
     const parsedTemplate = parseTemplateRepository(
@@ -389,21 +422,34 @@ const executeCreateRepository = async (
       );
     }
 
-    const studentDefaultBranchCommitSha = await runGitHubOperation(input, () =>
-      input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+    createdRepository = repository;
+
+    const studentDefaultBranchCommitSha = await waitForTemplateContentSha(
+      async () =>
+        await runGitHubOperation(input, () =>
+          input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+        ),
+      input.templateContentWait ??
+        (input.retryOptions?.sleep === undefined ? {} : { sleep: input.retryOptions.sleep })
     );
 
     if (
       state.manifest.template.commitSha === undefined ||
       studentDefaultBranchCommitSha === undefined
     ) {
-      return recordError(
-        state,
-        createConfigDiagnostic(
-          DiagnosticCode.GithubApiError,
-          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
-          { repository: repository.fullName, operation: CREATE_REPOSITORY_OPERATION }
-        )
+      return recordCreatedRepository(
+        recordError(
+          state,
+          createConfigDiagnostic(
+            DiagnosticCode.GithubApiError,
+            `Unable to establish a template-sync baseline for ${repository.fullName}.`,
+            { repository: repository.fullName, operation: CREATE_REPOSITORY_OPERATION }
+          )
+        ),
+        input,
+        student,
+        repository,
+        observedAt
       );
     }
 
@@ -430,7 +476,11 @@ const executeCreateRepository = async (
       input.manifestPath
     );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error));
+    const failedState = recordError(state, normalizeGitHubError(error));
+
+    return createdRepository === null
+      ? failedState
+      : recordCreatedRepository(failedState, input, student, createdRepository, observedAt);
   }
 };
 
@@ -911,12 +961,15 @@ export const executeApplyPlan = async (
         (operation.type === CREATE_REPOSITORY_PLAN_TYPE && state.summary.created > createdBefore),
       updated:
         current.updated ||
-        ([
-          "add_student_collaborator",
-          "add_faculty_team_permission",
-          "add_grader_team_permission",
-          "enable_actions"
-        ] as const).includes(operation.type) && state.summary.verified > verifiedBefore,
+        ((
+          [
+            "add_student_collaborator",
+            "add_faculty_team_permission",
+            "add_grader_team_permission",
+            "enable_actions"
+          ] as const
+        ).includes(operation.type) &&
+          state.summary.verified > verifiedBefore),
       failed: current.failed || state.errors.length > errorsBefore
     });
   }

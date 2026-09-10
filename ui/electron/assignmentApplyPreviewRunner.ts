@@ -118,7 +118,7 @@ export const runAssignmentApplyPreviewCommand = async ({
   });
 
   if (result.error !== null) {
-    const cliStartError = getGraiderCliStartError(result.error.code);
+    const cliStartError = getGraiderCliStartError(result.error.code, result.diagnostic);
     const code = cliStartError?.code ?? "assignment_apply_preview_failed";
     const message =
       cliStartError?.message ?? "Graider assignment apply preview could not be started.";

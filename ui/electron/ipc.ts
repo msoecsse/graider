@@ -1,5 +1,10 @@
+import type { GraiderCliStatus } from "./graiderCliPreflight.js";
+
+export type { GraiderCliStatus };
+
 export const IPC_CHANNELS = {
   getAppInfo: "graider-ui:get-app-info",
+  getGraiderCliStatus: "graider-ui:graider-cli:status",
   checkGitHubAuth: "graider-ui:github-auth:check",
   listCourseFolders: "graider-ui:course-registry:list",
   selectCourseFolder: "graider-ui:course-registry:select-folder",
@@ -796,6 +801,7 @@ export interface CombinedDashboardResult {
 
 export interface GraiderUIApi {
   readonly getAppInfo: () => Promise<AppInfo>;
+  readonly getGraiderCliStatus?: () => Promise<GraiderCliStatus>;
   readonly checkGitHubAuth: () => Promise<GitHubAuthResult>;
   readonly selectCourseFolder: () => Promise<SelectCourseFolderResult>;
   readonly selectStudentAccessPagesRepositoryFolder?: (

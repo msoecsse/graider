@@ -17,7 +17,9 @@ import { createManifestPath } from "../../src/manifest/manifest-paths.js";
 enum TestNumber {
   TemplateRepositoryId = 101,
   ExistingRepositoryId = 202,
-  WorkflowId = 303
+  WorkflowId = 303,
+  ExtraEmptyRepositoryReads = 2,
+  FastWaitAttempts = 1
 }
 
 const FIXTURE_ROOT = path.resolve("tests/fixtures/apply");
@@ -268,6 +270,73 @@ describe("apply recovery", () => {
 
     expect(result.exitCode).toBe(ExitCode.AuthenticationOrAuthorizationFailure);
     expect(githubClient.mutations.createdRepositories).toEqual([]);
+  });
+
+  it("TC-RECOVERY-011 waits out asynchronous template generation instead of failing the apply", async () => {
+    const cwd = copyFixtureToTemp();
+    const githubClient = createReadyClient();
+    // An empty repository answers commit lookups with a retryable error until GitHub finishes
+    // copying template content. More failures than the per-request retry budget, so the apply
+    // only succeeds if the template-content wait polls again after that budget is spent.
+    githubClient.failTimes(
+      "getDefaultBranchCommitSha",
+      "api_error",
+      DEFAULT_GITHUB_RETRY_ATTEMPTS + TestNumber.ExtraEmptyRepositoryReads
+    );
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+    const manifestPath = createManifestPath(cwd, "27s1", "lab04");
+    const manifestResult = loadManifest(manifestPath.absolutePath);
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(manifestResult.manifest?.repositories[0]?.repository.templateSyncBaselineStatus).toBe(
+      "initialized"
+    );
+  });
+
+  it("TC-RECOVERY-012 records a created repository whose baseline never completes so the retry is not blocked", async () => {
+    const cwd = copyFixtureToTemp();
+    const githubClient = createReadyClient();
+    githubClient.failNext("getDefaultBranchCommitSha", "api_error", { persistent: true });
+
+    const first = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} },
+      templateContentWait: { sleep: async () => {}, maxAttempts: TestNumber.FastWaitAttempts }
+    });
+    const manifestPath = createManifestPath(cwd, "27s1", "lab04");
+    const firstManifest = loadManifest(manifestPath.absolutePath);
+
+    githubClient.clearFailures();
+
+    const second = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+
+    expect(first.exitCode).not.toBe(ExitCode.Success);
+    expect(firstManifest.manifest?.repositories[0]?.repository.name).toBe(JONES_REPOSITORY);
+    expect(firstManifest.manifest?.repositories[0]?.repository.templateSyncBaselineStatus).toBe(
+      "baseline_required"
+    );
+    expect(second.errors).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "repo_name_collision" })])
+    );
   });
 
   it("TC-RECOVERY-010 config error stops before GitHub mutation", async () => {

@@ -14,6 +14,8 @@ const ASAR_FILE_EXTENSION = ".asar";
 const ASAR_UNPACKED_FILE_EXTENSION = ".asar.unpacked";
 const ELECTRON_RUN_AS_NODE_ENV = "ELECTRON_RUN_AS_NODE";
 const ELECTRON_RUN_AS_NODE_VALUE = "1";
+const DEBUG_ENV_NAME = "GRAIDER_UI_DEBUG";
+const DEBUG_ENABLED_VALUE = "1";
 const WINDOWS_PLATFORM = "win32";
 
 export const BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE = "BUNDLED_GRAIDER_CLI_MISSING";
@@ -104,20 +106,36 @@ export const getBundledGraiderCliPath = (appPath: string): string =>
 export const getDevelopmentGraiderCliPath = (appPath: string): string =>
   path.resolve(appPath, ...DEVELOPMENT_GRAIDER_CLI_RELATIVE_PATH);
 
+/**
+ * Names the location that was actually tried. Without it "not found" gives no way to tell a
+ * missing install from a resolution that picked an unexpected path.
+ */
+export const describeGraiderCliAttempt = (diagnostic?: ProcessRunDiagnostic): string => {
+  if (diagnostic === undefined) {
+    return "";
+  }
+
+  const attemptedPath = diagnostic.helperPath ?? diagnostic.executablePath;
+  const source = diagnostic.resolutionSource ?? "unresolved";
+
+  return ` (tried ${source}: ${attemptedPath})`;
+};
+
 export const getGraiderCliStartError = (
-  processErrorCode: string | null
+  processErrorCode: string | null,
+  diagnostic?: ProcessRunDiagnostic
 ): GraiderCliStartError | null => {
   if (processErrorCode === BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE) {
     return {
       code: BUNDLED_GRAIDER_CLI_NOT_FOUND_CODE,
-      message: BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE
+      message: `${BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE}${describeGraiderCliAttempt(diagnostic)}`
     };
   }
 
   if (processErrorCode === "ENOENT") {
     return {
       code: EXTERNAL_GRAIDER_CLI_NOT_FOUND_CODE,
-      message: EXTERNAL_GRAIDER_CLI_NOT_FOUND_MESSAGE
+      message: `${EXTERNAL_GRAIDER_CLI_NOT_FOUND_MESSAGE}${describeGraiderCliAttempt(diagnostic)}`
     };
   }
 
@@ -316,6 +334,23 @@ const isMissingBundledGraiderCli = (
   options.graiderCli?.mode === "bundled" &&
   resolution === null;
 
+const isDebugEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
+  env[DEBUG_ENV_NAME]?.trim() === DEBUG_ENABLED_VALUE;
+
+/** Matches the convention in tokenResolver so one env var turns on all launch diagnostics. */
+const logGraiderCliDiagnostic = (
+  diagnostic: ProcessRunDiagnostic,
+  error: ProcessSpawnError
+): void => {
+  if (!isDebugEnabled()) {
+    return;
+  }
+
+  console.error(
+    `[graider-ui] Graider CLI launch failed: code=${error.code ?? "unknown"} mode=${diagnostic.runnerMode} source=${diagnostic.resolutionSource ?? "unresolved"} executable=${diagnostic.executablePath} helper=${diagnostic.helperPath ?? "none"} cwd=${diagnostic.cwd ?? "none"}`
+  );
+};
+
 const getErrorCode = (error: Error): string | null => {
   const maybeNodeError = error as NodeJS.ErrnoException;
 
@@ -340,15 +375,18 @@ export const createNodeProcessRunner =
       const diagnostic = createProcessRunDiagnostic(request, resolvedRequest, resolution, options);
 
       if (isMissingBundledGraiderCli(request, resolution, options)) {
+        const missingCliError: ProcessSpawnError = {
+          code: BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE,
+          message: BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE
+        };
+
+        logGraiderCliDiagnostic(diagnostic, missingCliError);
         finish({
           stdout,
           stderr,
           exitCode: null,
           signal: null,
-          error: {
-            code: BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE,
-            message: BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE
-          },
+          error: missingCliError,
           diagnostic
         });
       } else {
@@ -371,15 +409,18 @@ export const createNodeProcessRunner =
         });
 
         childProcess.on("error", (error: Error) => {
+          const spawnError: ProcessSpawnError = {
+            code: getErrorCode(error),
+            message: error.message
+          };
+
+          logGraiderCliDiagnostic(diagnostic, spawnError);
           finish({
             stdout,
             stderr,
             exitCode: null,
             signal: null,
-            error: {
-              code: getErrorCode(error),
-              message: error.message
-            },
+            error: spawnError,
             diagnostic
           });
         });

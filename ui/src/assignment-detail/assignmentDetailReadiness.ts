@@ -258,9 +258,25 @@ const getDiagnosticGroupKey = (
   return "info";
 };
 
+/**
+ * Codes from the apply gate rather than from any one subsystem. They match no keyword below, so
+ * without this they fall into the generic bucket and read as though Assignment detail itself
+ * failed. `mutation_blocked` in particular is the gate reporting that it refused to run; the
+ * diagnostics listed after it are the actual causes.
+ */
+const APPLY_GATE_CODES = new Set([
+  "mutation_blocked",
+  "confirmation_required",
+  "plan_contains_blocked_operations"
+]);
+
 export const getDiagnosticCategory = (diagnostic: AssignmentDetailDiagnostic): string => {
   const code = diagnostic.code ?? "";
   const message = diagnostic.message.toLowerCase();
+
+  if (APPLY_GATE_CODES.has(code)) {
+    return "Apply blocked";
+  }
 
   if (code.includes("template") || message.includes("template")) {
     return "Template";

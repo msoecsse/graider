@@ -95,7 +95,7 @@ export const getAssignmentRepositoryMappings = async ({
     cwd: root
   });
   if (result.error !== null) {
-    const start = getGraiderCliStartError(result.error.code);
+    const start = getGraiderCliStartError(result.error.code, result.diagnostic);
     return {
       manifestStatus: "not_applied",
       mappings: [],

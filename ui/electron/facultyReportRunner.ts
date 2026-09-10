@@ -116,7 +116,7 @@ export const runFacultyReportCommand = async ({
   });
 
   if (result.error !== null) {
-    const cliStartError = getGraiderCliStartError(result.error.code);
+    const cliStartError = getGraiderCliStartError(result.error.code, result.diagnostic);
     const code = cliStartError?.code ?? "faculty_report_failed";
     const message = cliStartError?.message ?? "Graider report could not be started.";
 

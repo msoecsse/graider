@@ -210,7 +210,7 @@ export const runDashboardCommand = async ({
   logDashboardDebug(env, request, result, token);
 
   if (result.error !== null) {
-    const cliStartError = getGraiderCliStartError(result.error.code);
+    const cliStartError = getGraiderCliStartError(result.error.code, result.diagnostic);
     const code = cliStartError?.code ?? "dashboard_command_failed";
     const message = cliStartError?.message ?? "Graider dashboard could not be started.";
 

@@ -13,6 +13,10 @@ export type GitHubErrorKind =
 
 interface GitHubClientErrorOptions {
   retryAfterSeconds?: number;
+  /** HTTP status GitHub returned, kept so an opaque failure names its own cause. */
+  status?: number;
+  /** GitHub's own error text, redacted before it reaches a diagnostic. */
+  githubMessage?: string;
 }
 
 const DIAGNOSTIC_CODE_BY_KIND = {
@@ -37,6 +41,8 @@ export class GitHubClientError extends Error {
   readonly diagnosticCode: string;
   readonly retryAfterSeconds?: number;
   readonly retryable: boolean;
+  readonly status?: number;
+  readonly githubMessage?: string;
 
   constructor(kind: GitHubErrorKind, message: string, options?: GitHubClientErrorOptions) {
     super(redactString(message));
@@ -49,19 +55,41 @@ export class GitHubClientError extends Error {
       this.retryAfterSeconds = options.retryAfterSeconds;
     }
 
+    if (options?.status !== undefined) {
+      this.status = options.status;
+    }
+
+    if (options?.githubMessage !== undefined) {
+      this.githubMessage = redactString(options.githubMessage);
+    }
+
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 export const isRetryableGitHubError = (error: GitHubClientError): boolean => error.retryable;
 
+/** "GitHub API request failed." on its own is unactionable; the status and GitHub's text are not. */
+const describeGitHubError = (error: GitHubClientError): string => {
+  const details = [
+    ...(error.status === undefined ? [] : [String(error.status)]),
+    ...(error.githubMessage === undefined || error.githubMessage === error.message
+      ? []
+      : [error.githubMessage])
+  ];
+
+  return details.length === 0 ? error.message : `${error.message} (${details.join(": ")})`;
+};
+
 export const createGitHubDiagnostic = (error: GitHubClientError): Diagnostic => ({
   code: error.diagnosticCode,
   severity: "error",
-  message: error.message,
+  message: describeGitHubError(error),
   context: {
     kind: error.kind,
     retryable: error.retryable,
+    ...(error.status === undefined ? {} : { status: error.status }),
+    ...(error.githubMessage === undefined ? {} : { githubMessage: error.githubMessage }),
     ...(error.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: error.retryAfterSeconds })
   }
 });
