@@ -93,10 +93,7 @@ export const executeGroupTargets = async (input: {
           permission: target.graderTeamPermission as never
         });
       }
-      if (
-        input.config.summary.gradingEnabled &&
-        input.config.course.grading.workflow !== undefined
-      )
+      if (input.config.summary.gradingEnabled && input.config.course.grading.workflow !== undefined)
         await input.githubClient.getWorkflow(
           repository.owner,
           repository.name,

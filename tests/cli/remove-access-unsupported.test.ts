@@ -8,6 +8,7 @@ import { formatCommandResultAsJson } from "../../src/cli/output.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { ExitCode } from "../../src/core/exit-codes.js";
 import { DiagnosticCode } from "../../src/diagnostics/error-catalog.js";
+import { CLI_SPAWN_TEST_TIMEOUT_MS } from "../support/timeouts.js";
 
 const CLI_ENTRYPOINT = path.resolve("src/cli/index.ts");
 const NODE_ARGUMENTS = ["--import", "tsx", CLI_ENTRYPOINT] as const;
@@ -54,7 +55,7 @@ const listFiles = (directory: string): string[] =>
     return entry.isFile() ? [entry.name] : [];
   });
 
-describe("remove-access unsupported command shell", () => {
+describe("remove-access unsupported command shell", { timeout: CLI_SPAWN_TEST_TIMEOUT_MS }, () => {
   it(
     "TC-CLI-REMOVE-UNSUPPORTED-001 remove-access command exists",
     () => {

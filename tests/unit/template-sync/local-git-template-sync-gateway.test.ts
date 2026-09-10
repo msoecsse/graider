@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { LocalGitTemplateSyncGateway } from "../../../src/template-sync/local-git-template-sync-gateway.js";
 import { getTemplateSyncFailure } from "../../../src/template-sync/template-sync-failure.js";
+import { removeTemporaryDirectories } from "../../support/temp-directory.js";
+import { GIT_TEST_TIMEOUT_MS } from "../../support/timeouts.js";
 
 const run = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -67,14 +69,10 @@ const setup = async (
 };
 
 afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map(async (directory) => rm(directory, { force: true, recursive: true }))
-  );
+  await removeTemporaryDirectories(temporaryDirectories);
 });
 
-describe("LocalGitTemplateSyncGateway", () => {
+describe("LocalGitTemplateSyncGateway", { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it("recovers an independent initial student commit with an identical tree", async () => {
     const fixture = await setup("main", true);
     const gateway = new LocalGitTemplateSyncGateway(fixture);

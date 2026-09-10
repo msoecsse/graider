@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { CLI_SPAWN_TEST_TIMEOUT_MS } from "../../support/timeouts.js";
 
 const CLI_ENTRYPOINT = path.resolve("src/cli/index.ts");
 const NODE_ARGUMENTS = ["--import", "tsx", CLI_ENTRYPOINT] as const;
@@ -45,7 +46,7 @@ const expectNoStackTrace = (output: string): void => {
   expect(output).not.toContain("at ");
 };
 
-describe("CLI output formatting", () => {
+describe("CLI output formatting", { timeout: CLI_SPAWN_TEST_TIMEOUT_MS }, () => {
   it("tokenless GitHub-backed command JSON output is parseable", () => {
     const result = runCli(["validate", ASSIGNMENT_FILE, "--json"], VALID_ROOT);
     const json = parseJson(result.stdout);

@@ -168,11 +168,15 @@ describe("manifest renderer", () => {
   });
 
   it("loads legacy repository state without a template-sync baseline", () => {
-    const result = loadManifest(path.resolve("tests/fixtures/manifest/valid-manifest/manifest.yml"));
+    const result = loadManifest(
+      path.resolve("tests/fixtures/manifest/valid-manifest/manifest.yml")
+    );
 
     expect(result.status).toBe("loaded");
     if (result.status === "loaded") {
-      expect(result.manifest.repositories[0]?.repository.studentDefaultBranchCommitSha).toBeUndefined();
+      expect(
+        result.manifest.repositories[0]?.repository.studentDefaultBranchCommitSha
+      ).toBeUndefined();
       expect(result.manifest.repositories[0]?.repository.templateSyncBaselineStatus).toBe(
         "baseline_required"
       );

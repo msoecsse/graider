@@ -1,5 +1,5 @@
 import { execFile as executeFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -10,6 +10,8 @@ import {
   withProductionTemplateSyncWorkspace
 } from "../../../src/template-sync/production-template-sync-workspace.js";
 import { getTemplateSyncFailure } from "../../../src/template-sync/template-sync-failure.js";
+import { removeTemporaryDirectories } from "../../support/temp-directory.js";
+import { GIT_TEST_TIMEOUT_MS } from "../../support/timeouts.js";
 
 const input = {
   templateCloneUrl: "https://github.com/course/template.git",
@@ -24,11 +26,7 @@ const execFile = promisify(executeFile);
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories.splice(0).map(async (directory) => {
-      await rm(directory, { force: true, recursive: true });
-    })
-  );
+  await removeTemporaryDirectories(temporaryDirectories);
 });
 
 enum WorkspaceTestNumber {
@@ -75,7 +73,7 @@ const createWorkspaceFixture = async (studentBranch: string) => {
   return { template, student };
 };
 
-describe("production template-sync diagnostics", () => {
+describe("production template-sync diagnostics", { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it.each([
     [1, "template_clone_failed", "Unable to clone template repository."],
     [2, "student_clone_failed", "Unable to clone student repository."]
@@ -129,7 +127,7 @@ describe("production template-sync diagnostics", () => {
   });
 });
 
-describe("production student default-branch checkout", () => {
+describe("production student default-branch checkout", { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it.each([
     ["main", "master"],
     ["master", "main"],

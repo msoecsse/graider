@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { CLI_SPAWN_TEST_TIMEOUT_MS } from "../support/timeouts.js";
 
 const CLI_ENTRYPOINT = path.resolve("src/cli/index.ts");
 const TEST_ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
@@ -59,7 +60,7 @@ const runCliText = (args: readonly string[], cwd?: string): string =>
 const parseJsonResult = (output: string): JsonCommandResult =>
   JSON.parse(output) as JsonCommandResult;
 
-describe("graider CLI shell", () => {
+describe("graider CLI shell", { timeout: CLI_SPAWN_TEST_TIMEOUT_MS }, () => {
   it("TC-CLI-SHELL-001 tokenless validate reports structured authentication requirements", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
     const json = parseJsonResult(result.stdout);
@@ -227,7 +228,7 @@ describe("graider CLI shell", () => {
   });
 });
 
-describe("graider validate roster validation", () => {
+describe("graider validate roster validation", { timeout: CLI_SPAWN_TEST_TIMEOUT_MS }, () => {
   it("reports token-required after loading a valid roster fixture", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE], VALID_ROSTER_REPO_ROOT);
 
@@ -337,7 +338,7 @@ describe("graider validate roster validation", () => {
   });
 });
 
-describe("graider validate path resolution", () => {
+describe("graider validate path resolution", { timeout: CLI_SPAWN_TEST_TIMEOUT_MS }, () => {
   it("tokenless validate resolves the repository root before requiring a token", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
     const json = parseJsonResult(result.stdout);
@@ -380,7 +381,7 @@ describe("graider validate path resolution", () => {
   });
 });
 
-describe("graider validate config validation", () => {
+describe("graider validate config validation", { timeout: CLI_SPAWN_TEST_TIMEOUT_MS }, () => {
   it("reports token-required for a tokenless valid fixture", () => {
     const result = runCli(["validate", TEST_ASSIGNMENT_FILE, "--json"], VALID_REPO_ROOT);
     const json = parseJsonResult(result.stdout);

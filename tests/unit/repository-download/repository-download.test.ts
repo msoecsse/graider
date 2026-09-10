@@ -9,6 +9,9 @@ import {
 import { renderManifestV2Yaml } from "../../../src/manifest/manifest-v2-renderer.js";
 
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
+const DESTINATION = "/downloads/lab04";
+const clonePath = (repositoryName: string): string =>
+  path.resolve(path.resolve(DESTINATION), repositoryName);
 const copyFixture = (): string => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "graider-repository-download-"));
   fs.cpSync(path.join("tests", "fixtures", "grade", "active-assignment"), cwd, {
@@ -33,7 +36,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DESTINATION,
       dependencies: createDependencies(execFile)
     });
 
@@ -124,7 +127,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DESTINATION,
       dependencies: createDependencies(execFile)
     });
 
@@ -146,12 +149,12 @@ describe("downloadAssignmentRepositories", () => {
     expect(execFile).toHaveBeenNthCalledWith(2, "git", [
       "clone",
       "https://github.com/example-org/27s1-se2030-lab04-team-1.git",
-      "/downloads/lab04/27s1-se2030-lab04-team-1"
+      clonePath("27s1-se2030-lab04-team-1")
     ]);
     expect(execFile).toHaveBeenNthCalledWith(3, "git", [
       "clone",
       "https://github.com/example-org/27s1-se2030-lab04-team-2",
-      "/downloads/lab04/27s1-se2030-lab04-team-2"
+      clonePath("27s1-se2030-lab04-team-2")
     ]);
   });
 });

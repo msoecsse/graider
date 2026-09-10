@@ -113,14 +113,14 @@ const getGradingEnabled = (
         gradingSource: "assignment"
       }
     : course.grading !== undefined
-    ? {
-        gradingEnabled: course.grading.enabled,
-        gradingSource: "course"
-      }
-    : {
-        gradingEnabled: false,
-        gradingSource: "none"
-      };
+      ? {
+          gradingEnabled: course.grading.enabled,
+          gradingSource: "course"
+        }
+      : {
+          gradingEnabled: false,
+          gradingSource: "none"
+        };
 
 const createSummary = (
   repoRoot: string,

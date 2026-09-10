@@ -12,6 +12,7 @@ const OUTPUT_FILE = "graider-output/grading-results.json";
 const SUCCESS_EXIT_CODE = 0;
 const SCHEMA_VERSION = 1;
 const VALID_STATUSES = ["passed", "failed", "skipped"] as const;
+const PYTHON_CANDIDATES = ["python3", "python", "py"] as const;
 
 interface GradingResult {
   readonly schema_version: number;
@@ -23,6 +24,26 @@ interface GradingResult {
 }
 
 const createTempRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), TEMP_FIXTURE_PREFIX));
+
+/**
+ * The generated workflow runs `python3`, which is correct on `ubuntu-latest`, but on Windows
+ * `python3` is usually an App Execution Alias that prints an install hint and exits nonzero
+ * without running anything. Probe for an interpreter that actually executes rather than
+ * assuming the name.
+ */
+const resolvePythonCommand = (): string => {
+  for (const candidate of PYTHON_CANDIDATES) {
+    const probe = spawnSync(candidate, ["-c", "print(1)"], { encoding: "utf8" });
+
+    if (probe.status === SUCCESS_EXIT_CODE && probe.stdout.trim() === "1") {
+      return candidate;
+    }
+  }
+
+  throw new Error(`No usable Python interpreter found; tried ${PYTHON_CANDIDATES.join(", ")}.`);
+};
+
+const PYTHON = resolvePythonCommand();
 
 const writeScript = (cwd: string): string => {
   const scriptPath = path.join(cwd, SCRIPT_FILE);
@@ -55,7 +76,7 @@ const runWriter = (
     ...checks.flatMap((check) => ["--check", check]),
     ...(options.classroomChecks ?? []).flatMap((check) => ["--classroom-check", check])
   ];
-  const result = spawnSync("python3", args, {
+  const result = spawnSync(PYTHON, args, {
     cwd,
     encoding: "utf8",
     env: {
@@ -336,7 +357,7 @@ describe("Graider grading result writer template", () => {
   it("exits nonzero when output is missing", () => {
     const cwd = createTempRoot();
     const scriptPath = writeScript(cwd);
-    const result = spawnSync("python3", [scriptPath, "--check", "CheckStyle=success"], {
+    const result = spawnSync(PYTHON, [scriptPath, "--check", "CheckStyle=success"], {
       cwd,
       encoding: "utf8"
     });

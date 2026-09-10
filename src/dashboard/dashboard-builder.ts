@@ -991,7 +991,13 @@ const loadRosterSummary = (
   const loadedRosters = termConfig.sections.flatMap((section) =>
     section.roster === undefined
       ? []
-      : [loadRosterStudents(repoRoot, [TERMS_DIRECTORY, termSlug, section.roster].join("/"), section.id)]
+      : [
+          loadRosterStudents(
+            repoRoot,
+            [TERMS_DIRECTORY, termSlug, section.roster].join("/"),
+            section.id
+          )
+        ]
   );
   const students = loadedRosters.flatMap((roster) => roster.students);
   const diagnostics = [

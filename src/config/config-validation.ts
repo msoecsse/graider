@@ -300,8 +300,8 @@ const validateGradingConfig = (
   grading === undefined
     ? []
     : grading.enabled
-    ? validateEnabledGradingConfig(filePath, grading, owner)
-    : validateDisabledGradingConfig(filePath, grading, owner);
+      ? validateEnabledGradingConfig(filePath, grading, owner)
+      : validateDisabledGradingConfig(filePath, grading, owner);
 
 const createMissingStudentPublishFieldDiagnostic = (
   filePath: string,

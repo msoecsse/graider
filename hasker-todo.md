@@ -357,42 +357,73 @@ available on PATH."` is hardcoded in eight renderer files (`dashboardAggregation
 
 ---
 
-## Task 13 — Repository health that predates this work — PARTLY RESOLVED 2026-09-10
+## Task 13 — Repository health that predates this work — RESOLVED 2026-09-10
 
-Measured 2026-09-10 while verifying Tasks 2-11. None of it was introduced by these changes, and
-none of it was fixed by them; recorded so it is not mistaken for new breakage.
+Measured 2026-09-10 while verifying Tasks 2-11, when none of it had been introduced or fixed by
+those changes. Tasks 14 and 15 then cleared the typecheck and lint backlogs, and a follow-up pass
+cleared the formatting and the test flakiness, so all of this is now closed except the `ui/`
+project.
 
 - [x] (**Task 14**, done) `npm run typecheck` reports **97 errors at HEAD**, mostly `'grading' is possibly 'undefined'`
       across `src/config`, `src/cli/commands/workflow.command.ts` and
-      `src/assignment-detail`. Verified identical with all local work stashed, so `npm run check`
-      cannot pass today regardless of these tasks.
-- [x] (**Task 15**, done for 15a—15c) `npx eslint .` reports **119 errors at HEAD**
+      `src/assignment-detail`. Verified identical with all local work stashed. Now 0.
+- [x] (**Task 15**, done for 15a–15c) `npx eslint .` reports **119 errors at HEAD**
       (identical before and after this work). Now 0.
-- [ ] **Still open, and now diagnosed.** The test suites are flaky on Windows. Full CLI-suite failures swung between 36 and 53 across
+- [x] **Fixed.** The test suites are flaky on Windows. Full CLI-suite failures swung between 36 and 53 across
       identical back-to-back runs. Three families account for it: tests that assert a missing token
       while `GRAIDER_GITHUB_TOKEN` is set in the shell; template-sync tests that drive real `git`
       in temp directories; and CLI-shell tests that spawn the built CLI as a subprocess and time
       out under parallel load. A fourth family — POSIX-vs-Windows path assertions such as
       `/Users/sean/...` vs `C:\Users\...` — fails deterministically in `ui/electron`
       (`tokenResolver`, `courseRegistry`, `dashboardRunner`, the access-page services).
-      The real-git family's mechanism is now known: `EBUSY: resource busy or locked, rmdir`
-      while tearing down temp clones under parallel load.
-      `local-git-template-sync-gateway.test.ts` and
-      `production-template-sync-workspace.test.ts` each pass alone (10/10 and 7/7) and swing
-      between 3 and 10 failures across full runs of the same tree. Fixing it wants unique
-      temp roots per test plus a retrying rmdir on Windows; worth its own task.
-- [ ] **Still open.** `npx tsc --noEmit --project ui/tsconfig.json` reports 7 pre-existing
-      errors (`prepareAssignmentTemplateSync` optionality in test mocks,
-      `exactOptionalPropertyTypes`). Not touched by Tasks 14 or 15, which were both scoped to
-      the CLI project.
-- [ ] **Newly recorded.** `prettier . --check` flags 6 files, all pre-existing and none from
-      this work: `docs/config-wizard-plan.md`, `src/config/config-loader.ts`,
+      All four families are fixed, and none of them were product bugs — every one was the test
+      harness depending on something about the machine. `npx vitest run` is now **726 passed, 0
+      failed** on five consecutive full runs, with `GRAIDER_GITHUB_TOKEN` still set in the shell.
+
+      1. **Ambient token (15 failures).** The offline suites assert tokenless behavior but read
+         `process.env` directly, so a developer token silently inverted them — and the
+         CLI-shell tests spawn subprocesses that inherited it too. New setup file
+         `tests/setup/clear-github-token.ts` deletes both token names;
+         `vitest.config.ts` registers it for every run except a live run, which needs the real
+         token. Verified: `vitest run tests/live` reports `setup 0ms`, so the file is not
+         registered there.
+      2. **`python3` on Windows (20 failures).** `result-writer.test.ts` hardcoded `python3`,
+         which on this machine is a Microsoft Store App Execution Alias that prints an install
+         hint and exits 49 without running anything (the real interpreter is `python`, 3.13.15).
+         The test now probes `python3`, `python`, `py` for one that actually executes. The
+         generated workflow still emits `python3`, which is correct for `ubuntu-latest` — this
+         was only ever a local-harness assumption.
+      3. **`EBUSY` on temp cleanup.** Confirmed as the real-git mechanism: cleanup races a Git
+         child process still holding a handle. `fs.rm` retries exactly that error class when
+         asked, so the new `tests/support/temp-directory.ts` passes `maxRetries`/`retryDelay`
+         and both suites use it.
+      4. **The 5s default timeout.** The remaining failures were not races at all but
+         `Test timed out in 5000ms`. The real-git cases take 2.4-4.1s *in isolation* and the
+         CLI-spawning cases pay a full `tsx` transpile per `spawnSync`; both exceed 5s under
+         parallel load. `tests/support/timeouts.ts` holds one rationale and two constants,
+         applied as suite-level timeouts to the two git suites and the four CLI-spawning suites.
+         Everything else keeps the strict 5s default.
+
+      The POSIX-vs-Windows path family was also real: `repository-download.test.ts` asserted
+      `/downloads/lab04/...` while the code builds the path with `path.resolve`, giving
+      `C:\downloads\lab04\...`. The expectation now uses `path.resolve` the same way the code
+      does. The `ui/electron` half of that family is untouched — see the `ui/` bullet below.
+
+- [ ] **Still open, and the only thing here that is.**
+      `npx tsc --noEmit --project ui/tsconfig.json` reports 7 pre-existing errors (`prepareAssignmentTemplateSync`
+      optionality in test mocks, `exactOptionalPropertyTypes`), and `npm --prefix ui test` still
+      has the deterministic POSIX-path failures in `ui/electron` (`tokenResolver`,
+      `courseRegistry`, `dashboardRunner`, the access-page services). Everything in Tasks 14, 15
+      and this task was scoped to the CLI project, so `npm run check` passing says nothing about
+      `ui/`. Pair this with 15d's deferred bullet (`ui/` TypeScript is not linted at all) — one
+      pass over the `ui/` project would clear typecheck, lint and tests together.
+- [x] **Fixed.** `prettier . --check` had flagged 6 pre-existing files
+      (`docs/config-wizard-plan.md`, `src/config/config-loader.ts`,
       `src/config/config-validation.ts`, `src/dashboard/dashboard-builder.ts`,
-      `src/groups/group-target-executor.ts`, `tests/unit/manifest/manifest-renderer.test.ts`.
-      Every disagreement is nested-ternary indentation. Three are files Tasks 14/15 edited;
-      they were left alone rather than mixing unrelated reformatting into those diffs. With
-      Tasks 14 and 15 landed, these 6 files and the flakiness above are all that keep
-      `npm run check` from passing.
+      `src/groups/group-target-executor.ts`, `tests/unit/manifest/manifest-renderer.test.ts`).
+      Formatted; the diff is line-wrapping and markdown table padding only, confirmed with
+      `git diff -w`. Deferred through Tasks 14/15 to keep unrelated reformatting out of those
+      diffs, then landed on its own.
 
 Because of the flakiness, verification for Tasks 2-11 used targeted runs, all green:
 `tests/unit/execution tests/unit/github tests/recovery tests/cli/apply.test.ts
@@ -650,8 +681,12 @@ For Part 2 also:
     npm --prefix ui run typecheck
     npm --prefix ui test
 
-Note that `npm run check` cannot pass today for reasons that predate this work — see Task 13. Until
-that is addressed, compare failure sets against a stashed baseline rather than expecting zero, and
-lean on the targeted runs listed in Task 13.
+`npm run check` **passes** as of 2026-09-10 (typecheck, lint, format:check and 726/726 tests),
+verified over five consecutive full runs. Expect zero failures now; a failure is a real
+regression, not the old Windows flakiness. See Task 13 for what each of those flakes turned out
+to be.
+
+`npm --prefix ui run typecheck` and `npm --prefix ui test` are a different story and still fail;
+none of this work touched the `ui/` project.
 
 io2 itself needs no further action: 21/21 students tracked as of 2026-09-10 (Task 1).
