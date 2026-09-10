@@ -92,7 +92,7 @@ export const createAssignmentTemplateSyncContextService = (
       };
     }
     const template = config.assignment.template;
-    if (!template?.repository?.trim())
+    if (!template.repository.trim())
       return {
         preview: unavailable(
           "template_required",
@@ -159,18 +159,20 @@ export const createAssignmentTemplateSyncContextService = (
   };
 
   return {
-    async prepare(request) {
+    prepare(request) {
       try {
-        return loadContext(request).preview;
+        return Promise.resolve(loadContext(request).preview);
       } catch {
-        return unavailable(
-          "invalid_assignment",
-          "Unable to load assignment context. Check the assignment path and files."
+        return Promise.resolve(
+          unavailable(
+            "invalid_assignment",
+            "Unable to load assignment context. Check the assignment path and files."
+          )
         );
       }
     },
     async execute(request) {
-      const options = { yes: request.confirmed === true, json: false, verbose: false };
+      const options = { yes: request.confirmed, json: false, verbose: false };
       const guard = evaluateMutationGuard({ options });
       if (!guard.allowed)
         return {
@@ -227,10 +229,11 @@ export const createAssignmentTemplateSyncContextService = (
             }
             return template.latestCommitSha;
           },
-          persistManifest: async (manifest) => {
+          persistManifest: (manifest) => {
             const written = dependencies.writeManifest(context.manifestPath, manifest);
-            if (written.status === "failure")
-              throw new Error("Unable to save assignment sync state.");
+            return written.status === "failure"
+              ? Promise.reject(new Error("Unable to save assignment sync state."))
+              : Promise.resolve();
           }
         });
         if (response.status === "failure")

@@ -18,6 +18,8 @@ import type {
 } from "./template-sync.js";
 
 const execFile = promisify(executeFile);
+/** 10 MiB; a repository-sized clone's Git output does not fit execFile's default buffer. */
+const GIT_OUTPUT_MAX_BUFFER_BYTES = 10485760;
 const GIT = "git";
 
 export interface ProductionTemplateSyncWorkspaceInput {
@@ -186,7 +188,7 @@ const git = async (
     [...authorization, ...(directory === undefined ? [] : ["-C", directory]), ...args],
     {
       encoding: "utf8",
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: GIT_OUTPUT_MAX_BUFFER_BYTES
     }
   );
   return { stdout };

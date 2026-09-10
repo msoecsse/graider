@@ -10,6 +10,8 @@ import {
 } from "./template-sync.js";
 import { getTemplateSyncFailure } from "./template-sync-failure.js";
 
+const LAST_SEGMENT_INDEX = -1;
+
 export const runProductionRepositoryTemplateSync = async (
   repository: ManifestRepositoryRecord,
   targetTemplateCommitSha: string,
@@ -27,7 +29,9 @@ export const runProductionRepositoryTemplateSync = async (
         await syncTemplateUpdate({
           templateRepository: {
             owner: repository.repository.owner,
-            name: repository.repository.templateRepository.split("/").at(-1) ?? "template"
+            name:
+              repository.repository.templateRepository.split("/").at(LAST_SEGMENT_INDEX) ??
+              "template"
           },
           studentRepository: {
             owner: repository.repository.owner,
@@ -49,8 +53,9 @@ export const runProductionRepositoryTemplateSync = async (
           },
           gateway,
           pullRequests,
-          updateAnchors: async (updated) => {
+          updateAnchors: (updated) => {
             anchors = updated;
+            return Promise.resolve();
           }
         })
     );

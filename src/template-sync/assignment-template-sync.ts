@@ -47,11 +47,6 @@ export const isApplicableRepository = (
   repository.repository.templateRepository === manifest.template.repository &&
   !["archived", "access_removed", "missing", "error"].includes(repository.lifecycle.status);
 
-const hasAnchorUpdate = (
-  result: TemplateSyncResult
-): result is Extract<TemplateSyncResult, { status: "updated" | "pull_request_reconciled" }> =>
-  result.status === "updated" || result.status === "pull_request_reconciled";
-
 export const syncAssignmentTemplate = async (
   input: AssignmentTemplateSyncInput
 ): Promise<AssignmentTemplateSyncResult> => {

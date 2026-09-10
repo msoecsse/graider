@@ -174,7 +174,7 @@ describe("config loading and validation", () => {
   it("accepts an omitted Graders team without inventing one", () => {
     const cwd = copyValidFixtureToTemp();
     writeCourseConfig(cwd, (content) =>
-      content.replace(/^  grader_team: .*\n  grader_permission: .*\n/mu, "")
+      content.replace(/^ {2}grader_team: .*\n {2}grader_permission: .*\n/mu, "")
     );
 
     const result = expectTempSuccess(cwd);
@@ -208,7 +208,7 @@ describe("config loading and validation", () => {
     const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
     fs.writeFileSync(
       assignmentPath,
-      fs.readFileSync(assignmentPath, "utf8").replace(/^  points: .*\n/mu, ""),
+      fs.readFileSync(assignmentPath, "utf8").replace(/^ {2}points: .*\n/mu, ""),
       "utf8"
     );
 
@@ -223,8 +223,8 @@ describe("config loading and validation", () => {
       assignmentPath,
       fs
         .readFileSync(assignmentPath, "utf8")
-        .replace(/^  faculty_owner: .*\n/mu, "")
-        .replace(/^  grading_category: .*\n/mu, ""),
+        .replace(/^ {2}faculty_owner: .*\n/mu, "")
+        .replace(/^ {2}grading_category: .*\n/mu, ""),
       "utf8"
     );
 
@@ -238,7 +238,7 @@ describe("config loading and validation", () => {
     const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
     fs.writeFileSync(
       assignmentPath,
-      fs.readFileSync(assignmentPath, "utf8").replace(/^  lms_assignment_id: .*\n/mu, ""),
+      fs.readFileSync(assignmentPath, "utf8").replace(/^ {2}lms_assignment_id: .*\n/mu, ""),
       "utf8"
     );
 

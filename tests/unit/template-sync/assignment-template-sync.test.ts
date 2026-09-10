@@ -19,25 +19,33 @@ const updatedTree: TemplateTree = { "README.md": "faculty" };
 class Gateway implements TemplateSyncGitGateway {
   readonly applied: string[] = [];
 
-  async getTree(_repository: typeof template, sha: string): Promise<TemplateTree> {
-    return sha === "template-base" ? tree : updatedTree;
+  getTree(_repository: typeof template, sha: string): Promise<TemplateTree> {
+    return Promise.resolve(sha === "template-base" ? tree : updatedTree);
   }
-  async getDefaultBranchCommitSha(input: { name: string }): Promise<string> {
-    return `${input.name}-head`;
+  getDefaultBranchCommitSha(input: { name: string }): Promise<string> {
+    return Promise.resolve(`${input.name}-head`);
   }
-  async recoverStudentBaseline() {
-    return { status: "not_found" as const };
+  recoverStudentBaseline() {
+    return Promise.resolve({ status: "not_found" as const });
   }
-  async applyAndPushTemplateDelta(
+  applyAndPushTemplateDelta(
     input: Parameters<TemplateSyncGitGateway["applyAndPushTemplateDelta"]>[0]
   ) {
     this.applied.push(input.studentRepository.name);
-    if (input.studentRepository.name === "failure") throw new Error("push failed");
-    if (input.studentRepository.name === "conflict") return { status: "conflict" as const };
-    return { status: "clean" as const, commitSha: `${input.studentRepository.name}-updated` };
+    if (input.studentRepository.name === "failure") return Promise.reject(new Error("push failed"));
+    if (input.studentRepository.name === "conflict")
+      return Promise.resolve({ status: "conflict" as const });
+    return Promise.resolve({
+      status: "clean" as const,
+      commitSha: `${input.studentRepository.name}-updated`
+    });
   }
-  async prepareConflictBranch(): Promise<void> {}
-  async deleteRemoteBranch(): Promise<void> {}
+  prepareConflictBranch(): Promise<void> {
+    return Promise.resolve();
+  }
+  deleteRemoteBranch(): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 class PullRequests implements TemplateSyncPullRequestGateway {
@@ -48,17 +56,17 @@ class PullRequests implements TemplateSyncPullRequestGateway {
     return `${repository.name}:${branchName}`;
   }
 
-  async createPullRequest(
-    input: Parameters<TemplateSyncPullRequestGateway["createPullRequest"]>[0]
-  ) {
+  createPullRequest(input: Parameters<TemplateSyncPullRequestGateway["createPullRequest"]>[0]) {
     this.created.push(input.sourceBranch);
     this.openBranches.add(this.key(input.repository, input.sourceBranch));
-    return { number: 10, url: "https://github.test/pr/10" };
+    return Promise.resolve({ number: 10, url: "https://github.test/pr/10" });
   }
-  async findPullRequest(input: Parameters<TemplateSyncPullRequestGateway["findPullRequest"]>[0]) {
-    return this.openBranches.has(this.key(input.repository, input.sourceBranch))
-      ? { number: 10, url: "https://github.test/pr/10", state: "open" as const, merged: false }
-      : null;
+  findPullRequest(input: Parameters<TemplateSyncPullRequestGateway["findPullRequest"]>[0]) {
+    return Promise.resolve(
+      this.openBranches.has(this.key(input.repository, input.sourceBranch))
+        ? { number: 10, url: "https://github.test/pr/10", state: "open" as const, merged: false }
+        : null
+    );
   }
 }
 
@@ -109,7 +117,7 @@ const batchInput = (
 ): AssignmentTemplateSyncInput => ({
   manifest: currentManifest,
   options: { yes, json: false, verbose: false },
-  resolveCurrentTemplateCommitSha: async () => "template-new",
+  resolveCurrentTemplateCommitSha: () => Promise.resolve("template-new"),
   runRepositorySync: async (record: ManifestRepositoryRecord, currentTemplateCommitSha: string) => {
     let anchors: Required<TemplateSyncAnchors> | undefined;
     const result = await syncTemplateUpdate({
@@ -134,8 +142,9 @@ const batchInput = (
       },
       gateway,
       pullRequests,
-      updateAnchors: async (updated) => {
+      updateAnchors: (updated) => {
         anchors = updated;
+        return Promise.resolve(undefined);
       }
     });
     return anchors === undefined ? { result } : { result, anchors };

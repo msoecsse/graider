@@ -1,5 +1,4 @@
 import type { Command } from "commander";
-import type { LoadedGraiderConfig } from "../../config/config-models.js";
 import { getEffectiveGrading } from "../../config/effective-grading.js";
 import { loadGraiderConfig } from "../../config/config-loader.js";
 import {

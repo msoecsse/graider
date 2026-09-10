@@ -179,11 +179,14 @@ export type TemplateSyncReconciliationResult =
 
 const TEMPLATE_UPDATE_BRANCH_PREFIX = "graider/template-update-";
 const TEMPLATE_UPDATE_TITLE = "Template update";
+/** Short-sha length used in the branch name, matching Git's abbreviated-sha convention. */
+const BRANCH_NAME_SHA_LENGTH = 12;
+
 const TEMPLATE_UPDATE_BODY =
   "Graider could not merge this faculty template update automatically. Please resolve the conflicts and merge this pull request.";
 
 export const createTemplateUpdateBranchName = (templateCommitSha: string): string =>
-  `${TEMPLATE_UPDATE_BRANCH_PREFIX}${templateCommitSha.slice(0, 12)}`;
+  `${TEMPLATE_UPDATE_BRANCH_PREFIX}${templateCommitSha.slice(0, BRANCH_NAME_SHA_LENGTH)}`;
 
 const hasInitializedAnchors = (
   anchors: TemplateSyncAnchors

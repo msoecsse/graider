@@ -25,48 +25,46 @@ class FakeGateway implements TemplateSyncGitGateway {
   recoveryResult: TemplateSyncBaselineRecoveryResult = { status: "not_found" };
   readonly recoveryAttempts: Parameters<TemplateSyncGitGateway["recoverStudentBaseline"]>[0][] = [];
 
-  async getTree(
-    _repository: { owner: string; name: string },
-    commitSha: string
-  ): Promise<TemplateTree> {
+  getTree(_repository: { owner: string; name: string }, commitSha: string): Promise<TemplateTree> {
     const tree = this.commits.get(commitSha);
-    if (tree === undefined) throw new Error(`Missing ${commitSha}`);
-    return tree;
+    return tree === undefined
+      ? Promise.reject(new Error(`Missing ${commitSha}`))
+      : Promise.resolve(tree);
   }
 
-  async getDefaultBranchCommitSha(): Promise<string> {
-    return "student-current";
+  getDefaultBranchCommitSha(): Promise<string> {
+    return Promise.resolve("student-current");
   }
 
-  async recoverStudentBaseline(
+  recoverStudentBaseline(
     input: Parameters<TemplateSyncGitGateway["recoverStudentBaseline"]>[0]
   ): Promise<TemplateSyncBaselineRecoveryResult> {
     this.recoveryAttempts.push(input);
-    return this.recoveryResult;
+    return Promise.resolve(this.recoveryResult);
   }
 
-  async applyAndPushTemplateDelta(
+  applyAndPushTemplateDelta(
     input: Parameters<TemplateSyncGitGateway["applyAndPushTemplateDelta"]>[0]
   ) {
     this.applied.push(input);
-    if (this.result === "conflict") return { status: "conflict" as const };
-    if (this.result === "failure") throw new Error("push failed");
+    if (this.result === "conflict") return Promise.resolve({ status: "conflict" as const });
+    if (this.result === "failure") return Promise.reject(new Error("push failed"));
     this.pushed = true;
-    return { status: "clean" as const, commitSha: "student-after-push" };
+    return Promise.resolve({ status: "clean" as const, commitSha: "student-after-push" });
   }
 
-  async prepareConflictBranch(
+  prepareConflictBranch(
     input: Parameters<TemplateSyncGitGateway["prepareConflictBranch"]>[0]
   ): Promise<void> {
     this.preparedBranches.push(input);
+    return Promise.resolve();
   }
 
-  async deleteRemoteBranch(
-    _repository: typeof studentRepository,
-    branchName: string
-  ): Promise<void> {
+  deleteRemoteBranch(_repository: typeof studentRepository, branchName: string): Promise<void> {
     this.deletedBranches.push(branchName);
-    if (this.failBranchCleanup) throw new Error("branch cleanup failed");
+    return this.failBranchCleanup
+      ? Promise.reject(new Error("branch cleanup failed"))
+      : Promise.resolve();
   }
 }
 
@@ -76,21 +74,20 @@ class FakePullRequests implements TemplateSyncPullRequestGateway {
   existing: { number: number; url: string; state: "open" | "closed"; merged: boolean } | null =
     null;
 
-  async createPullRequest(
-    input: Parameters<TemplateSyncPullRequestGateway["createPullRequest"]>[0]
-  ) {
+  createPullRequest(input: Parameters<TemplateSyncPullRequestGateway["createPullRequest"]>[0]) {
     this.created.push(input);
-    if (this.fail) throw new Error("PR creation failed");
-    return { number: 42, url: "https://github.test/course/student/pull/42" };
+    return this.fail
+      ? Promise.reject(new Error("PR creation failed"))
+      : Promise.resolve({ number: 42, url: "https://github.test/course/student/pull/42" });
   }
 
-  async findPullRequest(): Promise<{
+  findPullRequest(): Promise<{
     number: number;
     url: string;
     state: "open" | "closed";
     merged: boolean;
   } | null> {
-    return this.existing;
+    return Promise.resolve(this.existing);
   }
 }
 
@@ -106,7 +103,7 @@ const input = (
     templateSyncBaselineStatus: "initialized"
   },
   pullRequests: new FakePullRequests(),
-  updateAnchors: async () => undefined,
+  updateAnchors: () => Promise.resolve(undefined),
   ...overrides
 });
 
@@ -126,8 +123,9 @@ describe("syncTemplateUpdate", () => {
     await expect(
       syncTemplateUpdate({
         ...input({
-          updateAnchors: async (anchors) => {
+          updateAnchors: (anchors) => {
             storedAnchors.push(anchors);
+            return Promise.resolve(undefined);
           }
         }),
         gateway
@@ -176,7 +174,7 @@ describe("syncTemplateUpdate", () => {
   it("creates a conflict PR from the recorded student baseline without advancing anchors", async () => {
     const gateway = gatewayWithTrees();
     gateway.result = "conflict";
-    const updateAnchors = async () => expect.unreachable("anchors must not advance");
+    const updateAnchors = (): Promise<void> => expect.unreachable("anchors must not advance");
     const pullRequests = new FakePullRequests();
 
     await expect(
@@ -214,7 +212,7 @@ describe("syncTemplateUpdate", () => {
     gateway.result = "conflict";
     const pullRequests = new FakePullRequests();
     pullRequests.fail = true;
-    const updateAnchors = async () => expect.unreachable("anchors must not advance");
+    const updateAnchors = (): Promise<void> => expect.unreachable("anchors must not advance");
 
     await expect(
       syncTemplateUpdate({ ...input({ pullRequests, updateAnchors }), gateway })
@@ -224,7 +222,7 @@ describe("syncTemplateUpdate", () => {
 
   it("returns AlreadyCurrent without Git or anchor mutation", async () => {
     const gateway = gatewayWithTrees();
-    const updateAnchors = async () => expect.unreachable("anchors must not advance");
+    const updateAnchors = (): Promise<void> => expect.unreachable("anchors must not advance");
 
     await expect(
       syncTemplateUpdate({
@@ -283,8 +281,9 @@ describe("syncTemplateUpdate", () => {
             templateCommitSha: "template-base",
             templateSyncBaselineStatus: "baseline_required"
           },
-          updateAnchors: async (updated) => {
+          updateAnchors: (updated) => {
             anchors.push(updated);
+            return Promise.resolve(undefined);
           }
         }),
         gateway
@@ -321,7 +320,7 @@ describe("syncTemplateUpdate", () => {
     async (recoveryStatus, reason) => {
       const gateway = gatewayWithTrees();
       gateway.recoveryResult = { status: recoveryStatus };
-      const updateAnchors = async () => expect.unreachable("anchors must not advance");
+      const updateAnchors = (): Promise<void> => expect.unreachable("anchors must not advance");
 
       await expect(
         syncTemplateUpdate({
@@ -358,8 +357,9 @@ describe("syncTemplateUpdate", () => {
             templateSyncBaselineStatus: "baseline_required"
           },
           pullRequests,
-          updateAnchors: async (updated) => {
+          updateAnchors: (updated) => {
             anchors.push(updated);
+            return Promise.resolve(undefined);
           }
         }),
         gateway
@@ -385,8 +385,9 @@ describe("syncTemplateUpdate", () => {
     await expect(
       syncTemplateUpdate({
         ...input({
-          updateAnchors: async () => {
+          updateAnchors: () => {
             updated = true;
+            return Promise.resolve(undefined);
           }
         }),
         gateway
@@ -438,8 +439,9 @@ describe("reconcileTemplateUpdatePullRequest", () => {
       reconcileTemplateUpdatePullRequest({
         ...reconcileInput({
           pullRequests,
-          updateAnchors: async (updated) => {
+          updateAnchors: (updated) => {
             anchors.push(updated);
+            return Promise.resolve(undefined);
           }
         }),
         gateway
@@ -471,8 +473,9 @@ describe("reconcileTemplateUpdatePullRequest", () => {
       reconcileTemplateUpdatePullRequest({
         ...reconcileInput({
           pullRequests,
-          updateAnchors: async () => {
+          updateAnchors: () => {
             anchorsUpdated = true;
+            return Promise.resolve(undefined);
           }
         }),
         gateway
@@ -490,7 +493,7 @@ describe("reconcileTemplateUpdatePullRequest", () => {
       state: "closed",
       merged: false
     };
-    const updateAnchors = async () => expect.unreachable("anchors must not advance");
+    const updateAnchors = (): Promise<void> => expect.unreachable("anchors must not advance");
 
     await expect(
       reconcileTemplateUpdatePullRequest({
@@ -543,8 +546,9 @@ describe("reconcileTemplateUpdatePullRequest", () => {
         ...reconcileInput({
           pullRequests,
           anchors,
-          updateAnchors: async (updated) => {
+          updateAnchors: (updated) => {
             anchors = updated;
+            return Promise.resolve(undefined);
           }
         }),
         gateway

@@ -539,7 +539,7 @@ export class OctokitGitHubClient implements GitHubClient {
     const data = await this.run(() =>
       this.octokit.rest.pulls.list({ owner, repo, head: `${owner}:${head}`, base, state: "all" })
     );
-    const first = Array.isArray(data) ? data[0] : undefined;
+    const [first] = asArray(data);
     return first === undefined ? null : mapPullRequest(first);
   }
 

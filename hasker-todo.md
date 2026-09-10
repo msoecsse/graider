@@ -357,26 +357,42 @@ available on PATH."` is hardcoded in eight renderer files (`dashboardAggregation
 
 ---
 
-## Task 13 — Repository health that predates this work — OPEN, informational
+## Task 13 — Repository health that predates this work — PARTLY RESOLVED 2026-09-10
 
 Measured 2026-09-10 while verifying Tasks 2-11. None of it was introduced by these changes, and
 none of it was fixed by them; recorded so it is not mistaken for new breakage.
 
-- [ ] (now **Task 14**) `npm run typecheck` reports **97 errors at HEAD**, mostly `'grading' is possibly 'undefined'`
+- [x] (**Task 14**, done) `npm run typecheck` reports **97 errors at HEAD**, mostly `'grading' is possibly 'undefined'`
       across `src/config`, `src/cli/commands/workflow.command.ts` and
       `src/assignment-detail`. Verified identical with all local work stashed, so `npm run check`
       cannot pass today regardless of these tasks.
-- [ ] (now **Task 15**) `npx eslint .` reports **119 errors at HEAD** (identical before and after
-      this work).
-- [ ] The test suites are flaky on Windows. Full CLI-suite failures swung between 36 and 53 across
+- [x] (**Task 15**, done for 15a—15c) `npx eslint .` reports **119 errors at HEAD**
+      (identical before and after this work). Now 0.
+- [ ] **Still open, and now diagnosed.** The test suites are flaky on Windows. Full CLI-suite failures swung between 36 and 53 across
       identical back-to-back runs. Three families account for it: tests that assert a missing token
       while `GRAIDER_GITHUB_TOKEN` is set in the shell; template-sync tests that drive real `git`
       in temp directories; and CLI-shell tests that spawn the built CLI as a subprocess and time
       out under parallel load. A fourth family — POSIX-vs-Windows path assertions such as
       `/Users/sean/...` vs `C:\Users\...` — fails deterministically in `ui/electron`
       (`tokenResolver`, `courseRegistry`, `dashboardRunner`, the access-page services).
-- [ ] `npx tsc --noEmit --project ui/tsconfig.json` reports 7 pre-existing errors
-      (`prepareAssignmentTemplateSync` optionality in test mocks, `exactOptionalPropertyTypes`).
+      The real-git family's mechanism is now known: `EBUSY: resource busy or locked, rmdir`
+      while tearing down temp clones under parallel load.
+      `local-git-template-sync-gateway.test.ts` and
+      `production-template-sync-workspace.test.ts` each pass alone (10/10 and 7/7) and swing
+      between 3 and 10 failures across full runs of the same tree. Fixing it wants unique
+      temp roots per test plus a retrying rmdir on Windows; worth its own task.
+- [ ] **Still open.** `npx tsc --noEmit --project ui/tsconfig.json` reports 7 pre-existing
+      errors (`prepareAssignmentTemplateSync` optionality in test mocks,
+      `exactOptionalPropertyTypes`). Not touched by Tasks 14 or 15, which were both scoped to
+      the CLI project.
+- [ ] **Newly recorded.** `prettier . --check` flags 6 files, all pre-existing and none from
+      this work: `docs/config-wizard-plan.md`, `src/config/config-loader.ts`,
+      `src/config/config-validation.ts`, `src/dashboard/dashboard-builder.ts`,
+      `src/groups/group-target-executor.ts`, `tests/unit/manifest/manifest-renderer.test.ts`.
+      Every disagreement is nested-ternary indentation. Three are files Tasks 14/15 edited;
+      they were left alone rather than mixing unrelated reformatting into those diffs. With
+      Tasks 14 and 15 landed, these 6 files and the flakiness above are all that keep
+      `npm run check` from passing.
 
 Because of the flakiness, verification for Tasks 2-11 used targeted runs, all green:
 `tests/unit/execution tests/unit/github tests/recovery tests/cli/apply.test.ts
@@ -494,7 +510,15 @@ fails 20 cases, unchanged — confirmed identical against a stashed baseline (Ta
 
 ---
 
-## Task 15 — Fix the 119 lint errors so `npm run lint` passes — OPEN
+## Task 15 — Fix the 119 lint errors so `npm run lint` passes — 15a–15c DONE 2026-09-10;
+
+one 15d bullet deferred
+
+`npx eslint .` now reports **0 errors** and `npm run lint` passes. Task 14 landed first and
+took the count from 119 to 94 on its own — the sequencing note was right, and the whole of
+`production-assignment-template-sync-service.test.ts`'s `any`/unsafe-value cluster went with it.
+The one piece **not** done is 15d's second bullet, linting `ui/` TypeScript, which the task
+itself says to land as its own commit because it raises the count before it lowers it.
 
 Analyzed 2026-09-10; identical count with all local work stashed. `--fix` resolves only **7** of
 them, so plan on hand edits. The distribution matters more than the total: **85 are in `tests/`,
@@ -504,54 +528,111 @@ feature area, which appears never to have been linted.
     npx eslint .                  # 119 today
     npx eslint . --fix-dry-run    # 112 remain, so only 7 are mechanical
 
-### 15a — `require-await` in template-sync tests (49 errors, one mechanical pass)
+### 15a — `require-await` in template-sync tests — DONE
 
-- [ ] All 49 are `async` fakes with no `await` — `template-sync.test.ts` (21),
-      `assignment-template-sync.test.ts` (11),
-      `production-assignment-template-sync-service.test.ts` (6), and the rest in the same folder.
-      Replace `async () => value` with `() => Promise.resolve(value)`, and
-      `async () => { throw x }` with `() => Promise.reject(x)`. Keep the return types explicit so
-      the fakes still satisfy their interfaces.
+- [x] Done, but it was 43 sites rather than 49 and three of them were in `src/`, not tests:
+      `assignment-template-sync-context.ts` (`prepare`, `persistManifest`) and
+      `production-repository-sync-executor.ts` (`updateAnchors`). Applied the stated recipe —
+      `() => Promise.resolve(v)`, `() => Promise.reject(e)`, and braces plus an explicit
+      `return Promise.resolve()` where the body does real work. Return types stayed explicit and
+      every fake still satisfies its interface (typecheck confirms). Two mid-body `throw`s in
+      `FakeGateway` became `Promise.reject`, which keeps the rejection but drops the implicit
+      `async` wrapper.
 
-### 15b — `any` and unsafe values in template-sync tests (27 errors)
+### 15b — `any` and unsafe values in template-sync tests — DONE
 
-- [ ] `no-explicit-any` 12, `no-unsafe-assignment` 12, `no-unsafe-return` 3 — concentrated in
-      `production-assignment-template-sync-service.test.ts` (16 between them) and
-      `production-assignment-template-sync-bridge.test.ts` (6). Type the fakes against the real
-      interfaces instead of `any`; that usually removes the unsafe-assignment and unsafe-return
-      reports at the same time.
-- [ ] `no-non-null-assertion` 5 — four in `assignment-template-sync-context.test.ts`, one in
-      `src/template-sync/local-git-template-sync-gateway.ts`.
+- [x] Confirmed: typing the fakes against the real interfaces cleared the unsafe-assignment and
+      unsafe-return reports with them, exactly as predicted. The service test went with Task 14;
+      the bridge test was rewritten the same way — a typed `Manifest` fixture, `Executor`
+      derived from `ProductionAssignmentTemplateSyncBridgeInput["executor"]`, and a real
+      `FakeGitHubClient` — which took it from 9 errors to 0 in one pass. Two more `any`s were
+      elsewhere: `apply.test.ts` was reading `expect.objectContaining`/`expect.any(String)`
+      (both `any`) into a nested literal, now a direct `toContainEqual` on mapped values, which
+      also states the assertion more plainly; and `octokit-github-client.ts` inferred `unknown`
+      from `this.run`, then `Array.isArray(data) ? data[0]` widened it to `any` — the file
+      already had an `asArray` helper for this.
+- [x] All five removed with real guards, not suppressions. The four in the context test were
+      indexed access; they now go through one local `first<T>(items): T` that throws on empty.
+      A fifth `any` surfaced there once the assertions were untangled: vitest types
+      `MockResult.value` as `any` for its throw variant, so reading the client back through
+      `createClient.mock.results[0]` widened it — `setup` now returns the `FakeGitHubClient` it
+      handed the fake. The gateway one was `exactTreeMatches[0]!` guarded by a
+      `length === 1` check, now a destructure plus an `undefined` check after the ambiguity
+      check.
 
-### 15c — `src/` errors (27 total, mostly template-sync)
+### 15c — `src/` errors — DONE
 
-- [ ] `src/template-sync/local-git-template-sync-gateway.ts` (8): 3 magic numbers, plus one each of
-      `no-confusing-void-expression`, `only-throw-error`, `restrict-template-expressions`,
-      `no-non-null-assertion`. `only-throw-error` is worth a look on its merits — throwing a
-      non-Error loses stack context.
-- [ ] `src/template-sync/assignment-template-sync-context.ts` (5): 2 `no-unnecessary-condition`,
-      1 `no-unnecessary-boolean-literal-compare`. These flag checks the types say cannot fail —
-      either the check is dead or the type is wrong, so read each before deleting it.
-- [ ] `src/github/fake-github-client.ts` (4) and `src/template-sync/*` (3): `no-unused-vars`,
-      including `_base` at `fake-github-client.ts:634`.
-- [ ] `src/template-sync/production-template-sync-workspace.ts` (3): magic numbers.
+- [x] All 8 fixed. `only-throw-error` was worth the look: `operationError` was declared
+      `unknown` and rethrown bare. Every escape from that block comes from `withFailureStage`,
+      which always throws a `TemplateSyncOperationError`, so the variable is now typed as one
+      and the catch normalizes through `createTemplateSyncOperationError` — which returns an
+      existing `TemplateSyncOperationError` unchanged, so the staged message survives and
+      anything unexpected gains a real stack instead of being rethrown as a raw value.
+      `no-confusing-void-expression` was a shorthand arrow returning `applyThreeWayPatch`'s
+      void; `restrict-template-expressions` was `${code ?? "an unknown"}` over `number | null`.
+      The 3 magic numbers were `10 * 1024 * 1024` — note the rule exempts a plain literal
+      initializer but not an arithmetic one, so the constant holds `10485760` with the MiB
+      figure in its doc comment.
+- [x] Read each; all three were genuinely dead. `!template?.repository?.trim()` optional-chains
+      twice over a `ResolvedAssignmentConfig`, where `template` and `template.repository` are
+      both guaranteed — the same widening Task 14 was about. `request.confirmed === true`
+      compares a plain `boolean`. The remaining two of the five were the `require-await` pair
+      counted under 15a.
+- [x] 8 of the 9 were a config gap rather than code defects, so this became a third 15d item.
+      The codebase already marks a deliberately unused parameter with a `_` prefix (all four in
+      `fake-github-client.ts`, `_base` included) and already uses destructure-to-omit
+      (`const { env: _env, ...bridgeInput } = input`), but `no-unused-vars` was configured with
+      no `argsIgnorePattern` and no `ignoreRestSiblings`, so it contradicted both conventions.
+      Configured it to honor them; note this is also why only _some_ `_` params were reported —
+      the base rule's `after-used` default hides any that precede a used parameter. The one real
+      defect was dead code: `hasAnchorUpdate` in `assignment-template-sync.ts`, a type guard
+      with no callers (`hasInitializedAnchors` in `template-sync.ts` is the one in use). Deleted.
+- [x] Same `10 * 1024 * 1024` as the gateway, named the same way. Two more magic numbers turned
+      up outside the listed files once the others were gone: the `.slice(0, 12)` short-sha in
+      `template-sync.ts` and `.at(-1)` in `production-repository-sync-executor.ts`, both now
+      named constants.
 
-### 15d — Two config gaps, not code defects
+### 15d — Config gaps, not code defects — first bullet DONE, second DEFERRED
 
-- [ ] `no-undef` (7) fires in `ui/scripts/package-win.cjs` (3), `build-template-sync.mjs` (2) and
-      `start-electron-dev.cjs` (2) because `eslint.config.mjs` only relaxes typed rules for
-      **top-level** `*.js`/`*.mjs`/`*.cjs`. In flat config `*.cjs` does not match nested paths, so
-      these Node scripts are linted without Node globals. Change the pattern to `**/*.{js,mjs,cjs}`
-      and give that block `languageOptions.globals` for Node (`require`, `process`, `__dirname`).
-- [ ] **`ui/` TypeScript is not linted at all.** `eslint .` reports "File ignored because no
-      matching configuration was supplied" for `ui/electron/*.ts`, because the typed block only
-      matches `src/**/*.ts` and `tests/**/*.ts`, and `ui/package.json` has no `lint` script. All the
-      Part 2 work landed unlinted. Add `ui/electron/**/*.ts` and `ui/src/**/*.{ts,tsx}` to the
-      config (expect a fresh batch of findings) or add a `lint` script under `ui/` — but do this
-      **after** 15a-15c, so the existing backlog is not mixed with a new one.
+- [x] Done as described: the pattern is now `**/*.{js,mjs,cjs}` with `languageOptions.globals`
+      for the Node globals these scripts actually use (`__dirname`, `__filename`, `console`,
+      `exports`, `module`, `process`, `require`, `URL`). Hand-listed rather than adding a
+      `globals` dependency, which is not currently installed. Two scripts had been working
+      around the gap with `/* global ... */` header comments
+      (`assemble-rc1-release.cjs`, `write-electron-package-type.cjs`); those are now redundant
+      and were removed so they do not misinform.
+- [ ] **DEFERRED — `ui/` TypeScript is still not linted at all.** Unchanged from the analysis:
+      `eslint .` reports "File ignored because no matching configuration was supplied" for
+      `ui/electron/*.ts`, the typed block still matches only `src/**/*.ts` and `tests/**/*.ts`,
+      and `ui/package.json` still has no `lint` script. Left for its own commit as the task
+      instructs, now that 15a–15c are landed and the existing backlog is at zero — which is
+      exactly the clean baseline that makes the new findings readable. Add
+      `ui/electron/**/*.ts` and `ui/src/**/*.{ts,tsx}` to `eslint.config.mjs`, or a `lint`
+      script under `ui/`, and expect the count to jump before it comes down.
 
-**Acceptance:** `npx eslint .` reports zero errors and `npm run lint` passes. Note that 15d's
-second bullet will raise the count before it lowers it; land it as its own commit.
+**Acceptance met for 15a–15c:** `npx eslint .` reports 0 errors (was 119) and `npm run lint`
+passes, alongside `npm run typecheck`. `prettier . --check` is back to the same 6 pre-existing
+files it flagged before any of this work — `docs/config-wizard-plan.md`, `config-loader.ts`,
+`config-validation.ts`, `dashboard-builder.ts`, `group-target-executor.ts`,
+`manifest-renderer.test.ts`. Three of those are files Tasks 14/15 edited; their disagreements
+are all pre-existing nested-ternary indentation, so they were left alone rather than mixed in.
+They are the only thing still standing between the repo and a green `npm run check` (besides
+the Task 13 flakiness).
+
+**Test verification.** `npx vitest run` fails in exactly the same 9 files before and after,
+with no file gaining or losing a failure:
+
+    result-writer 20 | local-git-template-sync-gateway 9-10 | cli-shell 9
+    production-template-sync-workspace 3-7 | output 3 | repository-download 1
+    assignment-grade-status 1 | assignment-grade-preview 1 | assignment-apply-preview 1
+
+The two ranges are the Task 13 Windows flakiness and move in both directions between runs on
+the same tree. The cause is now identified: `EBUSY: resource busy or locked, rmdir` when the
+real-git tests tear down temp clones under parallel load. Both files pass alone
+(`local-git-template-sync-gateway` 10/10, `production-template-sync-workspace` 7/7), and
+`tests/unit/template-sync tests/unit/repository-download` gives an identical
+"1 failed | 61 passed" on three consecutive runs of each tree. Worth fixing as its own task —
+the tests need unique temp roots and a retrying cleanup on Windows.
 
 **Sequencing note for Tasks 14 and 15:** do Task 14 first. Several `no-unnecessary-condition` and
 unsafe-value reports are downstream of the widened optional types in 14a, so some of Task 15

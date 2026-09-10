@@ -14,12 +14,15 @@ import type {
 } from "./template-sync.js";
 import {
   createTemplateSyncOperationError,
+  TemplateSyncOperationError,
   type TemplateSyncFailureStage
 } from "./template-sync-failure.js";
 
 const execFile = promisify(executeFile);
 const GIT = "git";
 const TEMPLATE_UPDATE_MESSAGE = "Apply template update";
+/** 10 MiB; a repository-sized diff does not fit execFile's default 1 MiB buffer. */
+const GIT_OUTPUT_MAX_BUFFER_BYTES = 10485760;
 
 const withFailureStage = async <T>(
   stage: TemplateSyncFailureStage,
@@ -97,10 +100,11 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
 
     const exactTreeMatches = history.filter((commit) => commit.treeSha === templateTreeSha);
     if (exactTreeMatches.length > 1) return { status: "ambiguous" };
-    if (exactTreeMatches.length === 1)
+    const [exactTreeMatch] = exactTreeMatches;
+    if (exactTreeMatch !== undefined)
       return {
         status: "recovered",
-        studentDefaultBranchCommitSha: exactTreeMatches[0]!.commitSha
+        studentDefaultBranchCommitSha: exactTreeMatch.commitSha
       };
 
     const templateManagedState = await this.getTreeState(
@@ -186,7 +190,7 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
   async prepareConflictBranch(input: PrepareConflictBranchInput): Promise<void> {
     await this.ensureCleanStudentWorktree();
 
-    let operationError: unknown;
+    let operationError: TemplateSyncOperationError | undefined;
     try {
       await withFailureStage(
         "student_checkout_failed",
@@ -208,7 +212,9 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
         await withFailureStage(
           "patch_failed",
           "Unable to apply the template changes to the conflict branch.",
-          async () => await this.applyThreeWayPatch(patch)
+          async () => {
+            await this.applyThreeWayPatch(patch);
+          }
         );
       await withFailureStage(
         "commit_failed",
@@ -232,7 +238,11 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
           ])
       );
     } catch (error: unknown) {
-      operationError = error;
+      operationError = createTemplateSyncOperationError(
+        "patch_failed",
+        "Unable to prepare the template-update branch.",
+        error
+      );
     }
 
     try {
@@ -311,7 +321,13 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
       process.on("error", reject);
       process.on("close", (code) => {
         if (code === 0) resolve();
-        else reject(new Error(stderr || `git apply exited with ${code ?? "an unknown"} status.`));
+        else
+          reject(
+            new Error(
+              stderr ||
+                `git apply exited with ${code === null ? "an unknown" : String(code)} status.`
+            )
+          );
       });
       process.stdin.end(patch);
     });
@@ -337,7 +353,7 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
   }
 
   private async git(directory: string, args: string[]) {
-    return execFile(GIT, ["-C", directory, ...args], { maxBuffer: 10 * 1024 * 1024 });
+    return execFile(GIT, ["-C", directory, ...args], { maxBuffer: GIT_OUTPUT_MAX_BUFFER_BYTES });
   }
 }
 

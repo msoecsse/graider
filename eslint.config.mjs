@@ -33,6 +33,19 @@ export default tseslint.config(
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": "error",
       "@typescript-eslint/switch-exhaustiveness-check": "error",
+      // `_`-prefixed bindings are the codebase's marker for a deliberately unused
+      // parameter required by an interface; `ignoreRestSiblings` covers the
+      // destructure-to-omit pattern (`const { a: _a, ...rest } = input`).
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          args: "after-used",
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          ignoreRestSiblings: true
+        }
+      ],
       "@typescript-eslint/no-magic-numbers": [
         "error",
         {
@@ -45,8 +58,22 @@ export default tseslint.config(
   },
 
   {
-    files: ["*.js", "*.mjs", "*.cjs", "eslint.config.mjs"],
+    // `*.cjs` matches only top-level files in flat config, which left the nested build
+    // scripts under ui/scripts linted without Node globals.
+    files: ["**/*.{js,mjs,cjs}"],
     extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        __dirname: "readonly",
+        __filename: "readonly",
+        console: "readonly",
+        exports: "writable",
+        module: "writable",
+        process: "readonly",
+        require: "readonly",
+        URL: "readonly"
+      }
+    },
     rules: {}
   }
 );

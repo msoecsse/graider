@@ -14,7 +14,14 @@ const request = {
   assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
 };
 
+const first = <T>(items: readonly T[]): T => {
+  const [item] = items;
+  if (item === undefined) throw new Error("Expected at least one item.");
+  return item;
+};
+
 const setup = () => {
+  const githubClient = new FakeGitHubClient();
   const config = loadGraiderConfig({
     cwd: request.courseFolderPath,
     assignmentFile: request.assignmentFile
@@ -29,23 +36,26 @@ const setup = () => {
     loadConfig: vi.fn(() => config),
     loadManifest: vi.fn(() => manifest),
     writeManifest: vi.fn(() => ({ status: "success" as const })),
-    createClient: vi.fn(() => new FakeGitHubClient()),
+    createClient: vi.fn(() => githubClient),
     resolveToken: vi.fn<AssignmentTemplateSyncContextDependencies["resolveToken"]>(
       () => "resolved-token"
     ),
-    runSync: vi.fn<AssignmentTemplateSyncContextDependencies["runSync"]>(async () => ({
-      status: "success" as const,
-      result: {
-        status: "completed" as const,
-        templateCommitSha: "target",
-        manifest: manifest.manifest,
-        outcomes: []
-      }
-    }))
+    runSync: vi.fn<AssignmentTemplateSyncContextDependencies["runSync"]>(() =>
+      Promise.resolve({
+        status: "success" as const,
+        result: {
+          status: "completed" as const,
+          templateCommitSha: "target",
+          manifest: manifest.manifest,
+          outcomes: []
+        }
+      })
+    )
   };
   return {
     config,
     manifest,
+    githubClient,
     dependencies,
     service: createAssignmentTemplateSyncContextService(dependencies)
   };
@@ -54,7 +64,7 @@ const setup = () => {
 describe("assignment template-sync main-process context", () => {
   it("uses canonical loaders and shared eligibility without constructing production dependencies", async () => {
     const { dependencies, service, manifest } = setup();
-    manifest.manifest.repositories[0]!.lifecycle.status = "archived";
+    first(manifest.manifest.repositories).lifecycle.status = "archived";
     const result = await service.prepare(request);
     expect(result.available).toBe(true);
     expect(result.repositoryCount).toBe(manifest.manifest.repositories.length - 1);
@@ -119,20 +129,20 @@ describe("assignment template-sync main-process context", () => {
   });
 
   it("composes production inputs once and projects public results without internals", async () => {
-    const { dependencies, service } = setup();
+    const { dependencies, githubClient, service } = setup();
     const result = await service.execute({ ...request, confirmed: true });
     expect(dependencies.runSync).toHaveBeenCalledTimes(1);
     expect(dependencies.createClient).toHaveBeenCalledTimes(1);
     expect(dependencies.resolveToken).toHaveBeenCalledTimes(1);
-    const input = dependencies.runSync.mock.calls[0]![0];
+    const input = first(dependencies.runSync.mock.calls)[0];
     expect(input).toMatchObject({
       configuredOrganization: "example-org",
       configuredTemplateRepository: "example-org/lab04-template",
       resolvedToken: "resolved-token",
       options: { yes: true },
-      workspace: { githubClient: dependencies.createClient.mock.results[0]!.value }
+      workspace: { githubClient }
     });
-    expect(input.manifest.repositories[0]!.studentId).toBe("jones");
+    expect(first(input.manifest.repositories).studentId).toBe("jones");
     await input.persistManifest(input.manifest);
     expect(dependencies.writeManifest).toHaveBeenCalledExactlyOnceWith(
       path.join(request.courseFolderPath, "terms/27s1/manifests/lab04/manifest.yml"),
