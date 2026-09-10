@@ -110,7 +110,7 @@ export interface FakeGitHubFailure {
   persistent?: boolean;
 }
 
-type FakeGitHubFailureOptions = Pick<FakeGitHubFailure, "retryAfterSeconds">;
+type FakeGitHubFailureOptions = Pick<FakeGitHubFailure, "retryAfterSeconds" | "persistent">;
 
 export interface FakeGitHubClientState {
   authenticatedUser?: GitHubUser;

@@ -362,11 +362,12 @@ available on PATH."` is hardcoded in eight renderer files (`dashboardAggregation
 Measured 2026-09-10 while verifying Tasks 2-11. None of it was introduced by these changes, and
 none of it was fixed by them; recorded so it is not mistaken for new breakage.
 
-- [ ] `npm run typecheck` reports **97 errors at HEAD**, mostly `'grading' is possibly 'undefined'`
+- [ ] (now **Task 14**) `npm run typecheck` reports **97 errors at HEAD**, mostly `'grading' is possibly 'undefined'`
       across `src/config`, `src/cli/commands/workflow.command.ts` and
       `src/assignment-detail`. Verified identical with all local work stashed, so `npm run check`
       cannot pass today regardless of these tasks.
-- [ ] `npx eslint .` reports **119 errors at HEAD** (identical before and after this work).
+- [ ] (now **Task 15**) `npx eslint .` reports **119 errors at HEAD** (identical before and after
+      this work).
 - [ ] The test suites are flaky on Windows. Full CLI-suite failures swung between 36 and 53 across
       identical back-to-back runs. Three families account for it: tests that assert a missing token
       while `GRAIDER_GITHUB_TOKEN` is set in the shell; template-sync tests that drive real `git`
@@ -384,6 +385,148 @@ tests/cli/assignment-apply.test.ts tests/unit/manifest` (142 passed) and, in `ui
 electron/windowsGraiderCliResolver.test.ts src/assignment-detail
 electron/assignmentTemplateSyncService.test.ts` (162 passed). Neither project gained a failing
 test, a lint error, or a typecheck error.
+
+---
+
+## Task 14 — Fix the 97 typecheck errors so `npm run typecheck` passes — OPEN
+
+Analyzed 2026-09-10. All 97 predate this work (verified with every local change stashed). They are
+not 97 independent problems: **79 of them come from one pattern**, and the remaining 18 sit in two
+clusters. Fix them in the order below — the first step is a handful of lines and clears 79 errors.
+
+    npx tsc --noEmit 2>&1 | grep -c "error TS"     # 97 today
+
+### 14a — Stop discarding the resolved-config guarantee (79 errors, do first)
+
+`ResolvedCourseConfig` and `ResolvedAssignmentConfig` (`src/config/config-models.ts:13-19`) exist
+precisely to promise that `grading` and `template` are present after loading:
+
+    export type ResolvedCourseConfig = RawCourseConfig & {
+      readonly grading: NonNullable<RawCourseConfig["grading"]>;
+    };
+
+The schema marks both `optional()` (`src/config/config-schemas.ts:97,162`), so `RawCourseConfig`
+carries `| undefined` — and helpers annotated with the **Raw** type throw the guarantee away again.
+`getEffectiveGrading` is duplicated in **10 places**, each annotated
+`: RawCourseConfig["grading"]`, e.g. `src/assignment-detail/assignment-detail-builder.ts:79`:
+
+    const getEffectiveGrading = (config: LoadedGraiderConfig): RawCourseConfig["grading"] =>
+      config.assignment.grading ?? config.course.grading;
+
+`config.course` is a `ResolvedCourseConfig`, so the expression is already non-optional; only the
+annotation re-widens it. Every caller then reads `grading.enabled` / `grading.workflow` and trips
+TS18048.
+
+- [ ] Consolidate the 10 copies into one exported helper (suggest
+      `src/config/effective-grading.ts`) returning `NonNullable<RawCourseConfig["grading"]>`, and
+      delete the local copies. `grep -rn "getEffectiveGrading = " src/` lists them.
+- [ ] Narrow the parameters that take a loaded assignment from `RawAssignmentConfig` to
+      `ResolvedAssignmentConfig` — that clears the 8 `template` errors
+      (`src/github/github-readiness-validation.ts:157,166` and the `loadedAssignment.config.template`
+      pair).
+- [ ] Do **not** silence these with `?.` or non-null assertions. The types already encode the
+      invariant; the fix is to stop widening it. Where a genuinely raw, unvalidated config is being
+      inspected (`src/config/config-validation.ts`, 14 errors) the optionality is real — guard there.
+
+**Verified:** dropping the return annotation in `assignment-detail-builder.ts` took that file from
+6 errors to 0, with no other change.
+
+**Affected files** (error counts): `config-validation.ts` 14, `grade-preview-builder.ts` 13,
+`grade-status-builder.ts` 11, `dashboard-builder.ts` 11, `github-readiness-validation.ts` 8,
+`workflow-compatibility-validation.ts` 7, `cli/commands/workflow.command.ts` 7,
+`assignment-detail-builder.ts` 6, `java-junit-checkstyle-workflow.ts` 2.
+
+### 14b — Template-sync test types under `exactOptionalPropertyTypes` (14 errors)
+
+- [ ] `TemplateSyncAnchors` is built with `string | undefined` fields but declared with required
+      `string` (`src/template-sync/production-repository-sync-executor.ts:38`, plus
+      `tests/unit/template-sync/assignment-template-sync.test.ts:119`). Decide whether an anchor
+      can legitimately be absent: if yes, declare the fields optional; if no, build them only once
+      both shas are known.
+- [ ] `tests/unit/template-sync/assignment-template-sync.test.ts` (7) and
+      `production-assignment-template-sync-service.test.ts` (6) fail on fake `runRepositorySync`
+      return shapes that are unions rather than the declared
+      `{ result; anchors?: Required<TemplateSyncAnchors> }`. Give the fakes the declared type.
+- [ ] `assignment-template-sync-context.test.ts:244` passes `undefined` for a `string` parameter.
+
+### 14c — Three one-off signature mismatches (3 errors)
+
+- [ ] `src/execution/apply-executor.ts:971` — a `PlanOperationType` union is passed to a parameter
+      that only accepts the four permission/actions operations. Narrow the argument (or widen the
+      parameter) rather than casting.
+- [ ] `src/github/octokit-github-client.ts:547` — `CreatePullRequestInput` has no index signature,
+      so it is not assignable to `OctokitParameters` (`Record<string, unknown>`). Spread it into a
+      fresh object literal at the call, or give `OctokitParameters` a compatible shape.
+- [ ] `tests/cli/report.test.ts:302` — the mock Octokit is missing `pulls` and `git`. Add them (a
+      shared mock factory would stop this recurring; `tests/unit/github/octokit-github-client.test.ts`
+      already has `createMockOctokit`).
+
+**Acceptance:** `npx tsc --noEmit` reports zero errors, and `npm run typecheck` passes.
+
+---
+
+## Task 15 — Fix the 119 lint errors so `npm run lint` passes — OPEN
+
+Analyzed 2026-09-10; identical count with all local work stashed. `--fix` resolves only **7** of
+them, so plan on hand edits. The distribution matters more than the total: **85 are in `tests/`,
+27 in `src/`, 7 in `ui/scripts/`**, and the top seven files are all template-sync — the newest
+feature area, which appears never to have been linted.
+
+    npx eslint .                  # 119 today
+    npx eslint . --fix-dry-run    # 112 remain, so only 7 are mechanical
+
+### 15a — `require-await` in template-sync tests (49 errors, one mechanical pass)
+
+- [ ] All 49 are `async` fakes with no `await` — `template-sync.test.ts` (21),
+      `assignment-template-sync.test.ts` (11),
+      `production-assignment-template-sync-service.test.ts` (6), and the rest in the same folder.
+      Replace `async () => value` with `() => Promise.resolve(value)`, and
+      `async () => { throw x }` with `() => Promise.reject(x)`. Keep the return types explicit so
+      the fakes still satisfy their interfaces.
+
+### 15b — `any` and unsafe values in template-sync tests (27 errors)
+
+- [ ] `no-explicit-any` 12, `no-unsafe-assignment` 12, `no-unsafe-return` 3 — concentrated in
+      `production-assignment-template-sync-service.test.ts` (16 between them) and
+      `production-assignment-template-sync-bridge.test.ts` (6). Type the fakes against the real
+      interfaces instead of `any`; that usually removes the unsafe-assignment and unsafe-return
+      reports at the same time.
+- [ ] `no-non-null-assertion` 5 — four in `assignment-template-sync-context.test.ts`, one in
+      `src/template-sync/local-git-template-sync-gateway.ts`.
+
+### 15c — `src/` errors (27 total, mostly template-sync)
+
+- [ ] `src/template-sync/local-git-template-sync-gateway.ts` (8): 3 magic numbers, plus one each of
+      `no-confusing-void-expression`, `only-throw-error`, `restrict-template-expressions`,
+      `no-non-null-assertion`. `only-throw-error` is worth a look on its merits — throwing a
+      non-Error loses stack context.
+- [ ] `src/template-sync/assignment-template-sync-context.ts` (5): 2 `no-unnecessary-condition`,
+      1 `no-unnecessary-boolean-literal-compare`. These flag checks the types say cannot fail —
+      either the check is dead or the type is wrong, so read each before deleting it.
+- [ ] `src/github/fake-github-client.ts` (4) and `src/template-sync/*` (3): `no-unused-vars`,
+      including `_base` at `fake-github-client.ts:634`.
+- [ ] `src/template-sync/production-template-sync-workspace.ts` (3): magic numbers.
+
+### 15d — Two config gaps, not code defects
+
+- [ ] `no-undef` (7) fires in `ui/scripts/package-win.cjs` (3), `build-template-sync.mjs` (2) and
+      `start-electron-dev.cjs` (2) because `eslint.config.mjs` only relaxes typed rules for
+      **top-level** `*.js`/`*.mjs`/`*.cjs`. In flat config `*.cjs` does not match nested paths, so
+      these Node scripts are linted without Node globals. Change the pattern to `**/*.{js,mjs,cjs}`
+      and give that block `languageOptions.globals` for Node (`require`, `process`, `__dirname`).
+- [ ] **`ui/` TypeScript is not linted at all.** `eslint .` reports "File ignored because no
+      matching configuration was supplied" for `ui/electron/*.ts`, because the typed block only
+      matches `src/**/*.ts` and `tests/**/*.ts`, and `ui/package.json` has no `lint` script. All the
+      Part 2 work landed unlinted. Add `ui/electron/**/*.ts` and `ui/src/**/*.{ts,tsx}` to the
+      config (expect a fresh batch of findings) or add a `lint` script under `ui/` — but do this
+      **after** 15a-15c, so the existing backlog is not mixed with a new one.
+
+**Acceptance:** `npx eslint .` reports zero errors and `npm run lint` passes. Note that 15d's
+second bullet will raise the count before it lowers it; land it as its own commit.
+
+**Sequencing note for Tasks 14 and 15:** do Task 14 first. Several `no-unnecessary-condition` and
+unsafe-value reports are downstream of the widened optional types in 14a, so some of Task 15
+resolves itself once the types are honest.
 
 ---
 
