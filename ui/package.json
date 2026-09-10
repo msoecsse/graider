@@ -7,7 +7,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "dev:electron": "npm run build:template-sync && tsc --project tsconfig.node.json && node scripts/write-electron-package-type.cjs && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "dev:electron": "npm run build:template-sync && tsc --project tsconfig.node.json && node scripts/write-electron-package-type.cjs && node scripts/start-electron-dev.cjs",
     "build:template-sync": "node scripts/build-template-sync.mjs",
     "build:cli": "cd .. && npx tsup --config ui/scripts/tsup.graider-cli.config.mjs",
     "build": "npm run build:template-sync && tsc --project tsconfig.node.json && node scripts/write-electron-package-type.cjs && vite build",
