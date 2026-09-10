@@ -424,7 +424,9 @@ export const registerIpcHandlers = (): void => {
 
     logDebugDiagnostic(
       `Course folder selection: selectedPath=${selectedFolder} validation=${
-        selectionResult.courseFolder === null ? selectionResult.error?.code : "success"
+        selectionResult.courseFolder === null
+          ? (selectionResult.error?.code ?? "unknown")
+          : "success"
       } registeredPath=${selectionResult.courseFolder?.path ?? ""}`
     );
 
@@ -936,7 +938,7 @@ export const createMainWindow = (): BrowserWindow => {
 
 registerIpcHandlers();
 
-app.whenReady().then(() => {
+void app.whenReady().then(() => {
   createMainWindow();
 
   app.on("activate", () => {

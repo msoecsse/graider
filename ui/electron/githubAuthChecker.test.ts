@@ -14,12 +14,14 @@ const createRunner = (runner: ProcessRunner): ProcessRunner => vi.fn(runner);
 
 describe("githubAuthChecker", () => {
   it("reports env token as connected without exposing the token", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "",
-      stderr: "",
-      exitCode: SUCCESS_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "",
+        stderr: "",
+        exitCode: SUCCESS_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await checkGitHubAuth({
       env: { [GITHUB_TOKEN_ENV_NAME]: "ghp_secret_token" },
@@ -37,12 +39,14 @@ describe("githubAuthChecker", () => {
   });
 
   it("reports gh auth token success as connected without exposing the token", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "ghp_secret_token\n",
-      stderr: "",
-      exitCode: SUCCESS_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "ghp_secret_token\n",
+        stderr: "",
+        exitCode: SUCCESS_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await checkGitHubAuth({
       env: {},
@@ -59,12 +63,14 @@ describe("githubAuthChecker", () => {
   });
 
   it("reports missing gh as not connected with a safe diagnostic", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "",
-      stderr: "",
-      exitCode: null,
-      error: { code: "ENOENT", message: "spawn gh ENOENT" }
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        error: { code: "ENOENT", message: "spawn gh ENOENT" }
+      })
+    );
 
     const result = await checkGitHubAuth({
       env: {},
@@ -78,12 +84,14 @@ describe("githubAuthChecker", () => {
   });
 
   it("reports gh auth failure as not connected with a safe diagnostic", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "",
-      stderr: "not authenticated ghp_secret_token",
-      exitCode: FAILURE_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "",
+        stderr: "not authenticated ghp_secret_token",
+        exitCode: FAILURE_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await checkGitHubAuth({
       env: {},

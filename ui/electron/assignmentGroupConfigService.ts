@@ -59,7 +59,7 @@ const loadStudents = (
   sections.flatMap((section) => {
     const rosterPath = path.join(root, "terms", termCode, "rosters", `section-${section}.csv`);
     try {
-      const [header, ...lines] = fs.readFileSync(rosterPath, "utf8").split(/\r?\n/u);
+      const [header = "", ...lines] = fs.readFileSync(rosterPath, "utf8").split(/\r?\n/u);
       const columns = header.split(",").map((value) => value.trim());
       const idIndex = columns.indexOf("student_id");
       const sectionIndex = columns.indexOf("section");

@@ -13,16 +13,20 @@ const request = {
 describe("assignment template-sync Electron service", () => {
   it("lazily loads its main-process backend and passes only assignment identity for prepare", async () => {
     const backend: AssignmentTemplateSyncService = {
-      prepare: vi.fn(async () => ({
-        available: true,
-        repositoryCount: 2,
-        templateRepository: "course/template",
-        recordedTemplateRevision: "baseline"
-      })),
-      execute: vi.fn(async () => ({ status: "success" as const, outcomes: [] }))
+      prepare: vi.fn(() =>
+        Promise.resolve({
+          available: true,
+          repositoryCount: 2,
+          templateRepository: "course/template",
+          recordedTemplateRevision: "baseline"
+        })
+      ),
+      execute: vi.fn(() => Promise.resolve({ status: "success" as const, outcomes: [] }))
     };
     const load = vi.fn(() => backend);
-    const resolveToken = vi.fn(async () => ({ status: "success" as const, token: "secret-token" }));
+    const resolveToken = vi.fn(() =>
+      Promise.resolve({ status: "success" as const, token: "secret-token" })
+    );
     const service = createAssignmentTemplateSyncService(load, resolveToken);
     expect(load).not.toHaveBeenCalled();
     expect(await service.prepare(request)).toMatchObject({ available: true, repositoryCount: 2 });
@@ -42,22 +46,26 @@ describe("assignment template-sync Electron service", () => {
   it("preserves confirmation and github_token_required without exposing authentication data", async () => {
     const backend: AssignmentTemplateSyncService = {
       prepare: vi.fn(),
-      execute: vi.fn(async () => ({
-        status: "failure" as const,
-        outcomes: [],
-        blocker: { code: "confirmation_required", message: "Confirm first." }
-      }))
+      execute: vi.fn(() =>
+        Promise.resolve({
+          status: "failure" as const,
+          outcomes: [],
+          blocker: { code: "confirmation_required", message: "Confirm first." }
+        })
+      )
     };
-    const resolveToken = vi.fn(async () => ({
-      status: "failure" as const,
-      error: {
-        code: "github_cli_auth_failed",
-        message: "Sign in with GitHub CLI.",
-        exitCode: 1,
-        stderrSnippet: null,
-        stdoutSnippet: null
-      }
-    }));
+    const resolveToken = vi.fn(() =>
+      Promise.resolve({
+        status: "failure" as const,
+        error: {
+          code: "github_cli_auth_failed",
+          message: "Sign in with GitHub CLI.",
+          exitCode: 1,
+          stderrSnippet: null,
+          stdoutSnippet: null
+        }
+      })
+    );
     const service = createAssignmentTemplateSyncService(() => backend, resolveToken);
 
     expect(await service.execute({ ...request, confirmed: false })).toMatchObject({

@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -8,6 +7,7 @@ import type { StudentRepositoryAccessPageRequest } from "./ipc";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService";
 import { toGitFileRemote } from "./testSupport/gitFileRemote.js";
 import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
 const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 const outputPath = "terms/27s1/notifications/lab02/student-repositories.html";
@@ -23,7 +23,7 @@ const request = (root: string): StudentRepositoryAccessPageRequest => ({
 });
 
 const createFixture = (withUpstream = true): string => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-publish-action-"));
+  const root = createTrackedTempRoot("graider-publish-action-");
   fs.writeFileSync(
     path.join(root, "course.yml"),
     "notifications:\n  student_access_pages:\n    repository: csc1120/csc1120pages\n    base_url: https://csc1120.github.io/csc1120pages\n    branch: main\n",

@@ -34,9 +34,9 @@ export type GithubTokenResolution =
     };
 
 export interface GithubTokenResolverOptions {
-  readonly env?: NodeJS.ProcessEnv;
-  readonly fileExists?: (candidatePath: string) => boolean;
-  readonly platform?: NodeJS.Platform;
+  readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly fileExists?: ((candidatePath: string) => boolean) | undefined;
+  readonly platform?: NodeJS.Platform | undefined;
   readonly runner: ProcessRunner;
 }
 

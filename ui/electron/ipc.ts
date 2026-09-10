@@ -563,13 +563,13 @@ export interface DashboardCommandError {
   readonly exitCode: number | null;
   readonly stderrSnippet: string | null;
   readonly stdoutSnippet: string | null;
-  readonly commandName?: string;
-  readonly cwd?: string;
-  readonly argv?: readonly string[];
-  readonly runnerMode?: string;
-  readonly executablePath?: string;
-  readonly helperPath?: string | null;
-  readonly signal?: string | null;
+  readonly commandName?: string | undefined;
+  readonly cwd?: string | undefined;
+  readonly argv?: readonly string[] | undefined;
+  readonly runnerMode?: string | undefined;
+  readonly executablePath?: string | undefined;
+  readonly helperPath?: string | null | undefined;
+  readonly signal?: string | null | undefined;
 }
 
 export interface AssignmentDetailRequest {
@@ -877,10 +877,10 @@ export interface GraiderUIApi {
   readonly getAssignmentDetail: (
     request: AssignmentDetailRequest
   ) => Promise<AssignmentDetailResult>;
-  readonly prepareAssignmentTemplateSync: (
+  readonly prepareAssignmentTemplateSync?: (
     request: import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncRequest
   ) => Promise<import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncAvailability>;
-  readonly executeAssignmentTemplateSync: (
+  readonly executeAssignmentTemplateSync?: (
     request: import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncExecuteRequest
   ) => Promise<import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncExecutionResult>;
   readonly getAssignmentApplyPreview: (

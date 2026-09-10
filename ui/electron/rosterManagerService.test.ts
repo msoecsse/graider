@@ -1,8 +1,12 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { RosterRemoveRequest, RosterSaveRequest, RosterSectionRequest } from "./ipc";
+import type {
+  RosterRemoveRequest,
+  RosterRow,
+  RosterSaveRequest,
+  RosterSectionRequest
+} from "./ipc";
 import {
   getRosterForSection,
   removeSection,
@@ -10,9 +14,10 @@ import {
   previewRosterSave,
   saveRoster
 } from "./rosterManagerService";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
 const CANONICAL_HEADER = "student_id,github_username,section,status";
-const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-roster-manager-"));
+const createRoot = (): string => createTrackedTempRoot("graider-roster-manager-");
 
 const createTerm = (root: string): void => {
   fs.writeFileSync(path.join(root, "course.yml"), "schema_version: 1\n", "utf8");
@@ -34,19 +39,20 @@ sections:
   );
 };
 
+/** The one roster row every case starts from; named so overrides need no array indexing. */
+const BASE_ROW: RosterRow = {
+  studentId: "S001",
+  githubUsername: "octocat",
+  section: "001",
+  status: "active"
+};
+
 const request = (root: string, overrides: Partial<RosterSaveRequest> = {}): RosterSaveRequest => ({
   courseFolderId: "course-folder-test",
   courseFolderPath: root,
   termCode: "27s1",
   sectionId: "001",
-  rows: [
-    {
-      studentId: "S001",
-      githubUsername: "octocat",
-      section: "001",
-      status: "active"
-    }
-  ],
+  rows: [BASE_ROW],
   confirmed: false,
   ...overrides
 });
@@ -80,7 +86,7 @@ describe("roster manager service", () => {
     expect(getRosterForSection(loadRequest(root))).toMatchObject({
       status: "ready",
       exists: true,
-      rows: [request(root).rows[0]]
+      rows: [BASE_ROW]
     });
   });
 
@@ -89,7 +95,7 @@ describe("roster manager service", () => {
     createTerm(root);
     const preview = previewRosterSave(
       request(root, {
-        rows: [{ ...request(root).rows[0], githubUsername: "octocat" }]
+        rows: [{ ...BASE_ROW, githubUsername: "octocat" }]
       })
     );
 
@@ -102,7 +108,7 @@ describe("roster manager service", () => {
   it("rejects missing retained fields, invalid statuses, duplicates, and wrong sections", () => {
     const root = createRoot();
     createTerm(root);
-    const first = request(root).rows[0];
+    const first = BASE_ROW;
     const preview = previewRosterSave(
       request(root, {
         rows: [
@@ -216,7 +222,7 @@ describe("roster manager service", () => {
     const root = createRoot();
     createTerm(root);
     const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
-    const first = request(root).rows[0];
+    const first = BASE_ROW;
     const second = { ...first, studentId: "S002", githubUsername: "hubot" };
 
     expect(saveRoster(request(root, { rows: [first, second], confirmed: true })).status).toBe(
@@ -281,7 +287,7 @@ describe("roster manager service", () => {
     const canonical = request(root, {
       sectionId: "121",
       createSection: true,
-      rows: [{ ...request(root).rows[0], section: "121" }]
+      rows: [{ ...BASE_ROW, section: "121" }]
     });
     expect(saveRoster({ ...canonical, confirmed: true }).status).toBe("success");
     expect(
@@ -297,7 +303,7 @@ describe("roster manager service", () => {
         request(root, {
           sectionId: "111",
           createSection: true,
-          rows: [{ ...request(root).rows[0], section: "999" }]
+          rows: [{ ...BASE_ROW, section: "999" }]
         })
       )
         .diagnostics.map((item) => item.message)

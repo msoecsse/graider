@@ -10,6 +10,8 @@
     "declaration": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "types": ["node", "electron"]
   },
   "include": ["electron/**/*.ts"],

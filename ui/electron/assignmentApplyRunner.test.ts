@@ -54,15 +54,13 @@ const createProcessResult = (overrides: Partial<ProcessRunResult> = {}): Process
 const createRunner = (results: readonly ProcessRunResult[]): ProcessRunner => {
   let index = 0;
 
-  return vi.fn(async () => {
+  return vi.fn(() => {
     const result = results[index] ?? results[results.length - 1];
     index += 1;
 
-    if (result === undefined) {
-      throw new Error("Expected a fake process result.");
-    }
-
-    return result;
+    return result === undefined
+      ? Promise.reject(new Error("Expected a fake process result."))
+      : Promise.resolve(result);
   });
 };
 
@@ -209,14 +207,16 @@ describe("assignmentApplyRunner", () => {
   });
 
   it("still runs apply so backend can return missing-token diagnostics when token is unavailable", async () => {
-    const runner: ProcessRunner = vi.fn(async (request) =>
-      request.command === "graider"
-        ? createProcessResult()
-        : createProcessResult({
-            stdout: "",
-            exitCode: null,
-            error: { code: "ENOENT", message: "missing gh" }
-          })
+    const runner = vi.fn<ProcessRunner>((request) =>
+      Promise.resolve(
+        request.command === "graider"
+          ? createProcessResult()
+          : createProcessResult({
+              stdout: "",
+              exitCode: null,
+              error: { code: "ENOENT", message: "missing gh" }
+            })
+      )
     );
 
     const result = await applyAssignment(APPLY_REQUEST, {

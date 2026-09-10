@@ -17,7 +17,7 @@ interface FetchResponse {
   readonly status: number;
   json(): Promise<unknown>;
 }
-type FetchImplementation = (
+export type FetchImplementation = (
   input: string,
   init: {
     readonly method?: string;
@@ -82,7 +82,13 @@ const resolve = async (
   request: TemplateWorkflowRequest,
   options: TemplateWorkflowServiceOptions
 ): Promise<
-  | { token: string; fetchImplementation: FetchImplementation; owner: string; repo: string }
+  | {
+      token: string;
+      fetchImplementation: FetchImplementation;
+      owner: string;
+      repo: string;
+      branch: string;
+    }
   | TemplateWorkflowResult
 > => {
   const repository = request.templateRepository?.trim() ?? "";
@@ -111,7 +117,8 @@ const resolve = async (
     token: tokenResult.token,
     fetchImplementation: options.fetchImplementation ?? globalThis.fetch,
     owner,
-    repo
+    repo,
+    branch
   };
 };
 const headersFor = (token: string): Record<string, string> => ({
@@ -128,7 +135,7 @@ export const getTemplateWorkflow = async (
 ): Promise<TemplateWorkflowResult> => {
   const resolved = await resolve(request, options);
   if ("status" in resolved) return resolved;
-  const { token, fetchImplementation, owner, repo } = resolved;
+  const { token, fetchImplementation, owner, repo, branch } = resolved;
   const headers = headersFor(token);
   try {
     const repoResponse = await fetchImplementation(
@@ -141,10 +148,9 @@ export const getTemplateWorkflow = async (
         repoResponse.status === 401 || repoResponse.status === 403 ? "auth_required" : "error",
         [diagnostic("The template repository could not be accessed.")]
       );
-    const fileResponse = await fetchImplementation(
-      urlFor(owner, repo, pathFor(request), request.templateBranch!.trim()),
-      { headers }
-    );
+    const fileResponse = await fetchImplementation(urlFor(owner, repo, pathFor(request), branch), {
+      headers
+    });
     if (fileResponse.status === 404)
       return workflowResult(request, "missing", [
         diagnostic(`No ${pathFor(request)} was found in the template repository on this branch.`)

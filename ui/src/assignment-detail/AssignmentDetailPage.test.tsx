@@ -11,6 +11,7 @@ import type {
 } from "../../electron/ipc";
 import { AssignmentDetailPage } from "./AssignmentDetailPage";
 import type { AssignmentDetailSelection } from "./assignmentDetailTypes";
+import { objectContaining } from "../test/matchers";
 
 const COURSE_FOLDER_PATH = "/Users/sean/dev/csc1120";
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab02/assignment.yml";
@@ -231,6 +232,17 @@ const createAssignmentGradeStatusResult = (
   ...overrides
 });
 
+/** The cloned first target, named so cases that reuse it need no array indexing. */
+const ALPHA_DOWNLOAD_TARGET: AssignmentRepositoryDownloadResult["targets"][number] = {
+  targetId: "student-alpha",
+  repositoryName: "27s1-csc1120-lab02-alpha",
+  localPath: "/Users/sean/Downloads/lab02/27s1-csc1120-lab02-alpha",
+  status: "cloned",
+  studentIds: ["alpha"],
+  githubUsernames: ["alpha-gh"],
+  diagnostics: []
+};
+
 const createRepositoryDownloadResult = (
   overrides: Partial<AssignmentRepositoryDownloadResult> = {}
 ): AssignmentRepositoryDownloadResult => ({
@@ -241,15 +253,7 @@ const createRepositoryDownloadResult = (
   clonedCount: 2,
   failedCount: 0,
   targets: [
-    {
-      targetId: "student-alpha",
-      repositoryName: "27s1-csc1120-lab02-alpha",
-      localPath: "/Users/sean/Downloads/lab02/27s1-csc1120-lab02-alpha",
-      status: "cloned",
-      studentIds: ["alpha"],
-      githubUsernames: ["alpha-gh"],
-      diagnostics: []
-    },
+    ALPHA_DOWNLOAD_TARGET,
     {
       targetId: "student-beta",
       repositoryName: "27s1-csc1120-lab02-beta",
@@ -438,16 +442,14 @@ describe("AssignmentDetailPage", () => {
   });
 
   it("executes template sync once, prevents duplicate confirmation, and renders mixed student results", async () => {
-    let resolveExecution: (
-      value: Awaited<ReturnType<GraiderUIApi["executeAssignmentTemplateSync"]>>
-    ) => void = () => undefined;
-    const executeAssignmentTemplateSync = vi.fn(
-      async () =>
-        await new Promise<Awaited<ReturnType<GraiderUIApi["executeAssignmentTemplateSync"]>>>(
-          (resolve) => {
-            resolveExecution = resolve;
-          }
-        )
+    type ExecuteTemplateSync = NonNullable<GraiderUIApi["executeAssignmentTemplateSync"]>;
+    type ExecutionResult = Awaited<ReturnType<ExecuteTemplateSync>>;
+    let resolveExecution: (value: ExecutionResult) => void = () => undefined;
+    const executeAssignmentTemplateSync = vi.fn<ExecuteTemplateSync>(
+      () =>
+        new Promise<ExecutionResult>((resolve) => {
+          resolveExecution = resolve;
+        })
     );
     mockGraiderUI({
       prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
@@ -1349,7 +1351,7 @@ describe("AssignmentDetailPage", () => {
     expect(onPreviewGrade).toHaveBeenCalledWith(
       SELECTION,
       expect.objectContaining({
-        assignment: expect.objectContaining({ slug: "lab02" })
+        assignment: objectContaining({ slug: "lab02" })
       }),
       expect.objectContaining({
         assignmentFile: ASSIGNMENT_FILE
@@ -1371,7 +1373,7 @@ describe("AssignmentDetailPage", () => {
     expect(onViewGradeStatus).toHaveBeenCalledWith(
       SELECTION,
       expect.objectContaining({
-        assignment: expect.objectContaining({ slug: "lab02" })
+        assignment: objectContaining({ slug: "lab02" })
       }),
       expect.objectContaining({
         assignmentFile: ASSIGNMENT_FILE
@@ -1397,7 +1399,7 @@ describe("AssignmentDetailPage", () => {
     expect(onViewFacultyReport).toHaveBeenCalledWith(
       SELECTION,
       expect.objectContaining({
-        assignment: expect.objectContaining({ slug: "lab02" })
+        assignment: objectContaining({ slug: "lab02" })
       }),
       expect.objectContaining({
         courseFolderId: SELECTION.courseFolderId,
@@ -1438,7 +1440,7 @@ describe("AssignmentDetailPage", () => {
     expect(onViewGradeStatus).toHaveBeenCalledWith(
       SELECTION,
       expect.objectContaining({
-        assignment: expect.objectContaining({ slug: "lab02" })
+        assignment: objectContaining({ slug: "lab02" })
       }),
       expect.objectContaining({
         assignmentFile: ASSIGNMENT_FILE
@@ -1765,7 +1767,7 @@ describe("AssignmentDetailPage", () => {
       clonedCount: 1,
       failedCount: 1,
       targets: [
-        createRepositoryDownloadResult().targets[0]!,
+        ALPHA_DOWNLOAD_TARGET,
         {
           targetId: "student-beta",
           repositoryName: "27s1-csc1120-lab02-beta",

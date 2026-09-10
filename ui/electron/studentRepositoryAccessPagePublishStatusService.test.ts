@@ -1,16 +1,16 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { StudentRepositoryAccessPageRequest } from "./ipc";
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService";
 import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
 const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 const outputPath = "terms/27s1/notifications/lab02/student-repositories.html";
 const pagesRoot = (root: string): string => path.join(root, "pages repo");
-const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-publish-status "));
+const createRoot = (): string => createTrackedTempRoot("graider-publish-status ");
 const git = (root: string, arguments_: readonly string[]): void => {
   execFileSync("git", arguments_, { cwd: root, stdio: "ignore" });
 };
@@ -89,7 +89,7 @@ describe(
         (await getStudentRepositoryAccessPagePublishStatus(request(root), mappings)).status
       ).toBe("no_upstream");
 
-      const remote = fs.mkdtempSync(path.join(os.tmpdir(), "graider-publish-remote-"));
+      const remote = createTrackedTempRoot("graider-publish-remote-");
       git(remote, ["init", "--bare"]);
       git(pagesRoot(root), ["remote", "add", "origin", remote]);
       git(pagesRoot(root), ["commit", "--allow-empty", "-m", "Ahead"]);

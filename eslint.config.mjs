@@ -58,6 +58,56 @@ export default tseslint.config(
   },
 
   {
+    files: [
+      "ui/electron/**/*.ts",
+      "ui/src/**/*.{ts,tsx}",
+      "ui/vite.config.ts",
+      "ui/vitest.config.ts"
+    ],
+    extends: [...tseslint.configs.strictTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        project: ["ui/tsconfig.json", "ui/tsconfig.node.json", "ui/tsconfig.electron-test.json"],
+        tsconfigRootDir: import.meta.dirname
+      }
+    },
+    rules: {
+      "@typescript-eslint/consistent-type-definitions": ["error", "interface"],
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          args: "after-used",
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          ignoreRestSiblings: true
+        }
+      ],
+      // Counts and totals are interpolated into display strings all over the views, and
+      // `${String(count)}` buys nothing there. Everything else stays as strict-type-checked
+      // has it -- spelled out because supplying options resets the unlisted ones to the rule's
+      // own permissive defaults, which would quietly allow the nullish and any cases that
+      // actually render "undefined" or "[object Object]" to a user.
+      "@typescript-eslint/restrict-template-expressions": [
+        "error",
+        {
+          allowAny: false,
+          allowBoolean: false,
+          allowNullish: false,
+          allowNumber: true,
+          allowRegExp: false,
+          allowNever: false
+        }
+      ]
+      // Deliberately no `no-magic-numbers` here. It earns its place in the CLI, where numbers
+      // are protocol and policy, but view code is full of legitimately inline numbers (indices,
+      // widths, retry counts read straight from a layout) and naming each one hurts more than
+      // it helps.
+    }
+  },
+
+  {
     // `*.cjs` matches only top-level files in flat config, which left the nested build
     // scripts under ui/scripts linted without Node globals.
     files: ["**/*.{js,mjs,cjs}"],

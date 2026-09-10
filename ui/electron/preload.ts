@@ -193,7 +193,7 @@ const graiderUI: GraiderUIApi = {
   listCourseFolders: async (): Promise<CourseFolderRecord[]> =>
     await invoke<CourseFolderRecord[]>(IPC_CHANNELS.listCourseFolders),
   removeCourseFolder: async (id: string): Promise<void> => {
-    await invoke<void>(IPC_CHANNELS.removeCourseFolder, id);
+    await invoke<undefined>(IPC_CHANNELS.removeCourseFolder, id);
   },
   refreshCourseFolder: async (id: string): Promise<CourseFolderDashboardResult> =>
     await invoke<CourseFolderDashboardResult>(IPC_CHANNELS.refreshCourseFolder, id),

@@ -26,7 +26,8 @@ export interface WindowsGraiderCliResolverOptions {
 }
 
 interface PackageManifest {
-  readonly bin?: string | Record<string, string>;
+  // Parsed from package.json, so a malformed manifest can legitimately hold null here.
+  readonly bin?: string | Record<string, string> | null;
 }
 
 const readEnvironmentValue = (env: NodeJS.ProcessEnv, name: string): string | undefined => {

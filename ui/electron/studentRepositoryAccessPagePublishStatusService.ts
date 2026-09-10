@@ -144,10 +144,9 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
     currentBranch: branch.stdout === "" ? null : branch.stdout,
     hasUncommittedAccessPage,
     hasUncommittedOtherChanges,
-    remoteMatchesConfiguredRepository:
-      remote.ok && accessPage.pagesRepository !== null
-        ? remote.stdout.replace(/\.git$/u, "").endsWith(`/${accessPage.pagesRepository}`)
-        : null
+    remoteMatchesConfiguredRepository: remote.ok
+      ? remote.stdout.replace(/\.git$/u, "").endsWith(`/${accessPage.pagesRepository}`)
+      : null
   };
   const assignment = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile);
   const label = assignment.model?.assignmentTitle ?? accessPage.assignmentSlug ?? "assignment";

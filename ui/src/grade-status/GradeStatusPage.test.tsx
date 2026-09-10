@@ -11,6 +11,7 @@ import {
   AUTO_REFRESH_MAX_DURATION_MS
 } from "./GradeStatusPage";
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
+import { objectContaining } from "../test/matchers";
 
 const SELECTION: AssignmentDetailSelection = {
   courseFolderId: "course-folder-csc1120",
@@ -228,7 +229,7 @@ describe("GradeStatusPage", () => {
     expect(onViewFacultyReport).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "success",
-        assignment: expect.objectContaining({ slug: "lab02" })
+        assignment: objectContaining({ slug: "lab02" })
       })
     );
   });

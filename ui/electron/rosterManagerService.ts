@@ -112,8 +112,8 @@ const createTermContentWithSection = (request: RosterSaveRequest): string | null
   try {
     const document = parseDocument(fs.readFileSync(termPath, "utf8"));
     const root = document.toJS() as { sections?: unknown };
-    const sections = root.sections;
-    if (!Array.isArray(sections)) return null;
+    if (!Array.isArray(root.sections)) return null;
+    const sections: readonly unknown[] = root.sections;
     document.set("sections", [
       ...sections,
       { id: request.sectionId.trim(), roster: `rosters/section-${request.sectionId.trim()}.csv` }
@@ -150,9 +150,10 @@ const createTermContentWithRosterReference = (request: RosterSectionRequest): st
     const document = parseDocument(fs.readFileSync(termPath, "utf8"));
     const root = document.toJS() as { sections?: unknown };
     if (!Array.isArray(root.sections)) return null;
+    const sections: readonly unknown[] = root.sections;
     document.set(
       "sections",
-      root.sections.map((section) => {
+      sections.map((section) => {
         if (
           typeof section !== "object" ||
           section === null ||
@@ -198,19 +199,17 @@ const getAssociatedRosterPaths = (request: RosterSectionRequest): string[] => {
     const root = parseDocument(
       fs.readFileSync(path.join(request.courseFolderPath, getTermPath(request.termCode)), "utf8")
     ).toJS() as { sections?: unknown };
-    const section = Array.isArray(root.sections)
-      ? root.sections.find(
-          (candidate) =>
-            typeof candidate === "object" &&
-            candidate !== null &&
-            (candidate as Record<string, unknown>).id === request.sectionId
-        )
-      : undefined;
-    const roster =
-      section !== undefined && typeof (section as Record<string, unknown>).roster === "string"
-        ? (section as Record<string, unknown>).roster
-        : null;
-    if (roster !== null) paths.push(`terms/${request.termCode}/${roster}`);
+    const sections: readonly unknown[] = Array.isArray(root.sections) ? root.sections : [];
+    const section = sections.find(
+      (candidate) =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        (candidate as Record<string, unknown>).id === request.sectionId
+    );
+    // Bind the value before testing it; re-reading the property in the true branch discards the
+    // typeof narrowing and leaves it `unknown`.
+    const roster = section === undefined ? null : (section as Record<string, unknown>).roster;
+    if (typeof roster === "string") paths.push(`terms/${request.termCode}/${roster}`);
   } catch {
     return paths;
   }

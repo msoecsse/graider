@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -12,6 +11,7 @@ import {
   resolveGraiderCli,
   resolveProcessRunRequest
 } from "./commandRunner.js";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
 const COMMAND_RUNNER_SOURCE = path.join(__dirname, "commandRunner.ts");
 const SUCCESS_EXIT_CODE = 0;
@@ -187,7 +187,7 @@ describe("commandRunner", () => {
   });
 
   it("executes the resolved external Windows helper and reports it in the diagnostic", async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "graider external shim-"));
+    const tempRoot = createTrackedTempRoot("graider external shim-");
     const packageDirectory = path.join(tempRoot, "node_modules", "graider");
     const scriptPath = path.join(packageDirectory, "dist", "index.js");
     const existingFiles = new Set([
@@ -283,7 +283,7 @@ describe("commandRunner", () => {
   });
 
   it("executes bundled helper mode with a cwd containing spaces", async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "graider bundled helper-"));
+    const tempRoot = createTrackedTempRoot("graider bundled helper-");
     const appPath = path.join(tempRoot, "app.asar");
     const helperPath = getBundledGraiderCliPath(appPath);
     const courseFolderPath = path.join(tempRoot, "Box Sync", "course root");
@@ -549,7 +549,7 @@ describe("commandRunner", () => {
   });
 
   it("reports which tier resolved the CLI in the run diagnostic", async () => {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "graider override-"));
+    const tempRoot = createTrackedTempRoot("graider override-");
     const overridePath = path.join(tempRoot, "cli.js");
 
     fs.writeFileSync(overridePath, "process.stdout.write('override');\n", "utf8");
@@ -577,7 +577,7 @@ describe("commandRunner", () => {
   });
 
   it("names the location that was tried in the start error", () => {
-    const helperPath = path.join("C:\Program Files", "Graider", "dist-graider-cli", "index.js");
+    const helperPath = path.join("C:\\Program Files", "Graider", "dist-graider-cli", "index.js");
 
     expect(
       getGraiderCliStartError(BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE, {

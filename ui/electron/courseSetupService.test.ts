@@ -1,11 +1,11 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { CourseSetupRequest } from "./ipc";
 import { previewCourseSetup, saveCourseSetup } from "./courseSetupService";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
-const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-course-setup-"));
+const createRoot = (): string => createTrackedTempRoot("graider-course-setup-");
 
 const createRequest = (
   courseFolderPath: string,

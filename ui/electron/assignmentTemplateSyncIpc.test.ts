@@ -21,22 +21,26 @@ const setup = () => {
     })
   };
   const service: AssignmentTemplateSyncService = {
-    prepare: vi.fn(async () => ({
-      available: true,
-      repositoryCount: 2,
-      templateRepository: "course/template",
-      recordedTemplateRevision: "abcdef"
-    })),
-    execute: vi.fn(async () => ({
-      status: "partial_success" as const,
-      outcomes: [
-        {
-          studentId: "S001",
-          status: "pull_request_pending" as const,
-          pullRequest: { number: 7, url: "https://github.com/course/student/pull/7" }
-        }
-      ]
-    }))
+    prepare: vi.fn(() =>
+      Promise.resolve({
+        available: true,
+        repositoryCount: 2,
+        templateRepository: "course/template",
+        recordedTemplateRevision: "abcdef"
+      })
+    ),
+    execute: vi.fn(() =>
+      Promise.resolve({
+        status: "partial_success" as const,
+        outcomes: [
+          {
+            studentId: "S001",
+            status: "pull_request_pending" as const,
+            pullRequest: { number: 7, url: "https://github.com/course/student/pull/7" }
+          }
+        ]
+      })
+    )
   };
   registerAssignmentTemplateSyncIpc(ipc, service, () => true);
   const invoke = async (channel: string, request: unknown): Promise<unknown> => {

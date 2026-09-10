@@ -1,17 +1,17 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService";
 import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
 const git = (root: string, arguments_: readonly string[]): string =>
   execFileSync("git", arguments_, { cwd: root, encoding: "utf8" }).trim();
 
 const fixture = (withUpstream = true): string => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-course-publish-"));
+  const root = createTrackedTempRoot("graider-course-publish-");
   fs.mkdirSync(path.join(root, "terms", "27s1", "rosters"), { recursive: true });
   fs.writeFileSync(path.join(root, "course.yml"), "course:\n  code: CSC1120\n", "utf8");
   fs.writeFileSync(path.join(root, "terms", "27s1", "term.yml"), "term: 27s1\n", "utf8");

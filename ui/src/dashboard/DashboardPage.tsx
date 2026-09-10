@@ -105,7 +105,7 @@ const GraiderCliStatusPanel = ({
             {cliPath === null ? "." : ":"}
           </p>
         ) : null}
-        {isFailure ? <p className="error-message">{status?.errorMessage}</p> : null}
+        {isFailure ? <p className="error-message">{status.errorMessage}</p> : null}
         {cliPath === null ? null : <pre>{cliPath}</pre>}
       </div>
       <button className="secondary-action" type="button" onClick={onRecheck}>

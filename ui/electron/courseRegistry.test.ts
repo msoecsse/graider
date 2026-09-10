@@ -79,8 +79,8 @@ describe("course registry", () => {
       FIRST_OPENED_AT
     );
 
+    expect(addResult.courseFolder.id).toMatch(/^course-folder-[a-f0-9]+$/);
     expect(addResult.courseFolder).toMatchObject({
-      id: expect.stringMatching(/^course-folder-[a-f0-9]+$/),
       // The record stores the path normalized for the host, so `..` is resolved away here
       // whether the separator is "/" or "\".
       path: normalizeCourseFolderPath("/Users/sean/dev/csc1120"),
@@ -193,7 +193,7 @@ describe("course registry", () => {
   it("returns canceled folder selection without saving", async () => {
     const registryPath = getCourseRegistryPath(createTempRoot());
     const result = await selectCourseFolderWithPicker(registryPath, {
-      selectFolder: async () => null
+      selectFolder: () => Promise.resolve(null)
     });
 
     expect(result).toEqual({ canceled: true, courseFolder: null });
@@ -206,7 +206,7 @@ describe("course registry", () => {
     const result = await selectCourseFolderWithPicker(
       registryPath,
       {
-        selectFolder: async () => courseRoot
+        selectFolder: () => Promise.resolve(courseRoot)
       },
       FIRST_OPENED_AT
     );
@@ -223,7 +223,7 @@ describe("course registry", () => {
     fs.mkdirSync(folderPath, { recursive: true });
 
     const result = await selectCourseFolderWithPicker(registryPath, {
-      selectFolder: async () => folderPath
+      selectFolder: () => Promise.resolve(folderPath)
     });
 
     expect(result).toEqual({

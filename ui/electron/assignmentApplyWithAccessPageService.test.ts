@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ProcessRunner } from "./commandRunner.js";
@@ -8,9 +7,10 @@ import type { AssignmentApplyRequest } from "./ipc.js";
 import { applyAssignmentWithStudentRepositoryAccessPage } from "./assignmentApplyWithAccessPageService.js";
 import { toGitFileRemote } from "./testSupport/gitFileRemote.js";
 import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
 const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
-const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-apply-page-"));
+const createRoot = (): string => createTrackedTempRoot("graider-apply-page-");
 const pagesRoot = (root: string): string => path.join(root, "pages");
 const outputPath = "terms/27s1/notifications/lab02/student-repositories.html";
 const git = (root: string, arguments_: readonly string[]): string =>
@@ -91,12 +91,22 @@ const mappingsJson = {
 };
 
 const runner = (): ProcessRunner =>
-  vi.fn(async (command) => {
+  vi.fn<ProcessRunner>((command) => {
     if (command.command === "gh")
-      return { stdout: "token\n", stderr: "", exitCode: 0, error: null };
+      return Promise.resolve({ stdout: "token\n", stderr: "", exitCode: 0, error: null });
     if (command.args[1] === "apply")
-      return { stdout: JSON.stringify(applyJson), stderr: "", exitCode: 0, error: null };
-    return { stdout: JSON.stringify(mappingsJson), stderr: "", exitCode: 0, error: null };
+      return Promise.resolve({
+        stdout: JSON.stringify(applyJson),
+        stderr: "",
+        exitCode: 0,
+        error: null
+      });
+    return Promise.resolve({
+      stdout: JSON.stringify(mappingsJson),
+      stderr: "",
+      exitCode: 0,
+      error: null
+    });
   });
 
 describe("assignmentApplyWithAccessPageService", { timeout: GIT_TEST_TIMEOUT_MS }, () => {
@@ -206,9 +216,7 @@ describe("assignmentApplyWithAccessPageService", { timeout: GIT_TEST_TIMEOUT_MS 
     });
 
     expect(result.status).toBe("failure");
-    expect(result.error).toMatchObject({
-      code: "student_repository_access_page_publication_failed",
-      message: expect.stringMatching(/Unable to push/u)
-    });
+    expect(result.error?.code).toBe("student_repository_access_page_publication_failed");
+    expect(result.error?.message).toMatch(/Unable to push/u);
   });
 });

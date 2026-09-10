@@ -55,28 +55,35 @@ export interface AssignmentTemplateSyncExecutionResult {
   readonly blocker?: TemplateSyncBlocker;
 }
 
+// Declared as function-typed properties, not methods: neither one uses `this`, callers pass
+// them around detached, and property syntax also checks their parameters contravariantly.
 export interface AssignmentTemplateSyncService {
-  prepare(request: AssignmentTemplateSyncRequest): Promise<AssignmentTemplateSyncAvailability>;
-  execute(
+  readonly prepare: (
+    request: AssignmentTemplateSyncRequest
+  ) => Promise<AssignmentTemplateSyncAvailability>;
+  readonly execute: (
     request: AssignmentTemplateSyncExecuteRequest
-  ): Promise<AssignmentTemplateSyncExecutionResult>;
+  ) => Promise<AssignmentTemplateSyncExecutionResult>;
 }
 
 interface AssignmentTemplateSyncBackend extends Omit<AssignmentTemplateSyncService, "execute"> {
-  execute(
+  readonly execute: (
     request: AssignmentTemplateSyncExecuteRequest & { readonly resolvedGithubToken?: string }
-  ): Promise<AssignmentTemplateSyncExecutionResult>;
+  ) => Promise<AssignmentTemplateSyncExecutionResult>;
 }
 
 type ResolveGithubToken = () => Promise<GithubTokenResolution>;
 
-// The core backend is bundled alongside Electron to preserve its existing CJS layout.
-const loadBackend = (): AssignmentTemplateSyncBackend =>
-  (
-    require(path.join(__dirname, "assignmentTemplateSyncBackend.cjs")) as {
-      assignmentTemplateSyncContextService: AssignmentTemplateSyncBackend;
-    }
-  ).assignmentTemplateSyncContextService;
+// The core backend is bundled alongside Electron to preserve its existing CJS layout, and this
+// module is itself emitted as CommonJS, so `require` is the correct loader here.
+const loadBackend = (): AssignmentTemplateSyncBackend => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- see note above
+  const backendModule = require(path.join(__dirname, "assignmentTemplateSyncBackend.cjs")) as {
+    assignmentTemplateSyncContextService: AssignmentTemplateSyncBackend;
+  };
+
+  return backendModule.assignmentTemplateSyncContextService;
+};
 
 export const createAssignmentTemplateSyncService = (
   backend: () => AssignmentTemplateSyncBackend,

@@ -4,7 +4,8 @@ import type { TemplateWorkflowRequest } from "./ipc";
 import {
   getTemplateWorkflow,
   previewTemplateWorkflowSave,
-  saveTemplateWorkflow
+  saveTemplateWorkflow,
+  type FetchImplementation
 } from "./templateWorkflowService";
 
 const request: TemplateWorkflowRequest = {
@@ -19,13 +20,13 @@ const runner: ProcessRunner = vi.fn();
 const response = (status: number, body: unknown) => ({
   ok: status >= 200 && status < 300,
   status,
-  json: async () => body
+  json: () => Promise.resolve(body)
 });
 
 describe("template workflow service", () => {
   it("fetches the configured branch and returns decoded workflow text without a token", async () => {
     const fetchImplementation = vi
-      .fn()
+      .fn<FetchImplementation>()
       .mockResolvedValueOnce(response(200, {}))
       .mockResolvedValueOnce(
         response(200, {
@@ -37,7 +38,7 @@ describe("template workflow service", () => {
 
     const result = await getTemplateWorkflow(request, {
       runner,
-      resolveToken: async () => ({ status: "success", token: "secret-token" }),
+      resolveToken: () => Promise.resolve({ status: "success", token: "secret-token" }),
       fetchImplementation
     });
 
@@ -48,14 +49,14 @@ describe("template workflow service", () => {
 
   it("uses the default workflow path and returns missing only after repository access succeeds", async () => {
     const fetchImplementation = vi
-      .fn()
+      .fn<FetchImplementation>()
       .mockResolvedValueOnce(response(200, {}))
       .mockResolvedValueOnce(response(404, {}));
     const result = await getTemplateWorkflow(
       { ...request, workflowPath: null },
       {
         runner,
-        resolveToken: async () => ({ status: "success", token: "secret-token" }),
+        resolveToken: () => Promise.resolve({ status: "success", token: "secret-token" }),
         fetchImplementation
       }
     );
@@ -65,7 +66,7 @@ describe("template workflow service", () => {
   });
 
   it("does not fetch when grading or template configuration is unavailable", async () => {
-    const fetchImplementation = vi.fn();
+    const fetchImplementation = vi.fn<FetchImplementation>();
     const disabled = await getTemplateWorkflow(
       { ...request, gradingEnabled: false },
       { runner, fetchImplementation }
@@ -83,20 +84,21 @@ describe("template workflow service", () => {
   it("returns auth and inaccessible repository diagnostics without mutation", async () => {
     const authRequired = await getTemplateWorkflow(request, {
       runner,
-      resolveToken: async () => ({
-        status: "failure",
-        error: {
-          code: "github_token_unavailable",
-          message: "secret-token",
-          exitCode: null,
-          stderrSnippet: null,
-          stdoutSnippet: null
-        }
-      })
+      resolveToken: () =>
+        Promise.resolve({
+          status: "failure",
+          error: {
+            code: "github_token_unavailable",
+            message: "secret-token",
+            exitCode: null,
+            stderrSnippet: null,
+            stdoutSnippet: null
+          }
+        })
     });
     const inaccessible = await getTemplateWorkflow(request, {
       runner,
-      resolveToken: async () => ({ status: "success", token: "secret-token" }),
+      resolveToken: () => Promise.resolve({ status: "success", token: "secret-token" }),
       fetchImplementation: vi.fn().mockResolvedValue(response(404, {}))
     });
 
@@ -114,7 +116,7 @@ describe("template workflow service", () => {
       confirmed: false
     };
     const fetchImplementation = vi
-      .fn()
+      .fn<FetchImplementation>()
       .mockResolvedValueOnce(response(200, {}))
       .mockResolvedValueOnce(
         response(200, {
@@ -136,7 +138,7 @@ describe("template workflow service", () => {
       );
     const options = {
       runner,
-      resolveToken: async () => ({ status: "success" as const, token: "secret-token" }),
+      resolveToken: () => Promise.resolve({ status: "success" as const, token: "secret-token" }),
       fetchImplementation
     };
 
@@ -167,7 +169,7 @@ describe("template workflow service", () => {
       .mockResolvedValueOnce(response(404, {}));
     const options = {
       runner,
-      resolveToken: async () => ({ status: "success" as const, token: "secret-token" }),
+      resolveToken: () => Promise.resolve({ status: "success" as const, token: "secret-token" }),
       fetchImplementation: missingFetch
     };
     expect((await previewTemplateWorkflowSave(saveRequest, options)).operation).toBe("create");

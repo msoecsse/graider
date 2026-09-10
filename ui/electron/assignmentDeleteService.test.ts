@@ -1,14 +1,13 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AssignmentDeleteRequest } from "./ipc";
 import { deleteAssignment } from "./assignmentDeleteService";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
 const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 
-const createRoot = (): string =>
-  fs.mkdtempSync(path.join(os.tmpdir(), "graider-assignment-delete-"));
+const createRoot = (): string => createTrackedTempRoot("graider-assignment-delete-");
 
 const request = (root: string, confirmed = false): AssignmentDeleteRequest => ({
   courseFolderId: "course-folder-test",

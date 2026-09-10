@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { validateTemplateRepository } from "./templateRepositoryValidationService";
 
 const runner = vi.fn();
-const successToken = async () => ({ status: "success" as const, token: "secret-token" });
+const successToken = () => Promise.resolve({ status: "success" as const, token: "secret-token" });
 const response = (ok: boolean, status: number, value: unknown = {}) => ({
   ok,
   status,
-  json: async () => value
+  json: () => Promise.resolve(value)
 });
 
 describe("templateRepositoryValidationService", () => {
@@ -60,7 +60,7 @@ describe("templateRepositoryValidationService", () => {
         await validateTemplateRepository("owner/repo", "main", {
           runner,
           fetchImplementation,
-          resolveToken: async () => ({ status: "failure" as const, error: {} as never })
+          resolveToken: () => Promise.resolve({ status: "failure" as const, error: {} as never })
         })
       ).diagnostics[0]?.message
     ).toContain("authentication");

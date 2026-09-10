@@ -17,12 +17,14 @@ const createRunner = (runner: ProcessRunner): ProcessRunner => vi.fn(runner);
 
 describe("tokenResolver", () => {
   it("uses GRAIDER_GITHUB_TOKEN before GITHUB_TOKEN and GitHub CLI", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "",
-      stderr: "",
-      exitCode: SUCCESS_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "",
+        stderr: "",
+        exitCode: SUCCESS_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await resolveGithubToken({
       env: {
@@ -37,12 +39,14 @@ describe("tokenResolver", () => {
   });
 
   it("uses GITHUB_TOKEN before GitHub CLI when the Graider token is blank", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "token-from-gh",
-      stderr: "",
-      exitCode: SUCCESS_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "token-from-gh",
+        stderr: "",
+        exitCode: SUCCESS_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await resolveGithubToken({
       env: {
@@ -57,12 +61,14 @@ describe("tokenResolver", () => {
   });
 
   it("ignores blank environment tokens and falls back to gh auth token", async () => {
-    const runner = createRunner(async () => ({
-      stdout: " token-from-gh \n",
-      stderr: "",
-      exitCode: SUCCESS_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: " token-from-gh \n",
+        stderr: "",
+        exitCode: SUCCESS_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await resolveGithubToken({
       env: { [GITHUB_TOKEN_ENV_NAME]: "   " },
@@ -78,22 +84,22 @@ describe("tokenResolver", () => {
   });
 
   it("finds GitHub CLI in common macOS paths when PATH is minimal", async () => {
-    const runner = createRunner(async (request) => {
+    const runner = createRunner((request) => {
       if (request.command === "gh") {
-        return {
+        return Promise.resolve({
           stdout: "",
           stderr: "",
           exitCode: null,
           error: { code: "ENOENT", message: "missing gh" }
-        };
+        });
       }
 
-      return {
+      return Promise.resolve({
         stdout: " token-from-common-gh \n",
         stderr: "",
         exitCode: SUCCESS_EXIT_CODE,
         error: null
-      };
+      });
     });
 
     const result = await resolveGithubToken({
@@ -117,12 +123,14 @@ describe("tokenResolver", () => {
   });
 
   it("fails safely when gh is missing from PATH and common locations", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "",
-      stderr: "",
-      exitCode: null,
-      error: { code: "ENOENT", message: "missing gh" }
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        error: { code: "ENOENT", message: "missing gh" }
+      })
+    );
 
     const result = await resolveGithubToken({ env: {}, runner });
 
@@ -135,12 +143,14 @@ describe("tokenResolver", () => {
   });
 
   it("fails safely when gh exits nonzero", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "",
-      stderr: "not authenticated",
-      exitCode: FAILURE_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "",
+        stderr: "not authenticated",
+        exitCode: FAILURE_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await resolveGithubToken({ env: {}, runner });
 
@@ -151,12 +161,14 @@ describe("tokenResolver", () => {
   });
 
   it("fails safely when the gh command cannot run", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "ghp_secret_token",
-      stderr: "permission denied",
-      exitCode: null,
-      error: { code: "EACCES", message: "permission denied: ghp_secret_token" }
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "ghp_secret_token",
+        stderr: "permission denied",
+        exitCode: null,
+        error: { code: "EACCES", message: "permission denied: ghp_secret_token" }
+      })
+    );
 
     const result = await resolveGithubToken({ env: {}, runner });
 
@@ -167,12 +179,14 @@ describe("tokenResolver", () => {
   });
 
   it("fails safely when gh returns blank stdout", async () => {
-    const runner = createRunner(async () => ({
-      stdout: " \n",
-      stderr: "",
-      exitCode: SUCCESS_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: " \n",
+        stderr: "",
+        exitCode: SUCCESS_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await resolveGithubToken({ env: {}, runner });
 
@@ -182,12 +196,14 @@ describe("tokenResolver", () => {
   });
 
   it("does not include token-like values in failure errors", async () => {
-    const runner = createRunner(async () => ({
-      stdout: "ghp_secret_token",
-      stderr: "authorization: Bearer ghp_secret_token",
-      exitCode: FAILURE_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: "ghp_secret_token",
+        stderr: "authorization: Bearer ghp_secret_token",
+        exitCode: FAILURE_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await resolveGithubToken({ env: {}, runner });
 
@@ -198,12 +214,14 @@ describe("tokenResolver", () => {
 
   it("logs only auth source diagnostics in debug mode", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const runner = createRunner(async () => ({
-      stdout: " debug-token \n",
-      stderr: "",
-      exitCode: SUCCESS_EXIT_CODE,
-      error: null
-    }));
+    const runner = createRunner(() =>
+      Promise.resolve({
+        stdout: " debug-token \n",
+        stderr: "",
+        exitCode: SUCCESS_EXIT_CODE,
+        error: null
+      })
+    );
 
     const result = await resolveGithubToken({
       env: {

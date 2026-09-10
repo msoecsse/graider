@@ -23,14 +23,15 @@ const diagnostic: ProcessRunDiagnostic = {
 
 const createRunner = (result: Partial<ProcessRunResult>) =>
   vi.fn(
-    async (): Promise<ProcessRunResult> => ({
-      stdout: "",
-      stderr: "",
-      exitCode: SUCCESS_EXIT_CODE,
-      error: null,
-      diagnostic,
-      ...result
-    })
+    (): Promise<ProcessRunResult> =>
+      Promise.resolve({
+        stdout: "",
+        stderr: "",
+        exitCode: SUCCESS_EXIT_CODE,
+        error: null,
+        diagnostic,
+        ...result
+      })
   );
 
 describe("runGraiderCliPreflight", () => {

@@ -37,11 +37,11 @@ const hasStudentRepositoryPageConfiguration = (courseFolderPath: string): boolea
     return (
       typeof settings === "object" &&
       settings !== null &&
-      ["repository", "base_url", "branch"].every(
-        (key) =>
-          typeof (settings as Record<string, unknown>)[key] === "string" &&
-          (settings as Record<string, string>)[key].trim() !== ""
-      )
+      ["repository", "base_url", "branch"].every((key) => {
+        // Read once; indexing again in the second clause discards the typeof narrowing.
+        const value = (settings as Record<string, unknown>)[key];
+        return typeof value === "string" && value.trim() !== "";
+      })
     );
   } catch {
     return false;

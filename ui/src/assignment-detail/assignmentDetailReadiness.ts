@@ -17,7 +17,6 @@ const NON_ATTENTION_STATUSES = [
 const PARTIAL_STATUSES = ["token_required", "not_checked"] as const;
 const ERROR_SEVERITY = "error";
 const WARNING_SEVERITY = "warning";
-const INFO_SEVERITY = "info";
 
 export const formatNullableValue = (value: string | number | null | undefined): string =>
   value === null || value === undefined || value === "" ? "Not configured" : String(value);

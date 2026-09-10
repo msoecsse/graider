@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AssignmentEditRequest } from "./ipc";
@@ -8,8 +7,9 @@ import {
   previewAssignmentEdit,
   saveAssignmentEdit
 } from "./assignmentEditService";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
-const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-assignment-edit-"));
+const createRoot = (): string => createTrackedTempRoot("graider-assignment-edit-");
 const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 
 const writeFixture = (root: string): void => {

@@ -22,9 +22,11 @@
     "lint": "eslint .",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
-    "validate:release": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run build && npm --prefix ui run typecheck && npm --prefix ui test && npm --prefix ui run build && npm --prefix ui run package",
+    "validate:release": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run build && npm run check:ui && npm --prefix ui run build && npm --prefix ui run package",
     "audit": "npm audit --audit-level=high",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
+    "check:ui": "npm --prefix ui run check",
+    "check:all": "npm run check && npm run check:ui"
   },
   "keywords": [
     "github",

@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { StudentRepositoryAccessPageRequest } from "./ipc";
@@ -8,6 +7,7 @@ import {
   getStudentRepositoryAccessPagePath,
   getStudentRepositoryAccessPageStatus
 } from "./studentRepositoryAccessPageService";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
 const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 const request = (root: string): StudentRepositoryAccessPageRequest => ({
@@ -16,7 +16,7 @@ const request = (root: string): StudentRepositoryAccessPageRequest => ({
   assignmentFile,
   pagesRepositoryFolderPath: path.join(root, "pages repo")
 });
-const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-access-page-"));
+const createRoot = (): string => createTrackedTempRoot("graider-access-page-");
 
 const writeFixture = (root: string, course = true): void => {
   fs.writeFileSync(

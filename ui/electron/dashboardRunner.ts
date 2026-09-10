@@ -28,8 +28,8 @@ const DEBUG_ENABLED_VALUE = "1";
 
 interface DashboardRunnerOptions {
   readonly runner: ProcessRunner;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly now?: () => Date;
+  readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly now?: (() => Date) | undefined;
 }
 
 interface DashboardCommandOptions extends DashboardRunnerOptions {

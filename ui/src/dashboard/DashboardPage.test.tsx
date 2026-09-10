@@ -553,7 +553,7 @@ const getFirstOpenCourseFolderButton = async (): Promise<HTMLElement> => {
 const getCourseCardHeadingNames = (): string[] =>
   screen
     .getAllByRole("heading", { level: 2 })
-    .map((heading) => heading.textContent ?? "")
+    .map((heading) => heading.textContent)
     .filter((text) => text.startsWith("27"));
 
 const getFirstPreviewApplyButton = (): HTMLElement => {

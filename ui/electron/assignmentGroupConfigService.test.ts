@@ -1,15 +1,15 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   getAssignmentGroupConfig,
   saveAssignmentGroupConfig
 } from "./assignmentGroupConfigService";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
 const assignmentFile = "terms/27s1/assignments/lab01/assignment.yml";
 const createFixture = (): string => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-groups-"));
+  const root = createTrackedTempRoot("graider-groups-");
   fs.mkdirSync(path.join(root, "terms/27s1/assignments/lab01"), { recursive: true });
   fs.mkdirSync(path.join(root, "terms/27s1/rosters"), { recursive: true });
   fs.writeFileSync(

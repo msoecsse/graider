@@ -107,6 +107,10 @@ interface CopyState {
   readonly status: "copied" | "failed";
 }
 
+/** GitHub Pages convention: the `<owner>/<owner>pages` repository for a course. */
+const getDefaultAccessPagesRepository = (owner: string | null): string =>
+  owner === null ? "" : `${owner}/${owner}pages`;
+
 const getCopyStateText = (copyState: CopyState | null, copyKey: CopyKey): string | null => {
   if (copyState?.key !== copyKey) {
     return null;
@@ -560,7 +564,7 @@ const GradeWorkflowPanel = ({
             <>
               <p className={preview.status === "ready" ? "detail-panel__note" : "error-message"}>
                 {preview.diagnostics.map((item) => item.message).join(" ") ||
-                  `${preview.operation} ready`}
+                  (preview.operation === null ? "Ready" : `${preview.operation} ready`)}
               </p>
               <p className="detail-panel__note">
                 This will commit directly to the template repository branch used by this assignment.
@@ -715,7 +719,9 @@ const StudentRepositoryAccessPagePanel = ({
             className="secondary-action"
             type="button"
             disabled={isSelectingPagesFolder}
-            onClick={onSelectPagesFolder}
+            onClick={() => {
+              void onSelectPagesFolder();
+            }}
           >
             {isSelectingPagesFolder
               ? "Selecting Pages repository folder..."
@@ -1377,35 +1383,6 @@ const TemplateSyncResultsPanel = ({
   </section>
 );
 
-const CollapsibleDiagnosticsPanel = ({
-  diagnostics
-}: {
-  readonly diagnostics: readonly AssignmentDetailDiagnostic[];
-}): ReactElement => (
-  <details className="detail-panel assignment-detail-disclosure">
-    <summary>Diagnostics ({diagnostics.length})</summary>
-    {diagnostics.length === 0 ? (
-      <p className="detail-panel__note">No diagnostics.</p>
-    ) : (
-      <div className="diagnostic-groups">
-        {groupDiagnostics(diagnostics).map((group) => (
-          <section className="diagnostic-group" aria-label={group.label} key={group.key}>
-            <h3>{group.label}</h3>
-            <ul className="assignment-detail-diagnostics">
-              {group.diagnostics.map((diagnostic, index) => (
-                <DiagnosticEntry
-                  diagnostic={diagnostic}
-                  key={`${diagnostic.code ?? "diagnostic"}-${index}`}
-                />
-              ))}
-            </ul>
-          </section>
-        ))}
-      </div>
-    )}
-  </details>
-);
-
 const getActionDescription = (
   action: AssignmentDetailAction,
   actionKey: ActionKey,
@@ -1706,11 +1683,17 @@ export const AssignmentDetailPage = ({
   const executeTemplateSync = async (confirmed: boolean): Promise<void> => {
     if (!confirmed || templateSyncExecutionRef.current) return;
 
+    const executeSync = window.graiderUI.executeAssignmentTemplateSync;
+    if (executeSync === undefined) {
+      setTemplateSyncError("Template sync is unavailable in this app build.");
+      return;
+    }
+
     templateSyncExecutionRef.current = true;
     setIsExecutingTemplateSync(true);
     setTemplateSyncError(null);
     try {
-      const result = await window.graiderUI.executeAssignmentTemplateSync({
+      const result = await executeSync({
         courseFolderId: selection.courseFolderId,
         courseFolderPath: selection.courseFolderPath,
         assignmentFile: selection.assignmentFile,
@@ -2359,11 +2342,9 @@ export const AssignmentDetailPage = ({
                   onSaveConfig={saveStudentAccessPagesConfig}
                   isSavingConfig={isSavingAccessPagesConfig}
                   configFeedback={accessPagesConfigFeedback}
-                  defaultRepository={
-                    (accessPage.githubOrganization ?? selection.courseSlug) === null
-                      ? ""
-                      : `${accessPage.githubOrganization ?? selection.courseSlug}/${accessPage.githubOrganization ?? selection.courseSlug}pages`
-                  }
+                  defaultRepository={getDefaultAccessPagesRepository(
+                    accessPage.githubOrganization ?? selection.courseSlug
+                  )}
                   onCopy={(value) => {
                     handleCopy("canvas-link", value);
                   }}

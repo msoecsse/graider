@@ -81,7 +81,7 @@ export const validateTemplateRepository = async (
         explicitBranch || null,
         `Template repository was not found or is not accessible: ${repository}`
       );
-    const metadata = await repositoryResponse.json();
+    const metadata: unknown = await repositoryResponse.json();
     const metadataRecord =
       typeof metadata === "object" && metadata !== null
         ? (metadata as Record<string, unknown>)

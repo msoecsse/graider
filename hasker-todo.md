@@ -409,14 +409,9 @@ project.
       `C:\downloads\lab04\...`. The expectation now uses `path.resolve` the same way the code
       does. The `ui/electron` half of that family is untouched — see the `ui/` bullet below.
 
-- [ ] **Still open, and the only thing here that is.**
-      `npx tsc --noEmit --project ui/tsconfig.json` reports 7 pre-existing errors (`prepareAssignmentTemplateSync`
-      optionality in test mocks, `exactOptionalPropertyTypes`), and `npm --prefix ui test` still
-      has the deterministic POSIX-path failures in `ui/electron` (`tokenResolver`,
-      `courseRegistry`, `dashboardRunner`, the access-page services). Everything in Tasks 14, 15
-      and this task was scoped to the CLI project, so `npm run check` passing says nothing about
-      `ui/`. Pair this with 15d's deferred bullet (`ui/` TypeScript is not linted at all) — one
-      pass over the `ui/` project would clear typecheck, lint and tests together.
+- [x] **Fixed.** `ui/` sat outside every gate: 7 typecheck errors, 16 test failures, and no
+      linting at all. All three are clean now and reachable as `npm run check:ui`. See **Task 16**
+      for what was wrong and what is still shaky.
 - [x] **Fixed.** `prettier . --check` had flagged 6 pre-existing files
       (`docs/config-wizard-plan.md`, `src/config/config-loader.ts`,
       `src/config/config-validation.ts`, `src/dashboard/dashboard-builder.ts`,
@@ -541,15 +536,13 @@ fails 20 cases, unchanged — confirmed identical against a stashed baseline (Ta
 
 ---
 
-## Task 15 — Fix the 119 lint errors so `npm run lint` passes — 15a–15c DONE 2026-09-10;
-
-one 15d bullet deferred
+## Task 15 — Fix the 119 lint errors so `npm run lint` passes — DONE 2026-09-10
 
 `npx eslint .` now reports **0 errors** and `npm run lint` passes. Task 14 landed first and
 took the count from 119 to 94 on its own — the sequencing note was right, and the whole of
 `production-assignment-template-sync-service.test.ts`'s `any`/unsafe-value cluster went with it.
-The one piece **not** done is 15d's second bullet, linting `ui/` TypeScript, which the task
-itself says to land as its own commit because it raises the count before it lowers it.
+15d's second bullet — linting `ui/` TypeScript — landed afterwards as its own commit,
+as the task instructed. It raised the count from 0 to 246 before bringing it back to 0.
 
 Analyzed 2026-09-10; identical count with all local work stashed. `--fix` resolves only **7** of
 them, so plan on hand edits. The distribution matters more than the total: **85 are in `tests/`,
@@ -623,7 +616,7 @@ feature area, which appears never to have been linted.
       `template-sync.ts` and `.at(-1)` in `production-repository-sync-executor.ts`, both now
       named constants.
 
-### 15d — Config gaps, not code defects — first bullet DONE, second DEFERRED
+### 15d — Config gaps, not code defects — DONE
 
 - [x] Done as described: the pattern is now `**/*.{js,mjs,cjs}` with `languageOptions.globals`
       for the Node globals these scripts actually use (`__dirname`, `__filename`, `console`,
@@ -632,7 +625,7 @@ feature area, which appears never to have been linted.
       around the gap with `/* global ... */` header comments
       (`assemble-rc1-release.cjs`, `write-electron-package-type.cjs`); those are now redundant
       and were removed so they do not misinform.
-- [ ] **DEFERRED — `ui/` TypeScript is still not linted at all.** Unchanged from the analysis:
+- [x] **`ui/` TypeScript is now linted.** It had not been; the original analysis stands:
       `eslint .` reports "File ignored because no matching configuration was supplied" for
       `ui/electron/*.ts`, the typed block still matches only `src/**/*.ts` and `tests/**/*.ts`,
       and `ui/package.json` still has no `lint` script. Left for its own commit as the task
@@ -640,6 +633,17 @@ feature area, which appears never to have been linted.
       exactly the clean baseline that makes the new findings readable. Add
       `ui/electron/**/*.ts` and `ui/src/**/*.{ts,tsx}` to `eslint.config.mjs`, or a `lint`
       script under `ui/`, and expect the count to jump before it comes down.
+
+      Did both. `eslint.config.mjs` gained a `ui/` block on `strictTypeChecked`, pointed at all
+      three `ui/` tsconfigs, and `ui/package.json` gained `lint` (delegating to the root config so
+      there is one rule set for the repository) plus `check`. The count went 0 — 246 — 0. Two
+      deliberate rule decisions, both commented in the config: `no-magic-numbers` is **not**
+      enabled for `ui/`, because view code is full of legitimately inline numbers and naming each
+      one costs more than it returns; and `restrict-template-expressions` allows numbers there but
+      nothing else. Note that supplying options to that rule resets the unlisted ones to the
+      rule's own permissive defaults, so the strict values are spelled out — otherwise it
+      would have quietly stopped catching the nullish and `any` interpolations, which are the ones
+      that render "undefined" to a user. Five of those were real and are fixed.
 
 **Acceptance met for 15a–15c:** `npx eslint .` reports 0 errors (was 119) and `npm run lint`
 passes, alongside `npm run typecheck`. `prettier . --check` is back to the same 6 pre-existing
@@ -671,6 +675,123 @@ resolves itself once the types are honest.
 
 ---
 
+## Task 16 — Bring the `ui/` project under the same checks as the CLI — DONE 2026-09-10
+
+Added 2026-09-10, after `npm run check` went green and made it obvious that the check said
+nothing at all about half the product. `ui/` had 7 typecheck errors, 16 failing tests, and no
+linting whatsoever. All three are clean now.
+
+    npm run check:ui     # typecheck (3 projects) + lint + format:check + 415 tests
+    npm run check:all    # both projects
+
+### 16a — The 16 test failures, none of which were product bugs
+
+- [x] **Platform-specific path literals (3 suites).** `tokenResolver` expected
+      `"C:\Program Files/GitHub CLI/gh.exe"` — a POSIX join of a Windows path, which only ever
+      matched on macOS; `courseRegistry` expected `/Users/sean/dev/csc1120`; the mappings runner
+      expected `/tmp/Course Folder`. Each expectation now goes through the same `path.join` /
+      `path.resolve` / `normalizeCourseFolderPath` call the code uses, so it is right on either
+      host.
+- [x] **Filesystem paths used as git remotes (5 suites, 12 failures).** The access-page readiness
+      check compares `git remote get-url origin` against a `/owner/repo` suffix. The tests handed
+      `git remote add` a bare filesystem path, which only agrees with that on POSIX; on Windows
+      Git echoes back `C:\...\owner\repo` and the check correctly refused, so five suites
+      reported publication failures that were really assertion failures. Production remotes are
+      URLs, so the tests now use a `file://` remote — pushable, and always `/`-separated. New
+      `electron/testSupport/gitFileRemote.ts` carries the reasoning. **The product check is
+      unchanged and still strict**; loosening it to accept backslashes would have weakened a real
+      safety check to suit a test fixture.
+- [x] **A stale security allowlist.** `src/security-boundary.test.ts` enumerates every IPC channel
+      on purpose, so that adding one is a conscious act. Task 9's `graider-ui:graider-cli:status`
+      was never added to it. Added — and the test did its job, which is why it was failing.
+- [x] **The 5s default timeout.** The five git-driven suites sit at 2.5–4.7s per test in isolation
+      and were being truncated under the parallel load of a full run. Suite-level timeouts from a
+      new `electron/testSupport/timeouts.ts`, mirroring the CLI project's
+      `tests/support/timeouts.ts`. Everything else keeps the strict 5s default.
+- [x] **Testing Library's 1s async deadline.** `DashboardPage` failed intermittently with
+      `Unable to find role="button"` — a misleading message for what was really a timeout, since
+      these pages render behind mocked IPC promises. Raised `asyncUtilTimeout` in the shared
+      `src/test/setup.ts`, which fixes the whole class rather than one call site.
+
+### 16b — The 7 typecheck errors
+
+- [x] Five page-test mock factories claim to return `GraiderUIApi` but omitted
+      `prepareAssignmentTemplateSync` / `executeAssignmentTemplateSync`, which
+      `exactOptionalPropertyTypes` rejects. Gave them defaults. (Both members later became
+      optional — see 16d — but a complete mock is still the right shape.)
+- [x] `AssignmentSetupPage` passed `acknowledgementLabel: undefined`; the prop is genuinely
+      optional, so it is now conditionally spread rather than explicitly undefined.
+- [x] `RosterManagerPage.test` invented a `label` field and omitted the required ones. It now uses
+      a real `CourseFolderRecord` fixture, matching the other page tests.
+
+### 16c — Two problems the checks themselves exposed
+
+- [x] **Half the Electron bundle was test code.** `tsconfig.node.json` included
+      `electron/**/*.ts` with no `exclude`, so 102 of the 215 files in `dist-electron` were
+      compiled tests — packaged into the shipped app. Tests are now excluded from the emitting
+      project and type-checked by a new `tsconfig.electron-test.json`, so nothing goes unchecked.
+      `dist-electron` drops to 111 files; `npm run build` verified end to end.
+- [x] **The main process was checked far more loosely than the renderer.** `tsconfig.json` has
+      `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`; `tsconfig.node.json` had
+      neither — so the IPC, filesystem and git code was the _least_ strictly checked code in the
+      repository. Aligning them cost only 26 errors, and two were genuine latent bugs
+      (`assignmentGroupConfigService` indexing a possibly-absent CSV header,
+      `rosterStudentRepositoryAccessPageService` re-reading a property and discarding its own
+      `typeof` narrowing). It also cleared 27 lint findings on its own, because the loose types
+      were making live checks look dead.
+
+### 16d — Real defects the new lint found
+
+Worth listing separately: these were not style complaints.
+
+- [x] `commandRunner.test.ts` had `"C:\Program Files"` written with a single backslash. `\P` is
+      not an escape sequence, so the string was silently `"C:Program Files"` and the test was
+      asserting against a path that never existed.
+- [x] `app.whenReady().then(...)` in `main.ts` was a floating promise — a rejection during startup
+      would have been an unhandled rejection.
+- [x] `executeAssignmentTemplateSync` was called with no guard while its sibling `prepare` was
+      guarded. Marking both optional in `GraiderUIApi` (matching every other channel the renderer
+      guards with "unavailable in this app build") turned that into a compile error and it now has
+      the same guard. On an older preload this would have thrown.
+- [x] Five nullish-or-object values interpolated into display strings, which render as
+      "undefined" or "[object Object]": a debug log in `main.ts`, a `{} | undefined` in
+      `rosterManagerService`, and three in `AssignmentDetailPage` — two of them from re-evaluating
+      an expression after a null check instead of binding it, so the narrowing was thrown away.
+- [x] Dead code: an unused `CollapsibleDiagnosticsPanel` component and an unused `INFO_SEVERITY`
+      constant.
+- [x] `PackageManifest.bin` was typed as never null even though it is parsed from `package.json`,
+      where null is perfectly possible. The type was wrong, not the guard.
+
+### 16e — Temp-directory leak in the `ui` tests
+
+- [x] Twelve `ui` suites created temp directories and **none** of them cleaned up: a full run left
+      a temp git repository behind per test, and the machine had accumulated **912** of them.
+      New `electron/testSupport/tempRoots.ts` hands out tracked roots and removes them after each
+      test, with `rm` asked to retry (`EBUSY` when cleanup races a Git child process) and a
+      swallowed failure, because a stubborn temp directory must never fail a passing test. A full
+      run now leaves zero behind. Removing the leak also made 13 `os` imports unused — which the
+      new lint caught immediately.
+
+**Acceptance:** `npm run check:ui` passes — 3 typecheck projects, 0 lint errors (was 246 once
+`ui/` was linted at all), format:check clean, 415/415 tests. `npm run check:all` runs both
+projects. `validate:release` now routes through `check:ui` instead of calling ui typecheck and
+test directly, so a release cannot skip the new lint.
+
+### Still shaky: intermittent failures in the git-driven `ui` suites
+
+- [ ] The real-git `ui` suites failed intermittently during verification: roughly **1 run in 15**,
+      in `studentRepositoryAccessPagePublishService`, `rosterStudentRepositoryAccessPageService`
+      or `studentRepositoryAccessPageService`. Every affected file passes on its own and passes
+      repeatedly, and the failures never reproduced in isolation, so this is load-related rather
+      than a logic error. The temp-directory leak above was one real contributor and is fixed, but
+      **that is not proof the flake is gone** — I could not reproduce it often enough to
+      demonstrate either way, and the last stretch of verification was itself distorted by memory
+      pressure from running the suite back to back (two runs were killed mid-flight and reported
+      partial counts). If it resurfaces, the likely next step is limiting concurrency for those
+      suites specifically rather than raising timeouts again, since they already have 30s.
+
+---
+
 ## Validation before calling any of this done
 
     cd C:\apps\graider
@@ -678,15 +799,16 @@ resolves itself once the types are honest.
 
 For Part 2 also:
 
-    npm --prefix ui run typecheck
-    npm --prefix ui test
+    npm run check:ui   # or npm run check:all for both projects
 
 `npm run check` **passes** as of 2026-09-10 (typecheck, lint, format:check and 726/726 tests),
 verified over five consecutive full runs. Expect zero failures now; a failure is a real
 regression, not the old Windows flakiness. See Task 13 for what each of those flakes turned out
 to be.
 
-`npm --prefix ui run typecheck` and `npm --prefix ui test` are a different story and still fail;
-none of this work touched the `ui/` project.
+`npm run check:ui` (added 2026-09-10) covers the `ui/` project the same way: typecheck across its
+three tsconfig projects, lint, format:check and 415 tests. `npm run check:all` runs both. See
+Task 16; the one thing still open there is an intermittent, load-related failure in the
+real-git `ui` suites.
 
 io2 itself needs no further action: 21/21 students tracked as of 2026-09-10 (Task 1).

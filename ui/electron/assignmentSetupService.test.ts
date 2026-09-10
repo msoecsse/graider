@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AssignmentSetupRequest } from "./ipc";
@@ -9,9 +8,9 @@ import {
   previewAssignmentSetup,
   saveAssignmentSetup
 } from "./assignmentSetupService";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
-const createRoot = (): string =>
-  fs.mkdtempSync(path.join(os.tmpdir(), "graider-assignment-setup-"));
+const createRoot = (): string => createTrackedTempRoot("graider-assignment-setup-");
 
 const createTerm = (root: string, termCode = "27s1", sections = ["001", "002"]): void => {
   fs.writeFileSync(path.join(root, "course.yml"), "schema_version: 1\n", "utf8");

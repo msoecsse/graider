@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -12,8 +11,9 @@ import {
 } from "./rosterStudentRepositoryAccessPageService.js";
 import { toGitFileRemote } from "./testSupport/gitFileRemote.js";
 import { GIT_TEST_TIMEOUT_MS } from "./testSupport/timeouts.js";
+import { createTrackedTempRoot } from "./testSupport/tempRoots.js";
 
-const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-roster-page-"));
+const createRoot = (): string => createTrackedTempRoot("graider-roster-page-");
 const pagesRoot = (root: string): string => path.join(root, "pages");
 const git = (root: string, arguments_: readonly string[]): string =>
   execFileSync("git", arguments_, { cwd: root, encoding: "utf8" }).trim();
@@ -84,9 +84,9 @@ const saveRequest = (root: string, rows: RosterSaveRequest["rows"]): RosterSaveR
 });
 
 const runner = (): ProcessRunner =>
-  vi.fn(async (command) => {
+  vi.fn<ProcessRunner>((command) => {
     const slug = command.args[2]?.split("/").at(-2) ?? "";
-    return {
+    return Promise.resolve({
       stdout: JSON.stringify({
         schemaVersion: 1,
         commandName: "assignment repository-mappings",
@@ -123,7 +123,7 @@ const runner = (): ProcessRunner =>
       stderr: "",
       exitCode: 0,
       error: null
-    };
+    });
   });
 
 const options = (root: string) => ({
