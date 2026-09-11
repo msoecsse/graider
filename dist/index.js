@@ -3142,6 +3142,10 @@ var buildAssignmentApplyPreview = async ({
   };
 };
 
+// src/config/effective-grading.ts
+var getEffectiveGrading = (config) => config.assignment.grading ?? config.course.grading;
+var resolveEffectiveGrading = (courseConfig, assignmentConfig) => assignmentConfig.grading ?? courseConfig.grading;
+
 // src/workflows/workflow-paths.ts
 import path7 from "path";
 var TERMS_DIRECTORY3 = "terms";
@@ -3306,7 +3310,6 @@ var createEmptyAssignmentGradePreviewResult = (status, diagnostics) => ({
   files: null,
   actions: null
 });
-var getEffectiveGrading = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var createGradingNotConfiguredWarning = () => createWarningDiagnostic(
   GRADING_NOT_CONFIGURED_CODE,
   "Automated grading is not configured for this assignment."
@@ -3748,7 +3751,6 @@ var createEmptyAssignmentGradeStatusResult = (status, diagnostics) => ({
   repositories: [],
   actions: null
 });
-var getEffectiveGrading2 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var createGradingNotConfiguredWarning2 = () => createWarningDiagnostic(
   GRADING_NOT_CONFIGURED_CODE,
   "Automated grading is not configured for this assignment."
@@ -3866,7 +3868,7 @@ var createWorkflowRunFailedDiagnostic = (student, repository, run, workflowPath,
   }
 );
 var createGradingStatus = (config) => {
-  const grading = getEffectiveGrading2(config);
+  const grading = getEffectiveGrading(config);
   const resolvedFrom = config.summary.gradingSource === "assignment" ? "assignment_override" : config.summary.gradingSource === "course" ? "course_default" : "none";
   if (!grading.enabled) {
     return {
@@ -4021,7 +4023,7 @@ var getRepositoryWorkflowStatus = async (student, repository, githubClient, work
   }
 };
 var createRepositoryStatusRowUncached = async (config, student, targets, githubClient) => {
-  const grading = getEffectiveGrading2(config);
+  const grading = getEffectiveGrading(config);
   const workflowPath = grading.workflow ?? null;
   const workflowRef = grading.enabled ? config.assignment.template.branch : null;
   const repository = findManifestRecord3(targets, student);
@@ -4173,7 +4175,7 @@ var buildAssignmentGradeStatus = async ({
     config.summary.termCode,
     config.summary.assignmentSlug
   );
-  const grading = getEffectiveGrading2(config);
+  const grading = getEffectiveGrading(config);
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: grading.enabled });
   const manifest = manifestResult.status === "loaded" ? manifestResult.manifest : void 0;
   const normalizedTargets = manifest === void 0 ? void 0 : normalizeGradingTargets(manifest, config.course.github.organization);
@@ -4306,7 +4308,6 @@ var createEmptyAssignmentDetailResult = (status, diagnostics) => ({
   actions: null
 });
 var hasErrorDiagnostics4 = (diagnostics) => diagnostics.some((diagnostic3) => diagnostic3.severity === "error");
-var getEffectiveGrading3 = (config) => config.assignment.grading ?? config.course.grading;
 var createRosterSummary = (config) => {
   const rosterResult = loadAssignmentRosters(config);
   return {
@@ -4334,7 +4335,7 @@ var getApplyState = (config) => {
   return isFile2(manifestPath.absolutePath) ? APPLY_STATE_APPLIED : APPLY_STATE_NOT_APPLIED;
 };
 var createGradingDetail = (config) => {
-  const grading = getEffectiveGrading3(config);
+  const grading = getEffectiveGrading(config);
   if (!grading.enabled) {
     return {
       enabled: false,
@@ -4884,11 +4885,11 @@ var OctokitGitHubClient = class {
     const data = await this.run(
       () => this.octokit.rest.pulls.list({ owner, repo, head: `${owner}:${head}`, base, state: "all" })
     );
-    const first = Array.isArray(data) ? data[0] : void 0;
+    const [first] = asArray(data);
     return first === void 0 ? null : mapPullRequest(first);
   }
   async createPullRequest(input) {
-    return mapPullRequest(await this.run(() => this.octokit.rest.pulls.create(input)));
+    return mapPullRequest(await this.run(() => this.octokit.rest.pulls.create({ ...input })));
   }
   async deleteRepositoryBranch(owner, repo, branch, defaultBranch) {
     if (branch === defaultBranch) throw new Error("Refusing to delete the default branch.");
@@ -5678,6 +5679,12 @@ var FACULTY_PERMISSION2 = "admin";
 var GRADER_PERMISSION2 = "maintain";
 var CREATE_REPOSITORY_OPERATION = "createRepositoryFromTemplate";
 var CREATE_REPOSITORY_PLAN_TYPE = "create_repository_from_template";
+var REPOSITORY_UPDATE_PLAN_TYPES = [
+  "add_student_collaborator",
+  "add_faculty_team_permission",
+  "add_grader_team_permission",
+  "enable_actions"
+];
 var PERMISSION_RANK = {
   none: 0,
   pull: 1,
@@ -6322,12 +6329,7 @@ var executeApplyPlan = async (input) => {
     };
     repositoryOutcomes.set(operation.target_id, {
       created: current.created || operation.type === CREATE_REPOSITORY_PLAN_TYPE && state.summary.created > createdBefore,
-      updated: current.updated || [
-        "add_student_collaborator",
-        "add_faculty_team_permission",
-        "add_grader_team_permission",
-        "enable_actions"
-      ].includes(operation.type) && state.summary.verified > verifiedBefore,
+      updated: current.updated || REPOSITORY_UPDATE_PLAN_TYPES.includes(operation.type) && state.summary.verified > verifiedBefore,
       failed: current.failed || state.errors.length > errorsBefore
     });
   }
@@ -6485,7 +6487,6 @@ var validateTemplateRepository = async (courseConfig, assignmentConfig, githubCl
     return [normalizeGitHubError2(error)];
   }
 };
-var getEffectiveGrading4 = (courseConfig, assignmentConfig) => assignmentConfig.grading ?? courseConfig.grading;
 var createTemplateWorkflowMissingDiagnostic = (reference, workflow, checkedPaths) => createConfigDiagnostic(
   DiagnosticCode.GradingWorkflowMissing,
   `Configured grading workflow ${workflow} was not found in template repository ${reference.fullName}.`,
@@ -6514,7 +6515,7 @@ var validateTemplateWorkflowContent = (reference, workflowPath, content) => {
   return hasWorkflowDispatchTrigger(parseResult.value) ? [] : [createTemplateWorkflowDispatchUnsupportedDiagnostic(reference, workflowPath)];
 };
 var validateTemplateWorkflow = async (courseConfig, assignmentConfig, githubClient) => {
-  const grading = getEffectiveGrading4(courseConfig, assignmentConfig);
+  const grading = resolveEffectiveGrading(courseConfig, assignmentConfig);
   if (!grading.enabled || grading.workflow === void 0) {
     return [];
   }
@@ -7918,7 +7919,6 @@ var createInitialSummary = (targetsSelected) => ({
   warnings: EMPTY_COUNT12,
   errors: EMPTY_COUNT12
 });
-var getEffectiveGrading5 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var normalizeGitHubError4 = (error, target) => error instanceof GitHubClientError ? createConfigDiagnostic(
   DiagnosticCode.WorkflowDispatchFailed,
   "Workflow dispatch failed for a selected repository target.",
@@ -8035,7 +8035,7 @@ var getGradeGitHubDiagnostics = (errors) => errors.flatMap((error) => {
   ] : [];
 });
 var executeGrade = async (input) => {
-  const grading = getEffectiveGrading5(input.config);
+  const grading = getEffectiveGrading(input.config);
   const workflowPath = grading.workflow;
   const normalizedTargets = normalizeGradingTargets(
     input.manifest,
@@ -8119,7 +8119,6 @@ var executeGrade = async (input) => {
 var COMMAND_NAME6 = "grade";
 var EMPTY_COUNT13 = 0;
 var NOT_CONFIGURED_WARNING_COUNT = 1;
-var getEffectiveGrading6 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getCommandStatus = (result) => {
   if (result.errors.length === EMPTY_COUNT13) {
     return "success";
@@ -8216,7 +8215,7 @@ var runGradeCommand = async ({
       }
     });
   }
-  const grading = getEffectiveGrading6(configResult.config);
+  const grading = getEffectiveGrading(configResult.config);
   if (!grading.enabled || grading.workflow === void 0) {
     return createCommandResult({
       commandName,
@@ -9045,7 +9044,7 @@ var loadCourse = (cwd) => {
   }
   return {
     repoRoot: rootResult.repoRoot,
-    config: loadResult.value,
+    config: resolveCourseConfig(loadResult.value),
     diagnostics: validateCourseConfig(COURSE_CONFIG_PATH2, loadResult.value)
   };
 };
@@ -9212,13 +9211,12 @@ var compareRecentAssignments = (left, right) => {
   const titleComparison = left.title.localeCompare(right.title);
   return titleComparison === SORT_EQUAL ? left.slug.localeCompare(right.slug) : titleComparison;
 };
-var getEffectiveGrading7 = (courseConfig, assignmentConfig) => assignmentConfig.grading ?? courseConfig.grading;
 var getAssignmentApplyState = (repoRoot, termSlug, assignmentSlug) => {
   const manifestPath = createManifestPath(repoRoot, termSlug, assignmentSlug);
   return isFile3(manifestPath.absolutePath) ? APPLY_STATE_APPLIED2 : APPLY_STATE_NOT_APPLIED2;
 };
 var createAssignmentSummary = (repoRoot, courseConfig, assignmentConfig, assignmentFile, expectedSlug, diagnostics) => {
-  const grading = getEffectiveGrading7(courseConfig, assignmentConfig);
+  const grading = resolveEffectiveGrading(courseConfig, assignmentConfig);
   const assignmentStatus = mapAssignmentStatus(assignmentConfig.assignment.status);
   return {
     slug: assignmentConfig.assignment.slug,
@@ -9441,12 +9439,13 @@ var loadAssignmentSummary = (repoRoot, courseConfig, termSlug, assignmentSlug) =
     };
   }
   const diagnostics = validateAssignmentConfig(assignmentFile, loadResult.value, assignmentSlug);
+  const assignmentConfig = resolveAssignmentConfig(loadResult.value);
   return {
-    config: loadResult.value,
+    config: assignmentConfig,
     summary: createAssignmentSummary(
       repoRoot,
       courseConfig,
-      loadResult.value,
+      assignmentConfig,
       assignmentFile,
       assignmentSlug,
       diagnostics
@@ -9556,7 +9555,13 @@ var loadRosterSummary = (repoRoot, termSlug, termConfig) => {
     };
   }
   const loadedRosters = termConfig.sections.flatMap(
-    (section) => section.roster === void 0 ? [] : [loadRosterStudents(repoRoot, [TERMS_DIRECTORY4, termSlug, section.roster].join("/"), section.id)]
+    (section) => section.roster === void 0 ? [] : [
+      loadRosterStudents(
+        repoRoot,
+        [TERMS_DIRECTORY4, termSlug, section.roster].join("/"),
+        section.id
+      )
+    ]
   );
   const students = loadedRosters.flatMap((roster) => roster.students);
   const diagnostics = [
@@ -10767,7 +10772,6 @@ var normalizeGitHubError5 = (error) => error instanceof GitHubClientError ? crea
   severity: "error",
   message: "Unexpected GitHub client failure during report collection."
 };
-var getEffectiveGrading8 = (config) => config.assignment.grading === void 0 ? config.course.grading : config.assignment.grading;
 var getWorkflowRunStatus = (run) => run === void 0 ? void 0 : run.status;
 var getWorkflowRunConclusion = (run) => run === void 0 ? void 0 : run.conclusion;
 var normalizeArtifactPath2 = (filePath) => {
@@ -10792,7 +10796,7 @@ var createDefaultGrading = () => ({
   checks: []
 });
 var collectStudentGrading = async (input, record, repositoryStatus) => {
-  const gradingConfig = getEffectiveGrading8(input.config);
+  const gradingConfig = getEffectiveGrading(input.config);
   if (!gradingConfig.enabled) {
     const mapping2 = mapGradingStatus({
       gradingEnabled: false,
@@ -11497,7 +11501,6 @@ var registerReportCommand = (program) => {
 import fs13 from "fs";
 import path18 from "path";
 var PRESET_GRADING_MODE3 = "preset";
-var getEffectiveGrading9 = (config) => config.assignment.grading ?? config.course.grading;
 var createConfiguredWorkflowCandidate = (repoRoot, workflowPath) => {
   return {
     absolutePath: path18.join(repoRoot, workflowPath),
@@ -11536,7 +11539,7 @@ var createWorkflowDispatchUnsupportedDiagnostic = (workflowPath) => createConfig
   }
 );
 var validateWorkflowCompatibility = (config) => {
-  const grading = getEffectiveGrading9(config);
+  const grading = getEffectiveGrading(config);
   if (!grading.enabled || grading.workflow === void 0) {
     return {
       warnings: [],
@@ -12045,7 +12048,6 @@ var COMMAND_NAME16 = "workflow generate";
 var PRESET_GRADING_MODE4 = "preset";
 var LEGACY_GRADING_MODE7 = "custom-workflow";
 var EMPTY_COUNT20 = 0;
-var getEffectiveGrading10 = (courseGrading, assignmentGrading) => assignmentGrading ?? courseGrading;
 var formatGeneratedFilePath = (repoRoot, absolutePath) => {
   try {
     return toRepositoryRelativePath(repoRoot, absolutePath);
@@ -12091,10 +12093,7 @@ var runWorkflowGenerateCommand = ({
       }
     });
   }
-  const grading = getEffectiveGrading10(
-    configResult.config.course.grading,
-    configResult.config.assignment.grading
-  );
+  const grading = getEffectiveGrading(configResult.config);
   const assignmentConfigPath = configResult.config.summary.assignmentConfigPath;
   if (!grading.enabled) {
     return createCommandResult({

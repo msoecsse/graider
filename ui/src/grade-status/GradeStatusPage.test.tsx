@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   AssignmentGradeStatusJsonResponse,
@@ -216,6 +216,31 @@ describe("GradeStatusPage", () => {
       screen.getByRole("button", { name: "Publish student reports — deferred" })
     ).toBeDisabled();
     expect(graiderUI.gradeAssignment).not.toHaveBeenCalled();
+  });
+
+  it("sorts repository status rows by student id within each section", async () => {
+    const template = createGradeStatusJson().repositories[0] as Record<string, unknown>;
+    const rows = [
+      { ...template, studentId: "s003", section: "001" },
+      { ...template, studentId: "s001", section: "001" },
+      { ...template, studentId: "s004", section: "002" },
+      { ...template, studentId: "s002", section: "002" }
+    ];
+    mockGraiderUI({
+      getAssignmentGradeStatus: vi
+        .fn()
+        .mockResolvedValue(createGradeStatusResult(createGradeStatusJson(rows)))
+    });
+
+    renderGradeStatusPage();
+
+    const table = await screen.findByRole("table", { name: "Repository grade status rows" });
+    const studentCells = within(table)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell")[0]?.textContent);
+
+    expect(studentCells).toEqual(["s001", "s003", "s002", "s004"]);
   });
 
   it("opens faculty report from the latest loaded status", async () => {

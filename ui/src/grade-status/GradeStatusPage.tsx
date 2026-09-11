@@ -80,6 +80,25 @@ const formatSeconds = (milliseconds: number): number => milliseconds / MILLISECO
 const getStudentLabel = (row: GradeStatusRepositoryRow): string =>
   row.studentId ?? "Unknown student";
 
+const sortRowsWithinSections = (
+  rows: readonly GradeStatusRepositoryRow[]
+): readonly GradeStatusRepositoryRow[] => {
+  const sections = new Map<string, GradeStatusRepositoryRow[]>();
+
+  for (const row of rows) {
+    const sectionRows = sections.get(row.section ?? "") ?? [];
+
+    sectionRows.push(row);
+    sections.set(row.section ?? "", sectionRows);
+  }
+
+  return [...sections.values()].flatMap((sectionRows) =>
+    [...sectionRows].sort((left, right) =>
+      (left.studentId ?? "").localeCompare(right.studentId ?? "")
+    )
+  );
+};
+
 const formatGradeStatusRowLabel = (row: GradeStatusRepositoryRow): string => {
   if (row.status === "queued") {
     return "Queued";
@@ -259,7 +278,7 @@ const RepositoryRowsPanel = ({
           <span role="columnheader">Workflow</span>
           <span role="columnheader">Run</span>
         </div>
-        {rows.map((row) => {
+        {sortRowsWithinSections(rows).map((row) => {
           const runUrl = getGradeStatusRunUrl(row);
 
           return (
