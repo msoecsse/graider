@@ -13,6 +13,7 @@ const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 const createRoot = (): string => createTrackedTempRoot("graider-apply-page-");
 const pagesRoot = (root: string): string => path.join(root, "pages");
 const outputPath = "terms/27s1/notifications/lab02/student-repositories.html";
+const cloneScriptPath = "terms/27s1/notifications/lab02/clone_repositories_section001.sh";
 const git = (root: string, arguments_: readonly string[]): string =>
   execFileSync("git", arguments_, { cwd: root, encoding: "utf8" }).trim();
 
@@ -123,7 +124,9 @@ describe("assignmentApplyWithAccessPageService", { timeout: GIT_TEST_TIMEOUT_MS 
 
     expect(result.status).toBe("success");
     expect(fs.existsSync(path.join(pagesRoot(root), outputPath))).toBe(true);
-    expect(git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"])).toBe(outputPath);
+    expect(
+      git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"]).split("\n").sort()
+    ).toEqual([cloneScriptPath, outputPath].sort());
   });
 
   it("replaces an existing generated page without creating another file", async () => {
@@ -141,9 +144,9 @@ describe("assignmentApplyWithAccessPageService", { timeout: GIT_TEST_TIMEOUT_MS 
 
     expect(result.status).toBe("success");
     expect(fs.readFileSync(path.join(pagesRoot(root), outputPath), "utf8")).not.toBe("old page");
-    expect(fs.readdirSync(path.join(pagesRoot(root), "terms/27s1/notifications/lab02"))).toEqual([
-      "student-repositories.html"
-    ]);
+    expect(
+      fs.readdirSync(path.join(pagesRoot(root), "terms/27s1/notifications/lab02")).sort()
+    ).toEqual(["clone_repositories_section001.sh", "student-repositories.html"]);
   });
 
   it("treats unchanged generated content as a successful, idempotent publish", async () => {
@@ -176,7 +179,9 @@ describe("assignmentApplyWithAccessPageService", { timeout: GIT_TEST_TIMEOUT_MS 
     expect(fs.readFileSync(path.join(pagesRoot(root), "unrelated.txt"), "utf8")).toBe(
       "leave me alone"
     );
-    expect(git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"])).toBe(outputPath);
+    expect(
+      git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"]).split("\n").sort()
+    ).toEqual([cloneScriptPath, outputPath].sort());
     expect(git(pagesRoot(root), ["status", "--porcelain"])).toContain("unrelated.txt");
   });
 

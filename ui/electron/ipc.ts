@@ -377,12 +377,18 @@ export interface StudentRepositoryAccessPageSummary {
   readonly missingRepository: number;
 }
 
+export interface StudentRepositoryAccessPageSectionScript {
+  readonly section: string;
+  readonly path: string;
+}
+
 export interface StudentRepositoryAccessPageResult {
   readonly schemaVersion: 1;
   readonly assignmentFile: string;
   readonly termCode: string | null;
   readonly assignmentSlug: string | null;
   readonly outputPath: string;
+  readonly sectionScriptPaths: readonly StudentRepositoryAccessPageSectionScript[];
   readonly githubOrganization?: string | null;
   readonly pagesRepository: string | null;
   readonly pagesBaseUrl?: string | null;
@@ -429,6 +435,7 @@ export interface StudentRepositoryAccessPagePublishResult {
   readonly termCode: string | null;
   readonly assignmentSlug: string | null;
   readonly outputPath: string;
+  readonly sectionScriptPaths: readonly StudentRepositoryAccessPageSectionScript[];
   readonly pagesRepositoryFolderPath: string | null;
   readonly pagesUrl: string | null;
   readonly status: StudentRepositoryAccessPagePublishStatus;

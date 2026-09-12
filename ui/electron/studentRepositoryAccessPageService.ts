@@ -18,6 +18,9 @@ const ASSIGNMENT_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const ASSIGNMENT_FILE_PATTERN =
   /^terms\/(\d{2}s[123])\/assignments\/([A-Za-z0-9][A-Za-z0-9._-]*)\/assignment\.yml$/u;
 const HTML_FILE_NAME = "student-repositories.html";
+const SECTION_ID_PATTERN = /^[A-Za-z0-9._-]+$/u;
+const CLONE_SCRIPT_PREFIX = "clone_repositories_section";
+const CLONE_SCRIPT_SUFFIX = ".sh";
 
 interface CourseContext {
   readonly code: string | null;
@@ -64,6 +67,49 @@ export const getStudentRepositoryAccessPagePath = (
   TERM_CODE_PATTERN.test(termCode) && ASSIGNMENT_SLUG_PATTERN.test(assignmentSlug)
     ? `terms/${termCode}/notifications/${assignmentSlug}/${HTML_FILE_NAME}`
     : null;
+
+const getSectionCloneScriptFileName = (section: string): string | null =>
+  SECTION_ID_PATTERN.test(section)
+    ? `${CLONE_SCRIPT_PREFIX}${section}${CLONE_SCRIPT_SUFFIX}`
+    : null;
+
+export const getStudentRepositoryAccessPageSectionCloneScriptPath = (
+  termCode: string,
+  assignmentSlug: string,
+  section: string
+): string | null => {
+  const fileName = getSectionCloneScriptFileName(section);
+  if (
+    fileName === null ||
+    !TERM_CODE_PATTERN.test(termCode) ||
+    !ASSIGNMENT_SLUG_PATTERN.test(assignmentSlug)
+  )
+    return null;
+  return `terms/${termCode}/notifications/${assignmentSlug}/${fileName}`;
+};
+
+const groupIncludedRowsBySection = (
+  rows: readonly StudentRepositoryAccessPageRow[]
+): Map<string, StudentRepositoryAccessPageRow[]> => {
+  const rowsBySection = new Map<string, StudentRepositoryAccessPageRow[]>();
+  for (const row of rows) {
+    if (row.status !== "included" || row.repositoryUrl === null) continue;
+    const sectionRows = rowsBySection.get(row.section) ?? [];
+    sectionRows.push(row);
+    rowsBySection.set(row.section, sectionRows);
+  }
+  return rowsBySection;
+};
+
+const shellSingleQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+
+const buildCloneScript = (sectionRows: readonly StudentRepositoryAccessPageRow[]): string => {
+  const lines = sectionRows.map(
+    (row) =>
+      `git clone ${shellSingleQuote(row.repositoryUrl ?? "")} ${shellSingleQuote(row.studentId)}`
+  );
+  return `#!/bin/sh\nset -e\n\n${lines.join("\n")}\n`;
+};
 
 const readCourseContext = (courseFolderPath: string): CourseContext | null => {
   try {
@@ -154,23 +200,22 @@ const renderPage = (
       .filter((value) => value !== "")
       .join(" ")
       .trim() || assignmentSlug;
-  const rowsBySection = new Map<string, StudentRepositoryAccessPageRow[]>();
-  for (const row of rows) {
-    if (row.status !== "included" || row.repositoryUrl === null) continue;
-    const sectionRows = rowsBySection.get(row.section) ?? [];
-    sectionRows.push(row);
-    rowsBySection.set(row.section, sectionRows);
-  }
+  const rowsBySection = groupIncludedRowsBySection(rows);
   const sectionContent = [...rowsBySection.entries()]
     .map(([section, sectionRows]) => {
       const sectionId = `section-${escapeHtml(section)}`;
+      const scriptFileName = getSectionCloneScriptFileName(section);
+      const heading =
+        scriptFileName === null
+          ? `Section ${escapeHtml(section)}`
+          : `<a class="clone-script-link" href="${escapeHtml(scriptFileName)}" download>Section ${escapeHtml(section)}</a>`;
       const studentRows = sectionRows
         .map(
           (row) =>
             `            <li><a class="student-repository-link" href="${escapeHtml(row.repositoryUrl ?? "")}">${escapeHtml(row.studentId)}</a></li>`
         )
         .join("\n");
-      return `        <section class="repository-section" aria-labelledby="${sectionId}">\n          <h2 id="${sectionId}">Section ${escapeHtml(section)}</h2>\n          <ul class="student-repository-list">\n${studentRows}\n          </ul>\n        </section>`;
+      return `        <section class="repository-section" aria-labelledby="${sectionId}">\n          <h2 id="${sectionId}">${heading}</h2>\n          <ul class="student-repository-list">\n${studentRows}\n          </ul>\n        </section>`;
     })
     .join("\n");
   return `<!doctype html>
@@ -187,6 +232,9 @@ const renderPage = (
       h1, h2, p { margin-top: 0; }
       h1 { margin-bottom: 0.75rem; font-size: clamp(1.75rem, 5vw, 2.25rem); letter-spacing: -0.025em; }
       h2 { margin-bottom: 1rem; font-size: 1.125rem; }
+      .clone-script-link { color: inherit; text-decoration: none; border-bottom: 1px dashed #aebddb; }
+      .clone-script-link:hover { border-bottom-color: #2d6cdf; }
+      .clone-script-link:focus-visible { outline: 3px solid #2d6cdf; outline-offset: 3px; }
       p { color: #526078; line-height: 1.6; }
       .repository-sections { display: grid; gap: 1.25rem; margin-top: 2rem; }
       .repository-section { padding: 1.25rem; border: 1px solid #dce3ef; border-radius: 0.875rem; background: #ffffff; box-shadow: 0 1px 2px rgb(23 32 51 / 0.04); }
@@ -203,6 +251,7 @@ const renderPage = (
       <p>Term: ${escapeHtml(termCode)}. Assignment: ${escapeHtml(assignmentTitle)} (${escapeHtml(assignmentSlug)}).</p>
       <p>Find your MSOE username below and open your repository.</p>
       <p>If you do not see your username or cannot access your repository, contact your instructor.</p>
+      <p>Instructors: click a section heading to download a script that clones every repository in that section.</p>
       <div class="repository-sections">
 ${sectionContent}
       </div>
@@ -231,6 +280,7 @@ const buildResult = (
       exists: false,
       status: "failure",
       summary: emptySummary(),
+      sectionScriptPaths: [],
       rows: [],
       diagnostics: assignment.diagnostics
     };
@@ -253,6 +303,7 @@ const buildResult = (
       exists: false,
       status: "failure",
       summary: emptySummary(),
+      sectionScriptPaths: [],
       rows: [],
       diagnostics: [diagnostic("Student access page path is invalid.")]
     };
@@ -276,6 +327,7 @@ const buildResult = (
       exists: false,
       status: "failure",
       summary: emptySummary(),
+      sectionScriptPaths: [],
       rows: [],
       diagnostics: [
         diagnostic(
@@ -297,6 +349,7 @@ const buildResult = (
       exists: false,
       status: "failure",
       summary: emptySummary(),
+      sectionScriptPaths: [],
       rows: [],
       diagnostics: [
         diagnostic(
@@ -321,6 +374,7 @@ const buildResult = (
       exists: false,
       status: "failure",
       summary: emptySummary(),
+      sectionScriptPaths: [],
       rows: [],
       diagnostics: [
         diagnostic(
@@ -344,6 +398,7 @@ const buildResult = (
       exists: false,
       status: "failure",
       summary: emptySummary(),
+      sectionScriptPaths: [],
       rows: [],
       diagnostics: [
         diagnostic("Student access page path is outside the selected Pages repository folder.")
@@ -391,6 +446,16 @@ const buildResult = (
   );
   const rows = sortableRows.map((entry) => entry.row);
   const summary = summarize(rows);
+  const sectionScriptPaths = [...groupIncludedRowsBySection(rows).keys()]
+    .map((section) => {
+      const scriptPath = getStudentRepositoryAccessPageSectionCloneScriptPath(
+        termCode,
+        assignmentSlug,
+        section
+      );
+      return scriptPath === null ? null : { section, path: scriptPath };
+    })
+    .filter((entry): entry is { section: string; path: string } => entry !== null);
   if (mappings.manifestStatus === "not_applied")
     diagnostics.push(
       diagnostic(
@@ -428,6 +493,7 @@ const buildResult = (
     termCode,
     assignmentSlug,
     outputPath,
+    sectionScriptPaths,
     githubOrganization: course?.githubOrganization ?? null,
     pagesRepository,
     pagesBaseUrl: course?.pagesBaseUrl ?? null,
@@ -489,6 +555,30 @@ export const generateStudentRepositoryAccessPage = (
       "utf8"
     );
     fs.renameSync(temporaryPath, absolutePath);
+    const directory = path.dirname(absolutePath);
+    const rowsBySection = groupIncludedRowsBySection(result.rows);
+    const expectedFileNames = new Set<string>();
+    for (const [section, sectionRows] of rowsBySection) {
+      const fileName = getSectionCloneScriptFileName(section);
+      if (fileName === null) continue;
+      expectedFileNames.add(fileName);
+      const scriptPath = path.join(directory, fileName);
+      const scriptTemporaryPath = `${scriptPath}.${process.pid}.${now().getTime()}.tmp`;
+      fs.writeFileSync(scriptTemporaryPath, buildCloneScript(sectionRows), {
+        encoding: "utf8",
+        mode: 0o755
+      });
+      fs.renameSync(scriptTemporaryPath, scriptPath);
+    }
+    for (const entry of fs.readdirSync(directory)) {
+      if (
+        entry.startsWith(CLONE_SCRIPT_PREFIX) &&
+        entry.endsWith(CLONE_SCRIPT_SUFFIX) &&
+        !expectedFileNames.has(entry)
+      ) {
+        fs.unlinkSync(path.join(directory, entry));
+      }
+    }
     return Promise.resolve({
       ...result,
       exists: true,

@@ -61,6 +61,7 @@ const resultFromAccessPage = (
   termCode: accessPage.termCode,
   assignmentSlug: accessPage.assignmentSlug,
   outputPath: accessPage.outputPath,
+  sectionScriptPaths: accessPage.sectionScriptPaths,
   pagesRepositoryFolderPath: request.pagesRepositoryFolderPath ?? null,
   pagesUrl: accessPage.pagesUrl,
   status,
@@ -119,8 +120,12 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
       )
     ]);
 
+  const publishPaths = [
+    accessPage.outputPath,
+    ...accessPage.sectionScriptPaths.map((entry) => entry.path)
+  ];
   const [pageStatus, allStatus, branch, remote] = await Promise.all([
-    runGit(pagesFolderPath, ["status", "--porcelain", "--", accessPage.outputPath]),
+    runGit(pagesFolderPath, ["status", "--porcelain", "--", ...publishPaths]),
     runGit(pagesFolderPath, ["status", "--porcelain"]),
     runGit(pagesFolderPath, ["branch", "--show-current"]),
     runGit(pagesFolderPath, ["remote", "get-url", "origin"])
@@ -151,7 +156,7 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
   const assignment = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile);
   const label = assignment.model?.assignmentTitle ?? accessPage.assignmentSlug ?? "assignment";
   const commitCommands = [
-    `git add ${quoteCommandArgument(accessPage.outputPath)}`,
+    `git add ${publishPaths.map(quoteCommandArgument).join(" ")}`,
     `git commit -m ${quoteCommandArgument(`Add ${label} student repository access page`)}`
   ];
   const remoteDiagnostic =

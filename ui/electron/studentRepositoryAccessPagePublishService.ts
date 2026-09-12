@@ -107,6 +107,17 @@ export const publishStudentRepositoryAccessPage = async (
     return failure(
       "The generated student access page is unavailable inside the selected Pages repository."
     );
+  const publishPaths = [
+    readiness.outputPath,
+    ...readiness.sectionScriptPaths
+      .map((entry) => entry.path)
+      .filter((scriptPath) => {
+        const absoluteScriptPath = path.resolve(repositoryRoot, scriptPath);
+        return (
+          isContainedPath(repositoryRoot, absoluteScriptPath) && fs.existsSync(absoluteScriptPath)
+        );
+      })
+  ];
 
   if (readiness.status === "ready_to_publish")
     return {
@@ -122,7 +133,7 @@ export const publishStudentRepositoryAccessPage = async (
         .ok
     )
       return failure("This Pages repository branch does not have an upstream branch configured.");
-    if (!(await runGit(repositoryRoot, ["add", "--", readiness.outputPath])).ok)
+    if (!(await runGit(repositoryRoot, ["add", "--", ...publishPaths])).ok)
       return failure("Unable to stage the generated student access page.");
     if (!(await runGit(repositoryRoot, ["commit", "-m", commitMessage])).ok)
       return failure("Unable to commit the generated student access page.");
