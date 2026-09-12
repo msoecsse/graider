@@ -19,8 +19,11 @@ const ASSIGNMENT_FILE_PATTERN =
   /^terms\/(\d{2}s[123])\/assignments\/([A-Za-z0-9][A-Za-z0-9._-]*)\/assignment\.yml$/u;
 const HTML_FILE_NAME = "student-repositories.html";
 const SECTION_ID_PATTERN = /^[A-Za-z0-9._-]+$/u;
-const CLONE_SCRIPT_PREFIX = "clone_repositories_section";
+const COURSE_CODE_PATTERN = /^[A-Za-z0-9._-]+$/u;
+const CLONE_SCRIPT_PREFIX = "clone-";
 const CLONE_SCRIPT_SUFFIX = ".sh";
+const GITHUB_HTTPS_URL_PATTERN =
+  /^https:\/\/github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/u;
 
 interface CourseContext {
   readonly code: string | null;
@@ -68,17 +71,18 @@ export const getStudentRepositoryAccessPagePath = (
     ? `terms/${termCode}/notifications/${assignmentSlug}/${HTML_FILE_NAME}`
     : null;
 
-const getSectionCloneScriptFileName = (section: string): string | null =>
-  SECTION_ID_PATTERN.test(section)
-    ? `${CLONE_SCRIPT_PREFIX}${section}${CLONE_SCRIPT_SUFFIX}`
+const getSectionCloneScriptFileName = (courseCode: string, section: string): string | null =>
+  COURSE_CODE_PATTERN.test(courseCode) && SECTION_ID_PATTERN.test(section)
+    ? `${CLONE_SCRIPT_PREFIX}${courseCode}-${section}${CLONE_SCRIPT_SUFFIX}`.toLowerCase()
     : null;
 
 export const getStudentRepositoryAccessPageSectionCloneScriptPath = (
   termCode: string,
   assignmentSlug: string,
+  courseCode: string,
   section: string
 ): string | null => {
-  const fileName = getSectionCloneScriptFileName(section);
+  const fileName = getSectionCloneScriptFileName(courseCode, section);
   if (
     fileName === null ||
     !TERM_CODE_PATTERN.test(termCode) ||
@@ -103,11 +107,20 @@ const groupIncludedRowsBySection = (
 
 const shellSingleQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
+const toSshCloneUrl = (httpsUrl: string): string | null => {
+  const match = GITHUB_HTTPS_URL_PATTERN.exec(httpsUrl);
+  const owner = match?.[1];
+  const repo = match?.[2];
+  if (owner === undefined || repo === undefined) return null;
+  return `git@github.com:${owner}/${repo}.git`;
+};
+
 const buildCloneScript = (sectionRows: readonly StudentRepositoryAccessPageRow[]): string => {
-  const lines = sectionRows.map(
-    (row) =>
-      `git clone ${shellSingleQuote(row.repositoryUrl ?? "")} ${shellSingleQuote(row.studentId)}`
-  );
+  const lines = sectionRows.map((row) => {
+    const repositoryUrl = row.repositoryUrl ?? "";
+    const cloneUrl = toSshCloneUrl(repositoryUrl) ?? repositoryUrl;
+    return `git clone ${shellSingleQuote(cloneUrl)} ${shellSingleQuote(row.studentId)}`;
+  });
   return `#!/bin/sh\nset -e\n\n${lines.join("\n")}\n`;
 };
 
@@ -204,7 +217,7 @@ const renderPage = (
   const sectionContent = [...rowsBySection.entries()]
     .map(([section, sectionRows]) => {
       const sectionId = `section-${escapeHtml(section)}`;
-      const scriptFileName = getSectionCloneScriptFileName(section);
+      const scriptFileName = getSectionCloneScriptFileName(course.code ?? "", section);
       const heading =
         scriptFileName === null
           ? `Section ${escapeHtml(section)}`
@@ -451,6 +464,7 @@ const buildResult = (
       const scriptPath = getStudentRepositoryAccessPageSectionCloneScriptPath(
         termCode,
         assignmentSlug,
+        course?.code ?? "",
         section
       );
       return scriptPath === null ? null : { section, path: scriptPath };
@@ -559,7 +573,7 @@ export const generateStudentRepositoryAccessPage = (
     const rowsBySection = groupIncludedRowsBySection(result.rows);
     const expectedFileNames = new Set<string>();
     for (const [section, sectionRows] of rowsBySection) {
-      const fileName = getSectionCloneScriptFileName(section);
+      const fileName = getSectionCloneScriptFileName(course.code ?? "", section);
       if (fileName === null) continue;
       expectedFileNames.add(fileName);
       const scriptPath = path.join(directory, fileName);

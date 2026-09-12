@@ -109,7 +109,7 @@ describe("studentRepositoryAccessPageService", () => {
     expect(content).toContain("z002");
     expect(content).toContain('<section class="repository-section" aria-labelledby="section-001">');
     expect(content).toContain(
-      '<h2 id="section-001"><a class="clone-script-link" href="clone_repositories_section001.sh" download>Section 001</a></h2>'
+      '<h2 id="section-001"><a class="clone-script-link" href="clone-csc1120-001.sh" download>Section 001</a></h2>'
     );
     expect(content).toContain(
       '<a class="student-repository-link" href="https://github.com/org/a-repo">a001</a>'
@@ -141,15 +141,15 @@ describe("studentRepositoryAccessPageService", () => {
     writeFixture(root);
     const result = await generateStudentRepositoryAccessPage(request(root), mappings);
     expect(result.sectionScriptPaths).toEqual([
-      { section: "001", path: "terms/27s1/notifications/lab02/clone_repositories_section001.sh" }
+      { section: "001", path: "terms/27s1/notifications/lab02/clone-csc1120-001.sh" }
     ]);
-    expect(getStudentRepositoryAccessPageSectionCloneScriptPath("27s1", "lab02", "001")).toBe(
-      "terms/27s1/notifications/lab02/clone_repositories_section001.sh"
-    );
+    expect(
+      getStudentRepositoryAccessPageSectionCloneScriptPath("27s1", "lab02", "CSC1120", "001")
+    ).toBe("terms/27s1/notifications/lab02/clone-csc1120-001.sh");
     const scriptPath = path.join(root, "pages repo", result.sectionScriptPaths[0]!.path);
     const script = fs.readFileSync(scriptPath, "utf8");
     expect(script).toContain("#!/bin/sh");
-    expect(script).toContain("git clone 'https://github.com/org/a-repo' 'a001'");
+    expect(script).toContain("git clone 'git@github.com:org/a-repo.git' 'a001'");
     expect(script).toContain("git clone 'https://github.com/org/z-repo?x=<unsafe>' 'z002'");
     expect(fs.statSync(scriptPath).mode & 0o777).toBe(0o755);
 
@@ -183,7 +183,7 @@ describe("studentRepositoryAccessPageService", () => {
       ]
     });
     expect(second.sectionScriptPaths).toEqual([
-      { section: "002", path: "terms/27s1/notifications/lab02/clone_repositories_section002.sh" }
+      { section: "002", path: "terms/27s1/notifications/lab02/clone-csc1120-002.sh" }
     ]);
     expect(fs.existsSync(scriptPath)).toBe(false);
     expect(fs.existsSync(path.join(root, "pages repo", second.sectionScriptPaths[0]!.path))).toBe(
