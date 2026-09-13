@@ -1,4 +1,5 @@
 import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import { parseTemplateRepository } from "../config/github-config-validation.js";
 import type { Clock } from "../core/clock.js";
 import {
@@ -17,6 +18,7 @@ import {
   createEmptyManifest,
   updateActionsState,
   updatePermissionState,
+  updateRepositoryIdentity,
   upsertRepositoryRecord
 } from "../manifest/manifest-updater.js";
 import type { PlanOperation } from "../planning/operation-models.js";
@@ -24,6 +26,12 @@ import type { Plan } from "../planning/plan-models.js";
 import type { ApplyRepositoryTarget } from "../planning/repository-targets.js";
 import type { RosterStudent } from "../roster/roster-models.js";
 import { getWorkflowDispatchIdentifier } from "../workflows/workflow-paths.js";
+import {
+  WorkflowDeploymentPermissionError,
+  ensureManagedGradingWorkflow,
+  isManagedGradingWorkflowEligible
+} from "../workflows/managed-workflow-deployment.js";
+import { GRAIDER_MANAGED_WORKFLOW_PATH } from "../workflows/managed-workflow-policy.js";
 
 const EMPTY_COUNT = 0;
 const PRIVATE_REPOSITORY = true;
@@ -31,8 +39,26 @@ const DEFAULT_ACTIONS_ENABLED = true;
 const STUDENT_PERMISSION: Exclude<GitHubPermission, "none"> = "admin";
 const FACULTY_PERMISSION: Exclude<GitHubPermission, "none"> = "admin";
 const GRADER_PERMISSION: Exclude<GitHubPermission, "none"> = "maintain";
-const CREATE_REPOSITORY_OPERATION = "createRepositoryFromTemplate";
-const CREATE_REPOSITORY_PLAN_TYPE = "create_repository_from_template";
+const CREATE_REPOSITORY_OPERATION = "createRepository";
+const CREATE_REPOSITORY_FROM_TEMPLATE_OPERATION = "createRepositoryFromTemplate";
+const CREATE_REPOSITORY_PLAN_TYPE = "create_repository";
+const CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE = "create_repository_from_template";
+const TEMPLATE_MATERIALIZATION_ATTEMPTS = 10;
+const TEMPLATE_MATERIALIZATION_POLL_MS = 1000;
+
+const isRepositoryCreationOperation = (operation: PlanOperation): boolean =>
+  operation.type === CREATE_REPOSITORY_PLAN_TYPE ||
+  operation.type === CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE;
+
+const isRepositoryUpdateOperation = (operation: PlanOperation): boolean =>
+  operation.type === "add_student_collaborator" ||
+  operation.type === "add_faculty_team_permission" ||
+  operation.type === "add_grader_team_permission" ||
+  operation.type === "enable_actions" ||
+  operation.type === "ensure_managed_grading_workflow";
+
+const hasConfiguredTemplate = (config: LoadedGraiderConfig): boolean =>
+  config.assignment.template !== undefined;
 
 const PERMISSION_RANK = {
   none: 0,
@@ -117,6 +143,30 @@ const runGitHubOperation = async <T>(
   operation: () => Promise<T>
 ): Promise<T> => withGitHubRetry(operation, input.retryOptions);
 
+const waitForTemplateMaterialization = async (
+  input: ApplyExecutionInput,
+  repository: GitHubRepository
+): Promise<string | undefined> => {
+  const sleep =
+    input.retryOptions?.sleep ??
+    ((milliseconds: number) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, milliseconds);
+      }));
+
+  for (let attempt = 1; attempt <= TEMPLATE_MATERIALIZATION_ATTEMPTS; attempt += 1) {
+    const commitSha = await runGitHubOperation(input, () =>
+      input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+    );
+    if (commitSha !== undefined) return commitSha;
+    if (attempt < TEMPLATE_MATERIALIZATION_ATTEMPTS) {
+      await sleep(TEMPLATE_MATERIALIZATION_POLL_MS);
+    }
+  }
+
+  return undefined;
+};
+
 const createWorkflowMissingDiagnostic = (operation: PlanOperation): Diagnostic =>
   createConfigDiagnostic(
     DiagnosticCode.GradingWorkflowMissing,
@@ -141,13 +191,57 @@ const createWorkflowDispatchDiagnostic = (operation: PlanOperation): Diagnostic 
     }
   );
 
+const createWorkflowDeploymentConflictDiagnostic = (
+  operation: PlanOperation,
+  unsupportedVersion: boolean
+): Diagnostic =>
+  createConfigDiagnostic(
+    unsupportedVersion
+      ? DiagnosticCode.WorkflowDeploymentVersionUnsupported
+      : DiagnosticCode.WorkflowDeploymentConflict,
+    unsupportedVersion
+      ? `Repository ${operation.repository_name ?? "repository"} contains a Graider workflow with an unsupported ownership version; it was preserved.`
+      : `Repository ${operation.repository_name ?? "repository"} contains an existing ${GRAIDER_MANAGED_WORKFLOW_PATH} that is not managed by Graider; it was preserved.`,
+    {
+      repositoryName: operation.repository_name,
+      workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
+      student_id: operation.student_id,
+      github_username: operation.github_username,
+      section: operation.section
+    }
+  );
+
+const createWorkflowDeploymentForbiddenDiagnostic = (operation: PlanOperation): Diagnostic =>
+  createConfigDiagnostic(
+    DiagnosticCode.WorkflowDeploymentForbidden,
+    `Graider could not create or update ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${operation.repository_name ?? "the student repository"}. Check the token's workflow-file write permission.`,
+    {
+      repositoryName: operation.repository_name,
+      workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
+      student_id: operation.student_id,
+      github_username: operation.github_username,
+      section: operation.section
+    }
+  );
+
+const operationTargetKey = (operation: PlanOperation): string =>
+  operation.target_id ?? `${operation.section ?? ""}:${operation.student_id ?? ""}`;
+
+const getEffectiveWorkflowPath = (config: LoadedGraiderConfig): string | undefined => {
+  const grading = getEffectiveAssignmentGrading(config);
+
+  return isManagedGradingWorkflowEligible(grading)
+    ? GRAIDER_MANAGED_WORKFLOW_PATH
+    : grading.workflow;
+};
+
 const wasRepositoryCreatedInPlan = (
   input: ApplyExecutionInput,
   operation: PlanOperation
 ): boolean =>
   input.plan.operations.some(
     (candidate) =>
-      candidate.type === CREATE_REPOSITORY_PLAN_TYPE &&
+      isRepositoryCreationOperation(candidate) &&
       candidate.student_id === operation.student_id &&
       candidate.status === "planned"
   );
@@ -173,13 +267,14 @@ const createPermissionWarning = (
 const createRepositoryCreationNotObservedDiagnostic = (
   operation: PlanOperation,
   owner: string,
-  repositoryName: string
+  repositoryName: string,
+  githubOperation: string
 ): Diagnostic =>
   createConfigDiagnostic(
     DiagnosticCode.GithubApiError,
     `Repository creation did not produce an observable repository for ${owner}/${repositoryName}.`,
     {
-      operation: CREATE_REPOSITORY_OPERATION,
+      operation: githubOperation,
       owner,
       repositoryName,
       student_id: operation.student_id,
@@ -219,6 +314,7 @@ const createManifestRecord = (
   student: RosterStudent,
   repository: GitHubRepository,
   observedAt: string,
+  createdFromTemplate: boolean,
   templateCommitSha?: string,
   studentDefaultBranchCommitSha?: string
 ): ManifestRepositoryRecord => ({
@@ -232,14 +328,20 @@ const createManifestRecord = (
     fullName: repository.fullName,
     id: repository.id,
     htmlUrl: repository.htmlUrl,
-    createdFromTemplate: true,
-    templateRepository: config.assignment.template.repository,
+    createdFromTemplate,
+    ...(createdFromTemplate && config.assignment.template !== undefined
+      ? { templateRepository: config.assignment.template.repository }
+      : {}),
     ...(templateCommitSha === undefined ? {} : { templateCommitSha }),
     ...(studentDefaultBranchCommitSha === undefined ? {} : { studentDefaultBranchCommitSha }),
-    templateSyncBaselineStatus:
-      templateCommitSha === undefined || studentDefaultBranchCommitSha === undefined
-        ? "baseline_required"
-        : "initialized",
+    ...(createdFromTemplate
+      ? {
+          templateSyncBaselineStatus:
+            templateCommitSha === undefined || studentDefaultBranchCommitSha === undefined
+              ? ("baseline_required" as const)
+              : ("initialized" as const)
+        }
+      : {}),
     createdAt: observedAt,
     lastObservedAt: observedAt
   },
@@ -262,9 +364,39 @@ const createInitialManifest = async (
   plan: Plan,
   githubClient: GitHubClient
 ): Promise<Manifest> => {
+  if (!hasConfiguredTemplate(config)) {
+    return createEmptyManifest({
+      assignment: {
+        termCode: config.summary.termCode,
+        courseCode: config.course.course.code,
+        assignmentSlug: config.summary.assignmentSlug,
+        assignmentTitle: config.assignment.assignment.title
+      },
+      source: {
+        sourceFiles: plan.source.source_files,
+        inputFingerprint: plan.source.input_fingerprint
+      }
+    });
+  }
+
+  const template = config.assignment.template;
+  if (template === undefined)
+    return createEmptyManifest({
+      assignment: {
+        termCode: config.summary.termCode,
+        courseCode: config.course.course.code,
+        assignmentSlug: config.summary.assignmentSlug,
+        assignmentTitle: config.assignment.assignment.title
+      },
+      source: {
+        sourceFiles: plan.source.source_files,
+        inputFingerprint: plan.source.input_fingerprint
+      }
+    });
+
   const parsedTemplate = parseTemplateRepository(
     config.course.github.organization,
-    config.assignment.template.repository
+    template.repository
   );
   const templateRepository =
     parsedTemplate.status === "success"
@@ -285,8 +417,8 @@ const createInitialManifest = async (
       inputFingerprint: plan.source.input_fingerprint
     },
     template: {
-      repository: config.assignment.template.repository,
-      branch: config.assignment.template.branch,
+      repository: template.repository,
+      branch: template.branch,
       ...(templateRepository?.latestCommitSha === undefined
         ? {}
         : { commitSha: templateRepository.latestCommitSha })
@@ -354,26 +486,52 @@ const executeCreateRepository = async (
   }
 
   const repositoryName = operation.repository_name;
+  const createdFromTemplate = operation.type === CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE;
+  const githubOperation = createdFromTemplate
+    ? CREATE_REPOSITORY_FROM_TEMPLATE_OPERATION
+    : CREATE_REPOSITORY_OPERATION;
+  let nextState = state;
 
   try {
-    const parsedTemplate = parseTemplateRepository(
-      input.config.course.github.organization,
-      input.config.assignment.template.repository
-    );
+    if (createdFromTemplate) {
+      const template = input.config.assignment.template;
+      if (template === undefined) {
+        return recordError(
+          state,
+          createConfigDiagnostic(
+            DiagnosticCode.InvalidTemplateRepository,
+            "Template-backed repository creation requires assignment template configuration."
+          )
+        );
+      }
+      const parsedTemplate = parseTemplateRepository(
+        input.config.course.github.organization,
+        template.repository
+      );
 
-    if (parsedTemplate.status === "failure") {
-      return recordError(state, parsedTemplate.diagnostic);
+      if (parsedTemplate.status === "failure") {
+        return recordError(state, parsedTemplate.diagnostic);
+      }
+
+      await runGitHubOperation(input, () =>
+        input.githubClient.createRepositoryFromTemplate({
+          templateOwner: parsedTemplate.repository.owner,
+          templateRepo: parsedTemplate.repository.repo,
+          owner: input.config.course.github.organization,
+          name: repositoryName,
+          private: PRIVATE_REPOSITORY
+        })
+      );
+    } else {
+      await runGitHubOperation(input, () =>
+        input.githubClient.createRepository({
+          owner: input.config.course.github.organization,
+          name: repositoryName,
+          private: PRIVATE_REPOSITORY
+        })
+      );
     }
 
-    await runGitHubOperation(input, () =>
-      input.githubClient.createRepositoryFromTemplate({
-        templateOwner: parsedTemplate.repository.owner,
-        templateRepo: parsedTemplate.repository.repo,
-        owner: input.config.course.github.organization,
-        name: repositoryName,
-        private: PRIVATE_REPOSITORY
-      })
-    );
     const repository = await runGitHubOperation(input, () =>
       input.githubClient.getRepository(input.config.course.github.organization, repositoryName)
     );
@@ -384,53 +542,73 @@ const executeCreateRepository = async (
         createRepositoryCreationNotObservedDiagnostic(
           operation,
           input.config.course.github.organization,
-          repositoryName
+          repositoryName,
+          githubOperation
         )
       );
     }
 
-    const studentDefaultBranchCommitSha = await runGitHubOperation(input, () =>
-      input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
-    );
-
-    if (
-      state.manifest.template.commitSha === undefined ||
-      studentDefaultBranchCommitSha === undefined
-    ) {
-      return recordError(
-        state,
-        createConfigDiagnostic(
-          DiagnosticCode.GithubApiError,
-          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
-          { repository: repository.fullName, operation: CREATE_REPOSITORY_OPERATION }
-        )
-      );
-    }
-
-    const manifest = upsertRepositoryRecord(
-      state.manifest,
-      createManifestRecord(
-        input.config,
-        student,
-        repository,
-        observedAt,
-        state.manifest.template.commitSha,
-        studentDefaultBranchCommitSha
-      )
-    );
-
-    return persistManifest(
+    const templateCommitSha = createdFromTemplate ? state.manifest.template?.commitSha : undefined;
+    nextState = persistManifest(
       incrementSummary(
         {
           ...state,
-          manifest
+          manifest: upsertRepositoryRecord(
+            state.manifest,
+            createManifestRecord(
+              input.config,
+              student,
+              repository,
+              observedAt,
+              createdFromTemplate,
+              templateCommitSha
+            )
+          )
         },
         "created"
       ),
       input.manifestPath
     );
+    if (nextState.errors.length > state.errors.length) {
+      return nextState;
+    }
+
+    const studentDefaultBranchCommitSha = createdFromTemplate
+      ? await waitForTemplateMaterialization(input, repository)
+      : undefined;
+
+    if (
+      createdFromTemplate &&
+      (templateCommitSha === undefined || studentDefaultBranchCommitSha === undefined)
+    ) {
+      return recordError(
+        nextState,
+        createConfigDiagnostic(
+          DiagnosticCode.GithubApiError,
+          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
+          { repository: repository.fullName, operation: githubOperation }
+        )
+      );
+    }
+
+    return persistManifest(
+      {
+        ...nextState,
+        manifest: updateRepositoryIdentity(nextState.manifest, {
+          studentId: student.studentId,
+          repository: {
+            ...(templateCommitSha === undefined ? {} : { templateCommitSha }),
+            ...(studentDefaultBranchCommitSha === undefined
+              ? {}
+              : { studentDefaultBranchCommitSha }),
+            ...(createdFromTemplate ? { templateSyncBaselineStatus: "initialized" } : {})
+          }
+        })
+      },
+      input.manifestPath
+    );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error));
+    return recordError(nextState, normalizeGitHubError(error));
   }
 };
 
@@ -648,17 +826,20 @@ const executeVerifyWorkflow = async (
   input: ApplyExecutionInput,
   state: ApplyState,
   operation: PlanOperation,
-  observedAt: string
+  observedAt: string,
+  blockedWorkflowTargets: ReadonlySet<string>
 ): Promise<ApplyState> => {
-  if (
-    operation.repository_name === undefined ||
-    input.config.course.grading.workflow === undefined
-  ) {
+  const workflowPath = getEffectiveWorkflowPath(input.config);
+
+  if (operation.repository_name === undefined || workflowPath === undefined) {
     return state;
   }
 
+  if (blockedWorkflowTargets.has(operationTargetKey(operation))) {
+    return incrementSummary(state, "skipped");
+  }
+
   const repositoryName = operation.repository_name;
-  const workflowPath = input.config.course.grading.workflow;
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
 
   if (findManifestRecord(input, state.manifest, operation) === undefined) {
@@ -733,17 +914,20 @@ const executeVerifyDispatch = async (
   input: ApplyExecutionInput,
   state: ApplyState,
   operation: PlanOperation,
-  observedAt: string
+  observedAt: string,
+  blockedWorkflowTargets: ReadonlySet<string>
 ): Promise<ApplyState> => {
-  if (
-    operation.repository_name === undefined ||
-    input.config.course.grading.workflow === undefined
-  ) {
+  const workflowPath = getEffectiveWorkflowPath(input.config);
+
+  if (operation.repository_name === undefined || workflowPath === undefined) {
     return state;
   }
 
+  if (blockedWorkflowTargets.has(operationTargetKey(operation))) {
+    return incrementSummary(state, "skipped");
+  }
+
   const repositoryName = operation.repository_name;
-  const workflowPath = input.config.course.grading.workflow;
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
 
   if (findManifestRecord(input, state.manifest, operation) === undefined) {
@@ -812,12 +996,85 @@ const executeVerifyDispatch = async (
   }
 };
 
+const executeEnsureManagedWorkflow = async (
+  input: ApplyExecutionInput,
+  state: ApplyState,
+  operation: PlanOperation,
+  blockedWorkflowTargets: Set<string>
+): Promise<ApplyState> => {
+  if (operation.repository_name === undefined) return state;
+  if (findManifestRecord(input, state.manifest, operation) === undefined) {
+    return incrementSummary(state, "skipped");
+  }
+
+  const owner = input.config.course.github.organization;
+  const repositoryName = operation.repository_name;
+
+  try {
+    const repository = await runGitHubOperation(input, () =>
+      input.githubClient.getRepository(owner, repositoryName)
+    );
+    if (repository === null) {
+      blockedWorkflowTargets.add(operationTargetKey(operation));
+      return recordError(
+        state,
+        createConfigDiagnostic(
+          DiagnosticCode.StudentRepositoryMissing,
+          `Student repository ${owner}/${repositoryName} was not found while deploying the grading workflow.`,
+          {
+            owner,
+            repositoryName,
+            student_id: operation.student_id,
+            github_username: operation.github_username,
+            section: operation.section
+          }
+        )
+      );
+    }
+
+    const result = await runGitHubOperation(input, () =>
+      ensureManagedGradingWorkflow({
+        githubClient: input.githubClient,
+        owner,
+        repo: repositoryName,
+        defaultBranch: repository.defaultBranch,
+        grading: getEffectiveAssignmentGrading(input.config)
+      })
+    );
+
+    if (result.status === "conflict_unmanaged") {
+      blockedWorkflowTargets.add(operationTargetKey(operation));
+      return recordError(state, createWorkflowDeploymentConflictDiagnostic(operation, false));
+    }
+    if (result.status === "conflict_unsupported_version") {
+      blockedWorkflowTargets.add(operationTargetKey(operation));
+      return recordError(state, createWorkflowDeploymentConflictDiagnostic(operation, true));
+    }
+
+    return incrementSummary(state, result.status === "noop" ? "noop" : "verified");
+  } catch (error: unknown) {
+    blockedWorkflowTargets.add(operationTargetKey(operation));
+    return recordError(
+      state,
+      error instanceof WorkflowDeploymentPermissionError
+        ? createWorkflowDeploymentForbiddenDiagnostic(operation)
+        : normalizeGitHubError(error)
+    );
+  }
+};
+
 const executeOperation = async (
   input: ApplyExecutionInput,
   state: ApplyState,
   operation: PlanOperation,
-  observedAt: string
+  observedAt: string,
+  blockedWorkflowTargets: Set<string>,
+  durabilityBlockedTargets: ReadonlySet<string>
 ): Promise<ApplyState> => {
+  if (durabilityBlockedTargets.has(operationTargetKey(operation))) {
+    return incrementSummary(state, "skipped");
+  }
+
   if (operation.status === "skipped") {
     return incrementSummary(state, "skipped");
   }
@@ -830,7 +1087,7 @@ const executeOperation = async (
     return state;
   }
 
-  if (operation.type === "create_repository_from_template") {
+  if (isRepositoryCreationOperation(operation)) {
     return executeCreateRepository(input, state, operation, observedAt);
   }
 
@@ -866,11 +1123,15 @@ const executeOperation = async (
     return executeEnableActions(input, state, operation, observedAt);
   }
 
-  if (operation.type === "verify_grading_workflow") {
-    return executeVerifyWorkflow(input, state, operation, observedAt);
+  if (operation.type === "ensure_managed_grading_workflow") {
+    return executeEnsureManagedWorkflow(input, state, operation, blockedWorkflowTargets);
   }
 
-  return executeVerifyDispatch(input, state, operation, observedAt);
+  if (operation.type === "verify_grading_workflow") {
+    return executeVerifyWorkflow(input, state, operation, observedAt, blockedWorkflowTargets);
+  }
+
+  return executeVerifyDispatch(input, state, operation, observedAt, blockedWorkflowTargets);
 };
 
 export const executeApplyPlan = async (
@@ -884,17 +1145,51 @@ export const executeApplyPlan = async (
     warnings: [],
     errors: []
   };
+  state = persistManifest(state, input.manifestPath);
   const observedAt = input.clock.now().toISOString();
+  const blockedWorkflowTargets = new Set<string>();
+  const durabilityBlockedTargets = new Set<string>();
   const repositoryOutcomes = new Map<
     string,
     { created: boolean; updated: boolean; failed: boolean }
   >();
 
+  if (state.errors.length > EMPTY_COUNT) {
+    return {
+      ...state,
+      repositories: input.plan.targets
+        .filter((target) => target.mode === "individual")
+        .map((target) => ({
+          studentId: target.primaryStudentId ?? target.targetId,
+          githubUsername: target.githubUsernames[0] ?? "",
+          section: target.sectionIds[0] ?? "",
+          repository: target.repositoryName,
+          status: "failed" as const
+        }))
+    };
+  }
+
   for (const operation of input.plan.operations) {
     const errorsBefore = state.errors.length;
     const createdBefore = state.summary.created;
     const verifiedBefore = state.summary.verified;
-    state = await executeOperation(input, state, operation, observedAt);
+    state = await executeOperation(
+      input,
+      state,
+      operation,
+      observedAt,
+      blockedWorkflowTargets,
+      durabilityBlockedTargets
+    );
+
+    if (
+      operation.target_id !== undefined &&
+      state.errors
+        .slice(errorsBefore)
+        .some((diagnostic) => diagnostic.code === DiagnosticCode.ManifestWriteFailed)
+    ) {
+      durabilityBlockedTargets.add(operationTargetKey(operation));
+    }
 
     if (operation.target_id === undefined) {
       continue;
@@ -908,15 +1203,10 @@ export const executeApplyPlan = async (
     repositoryOutcomes.set(operation.target_id, {
       created:
         current.created ||
-        (operation.type === CREATE_REPOSITORY_PLAN_TYPE && state.summary.created > createdBefore),
+        (isRepositoryCreationOperation(operation) && state.summary.created > createdBefore),
       updated:
         current.updated ||
-        ([
-          "add_student_collaborator",
-          "add_faculty_team_permission",
-          "add_grader_team_permission",
-          "enable_actions"
-        ] as const).includes(operation.type) && state.summary.verified > verifiedBefore,
+        (isRepositoryUpdateOperation(operation) && state.summary.verified > verifiedBefore),
       failed: current.failed || state.errors.length > errorsBefore
     });
   }

@@ -49,6 +49,59 @@ beforeEach(() => {
         error: null,
         refreshedAt: null
       }),
+      prepareGradingWorkspace: vi.fn().mockResolvedValue({
+        status: "success",
+        assignment: { title: "Lab 02", termCode: "27s1", slug: "lab02" },
+        requiredFiles: [],
+        rubric: [],
+        students: []
+      }),
+      loadGradingStudentSource: vi.fn().mockResolvedValue({
+        status: "success",
+        studentId: "student",
+        combinedText: "",
+        sections: [],
+        syntheticCombinedLines: []
+      }),
+      loadGradingStudentViewState: vi.fn().mockResolvedValue({
+        status: "success",
+        studentId: "student",
+        submissionCommitSha: "a".repeat(40),
+        gradingStatus: "not_started",
+        viewState: null
+      }),
+      saveGradingStudentViewState: vi.fn().mockImplementation(({ studentId, viewState }) =>
+        Promise.resolve({
+          status: "success",
+          studentId,
+          submissionCommitSha: "a".repeat(40),
+          gradingStatus: "not_started",
+          viewState
+        })
+      ),
+      clearGradingStudentViewState: vi.fn().mockResolvedValue({
+        status: "success",
+        studentId: "student",
+        submissionCommitSha: "a".repeat(40),
+        gradingStatus: "not_started",
+        viewState: null
+      }),
+      loadGradingStudentSnapshot: vi.fn().mockImplementation(({ studentId }) =>
+        Promise.resolve({
+          status: "success",
+          studentId,
+          gradingStatus: "not_started",
+          appliedComments: [],
+          manualAdjustments: [],
+          grade: {
+            pointsPossible: 0,
+            totalScore: 0,
+            categories: [],
+            uncategorizedCommentAdjustmentTotal: 0
+          }
+        })
+      ),
+      loadGradingCommentLibrary: vi.fn().mockResolvedValue({ status: "success", comments: [] }),
       getAssignmentApplyPreview: vi.fn().mockResolvedValue({
         courseFolderId: "course-folder-default",
         courseFolderPath: "/tmp/course",

@@ -36,12 +36,16 @@
   "dependencies": {
     "@octokit/rest": "latest",
     "commander": "latest",
+    "fast-xml-parser": "^5.11.1",
+    "fast-xml-validator": "^1.4.2",
     "yaml": "latest",
+    "yauzl": "^3.4.0",
     "zod": "latest"
   },
   "devDependencies": {
     "@eslint/js": "latest",
     "@types/node": "^25.9.1",
+    "@types/yauzl": "^2.10.3",
     "eslint": "latest",
     "jiti": "^2.7.0",
     "prettier": "latest",

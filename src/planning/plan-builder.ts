@@ -3,6 +3,7 @@ import {
   getSourceFingerprintPaths
 } from "../config/source-fingerprint.js";
 import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import { DiagnosticCode, createConfigDiagnostic } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
@@ -15,6 +16,7 @@ import { comparePlanOperations, createOperationId } from "./operation-ordering.j
 import { PLAN_SCHEMA_VERSION, type Plan, type PlanSummary } from "./plan-models.js";
 import { generateRepositoryName } from "./repo-name.js";
 import { createIndividualRepositoryTarget } from "./repository-targets.js";
+import { isManagedGradingWorkflowEligible } from "../workflows/managed-workflow-deployment.js";
 
 const EMPTY_COUNT = 0;
 const NO_REPOSITORY_NAME = "";
@@ -24,6 +26,14 @@ const CLOSED_ASSIGNMENT_STATUS = "closed";
 const ARCHIVED_ASSIGNMENT_STATUS = "archived";
 const STUDENT_STATUS_REASON_PREFIX = "student_status";
 const GRADING_DISABLED_REASON = "grading_disabled";
+
+const hasConfiguredTemplate = (config: LoadedGraiderConfig): boolean =>
+  config.assignment.template !== undefined;
+
+const getRepositoryCreationOperationType = (
+  config: LoadedGraiderConfig
+): Extract<PlanOperationType, "create_repository" | "create_repository_from_template"> =>
+  hasConfiguredTemplate(config) ? "create_repository_from_template" : "create_repository";
 
 export interface BuildPlanInput {
   config: LoadedGraiderConfig;
@@ -149,14 +159,17 @@ const createLifecycleBlockedOperation = (
   diagnostic: Diagnostic,
   repositoryName: string
 ): PlanOperation =>
-  createOperation(student, "create_repository_from_template", "blocked", {
+  createOperation(student, getRepositoryCreationOperationType(config), "blocked", {
     repositoryName,
     reason: config.assignment.assignment.status,
     errors: [diagnostic]
   });
 
-const buildSkippedStudentOperation = (student: RosterStudent): PlanOperation =>
-  createOperation(student, "create_repository_from_template", "skipped", {
+const buildSkippedStudentOperation = (
+  config: LoadedGraiderConfig,
+  student: RosterStudent
+): PlanOperation =>
+  createOperation(student, getRepositoryCreationOperationType(config), "skipped", {
     reason: `${STUDENT_STATUS_REASON_PREFIX}_${student.status}`
   });
 
@@ -223,12 +236,18 @@ const buildPlannedProvisioningOperations = (
   student: RosterStudent,
   repositoryName: string
 ): PlanOperation[] => {
+  const creationOperationType = getRepositoryCreationOperationType(config);
   const createRepositoryId = createOperationId(
     student.section,
     student.studentId,
-    "create_repository_from_template"
+    creationOperationType
   );
   const enableActionsId = createOperationId(student.section, student.studentId, "enable_actions");
+  const ensureWorkflowId = createOperationId(
+    student.section,
+    student.studentId,
+    "ensure_managed_grading_workflow"
+  );
   const verifyWorkflowId = createOperationId(
     student.section,
     student.studentId,
@@ -238,9 +257,11 @@ const buildPlannedProvisioningOperations = (
     repositoryName,
     requires: [createRepositoryId]
   };
+  const grading = getEffectiveAssignmentGrading(config);
+  const deployManagedWorkflow = isManagedGradingWorkflowEligible(grading);
 
   return [
-    createOperation(student, "create_repository_from_template", "planned", {
+    createOperation(student, creationOperationType, "planned", {
       repositoryName
     }),
     createOperation(student, "add_student_collaborator", "planned", sharedInput),
@@ -249,11 +270,19 @@ const buildPlannedProvisioningOperations = (
       ? []
       : [createOperation(student, "add_grader_team_permission", "planned", sharedInput)]),
     createOperation(student, "enable_actions", "planned", sharedInput),
-    ...(config.summary.gradingEnabled
+    ...(deployManagedWorkflow
+      ? [
+          createOperation(student, "ensure_managed_grading_workflow", "planned", {
+            repositoryName,
+            requires: [enableActionsId]
+          })
+        ]
+      : []),
+    ...(grading.enabled
       ? [
           createOperation(student, "verify_grading_workflow", "planned", {
             repositoryName,
-            requires: [enableActionsId]
+            requires: [deployManagedWorkflow ? ensureWorkflowId : enableActionsId]
           }),
           createOperation(student, "verify_workflow_dispatch", "planned", {
             repositoryName,
@@ -280,12 +309,18 @@ const buildTrackedRepositoryOperations = (
   student: RosterStudent,
   repositoryName: string
 ): PlanOperation[] => {
+  const creationOperationType = getRepositoryCreationOperationType(config);
   const createRepositoryId = createOperationId(
     student.section,
     student.studentId,
-    "create_repository_from_template"
+    creationOperationType
   );
   const enableActionsId = createOperationId(student.section, student.studentId, "enable_actions");
+  const ensureWorkflowId = createOperationId(
+    student.section,
+    student.studentId,
+    "ensure_managed_grading_workflow"
+  );
   const verifyWorkflowId = createOperationId(
     student.section,
     student.studentId,
@@ -295,9 +330,11 @@ const buildTrackedRepositoryOperations = (
     repositoryName,
     requires: [createRepositoryId]
   };
+  const grading = getEffectiveAssignmentGrading(config);
+  const deployManagedWorkflow = isManagedGradingWorkflowEligible(grading);
 
   return [
-    createOperation(student, "create_repository_from_template", "noop", {
+    createOperation(student, creationOperationType, "noop", {
       repositoryName,
       reason: "manifest_tracked_repository"
     }),
@@ -307,11 +344,19 @@ const buildTrackedRepositoryOperations = (
       ? []
       : [createOperation(student, "add_grader_team_permission", "planned", sharedInput)]),
     createOperation(student, "enable_actions", "planned", sharedInput),
-    ...(config.summary.gradingEnabled
+    ...(deployManagedWorkflow
+      ? [
+          createOperation(student, "ensure_managed_grading_workflow", "planned", {
+            repositoryName,
+            requires: [enableActionsId]
+          })
+        ]
+      : []),
+    ...(grading.enabled
       ? [
           createOperation(student, "verify_grading_workflow", "planned", {
             repositoryName,
-            requires: [enableActionsId]
+            requires: [deployManagedWorkflow ? ensureWorkflowId : enableActionsId]
           }),
           createOperation(student, "verify_workflow_dispatch", "planned", {
             repositoryName,
@@ -345,11 +390,12 @@ const buildActiveStudentOperations = async (
   githubClient: GitHubClient,
   manifest: Manifest | undefined
 ): Promise<PlanOperation[]> => {
+  const creationOperationType = getRepositoryCreationOperationType(config);
   const repositoryNameResult = generateStudentRepositoryName(config, student);
 
   if (repositoryNameResult.errors.length > EMPTY_COUNT) {
     return [
-      createOperation(student, "create_repository_from_template", "blocked", {
+      createOperation(student, creationOperationType, "blocked", {
         errors: repositoryNameResult.errors,
         warnings: repositoryNameResult.warnings
       })
@@ -375,7 +421,7 @@ const buildActiveStudentOperations = async (
 
       if (existingRepository === null) {
         return [
-          createOperation(student, "create_repository_from_template", "blocked", {
+          createOperation(student, creationOperationType, "blocked", {
             repositoryName: manifestRecord.repository.name,
             errors: [
               createManifestTrackedMissingDiagnostic(
@@ -391,7 +437,7 @@ const buildActiveStudentOperations = async (
       return buildTrackedRepositoryOperations(config, student, manifestRecord.repository.name);
     } catch (error: unknown) {
       return [
-        createOperation(student, "create_repository_from_template", "blocked", {
+        createOperation(student, creationOperationType, "blocked", {
           repositoryName: manifestRecord.repository.name,
           errors: [normalizeGitHubError(error)]
         })
@@ -417,7 +463,7 @@ const buildActiveStudentOperations = async (
 
     if (existingRepository !== null) {
       return [
-        createOperation(student, "create_repository_from_template", "blocked", {
+        createOperation(student, creationOperationType, "blocked", {
           repositoryName,
           errors: [createCollisionDiagnostic(config.course.github.organization, repositoryName)]
         })
@@ -427,7 +473,7 @@ const buildActiveStudentOperations = async (
     return buildPlannedProvisioningOperations(config, student, repositoryName);
   } catch (error: unknown) {
     return [
-      createOperation(student, "create_repository_from_template", "blocked", {
+      createOperation(student, creationOperationType, "blocked", {
         repositoryName,
         errors: [normalizeGitHubError(error)]
       })
@@ -443,7 +489,7 @@ const buildStudentOperations = async (
 ): Promise<PlanOperation[]> =>
   student.status === ROSTER_STATUS_ACTIVE
     ? buildActiveStudentOperations(config, student, githubClient, manifest)
-    : [buildSkippedStudentOperation(student)];
+    : [buildSkippedStudentOperation(config, student)];
 
 const createPlanSummary = (
   rosterSummary: RosterSummary,

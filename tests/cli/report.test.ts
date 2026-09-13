@@ -306,6 +306,7 @@ const createUnusedOctokit = (): OctokitRestClientLike => {
       },
       repos: {
         get: unusedMethod,
+        createInOrg: unusedMethod,
         createUsingTemplate: unusedMethod,
         listBranches: unusedMethod,
         listCommits: unusedMethod,
@@ -315,6 +316,13 @@ const createUnusedOctokit = (): OctokitRestClientLike => {
         removeCollaborator: unusedMethod,
         update: unusedMethod,
         createOrUpdateFileContents: unusedMethod
+      },
+      pulls: {
+        create: unusedMethod,
+        list: unusedMethod
+      },
+      git: {
+        deleteRef: unusedMethod
       },
       teams: {
         getByName: unusedMethod,

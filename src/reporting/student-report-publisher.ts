@@ -13,8 +13,10 @@ import { renderStudentMarkdownReport } from "./student-markdown-renderer.js";
 import { renderStudentResultsJson } from "./student-results-json-renderer.js";
 
 export const PUBLISHED_STUDENT_REPORT_PATH = "grading/report.md";
+/** The implicit destination for Slice 44 standalone HTML grading reports. */
+export const DEFAULT_GRAIDER_GENERATED_GRADING_REPORT_PATH = "grading/report.html";
 export const PUBLISHED_STUDENT_RESULTS_PATH = "grading/results.json";
-export const PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE = "Update Graider student report";
+export const PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE = "Publish Graider grading report [skip ci]";
 
 const EMPTY_COUNT = 0;
 const PUBLISHED_FILE_COUNT_PER_STUDENT = 2;
@@ -26,7 +28,86 @@ const STUDENT_PUBLISH_MODE_DISABLED = "disabled";
 const CURRENT_DIRECTORY_PREFIX = "./";
 const WINDOWS_PATH_SEPARATOR_PATTERN = /\\/g;
 
-type StudentPublishConfig = RawCourseConfig["reports"]["student_publish"];
+export type StudentPublishConfig = RawCourseConfig["reports"]["student_publish"];
+
+export type GraiderGeneratedStudentReportDestinationResult =
+  | { readonly status: "success"; readonly path: string }
+  | { readonly status: "report_destination_unavailable" | "unsafe_report_destination" };
+
+const isSafeRepositoryFilePath = (filePath: string): boolean => {
+  const segments = filePath.split("/");
+  return (
+    filePath.trim() === filePath &&
+    filePath.length > EMPTY_COUNT &&
+    !filePath.startsWith("/") &&
+    !filePath.includes("\\") &&
+    !filePath.includes("\0") &&
+    segments.every((segment) => segment !== "" && segment !== "." && segment !== "..")
+  );
+};
+
+export const resolveGraiderGeneratedStudentReportDestination = (
+  studentPublishConfig: StudentPublishConfig
+): GraiderGeneratedStudentReportDestinationResult => {
+  const mode = getStudentPublishMode(studentPublishConfig);
+  if (mode === STUDENT_PUBLISH_MODE_DISABLED || mode === STUDENT_PUBLISH_MODE_FACULTY_PROVIDED)
+    return { status: "report_destination_unavailable" };
+  const reportPath =
+    mode === STUDENT_PUBLISH_MODE_BOTH
+      ? (studentPublishConfig?.graider_report_destination ??
+        DEFAULT_GRAIDER_GENERATED_GRADING_REPORT_PATH)
+      : (studentPublishConfig?.destination_file ?? DEFAULT_GRAIDER_GENERATED_GRADING_REPORT_PATH);
+  return isSafeRepositoryFilePath(reportPath)
+    ? { status: "success", path: reportPath }
+    : { status: "unsafe_report_destination" };
+};
+
+type GraiderReportFileGitHubClient = Pick<
+  GitHubClient,
+  "getRepositoryFileContent" | "writeRepositoryFile"
+>;
+
+export interface PublishGraiderOwnedStudentReportFileInput {
+  readonly githubClient: GraiderReportFileGitHubClient;
+  readonly repository: {
+    readonly owner: string;
+    readonly repo: string;
+    readonly branch: string;
+  };
+  readonly path: string;
+  readonly html: string;
+  readonly beforePublish: () => Promise<boolean>;
+}
+
+export type PublishGraiderOwnedStudentReportFileResult =
+  | { readonly status: "published"; readonly writePerformed: boolean }
+  | { readonly status: "stale" };
+
+export const publishGraiderOwnedStudentReportFile = async ({
+  githubClient,
+  repository,
+  path: reportPath,
+  html,
+  beforePublish
+}: PublishGraiderOwnedStudentReportFileInput): Promise<PublishGraiderOwnedStudentReportFileResult> => {
+  const existing = await githubClient.getRepositoryFileContent(
+    repository.owner,
+    repository.repo,
+    reportPath,
+    repository.branch
+  );
+  if (!(await beforePublish())) return { status: "stale" };
+  if (existing === html) return { status: "published", writePerformed: false };
+  await githubClient.writeRepositoryFile({
+    owner: repository.owner,
+    repo: repository.repo,
+    branch: repository.branch,
+    path: reportPath,
+    content: html,
+    message: PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE
+  });
+  return { status: "published", writePerformed: true };
+};
 
 interface PublishFile {
   path: string;

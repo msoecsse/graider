@@ -1,4 +1,8 @@
-import type { LoadedGraiderConfig, RawCourseConfig } from "../config/config-models.js";
+import {
+  getEffectiveAssignmentGrading,
+  type EffectiveAssignmentGrading
+} from "../config/effective-grading.js";
+import type { LoadedGraiderConfig } from "../config/config-models.js";
 import { DISABLED_GRADING_MODE } from "../config/config-schemas.js";
 import { loadGraiderConfig } from "../config/config-loader.js";
 import type { CommandStatus } from "../core/command-result.js";
@@ -82,9 +86,6 @@ export const createEmptyAssignmentGradePreviewResult = (
   files: null,
   actions: null
 });
-
-const getEffectiveGrading = (config: LoadedGraiderConfig): RawCourseConfig["grading"] =>
-  config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
 
 const createGradingNotConfiguredWarning = (): Diagnostic =>
   createWarningDiagnostic(
@@ -223,7 +224,7 @@ const createGradingPreview = (
   config: LoadedGraiderConfig,
   workflowDispatch: GradePreviewWorkflowDispatchStatus
 ): GradePreviewGrading => {
-  const grading = getEffectiveGrading(config);
+  const grading = getEffectiveAssignmentGrading(config);
   const resolvedFrom =
     config.summary.gradingSource === "assignment"
       ? "assignment_override"
@@ -252,7 +253,7 @@ const createGradingPreview = (
     artifact: grading.artifact ?? null,
     resultFile: grading.result_file ?? null,
     workflowDispatch,
-    workflowRef: config.assignment.template.branch
+    workflowRef: config.assignment.template?.branch ?? null
   };
 };
 
@@ -307,7 +308,7 @@ const createBlockedLifecycleRow = (
     "blocked",
     config.assignment.assignment.status,
     workflowPath,
-    config.assignment.template.branch,
+    config.assignment.template?.branch ?? null,
     [createAssignmentStatusBlocksGradeDiagnostic(config, student)]
   );
 
@@ -338,7 +339,7 @@ const previewDispatchableRepository = async (
   repository: GradingRepositoryTarget,
   githubClient: GitHubClient,
   workflowPath: string,
-  ref: string
+  ref: string | null
 ): Promise<GradePreviewRepositoryRow> => {
   try {
     const existingRepository = await githubClient.getRepository(
@@ -415,9 +416,9 @@ const previewStudentRepository = async (
   targets: NormalizedGradingTargets | undefined,
   githubClient: GitHubClient | undefined
 ): Promise<GradePreviewRepositoryRow> => {
-  const grading = getEffectiveGrading(config);
+  const grading = getEffectiveAssignmentGrading(config);
   const workflowPath = grading.workflow ?? null;
-  const workflowRef = grading.enabled ? config.assignment.template.branch : null;
+  const workflowRef = grading.enabled ? (config.assignment.template?.branch ?? null) : null;
   const repository = findManifestRecord(targets, student);
 
   if (student.status !== ROSTER_STATUS_ACTIVE) {
@@ -454,7 +455,7 @@ const previewStudentRepository = async (
     repository,
     githubClient,
     workflowPath,
-    config.assignment.template.branch
+    workflowRef
   );
 };
 
@@ -499,7 +500,7 @@ const createGradeAction = (
 };
 
 const createWorkflowDispatchStatus = (
-  grading: RawCourseConfig["grading"],
+  grading: EffectiveAssignmentGrading,
   repositories: readonly GradePreviewRepositoryRow[]
 ): GradePreviewWorkflowDispatchStatus => {
   if (!grading.enabled) {
@@ -557,7 +558,7 @@ export const buildAssignmentGradePreview = async ({
     config.summary.termCode,
     config.summary.assignmentSlug
   );
-  const grading = getEffectiveGrading(config);
+  const grading = getEffectiveAssignmentGrading(config);
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: grading.enabled });
   const manifest = manifestResult.status === "loaded" ? manifestResult.manifest : undefined;
   const normalizedTargets =

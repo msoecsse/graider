@@ -22,6 +22,7 @@
     "format:check": "prettier . --check"
   },
   "dependencies": {
+    "monaco-editor": "^0.52.2",
     "react": "latest",
     "react-dom": "latest",
     "yaml": "^2.9.0"

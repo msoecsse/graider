@@ -20,6 +20,9 @@ import {
 const execFile = promisify(executeFile);
 const GIT = "git";
 const TEMPLATE_UPDATE_MESSAGE = "Apply template update";
+const BYTES_PER_MEBIBYTE = 1_048_576;
+const MAX_GIT_COMMAND_OUTPUT_MEBIBYTES = 10;
+const MAX_GIT_COMMAND_OUTPUT_BYTES = MAX_GIT_COMMAND_OUTPUT_MEBIBYTES * BYTES_PER_MEBIBYTE;
 
 const withFailureStage = async <T>(
   stage: TemplateSyncFailureStage,
@@ -65,7 +68,7 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
     );
   }
 
-  async getDefaultBranchCommitSha(_repository: StudentRepositoryRef): Promise<string> {
+  async getDefaultBranchCommitSha(): Promise<string> {
     const { stdout } = await this.git(this.options.studentDirectory, ["rev-parse", "HEAD"]);
     return stdout.trim();
   }
@@ -97,10 +100,11 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
 
     const exactTreeMatches = history.filter((commit) => commit.treeSha === templateTreeSha);
     if (exactTreeMatches.length > 1) return { status: "ambiguous" };
-    if (exactTreeMatches.length === 1)
+    const exactTreeMatch = exactTreeMatches[0];
+    if (exactTreeMatch !== undefined && exactTreeMatches.length === 1)
       return {
         status: "recovered",
-        studentDefaultBranchCommitSha: exactTreeMatches[0]!.commitSha
+        studentDefaultBranchCommitSha: exactTreeMatch.commitSha
       };
 
     const templateManagedState = await this.getTreeState(
@@ -128,7 +132,7 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
     input: ApplyTemplateDeltaInput
   ): Promise<ApplyTemplateDeltaResult> {
     await this.ensureCleanStudentWorktree();
-    const originalHead = await this.getDefaultBranchCommitSha(input.studentRepository);
+    const originalHead = await this.getDefaultBranchCommitSha();
     try {
       const patch = await this.templatePatch(
         input.templateBaseCommitSha,
@@ -164,7 +168,7 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
     const commitSha = await withFailureStage(
       "commit_failed",
       "Unable to read the template-update commit.",
-      async () => await this.getDefaultBranchCommitSha(input.studentRepository)
+      async () => await this.getDefaultBranchCommitSha()
     );
     try {
       await this.git(this.options.studentDirectory, [
@@ -186,7 +190,7 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
   async prepareConflictBranch(input: PrepareConflictBranchInput): Promise<void> {
     await this.ensureCleanStudentWorktree();
 
-    let operationError: unknown;
+    let operationError: Error | undefined;
     try {
       await withFailureStage(
         "student_checkout_failed",
@@ -208,7 +212,7 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
         await withFailureStage(
           "patch_failed",
           "Unable to apply the template changes to the conflict branch.",
-          async () => await this.applyThreeWayPatch(patch)
+          () => this.applyThreeWayPatch(patch)
         );
       await withFailureStage(
         "commit_failed",
@@ -232,7 +236,7 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
           ])
       );
     } catch (error: unknown) {
-      operationError = error;
+      operationError = error instanceof Error ? error : new Error(String(error));
     }
 
     try {
@@ -311,7 +315,10 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
       process.on("error", reject);
       process.on("close", (code) => {
         if (code === 0) resolve();
-        else reject(new Error(stderr || `git apply exited with ${code ?? "an unknown"} status.`));
+        else
+          reject(
+            new Error(stderr || `git apply exited with ${String(code ?? "an unknown")} status.`)
+          );
       });
       process.stdin.end(patch);
     });
@@ -337,7 +344,7 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
   }
 
   private async git(directory: string, args: string[]) {
-    return execFile(GIT, ["-C", directory, ...args], { maxBuffer: 10 * 1024 * 1024 });
+    return execFile(GIT, ["-C", directory, ...args], { maxBuffer: MAX_GIT_COMMAND_OUTPUT_BYTES });
   }
 }
 

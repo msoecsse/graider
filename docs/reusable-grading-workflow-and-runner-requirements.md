@@ -365,7 +365,7 @@ reports:
 student_publish:
 enabled: true
 mode: graider-generated
-destination_file: grading/report.md
+destination_file: grading/report.html
 
 Example for both:
 
@@ -373,7 +373,7 @@ reports:
 student_publish:
 enabled: true
 mode: both
-graider_report_destination: grading/graider-report.md
+graider_report_destination: grading/graider-report.html
 artifact: grading-results
 faculty_report_source: graider-output/student-report.md
 faculty_report_destination: grading/report.md

@@ -21,6 +21,23 @@ const README_FILE = "README.md";
 const CREATED_AT = "2026-09-01T14:30:00.000Z";
 const EXPECTED_REPOSITORY_NAME = "27s1-se2030-lab04-seanjones";
 
+const withAssignmentPresetGrading = (
+  config: ReturnType<typeof loadFixture>["config"]
+): ReturnType<typeof loadFixture>["config"] => ({
+  ...config,
+  assignment: {
+    ...config.assignment,
+    grading: {
+      enabled: true,
+      mode: "preset",
+      preset: "java-junit-checkstyle",
+      workflow: ".github/workflows/grade.yml",
+      artifact: "grading-results",
+      result_file: "results.json"
+    }
+  }
+});
+
 const templateRepository: GitHubTemplateRepository = {
   owner: ORGANIZATION,
   name: TEMPLATE_REPO,
@@ -69,6 +86,42 @@ const loadFixture = (name: string) => {
 };
 
 describe("plan builder", () => {
+  it("plans direct repository creation when the assignment has no template", async () => {
+    const loaded = loadFixture("grading-disabled");
+    const config = {
+      ...loaded.config,
+      assignment: { ...loaded.config.assignment }
+    };
+    delete config.assignment.template;
+    const { rosterResult } = loaded;
+    const plan = await buildPlan({
+      config,
+      students: rosterResult.students,
+      rosterSummary: rosterResult.summary,
+      githubClient: createReadyClient(),
+      createdAt: CREATED_AT
+    });
+
+    expect(plan.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "create_repository",
+          status: "planned",
+          student_id: "jones",
+          repository_name: EXPECTED_REPOSITORY_NAME
+        })
+      ])
+    );
+    expect(plan.operations).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "create_repository_from_template",
+          student_id: "jones"
+        })
+      ])
+    );
+  });
+
   it("builds repository creation operations for active students", async () => {
     const { config, rosterResult } = loadFixture("active-assignment");
     const plan = await buildPlan({
@@ -133,6 +186,122 @@ describe("plan builder", () => {
         })
       ])
     );
+  });
+
+  it("plans managed workflow deployment between Actions enablement and verification", async () => {
+    const loaded = loadFixture("active-assignment");
+    const plan = await buildPlan({
+      config: withAssignmentPresetGrading(loaded.config),
+      students: loaded.rosterResult.students,
+      rosterSummary: loaded.rosterResult.summary,
+      githubClient: createReadyClient(),
+      createdAt: CREATED_AT
+    });
+    const operations = plan.operations.filter((operation) => operation.student_id === "jones");
+    const operationTypes = operations.map((operation) => operation.type);
+    const ensureOperation = operations.find(
+      (operation) => operation.type === "ensure_managed_grading_workflow"
+    );
+    const verifyOperation = operations.find(
+      (operation) => operation.type === "verify_grading_workflow"
+    );
+
+    expect(operationTypes.indexOf("enable_actions")).toBeLessThan(
+      operationTypes.indexOf("ensure_managed_grading_workflow")
+    );
+    expect(operationTypes.indexOf("ensure_managed_grading_workflow")).toBeLessThan(
+      operationTypes.indexOf("verify_grading_workflow")
+    );
+    expect(ensureOperation).toMatchObject({
+      status: "planned",
+      repository_name: EXPECTED_REPOSITORY_NAME,
+      requires: ["001:jones:enable_actions"]
+    });
+    expect(verifyOperation).toMatchObject({
+      requires: ["001:jones:ensure_managed_grading_workflow"]
+    });
+  });
+
+  it("plans deployment from an inherited course preset", async () => {
+    const loaded = loadFixture("active-assignment");
+    const config = {
+      ...loaded.config,
+      course: {
+        ...loaded.config.course,
+        grading: {
+          enabled: true,
+          mode: "preset",
+          preset: "java-junit-checkstyle",
+          workflow: ".github/workflows/grade.yml",
+          artifact: "grading-results",
+          result_file: "results.json"
+        }
+      }
+    };
+    const plan = await buildPlan({
+      config,
+      students: loaded.rosterResult.students,
+      rosterSummary: loaded.rosterResult.summary,
+      githubClient: createReadyClient(),
+      createdAt: CREATED_AT
+    });
+
+    expect(plan.operations.map((operation) => operation.type)).toContain(
+      "ensure_managed_grading_workflow"
+    );
+  });
+
+  it("does not plan canonical deployment for custom or config-only grading", async () => {
+    const loaded = loadFixture("active-assignment");
+    const customConfig = {
+      ...loaded.config,
+      course: {
+        ...loaded.config.course,
+        grading: {
+          enabled: true,
+          mode: "preset",
+          preset: "java-junit-checkstyle",
+          workflow: ".github/workflows/grade.yml",
+          artifact: "grading-results",
+          result_file: "results.json"
+        }
+      },
+      assignment: {
+        ...loaded.config.assignment,
+        grading: {
+          enabled: true,
+          mode: "custom-workflow",
+          workflow: "faculty-grade.yml",
+          artifact: "grading-results",
+          result_file: "results.json"
+        }
+      }
+    };
+    const configOnly = {
+      ...loaded.config,
+      assignment: {
+        ...loaded.config.assignment,
+        grading: {
+          enabled: false,
+          required_files: ["src/Main.java"],
+          rubric: [{ id: "correctness", name: "Correctness", points: 10 }]
+        }
+      }
+    };
+
+    for (const config of [customConfig, configOnly]) {
+      const plan = await buildPlan({
+        config,
+        students: loaded.rosterResult.students,
+        rosterSummary: loaded.rosterResult.summary,
+        githubClient: createReadyClient(),
+        createdAt: CREATED_AT
+      });
+
+      expect(plan.operations.map((operation) => operation.type)).not.toContain(
+        "ensure_managed_grading_workflow"
+      );
+    }
   });
 
   it("includes source file hashes and input fingerprint with repository-relative paths", async () => {

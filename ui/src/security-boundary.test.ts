@@ -37,6 +37,8 @@ describe("UI security boundary", () => {
 
     expect(channelNames).toEqual([
       "graider-ui:get-app-info",
+      "graider-ui:local-settings:get",
+      "graider-ui:local-settings:save",
       "graider-ui:github-auth:check",
       "graider-ui:course-registry:list",
       "graider-ui:course-registry:select-folder",
@@ -74,6 +76,27 @@ describe("UI security boundary", () => {
       "graider-ui:dashboard:refresh-course-folder",
       "graider-ui:dashboard:refresh-all",
       "graider-ui:assignment-detail:get",
+      "graider-ui:grading-workspace:prepare",
+      "graider-ui:grading-student-source:load",
+      "graider-ui:grading-student-view-state:load",
+      "graider-ui:grading-student-view-state:save",
+      "graider-ui:grading-student-view-state:clear",
+      "graider-ui:grading-student-snapshot:load",
+      "graider-ui:grading-student-evidence:load",
+      "graider-ui:grading-student-commit-history:load",
+      "graider-ui:grading-student-comment:add",
+      "graider-ui:grading-student-comment:edit",
+      "graider-ui:grading-student-comment:delete",
+      "graider-ui:grading-student-manual-adjustment:add",
+      "graider-ui:grading-student-manual-adjustment:edit",
+      "graider-ui:grading-student-manual-adjustment:delete",
+      "graider-ui:grading-student:mark-complete",
+      "graider-ui:grading-student-report:publish",
+      "graider-ui:grading-student-reports:publish",
+      "graider-ui:grading-comment-library:load",
+      "graider-ui:grading-comment-library:create",
+      "graider-ui:grading-comment-library:edit",
+      "graider-ui:grading-comment-library:delete",
       "graider-ui:assignment-template-sync:prepare",
       "graider-ui:assignment-template-sync:execute",
       "graider-ui:assignment-apply-preview:get",
@@ -98,6 +121,27 @@ describe("UI security boundary", () => {
     expect(preloadSource).toContain('exposeInMainWorld("graiderUI"');
     expect(preloadSource).toContain("prepareAssignmentTemplateSync:");
     expect(preloadSource).toContain("executeAssignmentTemplateSync:");
+    expect(preloadSource).toContain("loadGradingStudentViewState:");
+    expect(preloadSource).toContain("saveGradingStudentViewState:");
+    expect(preloadSource).toContain("clearGradingStudentViewState:");
+    expect(preloadSource).toContain("loadGradingStudentSnapshot:");
+    expect(preloadSource).toContain("loadGradingStudentEvidence:");
+    expect(preloadSource).toContain("loadGradingStudentCommitHistory:");
+    expect(preloadSource).toContain("addGradingStudentComment:");
+    expect(preloadSource).toContain("editGradingStudentComment:");
+    expect(preloadSource).toContain("deleteGradingStudentComment:");
+    expect(preloadSource).toContain("addGradingStudentManualAdjustment:");
+    expect(preloadSource).toContain("editGradingStudentManualAdjustment:");
+    expect(preloadSource).toContain("deleteGradingStudentManualAdjustment:");
+    expect(preloadSource).toContain("markGradingStudentComplete:");
+    expect(preloadSource).toContain("publishGradingStudentReport:");
+    expect(preloadSource).toContain("bulkPublishGradingStudentReports:");
+    expect(preloadSource).not.toContain("markGradingStudentPublished:");
+    expect(preloadSource).not.toContain("setGradingStatus:");
+    expect(preloadSource).toContain("loadGradingCommentLibrary:");
+    expect(preloadSource).toContain("createGradingLibraryComment:");
+    expect(preloadSource).toContain("editGradingLibraryComment:");
+    expect(preloadSource).toContain("deleteGradingLibraryComment:");
     expect(preloadSource).not.toContain('exposeInMainWorld("process"');
     expect(preloadSource).not.toContain('exposeInMainWorld("fs"');
   });

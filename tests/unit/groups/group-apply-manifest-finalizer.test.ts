@@ -50,7 +50,7 @@ const success = (targets: GroupApplyPreviewTarget[]): GroupTargetExecutionResult
 });
 
 describe("group apply manifest finalizer", () => {
-  it("builds shared student mappings only after every target succeeds", () => {
+  it("builds shared student mappings for every observed target", () => {
     const planned = [target("team-1", ["alpha", "beta"]), target("team-2", ["gamma"])];
     const result = buildGroupApplyManifestV2(planned, success(planned));
     expect(result.status).toBe("success");
@@ -67,29 +67,57 @@ describe("group apply manifest finalizer", () => {
     });
     expect("cloneUrl" in (result.targets[1] ?? {})).toBe(false);
   });
-  it("refuses failed or incomplete execution without partial data", () => {
+  it("preserves partial observed identities and their failure diagnostics", () => {
     const planned = [target("team-1", ["alpha"]), target("team-2", ["beta"])];
     const incompleteExecution = success([target("team-1", ["alpha"])]);
     const failedTargetExecution = success(planned);
-    for (const execution of [
+    for (const [execution, expectedTargetCount] of [
       {
-        ...success(planned),
-        errors: [{ code: "failed", severity: "error" as const, message: "failed" }]
+        execution: {
+          ...success(planned),
+          errors: [{ code: "failed", severity: "error" as const, message: "failed" }]
+        },
+        expectedTargetCount: 2
       },
-      incompleteExecution,
       {
+        execution: incompleteExecution,
+        expectedTargetCount: 1
+      },
+      {
+        execution: {
+          ...failedTargetExecution,
+          targets: failedTargetExecution.targets.map((targetResult, index) =>
+            index === 0
+              ? {
+                  ...targetResult,
+                  status: "failed" as const,
+                  diagnostics: [{ code: "failed", severity: "error" as const, message: "failed" }]
+                }
+              : targetResult
+          )
+        },
+        expectedTargetCount: 2
+      }
+    ].map(({ execution, expectedTargetCount }) => [execution, expectedTargetCount] as const)) {
+      const result = buildGroupApplyManifestV2(planned, execution);
+      expect(result.status).toBe("success");
+      expect(result.targets).toHaveLength(expectedTargetCount);
+      expect(result.studentMappings).toHaveLength(expectedTargetCount);
+    }
+    expect(
+      buildGroupApplyManifestV2(planned, {
         ...failedTargetExecution,
         targets: failedTargetExecution.targets.map((targetResult, index) =>
-          index === 0 ? { ...targetResult, status: "failed" as const } : targetResult
+          index === 0
+            ? {
+                ...targetResult,
+                status: "failed" as const,
+                diagnostics: [{ code: "failed", severity: "error" as const, message: "failed" }]
+              }
+            : targetResult
         )
-      }
-    ]) {
-      const result = buildGroupApplyManifestV2(planned, execution);
-      expect(result.status).toBe("failure");
-      expect(result.targets).toEqual([]);
-      expect(result.studentMappings).toEqual([]);
-      expect(result.diagnostics[0]?.message).not.toContain("token");
-    }
+      }).targets[0]?.diagnostics
+    ).toEqual([expect.objectContaining({ code: "failed" })]);
   });
   it("round-trips finalizer output through the v2 renderer and loader", () => {
     const planned = [

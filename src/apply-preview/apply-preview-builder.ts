@@ -1,5 +1,6 @@
 import { checkAssignmentDetailGithubReadiness } from "../assignment-detail/assignment-detail-github-readiness.js";
 import type { AssignmentDetailCheckStatus } from "../assignment-detail/assignment-detail-models.js";
+import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import { loadGraiderConfig } from "../config/config-loader.js";
 import type { LoadedGraiderConfig } from "../config/config-models.js";
 import { DISABLED_GRADING_MODE } from "../config/config-schemas.js";
@@ -89,7 +90,7 @@ export const createEmptyAssignmentApplyPreviewResult = (
 });
 
 const createGradingPreview = (config: LoadedGraiderConfig): ApplyPreviewGrading => {
-  const grading = config.assignment.grading ?? config.course.grading;
+  const grading = getEffectiveAssignmentGrading(config);
 
   if (!grading.enabled) {
     return {
@@ -115,8 +116,8 @@ const createGradingPreview = (config: LoadedGraiderConfig): ApplyPreviewGrading 
 };
 
 const createTemplatePreview = (config: LoadedGraiderConfig): ApplyPreviewTemplate => ({
-  repository: config.assignment.template.repository,
-  branch: config.assignment.template.branch,
+  repository: config.assignment.template?.repository ?? "",
+  branch: config.assignment.template?.branch ?? "",
   status: NOT_CHECKED_STATUS,
   repositoryStatus: NOT_CHECKED_STATUS,
   branchStatus: NOT_CHECKED_STATUS

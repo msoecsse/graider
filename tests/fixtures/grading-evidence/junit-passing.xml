@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="JUnit Jupiter">
+  <testcase name="passes" classname="Example" />
+</testsuite>

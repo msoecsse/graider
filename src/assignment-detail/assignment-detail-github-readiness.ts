@@ -1,5 +1,6 @@
 import { parseTemplateRepository } from "../config/github-config-validation.js";
 import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import {
   ASSIGNMENT_DETAIL_GITHUB_AUTH_FAILED_CODE,
   ASSIGNMENT_DETAIL_GITHUB_PERMISSION_DENIED_CODE,
@@ -17,6 +18,7 @@ import type { GitHubClient } from "../github/github-client.js";
 import { GitHubClientError } from "../github/github-errors.js";
 import { parseYaml } from "../io/stable-yaml.js";
 import { hasWorkflowDispatchTrigger } from "../workflows/workflow-dispatch-validation.js";
+import { isManagedGradingWorkflowEligible } from "../workflows/managed-workflow-deployment.js";
 import type {
   AssignmentDetailCheckStatus,
   AssignmentDetailGrading,
@@ -45,7 +47,16 @@ export interface AssignmentDetailGithubReadinessResult {
   readonly diagnostics: Diagnostic[];
 }
 
-const createTokenRequiredDiagnostic = (config: LoadedGraiderConfig): Diagnostic =>
+type TemplateBackedConfig = LoadedGraiderConfig & {
+  readonly assignment: LoadedGraiderConfig["assignment"] & {
+    readonly template: NonNullable<LoadedGraiderConfig["assignment"]["template"]>;
+  };
+};
+
+const hasAssignmentTemplate = (config: LoadedGraiderConfig): config is TemplateBackedConfig =>
+  config.assignment.template !== undefined;
+
+const createTokenRequiredDiagnostic = (config: TemplateBackedConfig): Diagnostic =>
   createConfigDiagnostic(
     GITHUB_TOKEN_REQUIRED_CODE,
     "GRAIDER_GITHUB_TOKEN is required to check assignment GitHub readiness.",
@@ -106,7 +117,7 @@ const createGitHubDiagnostic = (
   return createConfigDiagnostic(ASSIGNMENT_DETAIL_GITHUB_REQUEST_FAILED_CODE, message, context);
 };
 
-const createTemplateRepositoryMissingDiagnostic = (config: LoadedGraiderConfig): Diagnostic =>
+const createTemplateRepositoryMissingDiagnostic = (config: TemplateBackedConfig): Diagnostic =>
   createConfigDiagnostic(
     ASSIGNMENT_DETAIL_TEMPLATE_REPOSITORY_MISSING_CODE,
     `Template repository ${config.assignment.template.repository} was not found.`,
@@ -116,7 +127,7 @@ const createTemplateRepositoryMissingDiagnostic = (config: LoadedGraiderConfig):
     }
   );
 
-const createTemplateBranchMissingDiagnostic = (config: LoadedGraiderConfig): Diagnostic =>
+const createTemplateBranchMissingDiagnostic = (config: TemplateBackedConfig): Diagnostic =>
   createConfigDiagnostic(
     ASSIGNMENT_DETAIL_TEMPLATE_BRANCH_MISSING_CODE,
     `Template branch ${config.assignment.template.branch} was not found.`,
@@ -128,7 +139,7 @@ const createTemplateBranchMissingDiagnostic = (config: LoadedGraiderConfig): Dia
   );
 
 const createGradingWorkflowMissingDiagnostic = (
-  config: LoadedGraiderConfig,
+  config: TemplateBackedConfig,
   workflowPath: string
 ): Diagnostic =>
   createConfigDiagnostic(
@@ -144,7 +155,7 @@ const createGradingWorkflowMissingDiagnostic = (
   );
 
 const createWorkflowDispatchMissingDiagnostic = (
-  config: LoadedGraiderConfig,
+  config: TemplateBackedConfig,
   workflowPath: string
 ): Diagnostic =>
   createConfigDiagnostic(
@@ -160,7 +171,7 @@ const createWorkflowDispatchMissingDiagnostic = (
   );
 
 const createTokenRequiredResult = (
-  config: LoadedGraiderConfig,
+  config: TemplateBackedConfig,
   template: AssignmentDetailTemplate,
   grading: AssignmentDetailGrading
 ): AssignmentDetailGithubReadinessResult => ({
@@ -205,7 +216,7 @@ const withWorkflowStatus = (
 });
 
 const inspectWorkflowDispatch = (
-  config: LoadedGraiderConfig,
+  config: TemplateBackedConfig,
   workflowPath: string,
   workflowContent: string
 ): {
@@ -246,7 +257,7 @@ const inspectWorkflowDispatch = (
 };
 
 const checkWorkflow = async (
-  config: LoadedGraiderConfig,
+  config: TemplateBackedConfig,
   grading: AssignmentDetailGrading,
   githubClient: GitHubClient,
   owner: string,
@@ -308,10 +319,18 @@ export const checkAssignmentDetailGithubReadiness = async ({
   grading,
   githubClient
 }: AssignmentDetailGithubReadinessInput): Promise<AssignmentDetailGithubReadinessResult> => {
-  if (config.assignment.template.repository === "" && config.assignment.template.branch === "") {
+  const managedWorkflowWillBeDeployed = isManagedGradingWorkflowEligible(
+    getEffectiveAssignmentGrading(config)
+  );
+
+  if (!hasAssignmentTemplate(config)) {
     return {
       template: withTemplateStatus(template, STATUS_NOT_REQUIRED, STATUS_NOT_REQUIRED),
-      grading: withWorkflowStatus(grading, STATUS_NOT_REQUIRED, STATUS_NOT_REQUIRED),
+      grading: withWorkflowStatus(
+        grading,
+        managedWorkflowWillBeDeployed ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED,
+        managedWorkflowWillBeDeployed ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED
+      ),
       diagnostics: []
     };
   }
@@ -361,6 +380,14 @@ export const checkAssignmentDetailGithubReadiness = async ({
           grading.enabled ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED
         ),
         diagnostics: [createTemplateBranchMissingDiagnostic(config)]
+      };
+    }
+
+    if (managedWorkflowWillBeDeployed) {
+      return {
+        template: withTemplateStatus(template, STATUS_AVAILABLE, STATUS_AVAILABLE),
+        grading: withWorkflowStatus(grading, STATUS_NOT_CHECKED, STATUS_NOT_CHECKED),
+        diagnostics: []
       };
     }
 

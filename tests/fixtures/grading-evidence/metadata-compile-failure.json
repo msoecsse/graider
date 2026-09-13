@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "submissionCommitSha": "0123456789abcdef0123456789abcdef01234567",
+  "workflowRunId": "1234",
+  "workflowRunAttempt": "2",
+  "compile": { "outcome": "failure" },
+  "junit": { "outcome": "skipped" },
+  "checkstyle": { "outcome": "skipped" }
+}

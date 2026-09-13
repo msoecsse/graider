@@ -19,6 +19,11 @@ import type {
 
 const execFile = promisify(executeFile);
 const GIT = "git";
+const BYTES_PER_KIBIBYTE = 1024;
+const KIBIBYTES_PER_MEBIBYTE = BYTES_PER_KIBIBYTE;
+const BYTES_PER_MEBIBYTE = BYTES_PER_KIBIBYTE * KIBIBYTES_PER_MEBIBYTE;
+const MAX_GIT_COMMAND_OUTPUT_MEBIBYTES = 10;
+const MAX_GIT_COMMAND_OUTPUT_BYTES = MAX_GIT_COMMAND_OUTPUT_MEBIBYTES * BYTES_PER_MEBIBYTE;
 
 export interface ProductionTemplateSyncWorkspaceInput {
   templateCloneUrl: string;
@@ -186,7 +191,7 @@ const git = async (
     [...authorization, ...(directory === undefined ? [] : ["-C", directory]), ...args],
     {
       encoding: "utf8",
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: MAX_GIT_COMMAND_OUTPUT_BYTES
     }
   );
   return { stdout };

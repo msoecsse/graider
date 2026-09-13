@@ -30,16 +30,20 @@ const setup = () => {
     loadManifest: vi.fn(() => manifest),
     writeManifest: vi.fn(() => ({ status: "success" as const })),
     createClient: vi.fn(() => new FakeGitHubClient()),
-    resolveToken: vi.fn(() => "resolved-token"),
-    runSync: vi.fn<AssignmentTemplateSyncContextDependencies["runSync"]>(async () => ({
-      status: "success" as const,
-      result: {
-        status: "completed" as const,
-        templateCommitSha: "target",
-        manifest: manifest.manifest,
-        outcomes: []
-      }
-    }))
+    resolveToken: vi.fn<AssignmentTemplateSyncContextDependencies["resolveToken"]>(
+      () => "resolved-token"
+    ),
+    runSync: vi.fn<AssignmentTemplateSyncContextDependencies["runSync"]>(() =>
+      Promise.resolve({
+        status: "success" as const,
+        result: {
+          status: "completed" as const,
+          templateCommitSha: "target",
+          manifest: manifest.manifest,
+          outcomes: []
+        }
+      })
+    )
   };
   return {
     config,
@@ -52,7 +56,10 @@ const setup = () => {
 describe("assignment template-sync main-process context", () => {
   it("uses canonical loaders and shared eligibility without constructing production dependencies", async () => {
     const { dependencies, service, manifest } = setup();
-    manifest.manifest.repositories[0]!.lifecycle.status = "archived";
+    const [firstRepository] = manifest.manifest.repositories;
+    if (firstRepository === undefined)
+      throw new Error("Fixture manifest must include a repository.");
+    firstRepository.lifecycle.status = "archived";
     const result = await service.prepare(request);
     expect(result.available).toBe(true);
     expect(result.repositoryCount).toBe(manifest.manifest.repositories.length - 1);
@@ -73,7 +80,7 @@ describe("assignment template-sync main-process context", () => {
 
   it("reports missing template without loading a manifest", async () => {
     const { config, service, dependencies } = setup();
-    config.config.assignment.template.repository = "";
+    delete config.config.assignment.template;
     expect(await service.prepare(request)).toMatchObject({
       available: false,
       blocker: { code: "template_required" }
@@ -122,15 +129,21 @@ describe("assignment template-sync main-process context", () => {
     expect(dependencies.runSync).toHaveBeenCalledTimes(1);
     expect(dependencies.createClient).toHaveBeenCalledTimes(1);
     expect(dependencies.resolveToken).toHaveBeenCalledTimes(1);
-    const input = dependencies.runSync.mock.calls[0]![0];
+    const [runSyncCall] = dependencies.runSync.mock.calls;
+    if (runSyncCall === undefined) throw new Error("Expected template-sync invocation.");
+    const [input] = runSyncCall;
+    const [createClientResult] = dependencies.createClient.mock.results;
+    if (createClientResult?.type !== "return") throw new Error("Expected GitHub client creation.");
     expect(input).toMatchObject({
       configuredOrganization: "example-org",
       configuredTemplateRepository: "example-org/lab04-template",
       resolvedToken: "resolved-token",
       options: { yes: true },
-      workspace: { githubClient: dependencies.createClient.mock.results[0]!.value }
+      workspace: { githubClient: createClientResult.value }
     });
-    expect(input.manifest.repositories[0]!.studentId).toBe("jones");
+    const [firstRepository] = input.manifest.repositories;
+    if (firstRepository === undefined) throw new Error("Expected manifest repository.");
+    expect(firstRepository.studentId).toBe("jones");
     await input.persistManifest(input.manifest);
     expect(dependencies.writeManifest).toHaveBeenCalledExactlyOnceWith(
       path.join(request.courseFolderPath, "terms/27s1/manifests/lab04/manifest.yml"),

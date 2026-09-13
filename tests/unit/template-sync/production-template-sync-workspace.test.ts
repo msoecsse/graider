@@ -22,6 +22,9 @@ const input = {
 
 const execFile = promisify(executeFile);
 const temporaryDirectories: string[] = [];
+const BYTES_PER_MEBIBYTE = 1_048_576;
+const MAX_GIT_COMMAND_OUTPUT_MEBIBYTES = 10;
+const MAX_GIT_COMMAND_OUTPUT_BYTES = MAX_GIT_COMMAND_OUTPUT_MEBIBYTES * BYTES_PER_MEBIBYTE;
 
 afterEach(async () => {
   await Promise.all(
@@ -35,7 +38,7 @@ const runGit = async (directory: string | undefined, args: string[]): Promise<st
   const { stdout } = await execFile(
     "git",
     [...(directory === undefined ? [] : ["-C", directory]), ...args],
-    { maxBuffer: 10 * 1024 * 1024 }
+    { maxBuffer: MAX_GIT_COMMAND_OUTPUT_BYTES }
   );
   return stdout.trim();
 };
@@ -75,19 +78,24 @@ describe("production template-sync diagnostics", () => {
     [2, "student_clone_failed", "Unable to clone student repository."]
   ])("classifies clone failure at Git call %i", async (failureCall, stage, message) => {
     let calls = 0;
-    const runGit = vi.fn(async () => {
+    const runGit = vi.fn(() => {
       calls += 1;
-      if (calls === failureCall) {
-        throw new Error(
-          "AUTHORIZATION: basic secret-token https://github.com/private/repo /tmp/workspace"
+      if (calls === failureCall)
+        return Promise.reject(
+          new Error(
+            "AUTHORIZATION: basic secret-token https://github.com/private/repo /tmp/workspace"
+          )
         );
-      }
-      return { stdout: "" };
+      return Promise.resolve({ stdout: "" });
     });
 
-    const error = await withProductionTemplateSyncWorkspace(input, async () => "unused", {
-      runGit
-    }).catch((caught: unknown) => caught);
+    const error = await withProductionTemplateSyncWorkspace(
+      input,
+      () => Promise.resolve("unused"),
+      {
+        runGit
+      }
+    ).catch((caught: unknown) => caught);
 
     expect(getTemplateSyncFailure(error)).toEqual({ stage, message });
     expect(JSON.stringify(getTemplateSyncFailure(error))).not.toMatch(
@@ -97,9 +105,9 @@ describe("production template-sync diagnostics", () => {
 
   it("classifies GitHub permission failures with a fixed safe message", async () => {
     const gateway = createGitHubPullRequestGateway({
-      findPullRequest: vi.fn(async () => {
-        throw new GitHubClientError("permission_denied", "denied secret-token");
-      })
+      findPullRequest: vi.fn(() =>
+        Promise.reject(new GitHubClientError("permission_denied", "denied secret-token"))
+      )
     } as never);
 
     const error = await gateway
@@ -166,7 +174,7 @@ describe("production student default-branch checkout", () => {
             calls.push(args);
             if (args[0] === "clone") {
               cloneCount += 1;
-              if (cloneCount === 2) studentDirectory = args.at(-1);
+              if (cloneCount === 2) studentDirectory = args[args.length - 1];
             }
             return { stdout: await runGit(directory, args) };
           }
@@ -212,7 +220,7 @@ describe("production student default-branch checkout", () => {
       "HEAD",
       "refs/heads/missing"
     ]);
-    const operation = vi.fn(async () => "unused");
+    const operation = vi.fn(() => Promise.resolve("unused"));
     const calls: string[][] = [];
 
     const error = await withProductionTemplateSyncWorkspace(

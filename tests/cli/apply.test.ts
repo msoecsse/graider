@@ -6,7 +6,9 @@ import { runApplyCommand } from "../../src/cli/commands/apply.command.js";
 import { formatCommandResultAsJson } from "../../src/cli/output.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { ExitCode } from "../../src/core/exit-codes.js";
+import { buildAssignmentGradePreview } from "../../src/grade-preview/grade-preview-builder.js";
 import { FakeGitHubClient } from "../../src/github/fake-github-client.js";
+import { GitHubClientError } from "../../src/github/github-errors.js";
 import { DEFAULT_GITHUB_RETRY_ATTEMPTS } from "../../src/github/github-retry.js";
 import type {
   GitHubRepository,
@@ -20,6 +22,11 @@ import {
   createEmptyManifest,
   upsertRepositoryRecord
 } from "../../src/manifest/manifest-updater.js";
+import { renderJavaJunitCheckstyleWorkflow } from "../../src/workflows/java-junit-checkstyle-workflow.js";
+import {
+  GRAIDER_MANAGED_WORKFLOW_MARKER,
+  GRAIDER_MANAGED_WORKFLOW_PATH
+} from "../../src/workflows/managed-workflow-policy.js";
 
 enum TestNumber {
   TemplateRepositoryId = 101,
@@ -77,6 +84,34 @@ const copyFixtureToTemp = (fixtureName: string): string => {
   return destinationRoot;
 };
 
+const removeAssignmentTemplate = (cwd: string): void => {
+  const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
+  const content = fs.readFileSync(assignmentPath, "utf8");
+  fs.writeFileSync(
+    assignmentPath,
+    content.replace(/template:\n {2}repository: [^\n]+\n {2}branch: [^\n]+\n/u, ""),
+    "utf8"
+  );
+};
+
+const configureAssignmentPresetGrading = (cwd: string): void => {
+  const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
+  fs.appendFileSync(
+    assignmentPath,
+    [
+      "grading:",
+      "  enabled: true",
+      "  mode: preset",
+      "  preset: java-junit-checkstyle",
+      `  workflow: ${GRAIDER_MANAGED_WORKFLOW_PATH}`,
+      "  artifact: grading-results",
+      "  result_file: results.json",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+};
+
 const createRepository = (
   name: string,
   id: number = TestNumber.ExistingRepositoryId
@@ -125,6 +160,53 @@ class NonPersistingCreateGitHubClient extends FakeGitHubClient {
 class NoWorkflowReadinessGitHubClient extends FakeGitHubClient {
   override getWorkflow(): Promise<GitHubWorkflow | null> {
     throw new Error("No-grading apply must not check grading workflows.");
+  }
+}
+
+class DelayedTemplateMaterializationGitHubClient extends FakeGitHubClient {
+  manifestWasDurableBeforeBaselineLookup = false;
+
+  constructor(
+    private readonly manifestPath: string,
+    state: ConstructorParameters<typeof FakeGitHubClient>[0]
+  ) {
+    super(state);
+  }
+
+  override getDefaultBranchCommitSha(owner: string, repo: string): Promise<string | undefined> {
+    if (repo !== TEMPLATE_REPO) {
+      const manifest = loadManifest(this.manifestPath);
+      this.manifestWasDurableBeforeBaselineLookup =
+        manifest.status === "loaded" &&
+        manifest.manifest.repositories.some((record) => record.repository.name === repo);
+      return Promise.resolve(undefined);
+    }
+
+    return super.getDefaultBranchCommitSha(owner, repo);
+  }
+}
+
+class StudentWorkflowFailureGitHubClient extends FakeGitHubClient {
+  override getWorkflow(
+    owner: string,
+    repo: string,
+    workflowPath: string
+  ): ReturnType<FakeGitHubClient["getWorkflow"]> {
+    return repo === TEMPLATE_REPO
+      ? super.getWorkflow(owner, repo, workflowPath)
+      : Promise.reject(new GitHubClientError("api_error", "Mock student workflow failure."));
+  }
+}
+
+class EventuallyMaterializedTemplateGitHubClient extends FakeGitHubClient {
+  materializationReads = 0;
+
+  override getDefaultBranchCommitSha(owner: string, repo: string): Promise<string | undefined> {
+    if (repo !== TEMPLATE_REPO) {
+      this.materializationReads += 1;
+      if (this.materializationReads < 3) return Promise.resolve(undefined);
+    }
+    return super.getDefaultBranchCommitSha(owner, repo);
   }
 }
 
@@ -208,6 +290,339 @@ const writeTrackedManifest = (cwd: string, repositoryName: string): void => {
 };
 
 describe("graider apply command", () => {
+  it("installs the managed workflow when a template-backed repository omits it", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    configureAssignmentPresetGrading(cwd);
+    const githubClient = createReadyClient();
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.createdRepositories).toHaveLength(2);
+    expect(githubClient.mutations.fileWrites).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          repo: JONES_REPOSITORY,
+          path: GRAIDER_MANAGED_WORKFLOW_PATH
+        }),
+        expect.objectContaining({
+          repo: PATEL_REPOSITORY,
+          path: GRAIDER_MANAGED_WORKFLOW_PATH
+        })
+      ])
+    );
+  });
+
+  it("installs the managed workflow in template-backed repositories when the template omits it", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    configureAssignmentPresetGrading(cwd);
+    const githubClient = createReadyClient();
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.createdRepositories).toHaveLength(2);
+    expect(githubClient.mutations.fileWrites).toHaveLength(2);
+    expect(
+      githubClient.mutations.fileWrites.every(
+        (write) => write.path === GRAIDER_MANAGED_WORKFLOW_PATH
+      )
+    ).toBe(true);
+  });
+
+  it("deploys the canonical workflow as the first file in a template-free repository", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    removeAssignmentTemplate(cwd);
+    configureAssignmentPresetGrading(cwd);
+    const githubClient = createReadyClient();
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock
+    });
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.createdRepositories).toEqual([]);
+    expect(githubClient.mutations.createdRepositoriesWithoutTemplate).toHaveLength(2);
+    expect(githubClient.mutations.fileWrites).toHaveLength(2);
+    const jonesWorkflow = githubClient.mutations.fileWrites.find(
+      (write) => write.repo === JONES_REPOSITORY
+    );
+    if (jonesWorkflow === undefined) throw new Error("Expected Jones workflow deployment.");
+    expect(jonesWorkflow).toMatchObject({
+      owner: ORGANIZATION,
+      path: GRAIDER_MANAGED_WORKFLOW_PATH,
+      message: "Configure Graider grading workflow"
+    });
+    expect(jonesWorkflow.content).toContain(GRAIDER_MANAGED_WORKFLOW_MARKER);
+    expect(githubClient.mutations.fileWrites.every((write) => write.branch === undefined)).toBe(
+      true
+    );
+  });
+
+  it("converges an existing repository to a no-op after installing the managed workflow", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    removeAssignmentTemplate(cwd);
+    configureAssignmentPresetGrading(cwd);
+    const githubClient = createReadyClient();
+    const request = {
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock
+    };
+
+    expect((await runApplyCommand(request)).exitCode).toBe(ExitCode.Success);
+    const writesAfterFirstApply = githubClient.mutations.fileWrites.length;
+    expect((await runApplyCommand(request)).exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.fileWrites).toHaveLength(writesAfterFirstApply);
+    expect(githubClient.mutations.createdRepositoriesWithoutTemplate).toHaveLength(2);
+  });
+
+  it("preserves an unmanaged workflow and skips later verification for that student", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    removeAssignmentTemplate(cwd);
+    configureAssignmentPresetGrading(cwd);
+    const facultyWorkflow = "name: Faculty workflow\non: push\n";
+    const client = new FakeGitHubClient({
+      templateRepositories: [templateRepository],
+      users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ],
+      workflows: [PATEL_REPOSITORY].map((repo) => ({
+        owner: ORGANIZATION,
+        repo,
+        workflow: gradingWorkflow
+      })),
+      repositoryFiles: [
+        {
+          owner: ORGANIZATION,
+          repo: JONES_REPOSITORY,
+          path: GRAIDER_MANAGED_WORKFLOW_PATH,
+          content: facultyWorkflow,
+          message: "Faculty workflow",
+          commitSha: "faculty-sha"
+        }
+      ]
+    });
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient: client,
+      clock: fixedClock
+    });
+
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "workflow_deployment_conflict" })])
+    );
+    expect(client.mutations.fileWrites).toHaveLength(1);
+    await expect(
+      client.getRepositoryFileContent(
+        ORGANIZATION,
+        JONES_REPOSITORY,
+        GRAIDER_MANAGED_WORKFLOW_PATH,
+        "main"
+      )
+    ).resolves.toBe(facultyWorkflow);
+    expect(client.workflowReads.filter((read) => read.repo === JONES_REPOSITORY)).toEqual([]);
+  });
+
+  it("reports workflow-file permission denial without relabeling other GitHub failures", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    removeAssignmentTemplate(cwd);
+    configureAssignmentPresetGrading(cwd);
+    const forbiddenClient = createReadyClient();
+    forbiddenClient.failNext("writeRepositoryFile", "permission_denied");
+
+    const forbiddenResult = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient: forbiddenClient,
+      clock: fixedClock
+    });
+
+    expect(forbiddenResult.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "workflow_deployment_forbidden" })])
+    );
+    expect(forbiddenResult.status).toBe("partial_success");
+    expect(forbiddenResult.summary.repositories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ repository: JONES_REPOSITORY, status: "failed" }),
+        expect.objectContaining({ repository: PATEL_REPOSITORY, status: "created" })
+      ])
+    );
+    const forbiddenManifest = loadWrittenManifest(cwd);
+    expect(forbiddenManifest.status).toBe("loaded");
+    if (forbiddenManifest.status === "loaded") {
+      expect(
+        forbiddenManifest.manifest.repositories.map((record) => record.repository.name)
+      ).toEqual([JONES_REPOSITORY, PATEL_REPOSITORY]);
+    }
+    expect(forbiddenClient.mutations.fileWrites).toEqual([
+      expect.objectContaining({ repo: PATEL_REPOSITORY, path: GRAIDER_MANAGED_WORKFLOW_PATH })
+    ]);
+
+    const otherCwd = copyFixtureToTemp("active-assignment");
+    removeAssignmentTemplate(otherCwd);
+    configureAssignmentPresetGrading(otherCwd);
+    const apiFailureClient = createReadyClient();
+    apiFailureClient.failTimes("writeRepositoryFile", "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS);
+    const apiResult = await runApplyCommand({
+      cwd: otherCwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient: apiFailureClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+
+    expect(apiResult.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
+    );
+    expect(apiResult.errors).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "workflow_deployment_forbidden" })])
+    );
+  });
+
+  it("renders from the effective assignment grading override and verifies its workflow", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    removeAssignmentTemplate(cwd);
+    configureAssignmentPresetGrading(cwd);
+    const coursePath = path.join(cwd, "course.yml");
+    fs.writeFileSync(
+      coursePath,
+      fs
+        .readFileSync(coursePath, "utf8")
+        .replace("workflow: grade.yml", "workflow: course-only.yml"),
+      "utf8"
+    );
+    const githubClient = createReadyClient();
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock
+    });
+    const expected = renderJavaJunitCheckstyleWorkflow({
+      grading: {
+        enabled: true,
+        mode: "preset",
+        preset: "java-junit-checkstyle",
+        workflow: GRAIDER_MANAGED_WORKFLOW_PATH,
+        artifact: "grading-results",
+        result_file: "results.json"
+      }
+    });
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.fileWrites[0]?.content).toBe(expected);
+    expect(githubClient.workflowReads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ repo: JONES_REPOSITORY, workflowPath: "grade.yml" })
+      ])
+    );
+    expect(githubClient.workflowReads.map((read) => read.workflowPath)).not.toContain(
+      "course-only.yml"
+    );
+  });
+
+  it("creates and configures empty student repositories when no template is configured", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    removeAssignmentTemplate(cwd);
+    const githubClient = createReadyClient();
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock
+    });
+    const manifestResult = loadWrittenManifest(cwd);
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.createdRepositories).toEqual([]);
+    expect(githubClient.mutations.createdRepositoriesWithoutTemplate).toHaveLength(1);
+    expect(githubClient.mutations.addedCollaborators).toHaveLength(1);
+    expect(githubClient.mutations.teamPermissions).toHaveLength(2);
+    expect(githubClient.mutations.enabledActions).toHaveLength(1);
+    expect(githubClient.mutations.fileWrites).toEqual([]);
+    expect(manifestResult.status).toBe("loaded");
+    if (manifestResult.status === "loaded") {
+      expect(manifestResult.manifest.template).toBeUndefined();
+      expect(manifestResult.manifest.repositories[0]?.repository).toMatchObject({
+        createdFromTemplate: false
+      });
+      expect(
+        manifestResult.manifest.repositories[0]?.repository.templateRepository
+      ).toBeUndefined();
+    }
+  });
+
+  it("reports direct repository creation failures without falling back to a template", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    removeAssignmentTemplate(cwd);
+    const githubClient = createReadyClient();
+    githubClient.failTimes("createRepository", "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS);
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+
+    expect(result.exitCode).toBe(ExitCode.GitHubOrNetworkFailure);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
+    );
+    expect(githubClient.mutations.createdRepositories).toEqual([]);
+    expect(githubClient.mutations.createdRepositoriesWithoutTemplate).toEqual([]);
+  });
+
+  it("reuses a manifest-backed template-free repository without recreating it", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    removeAssignmentTemplate(cwd);
+    const githubClient = createReadyClient();
+    const request = {
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock
+    };
+
+    expect((await runApplyCommand(request)).exitCode).toBe(ExitCode.Success);
+    expect((await runApplyCommand(request)).exitCode).toBe(ExitCode.Success);
+    expect(githubClient.mutations.createdRepositoriesWithoutTemplate).toHaveLength(1);
+    expect(githubClient.mutations.createdRepositories).toEqual([]);
+  });
+
   it("uses the production GitHub client path unless a fake client is injected", async () => {
     vi.stubEnv("GRAIDER_GITHUB_TOKEN", "");
     vi.stubEnv("GITHUB_TOKEN", "");
@@ -251,16 +666,13 @@ describe("graider apply command", () => {
         (repository) => repository.actions.gradingWorkflowFound === true
       )
     ).toBe(true);
-    expect(manifestResult.manifest?.repositories).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          repository: expect.objectContaining({
-            templateCommitSha: "template-sha",
-            studentDefaultBranchCommitSha: expect.any(String)
-          })
-        })
-      ])
+    if (manifestResult.status !== "loaded") throw new Error("Expected written manifest.");
+    const jonesRepository = manifestResult.manifest.repositories.find(
+      (repository) => repository.studentId === "jones"
     );
+    if (jonesRepository === undefined) throw new Error("Expected Jones manifest record.");
+    expect(jonesRepository.repository.templateCommitSha).toBe("template-sha");
+    expect(jonesRepository.repository.studentDefaultBranchCommitSha).toEqual(expect.any(String));
     expect(
       githubClient.mutations.createdRepositories.map((record) => record.repository.name)
     ).toEqual([JONES_REPOSITORY, PATEL_REPOSITORY]);
@@ -307,7 +719,7 @@ describe("graider apply command", () => {
 
   it("TC-CLI-APPLY-003 blocked plan prevents all GitHub mutations", async () => {
     const githubClient = createReadyClient([createRepository(JONES_REPOSITORY)]);
-    const { result } = await runApply("grading-disabled", githubClient);
+    const { cwd, result } = await runApply("grading-disabled", githubClient);
 
     expect(result.exitCode).toBe(ExitCode.CommandError);
     expect(result.errors).toEqual(
@@ -317,6 +729,7 @@ describe("graider apply command", () => {
     expect(githubClient.mutations.addedCollaborators).toEqual([]);
     expect(githubClient.mutations.teamPermissions).toEqual([]);
     expect(githubClient.mutations.enabledActions).toEqual([]);
+    expect(loadWrittenManifest(cwd).status).toBe("missing");
   });
 
   it("TC-CLI-APPLY-004 closed assignment repairs existing manifest-tracked repos only", async () => {
@@ -372,6 +785,189 @@ describe("graider apply command", () => {
     expect(manifestResult.status).toBe("loaded");
     expect(manifestResult.manifest?.repositories[0]?.studentId).toBe("jones");
     expect(manifestResult.manifest?.repositories[0]?.repository.name).toBe(JONES_REPOSITORY);
+  });
+
+  it("persists template-backed repository identity before the asynchronous template baseline is available", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    const manifestPath = createManifestPath(cwd, "27s1", "lab04");
+    const githubClient = new DelayedTemplateMaterializationGitHubClient(manifestPath.absolutePath, {
+      templateRepositories: [templateRepository],
+      users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({
+        username
+      })),
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ]
+    });
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+    const manifest = loadManifest(manifestPath.absolutePath);
+
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
+    );
+    expect(githubClient.manifestWasDurableBeforeBaselineLookup).toBe(true);
+    expect(manifest.status).toBe("loaded");
+    if (manifest.status !== "loaded") throw new Error("Expected written manifest.");
+    const [jonesRepository] = manifest.manifest.repositories;
+    if (jonesRepository === undefined) throw new Error("Expected Jones manifest record.");
+    expect(jonesRepository.studentId).toBe("jones");
+    expect(jonesRepository.repository).toMatchObject({
+      name: JONES_REPOSITORY,
+      createdFromTemplate: true,
+      templateSyncBaselineStatus: "baseline_required"
+    });
+  });
+
+  it("writes a new empty manifest before attempting the first repository creation", async () => {
+    const githubClient = createReadyClient();
+    githubClient.failTimes(
+      "createRepositoryFromTemplate",
+      "api_error",
+      DEFAULT_GITHUB_RETRY_ATTEMPTS
+    );
+
+    const { cwd, result } = await runApply("grading-disabled", githubClient);
+    const manifest = loadWrittenManifest(cwd);
+
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
+    );
+    expect(manifest.status).toBe("loaded");
+    if (manifest.status === "loaded") {
+      expect(manifest.manifest.repositories).toEqual([]);
+      expect(manifest.manifest.template?.repository).toBe(`${ORGANIZATION}/${TEMPLATE_REPO}`);
+    }
+  });
+
+  it("waits for GitHub template contents before recording the template-sync baseline", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    const githubClient = new EventuallyMaterializedTemplateGitHubClient({
+      templateRepositories: [templateRepository],
+      users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({
+        username
+      })),
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ]
+    });
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+    const manifest = loadWrittenManifest(cwd);
+
+    expect(result.status).toBe("success");
+    expect(githubClient.materializationReads).toBe(3);
+    expect(manifest.status).toBe("loaded");
+    if (manifest.status === "loaded") {
+      expect(manifest.manifest.repositories[0]?.repository).toMatchObject({
+        studentDefaultBranchCommitSha: "template-sha",
+        templateSyncBaselineStatus: "initialized"
+      });
+    }
+  });
+
+  it.each([
+    ["student permission", "addCollaborator"],
+    ["Actions enablement", "enableActions"]
+  ] as const)(
+    "keeps the created repository manifest-tracked after later %s failure",
+    async (_label, method) => {
+      const githubClient = createReadyClient();
+      githubClient.failTimes(method, "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS);
+
+      const { cwd } = await runApply("grading-disabled", githubClient);
+      const manifest = loadWrittenManifest(cwd);
+
+      expect(manifest.status).toBe("loaded");
+      if (manifest.status === "loaded") {
+        expect(manifest.manifest.repositories[0]?.repository.name).toBe(JONES_REPOSITORY);
+      }
+    }
+  );
+
+  it("keeps the created repository manifest-tracked after workflow verification fails", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    const githubClient = new StudentWorkflowFailureGitHubClient({
+      templateRepositories: [templateRepository],
+      users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({
+        username
+      })),
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ]
+    });
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+    const manifest = loadWrittenManifest(cwd);
+
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
+    );
+    expect(manifest.status).toBe("loaded");
+    if (manifest.status === "loaded") {
+      expect(manifest.manifest.repositories.map((record) => record.repository.name)).toEqual([
+        JONES_REPOSITORY,
+        PATEL_REPOSITORY
+      ]);
+    }
+    const subsequentDetail = await buildAssignmentGradePreview({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE
+    });
+    if (subsequentDetail.plan === null) throw new Error("Expected a grade preview plan.");
+    expect(subsequentDetail.plan.repositories).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ reason: "student_repository_missing" })])
+    );
+  });
+
+  it("tracks every created repository when one student fails and later students continue", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    const githubClient = createReadyClient();
+    githubClient.failTimes("addCollaborator", "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS);
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+    const manifest = loadWrittenManifest(cwd);
+
+    expect(result.status).toBe("partial_success");
+    expect(githubClient.mutations.createdRepositories).toHaveLength(2);
+    expect(manifest.status).toBe("loaded");
+    if (manifest.status === "loaded") {
+      expect(manifest.manifest.repositories.map((record) => record.repository.name)).toEqual([
+        JONES_REPOSITORY,
+        PATEL_REPOSITORY
+      ]);
+    }
   });
 
   it("repository creation retries a transient API failure and succeeds", async () => {

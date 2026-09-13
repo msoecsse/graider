@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import type { LoadedGraiderConfig } from "../../config/config-models.js";
+import { getEffectiveAssignmentGrading } from "../../config/effective-grading.js";
 import { loadGraiderConfig } from "../../config/config-loader.js";
 import {
   type CommonCommandOptions,
@@ -54,9 +54,6 @@ export interface GradeRawOptions extends RawCommonCommandOptions {
   studentId?: string;
   githubUsername?: string;
 }
-
-const getEffectiveGrading = (config: LoadedGraiderConfig) =>
-  config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
 
 const getCommandStatus = (result: GradeExecutionResult): CommandStatus => {
   if (result.errors.length === EMPTY_COUNT) {
@@ -170,7 +167,7 @@ export const runGradeCommand = async ({
     });
   }
 
-  const grading = getEffectiveGrading(configResult.config);
+  const grading = getEffectiveAssignmentGrading(configResult.config);
 
   if (!grading.enabled || grading.workflow === undefined) {
     return createCommandResult({

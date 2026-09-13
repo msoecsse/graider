@@ -16,7 +16,7 @@ const createRequest = (
   courseCode: "csc1120",
   githubOrganization: "graider-sandbox",
   termCode: "27s1",
-  sectionIds: ["001"],
+  sections: [{ id: "001", faculty: [] }],
   rosterUploads: [],
   confirmed: false,
   replaceExisting: false,
@@ -37,7 +37,30 @@ describe("course setup service", () => {
     expect(preview.files[0]?.content).not.toContain("grader_permission:");
     expect(preview.files[0]?.content).toContain("timezone: America/Chicago");
     expect(preview.files[1]?.content).toContain('display_name: "Fall 2026"');
+    expect(preview.files[1]?.content).toContain("faculty: []");
     expect(preview.files.map((file) => file.path)).toEqual(["course.yml", "terms/27s1/term.yml"]);
+  });
+
+  it("renders canonical faculty mappings for each created section", () => {
+    const preview = previewCourseSetup(
+      createRequest(createRoot(), {
+        sections: [
+          { id: "001", faculty: [] },
+          { id: "002", faculty: [" jones ", "smith", "jones", " "] },
+          { id: "003", faculty: ["jones"] }
+        ]
+      })
+    );
+    const term = preview.files.find((file) => file.path.endsWith("term.yml"))?.content ?? "";
+
+    expect(preview.status).toBe("ready");
+    expect(term).toContain('id: "001"\n    roster: rosters/section-001.csv\n    faculty: []');
+    expect(term).toContain(
+      'id: "002"\n    roster: rosters/section-002.csv\n    faculty:\n      - "jones"\n      - "smith"'
+    );
+    expect(term).toContain(
+      'id: "003"\n    roster: rosters/section-003.csv\n    faculty:\n      - "jones"'
+    );
   });
 
   it("omits course grading when grading is not configured", () => {
@@ -70,7 +93,12 @@ describe("course setup service", () => {
 
   it("rejects blank or duplicate sections and non-MVP roster headers", () => {
     const duplicate = previewCourseSetup(
-      createRequest(createRoot(), { sectionIds: ["001", " 001 "] })
+      createRequest(createRoot(), {
+        sections: [
+          { id: "001", faculty: [] },
+          { id: " 001 ", faculty: [] }
+        ]
+      })
     );
     const legacy = previewCourseSetup(
       createRequest(createRoot(), {

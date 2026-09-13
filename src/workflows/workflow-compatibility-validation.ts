@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { LoadedGraiderConfig, RawCourseConfig } from "../config/config-models.js";
+import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
+import type { EffectiveAssignmentGrading } from "../config/effective-grading.js";
+import type { LoadedGraiderConfig } from "../config/config-models.js";
 import {
   GRADING_WORKFLOW_MISSING_CODE,
   WORKFLOW_DISPATCH_UNSUPPORTED_CODE,
@@ -19,7 +21,7 @@ import {
 
 const PRESET_GRADING_MODE = "preset";
 
-type GradingConfig = RawCourseConfig["grading"];
+type GradingConfig = EffectiveAssignmentGrading;
 
 interface WorkflowCandidate {
   readonly absolutePath: string;
@@ -31,9 +33,6 @@ export interface WorkflowCompatibilityValidationResult {
   readonly errors: Diagnostic[];
   readonly workflowStatus: "not_required" | "found" | "missing" | "invalid";
 }
-
-const getEffectiveGrading = (config: LoadedGraiderConfig): GradingConfig =>
-  config.assignment.grading ?? config.course.grading;
 
 const createConfiguredWorkflowCandidate = (
   repoRoot: string,
@@ -98,7 +97,7 @@ const createWorkflowDispatchUnsupportedDiagnostic = (workflowPath: string): Diag
 export const validateWorkflowCompatibility = (
   config: LoadedGraiderConfig
 ): WorkflowCompatibilityValidationResult => {
-  const grading = getEffectiveGrading(config);
+  const grading = getEffectiveAssignmentGrading(config);
 
   if (!grading.enabled || grading.workflow === undefined) {
     return {

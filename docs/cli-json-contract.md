@@ -122,7 +122,8 @@ blockers exist, and
 `plan.groupTargets`. Each target includes its group ID, deterministic repository
 name, section, student IDs, GitHub usernames, and planned permissions. This is
 read-only planning: `assignment apply` runs preflight, creates one repository
-per group, and writes a v2 manifest only after all targets succeed.
+per group, and checkpoints the v2 manifest before creation and after each
+observed repository.
 
 `assignment grade-preview <assignment.yml> --json` is also JSON-only. Running it
 without `--json` returns a JSON failure with
@@ -504,7 +505,8 @@ Useful fields include:
 For `repository_mode: group`, Apply runs group preflight, then executes one
 repository target per `group_id`. It creates each shared repository, gives every
 group member `admin` access, applies configured faculty/grader teams, and writes
-manifest-v2 only after every target succeeds. Its top-level JSON shape remains
+manifest-v2 checkpoints before later operations can orphan an observed target.
+Its top-level JSON shape remains
 the standard command result; group-specific data is in `summary`:
 
 ```json
@@ -539,12 +541,12 @@ is not observable immediately after repository creation is treated as
 transient and does not add a target warning.
 
 On a group preflight error, including an untracked-existing-repository
-collision, Apply performs no group mutation and writes no manifest. An executor
-or writer failure also writes no manifest, even if earlier targets already
-mutated GitHub. The response includes safe errors plus the
-`group_apply_manifest_not_written` warning; faculty must manually clean up
-partial repositories or wait for a future reconcile workflow. Graider never
-adopts an untracked existing group repository automatically.
+collision, Apply performs no group mutation. Once execution begins, the
+manifest contains every repository identity observed as created even when a
+later target or workflow operation fails. The response includes the original
+safe error plus `group_apply_incomplete_manifest_saved`; retrying resumes
+manifest-tracked targets. Graider never adopts an untracked existing group
+repository automatically.
 
 The legacy `apply <assignment.yml> --json` command remains supported and keeps
 its existing `commandName: "apply"` response for compatibility.

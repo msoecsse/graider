@@ -300,7 +300,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     value: graiderUI
   });
 
-  return graiderUI;
+  return graiderUI as unknown as GraiderUIApi;
 };
 
 const mockClipboard = (writeText: ReturnType<typeof vi.fn>): void => {

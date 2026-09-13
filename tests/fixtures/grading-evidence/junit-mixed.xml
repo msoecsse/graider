@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="JUnit Jupiter">
+  <testcase name="passes" classname="Example" />
+  <testcase name="fails" classname="Example"><failure message="expected true">stack detail</failure></testcase>
+  <testcase name="errors"><error message="broken">error detail</error></testcase>
+  <testcase name="skips"><skipped /></testcase>
+</testsuite>

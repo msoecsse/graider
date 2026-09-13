@@ -3,6 +3,7 @@ import type {
   RawCourseConfig,
   RawTermConfig
 } from "../config/config-models.js";
+import { resolveEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import { parseTemplateRepository } from "../config/github-config-validation.js";
 import { DiagnosticCode, createConfigDiagnostic } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
@@ -16,6 +17,7 @@ import { createRepositoryWorkflowPathCandidates } from "../workflows/workflow-pa
 import type { GitHubClient } from "./github-client.js";
 import { GitHubClientError, createGitHubDiagnostic } from "./github-errors.js";
 import type { GitHubTemplateRepository } from "./github-models.js";
+import { isManagedGradingWorkflowEligible } from "../workflows/managed-workflow-deployment.js";
 
 const README_FILE = "README.md";
 const EMPTY_COUNT = 0;
@@ -152,6 +154,13 @@ const validateTemplateRepository = async (
   assignmentConfig: RawAssignmentConfig,
   githubClient: GitHubClient
 ): Promise<Diagnostic[]> => {
+  if (
+    assignmentConfig.template === undefined ||
+    (assignmentConfig.template.repository === "" && assignmentConfig.template.branch === "")
+  ) {
+    return [];
+  }
+
   const parsedRepository = parseTemplateRepository(
     courseConfig.github.organization,
     assignmentConfig.template.repository
@@ -190,11 +199,6 @@ const validateTemplateRepository = async (
     return [normalizeGitHubError(error)];
   }
 };
-
-const getEffectiveGrading = (
-  courseConfig: RawCourseConfig,
-  assignmentConfig: RawAssignmentConfig
-): RawCourseConfig["grading"] => assignmentConfig.grading ?? courseConfig.grading;
 
 const createTemplateWorkflowMissingDiagnostic = (
   reference: TemplateRepositoryReference,
@@ -248,9 +252,15 @@ const validateTemplateWorkflow = async (
   assignmentConfig: RawAssignmentConfig,
   githubClient: GitHubClient
 ): Promise<Diagnostic[]> => {
-  const grading = getEffectiveGrading(courseConfig, assignmentConfig);
+  const grading = resolveEffectiveAssignmentGrading(courseConfig.grading, assignmentConfig.grading);
 
-  if (!grading.enabled || grading.workflow === undefined) {
+  if (
+    !grading.enabled ||
+    grading.workflow === undefined ||
+    isManagedGradingWorkflowEligible(grading) ||
+    assignmentConfig.template === undefined ||
+    (assignmentConfig.template.repository === "" && assignmentConfig.template.branch === "")
+  ) {
     return [];
   }
 

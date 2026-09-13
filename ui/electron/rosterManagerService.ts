@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { parseDocument } from "yaml";
 
+import { normalizeFacultyUsernames } from "./sectionFaculty.js";
+
 import { loadAssignmentSetupTerms } from "./assignmentSetupService.js";
 import type {
   AssignmentSetupTermsResult,
@@ -86,6 +88,44 @@ const hasTermSection = (request: RosterSectionRequest): boolean => {
 };
 
 const getTermPath = (termCode: string): string => `terms/${termCode}/term.yml`;
+
+const getSectionFaculty = (request: RosterSectionRequest): string[] => {
+  try {
+    const root = parseDocument(
+      fs.readFileSync(path.join(request.courseFolderPath, getTermPath(request.termCode)), "utf8")
+    ).toJS() as { sections?: unknown };
+    const section = Array.isArray(root.sections)
+      ? root.sections.find(
+          (candidate) =>
+            typeof candidate === "object" &&
+            candidate !== null &&
+            (candidate as Record<string, unknown>).id === request.sectionId
+        )
+      : undefined;
+    const faculty =
+      section === undefined ? undefined : (section as Record<string, unknown>).faculty;
+    return Array.isArray(faculty)
+      ? faculty.filter((username): username is string => typeof username === "string")
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const normalizeFaculty = (
+  faculty: readonly string[] | undefined
+): { faculty: string[] | undefined; diagnostics: CourseSetupDiagnostic[] } => {
+  if (faculty === undefined) return { faculty: undefined, diagnostics: [] };
+  const normalized = normalizeFacultyUsernames(faculty);
+  const diagnostics = normalized.hasBlankEntries
+    ? [diagnostic("Faculty usernames cannot be blank.")]
+    : [];
+  return {
+    faculty: normalized.faculty,
+    diagnostics
+  };
+};
+
 const getSectionCreationDiagnostics = (request: RosterSaveRequest): CourseSetupDiagnostic[] => {
   if (!request.createSection) return [];
   const sectionId = request.sectionId.trim();
@@ -107,7 +147,10 @@ const getSectionCreationDiagnostics = (request: RosterSaveRequest): CourseSetupD
   return [];
 };
 
-const createTermContentWithSection = (request: RosterSaveRequest): string | null => {
+const createTermContentWithSection = (
+  request: RosterSaveRequest,
+  faculty: readonly string[]
+): string | null => {
   const termPath = path.join(request.courseFolderPath, getTermPath(request.termCode));
   try {
     const document = parseDocument(fs.readFileSync(termPath, "utf8"));
@@ -116,7 +159,11 @@ const createTermContentWithSection = (request: RosterSaveRequest): string | null
     if (!Array.isArray(sections)) return null;
     document.set("sections", [
       ...sections,
-      { id: request.sectionId.trim(), roster: `rosters/section-${request.sectionId.trim()}.csv` }
+      {
+        id: request.sectionId.trim(),
+        roster: `rosters/section-${request.sectionId.trim()}.csv`,
+        faculty
+      }
     ]);
     return document.toString();
   } catch {
@@ -144,12 +191,17 @@ const hasRosterReference = (request: RosterSectionRequest): boolean => {
   }
 };
 
-const createTermContentWithRosterReference = (request: RosterSectionRequest): string | null => {
+const createTermContentWithSectionUpdates = (
+  request: RosterSaveRequest,
+  faculty: readonly string[] | undefined
+): string | null => {
   const termPath = path.join(request.courseFolderPath, getTermPath(request.termCode));
   try {
     const document = parseDocument(fs.readFileSync(termPath, "utf8"));
     const root = document.toJS() as { sections?: unknown };
     if (!Array.isArray(root.sections)) return null;
+    const shouldAddRosterReference = !hasRosterReference(request);
+    if (!shouldAddRosterReference && faculty === undefined) return null;
     document.set(
       "sections",
       root.sections.map((section) => {
@@ -161,7 +213,10 @@ const createTermContentWithRosterReference = (request: RosterSectionRequest): st
           return section;
         return {
           ...(section as Record<string, unknown>),
-          roster: `rosters/section-${request.sectionId}.csv`
+          ...(faculty === undefined ? {} : { faculty }),
+          ...(shouldAddRosterReference
+            ? { roster: `rosters/section-${request.sectionId}.csv` }
+            : {})
         };
       })
     );
@@ -228,13 +283,21 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
       path: rosterPath,
       exists: false,
       rows: [],
+      faculty: [],
       diagnostics: [diagnostic("Select an existing term and section before managing a roster.")]
     };
   }
 
   const absolutePath = path.join(request.courseFolderPath, rosterPath);
   if (!fs.existsSync(absolutePath)) {
-    return { status: "ready", path: rosterPath, exists: false, rows: [], diagnostics: [] };
+    return {
+      status: "ready",
+      path: rosterPath,
+      exists: false,
+      rows: [],
+      faculty: getSectionFaculty(request),
+      diagnostics: []
+    };
   }
 
   try {
@@ -248,6 +311,7 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
         path: rosterPath,
         exists: true,
         rows: parseRows(content, header),
+        faculty: getSectionFaculty(request),
         diagnostics: []
       };
     }
@@ -256,6 +320,7 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
       path: rosterPath,
       exists: true,
       rows: [],
+      faculty: getSectionFaculty(request),
       diagnostics: [diagnostic(`Roster header must be ${ROSTER_HEADERS.join(",")}.`)]
     };
   } catch {
@@ -264,6 +329,7 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
       path: rosterPath,
       exists: true,
       rows: [],
+      faculty: getSectionFaculty(request),
       diagnostics: [diagnostic("Unable to read roster CSV.")]
     };
   }
@@ -329,11 +395,13 @@ export const previewRosterSave = (request: RosterSaveRequest): RosterPreviewResu
   const pathValue = getRosterPath(request.termCode, request.sectionId);
   const isValidSelection = request.createSection ? true : hasTermSection(request);
   const creationDiagnostics = getSectionCreationDiagnostics(request);
+  const facultyResult = normalizeFaculty(request.faculty);
   const diagnostics = [
     ...(isValidSelection
       ? []
       : [diagnostic("Select an existing term and section before saving a roster.")]),
     ...creationDiagnostics,
+    ...facultyResult.diagnostics,
     ...validateRows(request)
   ];
   return {
@@ -342,12 +410,15 @@ export const previewRosterSave = (request: RosterSaveRequest): RosterPreviewResu
     content: createCsv(request.rows),
     exists: fs.existsSync(path.join(request.courseFolderPath, pathValue)),
     termPath:
-      request.createSection || !hasRosterReference(request) ? getTermPath(request.termCode) : null,
+      request.createSection || !hasRosterReference(request) || facultyResult.faculty !== undefined
+        ? getTermPath(request.termCode)
+        : null,
     termContent:
       request.createSection && creationDiagnostics.length === 0
-        ? createTermContentWithSection(request)
-        : !request.createSection && !hasRosterReference(request)
-          ? createTermContentWithRosterReference(request)
+        ? createTermContentWithSection(request, facultyResult.faculty ?? [])
+        : !request.createSection &&
+            (!hasRosterReference(request) || facultyResult.faculty !== undefined)
+          ? createTermContentWithSectionUpdates(request, facultyResult.faculty)
           : null,
     diagnostics
   };

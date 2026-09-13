@@ -1,5 +1,20 @@
+import type { GradingEditorViewStateDto } from "./gradingStudentViewStateService.js";
+import type {
+  AppliedCommentDto,
+  AppliedCommentReplacementDto
+} from "./gradingStudentCommentService.js";
+import type {
+  ManualAdjustmentDto,
+  ManualAdjustmentReplacementDto
+} from "./gradingStudentManualAdjustmentService.js";
+import type { ReusableCommentFieldsDto } from "./gradingCommentLibraryService.js";
+import type { MarkGradingStudentCompleteResult } from "./gradingStudentCompleteService.js";
+import type { PublishGradingStudentReportResult } from "./gradingStudentReportPublicationService.js";
+
 export const IPC_CHANNELS = {
   getAppInfo: "graider-ui:get-app-info",
+  getLocalSettings: "graider-ui:local-settings:get",
+  saveLocalSettings: "graider-ui:local-settings:save",
   checkGitHubAuth: "graider-ui:github-auth:check",
   listCourseFolders: "graider-ui:course-registry:list",
   selectCourseFolder: "graider-ui:course-registry:select-folder",
@@ -39,6 +54,27 @@ export const IPC_CHANNELS = {
   refreshCourseFolder: "graider-ui:dashboard:refresh-course-folder",
   refreshDashboard: "graider-ui:dashboard:refresh-all",
   getAssignmentDetail: "graider-ui:assignment-detail:get",
+  prepareGradingWorkspace: "graider-ui:grading-workspace:prepare",
+  loadGradingStudentSource: "graider-ui:grading-student-source:load",
+  loadGradingStudentViewState: "graider-ui:grading-student-view-state:load",
+  saveGradingStudentViewState: "graider-ui:grading-student-view-state:save",
+  clearGradingStudentViewState: "graider-ui:grading-student-view-state:clear",
+  loadGradingStudentSnapshot: "graider-ui:grading-student-snapshot:load",
+  loadGradingStudentEvidence: "graider-ui:grading-student-evidence:load",
+  loadGradingStudentCommitHistory: "graider-ui:grading-student-commit-history:load",
+  addGradingStudentComment: "graider-ui:grading-student-comment:add",
+  editGradingStudentComment: "graider-ui:grading-student-comment:edit",
+  deleteGradingStudentComment: "graider-ui:grading-student-comment:delete",
+  addGradingStudentManualAdjustment: "graider-ui:grading-student-manual-adjustment:add",
+  editGradingStudentManualAdjustment: "graider-ui:grading-student-manual-adjustment:edit",
+  deleteGradingStudentManualAdjustment: "graider-ui:grading-student-manual-adjustment:delete",
+  markGradingStudentComplete: "graider-ui:grading-student:mark-complete",
+  publishGradingStudentReport: "graider-ui:grading-student-report:publish",
+  bulkPublishGradingStudentReports: "graider-ui:grading-student-reports:publish",
+  loadGradingCommentLibrary: "graider-ui:grading-comment-library:load",
+  createGradingLibraryComment: "graider-ui:grading-comment-library:create",
+  editGradingLibraryComment: "graider-ui:grading-comment-library:edit",
+  deleteGradingLibraryComment: "graider-ui:grading-comment-library:delete",
   prepareAssignmentTemplateSync: "graider-ui:assignment-template-sync:prepare",
   executeAssignmentTemplateSync: "graider-ui:assignment-template-sync:execute",
   getAssignmentApplyPreview: "graider-ui:assignment-apply-preview:get",
@@ -53,6 +89,10 @@ export const IPC_CHANNELS = {
 export interface AppInfo {
   readonly name: string;
   readonly version: string;
+}
+
+export interface LocalSettingsResult {
+  readonly currentFacultyMsoeUsername: string | null;
 }
 
 export interface StudentAccessPagesConfigRequest {
@@ -130,6 +170,11 @@ export interface CourseSetupRosterUpload {
   readonly content: string;
 }
 
+export interface CourseSetupSection {
+  readonly id: string;
+  readonly faculty: readonly string[];
+}
+
 export interface CourseSetupRequest {
   readonly courseFolderPath: string;
   readonly courseTitle: string;
@@ -140,7 +185,7 @@ export interface CourseSetupRequest {
   readonly studentAccessPagesBaseUrl?: string;
   readonly studentAccessPagesBranch?: string;
   readonly termCode: string;
-  readonly sectionIds: readonly string[];
+  readonly sections: readonly CourseSetupSection[];
   readonly rosterUploads: readonly CourseSetupRosterUpload[];
   readonly confirmed: boolean;
   readonly replaceExisting: boolean;
@@ -194,6 +239,8 @@ export interface AssignmentSetupRequest extends AssignmentSetupTermsRequest {
   readonly facultyOwner: string;
   readonly lmsAssignmentId: string;
   readonly gradingCategory: string;
+  readonly requiredFiles: readonly string[];
+  readonly rubric: readonly AssignmentRubricCategory[];
   readonly confirmed: boolean;
   readonly replaceExisting: boolean;
 }
@@ -231,8 +278,18 @@ export interface AssignmentEditRequest extends AssignmentSetupTermsRequest {
   readonly facultyOwner: string;
   readonly lmsAssignmentId: string;
   readonly gradingCategory: string;
+  readonly gradingMode: string | null;
+  readonly gradingPreset: string | null;
+  readonly requiredFiles: readonly string[];
+  readonly rubric: readonly AssignmentRubricCategory[];
   readonly originalContent: string;
   readonly confirmed: boolean;
+}
+
+export interface AssignmentRubricCategory {
+  readonly id: string;
+  readonly name: string;
+  readonly points: number;
 }
 
 export interface AssignmentEditModel {
@@ -252,8 +309,13 @@ export interface AssignmentEditModel {
   readonly facultyOwner: string;
   readonly lmsAssignmentId: string | null;
   readonly workflow: string;
+  readonly gradingMode: string | null;
+  readonly gradingPreset: string | null;
   readonly artifact: string;
   readonly resultFile: string;
+  readonly requiredFiles: readonly string[];
+  readonly rubric: readonly AssignmentRubricCategory[];
+  readonly gradingConfigurationPresent: boolean;
   readonly originalContent: string;
 }
 
@@ -455,11 +517,13 @@ export interface RosterLoadResult {
   readonly path: string;
   readonly exists: boolean;
   readonly rows: readonly RosterRow[];
+  readonly faculty: readonly string[];
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
 export interface RosterSaveRequest extends RosterSectionRequest {
   readonly rows: readonly RosterRow[];
+  readonly faculty?: readonly string[];
   readonly createSection?: boolean;
   readonly confirmed: boolean;
 }
@@ -572,6 +636,75 @@ export interface AssignmentDetailRequest {
   readonly courseFolderPath: string;
   readonly assignmentFile: string;
 }
+export interface GradingWorkspacePrepareRequest {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly termCode: string;
+  readonly assignmentSlug: string;
+}
+export interface GradingStudentSourceRequest extends GradingWorkspacePrepareRequest {
+  readonly studentId: string;
+}
+export type GradingStudentViewStateRequest = GradingStudentSourceRequest;
+export type GradingEditorViewState = GradingEditorViewStateDto;
+export interface SaveGradingStudentViewStateRequest extends GradingStudentViewStateRequest {
+  readonly viewState: GradingEditorViewState;
+}
+export type { GradingStudentViewStateResult } from "./gradingStudentViewStateService.js";
+export type GradingStudentSnapshotRequest = GradingStudentSourceRequest;
+export type { GradingStudentSnapshotResult } from "./gradingStudentSnapshotService.js";
+export type GradingStudentEvidenceRequest = GradingStudentSourceRequest;
+export type { GradingStudentEvidenceResult } from "./gradingStudentEvidenceService.js";
+export type GradingStudentCommitHistoryRequest = GradingStudentSourceRequest;
+export type { GradingStudentCommitHistoryResult } from "./gradingStudentCommitHistoryService.js";
+export interface AddGradingStudentCommentRequest extends GradingStudentViewStateRequest {
+  readonly comment: AppliedCommentDto;
+}
+export interface EditGradingStudentCommentRequest extends GradingStudentViewStateRequest {
+  readonly commentId: string;
+  readonly replacement: AppliedCommentReplacementDto;
+}
+export interface DeleteGradingStudentCommentRequest extends GradingStudentViewStateRequest {
+  readonly commentId: string;
+}
+export type { GradingStudentCommentResult } from "./gradingStudentCommentService.js";
+export interface AddGradingStudentManualAdjustmentRequest extends GradingStudentViewStateRequest {
+  readonly adjustment: ManualAdjustmentDto;
+}
+export interface EditGradingStudentManualAdjustmentRequest extends GradingStudentViewStateRequest {
+  readonly adjustmentId: string;
+  readonly replacement: ManualAdjustmentReplacementDto;
+}
+export interface DeleteGradingStudentManualAdjustmentRequest extends GradingStudentViewStateRequest {
+  readonly adjustmentId: string;
+}
+export type { GradingStudentManualAdjustmentResult } from "./gradingStudentManualAdjustmentService.js";
+export type MarkGradingStudentCompleteRequest = GradingStudentViewStateRequest;
+export type { MarkGradingStudentCompleteResult } from "./gradingStudentCompleteService.js";
+export type PublishGradingStudentReportRequest = GradingStudentViewStateRequest;
+export type { PublishGradingStudentReportResult } from "./gradingStudentReportPublicationService.js";
+export interface BulkPublishGradingStudentReportsRequest extends Omit<
+  GradingStudentViewStateRequest,
+  "studentId"
+> {
+  readonly studentIds: readonly string[];
+}
+export type { BulkPublishGradingStudentReportsResult } from "./gradingBulkReportPublicationService.js";
+export interface LoadGradingCommentLibraryRequest {
+  readonly courseFolderId: string;
+  readonly termCode: string;
+}
+export interface CreateGradingLibraryCommentRequest extends LoadGradingCommentLibraryRequest {
+  readonly comment: ReusableCommentFieldsDto;
+}
+export interface EditGradingLibraryCommentRequest extends LoadGradingCommentLibraryRequest {
+  readonly commentId: string;
+  readonly replacement: ReusableCommentFieldsDto;
+}
+export interface DeleteGradingLibraryCommentRequest extends LoadGradingCommentLibraryRequest {
+  readonly commentId: string;
+}
+export type { GradingCommentLibraryResult } from "./gradingCommentLibraryService.js";
 
 export type {
   AssignmentTemplateSyncAvailability,
@@ -796,6 +929,8 @@ export interface CombinedDashboardResult {
 
 export interface GraiderUIApi {
   readonly getAppInfo: () => Promise<AppInfo>;
+  readonly getLocalSettings?: () => Promise<LocalSettingsResult>;
+  readonly saveLocalSettings?: (currentFacultyMsoeUsername: string) => Promise<LocalSettingsResult>;
   readonly checkGitHubAuth: () => Promise<GitHubAuthResult>;
   readonly selectCourseFolder: () => Promise<SelectCourseFolderResult>;
   readonly selectStudentAccessPagesRepositoryFolder?: (
@@ -871,6 +1006,73 @@ export interface GraiderUIApi {
   readonly getAssignmentDetail: (
     request: AssignmentDetailRequest
   ) => Promise<AssignmentDetailResult>;
+  readonly prepareGradingWorkspace: (request: GradingWorkspacePrepareRequest) => Promise<unknown>;
+  readonly loadGradingStudentSource: (request: GradingStudentSourceRequest) => Promise<unknown>;
+  readonly loadGradingStudentViewState: (
+    request: GradingStudentViewStateRequest
+  ) => Promise<import("./gradingStudentViewStateService.js").GradingStudentViewStateResult>;
+  readonly saveGradingStudentViewState: (
+    request: SaveGradingStudentViewStateRequest
+  ) => Promise<import("./gradingStudentViewStateService.js").GradingStudentViewStateResult>;
+  readonly clearGradingStudentViewState: (
+    request: GradingStudentViewStateRequest
+  ) => Promise<import("./gradingStudentViewStateService.js").GradingStudentViewStateResult>;
+  readonly loadGradingStudentSnapshot?: (
+    request: GradingStudentSnapshotRequest
+  ) => Promise<import("./gradingStudentSnapshotService.js").GradingStudentSnapshotResult>;
+  readonly loadGradingStudentEvidence?: (
+    request: GradingStudentEvidenceRequest
+  ) => Promise<import("./gradingStudentEvidenceService.js").GradingStudentEvidenceResult>;
+  readonly loadGradingStudentCommitHistory?: (
+    request: GradingStudentCommitHistoryRequest
+  ) => Promise<import("./gradingStudentCommitHistoryService.js").GradingStudentCommitHistoryResult>;
+  readonly addGradingStudentComment?: (
+    request: AddGradingStudentCommentRequest
+  ) => Promise<import("./gradingStudentCommentService.js").GradingStudentCommentResult>;
+  readonly editGradingStudentComment?: (
+    request: EditGradingStudentCommentRequest
+  ) => Promise<import("./gradingStudentCommentService.js").GradingStudentCommentResult>;
+  readonly deleteGradingStudentComment?: (
+    request: DeleteGradingStudentCommentRequest
+  ) => Promise<import("./gradingStudentCommentService.js").GradingStudentCommentResult>;
+  readonly addGradingStudentManualAdjustment?: (
+    request: AddGradingStudentManualAdjustmentRequest
+  ) => Promise<
+    import("./gradingStudentManualAdjustmentService.js").GradingStudentManualAdjustmentResult
+  >;
+  readonly editGradingStudentManualAdjustment?: (
+    request: EditGradingStudentManualAdjustmentRequest
+  ) => Promise<
+    import("./gradingStudentManualAdjustmentService.js").GradingStudentManualAdjustmentResult
+  >;
+  readonly deleteGradingStudentManualAdjustment?: (
+    request: DeleteGradingStudentManualAdjustmentRequest
+  ) => Promise<
+    import("./gradingStudentManualAdjustmentService.js").GradingStudentManualAdjustmentResult
+  >;
+  readonly markGradingStudentComplete?: (
+    request: MarkGradingStudentCompleteRequest
+  ) => Promise<MarkGradingStudentCompleteResult>;
+  readonly publishGradingStudentReport?: (
+    request: PublishGradingStudentReportRequest
+  ) => Promise<PublishGradingStudentReportResult>;
+  readonly bulkPublishGradingStudentReports?: (
+    request: BulkPublishGradingStudentReportsRequest
+  ) => Promise<
+    import("./gradingBulkReportPublicationService.js").BulkPublishGradingStudentReportsResult
+  >;
+  readonly loadGradingCommentLibrary?: (
+    request: LoadGradingCommentLibraryRequest
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  readonly createGradingLibraryComment?: (
+    request: CreateGradingLibraryCommentRequest
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  readonly editGradingLibraryComment?: (
+    request: EditGradingLibraryCommentRequest
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  readonly deleteGradingLibraryComment?: (
+    request: DeleteGradingLibraryCommentRequest
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
   readonly prepareAssignmentTemplateSync: (
     request: import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncRequest
   ) => Promise<import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncAvailability>;

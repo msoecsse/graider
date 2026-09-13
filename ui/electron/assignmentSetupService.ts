@@ -20,6 +20,23 @@ const ISO_DATE_TIME_WITH_OFFSET_PATTERN =
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
 const quoteYaml = (value: string): string => JSON.stringify(value);
 
+const renderGradingConfiguration = (request: AssignmentSetupRequest): string => {
+  const requiredFiles = request.requiredFiles
+    .map((file) => file.trim())
+    .filter((file) => file !== "");
+  const rubric = request.rubric.map((category) => ({
+    id: category.id.trim(),
+    name: category.name.trim(),
+    points: category.points
+  }));
+  return `  required_files:\n${requiredFiles.map((file) => `    - ${quoteYaml(file)}`).join("\n")}\n  rubric:\n${rubric
+    .map(
+      (category) =>
+        `    - id: ${quoteYaml(category.id)}\n      name: ${quoteYaml(category.name)}\n      points: ${String(category.points)}`
+    )
+    .join("\n")}\n`;
+};
+
 const decodeYamlScalar = (value: string): string => {
   const trimmed = value.trim();
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -98,9 +115,12 @@ const createAssignmentYaml = (
   const sections = request.sectionIds
     .map((sectionId) => `  - ${quoteYaml(sectionId.trim())}`)
     .join("\n");
+  const hasGradingConfiguration = request.requiredFiles.length > 0 || request.rubric.length > 0;
   const grading = request.gradingEnabled
-    ? "grading:\n  enabled: true\n  workflow: .github/workflows/grade.yml\n  artifact: grading-results\n  result_file: grading-results.json\n"
-    : "grading:\n  enabled: false\n  mode: no-grading\n";
+    ? `grading:\n  enabled: true\n  workflow: .github/workflows/grade.yml\n  artifact: grading-results\n  result_file: grading-results.json\n${renderGradingConfiguration(request)}`
+    : hasGradingConfiguration
+      ? `grading:\n${renderGradingConfiguration(request)}`
+      : "";
   const deadline =
     request.dueAt.trim() === ""
       ? ""
@@ -144,6 +164,12 @@ const getGeneratedFile = (
   const termResult = loadAssignmentSetupTerms(request.courseFolderPath);
   const term = termResult.terms.find((candidate) => candidate.code === termCode);
   const repository = normalizeTemplateRepository(request.templateRepository);
+  const requiredFiles = request.requiredFiles.map((file) => file.trim());
+  const rubric = request.rubric.map((category) => ({
+    id: category.id.trim(),
+    name: category.name.trim(),
+    points: category.points
+  }));
   const diagnostics = [
     ...(request.assignmentTitle.trim().length === 0
       ? [diagnostic("Assignment title is required.")]
@@ -180,6 +206,21 @@ const getGeneratedFile = (
       : []),
     ...(request.points !== null && (!Number.isFinite(request.points) || request.points <= 0)
       ? [diagnostic("Points must be a positive number.")]
+      : []),
+    ...(requiredFiles.some((file) => file === "")
+      ? [diagnostic("Required file paths must not be blank.")]
+      : []),
+    ...(rubric.some((category) => category.id === "")
+      ? [diagnostic("Rubric category IDs are required.")]
+      : []),
+    ...(rubric.some((category) => category.name === "")
+      ? [diagnostic("Rubric category names are required.")]
+      : []),
+    ...(new Set(rubric.map((category) => category.id)).size !== rubric.length
+      ? [diagnostic("Rubric category IDs must be unique.")]
+      : []),
+    ...(rubric.some((category) => !Number.isFinite(category.points))
+      ? [diagnostic("Rubric category points must be finite numbers.")]
       : []),
     ...termResult.diagnostics
   ];

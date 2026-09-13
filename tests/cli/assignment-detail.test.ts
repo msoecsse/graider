@@ -13,6 +13,12 @@ import {
 } from "../../src/github/fake-github-client.js";
 import type { GitHubClient } from "../../src/github/github-client.js";
 import type { GitHubTemplateRepository } from "../../src/github/github-models.js";
+import { createManifestPath } from "../../src/manifest/manifest-paths.js";
+import { writeManifest } from "../../src/manifest/manifest-renderer.js";
+import {
+  createEmptyManifest,
+  upsertRepositoryRecord
+} from "../../src/manifest/manifest-updater.js";
 
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
 const ORGANIZATION = "example-org";
@@ -254,6 +260,61 @@ describe("graider assignment detail command", () => {
       generateWorkflow: { available: false, implemented: false }
     });
     expect(result.diagnostics).toEqual([]);
+  });
+
+  it("recognizes a repository after an interrupted Apply manifest is safely recovered", async () => {
+    const cwd = copyFixtureToTemp(VALID_CONFIG_ROOT);
+    const manifestPath = createManifestPath(cwd, "27s1", "lab04");
+    const manifest = upsertRepositoryRecord(
+      createEmptyManifest({
+        assignment: {
+          termCode: "27s1",
+          courseCode: "se2030",
+          assignmentSlug: "lab04",
+          assignmentTitle: "Lab 04"
+        },
+        source: { sourceFiles: [], inputFingerprint: "reviewed-recovery" },
+        template: {
+          repository: `${ORGANIZATION}/${TEMPLATE_REPOSITORY_NAME}`,
+          branch: TEMPLATE_BRANCH,
+          commitSha: "template-sha"
+        }
+      }),
+      {
+        studentId: "jones",
+        githubUsername: "seanjones",
+        section: "001",
+        rosterStatus: "active",
+        repository: {
+          owner: ORGANIZATION,
+          name: "27s1-se2030-lab04-seanjones",
+          fullName: `${ORGANIZATION}/27s1-se2030-lab04-seanjones`,
+          createdFromTemplate: true,
+          templateRepository: `${ORGANIZATION}/${TEMPLATE_REPOSITORY_NAME}`,
+          templateCommitSha: "template-sha",
+          studentDefaultBranchCommitSha: "student-sha",
+          templateSyncBaselineStatus: "initialized"
+        },
+        permissions: {},
+        actions: { enabled: true },
+        lifecycle: {
+          repositoryArchived: false,
+          studentAccessRemoved: false,
+          status: "created"
+        },
+        warnings: [],
+        errors: []
+      }
+    );
+
+    expect(writeManifest(manifestPath.absolutePath, manifest).status).toBe("success");
+
+    const result = await runDetail(cwd);
+
+    expect(result.applyState).toEqual({ status: "applied" });
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toEqual(
+      expect.arrayContaining(["manifest_missing", "student_repository_missing"])
+    );
   });
 
   it("marks a missing template repository as partial success", async () => {

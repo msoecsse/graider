@@ -147,6 +147,8 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshCourseFolder: vi.fn(),
     refreshDashboard: vi.fn(),
     getAssignmentDetail: vi.fn(),
+    prepareAssignmentTemplateSync: vi.fn(),
+    executeAssignmentTemplateSync: vi.fn(),
     getAssignmentApplyPreview: vi.fn(),
     getAssignmentGradePreview: vi.fn(),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createGradeStatusResult()),
@@ -161,7 +163,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     value: graiderUI
   });
 
-  return graiderUI;
+  return graiderUI as unknown as GraiderUIApi;
 };
 
 const renderGradeStatusPage = (onBack = vi.fn(), onViewFacultyReport = vi.fn()) =>

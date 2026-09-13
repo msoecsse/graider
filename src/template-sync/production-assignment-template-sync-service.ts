@@ -44,12 +44,17 @@ export const runProductionAssignmentTemplateSyncService = async (
   );
   if (template.status === "failure")
     return { status: "failure", code: "invalid_template_repository", message: template.message };
-  const {
-    bridge: injectedBridge,
-    env: _env,
-    resolvedToken: _resolvedToken,
-    ...bridgeInput
-  } = input;
+  const { bridge: injectedBridge } = input;
+  const bridgeInput: Omit<
+    ProductionAssignmentTemplateSyncBridgeInput,
+    "token" | "templateCloneUrl"
+  > = {
+    manifest: input.manifest,
+    options: input.options,
+    resolveCurrentTemplateCommitSha: input.resolveCurrentTemplateCommitSha,
+    persistManifest: input.persistManifest,
+    workspace: input.workspace
+  };
   const bridge = injectedBridge ?? runProductionAssignmentTemplateSync;
   const result = await bridge({ ...bridgeInput, token, templateCloneUrl: template.cloneUrl });
   return { status: "success", result };

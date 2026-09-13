@@ -92,7 +92,7 @@ export const createAssignmentTemplateSyncContextService = (
       };
     }
     const template = config.assignment.template;
-    if (!template?.repository?.trim())
+    if (template === undefined || template.repository.trim().length === 0)
       return {
         preview: unavailable(
           "template_required",
@@ -129,7 +129,7 @@ export const createAssignmentTemplateSyncContextService = (
       manifest.assignment.assignmentSlug !== config.summary.assignmentSlug ||
       manifest.assignment.termCode !== config.summary.termCode ||
       manifest.assignment.courseCode !== config.course.course.code ||
-      manifest.template.repository !== template.repository
+      manifest.template?.repository !== template.repository
     ) {
       return {
         preview: unavailable(
@@ -155,22 +155,33 @@ export const createAssignmentTemplateSyncContextService = (
           }
         : {})
     };
-    return { preview, context: { config, manifest, manifestPath, template: parsed.repository } };
+    return {
+      preview,
+      context: {
+        config,
+        manifest,
+        manifestPath,
+        template: parsed.repository,
+        templateConfig: template
+      }
+    };
   };
 
   return {
-    async prepare(request) {
+    prepare(request) {
       try {
-        return loadContext(request).preview;
+        return Promise.resolve(loadContext(request).preview);
       } catch {
-        return unavailable(
-          "invalid_assignment",
-          "Unable to load assignment context. Check the assignment path and files."
+        return Promise.resolve(
+          unavailable(
+            "invalid_assignment",
+            "Unable to load assignment context. Check the assignment path and files."
+          )
         );
       }
     },
     async execute(request) {
-      const options = { yes: request.confirmed === true, json: false, verbose: false };
+      const options = { yes: request.confirmed, json: false, verbose: false };
       const guard = evaluateMutationGuard({ options });
       if (!guard.allowed)
         return {
@@ -207,7 +218,7 @@ export const createAssignmentTemplateSyncContextService = (
         }
         const response = await dependencies.runSync({
           configuredOrganization: context.config.course.github.organization,
-          configuredTemplateRepository: context.config.assignment.template.repository,
+          configuredTemplateRepository: context.templateConfig.repository,
           resolvedToken: token,
           manifest: context.manifest,
           options,
@@ -219,7 +230,7 @@ export const createAssignmentTemplateSyncContextService = (
             );
             if (
               template === null ||
-              template.defaultBranch !== context.config.assignment.template.branch ||
+              template.defaultBranch !== context.templateConfig.branch ||
               !template.latestCommitSha ||
               template.latestCommitSha === "unknown"
             ) {
@@ -227,10 +238,11 @@ export const createAssignmentTemplateSyncContextService = (
             }
             return template.latestCommitSha;
           },
-          persistManifest: async (manifest) => {
+          persistManifest: (manifest) => {
             const written = dependencies.writeManifest(context.manifestPath, manifest);
             if (written.status === "failure")
               throw new Error("Unable to save assignment sync state.");
+            return Promise.resolve();
           }
         });
         if (response.status === "failure")

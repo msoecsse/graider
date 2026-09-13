@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resolveEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import type {
   RawAssignmentConfig,
   RawCourseConfig,
@@ -509,11 +510,6 @@ const compareRecentAssignments = (
   return titleComparison === SORT_EQUAL ? left.slug.localeCompare(right.slug) : titleComparison;
 };
 
-const getEffectiveGrading = (
-  courseConfig: RawCourseConfig,
-  assignmentConfig: RawAssignmentConfig
-): RawCourseConfig["grading"] => assignmentConfig.grading ?? courseConfig.grading;
-
 const getAssignmentApplyState = (
   repoRoot: string,
   termSlug: string,
@@ -532,7 +528,7 @@ const createAssignmentSummary = (
   expectedSlug: string,
   diagnostics: Diagnostic[]
 ): DashboardAssignmentSummary => {
-  const grading = getEffectiveGrading(courseConfig, assignmentConfig);
+  const grading = resolveEffectiveAssignmentGrading(courseConfig.grading, assignmentConfig.grading);
   const assignmentStatus = mapAssignmentStatus(assignmentConfig.assignment.status);
 
   return {
@@ -557,8 +553,12 @@ const createAssignmentSummary = (
       ? {}
       : { points: assignmentConfig.metadata.points }),
     sections: assignmentConfig.sections,
-    templateRepository: assignmentConfig.template.repository,
-    templateBranch: assignmentConfig.template.branch,
+    ...(assignmentConfig.template === undefined
+      ? {}
+      : {
+          templateRepository: assignmentConfig.template.repository,
+          templateBranch: assignmentConfig.template.branch
+        }),
     ...(grading.workflow === undefined ? {} : { workflow: grading.workflow })
   };
 };
@@ -710,6 +710,17 @@ const checkAssignmentGithubReadiness = async (
     return {
       ...loadedAssignment,
       summary: withAssignmentGithubResult(assignment, assignment.diagnostics, github)
+    };
+  }
+
+  if (loadedAssignment.config.template === undefined) {
+    return {
+      ...loadedAssignment,
+      summary: withAssignmentGithubResult(assignment, assignment.diagnostics, {
+        ...github,
+        templateRepository: GITHUB_STATUS_NOT_REQUIRED,
+        templateBranch: GITHUB_STATUS_NOT_REQUIRED
+      })
     };
   }
 
@@ -993,7 +1004,13 @@ const loadRosterSummary = (
   const loadedRosters = termConfig.sections.flatMap((section) =>
     section.roster === undefined
       ? []
-      : [loadRosterStudents(repoRoot, [TERMS_DIRECTORY, termSlug, section.roster].join("/"), section.id)]
+      : [
+          loadRosterStudents(
+            repoRoot,
+            [TERMS_DIRECTORY, termSlug, section.roster].join("/"),
+            section.id
+          )
+        ]
   );
   const students = loadedRosters.flatMap((roster) => roster.students);
   const diagnostics = [

@@ -107,20 +107,20 @@ const getGradingEnabled = (
   gradingEnabled: boolean;
   gradingSource: GradingSource;
 } =>
-  assignment.grading !== undefined
+  assignment.grading?.enabled !== undefined
     ? {
         gradingEnabled: assignment.grading.enabled,
         gradingSource: "assignment"
       }
     : course.grading !== undefined
-    ? {
-        gradingEnabled: course.grading.enabled,
-        gradingSource: "course"
-      }
-    : {
-        gradingEnabled: false,
-        gradingSource: "none"
-      };
+      ? {
+          gradingEnabled: course.grading.enabled,
+          gradingSource: "course"
+        }
+      : {
+          gradingEnabled: false,
+          gradingSource: "none"
+        };
 
 const createSummary = (
   repoRoot: string,
@@ -138,15 +138,10 @@ const createSummary = (
   ...getGradingEnabled(course, assignment)
 });
 
-const resolveCourseConfig = (course: RawCourseConfig): ResolvedCourseConfig => ({
-  ...course,
-  grading: course.grading ?? { enabled: false, mode: "no-grading" }
-});
+const resolveCourseConfig = (course: RawCourseConfig): ResolvedCourseConfig => course;
 
-const resolveAssignmentConfig = (assignment: RawAssignmentConfig): ResolvedAssignmentConfig => ({
-  ...assignment,
-  template: assignment.template ?? { repository: "", branch: "" }
-});
+const resolveAssignmentConfig = (assignment: RawAssignmentConfig): ResolvedAssignmentConfig =>
+  assignment;
 
 export const loadGraiderConfig = (request: ConfigLoadRequest): ConfigLoadResult => {
   const repositoryRootResult = findRepositoryRoot(request.cwd);
@@ -181,10 +176,11 @@ export const loadGraiderConfig = (request: ConfigLoadRequest): ConfigLoadResult 
     return createFailure(diagnostics);
   }
 
+  const course = resolveCourseConfig(loadResult.course);
   return {
     status: "success",
     config: {
-      course: resolveCourseConfig(loadResult.course),
+      course,
       term: loadResult.term,
       assignment: resolveAssignmentConfig(loadResult.assignment),
       summary: createSummary(

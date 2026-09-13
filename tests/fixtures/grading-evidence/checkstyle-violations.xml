@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle version="14.1.0">
+  <file name="src/Example.java">
+    <error line="4" column="2" severity="warning" message="Avoid tabs" source="com.example.TabCheck" />
+  </file>
+  <file name="src/Other.java">
+    <error line="9" severity="error" message="Missing Javadoc" />
+  </file>
+</checkstyle>

@@ -8,6 +8,7 @@ import type {
   AssignmentEditPreviewResult,
   AssignmentEditRequest,
   AssignmentEditSaveResult,
+  AssignmentRubricCategory,
   CourseSetupDiagnostic
 } from "./ipc.js";
 
@@ -40,6 +41,38 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
     : null;
 const asString = (value: unknown): string | null => (typeof value === "string" ? value : null);
 
+const asRequiredFiles = (value: unknown): string[] | null =>
+  Array.isArray(value) && value.every((item) => typeof item === "string") ? [...value] : null;
+
+const asRubric = (value: unknown): AssignmentRubricCategory[] | null =>
+  Array.isArray(value)
+    ? value.flatMap((item) => {
+        const category = asRecord(item);
+        return typeof category?.id === "string" &&
+          typeof category.name === "string" &&
+          typeof category.points === "number"
+          ? [{ id: category.id, name: category.name, points: category.points }]
+          : [];
+      })
+    : null;
+
+const renderGradingConfiguration = (request: AssignmentEditRequest): string => {
+  const requiredFiles = request.requiredFiles
+    .map((file) => file.trim())
+    .filter((file) => file !== "");
+  const rubric = request.rubric.map((category) => ({
+    id: category.id.trim(),
+    name: category.name.trim(),
+    points: category.points
+  }));
+  return `  required_files:\n${requiredFiles.map((file) => `    - ${quoteYaml(file)}`).join("\n")}\n  rubric:\n${rubric
+    .map(
+      (category) =>
+        `    - id: ${quoteYaml(category.id)}\n      name: ${quoteYaml(category.name)}\n      points: ${String(category.points)}`
+    )
+    .join("\n")}\n`;
+};
+
 const createYaml = (
   model: AssignmentEditModel,
   request: AssignmentEditRequest,
@@ -48,9 +81,17 @@ const createYaml = (
   const sections = request.sectionIds
     .map((section) => `  - ${quoteYaml(section.trim())}`)
     .join("\n");
-  const grading = request.gradingEnabled
-    ? `grading:\n  enabled: true\n  workflow: ${quoteYaml(model.workflow)}\n  artifact: ${quoteYaml(model.artifact)}\n  result_file: ${quoteYaml(model.resultFile)}\n`
-    : "grading:\n  enabled: false\n  mode: no-grading\n";
+  const shouldRenderGrading =
+    model.gradingConfigurationPresent ||
+    request.requiredFiles.length > 0 ||
+    request.rubric.length > 0;
+  const grading = !shouldRenderGrading
+    ? ""
+    : !model.gradingConfigurationPresent
+      ? `grading:\n${renderGradingConfiguration(request)}`
+      : request.gradingEnabled
+        ? `grading:\n  enabled: true\n${request.gradingMode === null ? "" : `  mode: ${quoteYaml(request.gradingMode)}\n`}${request.gradingPreset === null ? "" : `  preset: ${quoteYaml(request.gradingPreset)}\n`}  workflow: ${quoteYaml(model.workflow)}\n  artifact: ${quoteYaml(model.artifact)}\n  result_file: ${quoteYaml(model.resultFile)}\n${renderGradingConfiguration(request)}`
+        : `grading:\n  enabled: false\n  mode: no-grading\n${renderGradingConfiguration(request)}`;
   const deadline =
     request.dueAt.trim() === ""
       ? ""
@@ -121,6 +162,9 @@ export const getAssignmentForEdit = (
     const facultyOwner = asString(metadata?.faculty_owner) ?? "";
     const gradingCategory = asString(metadata?.grading_category) ?? "";
     const points = typeof metadata?.points === "number" ? metadata.points : null;
+    const requiredFiles =
+      grading?.required_files === undefined ? [] : asRequiredFiles(grading.required_files);
+    const rubric = grading?.rubric === undefined ? [] : asRubric(grading.rubric);
     if (
       document.errors.length > 0 ||
       title === null ||
@@ -130,7 +174,9 @@ export const getAssignmentForEdit = (
       (metadata?.grading_category !== undefined && typeof metadata.grading_category !== "string") ||
       (metadata?.points !== undefined &&
         metadata.points !== null &&
-        typeof metadata.points !== "number")
+        typeof metadata.points !== "number") ||
+      requiredFiles === null ||
+      rubric === null
     ) {
       return {
         status: "error",
@@ -161,8 +207,13 @@ export const getAssignmentForEdit = (
         lmsAssignmentId:
           typeof metadata?.lms_assignment_id === "string" ? metadata.lms_assignment_id : null,
         workflow: asString(grading?.workflow) ?? DEFAULT_WORKFLOW,
+        gradingMode: asString(grading?.mode),
+        gradingPreset: asString(grading?.preset),
         artifact: asString(grading?.artifact) ?? DEFAULT_ARTIFACT,
         resultFile: asString(grading?.result_file) ?? DEFAULT_RESULT_FILE,
+        requiredFiles,
+        rubric,
+        gradingConfigurationPresent: grading !== null,
         originalContent
       }
     };
@@ -194,6 +245,12 @@ const getPreview = (
   const repository = normalizeTemplateRepository(request.templateRepository);
   const term = loaded.terms.find((candidate) => candidate.code === model.termCode);
   const sections = request.sectionIds.map((section) => section.trim());
+  const requiredFiles = request.requiredFiles.map((file) => file.trim());
+  const rubric = request.rubric.map((category) => ({
+    id: category.id.trim(),
+    name: category.name.trim(),
+    points: category.points
+  }));
   const diagnostics = [
     ...(request.originalContent !== model.originalContent
       ? [diagnostic("The assignment.yml changed after it was loaded. Reload before saving.")]
@@ -223,6 +280,21 @@ const getPreview = (
       : []),
     ...(request.points !== null && (!Number.isFinite(request.points) || request.points <= 0)
       ? [diagnostic("Points must be a positive number.")]
+      : []),
+    ...(requiredFiles.some((file) => file === "")
+      ? [diagnostic("Required file paths must not be blank.")]
+      : []),
+    ...(rubric.some((category) => category.id === "")
+      ? [diagnostic("Rubric category IDs are required.")]
+      : []),
+    ...(rubric.some((category) => category.name === "")
+      ? [diagnostic("Rubric category names are required.")]
+      : []),
+    ...(new Set(rubric.map((category) => category.id)).size !== rubric.length
+      ? [diagnostic("Rubric category IDs must be unique.")]
+      : []),
+    ...(rubric.some((category) => !Number.isFinite(category.points))
+      ? [diagnostic("Rubric category points must be finite numbers.")]
       : [])
   ];
   const changed = request.originalContent !== model.originalContent;

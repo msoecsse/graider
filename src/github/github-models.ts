@@ -76,6 +76,19 @@ export interface GitHubWorkflowRun {
   completedAt?: string;
 }
 
+export interface GitHubWorkflowRunForCommit extends GitHubWorkflowRun {
+  runAttempt: number;
+}
+
+export interface GitHubActionsArtifact {
+  id: number;
+  name: string;
+  sizeInBytes: number;
+  expired: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DownloadedArtifact {
   name: string;
   files: Record<string, string>;
@@ -105,6 +118,13 @@ export interface CreatePullRequestInput {
 export interface CreateFromTemplateInput {
   templateOwner: string;
   templateRepo: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  description?: string;
+}
+
+export interface CreateRepositoryInput {
   owner: string;
   name: string;
   private: boolean;
@@ -143,6 +163,25 @@ export interface ListWorkflowRunsInput {
   owner: string;
   repo: string;
   workflowPath?: string;
+}
+
+export interface ListWorkflowRunsForCommitInput {
+  owner: string;
+  repo: string;
+  workflowPath: string;
+  headSha: string;
+}
+
+export interface ListWorkflowRunArtifactsInput {
+  owner: string;
+  repo: string;
+  runId: number;
+}
+
+export interface DownloadArtifactArchiveInput {
+  owner: string;
+  repo: string;
+  artifactId: number;
 }
 
 export interface DownloadArtifactInput {

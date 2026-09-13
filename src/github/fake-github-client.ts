@@ -4,10 +4,13 @@ import type {
   AddCollaboratorInput,
   AddTeamPermissionInput,
   CreateFromTemplateInput,
+  CreateRepositoryInput,
   DispatchWorkflowInput,
+  DownloadArtifactArchiveInput,
   DownloadArtifactInput,
   DownloadedArtifact,
   GitHubActionsState,
+  GitHubActionsArtifact,
   GitHubCollaboratorResult,
   GitHubFileWriteResult,
   GitHubPermission,
@@ -18,7 +21,10 @@ import type {
   GitHubUser,
   GitHubWorkflow,
   GitHubWorkflowRun,
+  GitHubWorkflowRunForCommit,
+  ListWorkflowRunArtifactsInput,
   ListWorkflowRunsInput,
+  ListWorkflowRunsForCommitInput,
   RemoveCollaboratorInput,
   WriteRepositoryFileInput,
   CreatePullRequestInput,
@@ -86,6 +92,14 @@ export interface FakeArtifactRecord {
   artifact: DownloadedArtifact;
 }
 
+export interface FakeActionsArtifactRecord {
+  owner: string;
+  repo: string;
+  runId: number;
+  artifact: GitHubActionsArtifact;
+  archiveBytes: Uint8Array;
+}
+
 export interface FakeRepositoryFileRecord {
   owner: string;
   repo: string;
@@ -98,6 +112,11 @@ export interface FakeRepositoryFileRecord {
 
 export interface FakeRepositoryCreationRecord {
   input: CreateFromTemplateInput;
+  repository: GitHubRepository;
+}
+
+export interface FakeRepositoryWithoutTemplateCreationRecord {
+  input: CreateRepositoryInput;
   repository: GitHubRepository;
 }
 
@@ -124,12 +143,14 @@ export interface FakeGitHubClientState {
   workflows?: FakeWorkflowRecord[];
   workflowRuns?: FakeWorkflowRunRecord[];
   artifacts?: FakeArtifactRecord[];
+  actionsArtifacts?: FakeActionsArtifactRecord[];
   repositoryFiles?: FakeRepositoryFileRecord[];
   failures?: FakeGitHubFailure[];
 }
 
 export interface FakeGitHubClientMutations {
   createdRepositories: FakeRepositoryCreationRecord[];
+  createdRepositoriesWithoutTemplate: FakeRepositoryWithoutTemplateCreationRecord[];
   addedCollaborators: AddCollaboratorInput[];
   removedCollaborators: RemoveCollaboratorInput[];
   teamPermissions: AddTeamPermissionInput[];
@@ -157,6 +178,16 @@ export interface FakeWorkflowRunRead {
   owner: string;
   repo: string;
   workflowPath?: string;
+}
+
+export type FakeWorkflowRunForCommitRead = ListWorkflowRunsForCommitInput;
+export type FakeWorkflowRunArtifactsRead = ListWorkflowRunArtifactsInput;
+export type FakeArtifactArchiveDownloadRead = DownloadArtifactArchiveInput;
+
+export interface FakeWorkflowRead {
+  owner: string;
+  repo: string;
+  workflowPath: string;
 }
 
 const normalizeKeyPart = (value: string): string => value.toLowerCase();
@@ -190,6 +221,7 @@ const createGitHubClientError = (failure: FakeGitHubFailure): GitHubClientError 
 export class FakeGitHubClient implements GitHubClient {
   readonly mutations: FakeGitHubClientMutations = {
     createdRepositories: [],
+    createdRepositoriesWithoutTemplate: [],
     addedCollaborators: [],
     removedCollaborators: [],
     teamPermissions: [],
@@ -200,7 +232,11 @@ export class FakeGitHubClient implements GitHubClient {
   };
   readonly fileReads: FakeRepositoryFileRead[] = [];
   readonly artifactDownloads: FakeArtifactDownloadRead[] = [];
+  readonly artifactArchiveDownloads: FakeArtifactArchiveDownloadRead[] = [];
+  readonly workflowRunArtifactReadRequests: FakeWorkflowRunArtifactsRead[] = [];
   readonly workflowRunReadRequests: FakeWorkflowRunRead[] = [];
+  readonly workflowRunForCommitReadRequests: FakeWorkflowRunForCommitRead[] = [];
+  readonly workflowReads: FakeWorkflowRead[] = [];
 
   private readonly authenticatedUser: GitHubUser;
   private readonly users: GitHubUser[];
@@ -213,6 +249,7 @@ export class FakeGitHubClient implements GitHubClient {
   private readonly workflows: FakeWorkflowRecord[];
   private readonly workflowRuns: FakeWorkflowRunRecord[];
   private readonly artifacts: FakeArtifactRecord[];
+  private readonly actionsArtifacts: FakeActionsArtifactRecord[];
   private readonly repositoryFiles: FakeRepositoryFileRecord[];
   private readonly defaultBranchCommitShas = new Map<string, string>();
   private readonly failures: FakeGitHubFailure[];
@@ -237,6 +274,7 @@ export class FakeGitHubClient implements GitHubClient {
     this.workflows = [...(state.workflows ?? [])];
     this.workflowRuns = [...(state.workflowRuns ?? [])];
     this.artifacts = [...(state.artifacts ?? [])];
+    this.actionsArtifacts = [...(state.actionsArtifacts ?? [])];
     this.repositoryFiles = [...(state.repositoryFiles ?? [])];
     this.failures = [...(state.failures ?? [])];
     this.nextRepositoryId = FakeGitHubNumber.FirstGeneratedRepositoryId;
@@ -341,6 +379,26 @@ export class FakeGitHubClient implements GitHubClient {
         input,
         repository
       });
+
+      return repository;
+    });
+  }
+
+  createRepository(input: CreateRepositoryInput): Promise<GitHubRepository> {
+    return this.run("createRepository", () => {
+      const repository = {
+        owner: input.owner,
+        name: input.name,
+        fullName: `${input.owner}/${input.name}`,
+        id: this.consumeRepositoryId(),
+        private: input.private,
+        archived: false,
+        defaultBranch: DEFAULT_BRANCH,
+        htmlUrl: `https://github.com/${input.owner}/${input.name}`
+      };
+
+      this.repositories.push(repository);
+      this.mutations.createdRepositoriesWithoutTemplate.push({ input, repository });
 
       return repository;
     });
@@ -522,15 +580,17 @@ export class FakeGitHubClient implements GitHubClient {
   }
 
   getWorkflow(owner: string, repo: string, workflowPath: string): Promise<GitHubWorkflow | null> {
-    return this.run(
-      "getWorkflow",
-      () =>
+    return this.run("getWorkflow", () => {
+      this.workflowReads.push({ owner, repo, workflowPath });
+
+      return (
         this.workflows.find(
           (record) =>
             workflowKey(record.owner, record.repo, record.workflow.path) ===
             workflowKey(owner, repo, workflowPath)
         )?.workflow ?? null
-    );
+      );
+    });
   }
 
   dispatchWorkflow(input: DispatchWorkflowInput): Promise<void> {
@@ -553,6 +613,56 @@ export class FakeGitHubClient implements GitHubClient {
             input.workflowPath === undefined || record.run.workflowPath === input.workflowPath
         )
         .map((record) => record.run);
+    });
+  }
+
+  listWorkflowRunsForCommit(
+    input: ListWorkflowRunsForCommitInput
+  ): Promise<GitHubWorkflowRunForCommit[]> {
+    return this.run("listWorkflowRunsForCommit", () => {
+      this.workflowRunForCommitReadRequests.push(input);
+
+      return this.workflowRuns
+        .filter(
+          (record) =>
+            repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo) &&
+            record.run.workflowPath === input.workflowPath &&
+            record.run.headSha === input.headSha &&
+            record.run.status === "completed"
+        )
+        .map((record) => ({
+          ...record.run,
+          runAttempt: "runAttempt" in record.run ? Number(record.run.runAttempt) : 1
+        }));
+    });
+  }
+
+  listWorkflowRunArtifacts(input: ListWorkflowRunArtifactsInput): Promise<GitHubActionsArtifact[]> {
+    return this.run("listWorkflowRunArtifacts", () => {
+      this.workflowRunArtifactReadRequests.push(input);
+      return this.actionsArtifacts
+        .filter(
+          (record) =>
+            repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo) &&
+            record.runId === input.runId
+        )
+        .map((record) => record.artifact);
+    });
+  }
+
+  downloadArtifactArchive(input: DownloadArtifactArchiveInput): Promise<Uint8Array> {
+    return this.run("downloadArtifactArchive", () => {
+      this.artifactArchiveDownloads.push(input);
+      const bytes = this.actionsArtifacts.find(
+        (record) =>
+          repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo) &&
+          record.artifact.id === input.artifactId
+      )?.archiveBytes;
+
+      if (bytes === undefined) {
+        throw new GitHubClientError("api_error", "Fake GitHub artifact archive is unavailable.");
+      }
+      return Uint8Array.from(bytes);
     });
   }
 
@@ -627,12 +737,7 @@ export class FakeGitHubClient implements GitHubClient {
     });
   }
 
-  findPullRequest(
-    _owner: string,
-    _repo: string,
-    _head: string,
-    _base: string
-  ): Promise<GitHubPullRequest | null> {
+  findPullRequest(): Promise<GitHubPullRequest | null> {
     return this.run("findPullRequest", () => null);
   }
 

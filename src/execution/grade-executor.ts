@@ -1,4 +1,5 @@
 import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import {
   DiagnosticCode,
   createConfigDiagnostic,
@@ -71,9 +72,6 @@ const createInitialSummary = (targetsSelected: number): GradeExecutionSummary =>
   warnings: EMPTY_COUNT,
   errors: EMPTY_COUNT
 });
-
-const getEffectiveGrading = (config: LoadedGraiderConfig) =>
-  config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
 
 const normalizeGitHubError = (error: unknown, target: GradingRepositoryTarget): Diagnostic =>
   error instanceof GitHubClientError
@@ -181,6 +179,23 @@ const dispatchForTarget = async (
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(configuredWorkflowPath);
 
   try {
+    const configuredRef = input.config.assignment.template?.branch;
+    const repository =
+      configuredRef === undefined
+        ? await runGitHubOperation(input, () =>
+            input.githubClient.getRepository(target.owner, target.repositoryName)
+          )
+        : undefined;
+    const workflowRef = configuredRef ?? repository?.defaultBranch;
+    if (workflowRef === undefined)
+      return recordFailure(
+        state,
+        createConfigDiagnostic(
+          DiagnosticCode.StudentRepositoryMissing,
+          "The manifest-tracked repository could not be observed for workflow dispatch.",
+          { repository: target.fullName }
+        )
+      );
     const workflow = await runGitHubOperation(input, () =>
       input.githubClient.getWorkflow(
         target.owner,
@@ -205,7 +220,7 @@ const dispatchForTarget = async (
         owner: target.owner,
         repo: target.repositoryName,
         workflowPath: workflowDispatchIdentifier,
-        ref: input.config.assignment.template.branch
+        ref: workflowRef
       })
     );
 
@@ -232,7 +247,7 @@ export const getGradeGitHubDiagnostics = (errors: readonly Diagnostic[]): Diagno
   });
 
 export const executeGrade = async (input: GradeExecutionInput): Promise<GradeExecutionResult> => {
-  const grading = getEffectiveGrading(input.config);
+  const grading = getEffectiveAssignmentGrading(input.config);
   const workflowPath = grading.workflow;
   const normalizedTargets = normalizeGradingTargets(
     input.manifest,

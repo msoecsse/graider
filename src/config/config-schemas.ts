@@ -20,14 +20,32 @@ export const ENABLED_STUDENT_PUBLISH_MODES = [
 export const DISABLED_STUDENT_PUBLISH_MODE = "disabled";
 export const TERM_CODE_PATTERN = /^\d{2}s[123]$/;
 
-const gradingSchema = z
+const gradingFields = {
+  mode: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  preset: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  workflow: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  artifact: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+  result_file: z.string().min(MINIMUM_LIST_ITEMS).optional()
+};
+
+const gradingSchema = z.object({ enabled: z.boolean(), ...gradingFields }).strict();
+
+const assignmentGradingSchema = z
   .object({
-    enabled: z.boolean(),
-    mode: z.string().min(MINIMUM_LIST_ITEMS).optional(),
-    preset: z.string().min(MINIMUM_LIST_ITEMS).optional(),
-    workflow: z.string().min(MINIMUM_LIST_ITEMS).optional(),
-    artifact: z.string().min(MINIMUM_LIST_ITEMS).optional(),
-    result_file: z.string().min(MINIMUM_LIST_ITEMS).optional()
+    enabled: z.boolean().optional(),
+    ...gradingFields,
+    required_files: z.array(z.string().trim().min(MINIMUM_LIST_ITEMS)).optional(),
+    rubric: z
+      .array(
+        z
+          .object({
+            id: z.string().trim().min(MINIMUM_LIST_ITEMS),
+            name: z.string().trim().min(MINIMUM_LIST_ITEMS),
+            points: z.number()
+          })
+          .strict()
+      )
+      .optional()
   })
   .strict();
 
@@ -116,7 +134,8 @@ export const rawTermConfigSchema = z
         z
           .object({
             id: z.string().min(MINIMUM_LIST_ITEMS),
-            roster: z.string().min(MINIMUM_LIST_ITEMS).optional()
+            roster: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+            faculty: z.array(z.string().min(MINIMUM_LIST_ITEMS)).optional()
           })
           .strict()
       )
@@ -159,7 +178,7 @@ export const rawAssignmentConfigSchema = z
       })
       .strict()
       .optional(),
-    grading: gradingSchema.optional(),
+    grading: assignmentGradingSchema.optional(),
     repository_mode: z.enum(["individual", "group"]).optional(),
     groups: z
       .object({

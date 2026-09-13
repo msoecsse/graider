@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { Command } from "commander";
+import { getEffectiveAssignmentGrading } from "../../config/effective-grading.js";
 import { loadGraiderConfig } from "../../config/config-loader.js";
-import type { RawCourseConfig } from "../../config/config-models.js";
 import {
   type CommonCommandOptions,
   normalizeCommonCommandOptions,
@@ -42,11 +42,6 @@ interface RawWorkflowGenerateOptions extends RawCommonCommandOptions {
   readonly output?: string;
   readonly force?: boolean;
 }
-
-const getEffectiveGrading = (
-  courseGrading: RawCourseConfig["grading"],
-  assignmentGrading: RawCourseConfig["grading"] | undefined
-): RawCourseConfig["grading"] => assignmentGrading ?? courseGrading;
 
 const formatGeneratedFilePath = (repoRoot: string, absolutePath: string): string => {
   try {
@@ -109,10 +104,7 @@ export const runWorkflowGenerateCommand = ({
     });
   }
 
-  const grading = getEffectiveGrading(
-    configResult.config.course.grading,
-    configResult.config.assignment.grading
-  );
+  const grading = getEffectiveAssignmentGrading(configResult.config);
   const assignmentConfigPath = configResult.config.summary.assignmentConfigPath;
 
   if (!grading.enabled) {

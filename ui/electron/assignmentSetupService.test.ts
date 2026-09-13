@@ -49,6 +49,8 @@ const createRequest = (
   facultyOwner: "professor",
   lmsAssignmentId: "",
   gradingCategory: "labs",
+  requiredFiles: [],
+  rubric: [],
   confirmed: false,
   replaceExisting: false,
   ...overrides
@@ -87,6 +89,53 @@ describe("assignment setup service", () => {
     expect(preview.files[0]?.content).toContain("status: active");
     expect(preview.files[0]?.content).toContain("workflow: .github/workflows/grade.yml");
     expect(preview.files[0]?.content).toContain("points: 100");
+  });
+
+  it("omits grading when no execution grading or grading configuration is requested", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    const preview = previewAssignmentSetup(createRequest(root, { gradingEnabled: false }));
+
+    expect(preview).toMatchObject({ status: "ready" });
+    expect(preview.files[0]?.content).not.toContain("grading:");
+  });
+
+  it("creates ordered configuration-only required files and rubric categories", () => {
+    const root = createRoot();
+    createTerm(root);
+    const preview = previewAssignmentSetup(
+      createRequest(root, {
+        gradingEnabled: false,
+        requiredFiles: [" src/Second.java ", "src/First.java"],
+        rubric: [
+          { id: "design", name: "Design", points: 25 },
+          { id: "correctness", name: "Correctness", points: 40 }
+        ]
+      })
+    );
+
+    expect(preview).toMatchObject({ status: "ready" });
+    expect(preview.files[0]?.content).toContain('    - "src/Second.java"');
+    expect(preview.files[0]?.content).toContain('    - id: "design"');
+    expect(preview.files[0]?.content).not.toContain("enabled:");
+  });
+
+  it("rejects blank required files and invalid rubric categories", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    expect(
+      previewAssignmentSetup(
+        createRequest(root, {
+          requiredFiles: [" "],
+          rubric: [
+            { id: "same", name: "One", points: 1 },
+            { id: "same", name: " ", points: Number.NaN }
+          ]
+        })
+      )
+    ).toMatchObject({ status: "invalid" });
   });
 
   it("allows a blank due date and omits the deadline block", () => {
@@ -191,14 +240,13 @@ describe("assignment setup service", () => {
     );
   });
 
-  it("writes disabled grading in the loader-compatible no-grading shape", () => {
+  it("omits grading when execution grading and configuration are both absent", () => {
     const root = createRoot();
     createTerm(root);
     const preview = previewAssignmentSetup(createRequest(root, { gradingEnabled: false }));
 
     expect(preview.status).toBe("ready");
-    expect(preview.files[0]?.content).toContain("enabled: false\n  mode: no-grading");
-    expect(preview.files[0]?.content).not.toContain("artifact: grading-results");
+    expect(preview.files[0]?.content).not.toContain("grading:");
   });
 
   it("does not write during preview and blocks conflicts without explicit replacement", () => {

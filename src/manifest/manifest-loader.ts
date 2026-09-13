@@ -107,7 +107,7 @@ const repositoryIdentitySchema = z
     id: z.number().optional(),
     html_url: z.string().optional(),
     created_from_template: z.boolean(),
-    template_repository: z.string().min(MINIMUM_ITEMS),
+    template_repository: z.string().min(MINIMUM_ITEMS).optional(),
     template_commit_sha: z.string().optional(),
     student_default_branch_commit_sha: z.string().optional(),
     template_sync_baseline_status: z
@@ -187,7 +187,8 @@ const rawManifestSchema = z
         branch: z.string().min(MINIMUM_ITEMS),
         commit_sha: z.string().optional()
       })
-      .strict(),
+      .strict()
+      .optional(),
     repositories: z.array(repositoryRecordSchema),
     operation_history: z.array(operationRecordSchema),
     warnings: z.array(diagnosticSchema),
@@ -325,14 +326,17 @@ const validateRawManifest = (filePath: string, value: unknown): ManifestLoadResu
       ]);
     const ids = new Set<string>();
     const students = new Set<string>();
-    const duplicate = result.data.targets.find((target) =>
-      ids.has(target.target_id) ? true : (ids.add(target.target_id), false)
-    );
-    const mappingError = result.data.student_mappings.find(
-      (mapping) =>
-        !ids.has(mapping.target_id) ||
-        (students.has(mapping.student_id) ? true : (students.add(mapping.student_id), false))
-    );
+    const duplicate = result.data.targets.find((target) => {
+      if (ids.has(target.target_id)) return true;
+      ids.add(target.target_id);
+      return false;
+    });
+    const mappingError = result.data.student_mappings.find((mapping) => {
+      if (!ids.has(mapping.target_id)) return true;
+      if (students.has(mapping.student_id)) return true;
+      students.add(mapping.student_id);
+      return false;
+    });
     if (duplicate !== undefined || mappingError !== undefined)
       return createFailure([
         createConfigDiagnostic(
@@ -370,7 +374,6 @@ const validateRawManifest = (filePath: string, value: unknown): ManifestLoadResu
         })),
         assignment: { termCode: "", courseCode: "", assignmentSlug: "", assignmentTitle: "" },
         source: { sourceFiles: [], inputFingerprint: "" },
-        template: { repository: "", branch: "" },
         repositories: [],
         operationHistory: [],
         warnings: result.data.diagnostics.map(normalizeDiagnostic),
@@ -417,19 +420,25 @@ const normalizeRepositoryIdentity = (
   ...(repository.id === undefined ? {} : { id: repository.id }),
   ...(repository.html_url === undefined ? {} : { htmlUrl: repository.html_url }),
   createdFromTemplate: repository.created_from_template,
-  templateRepository: repository.template_repository,
+  ...(repository.template_repository === undefined
+    ? {}
+    : { templateRepository: repository.template_repository }),
   ...(repository.template_commit_sha === undefined
     ? {}
     : { templateCommitSha: repository.template_commit_sha }),
   ...(repository.student_default_branch_commit_sha === undefined
     ? {}
     : { studentDefaultBranchCommitSha: repository.student_default_branch_commit_sha }),
-  templateSyncBaselineStatus:
-    repository.template_sync_baseline_status ??
-    (repository.template_commit_sha !== undefined &&
-    repository.student_default_branch_commit_sha !== undefined
-      ? "initialized"
-      : "baseline_required"),
+  ...(repository.created_from_template
+    ? {
+        templateSyncBaselineStatus:
+          repository.template_sync_baseline_status ??
+          (repository.template_commit_sha !== undefined &&
+          repository.student_default_branch_commit_sha !== undefined
+            ? "initialized"
+            : "baseline_required")
+      }
+    : {}),
   ...(repository.created_at === undefined ? {} : { createdAt: repository.created_at }),
   ...(repository.last_observed_at === undefined
     ? {}
@@ -529,13 +538,17 @@ const normalizeManifest = (manifest: RawManifest): Manifest => ({
     sourceFiles: manifest.source.source_files,
     inputFingerprint: manifest.source.input_fingerprint
   },
-  template: {
-    repository: manifest.template.repository,
-    branch: manifest.template.branch,
-    ...(manifest.template.commit_sha === undefined
-      ? {}
-      : { commitSha: manifest.template.commit_sha })
-  },
+  ...(manifest.template === undefined
+    ? {}
+    : {
+        template: {
+          repository: manifest.template.repository,
+          branch: manifest.template.branch,
+          ...(manifest.template.commit_sha === undefined
+            ? {}
+            : { commitSha: manifest.template.commit_sha })
+        }
+      }),
   repositories: sortManifestRepositories(manifest.repositories.map(normalizeRepositoryRecord)),
   operationHistory: manifest.operation_history.map(normalizeOperationRecord),
   warnings: manifest.warnings.map(normalizeDiagnostic),

@@ -1,5 +1,9 @@
 import { useMemo, useState, type ChangeEvent, type ReactElement } from "react";
-import type { CourseSetupPreviewResult, CourseSetupRequest } from "../../electron/ipc";
+import type {
+  CourseSetupPreviewResult,
+  CourseSetupRequest,
+  CourseSetupSection
+} from "../../electron/ipc";
 
 type Step = "Course" | "Term" | "Sections and rosters" | "Preview" | "Save / finish";
 
@@ -33,7 +37,7 @@ const createRequest = (
   studentAccessPagesBaseUrl: string,
   studentAccessPagesBranch: string,
   termCode: string,
-  sectionIds: readonly string[],
+  sections: readonly CourseSetupSection[],
   rosterUploads: readonly { sectionId: string; content: string }[],
   confirmed = false,
   replaceExisting = false
@@ -47,7 +51,7 @@ const createRequest = (
   studentAccessPagesBaseUrl,
   studentAccessPagesBranch,
   termCode,
-  sectionIds,
+  sections,
   rosterUploads,
   confirmed,
   replaceExisting
@@ -71,7 +75,8 @@ export const CourseSetupPage = ({
   const [studentAccessPagesBaseUrl, setStudentAccessPagesBaseUrl] = useState("");
   const [studentAccessPagesBranch, setStudentAccessPagesBranch] = useState("main");
   const [termCode, setTermCode] = useState("");
-  const [sectionIds, setSectionIds] = useState<string[]>([""]);
+  const [sections, setSections] = useState<CourseSetupSection[]>([{ id: "", faculty: [] }]);
+  const [facultyInputs, setFacultyInputs] = useState<string[]>([""]);
   const [rosterUploads, setRosterUploads] = useState<
     readonly { sectionId: string; content: string }[]
   >([]);
@@ -92,7 +97,7 @@ export const CourseSetupPage = ({
         studentAccessPagesBaseUrl,
         studentAccessPagesBranch,
         termCode,
-        sectionIds,
+        sections,
         rosterUploads
       ),
     [
@@ -105,14 +110,32 @@ export const CourseSetupPage = ({
       studentAccessPagesBaseUrl,
       studentAccessPagesBranch,
       termCode,
-      sectionIds,
+      sections,
       rosterUploads
     ]
   );
 
   const updateSection = (index: number, value: string): void => {
-    setSectionIds((currentSections) =>
-      currentSections.map((section, itemIndex) => (itemIndex === index ? value : section))
+    setSections((currentSections) =>
+      currentSections.map((section, itemIndex) =>
+        itemIndex === index ? { ...section, id: value } : section
+      )
+    );
+    setPreview(null);
+  };
+
+  const addFaculty = (index: number): void => {
+    const username = (facultyInputs[index] ?? "").trim();
+    if (username.length === 0) return;
+    setSections((currentSections) =>
+      currentSections.map((section, itemIndex) =>
+        itemIndex === index && !section.faculty.includes(username)
+          ? { ...section, faculty: [...section.faculty, username] }
+          : section
+      )
+    );
+    setFacultyInputs((current) =>
+      current.map((value, itemIndex) => (itemIndex === index ? "" : value))
     );
     setPreview(null);
   };
@@ -311,12 +334,12 @@ export const CourseSetupPage = ({
           </section>
           <section className="detail-panel" hidden={activeStep !== "Sections and rosters"}>
             <h2>Sections and rosters</h2>
-            {sectionIds.map((sectionId, index) => (
+            {sections.map((section, index) => (
               <div className="course-setup__section" key={index}>
                 <label>
                   Section ID
                   <input
-                    value={sectionId}
+                    value={section.id}
                     onChange={(event) => updateSection(index, event.target.value)}
                   />
                 </label>
@@ -326,16 +349,72 @@ export const CourseSetupPage = ({
                     type="file"
                     accept=".csv,text/csv"
                     onChange={(event) => {
-                      void handleRosterUpload(sectionId.trim(), event);
+                      void handleRosterUpload(section.id.trim(), event);
                     }}
                   />
                 </label>
+                <label>
+                  Faculty username
+                  <input
+                    value={facultyInputs[index] ?? ""}
+                    placeholder="jones"
+                    onChange={(event) =>
+                      setFacultyInputs((current) =>
+                        current.map((value, itemIndex) =>
+                          itemIndex === index ? event.target.value : value
+                        )
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => addFaculty(index)}
+                >
+                  Add faculty
+                </button>
+                {section.faculty.length === 0 ? (
+                  <p className="detail-panel__note">No faculty assigned.</p>
+                ) : (
+                  <ul>
+                    {section.faculty.map((username) => (
+                      <li key={username}>
+                        {username}{" "}
+                        <button
+                          className="danger-action"
+                          type="button"
+                          onClick={() => {
+                            setSections((currentSections) =>
+                              currentSections.map((currentSection, itemIndex) =>
+                                itemIndex === index
+                                  ? {
+                                      ...currentSection,
+                                      faculty: currentSection.faculty.filter(
+                                        (value) => value !== username
+                                      )
+                                    }
+                                  : currentSection
+                              )
+                            );
+                            setPreview(null);
+                          }}
+                        >
+                          Remove {username}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             ))}
             <button
               className="secondary-action"
               type="button"
-              onClick={() => setSectionIds((currentSections) => [...currentSections, ""])}
+              onClick={() => {
+                setSections((currentSections) => [...currentSections, { id: "", faculty: [] }]);
+                setFacultyInputs((current) => [...current, ""]);
+              }}
             >
               Add section
             </button>

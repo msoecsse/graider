@@ -28,11 +28,29 @@ STATUS_MAP = {
     "skip": STATUS_SKIPPED,
     "skipped": STATUS_SKIPPED,
 }
+EVIDENCE_OUTCOME_SUCCESS = "success"
+EVIDENCE_OUTCOME_FAILURE = "failure"
+EVIDENCE_OUTCOME_SKIPPED = "skipped"
+EVIDENCE_OUTCOME_MAP = {
+    "success": EVIDENCE_OUTCOME_SUCCESS,
+    "failure": EVIDENCE_OUTCOME_FAILURE,
+    "cancelled": EVIDENCE_OUTCOME_FAILURE,
+    "timed_out": EVIDENCE_OUTCOME_FAILURE,
+    "timed-out": EVIDENCE_OUTCOME_FAILURE,
+    "skipped": EVIDENCE_OUTCOME_SKIPPED,
+}
 
 
 def map_status(value):
     normalized = (value or "").strip().lower()
     return STATUS_MAP.get(normalized, STATUS_FAILED)
+
+
+def map_evidence_outcome(value):
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return EVIDENCE_OUTCOME_SKIPPED
+    return EVIDENCE_OUTCOME_MAP.get(normalized, EVIDENCE_OUTCOME_FAILURE)
 
 
 def decode_classroom_result(encoded):
@@ -106,6 +124,14 @@ def parse_classroom_check(raw_check):
     }
 
 
+def parse_evidence_outcome(raw_outcome):
+    name, separator, outcome = raw_outcome.partition("=")
+    normalized_name = name.strip()
+    if not separator or not normalized_name:
+        raise ValueError("evidence outcome must include a phase")
+    return normalized_name, map_evidence_outcome(outcome)
+
+
 def compute_overall_status(checks):
     if not checks:
         return STATUS_SKIPPED
@@ -131,11 +157,34 @@ def write_result(output_path, checks):
         output_file.write("\\n")
 
 
+def write_evidence_metadata(output_path, submission_commit_sha, workflow_run_id, workflow_run_attempt, outcomes):
+    parent = os.path.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    metadata = {
+        "schemaVersion": SCHEMA_VERSION,
+        "submissionCommitSha": submission_commit_sha,
+        "workflowRunId": workflow_run_id,
+        "workflowRunAttempt": workflow_run_attempt,
+        "compile": {"outcome": outcomes.get("compile", EVIDENCE_OUTCOME_SKIPPED)},
+        "junit": {"outcome": outcomes.get("junit", EVIDENCE_OUTCOME_SKIPPED)},
+        "checkstyle": {"outcome": outcomes.get("checkstyle", EVIDENCE_OUTCOME_SKIPPED)},
+    }
+    with open(output_path, "w", encoding="utf-8") as output_file:
+        json.dump(metadata, output_file, indent=2)
+        output_file.write("\\n")
+
+
 def main(argv):
     parser = argparse.ArgumentParser(description="Write Graider grading result JSON.")
     parser.add_argument("--output", required=True)
     parser.add_argument("--check", action="append", default=[])
     parser.add_argument("--classroom-check", action="append", default=[])
+    parser.add_argument("--evidence-metadata-output")
+    parser.add_argument("--evidence-outcome", action="append", default=[])
+    parser.add_argument("--submission-commit-sha", default="")
+    parser.add_argument("--workflow-run-id", default="")
+    parser.add_argument("--workflow-run-attempt", default="")
     args = parser.parse_args(argv)
 
     try:
@@ -144,6 +193,14 @@ def main(argv):
             *[parse_classroom_check(raw_check) for raw_check in args.classroom_check],
         ]
         write_result(args.output, checks)
+        if args.evidence_metadata_output:
+            write_evidence_metadata(
+                args.evidence_metadata_output,
+                args.submission_commit_sha,
+                args.workflow_run_id,
+                args.workflow_run_attempt,
+                dict(parse_evidence_outcome(raw_outcome) for raw_outcome in args.evidence_outcome),
+            )
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2

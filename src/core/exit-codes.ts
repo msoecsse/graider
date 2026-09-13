@@ -20,7 +20,8 @@ export interface ExitCodeInput {
 const AUTHORIZATION_ERROR_CODES = new Set<string>([
   DiagnosticCode.GithubAuthMissing,
   DiagnosticCode.GithubAuthFailed,
-  DiagnosticCode.GithubPermissionDenied
+  DiagnosticCode.GithubPermissionDenied,
+  DiagnosticCode.WorkflowDeploymentForbidden
 ]);
 
 const CONFIGURATION_ERROR_CODES = new Set<string>([

@@ -2,10 +2,13 @@ import type {
   AddCollaboratorInput,
   AddTeamPermissionInput,
   CreateFromTemplateInput,
+  CreateRepositoryInput,
   DispatchWorkflowInput,
+  DownloadArtifactArchiveInput,
   DownloadArtifactInput,
   DownloadedArtifact,
   GitHubActionsState,
+  GitHubActionsArtifact,
   GitHubCollaboratorResult,
   GitHubFileWriteResult,
   GitHubPermissionState,
@@ -16,6 +19,9 @@ import type {
   GitHubUser,
   GitHubWorkflow,
   GitHubWorkflowRun,
+  GitHubWorkflowRunForCommit,
+  ListWorkflowRunArtifactsInput,
+  ListWorkflowRunsForCommitInput,
   ListWorkflowRunsInput,
   RemoveCollaboratorInput,
   WriteRepositoryFileInput,
@@ -32,6 +38,8 @@ export interface GitHubClient {
   getTemplateRepository(owner: string, repo: string): Promise<GitHubTemplateRepository | null>;
 
   createRepositoryFromTemplate(input: CreateFromTemplateInput): Promise<GitHubRepository>;
+
+  createRepository(input: CreateRepositoryInput): Promise<GitHubRepository>;
 
   getUser(username: string): Promise<GitHubUser | null>;
 
@@ -67,6 +75,14 @@ export interface GitHubClient {
   dispatchWorkflow(input: DispatchWorkflowInput): Promise<void>;
 
   listWorkflowRuns(input: ListWorkflowRunsInput): Promise<GitHubWorkflowRun[]>;
+
+  listWorkflowRunsForCommit(
+    input: ListWorkflowRunsForCommitInput
+  ): Promise<GitHubWorkflowRunForCommit[]>;
+
+  listWorkflowRunArtifacts(input: ListWorkflowRunArtifactsInput): Promise<GitHubActionsArtifact[]>;
+
+  downloadArtifactArchive(input: DownloadArtifactArchiveInput): Promise<Uint8Array>;
 
   downloadArtifact(input: DownloadArtifactInput): Promise<DownloadedArtifact | null>;
 

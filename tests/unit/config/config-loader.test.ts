@@ -43,6 +43,11 @@ const writeCourseConfig = (cwd: string, transform: (content: string) => string):
   fs.writeFileSync(coursePath, transform(fs.readFileSync(coursePath, "utf8")));
 };
 
+const writeTermConfig = (cwd: string, transform: (content: string) => string): void => {
+  const termPath = path.join(cwd, "terms/27s1/term.yml");
+  fs.writeFileSync(termPath, transform(fs.readFileSync(termPath, "utf8")), "utf8");
+};
+
 const replaceCourseGrading = (cwd: string, grading: string): void => {
   writeCourseConfig(cwd, (content) => content.replace(COURSE_GRADING_BLOCK, grading));
 };
@@ -151,6 +156,7 @@ describe("config loading and validation", () => {
 
     expect(result.config.summary.gradingEnabled).toBe(false);
     expect(result.config.summary.gradingSource).toBe("assignment");
+    expect(result.config.assignment.grading).toEqual({ enabled: false });
   });
 
   it("TC-CONFIG-009 partial grading override fails", () => {
@@ -169,12 +175,15 @@ describe("config loading and validation", () => {
 
     const result = expectTempSuccess(cwd);
     expect(result.config.summary).toMatchObject({ gradingEnabled: false, gradingSource: "none" });
+    expect(result.config.course.grading).toBeUndefined();
+    expect(result.config.assignment.grading).toBeUndefined();
+    expect(result.config.assignment.template).toBeUndefined();
   });
 
   it("accepts an omitted Graders team without inventing one", () => {
     const cwd = copyValidFixtureToTemp();
     writeCourseConfig(cwd, (content) =>
-      content.replace(/^  grader_team: .*\n  grader_permission: .*\n/mu, "")
+      content.replace(/^ {2}grader_team: .*\n {2}grader_permission: .*\n/mu, "")
     );
 
     const result = expectTempSuccess(cwd);
@@ -184,6 +193,70 @@ describe("config loading and validation", () => {
 
   it("TC-CONFIG-010 missing required term.yml field fails", () => {
     expectFailureCode("missing-term-field", "missing_required_field");
+  });
+
+  it("parses a single MSOE faculty username assigned to a section", () => {
+    const cwd = copyValidFixtureToTemp();
+    writeTermConfig(cwd, (content) =>
+      content.replace("    roster:", "    faculty:\n      - jones\n    roster:")
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.term.sections[0]?.faculty).toEqual(["jones"]);
+  });
+
+  it("parses multiple faculty usernames assigned to a section", () => {
+    const cwd = copyValidFixtureToTemp();
+    writeTermConfig(cwd, (content) =>
+      content.replace("    roster:", "    faculty:\n      - jones\n      - smith\n    roster:")
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.term.sections[0]?.faculty).toEqual(["jones", "smith"]);
+  });
+
+  it("allows the same faculty username on multiple sections", () => {
+    const cwd = copyValidFixtureToTemp();
+    writeTermConfig(
+      cwd,
+      (content) =>
+        `${content}\n  - id: "002"\n    faculty:\n      - jones\n    roster: rosters/section-002.csv\n`
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.term.sections.map((section) => section.faculty)).toEqual([
+      undefined,
+      ["jones"]
+    ]);
+  });
+
+  it("keeps legacy sections without faculty valid and unassigned", () => {
+    const result = loadFixture("valid-course");
+
+    expect(result.status).toBe("success");
+    if (result.status === "failure") {
+      throw new Error("Expected legacy term fixture to pass.");
+    }
+    expect(result.config.term.sections[0]?.faculty).toBeUndefined();
+  });
+
+  it("loads an empty canonical faculty array after all assignments are removed", () => {
+    const cwd = copyValidFixtureToTemp();
+    writeTermConfig(cwd, (content) =>
+      content.replace("    roster:", "    faculty: []\n    roster:")
+    );
+
+    const result = expectTempSuccess(cwd);
+    expect(result.config.term.sections[0]?.faculty).toEqual([]);
+  });
+
+  it("rejects blank faculty usernames", () => {
+    const cwd = copyValidFixtureToTemp();
+    writeTermConfig(cwd, (content) =>
+      content.replace("    roster:", '    faculty:\n      - ""\n    roster:')
+    );
+
+    expectTempFailureCode(cwd, "missing_required_field");
   });
 
   it("TC-CONFIG-011 missing required assignment.yml field fails", () => {
@@ -208,7 +281,7 @@ describe("config loading and validation", () => {
     const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
     fs.writeFileSync(
       assignmentPath,
-      fs.readFileSync(assignmentPath, "utf8").replace(/^  points: .*\n/mu, ""),
+      fs.readFileSync(assignmentPath, "utf8").replace(/^ {2}points: .*\n/mu, ""),
       "utf8"
     );
 
@@ -223,8 +296,8 @@ describe("config loading and validation", () => {
       assignmentPath,
       fs
         .readFileSync(assignmentPath, "utf8")
-        .replace(/^  faculty_owner: .*\n/mu, "")
-        .replace(/^  grading_category: .*\n/mu, ""),
+        .replace(/^ {2}faculty_owner: .*\n/mu, "")
+        .replace(/^ {2}grading_category: .*\n/mu, ""),
       "utf8"
     );
 
@@ -238,7 +311,7 @@ describe("config loading and validation", () => {
     const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
     fs.writeFileSync(
       assignmentPath,
-      fs.readFileSync(assignmentPath, "utf8").replace(/^  lms_assignment_id: .*\n/mu, ""),
+      fs.readFileSync(assignmentPath, "utf8").replace(/^ {2}lms_assignment_id: .*\n/mu, ""),
       "utf8"
     );
 

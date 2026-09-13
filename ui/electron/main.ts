@@ -6,6 +6,62 @@ import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
 import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
+import { prepareGradingWorkspace } from "./gradingWorkspaceService.js";
+import { loadGradingStudentSource } from "./gradingStudentSourceService.js";
+import {
+  clearGradingStudentViewState,
+  loadGradingStudentViewState,
+  saveGradingStudentViewState
+} from "./gradingStudentViewStateService.js";
+import { loadGradingStudentSnapshot } from "./gradingStudentSnapshotService.js";
+import { loadGradingStudentEvidence } from "./gradingStudentEvidenceService.js";
+import { loadGradingStudentCommitHistory } from "./gradingStudentCommitHistoryService.js";
+import { markGradingStudentComplete } from "./gradingStudentCompleteService.js";
+import { publishGradingStudentReport } from "./gradingStudentReportPublicationService.js";
+import { bulkPublishGradingStudentReports } from "./gradingBulkReportPublicationService.js";
+import { isBulkPublishGradingStudentReportsRequest } from "./gradingBulkReportPublicationRequestValidation.js";
+import {
+  addGradingStudentComment,
+  deleteGradingStudentComment,
+  editGradingStudentComment
+} from "./gradingStudentCommentService.js";
+import {
+  addGradingStudentManualAdjustment,
+  deleteGradingStudentManualAdjustment,
+  editGradingStudentManualAdjustment
+} from "./gradingStudentManualAdjustmentService.js";
+import {
+  createGradingLibraryComment,
+  deleteGradingLibraryComment,
+  editGradingLibraryComment,
+  loadGradingCommentLibrary
+} from "./gradingCommentLibraryService.js";
+import {
+  isCreateGradingLibraryCommentRequest,
+  isDeleteGradingLibraryCommentRequest,
+  isEditGradingLibraryCommentRequest,
+  isLoadGradingCommentLibraryRequest
+} from "./gradingCommentLibraryRequestValidation.js";
+import {
+  isAddGradingStudentCommentRequest,
+  isAddGradingStudentManualAdjustmentRequest,
+  isDeleteGradingStudentCommentRequest,
+  isDeleteGradingStudentManualAdjustmentRequest,
+  isEditGradingStudentCommentRequest,
+  isEditGradingStudentManualAdjustmentRequest,
+  isGradingStudentViewStateRequest,
+  isLoadGradingStudentSourceRequest,
+  isLoadGradingStudentCommitHistoryRequest,
+  isLoadGradingStudentEvidenceRequest,
+  isMarkGradingStudentCompleteRequest,
+  isPublishGradingStudentReportRequest,
+  isSaveGradingStudentViewStateRequest
+} from "./gradingStudentViewStateRequestValidation.js";
+import { isPrepareGradingWorkspaceRequest } from "./gradingWorkspaceRequestValidation.js";
+import {
+  getLocalRepositoryLocatorPath,
+  recordSuccessfulDownloadLocators
+} from "./localRepositoryLocator.js";
 import { registerAssignmentTemplateSyncIpc } from "./assignmentTemplateSyncIpc.js";
 import { assignmentTemplateSyncService } from "./assignmentTemplateSyncService.js";
 import { saveStudentAccessPagesConfig } from "./studentAccessPagesConfigService.js";
@@ -13,6 +69,11 @@ import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishSer
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import { getFacultyReport } from "./facultyReportRunner.js";
 import { previewCourseSetup, saveCourseSetup } from "./courseSetupService.js";
+import {
+  getLocalSettingsPath,
+  loadLocalSettings,
+  saveCurrentFacultyMsoeUsername
+} from "./localSettings.js";
 import {
   loadAssignmentSetupTerms,
   previewAssignmentSetup,
@@ -156,7 +217,6 @@ const isAssignmentDetailRequest = (value: unknown): value is AssignmentDetailReq
     typeof request.assignmentFile === "string"
   );
 };
-
 const isAssignmentApplyPreviewRequest = (value: unknown): value is AssignmentApplyPreviewRequest =>
   isAssignmentDetailRequest(value);
 
@@ -202,8 +262,18 @@ const isCourseSetupRequest = (value: unknown): value is CourseSetupRequest => {
     typeof request.githubOrganization === "string" &&
     (request.gradingEnabled === undefined || typeof request.gradingEnabled === "boolean") &&
     typeof request.termCode === "string" &&
-    Array.isArray(request.sectionIds) &&
-    request.sectionIds.every((sectionId) => typeof sectionId === "string") &&
+    Array.isArray(request.sections) &&
+    request.sections.every(
+      (section) =>
+        typeof section === "object" &&
+        section !== null &&
+        !Array.isArray(section) &&
+        typeof (section as Record<string, unknown>).id === "string" &&
+        Array.isArray((section as Record<string, unknown>).faculty) &&
+        ((section as Record<string, unknown>).faculty as unknown[]).every(
+          (username) => typeof username === "string"
+        )
+    ) &&
     Array.isArray(rosterUploads) &&
     rosterUploads.every(
       (upload) =>
@@ -241,6 +311,17 @@ const isAssignmentSetupRequest = (value: unknown): value is AssignmentSetupReque
     typeof request.facultyOwner === "string" &&
     typeof request.lmsAssignmentId === "string" &&
     typeof request.gradingCategory === "string" &&
+    Array.isArray(request.requiredFiles) &&
+    request.requiredFiles.every((file) => typeof file === "string") &&
+    Array.isArray(request.rubric) &&
+    request.rubric.every(
+      (category) =>
+        typeof category === "object" &&
+        category !== null &&
+        typeof (category as Record<string, unknown>).id === "string" &&
+        typeof (category as Record<string, unknown>).name === "string" &&
+        typeof (category as Record<string, unknown>).points === "number"
+    ) &&
     typeof request.confirmed === "boolean" &&
     typeof request.replaceExisting === "boolean"
   );
@@ -264,6 +345,19 @@ const isAssignmentEditRequest = (value: unknown): value is AssignmentEditRequest
     typeof request.facultyOwner === "string" &&
     typeof request.lmsAssignmentId === "string" &&
     typeof request.gradingCategory === "string" &&
+    (typeof request.gradingMode === "string" || request.gradingMode === null) &&
+    (typeof request.gradingPreset === "string" || request.gradingPreset === null) &&
+    Array.isArray(request.requiredFiles) &&
+    request.requiredFiles.every((file) => typeof file === "string") &&
+    Array.isArray(request.rubric) &&
+    request.rubric.every(
+      (category) =>
+        typeof category === "object" &&
+        category !== null &&
+        typeof (category as Record<string, unknown>).id === "string" &&
+        typeof (category as Record<string, unknown>).name === "string" &&
+        typeof (category as Record<string, unknown>).points === "number"
+    ) &&
     typeof request.originalContent === "string" &&
     typeof request.confirmed === "boolean"
   );
@@ -370,6 +464,13 @@ export const registerIpcHandlers = (): void => {
   };
 
   ipcMain.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
+  ipcMain.handle(IPC_CHANNELS.getLocalSettings, () =>
+    loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+  );
+  ipcMain.handle(IPC_CHANNELS.saveLocalSettings, (_event, username: unknown) => {
+    if (typeof username !== "string") throw new Error("Faculty MSOE username is required.");
+    return saveCurrentFacultyMsoeUsername(getLocalSettingsPath(app.getPath("userData")), username);
+  });
   ipcMain.handle(IPC_CHANNELS.getCoursePublishStatus, async (_event, courseFolderId: unknown) => {
     const courseFolderPath = getRegisteredCourseFolderPath(courseFolderId);
     if (courseFolderPath === null) throw new Error("A registered course folder is required.");
@@ -807,6 +908,213 @@ export const registerIpcHandlers = (): void => {
       env: process.env
     });
   });
+  ipcMain.handle(IPC_CHANNELS.prepareGradingWorkspace, (_event, request: unknown) => {
+    if (!isPrepareGradingWorkspaceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder is required for grading preparation.");
+    return prepareGradingWorkspace({
+      courseFolderPath: request.courseFolderPath,
+      termCode: request.termCode,
+      assignmentSlug: request.assignmentSlug,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.loadGradingStudentSource, (_event, request: unknown) => {
+    if (!isLoadGradingStudentSourceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder is required for grading source loading.");
+    return loadGradingStudentSource({
+      courseFolderId: request.courseFolderId,
+      courseFolderPath: request.courseFolderPath,
+      termCode: request.termCode,
+      assignmentSlug: request.assignmentSlug,
+      studentId: request.studentId,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.loadGradingStudentViewState, (_event, request: unknown) => {
+    if (!isGradingStudentViewStateRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder is required for grading view-state loading.");
+    return loadGradingStudentViewState({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.saveGradingStudentViewState, (_event, request: unknown) => {
+    if (
+      !isSaveGradingStudentViewStateRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder is required for grading view-state saving.");
+    return saveGradingStudentViewState({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.clearGradingStudentViewState, (_event, request: unknown) => {
+    if (!isGradingStudentViewStateRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder is required for grading view-state clearing.");
+    return clearGradingStudentViewState({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.loadGradingStudentSnapshot, (_event, request: unknown) => {
+    if (!isGradingStudentViewStateRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder is required for grading snapshot loading.");
+    return loadGradingStudentSnapshot({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.loadGradingStudentEvidence, (_event, request: unknown) => {
+    if (
+      !isLoadGradingStudentEvidenceRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder is required for grading evidence loading.");
+    return loadGradingStudentEvidence({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.loadGradingStudentCommitHistory, (_event, request: unknown) => {
+    if (
+      !isLoadGradingStudentCommitHistoryRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder is required for grading commit-history loading.");
+    return loadGradingStudentCommitHistory({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.markGradingStudentComplete, (_event, request: unknown) => {
+    if (
+      !isMarkGradingStudentCompleteRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder is required for marking grading complete.");
+    return markGradingStudentComplete({ ...request, userDataPath: app.getPath("userData") });
+  });
+  ipcMain.handle(IPC_CHANNELS.publishGradingStudentReport, (_event, request: unknown) => {
+    if (
+      !isPublishGradingStudentReportRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder is required for publishing a grading report.");
+    return publishGradingStudentReport({ ...request, userDataPath: app.getPath("userData") });
+  });
+  ipcMain.handle(IPC_CHANNELS.bulkPublishGradingStudentReports, (_event, request: unknown) => {
+    if (
+      !isBulkPublishGradingStudentReportsRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder is required for publishing grading reports.");
+    return bulkPublishGradingStudentReports({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.addGradingStudentComment, (_event, request: unknown) => {
+    if (!isAddGradingStudentCommentRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder and a valid grading comment are required.");
+    return addGradingStudentComment({ ...request, userDataPath: app.getPath("userData") });
+  });
+  ipcMain.handle(IPC_CHANNELS.editGradingStudentComment, (_event, request: unknown) => {
+    if (!isEditGradingStudentCommentRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder and a valid grading comment are required.");
+    return editGradingStudentComment({ ...request, userDataPath: app.getPath("userData") });
+  });
+  ipcMain.handle(IPC_CHANNELS.deleteGradingStudentComment, (_event, request: unknown) => {
+    if (
+      !isDeleteGradingStudentCommentRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder and a valid grading comment are required.");
+    return deleteGradingStudentComment({ ...request, userDataPath: app.getPath("userData") });
+  });
+  ipcMain.handle(IPC_CHANNELS.addGradingStudentManualAdjustment, (_event, request: unknown) => {
+    if (
+      !isAddGradingStudentManualAdjustmentRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder and a valid manual adjustment are required.");
+    return addGradingStudentManualAdjustment({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.editGradingStudentManualAdjustment, (_event, request: unknown) => {
+    if (
+      !isEditGradingStudentManualAdjustmentRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder and a valid manual adjustment are required.");
+    return editGradingStudentManualAdjustment({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.deleteGradingStudentManualAdjustment, (_event, request: unknown) => {
+    if (
+      !isDeleteGradingStudentManualAdjustmentRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder and a valid manual adjustment are required.");
+    return deleteGradingStudentManualAdjustment({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.loadGradingCommentLibrary, (_event, request: unknown) => {
+    if (!isLoadGradingCommentLibraryRequest(request))
+      throw new Error(
+        "A registered course and valid term are required for comment-library loading."
+      );
+    const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
+    if (courseFolderPath === null) throw new Error("A registered course folder is required.");
+    return loadGradingCommentLibrary({
+      courseFolderPath,
+      termCode: request.termCode,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.createGradingLibraryComment, (_event, request: unknown) => {
+    if (!isCreateGradingLibraryCommentRequest(request))
+      throw new Error("A registered course and valid reusable comment are required.");
+    const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
+    if (courseFolderPath === null) throw new Error("A registered course folder is required.");
+    return createGradingLibraryComment({
+      courseFolderPath,
+      termCode: request.termCode,
+      userDataPath: app.getPath("userData"),
+      comment: request.comment
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.editGradingLibraryComment, (_event, request: unknown) => {
+    if (!isEditGradingLibraryCommentRequest(request))
+      throw new Error("A registered course and valid reusable comment are required.");
+    const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
+    if (courseFolderPath === null) throw new Error("A registered course folder is required.");
+    return editGradingLibraryComment({
+      courseFolderPath,
+      termCode: request.termCode,
+      userDataPath: app.getPath("userData"),
+      commentId: request.commentId,
+      replacement: request.replacement
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.deleteGradingLibraryComment, (_event, request: unknown) => {
+    if (!isDeleteGradingLibraryCommentRequest(request))
+      throw new Error("A registered course and reusable comment ID are required.");
+    const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
+    if (courseFolderPath === null) throw new Error("A registered course folder is required.");
+    return deleteGradingLibraryComment({
+      courseFolderPath,
+      termCode: request.termCode,
+      userDataPath: app.getPath("userData"),
+      commentId: request.commentId
+    });
+  });
 
   registerAssignmentTemplateSyncIpc(
     ipcMain,
@@ -888,7 +1196,25 @@ export const registerIpcHandlers = (): void => {
     });
     if (result.error !== null) throw new Error("Repository download command could not be started.");
     try {
-      return JSON.parse(result.stdout) as unknown;
+      const parsed = JSON.parse(result.stdout) as {
+        targets?: { status?: string; localPath?: string; studentIds?: string[] }[];
+      };
+      const match = request.assignmentFile
+        .replaceAll("\\", "/")
+        .match(
+          /^terms\/(\d{2}s[123])\/assignments\/([A-Za-z0-9][A-Za-z0-9._-]*)\/assignment\.yml$/u
+        );
+      if (match !== null)
+        recordSuccessfulDownloadLocators(
+          getLocalRepositoryLocatorPath(app.getPath("userData")),
+          {
+            courseFolderId: request.courseFolderId,
+            termCode: match[1] ?? "",
+            assignmentSlug: match[2] ?? ""
+          },
+          parsed.targets ?? []
+        );
+      return parsed as unknown;
     } catch {
       throw new Error("Repository download returned invalid JSON.");
     }

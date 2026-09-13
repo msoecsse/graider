@@ -12,12 +12,12 @@ All YAML schemas are strict, require `schema_version: 1`, and are loaded by
 `src/config/load-*-config.ts` before `src/config/config-validation.ts` applies
 semantic checks.
 
-| File             | Current required shape and relevant validation                                                                                                                                                                                                                                                                                                                    |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `course.yml`     | `course.code`, `course.title`, `course.repository`; GitHub organization, private visibility, repository-name pattern, faculty/grader teams and permissions; `defaults.timezone`, `defaults.assignment_type`; and `reports.formats`. `grading` is optional; when present, its validation remains strict. |
-| `term.yml`       | `term.code`, `academic_year`, `semester` (`1`, `2`, or `3`), `display_name`; at least one section with `id` and an optional `roster` reference. The code must be `YYsN` and equal the term directory name. Roster paths are relative to the term directory. |
+| File             | Current required shape and relevant validation                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `course.yml`     | `course.code`, `course.title`, `course.repository`; GitHub organization, private visibility, repository-name pattern, faculty/grader teams and permissions; `defaults.timezone`, `defaults.assignment_type`; and `reports.formats`. `grading` is optional; when present, its validation remains strict.                                                                                        |
+| `term.yml`       | `term.code`, `academic_year`, `semester` (`1`, `2`, or `3`), `display_name`; at least one section with `id` and an optional `roster` reference. The code must be `YYsN` and equal the term directory name. Roster paths are relative to the term directory.                                                                                                                                    |
 | `assignment.yml` | Assignment `slug`, `title`, `type`, `status`; optional template block with `repository` and `branch` when present; non-empty sections; optional deadline, metadata block, and grading override. Metadata fields are individually optional (`faculty_owner`, `grading_category`, nullable `lms_assignment_id`, and nullable `points`). The slug must equal its containing assignment directory. |
-| roster CSV       | Current parser requires `student_id,github_username,section,status`, validates values/status/section/GitHub username, normalizes ID, GitHub username, and status to lowercase, and rejects duplicate IDs/usernames across selected sections.                                                                                                                      |
+| roster CSV       | Current parser requires `student_id,github_username,section,status`, validates values/status/section/GitHub username, normalizes ID, GitHub username, and status to lowercase, and rejects duplicate IDs/usernames across selected sections.                                                                                                                                                   |
 
 `loadGraiderConfig` derives term and assignment identity from
 `terms/<term-code>/assignments/<assignment-slug>/assignment.yml`; callers must
@@ -61,14 +61,14 @@ reused for creation because it rejects roots without `course.yml`.
 
 Emit these defaults in the first implementation:
 
-| Field                             | Generated/default value                                                                                                                                                                                                |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `course.repository`               | Course code; show it in preview.                                                                                                                                                                                       |
-| GitHub visibility and permissions | `private`, `push`, `admin`, `maintain`.                                                                                                                                                                                |
-| GitHub naming/teams               | `{term}-{course}-{assignment}-{github_username}`, required `faculty`, optional `graders`.                                                                                                                              |
-| `defaults.assignment_type`        | `individual`.                                                                                                                                                                                                          |
-| course grading                    | Optional. The setup checkbox writes the enabled custom-workflow block only when selected.                                                                                                                               |
-| reports                           | `formats: [markdown, csv, json]`; omit `student_publish`.                                                                                                                                                              |
+| Field                             | Generated/default value                                                                                                                                         |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `course.repository`               | Course code; show it in preview.                                                                                                                                |
+| GitHub visibility and permissions | `private`, `push`, `admin`, `maintain`.                                                                                                                         |
+| GitHub naming/teams               | `{term}-{course}-{assignment}-{github_username}`, required `faculty`, optional `graders`.                                                                       |
+| `defaults.assignment_type`        | `individual`.                                                                                                                                                   |
+| course grading                    | Optional. The setup checkbox writes the enabled custom-workflow block only when selected.                                                                       |
+| reports                           | `formats: [markdown, csv, json]`; omit `student_publish`.                                                                                                       |
 | roster absent                     | Include the section in `term.yml` without a roster reference and do not generate an empty roster CSV. Add/importing a roster writes both the CSV and reference. |
 
 Slice B uses `America/Chicago` for `defaults.timezone`, matching the Course
@@ -171,7 +171,7 @@ student publish, or workflow generation as post-save work.
 
 Add narrow typed APIs rather than `readFile`, `writeFile`, or `runCommand`:
 
-```ts
+```text
 previewCourseSetup(request) -> ConfigWizardPreviewResult
 saveCourseSetup({ previewToken, conflictResolutions }) -> ConfigWizardSaveResult
 previewAssignmentSetup(request) -> ConfigWizardPreviewResult

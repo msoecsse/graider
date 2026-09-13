@@ -1,4 +1,9 @@
 :root {
+  --text-muted: #57606a;
+  --accent-color: #1a7f37;
+  --panel-background: #f6f8fa;
+  --text-color: #24292f;
+  --border-color: #d0d7de;
   color: #24292f;
   background: #ffffff;
   font-family:
@@ -1114,6 +1119,23 @@ h1 {
   margin-bottom: 0;
 }
 
+.muted-copy {
+  color: #57606a;
+  margin-top: -6px;
+}
+
+.inline-form-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.inline-form-row input {
+  flex: 1 1 140px;
+}
+
 .student-access-pages-settings {
   display: grid;
   gap: 16px;
@@ -1652,6 +1674,432 @@ h1 {
 
   .detail-item,
   .diagnostic-context div {
+    grid-template-columns: 1fr;
+  }
+}
+.grading-workspace__grid {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1fr) minmax(20rem, 2fr) minmax(14rem, 1fr);
+  gap: 1rem;
+}
+.grading-workspace__grid > aside,
+.grading-workspace__grid > section {
+  padding: 1rem;
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 0.5rem;
+}
+.grading-workspace__source-pane {
+  min-width: 0;
+}
+
+.grading-workspace__grading-pane {
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+}
+
+.grading-workspace__grading-pane section {
+  border-top: 1px solid #d8dee4;
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
+.grading-workspace__grading-pane h3 {
+  margin: 0 0 8px;
+}
+
+.grading-publication-action {
+  margin-top: 8px;
+}
+
+.grading-publication-message {
+  border-left: 4px solid #1f883d;
+  margin-top: 10px;
+  padding-left: 10px;
+}
+
+.grading-publication-message--warning,
+.grading-publication-message--error {
+  border-left-color: #bf8700;
+}
+
+.grading-publication-message p,
+.grading-publication-message ul {
+  margin: 4px 0;
+}
+
+.grading-bulk-publication {
+  border-top: 1px solid #d8dee4;
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
+.grading-bulk-publication h3,
+.grading-bulk-publication p {
+  margin: 0 0 8px;
+}
+
+.grading-bulk-publication__selection {
+  display: grid;
+  gap: 6px;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.grading-bulk-publication__selection label {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.grading-bulk-publication__results ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.grading-score-total {
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.grading-score-categories,
+.grading-comment-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.grading-score-categories li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.grading-comment-list li {
+  border: 1px solid #d8dee4;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.grading-comment-list p {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.grading-applied-comment__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.grading-delete-comment-confirmation {
+  background: #fff8c5;
+  border: 1px solid #d4a72c;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.grading-delete-comment-confirmation h4,
+.grading-delete-comment-confirmation p {
+  margin: 0;
+}
+
+.grading-comment-library > label {
+  display: grid;
+  gap: 4px;
+}
+
+.grading-comment-library input[type="search"] {
+  min-width: 0;
+  width: 100%;
+}
+
+.grading-comment-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 10px 0;
+}
+
+.grading-comment-tags label {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.grading-panel-message {
+  border-left: 4px solid #bf8700;
+  padding-left: 10px;
+}
+
+.grading-evidence {
+  display: grid;
+  gap: 10px;
+}
+
+.grading-evidence__heading {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.grading-evidence__heading button {
+  display: inline-block;
+  font-size: 0.78rem;
+  margin: 0;
+  width: auto;
+}
+
+.grading-evidence__student,
+.grading-evidence__phase h4,
+.grading-evidence__phase p,
+.grading-evidence__findings p {
+  margin: 0;
+}
+
+.grading-evidence__student {
+  color: #57606a;
+  font-size: 0.8rem;
+}
+
+.grading-evidence__outcomes,
+.grading-evidence__counts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.grading-evidence__outcomes div,
+.grading-evidence__counts div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.grading-evidence__outcomes dt,
+.grading-evidence__counts dt {
+  font-weight: 700;
+}
+
+.grading-evidence__outcomes dd,
+.grading-evidence__counts dd {
+  margin: 0;
+}
+
+.grading-evidence__counts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.grading-evidence__counts div {
+  border: 1px solid #d8dee4;
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.grading-evidence__phase {
+  display: grid;
+  gap: 8px;
+}
+
+.grading-evidence__findings {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.grading-evidence__findings li {
+  border: 1px solid #d8dee4;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  padding: 6px;
+}
+
+.grading-evidence__findings summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.grading-evidence__details {
+  background: #f6f8fa;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 6px;
+  white-space: pre-wrap;
+}
+
+.grading-evidence__message {
+  border-left: 4px solid #8c959f;
+  margin: 0;
+  padding-left: 10px;
+}
+
+.grading-evidence__message--warning {
+  border-left-color: #bf8700;
+}
+
+.grading-commit-history {
+  display: grid;
+  gap: 8px;
+}
+
+.grading-commit-history h3,
+.grading-commit-history p {
+  margin: 0;
+}
+
+.grading-commit-history__student,
+.grading-commit-history__metadata {
+  color: #57606a;
+  font-size: 0.8rem;
+}
+
+.grading-commit-history__list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.grading-commit-history__list li {
+  border-bottom: 1px solid #d8dee4;
+  display: grid;
+  gap: 3px;
+  overflow-wrap: anywhere;
+  padding-bottom: 7px;
+}
+
+.grading-commit-history__list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.grading-commit-history__message-text {
+  font-weight: 600;
+}
+
+.grading-commit-history__message {
+  border-left: 4px solid #8c959f;
+  padding-left: 10px;
+}
+
+.grading-commit-history__message--warning {
+  border-left-color: #bf8700;
+}
+
+.grading-apply-comment {
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px;
+}
+
+.grading-apply-comment h4,
+.grading-apply-comment p {
+  margin: 0;
+}
+
+.grading-apply-comment > label {
+  display: grid;
+  gap: 4px;
+}
+
+.grading-apply-comment textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
+.grading-apply-comment fieldset {
+  display: flex;
+  gap: 12px;
+}
+
+.grading-apply-comment fieldset label {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.grading-apply-comment__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.grading-source-comment-range {
+  background: color-mix(in srgb, #bf8700 14%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, #bf8700 55%, transparent);
+}
+
+.grading-source-comment-gutter {
+  border-left: 4px solid #bf8700;
+  margin-left: 4px;
+}
+.grading-source-editor {
+  min-height: 32rem;
+  height: 68vh;
+  overflow: hidden;
+  border: 1px solid #d0d7de;
+  border-radius: 0.35rem;
+}
+.grading-source-header {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 12px;
+  border-top: 1px solid #afb8c1;
+  border-bottom: 1px solid #d0d7de;
+  background: #f6f8fa;
+  color: #24292f;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+.grading-source-header--missing {
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
+  border-left: 3px solid #bf8700;
+}
+.grading-source-header--missing span {
+  color: #57606a;
+  font-family: inherit;
+  font-size: 0.82rem;
+}
+.grading-source-message {
+  padding: 1rem;
+  border: 1px solid #d0d7de;
+  border-radius: 0.35rem;
+  background: #f6f8fa;
+}
+.grading-workspace__grid aside button {
+  display: block;
+  width: 100%;
+  margin: 0.25rem 0;
+  text-align: left;
+}
+.grading-workspace__grid aside button.selected {
+  outline: 2px solid currentColor;
+}
+
+.grading-workspace__grid .grading-applied-comment__actions button,
+.grading-workspace__grid .grading-apply-comment__actions button,
+.grading-workspace__grid .grading-apply-comment > button,
+.grading-workspace__grid .grading-publication-action button,
+.grading-workspace__grid .grading-evidence__heading button {
+  display: inline-block;
+  width: auto;
+}
+
+@media (max-width: 1000px) {
+  .grading-workspace__grid {
     grid-template-columns: 1fr;
   }
 }

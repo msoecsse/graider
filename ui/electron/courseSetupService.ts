@@ -6,8 +6,10 @@ import type {
   CourseSetupRequest,
   CourseSetupSaveResult,
   CourseSetupFilePreview,
-  CourseSetupDiagnostic
+  CourseSetupDiagnostic,
+  CourseSetupSection
 } from "./ipc.js";
+import { normalizeFacultyUsernames } from "./sectionFaculty.js";
 
 const TERM_CODE_PATTERN = /^\d{2}s[123]$/;
 const ROSTER_HEADERS = ["student_id", "github_username", "section", "status"] as const;
@@ -54,14 +56,17 @@ const getTermDetails = (
 };
 
 const normalizeSections = (
-  sectionIds: readonly string[]
-): { sections: string[]; diagnostics: CourseSetupDiagnostic[] } => {
-  const sections = sectionIds.map((sectionId) => sectionId.trim());
+  requestedSections: readonly CourseSetupSection[]
+): { sections: CourseSetupSection[]; diagnostics: CourseSetupDiagnostic[] } => {
+  const sections = requestedSections.map((section) => ({
+    id: section.id.trim(),
+    faculty: normalizeFacultyUsernames(section.faculty).faculty
+  }));
   const diagnostics = [
-    ...(sections.some((sectionId) => sectionId.length === 0)
+    ...(sections.some((section) => section.id.length === 0)
       ? [createDiagnostic("Each section ID is required.")]
       : []),
-    ...(new Set(sections).size !== sections.length
+    ...(new Set(sections.map((section) => section.id)).size !== sections.length
       ? [createDiagnostic("Section IDs must be unique after trimming.")]
       : [])
   ];
@@ -200,7 +205,7 @@ ${
 `
 }`;
 
-const createTermYaml = (termCode: string, sections: readonly string[]): string => {
+const createTermYaml = (termCode: string, sections: readonly CourseSetupSection[]): string => {
   const details = getTermDetails(termCode);
 
   if (details === null) {
@@ -214,7 +219,7 @@ term:
   semester: ${String(details.semester)}
   display_name: ${quoteYaml(details.displayName)}
 sections:
-${sections.map((sectionId) => `  - id: ${quoteYaml(sectionId)}\n    roster: rosters/section-${sectionId}.csv`).join(LINE_ENDING)}
+${sections.map((section) => `  - id: ${quoteYaml(section.id)}\n    roster: rosters/section-${section.id}.csv\n    faculty:${section.faculty.length === 0 ? " []" : `\n${section.faculty.map((username) => `      - ${quoteYaml(username)}`).join(LINE_ENDING)}`}`).join(LINE_ENDING)}
 `;
 };
 
@@ -224,7 +229,8 @@ const getRelativePath = (termCode: string, fileName: string): string =>
 const getFiles = (
   request: CourseSetupRequest
 ): { files: CourseSetupFilePreview[]; diagnostics: CourseSetupDiagnostic[] } => {
-  const { sections, diagnostics: sectionDiagnostics } = normalizeSections(request.sectionIds);
+  const { sections, diagnostics: sectionDiagnostics } = normalizeSections(request.sections);
+  const sectionIds = sections.map((section) => section.id);
   const termCode = request.termCode.trim();
   const diagnostics = [
     ...(request.courseTitle.trim().length === 0
@@ -257,14 +263,14 @@ const getFiles = (
   );
 
   for (const upload of request.rosterUploads) {
-    if (!sections.includes(upload.sectionId.trim())) {
+    if (!sectionIds.includes(upload.sectionId.trim())) {
       diagnostics.push(
         createDiagnostic(`Roster upload references unknown section ${upload.sectionId.trim()}.`)
       );
     }
   }
 
-  const rosterFiles = sections.flatMap((sectionId) => {
+  const rosterFiles = sectionIds.flatMap((sectionId) => {
     const content = uploads.get(sectionId);
     if (content === undefined) {
       return [];

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parseDocument } from "yaml";
 import { describe, expect, it } from "vitest";
 import type { AssignmentEditRequest } from "./ipc";
 import {
@@ -43,7 +44,7 @@ const removePoints = (root: string): void => {
   const filePath = path.join(root, assignmentFile);
   fs.writeFileSync(
     filePath,
-    fs.readFileSync(filePath, "utf8").replace(/^  points: .*\n/mu, ""),
+    fs.readFileSync(filePath, "utf8").replace(/^ {2}points: .*\n/mu, ""),
     "utf8"
   );
 };
@@ -54,8 +55,8 @@ const removeFacultyOwnerAndGradingCategory = (root: string): void => {
     filePath,
     fs
       .readFileSync(filePath, "utf8")
-      .replace(/^  faculty_owner: .*\n/mu, "")
-      .replace(/^  grading_category: .*\n/mu, ""),
+      .replace(/^ {2}faculty_owner: .*\n/mu, "")
+      .replace(/^ {2}grading_category: .*\n/mu, ""),
     "utf8"
   );
 };
@@ -64,7 +65,7 @@ const removeLmsAssignmentId = (root: string): void => {
   const filePath = path.join(root, assignmentFile);
   fs.writeFileSync(
     filePath,
-    fs.readFileSync(filePath, "utf8").replace(/^  lms_assignment_id: .*\n/mu, ""),
+    fs.readFileSync(filePath, "utf8").replace(/^ {2}lms_assignment_id: .*\n/mu, ""),
     "utf8"
   );
 };
@@ -106,6 +107,10 @@ const createRequest = (root: string): AssignmentEditRequest => {
     facultyOwner: "professor",
     lmsAssignmentId: "",
     gradingCategory: "labs",
+    gradingMode: loaded.gradingMode,
+    gradingPreset: loaded.gradingPreset,
+    requiredFiles: loaded.requiredFiles,
+    rubric: loaded.rubric,
     originalContent: loaded.originalContent,
     confirmed: false
   };
@@ -129,6 +134,115 @@ describe("assignmentEditService", () => {
     expect(fs.readFileSync(path.join(root, assignmentFile), "utf8")).toContain(
       'title: "Updated Lab"'
     );
+  });
+
+  it("preserves required files and rubric categories through an existing assignment save", () => {
+    const root = createRoot();
+    writeFixture(root);
+    fs.appendFileSync(
+      path.join(root, assignmentFile),
+      `  required_files:\n    - src/First.java\n    - src/Second.java\n  rubric:\n    - id: correctness\n      name: Correctness\n      points: 40\n    - id: design\n      name: Design\n      points: 25\n`,
+      "utf8"
+    );
+    const request = createRequest(root);
+
+    expect(previewAssignmentEdit(request).content).toContain('    - "src/First.java"');
+    expect(saveAssignmentEdit({ ...request, confirmed: true }).status).toBe("success");
+    expect(
+      parseDocument(fs.readFileSync(path.join(root, assignmentFile), "utf8")).toJS()
+    ).toMatchObject({
+      grading: {
+        required_files: ["src/First.java", "src/Second.java"],
+        rubric: [
+          { id: "correctness", name: "Correctness", points: 40 },
+          { id: "design", name: "Design", points: 25 }
+        ]
+      }
+    });
+  });
+
+  it("saves edited required files and rubric categories in their requested order", () => {
+    const root = createRoot();
+    writeFixture(root);
+    const request = {
+      ...createRequest(root),
+      requiredFiles: [" src/Second.java ", "src/First.java"],
+      rubric: [
+        { id: "design", name: "Design", points: 25 },
+        { id: "correctness", name: "Correctness", points: 40 }
+      ]
+    };
+
+    expect(saveAssignmentEdit({ ...request, confirmed: true }).status).toBe("success");
+    expect(
+      parseDocument(fs.readFileSync(path.join(root, assignmentFile), "utf8")).toJS()
+    ).toMatchObject({
+      grading: {
+        required_files: ["src/Second.java", "src/First.java"],
+        rubric: [
+          { id: "design", name: "Design", points: 25 },
+          { id: "correctness", name: "Correctness", points: 40 }
+        ]
+      }
+    });
+  });
+
+  it("rejects invalid required files and rubric values before saving", () => {
+    const root = createRoot();
+    writeFixture(root);
+    const request = createRequest(root);
+    expect(
+      previewAssignmentEdit({
+        ...request,
+        requiredFiles: ["  "],
+        rubric: [
+          { id: "duplicate", name: "One", points: 1 },
+          { id: "duplicate", name: " ", points: Number.NaN }
+        ]
+      })
+    ).toMatchObject({ status: "invalid" });
+  });
+
+  it("adds grading configuration to a legacy assignment without workflow defaults", () => {
+    const root = createRoot();
+    writeFixture(root);
+    const filePath = path.join(root, assignmentFile);
+    fs.writeFileSync(
+      filePath,
+      fs.readFileSync(filePath, "utf8").replace(/grading:\n(?: {2}.*\n)+/u, ""),
+      "utf8"
+    );
+    const request = {
+      ...createRequest(root),
+      requiredFiles: ["src/Only.java"],
+      rubric: [{ id: "correctness", name: "Correctness", points: 40 }]
+    };
+
+    const preview = previewAssignmentEdit(request);
+    expect(preview).toMatchObject({ status: "ready" });
+    expect(preview.content).not.toContain("enabled:");
+    expect(saveAssignmentEdit({ ...request, confirmed: true }).status).toBe("success");
+  });
+
+  it("preserves existing grading mode and workflow settings while editing grading configuration", () => {
+    const root = createRoot();
+    writeFixture(root);
+    const filePath = path.join(root, assignmentFile);
+    fs.writeFileSync(
+      filePath,
+      fs
+        .readFileSync(filePath, "utf8")
+        .replace("  enabled: true\n", "  enabled: true\n  mode: custom-workflow\n"),
+      "utf8"
+    );
+    const request = { ...createRequest(root), requiredFiles: ["src/Only.java"] };
+
+    expect(saveAssignmentEdit({ ...request, confirmed: true }).status).toBe("success");
+    const content = fs.readFileSync(filePath, "utf8");
+    expect(content).toContain('mode: "custom-workflow"');
+    expect(content).toContain('workflow: ".github/workflows/grade.yml"');
+    expect(content).toContain('artifact: "grading-results"');
+    expect(content).toContain('result_file: "grading-results.json"');
   });
 
   it("loads and saves an assignment without inventing a template", () => {

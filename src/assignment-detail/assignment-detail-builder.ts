@@ -1,6 +1,7 @@
 import fs from "node:fs";
+import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import { loadGraiderConfig } from "../config/config-loader.js";
-import type { LoadedGraiderConfig, RawCourseConfig } from "../config/config-models.js";
+import type { LoadedGraiderConfig } from "../config/config-models.js";
 import { DISABLED_GRADING_MODE, DISABLED_STUDENT_PUBLISH_MODE } from "../config/config-schemas.js";
 import type { CommandStatus } from "../core/command-result.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
@@ -76,9 +77,6 @@ export const createEmptyAssignmentDetailResult = (
 const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
-const getEffectiveGrading = (config: LoadedGraiderConfig): RawCourseConfig["grading"] =>
-  config.assignment.grading ?? config.course.grading;
-
 const createRosterSummary = (
   config: LoadedGraiderConfig
 ): {
@@ -116,7 +114,7 @@ const getApplyState = (config: LoadedGraiderConfig): AssignmentDetailApplyState 
 };
 
 const createGradingDetail = (config: LoadedGraiderConfig): AssignmentDetailGrading => {
-  const grading = getEffectiveGrading(config);
+  const grading = getEffectiveAssignmentGrading(config);
 
   if (!grading.enabled) {
     return {
@@ -223,8 +221,8 @@ export const buildAssignmentDetail = ({
   const localGrading = createGradingDetail(config);
   const studentReports = createStudentReports(config);
   const template = {
-    repository: config.assignment.template.repository,
-    branch: config.assignment.template.branch,
+    repository: config.assignment.template?.repository ?? "",
+    branch: config.assignment.template?.branch ?? "",
     status: NOT_CHECKED_STATUS,
     repositoryStatus: NOT_CHECKED_STATUS,
     branchStatus: NOT_CHECKED_STATUS

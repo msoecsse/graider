@@ -279,9 +279,10 @@ beside `assignment.yml`; use **Publish Course Changes** to share those local
 admin-repository changes. Group Apply Preview shows one planned repository per
 group ID, including its members and repository name. Use Preview before Apply.
 For a valid preview, confirm Apply in the UI to create one shared repository per
-group and give every member admin access. If Apply fails partway, Graider writes
-no manifest and some repositories may already exist; delete partial repositories
-manually or wait for a future reconcile workflow before trying again. Group
+group and give every member admin access. If Apply fails partway, Graider keeps
+every observed repository in the assignment manifest. Review the failing
+operation and retry Apply; tracked repositories are resumed without recreation.
+Unknown repositories with matching names are still blocked and never adopted. Group
 grading and status/report views remain limited until their group-aware work is
 completed.
 

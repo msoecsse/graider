@@ -18,16 +18,16 @@ export const buildGroupApplyManifestV2 = (
   planned: readonly GroupApplyPreviewTarget[],
   execution: GroupTargetExecutionResult
 ): GroupApplyManifestFinalizationResult => {
-  const failed =
-    execution.errors.length > 0 ||
-    execution.targets.length !== planned.length ||
-    execution.targets.some(
-      (result, index) =>
-        result.status !== "created" ||
-        result.target.targetId !== planned[index]?.targetId ||
-        result.htmlUrl === null
+  const plannedById = new Map(planned.map((target) => [target.targetId, target]));
+  const invalidResult = execution.targets.find((result) => {
+    const plannedTarget = plannedById.get(result.target.targetId);
+    return (
+      plannedTarget === undefined ||
+      plannedTarget.repositoryName !== result.target.repositoryName ||
+      plannedTarget.groupId !== result.target.groupId
     );
-  if (failed)
+  });
+  if (invalidResult !== undefined)
     return {
       status: "failure",
       targets: [],
@@ -35,11 +35,12 @@ export const buildGroupApplyManifestV2 = (
       diagnostics: [
         createConfigDiagnostic(
           "group_apply_manifest_not_finalized",
-          "Group Apply did not complete successfully, so no manifest can be finalized."
+          "Group Apply returned repository identity that does not match the planned target."
         )
       ]
     };
-  const targets = execution.targets.map((result) => ({
+  const observedResults = execution.targets.filter((result) => result.htmlUrl !== null);
+  const targets = observedResults.map((result) => ({
     targetId: result.target.targetId,
     mode: "group" as const,
     groupId: result.target.groupId,
@@ -49,9 +50,9 @@ export const buildGroupApplyManifestV2 = (
     sectionIds: [...result.target.sectionIds],
     studentIds: [...result.target.studentIds],
     githubUsernames: [...result.target.githubUsernames],
-    diagnostics: [...result.diagnostics]
+    diagnostics: [...result.target.diagnostics, ...result.diagnostics]
   }));
-  const studentMappings = execution.targets.flatMap((result) =>
+  const studentMappings = observedResults.flatMap((result) =>
     result.target.studentIds.map((studentId, index) => ({
       studentId,
       githubUsername: result.target.githubUsernames[index] ?? "",
@@ -61,5 +62,10 @@ export const buildGroupApplyManifestV2 = (
       ...(result.cloneUrl === null ? {} : { cloneUrl: result.cloneUrl })
     }))
   );
-  return { status: "success", targets, studentMappings, diagnostics: [] };
+  return {
+    status: "success",
+    targets,
+    studentMappings,
+    diagnostics: [...execution.warnings, ...execution.errors]
+  };
 };

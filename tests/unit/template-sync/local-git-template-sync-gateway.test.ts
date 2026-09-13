@@ -198,7 +198,7 @@ describe("LocalGitTemplateSyncGateway", () => {
       templateBaseCommitSha: fixture.base,
       templateTargetCommitSha: target,
       studentBaseCommitSha: fixture.base,
-      studentCurrentCommitSha: await gateway.getDefaultBranchCommitSha(student),
+      studentCurrentCommitSha: await gateway.getDefaultBranchCommitSha(),
       changes: []
     });
 
@@ -234,7 +234,7 @@ describe("LocalGitTemplateSyncGateway", () => {
       templateBaseCommitSha: fixture.base,
       templateTargetCommitSha: target,
       studentBaseCommitSha: fixture.base,
-      studentCurrentCommitSha: await gateway.getDefaultBranchCommitSha(student),
+      studentCurrentCommitSha: await gateway.getDefaultBranchCommitSha(),
       changes: []
     });
 
@@ -311,7 +311,7 @@ describe("LocalGitTemplateSyncGateway", () => {
         templateBaseCommitSha: fixture.base,
         templateTargetCommitSha: target,
         studentBaseCommitSha: fixture.base,
-        studentCurrentCommitSha: await gateway.getDefaultBranchCommitSha(student),
+        studentCurrentCommitSha: await gateway.getDefaultBranchCommitSha(),
         changes: []
       })
       .catch((caught: unknown) => caught);

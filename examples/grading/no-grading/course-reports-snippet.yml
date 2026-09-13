@@ -2,4 +2,4 @@ reports:
   student_publish:
     enabled: true
     mode: graider-generated
-    destination_file: grading/report.md
+    destination_file: grading/report.html

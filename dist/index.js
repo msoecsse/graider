@@ -87,6 +87,9 @@ var DiagnosticCode = {
   ConfirmationRequired: "confirmation_required",
   ManifestTrackedRepositoryMissing: "manifest_tracked_repository_missing",
   GradingWorkflowMissing: "grading_workflow_missing",
+  WorkflowDeploymentConflict: "workflow_deployment_conflict",
+  WorkflowDeploymentVersionUnsupported: "workflow_deployment_version_unsupported",
+  WorkflowDeploymentForbidden: "workflow_deployment_forbidden",
   GroupRepositoryApplyNotImplemented: "group_repository_apply_not_implemented",
   WorkflowDispatchUnsupported: "workflow_dispatch_unsupported",
   WorkflowDispatchMissing: "workflow_dispatch_missing",
@@ -351,6 +354,9 @@ var parseTemplateRepository = (configuredOrganization, repository) => {
   };
 };
 
+// src/config/effective-grading.ts
+var getEffectiveAssignmentGrading = (config) => config.assignment.grading ?? config.course.grading;
+
 // src/diagnostics/redaction.ts
 var REDACTED_VALUE = "[REDACTED]";
 var GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9_]{10,}|github_pat_[A-Za-z0-9_]{10,})\b/g;
@@ -459,6 +465,484 @@ var hasWorkflowDispatchTrigger = (workflowDocument) => {
   }
   const triggers = workflowDocument.on;
   return hasWorkflowDispatchString(triggers) || hasWorkflowDispatchArray(triggers) || hasWorkflowDispatchObject(triggers);
+};
+
+// src/workflows/result-writer-template.ts
+var RESULT_SCHEMA_VERSION = 1;
+var RESULT_SCHEMA_VERSION_TEXT = String(RESULT_SCHEMA_VERSION);
+var RESULT_WRITER_SCRIPT_PATH = ".graider/write-grading-result.py";
+var renderGradingResultWriterScript = () => `#!/usr/bin/env python3
+import argparse
+import base64
+import json
+import os
+import sys
+
+SCHEMA_VERSION = ${RESULT_SCHEMA_VERSION_TEXT}
+STATUS_PASSED = "passed"
+STATUS_FAILED = "failed"
+STATUS_SKIPPED = "skipped"
+STATUS_MAP = {
+    "pass": STATUS_PASSED,
+    "passed": STATUS_PASSED,
+    "success": STATUS_PASSED,
+    "fail": STATUS_FAILED,
+    "failed": STATUS_FAILED,
+    "failure": STATUS_FAILED,
+    "error": STATUS_FAILED,
+    "cancelled": STATUS_FAILED,
+    "timed_out": STATUS_FAILED,
+    "timed-out": STATUS_FAILED,
+    "skip": STATUS_SKIPPED,
+    "skipped": STATUS_SKIPPED,
+}
+EVIDENCE_OUTCOME_SUCCESS = "success"
+EVIDENCE_OUTCOME_FAILURE = "failure"
+EVIDENCE_OUTCOME_SKIPPED = "skipped"
+EVIDENCE_OUTCOME_MAP = {
+    "success": EVIDENCE_OUTCOME_SUCCESS,
+    "failure": EVIDENCE_OUTCOME_FAILURE,
+    "cancelled": EVIDENCE_OUTCOME_FAILURE,
+    "timed_out": EVIDENCE_OUTCOME_FAILURE,
+    "timed-out": EVIDENCE_OUTCOME_FAILURE,
+    "skipped": EVIDENCE_OUTCOME_SKIPPED,
+}
+
+
+def map_status(value):
+    normalized = (value or "").strip().lower()
+    return STATUS_MAP.get(normalized, STATUS_FAILED)
+
+
+def map_evidence_outcome(value):
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return EVIDENCE_OUTCOME_SKIPPED
+    return EVIDENCE_OUTCOME_MAP.get(normalized, EVIDENCE_OUTCOME_FAILURE)
+
+
+def decode_classroom_result(encoded):
+    if not encoded:
+        return None
+
+    try:
+        decoded_bytes = base64.b64decode(encoded)
+        decoded_text = decoded_bytes.decode("utf-8")
+        return json.loads(decoded_text)
+    except Exception:
+        return None
+
+
+def status_from_classroom_or_outcome(classroom_env_name, outcome_env_name):
+    classroom_result = decode_classroom_result(os.environ.get(classroom_env_name))
+
+    if isinstance(classroom_result, dict):
+        top_level_status = classroom_result.get("status")
+        if top_level_status:
+            return map_status(top_level_status)
+
+        tests = classroom_result.get("tests")
+        if isinstance(tests, list) and tests:
+            test_statuses = [
+                map_status(test.get("status"))
+                for test in tests
+                if isinstance(test, dict)
+            ]
+
+            if STATUS_FAILED in test_statuses:
+                return STATUS_FAILED
+
+            if test_statuses and all(status == STATUS_SKIPPED for status in test_statuses):
+                return STATUS_SKIPPED
+
+            if test_statuses:
+                return STATUS_PASSED
+
+    return map_status(os.environ.get(outcome_env_name))
+
+
+def parse_check(raw_check):
+    name, separator, outcome = raw_check.partition("=")
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("check name must not be empty")
+    normalized_outcome = outcome if separator else ""
+    return {
+        "name": normalized_name,
+        "status": map_status(normalized_outcome),
+    }
+
+
+def parse_classroom_check(raw_check):
+    name, separator, env_names = raw_check.partition("=")
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("check name must not be empty")
+    if not separator:
+        raise ValueError("classroom check must include environment variable names")
+    classroom_env_name, env_separator, outcome_env_name = env_names.partition(":")
+    if not env_separator or not classroom_env_name.strip() or not outcome_env_name.strip():
+        raise ValueError("classroom check must include classroom and outcome environment names")
+    return {
+        "name": normalized_name,
+        "status": status_from_classroom_or_outcome(
+            classroom_env_name.strip(),
+            outcome_env_name.strip(),
+        ),
+    }
+
+
+def parse_evidence_outcome(raw_outcome):
+    name, separator, outcome = raw_outcome.partition("=")
+    normalized_name = name.strip()
+    if not separator or not normalized_name:
+        raise ValueError("evidence outcome must include a phase")
+    return normalized_name, map_evidence_outcome(outcome)
+
+
+def compute_overall_status(checks):
+    if not checks:
+        return STATUS_SKIPPED
+    statuses = [check["status"] for check in checks]
+    if STATUS_FAILED in statuses:
+        return STATUS_FAILED
+    if all(status == STATUS_SKIPPED for status in statuses):
+        return STATUS_SKIPPED
+    return STATUS_PASSED
+
+
+def write_result(output_path, checks):
+    parent = os.path.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    result = {
+        "schema_version": SCHEMA_VERSION,
+        "status": compute_overall_status(checks),
+        "checks": checks,
+    }
+    with open(output_path, "w", encoding="utf-8") as output_file:
+        json.dump(result, output_file, indent=2)
+        output_file.write("\\n")
+
+
+def write_evidence_metadata(output_path, submission_commit_sha, workflow_run_id, workflow_run_attempt, outcomes):
+    parent = os.path.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    metadata = {
+        "schemaVersion": SCHEMA_VERSION,
+        "submissionCommitSha": submission_commit_sha,
+        "workflowRunId": workflow_run_id,
+        "workflowRunAttempt": workflow_run_attempt,
+        "compile": {"outcome": outcomes.get("compile", EVIDENCE_OUTCOME_SKIPPED)},
+        "junit": {"outcome": outcomes.get("junit", EVIDENCE_OUTCOME_SKIPPED)},
+        "checkstyle": {"outcome": outcomes.get("checkstyle", EVIDENCE_OUTCOME_SKIPPED)},
+    }
+    with open(output_path, "w", encoding="utf-8") as output_file:
+        json.dump(metadata, output_file, indent=2)
+        output_file.write("\\n")
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(description="Write Graider grading result JSON.")
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--check", action="append", default=[])
+    parser.add_argument("--classroom-check", action="append", default=[])
+    parser.add_argument("--evidence-metadata-output")
+    parser.add_argument("--evidence-outcome", action="append", default=[])
+    parser.add_argument("--submission-commit-sha", default="")
+    parser.add_argument("--workflow-run-id", default="")
+    parser.add_argument("--workflow-run-attempt", default="")
+    args = parser.parse_args(argv)
+
+    try:
+        checks = [
+            *[parse_check(raw_check) for raw_check in args.check],
+            *[parse_classroom_check(raw_check) for raw_check in args.classroom_check],
+        ]
+        write_result(args.output, checks)
+        if args.evidence_metadata_output:
+            write_evidence_metadata(
+                args.evidence_metadata_output,
+                args.submission_commit_sha,
+                args.workflow_run_id,
+                args.workflow_run_attempt,
+                dict(parse_evidence_outcome(raw_outcome) for raw_outcome in args.evidence_outcome),
+            )
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
+`;
+
+// src/workflows/managed-workflow-policy.ts
+var GRAIDER_MANAGED_WORKFLOW_PATH = ".github/workflows/grade.yml";
+var GRAIDER_MANAGED_WORKFLOW_MARKER = "# Managed by Graider";
+var GRAIDER_MANAGED_WORKFLOW_VERSION = 1;
+var GRAIDER_MANAGED_WORKFLOW_VERSION_PREFIX = "# graider-workflow-version: ";
+var normalizeTransportLineEndings = (content) => content.replaceAll("\r\n", "\n");
+var getManagedWorkflowVersion = (content) => {
+  const lines = normalizeTransportLineEndings(content).split("\n");
+  const versionLine = lines[1];
+  if (lines[0] !== GRAIDER_MANAGED_WORKFLOW_MARKER || lines.filter((line) => line === GRAIDER_MANAGED_WORKFLOW_MARKER).length !== 1 || versionLine === void 0 || !versionLine.startsWith(GRAIDER_MANAGED_WORKFLOW_VERSION_PREFIX)) {
+    return void 0;
+  }
+  const rawVersion = versionLine.slice(GRAIDER_MANAGED_WORKFLOW_VERSION_PREFIX.length);
+  return /^\d+$/u.test(rawVersion) ? Number(rawVersion) : void 0;
+};
+var renderManagedWorkflowMarker = () => [
+  GRAIDER_MANAGED_WORKFLOW_MARKER,
+  `${GRAIDER_MANAGED_WORKFLOW_VERSION_PREFIX}${GRAIDER_MANAGED_WORKFLOW_VERSION}`
+];
+var classifyManagedWorkflow = (existingContent, canonicalContent) => {
+  if (existingContent === null || existingContent === void 0)
+    return { classification: "absent" };
+  if (normalizeTransportLineEndings(existingContent) === normalizeTransportLineEndings(canonicalContent)) {
+    return { classification: "identical" };
+  }
+  const ownershipVersion = getManagedWorkflowVersion(existingContent);
+  if (ownershipVersion === void 0) return { classification: "unmanaged_conflict" };
+  return ownershipVersion === GRAIDER_MANAGED_WORKFLOW_VERSION ? { classification: "managed_outdated", ownershipVersion } : { classification: "managed_version_unsupported", ownershipVersion };
+};
+var planManagedWorkflowDeployment = (existingContent, canonicalContent) => {
+  const classification = classifyManagedWorkflow(existingContent, canonicalContent);
+  switch (classification.classification) {
+    case "absent":
+      return { ...classification, action: "create" };
+    case "identical":
+      return { ...classification, action: "noop" };
+    case "managed_outdated":
+      return { ...classification, action: "update_managed" };
+    case "managed_version_unsupported":
+      return { ...classification, action: "conflict_unsupported_version" };
+    case "unmanaged_conflict":
+      return { ...classification, action: "conflict_unmanaged" };
+  }
+};
+
+// src/workflows/java-junit-checkstyle-workflow.ts
+var JAVA_JUNIT_CHECKSTYLE_PRESET = "java-junit-checkstyle";
+var WORKFLOW_NAME = "AutoGrading Tests";
+var JAVA_VERSION = "25";
+var JAVA_DISTRIBUTION = "oracle";
+var CHECKSTYLE_VERSION = "14.1.0";
+var CHECKSTYLE_CONFIG_URL = "https://csse.msoe.us/csc1110/MSOE_checkStyle.xml";
+var JUNIT_PLATFORM_CONSOLE_VERSION = "6.1.2";
+var MOCKITO_VERSION = "5.18.0";
+var BYTE_BUDDY_VERSION = "1.17.5";
+var JAVAFX_VERSION = "25";
+var OUTPUT_DIRECTORY = "graider-output";
+var EVIDENCE_DIRECTORY = "grading-evidence";
+var JUNIT_EVIDENCE_DIRECTORY = `${EVIDENCE_DIRECTORY}/junit`;
+var CHECKSTYLE_EVIDENCE_FILE = `${EVIDENCE_DIRECTORY}/checkstyle.xml`;
+var EVIDENCE_METADATA_FILE = `${EVIDENCE_DIRECTORY}/metadata.json`;
+var indentWorkflowRunLine = (line) => `          ${line}`;
+var renderResultWriterInstallLines = () => renderGradingResultWriterScript().trimEnd().split("\n").map(indentWorkflowRunLine);
+var createResultOutputPath = (resultFile) => resultFile.includes("/") ? resultFile : `${OUTPUT_DIRECTORY}/${resultFile}`;
+var renderJavaJunitCheckstyleWorkflow = ({
+  grading
+}) => {
+  const artifactName = grading.artifact ?? "grading-results";
+  const resultFile = grading.result_file ?? "grading-results.json";
+  const resultOutputPath = createResultOutputPath(resultFile);
+  return [
+    ...renderManagedWorkflowMarker(),
+    `name: ${WORKFLOW_NAME}`,
+    "",
+    "on:",
+    "  push:",
+    "    paths-ignore:",
+    `      - ${GRAIDER_MANAGED_WORKFLOW_PATH}`,
+    "  repository_dispatch:",
+    "  workflow_dispatch:",
+    "",
+    "permissions:",
+    "  checks: write",
+    "  actions: read",
+    "  contents: read",
+    "",
+    "jobs:",
+    "  run-autograding-tests:",
+    "    if: >-",
+    "      github.actor != 'github-classroom[bot]' &&",
+    "      !(",
+    "        github.event_name == 'push' &&",
+    "        github.event.before == '0000000000000000000000000000000000000000' &&",
+    "        github.ref_name == github.event.repository.default_branch",
+    "      )",
+    "    runs-on: ubuntu-latest",
+    "    env:",
+    `      JAVA_VERSION: "${JAVA_VERSION}"`,
+    `      CHECKSTYLE_VERSION: "${CHECKSTYLE_VERSION}"`,
+    `      CHECKSTYLE_CONFIG_URL: "${CHECKSTYLE_CONFIG_URL}"`,
+    `      JUNIT_PLATFORM_CONSOLE_VERSION: "${JUNIT_PLATFORM_CONSOLE_VERSION}"`,
+    `      MOCKITO_VERSION: "${MOCKITO_VERSION}"`,
+    `      BYTE_BUDDY_VERSION: "${BYTE_BUDDY_VERSION}"`,
+    `      JAVAFX_VERSION: "${JAVAFX_VERSION}"`,
+    "      TOOLS_DIR: graider-tools",
+    "    steps:",
+    "      - name: Check out repository",
+    "        uses: actions/checkout@v4",
+    "",
+    "      - name: Set up Java",
+    "        uses: actions/setup-java@v4",
+    "        with:",
+    `          distribution: ${JAVA_DISTRIBUTION}`,
+    "          java-version: ${{ env.JAVA_VERSION }}",
+    "",
+    "      - name: Install JavaFX headless dependencies",
+    "        run: |",
+    "          sudo apt-get update",
+    "          sudo apt-get install -y unzip xvfb",
+    "",
+    "      - name: Download grading tools",
+    "        run: |",
+    '          mkdir -p "$TOOLS_DIR"',
+    '          curl -fsSL -o "$TOOLS_DIR/checkstyle.jar" "https://repo1.maven.org/maven2/com/puppycrawl/tools/checkstyle/${CHECKSTYLE_VERSION}/checkstyle-${CHECKSTYLE_VERSION}-all.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/junit-platform-console-standalone.jar" "https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/${JUNIT_PLATFORM_CONSOLE_VERSION}/junit-platform-console-standalone-${JUNIT_PLATFORM_CONSOLE_VERSION}.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/mockito-core.jar" "https://repo1.maven.org/maven2/org/mockito/mockito-core/${MOCKITO_VERSION}/mockito-core-${MOCKITO_VERSION}.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/byte-buddy.jar" "https://repo1.maven.org/maven2/net/bytebuddy/byte-buddy/${BYTE_BUDDY_VERSION}/byte-buddy-${BYTE_BUDDY_VERSION}.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/byte-buddy-agent.jar" "https://repo1.maven.org/maven2/net/bytebuddy/byte-buddy-agent/${BYTE_BUDDY_VERSION}/byte-buddy-agent-${BYTE_BUDDY_VERSION}.jar"',
+    '          curl -fsSL -o "$TOOLS_DIR/javafx.zip" "https://download2.gluonhq.com/openjfx/${JAVAFX_VERSION}/openjfx-${JAVAFX_VERSION}_linux-x64_bin-sdk.zip"',
+    '          unzip -q "$TOOLS_DIR/javafx.zip" -d "$TOOLS_DIR/javafx"',
+    "",
+    "      - name: Install Graider result writer",
+    "        run: |",
+    "          mkdir -p .graider",
+    `          cat > ${RESULT_WRITER_SCRIPT_PATH} <<'PY'`,
+    ...renderResultWriterInstallLines(),
+    "          PY",
+    `          chmod +x ${RESULT_WRITER_SCRIPT_PATH}`,
+    "",
+    "      - name: CheckStyle",
+    "        id: checkstyle",
+    "        uses: classroom-resources/autograding-command-grader@v1",
+    "        continue-on-error: true",
+    "        with:",
+    "          test-name: CheckStyle",
+    "          command: |",
+    "            set +e",
+    `            java -jar "$TOOLS_DIR/checkstyle.jar" -c "$CHECKSTYLE_CONFIG_URL" $(find src -name '*.java' -print)`,
+    "            checkstyle_exit=$?",
+    `            mkdir -p ${EVIDENCE_DIRECTORY}`,
+    `            java -jar "$TOOLS_DIR/checkstyle.jar" -f xml -o ${CHECKSTYLE_EVIDENCE_FILE} -c "$CHECKSTYLE_CONFIG_URL" $(find src -name '*.java' -print)`,
+    "            exit $checkstyle_exit",
+    "",
+    "      - name: Compile Java sources",
+    "        id: compile",
+    "        run: |",
+    "          mkdir -p bin",
+    `          JAVAFX_LIB=$(find "$TOOLS_DIR/javafx" -type d -path '*/lib' | head -n 1)`,
+    `          javac --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -cp "$TOOLS_DIR/junit-platform-console-standalone.jar:$TOOLS_DIR/mockito-core.jar:$TOOLS_DIR/byte-buddy.jar:$TOOLS_DIR/byte-buddy-agent.jar" -d bin $(find src test -name '*.java' -print)`,
+    "",
+    "      - name: Unit Tests",
+    "        id: unit-tests",
+    "        uses: classroom-resources/autograding-command-grader@v1",
+    "        continue-on-error: true",
+    "        with:",
+    "          test-name: Unit Tests",
+    "          command: |",
+    "            COMMIT_MSG='${{ github.event.head_commit.message }}'",
+    '            case "$COMMIT_MSG" in',
+    "              COMMIT[0-9]*|DONE[0-9]*)",
+    '                TAG="${COMMIT_MSG%% *}"',
+    '                TAG_ARGS="--include-tag $TAG"',
+    "                ;;",
+    "              *)",
+    '                TAG_ARGS=""',
+    "                ;;",
+    "            esac",
+    `            JAVAFX_LIB=$(find "$TOOLS_DIR/javafx" -type d -path '*/lib' | head -n 1)`,
+    `            mkdir -p ${JUNIT_EVIDENCE_DIRECTORY}`,
+    `            xvfb-run -a java --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -jar "$TOOLS_DIR/junit-platform-console-standalone.jar" execute $TAG_ARGS --scan-class-path --class-path bin --reports-dir ${JUNIT_EVIDENCE_DIRECTORY}`,
+    "",
+    "      - name: AutoGrading Reporter",
+    "        if: always()",
+    "        uses: classroom-resources/autograding-grading-reporter@v1",
+    "        env:",
+    "          CHECKSTYLE_RESULTS: ${{ steps.checkstyle.outputs.result }}",
+    "          UNIT-TESTS_RESULTS: ${{ steps.unit-tests.outputs.result }}",
+    "        with:",
+    "          runners: checkstyle,unit-tests",
+    "",
+    "      - name: Write Graider grading result",
+    "        if: always()",
+    "        env:",
+    "          CHECKSTYLE_CLASSROOM_RESULT: ${{ steps.checkstyle.outputs.result }}",
+    "          UNIT_TESTS_CLASSROOM_RESULT: ${{ steps.unit-tests.outputs.result }}",
+    "          CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}",
+    "          UNIT_TESTS_OUTCOME: ${{ steps.unit-tests.outcome }}",
+    "          COMPILE_OUTCOME: ${{ steps.compile.outcome }}",
+    "          SUBMISSION_COMMIT_SHA: ${{ github.sha }}",
+    "          WORKFLOW_RUN_ID: ${{ github.run_id }}",
+    "          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}",
+    "        run: |",
+    `          python3 ${RESULT_WRITER_SCRIPT_PATH} \\`,
+    `            --output ${resultOutputPath} \\`,
+    '            --classroom-check "CheckStyle=CHECKSTYLE_CLASSROOM_RESULT:CHECKSTYLE_OUTCOME" \\',
+    '            --classroom-check "Unit Tests=UNIT_TESTS_CLASSROOM_RESULT:UNIT_TESTS_OUTCOME" \\',
+    `            --evidence-metadata-output ${EVIDENCE_METADATA_FILE} \\`,
+    '            --submission-commit-sha "$SUBMISSION_COMMIT_SHA" \\',
+    '            --workflow-run-id "$WORKFLOW_RUN_ID" \\',
+    '            --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" \\',
+    '            --evidence-outcome "compile=${COMPILE_OUTCOME}" \\',
+    '            --evidence-outcome "junit=${UNIT_TESTS_OUTCOME}" \\',
+    '            --evidence-outcome "checkstyle=${CHECKSTYLE_OUTCOME}"',
+    "",
+    "      - name: Upload Graider grading result",
+    "        if: always()",
+    "        uses: actions/upload-artifact@v4",
+    "        with:",
+    `          name: ${artifactName}`,
+    "          path: |",
+    `            ${resultOutputPath}`,
+    `            ${EVIDENCE_DIRECTORY}/`,
+    ""
+  ].join("\n");
+};
+
+// src/workflows/managed-workflow-deployment.ts
+var MANAGED_GRADING_WORKFLOW_COMMIT_MESSAGE = "Configure Graider grading workflow";
+var WorkflowDeploymentPermissionError = class extends Error {
+  constructor() {
+    super("GitHub denied permission to create or update the managed grading workflow.");
+    this.name = "WorkflowDeploymentPermissionError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+};
+var isManagedGradingWorkflowEligible = (grading) => grading?.enabled === true && grading.mode === "preset" && grading.preset === JAVA_JUNIT_CHECKSTYLE_PRESET;
+var ensureManagedGradingWorkflow = async (input) => {
+  const canonicalContent = renderJavaJunitCheckstyleWorkflow({ grading: input.grading });
+  const existingContent = await input.githubClient.getRepositoryFileContent(
+    input.owner,
+    input.repo,
+    GRAIDER_MANAGED_WORKFLOW_PATH,
+    input.defaultBranch
+  );
+  const plan = planManagedWorkflowDeployment(existingContent, canonicalContent);
+  if (plan.action === "noop") return { status: "noop" };
+  if (plan.action === "conflict_unmanaged") return { status: "conflict_unmanaged" };
+  if (plan.action === "conflict_unsupported_version")
+    return { status: "conflict_unsupported_version" };
+  try {
+    await input.githubClient.writeRepositoryFile({
+      owner: input.owner,
+      repo: input.repo,
+      path: GRAIDER_MANAGED_WORKFLOW_PATH,
+      content: canonicalContent,
+      message: MANAGED_GRADING_WORKFLOW_COMMIT_MESSAGE
+    });
+  } catch (error) {
+    if (error instanceof GitHubClientError && error.kind === "permission_denied") {
+      throw new WorkflowDeploymentPermissionError();
+    }
+    throw error;
+  }
+  return plan.action === "create" ? { status: "created" } : { status: "updated" };
 };
 
 // src/assignment-detail/assignment-detail-github-readiness.ts
@@ -650,10 +1134,17 @@ var checkAssignmentDetailGithubReadiness = async ({
   grading,
   githubClient
 }) => {
+  const managedWorkflowWillBeDeployed = isManagedGradingWorkflowEligible(
+    getEffectiveAssignmentGrading(config)
+  );
   if (config.assignment.template.repository === "" && config.assignment.template.branch === "") {
     return {
       template: withTemplateStatus(template, STATUS_NOT_REQUIRED, STATUS_NOT_REQUIRED),
-      grading: withWorkflowStatus(grading, STATUS_NOT_REQUIRED, STATUS_NOT_REQUIRED),
+      grading: withWorkflowStatus(
+        grading,
+        managedWorkflowWillBeDeployed ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED,
+        managedWorkflowWillBeDeployed ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED
+      ),
       diagnostics: []
     };
   }
@@ -694,6 +1185,13 @@ var checkAssignmentDetailGithubReadiness = async ({
           grading.enabled ? STATUS_NOT_CHECKED : STATUS_NOT_REQUIRED
         ),
         diagnostics: [createTemplateBranchMissingDiagnostic(config)]
+      };
+    }
+    if (managedWorkflowWillBeDeployed) {
+      return {
+        template: withTemplateStatus(template, STATUS_AVAILABLE, STATUS_AVAILABLE),
+        grading: withWorkflowStatus(grading, STATUS_NOT_CHECKED, STATUS_NOT_CHECKED),
+        diagnostics: []
       };
     }
     const workflowResult = await checkWorkflow(
@@ -752,13 +1250,25 @@ var ENABLED_STUDENT_PUBLISH_MODES = [
 ];
 var DISABLED_STUDENT_PUBLISH_MODE = "disabled";
 var TERM_CODE_PATTERN = /^\d{2}s[123]$/;
-var gradingSchema = z.object({
-  enabled: z.boolean(),
+var gradingFields = {
   mode: z.string().min(MINIMUM_LIST_ITEMS).optional(),
   preset: z.string().min(MINIMUM_LIST_ITEMS).optional(),
   workflow: z.string().min(MINIMUM_LIST_ITEMS).optional(),
   artifact: z.string().min(MINIMUM_LIST_ITEMS).optional(),
   result_file: z.string().min(MINIMUM_LIST_ITEMS).optional()
+};
+var gradingSchema = z.object({ enabled: z.boolean(), ...gradingFields }).strict();
+var assignmentGradingSchema = z.object({
+  enabled: z.boolean().optional(),
+  ...gradingFields,
+  required_files: z.array(z.string().trim().min(MINIMUM_LIST_ITEMS)).optional(),
+  rubric: z.array(
+    z.object({
+      id: z.string().trim().min(MINIMUM_LIST_ITEMS),
+      name: z.string().trim().min(MINIMUM_LIST_ITEMS),
+      points: z.number().finite()
+    }).strict()
+  ).optional()
 }).strict();
 var studentPublishSchema = z.object({
   enabled: z.boolean(),
@@ -819,7 +1329,8 @@ var rawTermConfigSchema = z.object({
   sections: z.array(
     z.object({
       id: z.string().min(MINIMUM_LIST_ITEMS),
-      roster: z.string().min(MINIMUM_LIST_ITEMS).optional()
+      roster: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+      faculty: z.array(z.string().min(MINIMUM_LIST_ITEMS)).optional()
     }).strict()
   ).min(MINIMUM_LIST_ITEMS)
 }).strict();
@@ -846,7 +1357,7 @@ var rawAssignmentConfigSchema = z.object({
     grading_category: z.string().min(MINIMUM_LIST_ITEMS).optional(),
     points: z.number().nullable().optional()
   }).strict().optional(),
-  grading: gradingSchema.optional(),
+  grading: assignmentGradingSchema.optional(),
   repository_mode: z.enum(["individual", "group"]).optional(),
   groups: z.object({
     file: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.csv$/u)
@@ -1026,7 +1537,7 @@ var validateDisabledGradingConfig = (filePath, grading, owner) => {
   }
   return [];
 };
-var validateGradingConfig = (filePath, grading, owner) => grading === void 0 ? [] : grading.enabled ? validateEnabledGradingConfig(filePath, grading, owner) : validateDisabledGradingConfig(filePath, grading, owner);
+var validateGradingConfig = (filePath, grading, owner) => grading === void 0 ? [] : grading.enabled === void 0 ? [] : grading.enabled ? validateEnabledGradingConfig(filePath, grading, owner) : validateDisabledGradingConfig(filePath, grading, owner);
 var createMissingStudentPublishFieldDiagnostic = (filePath, code, field) => createConfigDiagnostic(code, `Student report publishing in ${filePath} must include ${field}.`, {
   filePath,
   field
@@ -1237,7 +1748,16 @@ var validateAssignmentConfig = (filePath, config, expectedAssignmentSlug) => [
       }
     )
   ],
-  ...config.grading === void 0 ? [] : validateGradingConfig(filePath, config.grading, "assignment")
+  ...config.grading === void 0 ? [] : [
+    ...validateGradingConfig(filePath, config.grading, "assignment"),
+    ...config.grading.rubric === void 0 || new Set(config.grading.rubric.map((category) => category.id)).size === config.grading.rubric.length ? [] : [
+      createConfigDiagnostic(
+        INVALID_GRADING_CONFIG_CODE,
+        `Rubric category IDs in ${filePath} must be unique.`,
+        { filePath, owner: "assignment" }
+      )
+    ]
+  ]
 ];
 
 // src/io/file-system.ts
@@ -1408,7 +1928,7 @@ var loadAllConfigFiles = (repoRoot, parts) => {
     assignment: assignmentResult.value
   };
 };
-var getGradingEnabled = (course, assignment) => assignment.grading !== void 0 ? {
+var getGradingEnabled = (course, assignment) => assignment.grading?.enabled !== void 0 ? {
   gradingEnabled: assignment.grading.enabled,
   gradingSource: "assignment"
 } : course.grading !== void 0 ? {
@@ -1432,9 +1952,16 @@ var resolveCourseConfig = (course) => ({
   ...course,
   grading: course.grading ?? { enabled: false, mode: "no-grading" }
 });
-var resolveAssignmentConfig = (assignment) => ({
+var resolveAssignmentConfig = (assignment, course) => ({
   ...assignment,
-  template: assignment.template ?? { repository: "", branch: "" }
+  template: assignment.template ?? { repository: "", branch: "" },
+  ...assignment.grading === void 0 ? {} : {
+    grading: {
+      ...course.grading,
+      ...assignment.grading,
+      enabled: assignment.grading.enabled ?? course.grading.enabled
+    }
+  }
 });
 var loadGraiderConfig = (request) => {
   const repositoryRootResult = findRepositoryRoot(request.cwd);
@@ -1463,12 +1990,13 @@ var loadGraiderConfig = (request) => {
   if (diagnostics.length > 0) {
     return createFailure(diagnostics);
   }
+  const course = resolveCourseConfig(loadResult.course);
   return {
     status: "success",
     config: {
-      course: resolveCourseConfig(loadResult.course),
+      course,
       term: loadResult.term,
-      assignment: resolveAssignmentConfig(loadResult.assignment),
+      assignment: resolveAssignmentConfig(loadResult.assignment, course),
       summary: createSummary(
         repositoryRootResult.repoRoot,
         parts,
@@ -1511,7 +2039,7 @@ var createEmptyManifest = ({
   schemaVersion: MANIFEST_SCHEMA_VERSION,
   assignment,
   source,
-  template,
+  ...template === void 0 ? {} : { template },
   repositories: [],
   operationHistory: [],
   warnings: [...warnings],
@@ -1558,6 +2086,13 @@ var upsertRepositoryRecord = (manifest, record) => {
     repositories: sortManifestRepositories(repositories)
   };
 };
+var updateRepositoryIdentity = (manifest, input) => updateRepositoryRecord(manifest, input.studentId, (record) => ({
+  ...record,
+  repository: {
+    ...record.repository,
+    ...input.repository
+  }
+}));
 var updatePermissionState = (manifest, input) => updateRepositoryRecord(manifest, input.studentId, (record) => ({
   ...record,
   permissions: {
@@ -1619,7 +2154,7 @@ var repositoryIdentitySchema = z2.object({
   id: z2.number().optional(),
   html_url: z2.string().optional(),
   created_from_template: z2.boolean(),
-  template_repository: z2.string().min(MINIMUM_ITEMS),
+  template_repository: z2.string().min(MINIMUM_ITEMS).optional(),
   template_commit_sha: z2.string().optional(),
   student_default_branch_commit_sha: z2.string().optional(),
   template_sync_baseline_status: z2.union([z2.literal("initialized"), z2.literal("baseline_required")]).optional(),
@@ -1676,7 +2211,7 @@ var rawManifestSchema = z2.object({
     repository: z2.string().min(MINIMUM_ITEMS),
     branch: z2.string().min(MINIMUM_ITEMS),
     commit_sha: z2.string().optional()
-  }).strict(),
+  }).strict().optional(),
   repositories: z2.array(repositoryRecordSchema),
   operation_history: z2.array(operationRecordSchema),
   warnings: z2.array(diagnosticSchema),
@@ -1819,7 +2354,6 @@ var validateRawManifest = (filePath, value) => {
         })),
         assignment: { termCode: "", courseCode: "", assignmentSlug: "", assignmentTitle: "" },
         source: { sourceFiles: [], inputFingerprint: "" },
-        template: { repository: "", branch: "" },
         repositories: [],
         operationHistory: [],
         warnings: result.data.diagnostics.map(normalizeDiagnostic),
@@ -1857,10 +2391,12 @@ var normalizeRepositoryIdentity = (repository) => ({
   ...repository.id === void 0 ? {} : { id: repository.id },
   ...repository.html_url === void 0 ? {} : { htmlUrl: repository.html_url },
   createdFromTemplate: repository.created_from_template,
-  templateRepository: repository.template_repository,
+  ...repository.template_repository === void 0 ? {} : { templateRepository: repository.template_repository },
   ...repository.template_commit_sha === void 0 ? {} : { templateCommitSha: repository.template_commit_sha },
   ...repository.student_default_branch_commit_sha === void 0 ? {} : { studentDefaultBranchCommitSha: repository.student_default_branch_commit_sha },
-  templateSyncBaselineStatus: repository.template_sync_baseline_status ?? (repository.template_commit_sha !== void 0 && repository.student_default_branch_commit_sha !== void 0 ? "initialized" : "baseline_required"),
+  ...repository.created_from_template ? {
+    templateSyncBaselineStatus: repository.template_sync_baseline_status ?? (repository.template_commit_sha !== void 0 && repository.student_default_branch_commit_sha !== void 0 ? "initialized" : "baseline_required")
+  } : {},
   ...repository.created_at === void 0 ? {} : { createdAt: repository.created_at },
   ...repository.last_observed_at === void 0 ? {} : { lastObservedAt: repository.last_observed_at }
 });
@@ -1929,10 +2465,12 @@ var normalizeManifest = (manifest) => ({
     sourceFiles: manifest.source.source_files,
     inputFingerprint: manifest.source.input_fingerprint
   },
-  template: {
-    repository: manifest.template.repository,
-    branch: manifest.template.branch,
-    ...manifest.template.commit_sha === void 0 ? {} : { commitSha: manifest.template.commit_sha }
+  ...manifest.template === void 0 ? {} : {
+    template: {
+      repository: manifest.template.repository,
+      branch: manifest.template.branch,
+      ...manifest.template.commit_sha === void 0 ? {} : { commitSha: manifest.template.commit_sha }
+    }
   },
   repositories: sortManifestRepositories(manifest.repositories.map(normalizeRepositoryRecord)),
   operationHistory: manifest.operation_history.map(normalizeOperationRecord),
@@ -2527,14 +3065,14 @@ var createSummary2 = (rosterFiles, students) => ({
   holdStudentCount: students.filter((student) => student.status === ROSTER_STATUS_HOLD).length
 });
 var getTermDirectory = (termConfigPath) => termConfigPath.split("/").slice(EMPTY_COUNT, TERM_DIRECTORY_DEPTH).join("/");
-var getSectionSources = (config) => {
-  const termDirectory = getTermDirectory(config.summary.termConfigPath);
+var getSectionSources = (termConfigPath, sections, sectionIds) => {
+  const termDirectory = getTermDirectory(termConfigPath);
   const sectionsById = new Map(
-    config.term.sections.flatMap(
+    sections.flatMap(
       (section) => section.roster === void 0 ? [] : [[section.id, toForwardSlashPath(path6.posix.join(termDirectory, section.roster))]]
     )
   );
-  return config.assignment.sections.flatMap((sectionId) => {
+  return sectionIds.flatMap((sectionId) => {
     const rosterPath = sectionsById.get(sectionId);
     return rosterPath === void 0 ? [] : [{ sectionId, rosterPath }];
   });
@@ -2624,12 +3162,10 @@ var loadSectionRoster = (repoRoot, source) => {
     errors
   };
 };
-var loadAssignmentRosters = (config) => {
-  const sources = getSectionSources(config);
+var loadTermRosters = (request) => {
+  const sources = getSectionSources(request.termConfigPath, request.sections, request.sectionIds);
   const rosterFiles = sources.map((source) => source.rosterPath);
-  const loadedSections = sources.map(
-    (source) => loadSectionRoster(config.summary.repoRoot, source)
-  );
+  const loadedSections = sources.map((source) => loadSectionRoster(request.repoRoot, source));
   const students = loadedSections.flatMap((section) => section.students);
   const warnings = loadedSections.flatMap((section) => section.warnings);
   const errors = [
@@ -2643,6 +3179,12 @@ var loadAssignmentRosters = (config) => {
     summary: errors.length > EMPTY_COUNT ? createEmptySummary(rosterFiles) : createSummary2(rosterFiles, students)
   };
 };
+var loadAssignmentRosters = (config) => loadTermRosters({
+  repoRoot: config.summary.repoRoot,
+  termConfigPath: config.summary.termConfigPath,
+  sections: config.term.sections,
+  sectionIds: config.assignment.sections
+});
 
 // src/apply-preview/apply-preview-models.ts
 var ASSIGNMENT_APPLY_PREVIEW_SCHEMA_VERSION = 1;
@@ -4626,6 +5168,18 @@ var OctokitGitHubClient = class {
     );
     return mapRepository(data);
   }
+  async createRepository(input) {
+    const data = await this.run(
+      () => this.octokit.rest.repos.createInOrg({
+        org: input.owner,
+        name: input.name,
+        private: input.private,
+        auto_init: false,
+        ...input.description === void 0 ? {} : { description: input.description }
+      })
+    );
+    return mapRepository(data);
+  }
   async getUser(username) {
     const data = await this.runNullable(() => this.octokit.rest.users.getByUsername({ username }));
     return data === null ? null : mapUser(data);
@@ -4798,6 +5352,40 @@ var OctokitGitHubClient = class {
     const record = asRecord(response);
     const runs = asArray(record.workflow_runs);
     return runs.map((run) => mapWorkflowRun(run, input.workflowPath));
+  }
+  async listWorkflowRunsForCommit(input) {
+    const runs = await this.runPaginated(this.octokit.rest.actions.listWorkflowRuns, {
+      owner: input.owner,
+      repo: input.repo,
+      workflow_id: input.workflowPath,
+      head_sha: input.headSha,
+      status: "completed"
+    });
+    return runs.map((run) => mapWorkflowRunForCommit(run, input.workflowPath));
+  }
+  async listWorkflowRunArtifacts(input) {
+    const artifacts = await this.runPaginated(this.octokit.rest.actions.listWorkflowRunArtifacts, {
+      owner: input.owner,
+      repo: input.repo,
+      run_id: input.runId
+    });
+    return artifacts.map(mapActionsArtifact);
+  }
+  async downloadArtifactArchive(input) {
+    const archiveResponse = await this.resolveArtifactDownloadResponse(
+      await this.runResponse(
+        () => this.octokit.rest.actions.downloadArtifact({
+          archive_format: "zip",
+          artifact_id: input.artifactId,
+          owner: input.owner,
+          repo: input.repo,
+          request: {
+            parseSuccessResponseBody: PARSE_SUCCESS_RESPONSE_BODY_DISABLED
+          }
+        })
+      )
+    );
+    return Uint8Array.from(await toBuffer(archiveResponse.data));
   }
   async downloadArtifact(input) {
     const artifactsData = await this.run(
@@ -5088,6 +5676,24 @@ function mapWorkflowRun(value, workflowPath) {
     ...event === void 0 ? {} : { event },
     ...startedAt === void 0 ? {} : { startedAt },
     ...asString(record.status) === "completed" ? { completedAt: asString(record.updated_at) ?? "" } : {}
+  };
+}
+function mapWorkflowRunForCommit(value, workflowPath) {
+  const record = asRecord(value);
+  return {
+    ...mapWorkflowRun(value, workflowPath),
+    runAttempt: asNumber(record.run_attempt) ?? 1
+  };
+}
+function mapActionsArtifact(value) {
+  const record = asRecord(value);
+  return {
+    id: asNumber(record.id) ?? UNKNOWN_ID,
+    name: asString(record.name) ?? "",
+    sizeInBytes: asNumber(record.size_in_bytes) ?? 0,
+    expired: asBoolean(record.expired) ?? false,
+    createdAt: asString(record.created_at) ?? "",
+    updatedAt: asString(record.updated_at) ?? ""
   };
 }
 function toPermission(value) {
@@ -5405,7 +6011,8 @@ var formatFilesystemTimestamp = (date) => date.toISOString().replace(COLON_PATTE
 var AUTHORIZATION_ERROR_CODES = /* @__PURE__ */ new Set([
   DiagnosticCode.GithubAuthMissing,
   DiagnosticCode.GithubAuthFailed,
-  DiagnosticCode.GithubPermissionDenied
+  DiagnosticCode.GithubPermissionDenied,
+  DiagnosticCode.WorkflowDeploymentForbidden
 ]);
 var CONFIGURATION_ERROR_CODES = /* @__PURE__ */ new Set([
   DiagnosticCode.MissingRequiredFile,
@@ -5478,11 +6085,11 @@ var toRawRepositoryIdentity = (repository) => ({
     html_url: repository.htmlUrl
   }),
   created_from_template: repository.createdFromTemplate,
-  template_repository: repository.templateRepository,
   ...optionalEntries({
+    template_repository: repository.templateRepository,
     template_commit_sha: repository.templateCommitSha,
     student_default_branch_commit_sha: repository.studentDefaultBranchCommitSha,
-    template_sync_baseline_status: repository.templateSyncBaselineStatus ?? (repository.templateCommitSha !== void 0 && repository.studentDefaultBranchCommitSha !== void 0 ? "initialized" : "baseline_required"),
+    template_sync_baseline_status: repository.createdFromTemplate ? repository.templateSyncBaselineStatus ?? (repository.templateCommitSha !== void 0 && repository.studentDefaultBranchCommitSha !== void 0 ? "initialized" : "baseline_required") : void 0,
     created_at: repository.createdAt,
     last_observed_at: repository.lastObservedAt
   })
@@ -5563,13 +6170,13 @@ var toRawManifest = (manifest) => ({
     source_files: manifest.source.sourceFiles,
     input_fingerprint: manifest.source.inputFingerprint
   },
-  template: {
-    repository: manifest.template.repository,
-    branch: manifest.template.branch,
-    ...optionalEntries({
-      commit_sha: manifest.template.commitSha
-    })
-  },
+  ...optionalEntries({
+    template: manifest.template === void 0 ? void 0 : {
+      repository: manifest.template.repository,
+      branch: manifest.template.branch,
+      ...optionalEntries({ commit_sha: manifest.template.commitSha })
+    }
+  }),
   repositories: sortManifestRepositories(manifest.repositories).map(toRawRepositoryRecord),
   operation_history: manifest.operationHistory.map(toRawOperationHistory),
   warnings: manifest.warnings,
@@ -5610,8 +6217,15 @@ var DEFAULT_ACTIONS_ENABLED = true;
 var STUDENT_PERMISSION2 = "admin";
 var FACULTY_PERMISSION2 = "admin";
 var GRADER_PERMISSION2 = "maintain";
-var CREATE_REPOSITORY_OPERATION = "createRepositoryFromTemplate";
-var CREATE_REPOSITORY_PLAN_TYPE = "create_repository_from_template";
+var CREATE_REPOSITORY_OPERATION = "createRepository";
+var CREATE_REPOSITORY_FROM_TEMPLATE_OPERATION = "createRepositoryFromTemplate";
+var CREATE_REPOSITORY_PLAN_TYPE = "create_repository";
+var CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE = "create_repository_from_template";
+var TEMPLATE_MATERIALIZATION_ATTEMPTS = 10;
+var TEMPLATE_MATERIALIZATION_POLL_MS = 1e3;
+var isRepositoryCreationOperation = (operation) => operation.type === CREATE_REPOSITORY_PLAN_TYPE || operation.type === CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE;
+var isRepositoryUpdateOperation = (operation) => operation.type === "add_student_collaborator" || operation.type === "add_faculty_team_permission" || operation.type === "add_grader_team_permission" || operation.type === "enable_actions" || operation.type === "ensure_managed_grading_workflow";
+var hasConfiguredTemplate = (config) => config.assignment.template.repository !== "" && config.assignment.template.branch !== "";
 var PERMISSION_RANK = {
   none: 0,
   pull: 1,
@@ -5636,6 +6250,22 @@ var normalizeGitHubError = (error) => error instanceof GitHubClientError ? creat
   "Unexpected GitHub client failure during apply."
 );
 var runGitHubOperation = async (input, operation) => withGitHubRetry(operation, input.retryOptions);
+var waitForTemplateMaterialization = async (input, repository) => {
+  const sleep = input.retryOptions?.sleep ?? (async (milliseconds) => await new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  }));
+  for (let attempt = 1; attempt <= TEMPLATE_MATERIALIZATION_ATTEMPTS; attempt += 1) {
+    const commitSha = await runGitHubOperation(
+      input,
+      () => input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+    );
+    if (commitSha !== void 0) return commitSha;
+    if (attempt < TEMPLATE_MATERIALIZATION_ATTEMPTS) {
+      await sleep(TEMPLATE_MATERIALIZATION_POLL_MS);
+    }
+  }
+  return void 0;
+};
 var createWorkflowMissingDiagnostic2 = (operation) => createConfigDiagnostic(
   DiagnosticCode.GradingWorkflowMissing,
   `Grading workflow was not found for ${operation.repository_name ?? "repository"}.`,
@@ -5656,8 +6286,35 @@ var createWorkflowDispatchDiagnostic = (operation) => createConfigDiagnostic(
     section: operation.section
   }
 );
+var createWorkflowDeploymentConflictDiagnostic = (operation, unsupportedVersion) => createConfigDiagnostic(
+  unsupportedVersion ? DiagnosticCode.WorkflowDeploymentVersionUnsupported : DiagnosticCode.WorkflowDeploymentConflict,
+  unsupportedVersion ? `Repository ${operation.repository_name ?? "repository"} contains a Graider workflow with an unsupported ownership version; it was preserved.` : `Repository ${operation.repository_name ?? "repository"} contains an existing ${GRAIDER_MANAGED_WORKFLOW_PATH} that is not managed by Graider; it was preserved.`,
+  {
+    repositoryName: operation.repository_name,
+    workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section
+  }
+);
+var createWorkflowDeploymentForbiddenDiagnostic = (operation) => createConfigDiagnostic(
+  DiagnosticCode.WorkflowDeploymentForbidden,
+  `Graider could not create or update ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${operation.repository_name ?? "the student repository"}. Check the token's workflow-file write permission.`,
+  {
+    repositoryName: operation.repository_name,
+    workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
+    student_id: operation.student_id,
+    github_username: operation.github_username,
+    section: operation.section
+  }
+);
+var operationTargetKey = (operation) => operation.target_id ?? `${operation.section ?? ""}:${operation.student_id ?? ""}`;
+var getEffectiveWorkflowPath = (config) => {
+  const grading = getEffectiveAssignmentGrading(config);
+  return isManagedGradingWorkflowEligible(grading) ? GRAIDER_MANAGED_WORKFLOW_PATH : grading.workflow;
+};
 var wasRepositoryCreatedInPlan = (input, operation) => input.plan.operations.some(
-  (candidate) => candidate.type === CREATE_REPOSITORY_PLAN_TYPE && candidate.student_id === operation.student_id && candidate.status === "planned"
+  (candidate) => isRepositoryCreationOperation(candidate) && candidate.student_id === operation.student_id && candidate.status === "planned"
 );
 var createPermissionWarning = (operation, currentPermission, expectedPermission) => createWarningDiagnostic(
   DiagnosticCode.PermissionNotDowngraded,
@@ -5671,11 +6328,11 @@ var createPermissionWarning = (operation, currentPermission, expectedPermission)
     expectedPermission
   }
 );
-var createRepositoryCreationNotObservedDiagnostic = (operation, owner, repositoryName) => createConfigDiagnostic(
+var createRepositoryCreationNotObservedDiagnostic = (operation, owner, repositoryName, githubOperation) => createConfigDiagnostic(
   DiagnosticCode.GithubApiError,
   `Repository creation did not produce an observable repository for ${owner}/${repositoryName}.`,
   {
-    operation: CREATE_REPOSITORY_OPERATION,
+    operation: githubOperation,
     owner,
     repositoryName,
     student_id: operation.student_id,
@@ -5690,7 +6347,7 @@ var findStudent = (input, students, operation) => students.find(
 var findManifestRecord4 = (input, manifest, operation) => manifest.repositories.find(
   (record) => record.studentId === (findTarget(input, operation)?.primaryStudentId ?? operation.student_id)
 );
-var createManifestRecord = (config, student, repository, observedAt, templateCommitSha, studentDefaultBranchCommitSha) => ({
+var createManifestRecord = (config, student, repository, observedAt, createdFromTemplate, templateCommitSha, studentDefaultBranchCommitSha) => ({
   studentId: student.studentId,
   githubUsername: student.githubUsername,
   section: student.section,
@@ -5701,11 +6358,13 @@ var createManifestRecord = (config, student, repository, observedAt, templateCom
     fullName: repository.fullName,
     id: repository.id,
     htmlUrl: repository.htmlUrl,
-    createdFromTemplate: true,
-    templateRepository: config.assignment.template.repository,
+    createdFromTemplate,
+    ...createdFromTemplate ? { templateRepository: config.assignment.template.repository } : {},
     ...templateCommitSha === void 0 ? {} : { templateCommitSha },
     ...studentDefaultBranchCommitSha === void 0 ? {} : { studentDefaultBranchCommitSha },
-    templateSyncBaselineStatus: templateCommitSha === void 0 || studentDefaultBranchCommitSha === void 0 ? "baseline_required" : "initialized",
+    ...createdFromTemplate ? {
+      templateSyncBaselineStatus: templateCommitSha === void 0 || studentDefaultBranchCommitSha === void 0 ? "baseline_required" : "initialized"
+    } : {},
     createdAt: observedAt,
     lastObservedAt: observedAt
   },
@@ -5723,6 +6382,20 @@ var createManifestRecord = (config, student, repository, observedAt, templateCom
   errors: []
 });
 var createInitialManifest = async (config, plan, githubClient) => {
+  if (!hasConfiguredTemplate(config)) {
+    return createEmptyManifest({
+      assignment: {
+        termCode: config.summary.termCode,
+        courseCode: config.course.course.code,
+        assignmentSlug: config.summary.assignmentSlug,
+        assignmentTitle: config.assignment.assignment.title
+      },
+      source: {
+        sourceFiles: plan.source.source_files,
+        inputFingerprint: plan.source.input_fingerprint
+      }
+    });
+  }
   const parsedTemplate = parseTemplateRepository(
     config.course.github.organization,
     config.assignment.template.repository
@@ -5785,24 +6458,38 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
     return state;
   }
   const repositoryName = operation.repository_name;
+  const createdFromTemplate = operation.type === CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE;
+  const githubOperation = createdFromTemplate ? CREATE_REPOSITORY_FROM_TEMPLATE_OPERATION : CREATE_REPOSITORY_OPERATION;
+  let nextState = state;
   try {
-    const parsedTemplate = parseTemplateRepository(
-      input.config.course.github.organization,
-      input.config.assignment.template.repository
-    );
-    if (parsedTemplate.status === "failure") {
-      return recordError(state, parsedTemplate.diagnostic);
+    if (createdFromTemplate) {
+      const parsedTemplate = parseTemplateRepository(
+        input.config.course.github.organization,
+        input.config.assignment.template.repository
+      );
+      if (parsedTemplate.status === "failure") {
+        return recordError(state, parsedTemplate.diagnostic);
+      }
+      await runGitHubOperation(
+        input,
+        () => input.githubClient.createRepositoryFromTemplate({
+          templateOwner: parsedTemplate.repository.owner,
+          templateRepo: parsedTemplate.repository.repo,
+          owner: input.config.course.github.organization,
+          name: repositoryName,
+          private: PRIVATE_REPOSITORY
+        })
+      );
+    } else {
+      await runGitHubOperation(
+        input,
+        () => input.githubClient.createRepository({
+          owner: input.config.course.github.organization,
+          name: repositoryName,
+          private: PRIVATE_REPOSITORY
+        })
+      );
     }
-    await runGitHubOperation(
-      input,
-      () => input.githubClient.createRepositoryFromTemplate({
-        templateOwner: parsedTemplate.repository.owner,
-        templateRepo: parsedTemplate.repository.repo,
-        owner: input.config.course.github.organization,
-        name: repositoryName,
-        private: PRIVATE_REPOSITORY
-      })
-    );
     const repository = await runGitHubOperation(
       input,
       () => input.githubClient.getRepository(input.config.course.github.organization, repositoryName)
@@ -5813,47 +6500,62 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
         createRepositoryCreationNotObservedDiagnostic(
           operation,
           input.config.course.github.organization,
-          repositoryName
+          repositoryName,
+          githubOperation
         )
       );
     }
-    const studentDefaultBranchCommitSha = await runGitHubOperation(
-      input,
-      () => input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
-    );
-    if (state.manifest.template.commitSha === void 0 || studentDefaultBranchCommitSha === void 0) {
-      return recordError(
-        state,
-        createConfigDiagnostic(
-          DiagnosticCode.GithubApiError,
-          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
-          { repository: repository.fullName, operation: CREATE_REPOSITORY_OPERATION }
-        )
-      );
-    }
-    const manifest = upsertRepositoryRecord(
-      state.manifest,
-      createManifestRecord(
-        input.config,
-        student,
-        repository,
-        observedAt,
-        state.manifest.template.commitSha,
-        studentDefaultBranchCommitSha
-      )
-    );
-    return persistManifest(
+    const templateCommitSha = createdFromTemplate ? state.manifest.template?.commitSha : void 0;
+    nextState = persistManifest(
       incrementSummary(
         {
           ...state,
-          manifest
+          manifest: upsertRepositoryRecord(
+            state.manifest,
+            createManifestRecord(
+              input.config,
+              student,
+              repository,
+              observedAt,
+              createdFromTemplate,
+              templateCommitSha
+            )
+          )
         },
         "created"
       ),
       input.manifestPath
     );
+    if (nextState.errors.length > state.errors.length) {
+      return nextState;
+    }
+    const studentDefaultBranchCommitSha = createdFromTemplate ? await waitForTemplateMaterialization(input, repository) : void 0;
+    if (createdFromTemplate && (templateCommitSha === void 0 || studentDefaultBranchCommitSha === void 0)) {
+      return recordError(
+        nextState,
+        createConfigDiagnostic(
+          DiagnosticCode.GithubApiError,
+          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
+          { repository: repository.fullName, operation: githubOperation }
+        )
+      );
+    }
+    return persistManifest(
+      {
+        ...nextState,
+        manifest: updateRepositoryIdentity(nextState.manifest, {
+          studentId: student.studentId,
+          repository: {
+            ...templateCommitSha === void 0 ? {} : { templateCommitSha },
+            ...studentDefaultBranchCommitSha === void 0 ? {} : { studentDefaultBranchCommitSha },
+            ...createdFromTemplate ? { templateSyncBaselineStatus: "initialized" } : {}
+          }
+        })
+      },
+      input.manifestPath
+    );
   } catch (error) {
-    return recordError(state, normalizeGitHubError(error));
+    return recordError(nextState, normalizeGitHubError(error));
   }
 };
 var executeStudentCollaborator = async (input, state, operation, observedAt) => {
@@ -6023,12 +6725,15 @@ var executeEnableActions = async (input, state, operation, observedAt) => {
     return recordError(state, normalizeGitHubError(error));
   }
 };
-var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
-  if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
+var executeVerifyWorkflow = async (input, state, operation, observedAt, blockedWorkflowTargets) => {
+  const workflowPath = getEffectiveWorkflowPath(input.config);
+  if (operation.repository_name === void 0 || workflowPath === void 0) {
     return state;
   }
+  if (blockedWorkflowTargets.has(operationTargetKey(operation))) {
+    return incrementSummary(state, "skipped");
+  }
   const repositoryName = operation.repository_name;
-  const workflowPath = input.config.course.grading.workflow;
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
   if (findManifestRecord4(input, state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
@@ -6094,12 +6799,15 @@ var executeVerifyWorkflow = async (input, state, operation, observedAt) => {
     return recordError(state, normalizeGitHubError(error));
   }
 };
-var executeVerifyDispatch = async (input, state, operation, observedAt) => {
-  if (operation.repository_name === void 0 || input.config.course.grading.workflow === void 0) {
+var executeVerifyDispatch = async (input, state, operation, observedAt, blockedWorkflowTargets) => {
+  const workflowPath = getEffectiveWorkflowPath(input.config);
+  if (operation.repository_name === void 0 || workflowPath === void 0) {
     return state;
   }
+  if (blockedWorkflowTargets.has(operationTargetKey(operation))) {
+    return incrementSummary(state, "skipped");
+  }
   const repositoryName = operation.repository_name;
-  const workflowPath = input.config.course.grading.workflow;
   const workflowDispatchIdentifier = getWorkflowDispatchIdentifier(workflowPath);
   if (findManifestRecord4(input, state.manifest, operation) === void 0) {
     return incrementSummary(state, "skipped");
@@ -6163,7 +6871,66 @@ var executeVerifyDispatch = async (input, state, operation, observedAt) => {
     return recordError(state, normalizeGitHubError(error));
   }
 };
-var executeOperation = async (input, state, operation, observedAt) => {
+var executeEnsureManagedWorkflow = async (input, state, operation, blockedWorkflowTargets) => {
+  if (operation.repository_name === void 0) return state;
+  if (findManifestRecord4(input, state.manifest, operation) === void 0) {
+    return incrementSummary(state, "skipped");
+  }
+  const owner = input.config.course.github.organization;
+  const repositoryName = operation.repository_name;
+  try {
+    const repository = await runGitHubOperation(
+      input,
+      () => input.githubClient.getRepository(owner, repositoryName)
+    );
+    if (repository === null) {
+      blockedWorkflowTargets.add(operationTargetKey(operation));
+      return recordError(
+        state,
+        createConfigDiagnostic(
+          DiagnosticCode.StudentRepositoryMissing,
+          `Student repository ${owner}/${repositoryName} was not found while deploying the grading workflow.`,
+          {
+            owner,
+            repositoryName,
+            student_id: operation.student_id,
+            github_username: operation.github_username,
+            section: operation.section
+          }
+        )
+      );
+    }
+    const result = await runGitHubOperation(
+      input,
+      () => ensureManagedGradingWorkflow({
+        githubClient: input.githubClient,
+        owner,
+        repo: repositoryName,
+        defaultBranch: repository.defaultBranch,
+        grading: getEffectiveAssignmentGrading(input.config)
+      })
+    );
+    if (result.status === "conflict_unmanaged") {
+      blockedWorkflowTargets.add(operationTargetKey(operation));
+      return recordError(state, createWorkflowDeploymentConflictDiagnostic(operation, false));
+    }
+    if (result.status === "conflict_unsupported_version") {
+      blockedWorkflowTargets.add(operationTargetKey(operation));
+      return recordError(state, createWorkflowDeploymentConflictDiagnostic(operation, true));
+    }
+    return incrementSummary(state, result.status === "noop" ? "noop" : "verified");
+  } catch (error) {
+    blockedWorkflowTargets.add(operationTargetKey(operation));
+    return recordError(
+      state,
+      error instanceof WorkflowDeploymentPermissionError ? createWorkflowDeploymentForbiddenDiagnostic(operation) : normalizeGitHubError(error)
+    );
+  }
+};
+var executeOperation = async (input, state, operation, observedAt, blockedWorkflowTargets, durabilityBlockedTargets) => {
+  if (durabilityBlockedTargets.has(operationTargetKey(operation))) {
+    return incrementSummary(state, "skipped");
+  }
   if (operation.status === "skipped") {
     return incrementSummary(state, "skipped");
   }
@@ -6173,7 +6940,7 @@ var executeOperation = async (input, state, operation, observedAt) => {
   if (operation.status !== "planned") {
     return state;
   }
-  if (operation.type === "create_repository_from_template") {
+  if (isRepositoryCreationOperation(operation)) {
     return executeCreateRepository(input, state, operation, observedAt);
   }
   if (operation.type === "add_student_collaborator") {
@@ -6204,10 +6971,13 @@ var executeOperation = async (input, state, operation, observedAt) => {
   if (operation.type === "enable_actions") {
     return executeEnableActions(input, state, operation, observedAt);
   }
-  if (operation.type === "verify_grading_workflow") {
-    return executeVerifyWorkflow(input, state, operation, observedAt);
+  if (operation.type === "ensure_managed_grading_workflow") {
+    return executeEnsureManagedWorkflow(input, state, operation, blockedWorkflowTargets);
   }
-  return executeVerifyDispatch(input, state, operation, observedAt);
+  if (operation.type === "verify_grading_workflow") {
+    return executeVerifyWorkflow(input, state, operation, observedAt, blockedWorkflowTargets);
+  }
+  return executeVerifyDispatch(input, state, operation, observedAt, blockedWorkflowTargets);
 };
 var executeApplyPlan = async (input) => {
   const initialManifest = input.manifest ?? await createInitialManifest(input.config, input.plan, input.githubClient);
@@ -6217,13 +6987,38 @@ var executeApplyPlan = async (input) => {
     warnings: [],
     errors: []
   };
+  state = persistManifest(state, input.manifestPath);
   const observedAt = input.clock.now().toISOString();
+  const blockedWorkflowTargets = /* @__PURE__ */ new Set();
+  const durabilityBlockedTargets = /* @__PURE__ */ new Set();
   const repositoryOutcomes = /* @__PURE__ */ new Map();
+  if (state.errors.length > EMPTY_COUNT6) {
+    return {
+      ...state,
+      repositories: input.plan.targets.filter((target) => target.mode === "individual").map((target) => ({
+        studentId: target.primaryStudentId ?? target.targetId,
+        githubUsername: target.githubUsernames[0] ?? "",
+        section: target.sectionIds[0] ?? "",
+        repository: target.repositoryName,
+        status: "failed"
+      }))
+    };
+  }
   for (const operation of input.plan.operations) {
     const errorsBefore = state.errors.length;
     const createdBefore = state.summary.created;
     const verifiedBefore = state.summary.verified;
-    state = await executeOperation(input, state, operation, observedAt);
+    state = await executeOperation(
+      input,
+      state,
+      operation,
+      observedAt,
+      blockedWorkflowTargets,
+      durabilityBlockedTargets
+    );
+    if (operation.target_id !== void 0 && state.errors.slice(errorsBefore).some((diagnostic3) => diagnostic3.code === DiagnosticCode.ManifestWriteFailed)) {
+      durabilityBlockedTargets.add(operationTargetKey(operation));
+    }
     if (operation.target_id === void 0) {
       continue;
     }
@@ -6233,13 +7028,8 @@ var executeApplyPlan = async (input) => {
       failed: false
     };
     repositoryOutcomes.set(operation.target_id, {
-      created: current.created || operation.type === CREATE_REPOSITORY_PLAN_TYPE && state.summary.created > createdBefore,
-      updated: current.updated || [
-        "add_student_collaborator",
-        "add_faculty_team_permission",
-        "add_grader_team_permission",
-        "enable_actions"
-      ].includes(operation.type) && state.summary.verified > verifiedBefore,
+      created: current.created || isRepositoryCreationOperation(operation) && state.summary.created > createdBefore,
+      updated: current.updated || isRepositoryUpdateOperation(operation) && state.summary.verified > verifiedBefore,
       failed: current.failed || state.errors.length > errorsBefore
     });
   }
@@ -6366,6 +7156,9 @@ var validateTemplateRepositoryFields = (reference, templateRepository) => [
   ...templateRepository.files.includes(README_FILE) ? [] : [createTemplateReadmeMissingDiagnostic(reference)]
 ];
 var validateTemplateRepository = async (courseConfig, assignmentConfig, githubClient) => {
+  if (assignmentConfig.template === void 0 || assignmentConfig.template.repository === "" && assignmentConfig.template.branch === "") {
+    return [];
+  }
   const parsedRepository = parseTemplateRepository(
     courseConfig.github.organization,
     assignmentConfig.template.repository
@@ -6427,7 +7220,7 @@ var validateTemplateWorkflowContent = (reference, workflowPath, content) => {
 };
 var validateTemplateWorkflow = async (courseConfig, assignmentConfig, githubClient) => {
   const grading = getEffectiveGrading4(courseConfig, assignmentConfig);
-  if (!grading.enabled || grading.workflow === void 0) {
+  if (grading === void 0 || !grading.enabled || grading.workflow === void 0 || isManagedGradingWorkflowEligible(grading) || assignmentConfig.template === void 0 || assignmentConfig.template.repository === "" && assignmentConfig.template.branch === "") {
     return [];
   }
   const parsedRepository = parseTemplateRepository(
@@ -6665,11 +7458,13 @@ var getSourceFingerprintPaths = ({
 
 // src/planning/operation-models.ts
 var PLAN_OPERATION_TYPES = [
+  "create_repository",
   "create_repository_from_template",
   "add_student_collaborator",
   "add_faculty_team_permission",
   "add_grader_team_permission",
   "enable_actions",
+  "ensure_managed_grading_workflow",
   "verify_grading_workflow",
   "verify_workflow_dispatch"
 ];
@@ -6720,6 +7515,8 @@ var CLOSED_ASSIGNMENT_STATUS3 = "closed";
 var ARCHIVED_ASSIGNMENT_STATUS3 = "archived";
 var STUDENT_STATUS_REASON_PREFIX3 = "student_status";
 var GRADING_DISABLED_REASON = "grading_disabled";
+var hasConfiguredTemplate2 = (config) => config.assignment.template.repository !== "" && config.assignment.template.branch !== "";
+var getRepositoryCreationOperationType = (config) => hasConfiguredTemplate2(config) ? "create_repository_from_template" : "create_repository";
 var createUnexpectedGitHubDiagnostic2 = () => createConfigDiagnostic(
   DiagnosticCode.GithubApiError,
   "Unexpected GitHub client failure during planning."
@@ -6785,12 +7582,12 @@ var generateStudentRepositoryName = (config, student) => {
     errors: result.errors
   };
 };
-var createLifecycleBlockedOperation = (config, student, diagnostic3, repositoryName) => createOperation(student, "create_repository_from_template", "blocked", {
+var createLifecycleBlockedOperation = (config, student, diagnostic3, repositoryName) => createOperation(student, getRepositoryCreationOperationType(config), "blocked", {
   repositoryName,
   reason: config.assignment.assignment.status,
   errors: [diagnostic3]
 });
-var buildSkippedStudentOperation = (student) => createOperation(student, "create_repository_from_template", "skipped", {
+var buildSkippedStudentOperation = (config, student) => createOperation(student, getRepositoryCreationOperationType(config), "skipped", {
   reason: `${STUDENT_STATUS_REASON_PREFIX3}_${student.status}`
 });
 var buildLifecycleOperations = (config, student, repositoryName) => {
@@ -6843,12 +7640,18 @@ var buildLifecycleOperations = (config, student, repositoryName) => {
   return [];
 };
 var buildPlannedProvisioningOperations = (config, student, repositoryName) => {
+  const creationOperationType = getRepositoryCreationOperationType(config);
   const createRepositoryId = createOperationId(
     student.section,
     student.studentId,
-    "create_repository_from_template"
+    creationOperationType
   );
   const enableActionsId = createOperationId(student.section, student.studentId, "enable_actions");
+  const ensureWorkflowId = createOperationId(
+    student.section,
+    student.studentId,
+    "ensure_managed_grading_workflow"
+  );
   const verifyWorkflowId = createOperationId(
     student.section,
     student.studentId,
@@ -6858,18 +7661,26 @@ var buildPlannedProvisioningOperations = (config, student, repositoryName) => {
     repositoryName,
     requires: [createRepositoryId]
   };
+  const grading = getEffectiveAssignmentGrading(config);
+  const deployManagedWorkflow = isManagedGradingWorkflowEligible(grading);
   return [
-    createOperation(student, "create_repository_from_template", "planned", {
+    createOperation(student, creationOperationType, "planned", {
       repositoryName
     }),
     createOperation(student, "add_student_collaborator", "planned", sharedInput),
     createOperation(student, "add_faculty_team_permission", "planned", sharedInput),
     ...config.course.github.grader_team === void 0 ? [] : [createOperation(student, "add_grader_team_permission", "planned", sharedInput)],
     createOperation(student, "enable_actions", "planned", sharedInput),
-    ...config.summary.gradingEnabled ? [
-      createOperation(student, "verify_grading_workflow", "planned", {
+    ...deployManagedWorkflow ? [
+      createOperation(student, "ensure_managed_grading_workflow", "planned", {
         repositoryName,
         requires: [enableActionsId]
+      })
+    ] : [],
+    ...grading.enabled ? [
+      createOperation(student, "verify_grading_workflow", "planned", {
+        repositoryName,
+        requires: [deployManagedWorkflow ? ensureWorkflowId : enableActionsId]
       }),
       createOperation(student, "verify_workflow_dispatch", "planned", {
         repositoryName,
@@ -6890,12 +7701,18 @@ var buildPlannedProvisioningOperations = (config, student, repositoryName) => {
   ];
 };
 var buildTrackedRepositoryOperations = (config, student, repositoryName) => {
+  const creationOperationType = getRepositoryCreationOperationType(config);
   const createRepositoryId = createOperationId(
     student.section,
     student.studentId,
-    "create_repository_from_template"
+    creationOperationType
   );
   const enableActionsId = createOperationId(student.section, student.studentId, "enable_actions");
+  const ensureWorkflowId = createOperationId(
+    student.section,
+    student.studentId,
+    "ensure_managed_grading_workflow"
+  );
   const verifyWorkflowId = createOperationId(
     student.section,
     student.studentId,
@@ -6905,8 +7722,10 @@ var buildTrackedRepositoryOperations = (config, student, repositoryName) => {
     repositoryName,
     requires: [createRepositoryId]
   };
+  const grading = getEffectiveAssignmentGrading(config);
+  const deployManagedWorkflow = isManagedGradingWorkflowEligible(grading);
   return [
-    createOperation(student, "create_repository_from_template", "noop", {
+    createOperation(student, creationOperationType, "noop", {
       repositoryName,
       reason: "manifest_tracked_repository"
     }),
@@ -6914,10 +7733,16 @@ var buildTrackedRepositoryOperations = (config, student, repositoryName) => {
     createOperation(student, "add_faculty_team_permission", "planned", sharedInput),
     ...config.course.github.grader_team === void 0 ? [] : [createOperation(student, "add_grader_team_permission", "planned", sharedInput)],
     createOperation(student, "enable_actions", "planned", sharedInput),
-    ...config.summary.gradingEnabled ? [
-      createOperation(student, "verify_grading_workflow", "planned", {
+    ...deployManagedWorkflow ? [
+      createOperation(student, "ensure_managed_grading_workflow", "planned", {
         repositoryName,
         requires: [enableActionsId]
+      })
+    ] : [],
+    ...grading.enabled ? [
+      createOperation(student, "verify_grading_workflow", "planned", {
+        repositoryName,
+        requires: [deployManagedWorkflow ? ensureWorkflowId : enableActionsId]
       }),
       createOperation(student, "verify_workflow_dispatch", "planned", {
         repositoryName,
@@ -6939,10 +7764,11 @@ var buildTrackedRepositoryOperations = (config, student, repositoryName) => {
 };
 var findManifestRecord5 = (manifest, student) => manifest?.repositories.find((record) => record.studentId === student.studentId);
 var buildActiveStudentOperations = async (config, student, githubClient, manifest) => {
+  const creationOperationType = getRepositoryCreationOperationType(config);
   const repositoryNameResult = generateStudentRepositoryName(config, student);
   if (repositoryNameResult.errors.length > EMPTY_COUNT9) {
     return [
-      createOperation(student, "create_repository_from_template", "blocked", {
+      createOperation(student, creationOperationType, "blocked", {
         errors: repositoryNameResult.errors,
         warnings: repositoryNameResult.warnings
       })
@@ -6961,7 +7787,7 @@ var buildActiveStudentOperations = async (config, student, githubClient, manifes
       );
       if (existingRepository === null) {
         return [
-          createOperation(student, "create_repository_from_template", "blocked", {
+          createOperation(student, creationOperationType, "blocked", {
             repositoryName: manifestRecord.repository.name,
             errors: [
               createManifestTrackedMissingDiagnostic2(
@@ -6976,7 +7802,7 @@ var buildActiveStudentOperations = async (config, student, githubClient, manifes
       return buildTrackedRepositoryOperations(config, student, manifestRecord.repository.name);
     } catch (error) {
       return [
-        createOperation(student, "create_repository_from_template", "blocked", {
+        createOperation(student, creationOperationType, "blocked", {
           repositoryName: manifestRecord.repository.name,
           errors: [normalizeGitHubError3(error)]
         })
@@ -6997,7 +7823,7 @@ var buildActiveStudentOperations = async (config, student, githubClient, manifes
     );
     if (existingRepository !== null) {
       return [
-        createOperation(student, "create_repository_from_template", "blocked", {
+        createOperation(student, creationOperationType, "blocked", {
           repositoryName,
           errors: [createCollisionDiagnostic(config.course.github.organization, repositoryName)]
         })
@@ -7006,14 +7832,14 @@ var buildActiveStudentOperations = async (config, student, githubClient, manifes
     return buildPlannedProvisioningOperations(config, student, repositoryName);
   } catch (error) {
     return [
-      createOperation(student, "create_repository_from_template", "blocked", {
+      createOperation(student, creationOperationType, "blocked", {
         repositoryName,
         errors: [normalizeGitHubError3(error)]
       })
     ];
   }
 };
-var buildStudentOperations = async (config, student, githubClient, manifest) => student.status === ROSTER_STATUS_ACTIVE ? buildActiveStudentOperations(config, student, githubClient, manifest) : [buildSkippedStudentOperation(student)];
+var buildStudentOperations = async (config, student, githubClient, manifest) => student.status === ROSTER_STATUS_ACTIVE ? buildActiveStudentOperations(config, student, githubClient, manifest) : [buildSkippedStudentOperation(config, student)];
 var createPlanSummary3 = (rosterSummary, operations) => ({
   total_students: rosterSummary.studentCount,
   active_students: rosterSummary.activeStudentCount,
@@ -7113,20 +7939,50 @@ var writeCommandResult = (result, json) => {
 // src/groups/group-apply-preflight.ts
 var runGroupApplyPreflight = async (input) => {
   const plan = buildGroupApplyPreviewPlan(input.config, input.students);
+  const trackedTargets = new Map(
+    (input.manifest?.targets ?? []).map((target) => [target.targetId, target])
+  );
+  const trackedTargetIds = /* @__PURE__ */ new Set();
   if (plan.errors.length > 0)
     return {
       targets: plan.targets,
       warnings: plan.warnings,
       errors: plan.errors,
-      mutationSupported: true
+      mutationSupported: true,
+      trackedTargetIds
     };
   const errors = [];
   for (const target of plan.targets) {
+    const tracked = trackedTargets.get(target.targetId);
+    if (tracked !== void 0 && tracked.repositoryName !== target.repositoryName) {
+      errors.push(
+        createConfigDiagnostic(
+          "group_manifest_target_mismatch",
+          `Manifest target ${target.targetId} does not match planned repository ${target.repositoryName}.`,
+          {
+            groupId: target.groupId,
+            repositoryName: target.repositoryName,
+            manifestRepositoryName: tracked.repositoryName
+          }
+        )
+      );
+      continue;
+    }
     const repository = await input.githubClient.getRepository(
       input.config.course.github.organization,
       target.repositoryName
     );
-    if (repository !== null)
+    if (tracked !== void 0 && repository === null) {
+      errors.push(
+        createConfigDiagnostic(
+          "manifest_tracked_repository_missing",
+          `Manifest-tracked repository ${target.repositoryName} was not found on GitHub.`,
+          { groupId: target.groupId, repositoryName: target.repositoryName }
+        )
+      );
+    } else if (tracked !== void 0) {
+      trackedTargetIds.add(target.targetId);
+    } else if (repository !== null)
       errors.push(
         createConfigDiagnostic(
           "group_repository_untracked_collision",
@@ -7139,12 +7995,13 @@ var runGroupApplyPreflight = async (input) => {
     targets: plan.targets,
     warnings: plan.warnings,
     errors,
-    mutationSupported: true
+    mutationSupported: true,
+    trackedTargetIds
   };
 };
 
 // src/groups/group-target-executor.ts
-var failure = (target, message) => createConfigDiagnostic("group_target_execution_failed", message, {
+var failure = (target, message, code = "group_target_execution_failed") => createConfigDiagnostic(code, message, {
   groupId: target.groupId,
   repositoryName: target.repositoryName
 });
@@ -7152,19 +8009,25 @@ var executeGroupTargets = async (input) => {
   const results = [];
   const warnings = [];
   const errors = [];
-  const template = parseTemplateRepository(
+  const hasConfiguredTemplate3 = input.config.assignment.template.repository !== "" && input.config.assignment.template.branch !== "";
+  const template = hasConfiguredTemplate3 ? parseTemplateRepository(
     input.config.course.github.organization,
     input.config.assignment.template.repository
-  );
-  if (template.status === "failure")
+  ) : void 0;
+  const grading = getEffectiveAssignmentGrading(input.config);
+  const deployManagedWorkflow = isManagedGradingWorkflowEligible(grading);
+  if (template?.status === "failure")
     return { targets: results, warnings, errors: [template.diagnostic] };
   for (const target of input.targets) {
+    let repository = null;
+    let repositoryCreated = false;
     try {
       const existing = await input.githubClient.getRepository(
         input.config.course.github.organization,
         target.repositoryName
       );
-      if (existing !== null) {
+      const isTracked = input.trackedTargetIds?.has(target.targetId) === true;
+      if (existing !== null && !isTracked) {
         const diagnostic3 = failure(
           target,
           `Repository ${target.repositoryName} already exists and is not manifest-tracked. Graider will not adopt untracked repositories automatically.`
@@ -7178,18 +8041,63 @@ var executeGroupTargets = async (input) => {
           errors: [...errors, diagnostic3]
         };
       }
-      await input.githubClient.createRepositoryFromTemplate({
-        templateOwner: template.repository.owner,
-        templateRepo: template.repository.repo,
-        owner: input.config.course.github.organization,
-        name: target.repositoryName,
-        private: true
-      });
-      const repository = await input.githubClient.getRepository(
+      if (existing === null && isTracked) {
+        const diagnostic3 = failure(
+          target,
+          `Manifest-tracked repository ${target.repositoryName} was not found on GitHub.`,
+          DiagnosticCode.ManifestTrackedRepositoryMissing
+        );
+        return {
+          targets: [
+            ...results,
+            { target, htmlUrl: null, cloneUrl: null, status: "failed", diagnostics: [diagnostic3] }
+          ],
+          warnings,
+          errors: [...errors, diagnostic3]
+        };
+      }
+      if (existing === null && template?.status === "success") {
+        await input.githubClient.createRepositoryFromTemplate({
+          templateOwner: template.repository.owner,
+          templateRepo: template.repository.repo,
+          owner: input.config.course.github.organization,
+          name: target.repositoryName,
+          private: true
+        });
+        repositoryCreated = true;
+      } else if (existing === null) {
+        await input.githubClient.createRepository({
+          owner: input.config.course.github.organization,
+          name: target.repositoryName,
+          private: true
+        });
+        repositoryCreated = true;
+      }
+      repository = existing ?? await input.githubClient.getRepository(
         input.config.course.github.organization,
         target.repositoryName
       );
       if (repository === null) throw new Error("Repository creation was not observable.");
+      const observedResult = {
+        target,
+        htmlUrl: repository.htmlUrl,
+        cloneUrl: `${repository.htmlUrl}.git`,
+        status: repositoryCreated ? "created" : "updated",
+        diagnostics: []
+      };
+      if (repositoryCreated && input.onRepositoryObserved !== void 0) {
+        const persistenceDiagnostics = await input.onRepositoryObserved(observedResult);
+        if (persistenceDiagnostics.length > 0) {
+          return {
+            targets: [
+              ...results,
+              { ...observedResult, status: "failed", diagnostics: persistenceDiagnostics }
+            ],
+            warnings,
+            errors: [...errors, ...persistenceDiagnostics]
+          };
+        }
+      }
       for (const username of new Set(target.githubUsernames))
         await input.githubClient.addCollaborator({
           owner: repository.owner,
@@ -7211,28 +8119,67 @@ var executeGroupTargets = async (input) => {
           permission: target.graderTeamPermission
         });
       }
-      if (input.config.summary.gradingEnabled && input.config.course.grading.workflow !== void 0)
+      const actionsState = await input.githubClient.getActionsState(
+        repository.owner,
+        repository.name
+      );
+      if (actionsState !== "enabled") {
+        await input.githubClient.enableActions(repository.owner, repository.name);
+      }
+      if (deployManagedWorkflow) {
+        const deployment = await ensureManagedGradingWorkflow({
+          githubClient: input.githubClient,
+          owner: repository.owner,
+          repo: repository.name,
+          defaultBranch: repository.defaultBranch,
+          grading
+        });
+        if (deployment.status === "conflict_unmanaged" || deployment.status === "conflict_unsupported_version") {
+          const diagnostic3 = failure(
+            target,
+            deployment.status === "conflict_unmanaged" ? `Repository ${target.repositoryName} contains an existing ${GRAIDER_MANAGED_WORKFLOW_PATH} that is not managed by Graider; it was preserved.` : `Repository ${target.repositoryName} contains a Graider workflow with an unsupported ownership version; it was preserved.`,
+            deployment.status === "conflict_unmanaged" ? DiagnosticCode.WorkflowDeploymentConflict : DiagnosticCode.WorkflowDeploymentVersionUnsupported
+          );
+          return {
+            targets: [
+              ...results,
+              {
+                target,
+                htmlUrl: repository.htmlUrl,
+                cloneUrl: `${repository.htmlUrl}.git`,
+                status: "failed",
+                diagnostics: [diagnostic3]
+              }
+            ],
+            warnings,
+            errors: [...errors, diagnostic3]
+          };
+        }
+      }
+      const workflowPath = deployManagedWorkflow ? GRAIDER_MANAGED_WORKFLOW_PATH : grading.workflow;
+      if (grading.enabled && workflowPath !== void 0)
         await input.githubClient.getWorkflow(
           repository.owner,
           repository.name,
-          getWorkflowDispatchIdentifier(input.config.course.grading.workflow)
+          getWorkflowDispatchIdentifier(workflowPath)
         );
-      results.push({
-        target,
-        htmlUrl: repository.htmlUrl,
-        cloneUrl: `${repository.htmlUrl}.git`,
-        status: "created",
-        diagnostics: []
-      });
-    } catch {
+      results.push(observedResult);
+    } catch (error) {
       const diagnostic3 = failure(
         target,
-        `Group target ${target.groupId} failed for repository ${target.repositoryName}.`
+        error instanceof WorkflowDeploymentPermissionError ? `Graider could not create or update ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${target.repositoryName}. Check the token's workflow-file write permission.` : `Group target ${target.groupId} failed for repository ${target.repositoryName}.`,
+        error instanceof WorkflowDeploymentPermissionError ? DiagnosticCode.WorkflowDeploymentForbidden : "group_target_execution_failed"
       );
       return {
         targets: [
           ...results,
-          { target, htmlUrl: null, cloneUrl: null, status: "failed", diagnostics: [diagnostic3] }
+          {
+            target,
+            htmlUrl: repository?.htmlUrl ?? null,
+            cloneUrl: repository === null ? null : `${repository.htmlUrl}.git`,
+            status: "failed",
+            diagnostics: [diagnostic3]
+          }
         ],
         warnings,
         errors: [...errors, diagnostic3]
@@ -7279,10 +8226,12 @@ var renderManifestV2Yaml = (input) => stringify2(
 
 // src/groups/group-apply-manifest-finalizer.ts
 var buildGroupApplyManifestV2 = (planned, execution) => {
-  const failed = execution.errors.length > 0 || execution.targets.length !== planned.length || execution.targets.some(
-    (result, index) => result.status !== "created" || result.target.targetId !== planned[index]?.targetId || result.htmlUrl === null
-  );
-  if (failed)
+  const plannedById = new Map(planned.map((target) => [target.targetId, target]));
+  const invalidResult = execution.targets.find((result) => {
+    const plannedTarget = plannedById.get(result.target.targetId);
+    return plannedTarget === void 0 || plannedTarget.repositoryName !== result.target.repositoryName || plannedTarget.groupId !== result.target.groupId;
+  });
+  if (invalidResult !== void 0)
     return {
       status: "failure",
       targets: [],
@@ -7290,11 +8239,12 @@ var buildGroupApplyManifestV2 = (planned, execution) => {
       diagnostics: [
         createConfigDiagnostic(
           "group_apply_manifest_not_finalized",
-          "Group Apply did not complete successfully, so no manifest can be finalized."
+          "Group Apply returned repository identity that does not match the planned target."
         )
       ]
     };
-  const targets = execution.targets.map((result) => ({
+  const observedResults = execution.targets.filter((result) => result.htmlUrl !== null);
+  const targets = observedResults.map((result) => ({
     targetId: result.target.targetId,
     mode: "group",
     groupId: result.target.groupId,
@@ -7304,9 +8254,9 @@ var buildGroupApplyManifestV2 = (planned, execution) => {
     sectionIds: [...result.target.sectionIds],
     studentIds: [...result.target.studentIds],
     githubUsernames: [...result.target.githubUsernames],
-    diagnostics: [...result.diagnostics]
+    diagnostics: [...result.target.diagnostics, ...result.diagnostics]
   }));
-  const studentMappings = execution.targets.flatMap(
+  const studentMappings = observedResults.flatMap(
     (result) => result.target.studentIds.map((studentId, index) => ({
       studentId,
       githubUsername: result.target.githubUsernames[index] ?? "",
@@ -7316,7 +8266,12 @@ var buildGroupApplyManifestV2 = (planned, execution) => {
       ...result.cloneUrl === null ? {} : { cloneUrl: result.cloneUrl }
     }))
   );
-  return { status: "success", targets, studentMappings, diagnostics: [] };
+  return {
+    status: "success",
+    targets,
+    studentMappings,
+    diagnostics: [...execution.warnings, ...execution.errors]
+  };
 };
 
 // src/groups/group-apply-manifest-writer.ts
@@ -7369,7 +8324,7 @@ var writeGroupApplyManifestV2 = (input) => {
 // src/cli/commands/apply.command.ts
 var COMMAND_NAME5 = "apply";
 var EMPTY_COUNT10 = 0;
-var GROUP_APPLY_INCOMPLETE_MESSAGE = "Group Apply did not complete, so no manifest was written. Some group repositories may have been created before the failure. Graider will not adopt untracked repositories automatically. Delete any partial repositories manually or use a future reconcile workflow, then run Apply again.";
+var GROUP_APPLY_INCOMPLETE_MESSAGE = "Group Apply did not complete. Every repository observed as created remains manifest-tracked, so retrying Apply can safely resume without recreating it.";
 var getExecutionStatus = (errorsLength, summary) => {
   if (errorsLength === EMPTY_COUNT10) {
     return "success";
@@ -7445,11 +8400,56 @@ var runApplyCommand = async ({
     });
   }
   const effectiveGitHubClient = githubResolution.githubClient;
+  const manifestPath = createManifestPath(
+    configResult.config.summary.repoRoot,
+    configResult.config.summary.termCode,
+    configResult.config.summary.assignmentSlug
+  );
+  const manifestResult = loadManifest(manifestPath.absolutePath);
+  if (manifestResult.status === "failure") {
+    return createCommandResult({
+      commandName,
+      assignmentFile: configResult.config.summary.assignmentConfigPath,
+      status: "failure",
+      warnings: manifestResult.warnings,
+      errors: manifestResult.errors,
+      generatedFiles: [],
+      summary: {
+        options,
+        ...configResult.config.summary,
+        ...rosterResult.summary,
+        manifestFile: manifestPath.relativePath
+      }
+    });
+  }
   if (configResult.config.assignment.repository_mode === "group") {
+    if (manifestResult.status === "loaded" && (manifestResult.manifest.schemaVersion !== 2 || manifestResult.manifest.repositoryMode !== "group")) {
+      return createCommandResult({
+        commandName,
+        assignmentFile: configResult.config.summary.assignmentConfigPath,
+        status: "failure",
+        warnings: manifestResult.warnings,
+        errors: [
+          createConfigDiagnostic(
+            "group_manifest_mode_mismatch",
+            "The existing manifest does not contain group repository targets for this assignment.",
+            { manifestPath: manifestPath.relativePath }
+          )
+        ],
+        generatedFiles: [manifestPath.relativePath],
+        summary: {
+          options,
+          ...configResult.config.summary,
+          ...rosterResult.summary,
+          manifestFile: manifestPath.relativePath
+        }
+      });
+    }
     const preflight = await runGroupApplyPreflight({
       config: configResult.config,
       students: rosterResult.students,
-      githubClient: effectiveGitHubClient
+      githubClient: effectiveGitHubClient,
+      ...manifestResult.status === "loaded" ? { manifest: manifestResult.manifest } : {}
     });
     const groupTargetSummary = preflight.targets.map((target) => ({
       groupId: target.groupId,
@@ -7486,11 +8486,75 @@ var runApplyCommand = async ({
         summary: groupSummary
       });
     }
+    const checkpointResults = /* @__PURE__ */ new Map();
+    if (manifestResult.status === "loaded") {
+      for (const manifestTarget of manifestResult.manifest.targets ?? []) {
+        const plannedTarget = preflight.targets.find(
+          (target) => target.targetId === manifestTarget.targetId
+        );
+        if (plannedTarget === void 0) continue;
+        checkpointResults.set(manifestTarget.targetId, {
+          target: plannedTarget,
+          htmlUrl: manifestTarget.htmlUrl ?? null,
+          cloneUrl: manifestTarget.cloneUrl ?? null,
+          status: "updated",
+          diagnostics: manifestTarget.diagnostics
+        });
+      }
+    }
+    const writeGroupCheckpoint = (warnings = [], errors = []) => groupManifestWriter({
+      repoRoot: configResult.config.summary.repoRoot,
+      termCode: configResult.config.summary.termCode,
+      assignmentSlug: configResult.config.summary.assignmentSlug,
+      plannedTargets: preflight.targets,
+      execution: {
+        targets: [...checkpointResults.values()],
+        warnings,
+        errors
+      }
+    });
+    const initialManifestWrite = writeGroupCheckpoint();
+    if (initialManifestWrite.status === "failure") {
+      return createCommandResult({
+        commandName,
+        assignmentFile: configResult.config.summary.assignmentConfigPath,
+        status: "failure",
+        warnings: [...rosterResult.warnings, ...preflight.warnings],
+        errors: [...initialManifestWrite.diagnostics],
+        generatedFiles: manifestResult.status === "loaded" ? [manifestPath.relativePath] : [],
+        summary: {
+          ...groupSummary,
+          manifestFile: manifestPath.relativePath,
+          manifestWritten: manifestResult.status === "loaded"
+        }
+      });
+    }
+    let checkpointWriteFailed = false;
     const execution = await groupTargetExecutor({
       config: configResult.config,
       targets: preflight.targets,
-      githubClient: effectiveGitHubClient
+      githubClient: effectiveGitHubClient,
+      trackedTargetIds: preflight.trackedTargetIds,
+      onRepositoryObserved: async (observed) => {
+        checkpointResults.set(observed.target.targetId, observed);
+        const checkpoint = writeGroupCheckpoint();
+        if (checkpoint.status === "failure") {
+          checkpointWriteFailed = true;
+          return checkpoint.diagnostics;
+        }
+        return [];
+      }
     });
+    for (const targetResult of execution.targets) {
+      if (targetResult.htmlUrl !== null) {
+        checkpointResults.set(targetResult.target.targetId, targetResult);
+      }
+    }
+    const finalManifestWrite = checkpointWriteFailed ? {
+      status: "failure",
+      manifestPath: manifestPath.relativePath,
+      diagnostics: []
+    } : writeGroupCheckpoint(execution.warnings, execution.errors);
     const executionTargetSummary = execution.targets.map((result) => ({
       groupId: result.target.groupId,
       repositoryName: result.target.repositoryName,
@@ -7505,6 +8569,7 @@ var runApplyCommand = async ({
       ...groupSummary,
       groupTargets: executionTargetSummary
     };
+    const manifestWritten = fs8.existsSync(manifestPath.absolutePath);
     if (execution.errors.length > EMPTY_COUNT10) {
       return createCommandResult({
         commandName,
@@ -7514,24 +8579,26 @@ var runApplyCommand = async ({
           ...rosterResult.warnings,
           ...preflight.warnings,
           ...execution.warnings,
-          createWarningDiagnostic(
-            "group_apply_manifest_not_written",
-            GROUP_APPLY_INCOMPLETE_MESSAGE
-          )
+          ...checkpointWriteFailed ? [] : [
+            createWarningDiagnostic(
+              "group_apply_incomplete_manifest_saved",
+              GROUP_APPLY_INCOMPLETE_MESSAGE
+            )
+          ]
         ],
-        errors: [...execution.errors],
-        generatedFiles: [],
-        summary: executionSummary
+        errors: [
+          ...execution.errors,
+          ...finalManifestWrite.status === "failure" ? finalManifestWrite.diagnostics : []
+        ],
+        generatedFiles: manifestWritten ? [manifestPath.relativePath] : [],
+        summary: {
+          ...executionSummary,
+          manifestFile: manifestPath.relativePath,
+          manifestWritten
+        }
       });
     }
-    const manifestWrite = groupManifestWriter({
-      repoRoot: configResult.config.summary.repoRoot,
-      termCode: configResult.config.summary.termCode,
-      assignmentSlug: configResult.config.summary.assignmentSlug,
-      plannedTargets: preflight.targets,
-      execution
-    });
-    if (manifestWrite.status === "failure") {
+    if (finalManifestWrite.status === "failure") {
       return createCommandResult({
         commandName,
         assignmentFile: configResult.config.summary.assignmentConfigPath,
@@ -7541,13 +8608,17 @@ var runApplyCommand = async ({
           ...preflight.warnings,
           ...execution.warnings,
           createWarningDiagnostic(
-            "group_apply_manifest_not_written",
+            "group_apply_incomplete_manifest_saved",
             GROUP_APPLY_INCOMPLETE_MESSAGE
           )
         ],
-        errors: [...manifestWrite.diagnostics],
-        generatedFiles: [],
-        summary: executionSummary
+        errors: [...finalManifestWrite.diagnostics],
+        generatedFiles: manifestWritten ? [manifestPath.relativePath] : [],
+        summary: {
+          ...executionSummary,
+          manifestFile: manifestPath.relativePath,
+          manifestWritten
+        }
       });
     }
     return createCommandResult({
@@ -7556,10 +8627,10 @@ var runApplyCommand = async ({
       status: "success",
       warnings: [...rosterResult.warnings, ...preflight.warnings, ...execution.warnings],
       errors: [],
-      generatedFiles: [manifestWrite.manifestPath],
+      generatedFiles: [finalManifestWrite.manifestPath],
       summary: {
         ...executionSummary,
-        manifestFile: manifestWrite.manifestPath,
+        manifestFile: finalManifestWrite.manifestPath,
         manifestWritten: true
       }
     });
@@ -7584,28 +8655,6 @@ var runApplyCommand = async ({
         ...configResult.config.summary,
         ...rosterResult.summary,
         githubReadinessChecked: true
-      }
-    });
-  }
-  const manifestPath = createManifestPath(
-    configResult.config.summary.repoRoot,
-    configResult.config.summary.termCode,
-    configResult.config.summary.assignmentSlug
-  );
-  const manifestResult = loadManifest(manifestPath.absolutePath);
-  if (manifestResult.status === "failure") {
-    return createCommandResult({
-      commandName,
-      assignmentFile: configResult.config.summary.assignmentConfigPath,
-      status: "failure",
-      warnings: manifestResult.warnings,
-      errors: manifestResult.errors,
-      generatedFiles: [],
-      summary: {
-        options,
-        ...configResult.config.summary,
-        ...rosterResult.summary,
-        manifestFile: manifestPath.relativePath
       }
     });
   }
@@ -9985,7 +11034,7 @@ var renderStudentResultsJson = (assignment, student, generatedAt) => `${stringif
 // src/reporting/student-report-publisher.ts
 var PUBLISHED_STUDENT_REPORT_PATH = "grading/report.md";
 var PUBLISHED_STUDENT_RESULTS_PATH = "grading/results.json";
-var PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE = "Update Graider student report";
+var PUBLISHED_STUDENT_REPORT_COMMIT_MESSAGE = "Publish Graider grading report [skip ci]";
 var EMPTY_COUNT16 = 0;
 var PUBLISHED_FILE_COUNT_PER_STUDENT = 2;
 var FIRST_PUBLISHED_FILE_COUNT = 1;
@@ -11622,290 +12671,6 @@ var registerValidateCommand = (program) => {
 
 // src/cli/commands/workflow.command.ts
 import path20 from "path";
-
-// src/workflows/result-writer-template.ts
-var RESULT_SCHEMA_VERSION = 1;
-var RESULT_SCHEMA_VERSION_TEXT = String(RESULT_SCHEMA_VERSION);
-var RESULT_WRITER_SCRIPT_PATH = ".graider/write-grading-result.py";
-var renderGradingResultWriterScript = () => `#!/usr/bin/env python3
-import argparse
-import base64
-import json
-import os
-import sys
-
-SCHEMA_VERSION = ${RESULT_SCHEMA_VERSION_TEXT}
-STATUS_PASSED = "passed"
-STATUS_FAILED = "failed"
-STATUS_SKIPPED = "skipped"
-STATUS_MAP = {
-    "pass": STATUS_PASSED,
-    "passed": STATUS_PASSED,
-    "success": STATUS_PASSED,
-    "fail": STATUS_FAILED,
-    "failed": STATUS_FAILED,
-    "failure": STATUS_FAILED,
-    "error": STATUS_FAILED,
-    "cancelled": STATUS_FAILED,
-    "timed_out": STATUS_FAILED,
-    "timed-out": STATUS_FAILED,
-    "skip": STATUS_SKIPPED,
-    "skipped": STATUS_SKIPPED,
-}
-
-
-def map_status(value):
-    normalized = (value or "").strip().lower()
-    return STATUS_MAP.get(normalized, STATUS_FAILED)
-
-
-def decode_classroom_result(encoded):
-    if not encoded:
-        return None
-
-    try:
-        decoded_bytes = base64.b64decode(encoded)
-        decoded_text = decoded_bytes.decode("utf-8")
-        return json.loads(decoded_text)
-    except Exception:
-        return None
-
-
-def status_from_classroom_or_outcome(classroom_env_name, outcome_env_name):
-    classroom_result = decode_classroom_result(os.environ.get(classroom_env_name))
-
-    if isinstance(classroom_result, dict):
-        top_level_status = classroom_result.get("status")
-        if top_level_status:
-            return map_status(top_level_status)
-
-        tests = classroom_result.get("tests")
-        if isinstance(tests, list) and tests:
-            test_statuses = [
-                map_status(test.get("status"))
-                for test in tests
-                if isinstance(test, dict)
-            ]
-
-            if STATUS_FAILED in test_statuses:
-                return STATUS_FAILED
-
-            if test_statuses and all(status == STATUS_SKIPPED for status in test_statuses):
-                return STATUS_SKIPPED
-
-            if test_statuses:
-                return STATUS_PASSED
-
-    return map_status(os.environ.get(outcome_env_name))
-
-
-def parse_check(raw_check):
-    name, separator, outcome = raw_check.partition("=")
-    normalized_name = name.strip()
-    if not normalized_name:
-        raise ValueError("check name must not be empty")
-    normalized_outcome = outcome if separator else ""
-    return {
-        "name": normalized_name,
-        "status": map_status(normalized_outcome),
-    }
-
-
-def parse_classroom_check(raw_check):
-    name, separator, env_names = raw_check.partition("=")
-    normalized_name = name.strip()
-    if not normalized_name:
-        raise ValueError("check name must not be empty")
-    if not separator:
-        raise ValueError("classroom check must include environment variable names")
-    classroom_env_name, env_separator, outcome_env_name = env_names.partition(":")
-    if not env_separator or not classroom_env_name.strip() or not outcome_env_name.strip():
-        raise ValueError("classroom check must include classroom and outcome environment names")
-    return {
-        "name": normalized_name,
-        "status": status_from_classroom_or_outcome(
-            classroom_env_name.strip(),
-            outcome_env_name.strip(),
-        ),
-    }
-
-
-def compute_overall_status(checks):
-    if not checks:
-        return STATUS_SKIPPED
-    statuses = [check["status"] for check in checks]
-    if STATUS_FAILED in statuses:
-        return STATUS_FAILED
-    if all(status == STATUS_SKIPPED for status in statuses):
-        return STATUS_SKIPPED
-    return STATUS_PASSED
-
-
-def write_result(output_path, checks):
-    parent = os.path.dirname(output_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    result = {
-        "schema_version": SCHEMA_VERSION,
-        "status": compute_overall_status(checks),
-        "checks": checks,
-    }
-    with open(output_path, "w", encoding="utf-8") as output_file:
-        json.dump(result, output_file, indent=2)
-        output_file.write("\\n")
-
-
-def main(argv):
-    parser = argparse.ArgumentParser(description="Write Graider grading result JSON.")
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--check", action="append", default=[])
-    parser.add_argument("--classroom-check", action="append", default=[])
-    args = parser.parse_args(argv)
-
-    try:
-        checks = [
-            *[parse_check(raw_check) for raw_check in args.check],
-            *[parse_classroom_check(raw_check) for raw_check in args.classroom_check],
-        ]
-        write_result(args.output, checks)
-    except ValueError as error:
-        print(str(error), file=sys.stderr)
-        return 2
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
-`;
-
-// src/workflows/java-junit-checkstyle-workflow.ts
-var JAVA_JUNIT_CHECKSTYLE_PRESET = "java-junit-checkstyle";
-var WORKFLOW_NAME = "AutoGrading Tests";
-var JAVA_VERSION = "25";
-var JAVA_DISTRIBUTION = "oracle";
-var CHECKSTYLE_VERSION = "13.4.1";
-var CHECKSTYLE_CONFIG_URL = "https://csse.msoe.us/csc1110/MSOE_checkStyle.xml";
-var JUNIT_PLATFORM_CONSOLE_VERSION = "6.1.0";
-var MOCKITO_VERSION = "5.18.0";
-var BYTE_BUDDY_VERSION = "1.17.5";
-var JAVAFX_VERSION = "25";
-var OUTPUT_DIRECTORY = "graider-output";
-var indentWorkflowRunLine = (line) => `          ${line}`;
-var renderResultWriterInstallLines = () => renderGradingResultWriterScript().trimEnd().split("\n").map(indentWorkflowRunLine);
-var createResultOutputPath = (resultFile) => resultFile.includes("/") ? resultFile : `${OUTPUT_DIRECTORY}/${resultFile}`;
-var renderJavaJunitCheckstyleWorkflow = ({
-  grading
-}) => {
-  const artifactName = grading.artifact ?? "grading-results";
-  const resultFile = grading.result_file ?? "grading-results.json";
-  const resultOutputPath = createResultOutputPath(resultFile);
-  return [
-    `name: ${WORKFLOW_NAME}`,
-    "",
-    "on:",
-    "  - push",
-    "  - repository_dispatch",
-    "  - workflow_dispatch",
-    "",
-    "permissions:",
-    "  checks: write",
-    "  actions: read",
-    "  contents: read",
-    "",
-    "jobs:",
-    "  grade:",
-    "    runs-on: ubuntu-latest",
-    "    env:",
-    `      JAVA_VERSION: "${JAVA_VERSION}"`,
-    `      CHECKSTYLE_VERSION: "${CHECKSTYLE_VERSION}"`,
-    `      CHECKSTYLE_CONFIG_URL: "${CHECKSTYLE_CONFIG_URL}"`,
-    `      JUNIT_PLATFORM_CONSOLE_VERSION: "${JUNIT_PLATFORM_CONSOLE_VERSION}"`,
-    `      MOCKITO_VERSION: "${MOCKITO_VERSION}"`,
-    `      BYTE_BUDDY_VERSION: "${BYTE_BUDDY_VERSION}"`,
-    `      JAVAFX_VERSION: "${JAVAFX_VERSION}"`,
-    "      TOOLS_DIR: graider-tools",
-    "    steps:",
-    "      - name: Check out repository",
-    "        uses: actions/checkout@v4",
-    "",
-    "      - name: Set up Java",
-    "        uses: actions/setup-java@v4",
-    "        with:",
-    `          distribution: ${JAVA_DISTRIBUTION}`,
-    "          java-version: ${{ env.JAVA_VERSION }}",
-    "",
-    "      - name: Install JavaFX headless dependencies",
-    "        run: |",
-    "          sudo apt-get update",
-    "          sudo apt-get install -y unzip xvfb",
-    "",
-    "      - name: Download grading tools",
-    "        run: |",
-    '          mkdir -p "$TOOLS_DIR"',
-    '          curl -fsSL -o "$TOOLS_DIR/checkstyle.jar" "https://repo1.maven.org/maven2/com/puppycrawl/tools/checkstyle/${CHECKSTYLE_VERSION}/checkstyle-${CHECKSTYLE_VERSION}-all.jar"',
-    '          curl -fsSL -o "$TOOLS_DIR/junit-platform-console-standalone.jar" "https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/${JUNIT_PLATFORM_CONSOLE_VERSION}/junit-platform-console-standalone-${JUNIT_PLATFORM_CONSOLE_VERSION}.jar"',
-    '          curl -fsSL -o "$TOOLS_DIR/mockito-core.jar" "https://repo1.maven.org/maven2/org/mockito/mockito-core/${MOCKITO_VERSION}/mockito-core-${MOCKITO_VERSION}.jar"',
-    '          curl -fsSL -o "$TOOLS_DIR/byte-buddy.jar" "https://repo1.maven.org/maven2/net/bytebuddy/byte-buddy/${BYTE_BUDDY_VERSION}/byte-buddy-${BYTE_BUDDY_VERSION}.jar"',
-    '          curl -fsSL -o "$TOOLS_DIR/byte-buddy-agent.jar" "https://repo1.maven.org/maven2/net/bytebuddy/byte-buddy-agent/${BYTE_BUDDY_VERSION}/byte-buddy-agent-${BYTE_BUDDY_VERSION}.jar"',
-    '          curl -fsSL -o "$TOOLS_DIR/javafx.zip" "https://download2.gluonhq.com/openjfx/${JAVAFX_VERSION}/openjfx-${JAVAFX_VERSION}_linux-x64_bin-sdk.zip"',
-    '          unzip -q "$TOOLS_DIR/javafx.zip" -d "$TOOLS_DIR/javafx"',
-    "",
-    "      - name: Install Graider result writer",
-    "        run: |",
-    "          mkdir -p .graider",
-    `          cat > ${RESULT_WRITER_SCRIPT_PATH} <<'PY'`,
-    ...renderResultWriterInstallLines(),
-    "          PY",
-    `          chmod +x ${RESULT_WRITER_SCRIPT_PATH}`,
-    "",
-    "      - name: Run CheckStyle",
-    "        id: checkstyle",
-    "        continue-on-error: true",
-    "        run: |",
-    `          java -jar "$TOOLS_DIR/checkstyle.jar" -c "$CHECKSTYLE_CONFIG_URL" $(find src test -name '*.java' -print)`,
-    "",
-    "      - name: Compile Java sources",
-    "        id: compile",
-    "        continue-on-error: true",
-    "        run: |",
-    "          mkdir -p build/classes",
-    `          JAVAFX_LIB=$(find "$TOOLS_DIR/javafx" -type d -path '*/lib' | head -n 1)`,
-    `          javac --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -cp "$TOOLS_DIR/junit-platform-console-standalone.jar:$TOOLS_DIR/mockito-core.jar:$TOOLS_DIR/byte-buddy.jar:$TOOLS_DIR/byte-buddy-agent.jar" -d build/classes $(find src test -name '*.java' -print)`,
-    "",
-    "      - name: Run Unit Tests",
-    "        id: unit-tests",
-    "        continue-on-error: true",
-    "        run: |",
-    `          JAVAFX_LIB=$(find "$TOOLS_DIR/javafx" -type d -path '*/lib' | head -n 1)`,
-    '          xvfb-run -a java --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -jar "$TOOLS_DIR/junit-platform-console-standalone.jar" execute --class-path build/classes --scan-class-path',
-    "",
-    "      - name: Run GitHub Classroom autograding reporter",
-    "        if: always()",
-    "        continue-on-error: true",
-    "        uses: education/autograding@v1",
-    "",
-    "      - name: Write Graider grading result",
-    "        if: always()",
-    "        env:",
-    "          CHECKSTYLE_CLASSROOM_RESULT: ${{ steps.checkstyle.outputs.result }}",
-    "          UNIT_TESTS_CLASSROOM_RESULT: ${{ steps.unit-tests.outputs.result }}",
-    "          CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}",
-    "          UNIT_TESTS_OUTCOME: ${{ steps.unit-tests.outcome }}",
-    "        run: |",
-    `          python3 ${RESULT_WRITER_SCRIPT_PATH} \\`,
-    `            --output ${resultOutputPath} \\`,
-    '            --classroom-check "CheckStyle=CHECKSTYLE_CLASSROOM_RESULT:CHECKSTYLE_OUTCOME" \\',
-    '            --classroom-check "Unit Tests=UNIT_TESTS_CLASSROOM_RESULT:UNIT_TESTS_OUTCOME"',
-    "",
-    "      - name: Upload Graider grading result",
-    "        if: always()",
-    "        uses: actions/upload-artifact@v4",
-    "        with:",
-    `          name: ${artifactName}`,
-    `          path: ${resultOutputPath}`,
-    ""
-  ].join("\n");
-};
 
 // src/workflows/workflow-writer.ts
 import fs14 from "fs";

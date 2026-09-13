@@ -2,7 +2,7 @@ import type { CommonCommandOptions } from "../core/command-context.js";
 import { evaluateMutationGuard, type MutationGuardResult } from "../execution/mutation-guard.js";
 import type { Manifest, ManifestRepositoryRecord } from "../manifest/manifest-models.js";
 import { updateRepositoryIdentity } from "../manifest/manifest-updater.js";
-import type { TemplateSyncAnchors, TemplateSyncResult } from "./template-sync.js";
+import type { InitializedTemplateSyncAnchors, TemplateSyncResult } from "./template-sync.js";
 import { getTemplateSyncFailure } from "./template-sync-failure.js";
 import type { TemplateSyncFailure } from "./template-sync-failure.js";
 
@@ -13,7 +13,7 @@ export interface AssignmentTemplateSyncInput {
   runRepositorySync(
     repository: ManifestRepositoryRecord,
     targetTemplateCommitSha: string
-  ): Promise<{ result: TemplateSyncResult; anchors?: Required<TemplateSyncAnchors> }>;
+  ): Promise<{ result: TemplateSyncResult; anchors?: InitializedTemplateSyncAnchors }>;
   persistManifest(manifest: Manifest): Promise<void>;
 }
 
@@ -43,14 +43,11 @@ export const isApplicableRepository = (
   repository: ManifestRepositoryRecord,
   manifest: Manifest
 ): boolean =>
+  manifest.template !== undefined &&
   repository.repository.createdFromTemplate &&
+  repository.repository.templateRepository !== undefined &&
   repository.repository.templateRepository === manifest.template.repository &&
   !["archived", "access_removed", "missing", "error"].includes(repository.lifecycle.status);
-
-const hasAnchorUpdate = (
-  result: TemplateSyncResult
-): result is Extract<TemplateSyncResult, { status: "updated" | "pull_request_reconciled" }> =>
-  result.status === "updated" || result.status === "pull_request_reconciled";
 
 export const syncAssignmentTemplate = async (
   input: AssignmentTemplateSyncInput

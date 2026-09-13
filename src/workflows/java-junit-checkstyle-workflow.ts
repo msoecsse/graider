@@ -1,24 +1,32 @@
-import type { RawCourseConfig } from "../config/config-models.js";
 import {
   RESULT_WRITER_SCRIPT_PATH,
   renderGradingResultWriterScript
 } from "./result-writer-template.js";
+import {
+  GRAIDER_MANAGED_WORKFLOW_PATH,
+  renderManagedWorkflowMarker
+} from "./managed-workflow-policy.js";
+import type { EffectiveAssignmentGrading } from "../config/effective-grading.js";
 
 export const JAVA_JUNIT_CHECKSTYLE_PRESET = "java-junit-checkstyle";
 
 const WORKFLOW_NAME = "AutoGrading Tests";
 const JAVA_VERSION = "25";
 const JAVA_DISTRIBUTION = "oracle";
-const CHECKSTYLE_VERSION = "13.4.1";
+const CHECKSTYLE_VERSION = "14.1.0";
 const CHECKSTYLE_CONFIG_URL = "https://csse.msoe.us/csc1110/MSOE_checkStyle.xml";
-const JUNIT_PLATFORM_CONSOLE_VERSION = "6.1.0";
+const JUNIT_PLATFORM_CONSOLE_VERSION = "6.1.2";
 const MOCKITO_VERSION = "5.18.0";
 const BYTE_BUDDY_VERSION = "1.17.5";
 const JAVAFX_VERSION = "25";
 const OUTPUT_DIRECTORY = "graider-output";
+const EVIDENCE_DIRECTORY = "grading-evidence";
+const JUNIT_EVIDENCE_DIRECTORY = `${EVIDENCE_DIRECTORY}/junit`;
+const CHECKSTYLE_EVIDENCE_FILE = `${EVIDENCE_DIRECTORY}/checkstyle.xml`;
+const EVIDENCE_METADATA_FILE = `${EVIDENCE_DIRECTORY}/metadata.json`;
 
 export interface JavaJunitCheckstyleWorkflowInput {
-  readonly grading: RawCourseConfig["grading"];
+  readonly grading: EffectiveAssignmentGrading;
 }
 
 const indentWorkflowRunLine = (line: string): string => `          ${line}`;
@@ -37,12 +45,15 @@ export const renderJavaJunitCheckstyleWorkflow = ({
   const resultOutputPath = createResultOutputPath(resultFile);
 
   return [
+    ...renderManagedWorkflowMarker(),
     `name: ${WORKFLOW_NAME}`,
     "",
     "on:",
-    "  - push",
-    "  - repository_dispatch",
-    "  - workflow_dispatch",
+    "  push:",
+    "    paths-ignore:",
+    `      - ${GRAIDER_MANAGED_WORKFLOW_PATH}`,
+    "  repository_dispatch:",
+    "  workflow_dispatch:",
     "",
     "permissions:",
     "  checks: write",
@@ -50,7 +61,14 @@ export const renderJavaJunitCheckstyleWorkflow = ({
     "  contents: read",
     "",
     "jobs:",
-    "  grade:",
+    "  run-autograding-tests:",
+    "    if: >-",
+    "      github.actor != 'github-classroom[bot]' &&",
+    "      !(",
+    "        github.event_name == 'push' &&",
+    "        github.event.before == '0000000000000000000000000000000000000000' &&",
+    "        github.ref_name == github.event.repository.default_branch",
+    "      )",
     "    runs-on: ubuntu-latest",
     "    env:",
     `      JAVA_VERSION: "${JAVA_VERSION}"`,
@@ -95,31 +113,56 @@ export const renderJavaJunitCheckstyleWorkflow = ({
     "          PY",
     `          chmod +x ${RESULT_WRITER_SCRIPT_PATH}`,
     "",
-    "      - name: Run CheckStyle",
+    "      - name: CheckStyle",
     "        id: checkstyle",
+    "        uses: classroom-resources/autograding-command-grader@v1",
     "        continue-on-error: true",
-    "        run: |",
-    '          java -jar "$TOOLS_DIR/checkstyle.jar" -c "$CHECKSTYLE_CONFIG_URL" $(find src test -name \'*.java\' -print)',
+    "        with:",
+    "          test-name: CheckStyle",
+    "          command: |",
+    "            set +e",
+    '            java -jar "$TOOLS_DIR/checkstyle.jar" -c "$CHECKSTYLE_CONFIG_URL" $(find src -name \'*.java\' -print)',
+    "            checkstyle_exit=$?",
+    `            mkdir -p ${EVIDENCE_DIRECTORY}`,
+    `            java -jar "$TOOLS_DIR/checkstyle.jar" -f xml -o ${CHECKSTYLE_EVIDENCE_FILE} -c "$CHECKSTYLE_CONFIG_URL" $(find src -name '*.java' -print)`,
+    "            exit $checkstyle_exit",
     "",
     "      - name: Compile Java sources",
     "        id: compile",
-    "        continue-on-error: true",
     "        run: |",
-    "          mkdir -p build/classes",
+    "          mkdir -p bin",
     "          JAVAFX_LIB=$(find \"$TOOLS_DIR/javafx\" -type d -path '*/lib' | head -n 1)",
-    '          javac --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -cp "$TOOLS_DIR/junit-platform-console-standalone.jar:$TOOLS_DIR/mockito-core.jar:$TOOLS_DIR/byte-buddy.jar:$TOOLS_DIR/byte-buddy-agent.jar" -d build/classes $(find src test -name \'*.java\' -print)',
+    '          javac --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -cp "$TOOLS_DIR/junit-platform-console-standalone.jar:$TOOLS_DIR/mockito-core.jar:$TOOLS_DIR/byte-buddy.jar:$TOOLS_DIR/byte-buddy-agent.jar" -d bin $(find src test -name \'*.java\' -print)',
     "",
-    "      - name: Run Unit Tests",
+    "      - name: Unit Tests",
     "        id: unit-tests",
+    "        uses: classroom-resources/autograding-command-grader@v1",
     "        continue-on-error: true",
-    "        run: |",
-    "          JAVAFX_LIB=$(find \"$TOOLS_DIR/javafx\" -type d -path '*/lib' | head -n 1)",
-    '          xvfb-run -a java --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -jar "$TOOLS_DIR/junit-platform-console-standalone.jar" execute --class-path build/classes --scan-class-path',
+    "        with:",
+    "          test-name: Unit Tests",
+    "          command: |",
+    "            COMMIT_MSG='${{ github.event.head_commit.message }}'",
+    '            case "$COMMIT_MSG" in',
+    "              COMMIT[0-9]*|DONE[0-9]*)",
+    '                TAG="${COMMIT_MSG%% *}"',
+    '                TAG_ARGS="--include-tag $TAG"',
+    "                ;;",
+    "              *)",
+    '                TAG_ARGS=""',
+    "                ;;",
+    "            esac",
+    "            JAVAFX_LIB=$(find \"$TOOLS_DIR/javafx\" -type d -path '*/lib' | head -n 1)",
+    `            mkdir -p ${JUNIT_EVIDENCE_DIRECTORY}`,
+    `            xvfb-run -a java --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -jar "$TOOLS_DIR/junit-platform-console-standalone.jar" execute $TAG_ARGS --scan-class-path --class-path bin --reports-dir ${JUNIT_EVIDENCE_DIRECTORY}`,
     "",
-    "      - name: Run GitHub Classroom autograding reporter",
+    "      - name: AutoGrading Reporter",
     "        if: always()",
-    "        continue-on-error: true",
-    "        uses: education/autograding@v1",
+    "        uses: classroom-resources/autograding-grading-reporter@v1",
+    "        env:",
+    "          CHECKSTYLE_RESULTS: ${{ steps.checkstyle.outputs.result }}",
+    "          UNIT-TESTS_RESULTS: ${{ steps.unit-tests.outputs.result }}",
+    "        with:",
+    "          runners: checkstyle,unit-tests",
     "",
     "      - name: Write Graider grading result",
     "        if: always()",
@@ -128,18 +171,31 @@ export const renderJavaJunitCheckstyleWorkflow = ({
     "          UNIT_TESTS_CLASSROOM_RESULT: ${{ steps.unit-tests.outputs.result }}",
     "          CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}",
     "          UNIT_TESTS_OUTCOME: ${{ steps.unit-tests.outcome }}",
+    "          COMPILE_OUTCOME: ${{ steps.compile.outcome }}",
+    "          SUBMISSION_COMMIT_SHA: ${{ github.sha }}",
+    "          WORKFLOW_RUN_ID: ${{ github.run_id }}",
+    "          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}",
     "        run: |",
     `          python3 ${RESULT_WRITER_SCRIPT_PATH} \\`,
     `            --output ${resultOutputPath} \\`,
     '            --classroom-check "CheckStyle=CHECKSTYLE_CLASSROOM_RESULT:CHECKSTYLE_OUTCOME" \\',
-    '            --classroom-check "Unit Tests=UNIT_TESTS_CLASSROOM_RESULT:UNIT_TESTS_OUTCOME"',
+    '            --classroom-check "Unit Tests=UNIT_TESTS_CLASSROOM_RESULT:UNIT_TESTS_OUTCOME" \\',
+    `            --evidence-metadata-output ${EVIDENCE_METADATA_FILE} \\`,
+    '            --submission-commit-sha "$SUBMISSION_COMMIT_SHA" \\',
+    '            --workflow-run-id "$WORKFLOW_RUN_ID" \\',
+    '            --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" \\',
+    '            --evidence-outcome "compile=${COMPILE_OUTCOME}" \\',
+    '            --evidence-outcome "junit=${UNIT_TESTS_OUTCOME}" \\',
+    '            --evidence-outcome "checkstyle=${CHECKSTYLE_OUTCOME}"',
     "",
     "      - name: Upload Graider grading result",
     "        if: always()",
     "        uses: actions/upload-artifact@v4",
     "        with:",
     `          name: ${artifactName}`,
-    `          path: ${resultOutputPath}`,
+    "          path: |",
+    `            ${resultOutputPath}`,
+    `            ${EVIDENCE_DIRECTORY}/`,
     ""
   ].join("\n");
 };

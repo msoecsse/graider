@@ -3,6 +3,7 @@ import type {
   AssignmentSetupPreviewResult,
   AssignmentSetupRequest,
   AssignmentSetupTerm,
+  AssignmentRubricCategory,
   CourseFolderRecord
 } from "../../electron/ipc";
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
@@ -37,6 +38,8 @@ const createRequest = (
     facultyOwner: string;
     lmsAssignmentId: string;
     gradingCategory: string;
+    requiredFiles: readonly string[];
+    rubric: readonly AssignmentRubricCategory[];
   }
 ): AssignmentSetupRequest => ({
   courseFolderId: courseFolder.id,
@@ -64,11 +67,13 @@ export const AssignmentSetupPage = ({
   const [templateRepository, setTemplateRepository] = useState("");
   const [templateBranch, setTemplateBranch] = useState("");
   const [dueAt, setDueAt] = useState("");
-  const [gradingEnabled, setGradingEnabled] = useState(true);
+  const [gradingEnabled, setGradingEnabled] = useState(false);
   const [points, setPoints] = useState("100");
   const [facultyOwner, setFacultyOwner] = useState("");
   const [lmsAssignmentId, setLmsAssignmentId] = useState("");
   const [gradingCategory, setGradingCategory] = useState("labs");
+  const [requiredFiles, setRequiredFiles] = useState<readonly string[]>([]);
+  const [rubric, setRubric] = useState<readonly AssignmentRubricCategory[]>([]);
   const [preview, setPreview] = useState<AssignmentSetupPreviewResult | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -103,7 +108,9 @@ export const AssignmentSetupPage = ({
         points: points.trim() === "" ? null : Number(points),
         facultyOwner,
         lmsAssignmentId,
-        gradingCategory
+        gradingCategory,
+        requiredFiles,
+        rubric
       }),
     [
       assignmentSlug,
@@ -115,7 +122,9 @@ export const AssignmentSetupPage = ({
       gradingEnabled,
       lmsAssignmentId,
       points,
+      requiredFiles,
       sectionIds,
+      rubric,
       templateBranch,
       templateRepository,
       termCode
@@ -371,6 +380,193 @@ export const AssignmentSetupPage = ({
           </label>
         </section>
         <section className="detail-panel">
+          <h2>Required files</h2>
+          <p className="muted-copy">Files are shown to faculty in this order.</p>
+          {requiredFiles.map((file, index) => (
+            <div className="inline-form-row" key={`${index}-${file}`}>
+              <input
+                aria-label={`Required file ${String(index + 1)}`}
+                value={file}
+                onChange={(event) => {
+                  setRequiredFiles((current) =>
+                    current.map((value, item) => (item === index ? event.target.value : value))
+                  );
+                  clearPreview();
+                }}
+              />
+              <button
+                className="secondary-action"
+                disabled={index === 0}
+                onClick={() => {
+                  setRequiredFiles((current) => {
+                    const next = [...current];
+                    const previous = next[index - 1];
+                    const selectedItem = next[index];
+                    if (previous !== undefined && selectedItem !== undefined) {
+                      [next[index - 1], next[index]] = [selectedItem, previous];
+                    }
+                    return next;
+                  });
+                  clearPreview();
+                }}
+                type="button"
+              >
+                Up
+              </button>
+              <button
+                className="secondary-action"
+                disabled={index === requiredFiles.length - 1}
+                onClick={() => {
+                  setRequiredFiles((current) => {
+                    const next = [...current];
+                    const selectedItem = next[index];
+                    const following = next[index + 1];
+                    if (selectedItem !== undefined && following !== undefined) {
+                      [next[index], next[index + 1]] = [following, selectedItem];
+                    }
+                    return next;
+                  });
+                  clearPreview();
+                }}
+                type="button"
+              >
+                Down
+              </button>
+              <button
+                className="secondary-action"
+                onClick={() => {
+                  setRequiredFiles((current) => current.filter((_value, item) => item !== index));
+                  clearPreview();
+                }}
+                type="button"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            className="secondary-action"
+            onClick={() => {
+              setRequiredFiles((current) => [...current, ""]);
+              clearPreview();
+            }}
+            type="button"
+          >
+            Add required file
+          </button>
+        </section>
+        <section className="detail-panel">
+          <h2>Rubric</h2>
+          <p className="muted-copy">Categories are flat and shown in this order.</p>
+          {rubric.map((category, index) => (
+            <div className="inline-form-row" key={`${index}-${category.id}`}>
+              <input
+                aria-label={`Rubric ID ${String(index + 1)}`}
+                placeholder="ID"
+                value={category.id}
+                onChange={(event) => {
+                  setRubric((current) =>
+                    current.map((value, item) =>
+                      item === index ? { ...value, id: event.target.value } : value
+                    )
+                  );
+                  clearPreview();
+                }}
+              />
+              <input
+                aria-label={`Rubric name ${String(index + 1)}`}
+                placeholder="Name"
+                value={category.name}
+                onChange={(event) => {
+                  setRubric((current) =>
+                    current.map((value, item) =>
+                      item === index ? { ...value, name: event.target.value } : value
+                    )
+                  );
+                  clearPreview();
+                }}
+              />
+              <input
+                aria-label={`Rubric points ${String(index + 1)}`}
+                type="number"
+                value={Number.isFinite(category.points) ? String(category.points) : ""}
+                onChange={(event) => {
+                  setRubric((current) =>
+                    current.map((value, item) =>
+                      item === index
+                        ? {
+                            ...value,
+                            points:
+                              event.target.value === "" ? Number.NaN : Number(event.target.value)
+                          }
+                        : value
+                    )
+                  );
+                  clearPreview();
+                }}
+              />
+              <button
+                className="secondary-action"
+                disabled={index === 0}
+                onClick={() => {
+                  setRubric((current) => {
+                    const next = [...current];
+                    const previous = next[index - 1];
+                    const selectedItem = next[index];
+                    if (previous !== undefined && selectedItem !== undefined) {
+                      [next[index - 1], next[index]] = [selectedItem, previous];
+                    }
+                    return next;
+                  });
+                  clearPreview();
+                }}
+                type="button"
+              >
+                Up
+              </button>
+              <button
+                className="secondary-action"
+                disabled={index === rubric.length - 1}
+                onClick={() => {
+                  setRubric((current) => {
+                    const next = [...current];
+                    const selectedItem = next[index];
+                    const following = next[index + 1];
+                    if (selectedItem !== undefined && following !== undefined) {
+                      [next[index], next[index + 1]] = [following, selectedItem];
+                    }
+                    return next;
+                  });
+                  clearPreview();
+                }}
+                type="button"
+              >
+                Down
+              </button>
+              <button
+                className="secondary-action"
+                onClick={() => {
+                  setRubric((current) => current.filter((_value, item) => item !== index));
+                  clearPreview();
+                }}
+                type="button"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            className="secondary-action"
+            onClick={() => {
+              setRubric((current) => [...current, { id: "", name: "", points: Number.NaN }]);
+              clearPreview();
+            }}
+            type="button"
+          >
+            Add rubric category
+          </button>
+        </section>
+        <section className="detail-panel">
           <h2>Create assignment</h2>
           <button
             className="primary-action"
@@ -390,9 +586,9 @@ export const AssignmentSetupPage = ({
         </section>
       </section>
       <ConfirmationWithPreviewModal
-        acknowledgementLabel={
-          preview?.hasConflicts ? "Replace the existing assignment.yml" : undefined
-        }
+        {...(preview?.hasConflicts
+          ? { acknowledgementLabel: "Replace the existing assignment.yml" }
+          : {})}
         confirmLabel="Create assignment"
         isOpen={isConfirming && preview !== null}
         onCancel={() => setIsConfirming(false)}

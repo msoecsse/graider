@@ -376,6 +376,7 @@ const createMockOctokit = (): OctokitRestClientLike => ({
     },
     repos: {
       get: () => createRepositoryResponse(),
+      createInOrg: () => createRepositoryResponse(),
       createUsingTemplate: () => createRepositoryResponse(),
       listBranches: () => resolvedResponse([{ name: BRANCH }]),
       listCommits: () => resolvedResponse([{ sha: "latest-sha" }]),
@@ -464,6 +465,26 @@ const expectGitHubError = async (
 };
 
 describe("OctokitGitHubClient", () => {
+  it("creates an uninitialized private repository in the configured organization", async () => {
+    const octokit = createMockOctokit();
+    let observedInput: Record<string, unknown> = {};
+    octokit.rest.repos.createInOrg = (input = {}) => {
+      observedInput = input;
+      return createRepositoryResponse();
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(
+      client.createRepository({ owner: OWNER, name: REPO, private: true })
+    ).resolves.toMatchObject({ owner: OWNER, name: REPO, private: true });
+    expect(observedInput).toEqual({
+      org: OWNER,
+      name: REPO,
+      private: true,
+      auto_init: false
+    });
+  });
+
   it("finds PR state, creates a PR, and safely deletes a managed branch", async () => {
     const octokit = createMockOctokit();
     octokit.rest.pulls.list = () =>
@@ -693,6 +714,39 @@ describe("OctokitGitHubClient", () => {
     expect(Object.hasOwn(observedWriteInput, "sha")).toBe(false);
   });
 
+  it("creates grade.yml as the first default-branch file without a SHA or branch override", async () => {
+    const octokit = createMockOctokit();
+    let observedWriteInput: Record<string, unknown> = {};
+    octokit.rest.repos.getContent = () =>
+      rejectedResponse(createRequestError({ status: OctokitTestNumber.NotFoundStatus }));
+    octokit.rest.repos.createOrUpdateFileContents = (input = {}) => {
+      observedWriteInput = input;
+
+      return resolvedResponse({
+        commit: { sha: CREATED_SHA },
+        content: { path: TEMPLATE_WORKFLOW_PATH }
+      });
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await client.writeRepositoryFile({
+      owner: OWNER,
+      repo: REPO,
+      path: TEMPLATE_WORKFLOW_PATH,
+      content: WORKFLOW_CONTENT,
+      message: "Configure Graider grading workflow"
+    });
+
+    expect(observedWriteInput).toMatchObject({
+      owner: OWNER,
+      repo: REPO,
+      path: TEMPLATE_WORKFLOW_PATH,
+      message: "Configure Graider grading workflow"
+    });
+    expect(Object.hasOwn(observedWriteInput, "sha")).toBe(false);
+    expect(observedWriteInput.branch).toBeUndefined();
+  });
+
   it("writeRepositoryFile retries transient contents lookup then creates missing file", async () => {
     const octokit = createMockOctokit();
     let contentsLookups = 0;
@@ -809,6 +863,102 @@ describe("OctokitGitHubClient", () => {
       ref: BRANCH
     });
     expect(Object.hasOwn(observedDispatchInput, "inputs")).toBe(false);
+  });
+
+  it("queries exact-SHA completed workflow runs and paginates run artifacts", async () => {
+    const octokit = createMockOctokit();
+    const requests: Record<string, unknown>[] = [];
+    octokit.paginate = (method, parameters = {}) => {
+      requests.push(parameters);
+      if (method === octokit.rest.actions.listWorkflowRuns) {
+        return Promise.resolve([
+          {
+            id: OctokitTestNumber.WorkflowRunId,
+            run_attempt: 3,
+            path: WORKFLOW_PATH,
+            status: "completed",
+            conclusion: "failure",
+            head_sha: "head-sha",
+            created_at: "2026-09-01T00:00:00Z",
+            updated_at: "2026-09-01T00:01:00Z"
+          }
+        ]);
+      }
+      return Promise.resolve([
+        {
+          id: OctokitTestNumber.ArtifactId,
+          name: "grading-results",
+          size_in_bytes: 1234,
+          expired: false,
+          created_at: "2026-09-01T00:01:00Z",
+          updated_at: "2026-09-01T00:01:00Z"
+        }
+      ]);
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(
+      client.listWorkflowRunsForCommit({
+        owner: OWNER,
+        repo: REPO,
+        workflowPath: WORKFLOW_PATH,
+        headSha: "head-sha"
+      })
+    ).resolves.toMatchObject([
+      { id: OctokitTestNumber.WorkflowRunId, runAttempt: 3, conclusion: "failure" }
+    ]);
+    await expect(
+      client.listWorkflowRunArtifacts({
+        owner: OWNER,
+        repo: REPO,
+        runId: OctokitTestNumber.WorkflowRunId
+      })
+    ).resolves.toEqual([
+      {
+        id: OctokitTestNumber.ArtifactId,
+        name: "grading-results",
+        sizeInBytes: 1234,
+        expired: false,
+        createdAt: "2026-09-01T00:01:00Z",
+        updatedAt: "2026-09-01T00:01:00Z"
+      }
+    ]);
+    expect(requests).toEqual([
+      {
+        owner: OWNER,
+        repo: REPO,
+        workflow_id: WORKFLOW_PATH,
+        head_sha: "head-sha",
+        status: "completed"
+      },
+      { owner: OWNER, repo: REPO, run_id: OctokitTestNumber.WorkflowRunId }
+    ]);
+  });
+
+  it("downloads an artifact archive as bytes through the existing redirect-safe path", async () => {
+    const octokit = createMockOctokit();
+    const archive = new Uint8Array([1, 2, 3]);
+    let observedInput: Record<string, unknown> = {};
+    octokit.rest.actions.downloadArtifact = (input = {}) => {
+      observedInput = input;
+      return resolvedResponse(archive);
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(
+      client.downloadArtifactArchive({
+        owner: OWNER,
+        repo: REPO,
+        artifactId: OctokitTestNumber.ArtifactId
+      })
+    ).resolves.toEqual(archive);
+    expect(observedInput).toEqual({
+      archive_format: "zip",
+      artifact_id: OctokitTestNumber.ArtifactId,
+      owner: OWNER,
+      repo: REPO,
+      request: { parseSuccessResponseBody: false }
+    });
   });
 
   it("artifact missing returns null", async () => {

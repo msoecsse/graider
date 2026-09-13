@@ -4,6 +4,7 @@ import { loadGraiderConfig } from "../../../src/config/config-loader.js";
 import { executeGroupTargets } from "../../../src/groups/group-target-executor.js";
 import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
 import type { GroupApplyPreviewTarget } from "../../../src/groups/group-preview-planner.js";
+import { GRAIDER_MANAGED_WORKFLOW_PATH } from "../../../src/workflows/managed-workflow-policy.js";
 
 const target = (
   groupId: string,
@@ -26,6 +27,122 @@ const target = (
 });
 
 describe("group target executor", () => {
+  it("checkpoints a created repository before attempting later permissions", async () => {
+    const loaded = loadGraiderConfig({
+      cwd: path.resolve("tests/fixtures/plan/active-assignment"),
+      assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
+    });
+    if (loaded.status === "failure") throw new Error("Fixture config must load.");
+    const githubClient = new FakeGitHubClient({
+      templateRepositories: [
+        {
+          owner: "example-org",
+          name: "lab04-template",
+          fullName: "example-org/lab04-template",
+          id: 1,
+          private: true,
+          archived: false,
+          defaultBranch: "main",
+          htmlUrl: "https://github.com/example-org/lab04-template",
+          isTemplate: true,
+          branches: ["main"],
+          files: [],
+          latestCommitSha: "sha"
+        }
+      ]
+    });
+    let observedBeforePermissions = false;
+
+    await executeGroupTargets({
+      config: loaded.config,
+      githubClient,
+      targets: [target("team-1", ["alpha"], ["alpha-gh"])],
+      onRepositoryObserved: (observed) => {
+        observedBeforePermissions =
+          observed.htmlUrl !== null && githubClient.mutations.addedCollaborators.length === 0;
+        return [];
+      }
+    });
+
+    expect(observedBeforePermissions).toBe(true);
+    expect(githubClient.mutations.addedCollaborators).toHaveLength(1);
+  });
+
+  it("enables Actions and installs the managed preset workflow in a template-free group repo", async () => {
+    const loaded = loadGraiderConfig({
+      cwd: path.resolve("tests/fixtures/plan/active-assignment"),
+      assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
+    });
+    if (loaded.status === "failure") throw new Error("Fixture config must load.");
+    const config = {
+      ...loaded.config,
+      assignment: {
+        ...loaded.config.assignment,
+        grading: {
+          enabled: true,
+          mode: "preset",
+          preset: "java-junit-checkstyle",
+          workflow: GRAIDER_MANAGED_WORKFLOW_PATH,
+          artifact: "grading-results",
+          result_file: "results.json"
+        }
+      }
+    };
+    delete config.assignment.template;
+    const githubClient = new FakeGitHubClient();
+
+    const result = await executeGroupTargets({
+      config,
+      githubClient,
+      targets: [target("team-1", ["alpha", "beta"], ["alpha-gh", "beta-gh"])]
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(githubClient.mutations.enabledActions).toEqual([
+      { owner: "example-org", repo: "27s1-se2030-lab04-team-1" }
+    ]);
+    expect(githubClient.mutations.fileWrites).toEqual([
+      expect.objectContaining({
+        path: GRAIDER_MANAGED_WORKFLOW_PATH,
+        repo: "27s1-se2030-lab04-team-1"
+      })
+    ]);
+  });
+
+  it("creates an empty repository directly when no template is configured", async () => {
+    const loaded = loadGraiderConfig({
+      cwd: path.resolve("tests/fixtures/plan/active-assignment"),
+      assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
+    });
+    if (loaded.status === "failure") throw new Error("Fixture config must load.");
+    const config = {
+      ...loaded.config,
+      assignment: { ...loaded.config.assignment }
+    };
+    delete config.assignment.template;
+    const githubClient = new FakeGitHubClient();
+
+    const result = await executeGroupTargets({
+      config,
+      githubClient,
+      targets: [target("team-1", ["alpha", "beta"], ["alpha-gh", "beta-gh"])]
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(githubClient.mutations.createdRepositories).toEqual([]);
+    expect(githubClient.mutations.createdRepositoriesWithoutTemplate).toEqual([
+      expect.objectContaining({
+        input: {
+          owner: "example-org",
+          name: "27s1-se2030-lab04-team-1",
+          private: true
+        }
+      })
+    ]);
+    expect(githubClient.mutations.addedCollaborators).toHaveLength(2);
+    expect(githubClient.mutations.teamPermissions).toHaveLength(2);
+  });
+
   it("creates once per target, adds all members as admins, and returns manifest-ready data", async () => {
     const loaded = loadGraiderConfig({
       cwd: path.resolve("tests/fixtures/plan/active-assignment"),

@@ -10,13 +10,9 @@ export type RawCourseConfig = z.infer<typeof rawCourseConfigSchema>;
 export type RawTermConfig = z.infer<typeof rawTermConfigSchema>;
 export type RawAssignmentConfig = z.infer<typeof rawAssignmentConfigSchema>;
 
-export type ResolvedCourseConfig = RawCourseConfig & {
-  readonly grading: NonNullable<RawCourseConfig["grading"]>;
-};
+export type ResolvedCourseConfig = RawCourseConfig;
 
-export type ResolvedAssignmentConfig = RawAssignmentConfig & {
-  readonly template: NonNullable<RawAssignmentConfig["template"]>;
-};
+export type ResolvedAssignmentConfig = RawAssignmentConfig;
 
 export type GradingSource = "course" | "assignment" | "none";
 

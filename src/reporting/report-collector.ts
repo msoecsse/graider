@@ -1,4 +1,5 @@
 import type { LoadedGraiderConfig } from "../config/config-models.js";
+import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { createGitHubDiagnostic, GitHubClientError } from "../github/github-errors.js";
 import type { GitHubClient } from "../github/github-client.js";
@@ -94,9 +95,6 @@ const normalizeGitHubError = (error: unknown): Diagnostic =>
         message: "Unexpected GitHub client failure during report collection."
       };
 
-const getEffectiveGrading = (config: LoadedGraiderConfig) =>
-  config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
-
 const getWorkflowRunStatus = (run: GitHubWorkflowRun | undefined): WorkflowRunStatus | undefined =>
   run === undefined ? undefined : run.status;
 
@@ -151,7 +149,7 @@ const collectStudentGrading = async (
   warnings: Diagnostic[];
   errors: Diagnostic[];
 }> => {
-  const gradingConfig = getEffectiveGrading(input.config);
+  const gradingConfig = getEffectiveAssignmentGrading(input.config);
 
   if (!gradingConfig.enabled) {
     const mapping = mapGradingStatus({

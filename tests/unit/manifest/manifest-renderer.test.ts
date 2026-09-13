@@ -112,6 +112,50 @@ describe("manifest renderer", () => {
     expect(loadManifest(manifestPath.absolutePath).status).toBe("loaded");
   });
 
+  it("round-trips a template-free manifest without invented template identity", () => {
+    const manifest = createEmptyManifest({
+      assignment: createManifest().assignment,
+      source: createManifest().source
+    });
+    manifest.repositories.push({
+      studentId: "jones",
+      githubUsername: "seanjones",
+      section: "001",
+      rosterStatus: "active",
+      repository: {
+        owner: "example-org",
+        name: "lab04-seanjones",
+        fullName: "example-org/lab04-seanjones",
+        createdFromTemplate: false
+      },
+      permissions: {},
+      actions: { enabled: true },
+      lifecycle: { repositoryArchived: false, studentAccessRemoved: false, status: "created" },
+      warnings: [],
+      errors: []
+    });
+    const yaml = renderManifestYaml(manifest);
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "graider-manifest-no-template-"));
+    const manifestPath = createManifestPath(repoRoot, "27s1", "lab04");
+    fs.mkdirSync(path.dirname(manifestPath.absolutePath), { recursive: true });
+    fs.writeFileSync(manifestPath.absolutePath, yaml, "utf8");
+    const loaded = loadManifest(manifestPath.absolutePath);
+    const raw = parse(yaml) as Record<string, unknown>;
+
+    expect(raw.template).toBeUndefined();
+    expect(yaml).not.toContain("template_repository:");
+    expect(yaml).not.toContain("template_sync_baseline_status:");
+    expect(loaded.status).toBe("loaded");
+    if (loaded.status === "loaded") {
+      expect(loaded.manifest.template).toBeUndefined();
+      expect(loaded.manifest.repositories[0]?.repository).toMatchObject({
+        createdFromTemplate: false
+      });
+      expect(loaded.manifest.repositories[0]?.repository.templateRepository).toBeUndefined();
+      expect(renderManifestYaml(loaded.manifest)).toBe(yaml);
+    }
+  });
+
   it("loaded valid fixture renders deterministically after normalization", () => {
     const loadResult = loadManifest(
       path.resolve("tests/fixtures/manifest/valid-manifest/manifest.yml")
@@ -167,12 +211,55 @@ describe("manifest renderer", () => {
     }
   });
 
+  it("round-trips a baseline-required repository without emitting absent sync anchors", () => {
+    const manifest = createManifest();
+    manifest.repositories.push({
+      studentId: "recovered",
+      githubUsername: "recovered-user",
+      section: "001",
+      rosterStatus: "active",
+      repository: {
+        owner: "example-org",
+        name: "lab04-recovered",
+        fullName: "example-org/lab04-recovered",
+        createdFromTemplate: true,
+        templateRepository: "example-org/lab04-template",
+        templateSyncBaselineStatus: "baseline_required"
+      },
+      permissions: {},
+      actions: { enabled: false },
+      lifecycle: { repositoryArchived: false, studentAccessRemoved: false, status: "created" },
+      warnings: [],
+      errors: []
+    });
+
+    const yaml = renderManifestYaml(manifest);
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "graider-manifest-baseline-required-"));
+    const manifestPath = createManifestPath(repoRoot, "27s1", "lab04");
+    fs.mkdirSync(path.dirname(manifestPath.absolutePath), { recursive: true });
+    fs.writeFileSync(manifestPath.absolutePath, yaml, "utf8");
+    const loaded = loadManifest(manifestPath.absolutePath);
+
+    expect(yaml).toContain("template_sync_baseline_status: baseline_required");
+    expect(yaml).not.toContain("template_commit_sha:");
+    expect(yaml).not.toContain("student_default_branch_commit_sha:");
+    expect(loaded.status).toBe("loaded");
+    if (loaded.status === "loaded")
+      expect(loaded.manifest.repositories[0]?.repository).toMatchObject({
+        templateSyncBaselineStatus: "baseline_required"
+      });
+  });
+
   it("loads legacy repository state without a template-sync baseline", () => {
-    const result = loadManifest(path.resolve("tests/fixtures/manifest/valid-manifest/manifest.yml"));
+    const result = loadManifest(
+      path.resolve("tests/fixtures/manifest/valid-manifest/manifest.yml")
+    );
 
     expect(result.status).toBe("loaded");
     if (result.status === "loaded") {
-      expect(result.manifest.repositories[0]?.repository.studentDefaultBranchCommitSha).toBeUndefined();
+      expect(
+        result.manifest.repositories[0]?.repository.studentDefaultBranchCommitSha
+      ).toBeUndefined();
       expect(result.manifest.repositories[0]?.repository.templateSyncBaselineStatus).toBe(
         "baseline_required"
       );

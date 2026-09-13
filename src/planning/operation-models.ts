@@ -1,11 +1,13 @@
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 
 export const PLAN_OPERATION_TYPES = [
+  "create_repository",
   "create_repository_from_template",
   "add_student_collaborator",
   "add_faculty_team_permission",
   "add_grader_team_permission",
   "enable_actions",
+  "ensure_managed_grading_workflow",
   "verify_grading_workflow",
   "verify_workflow_dispatch"
 ] as const;

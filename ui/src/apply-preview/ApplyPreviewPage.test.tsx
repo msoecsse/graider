@@ -368,6 +368,8 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshCourseFolder: vi.fn(),
     refreshDashboard: vi.fn(),
     getAssignmentDetail: vi.fn(),
+    prepareAssignmentTemplateSync: vi.fn(),
+    executeAssignmentTemplateSync: vi.fn(),
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createApplyPreviewResult()),
     getAssignmentGradePreview: vi.fn(),
     getAssignmentGradeStatus: vi.fn(),
@@ -382,7 +384,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     value: graiderUI
   });
 
-  return graiderUI;
+  return graiderUI as unknown as GraiderUIApi;
 };
 
 const mockClipboard = (writeText: ReturnType<typeof vi.fn>): void => {
@@ -567,9 +569,9 @@ describe("ApplyPreviewPage", () => {
     expect(screen.queryByText("Repository result rows")).toBeNull();
   });
 
-  it("shows the no-manifest warning after a failed group Apply", async () => {
+  it("shows the durable-checkpoint warning after a failed group Apply", async () => {
     const incompleteMessage =
-      "Group Apply did not complete, so no manifest was written. Some group repositories may have been created before the failure. Graider will not adopt untracked repositories automatically. Delete any partial repositories manually or use a future reconcile workflow, then run Apply again.";
+      "Group Apply did not complete. Every repository observed as created remains manifest-tracked, so retrying Apply can safely resume without recreating it.";
     mockGraiderUI({
       getAssignmentApplyPreview: vi
         .fn()
@@ -581,19 +583,18 @@ describe("ApplyPreviewPage", () => {
             exitCode: 1,
             diagnostics: [
               {
-                code: "group_repository_untracked_collision",
+                code: "group_target_execution_failed",
                 severity: "error",
-                message:
-                  "Repository 27s2-csc1120-lab02-team-2 already exists and Graider will not adopt untracked repositories automatically.",
+                message: "Group target team-2 failed for repository 27s2-csc1120-lab02-team-2.",
                 context: { groupId: "team-2", repositoryName: "27s2-csc1120-lab02-team-2" }
               },
               {
-                code: "group_apply_manifest_not_written",
+                code: "group_apply_incomplete_manifest_saved",
                 severity: "warning",
                 message: incompleteMessage
               }
             ],
-            generatedFiles: [],
+            generatedFiles: ["terms/27s2/manifests/lab02/manifest.yml"],
             summary: {
               repositoryMode: "group",
               targetCount: 2,
@@ -613,9 +614,7 @@ describe("ApplyPreviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
 
     expect(await screen.findByText(incompleteMessage)).toBeInTheDocument();
-    expect(
-      screen.getAllByText(/will not adopt untracked repositories automatically/u)
-    ).toHaveLength(2);
+    expect(screen.getByText("group_apply_incomplete_manifest_saved")).toBeInTheDocument();
   });
 
   it("confirmed apply calls applyAssignment exactly once with assignment context", async () => {

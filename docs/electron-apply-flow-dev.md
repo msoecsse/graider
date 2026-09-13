@@ -53,6 +53,8 @@ process runner invokes it as:
 ```
 
 `--yes` is supplied only after the renderer confirmation checkbox is accepted.
+The assignment command delegates to the same Apply orchestrator as the legacy
+CLI alias, including initial and per-repository durable manifest checkpoints.
 
 ## IPC Boundary
 
@@ -111,6 +113,13 @@ This may write manifests/local apply state if the backend apply command does so.
 This may push files/commits to GitHub according to the existing apply implementation.
 ```
 
+When the effective assignment grading configuration enables the
+`java-junit-checkstyle` preset, confirmed Apply also ensures the canonical
+Graider-managed `.github/workflows/grade.yml` after Actions is enabled and
+before workflow verification. This works for template-backed and template-free
+repositories. Apply updates only recognized Graider-managed workflows and
+reports, without overwriting, an existing differing unmanaged workflow.
+
 For group assignments, the preview renders one repository target per group and
 the confirmation explicitly states that it creates or updates one shared
 repository per group and grants every group member `admin` access. Group Apply
@@ -156,9 +165,8 @@ When present, the UI shows command status, exit code, applied timestamp,
 assignment file, manifest file, generated files, repository counts, and
 diagnostics. Individual results show per-student rows. Group results show one
 target per repository, its members, repository URL, and group/student-mapping
-counts. Failed group Apply results must make clear that no manifest was written
-and partial external GitHub changes may need manual cleanup or a future
-reconcile workflow.
+counts. Failed group Apply results identify the failing operation and make clear
+that every observed repository identity was checkpointed for a safe retry.
 
 Safe command errors render bounded user-facing messages:
 

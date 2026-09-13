@@ -34,7 +34,14 @@ describe("RosterManagerPage", () => {
 
     render(
       <RosterManagerPage
-        courseFolder={{ id: "course", path: "/course", label: "Course" }}
+        courseFolder={{
+          id: "course",
+          path: "/course",
+          displayAlias: "Course",
+          lastOpenedAt: "",
+          lastRefreshedAt: null,
+          lastDashboardStatus: null
+        }}
         onBack={vi.fn()}
         onSaved={vi.fn()}
       />
@@ -51,6 +58,69 @@ describe("RosterManagerPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Save roster" }));
     await waitFor(() =>
       expect(saveRoster).toHaveBeenCalledWith(expect.objectContaining({ confirmed: true }))
+    );
+  });
+
+  it("edits faculty assignments in the selected section before saving", async () => {
+    const previewRosterSave = vi.fn().mockResolvedValue({
+      status: "ready",
+      path: "terms/27s1/rosters/001.csv",
+      content: "student_id,github_username,section,status\n",
+      exists: true,
+      diagnostics: []
+    });
+    Object.assign(window.graiderUI, {
+      loadRosterTerms: vi.fn().mockResolvedValue({
+        terms: [{ code: "27s1", sections: ["001"] }],
+        diagnostics: []
+      }),
+      getRosterForSection: vi.fn().mockResolvedValue({
+        status: "ready",
+        path: "terms/27s1/rosters/001.csv",
+        exists: true,
+        rows: [],
+        faculty: [],
+        diagnostics: []
+      }),
+      previewRosterSave,
+      saveRoster: vi.fn().mockResolvedValue({
+        status: "success",
+        path: "terms/27s1/rosters/001.csv",
+        diagnostics: []
+      })
+    });
+
+    render(
+      <RosterManagerPage
+        courseFolder={{
+          id: "course",
+          path: "/course",
+          displayAlias: "Course",
+          lastOpenedAt: "",
+          lastRefreshedAt: null,
+          lastDashboardStatus: null
+        }}
+        onBack={vi.fn()}
+        onSaved={vi.fn()}
+      />
+    );
+
+    fireEvent.change(await screen.findByLabelText("Term"), { target: { value: "27s1" } });
+    fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
+    await screen.findByText("No faculty assigned.");
+    fireEvent.change(screen.getByLabelText("Faculty username"), { target: { value: " jones " } });
+    fireEvent.click(screen.getByRole("button", { name: "Add faculty" }));
+    expect(screen.getByText("jones")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove jones" }));
+    expect(screen.getByText("No faculty assigned.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Faculty username"), { target: { value: "jones" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add faculty" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save roster" }));
+
+    await waitFor(() =>
+      expect(previewRosterSave).toHaveBeenCalledWith(
+        expect.objectContaining({ faculty: ["jones"] })
+      )
     );
   });
 });

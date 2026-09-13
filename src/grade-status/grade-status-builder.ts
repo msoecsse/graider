@@ -1,4 +1,5 @@
-import type { LoadedGraiderConfig, RawCourseConfig } from "../config/config-models.js";
+import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
+import type { LoadedGraiderConfig } from "../config/config-models.js";
 import { DISABLED_GRADING_MODE } from "../config/config-schemas.js";
 import { loadGraiderConfig } from "../config/config-loader.js";
 import type { CommandStatus } from "../core/command-result.js";
@@ -90,9 +91,6 @@ export const createEmptyAssignmentGradeStatusResult = (
   repositories: [],
   actions: null
 });
-
-const getEffectiveGrading = (config: LoadedGraiderConfig): RawCourseConfig["grading"] =>
-  config.assignment.grading === undefined ? config.course.grading : config.assignment.grading;
 
 const createGradingNotConfiguredWarning = (): Diagnostic =>
   createWarningDiagnostic(
@@ -263,7 +261,7 @@ const createWorkflowRunFailedDiagnostic = (
   );
 
 const createGradingStatus = (config: LoadedGraiderConfig): GradeStatusGrading => {
-  const grading = getEffectiveGrading(config);
+  const grading = getEffectiveAssignmentGrading(config);
   const resolvedFrom =
     config.summary.gradingSource === "assignment"
       ? "assignment_override"
@@ -290,7 +288,7 @@ const createGradingStatus = (config: LoadedGraiderConfig): GradeStatusGrading =>
     workflow: grading.workflow ?? null,
     artifact: grading.artifact ?? null,
     resultFile: grading.result_file ?? null,
-    workflowRef: config.assignment.template.branch
+    workflowRef: config.assignment.template?.branch ?? null
   };
 };
 
@@ -424,7 +422,7 @@ const createBlockedLifecycleRow = (
     "blocked",
     config.assignment.assignment.status,
     workflowPath,
-    config.assignment.template.branch,
+    config.assignment.template?.branch ?? null,
     [createAssignmentStatusBlocksGradeDiagnostic(config, student)]
   );
 
@@ -441,7 +439,7 @@ const createTokenRequiredRow = (
   student: RosterStudent,
   repository: GradingRepositoryTarget,
   workflowPath: string,
-  ref: string
+  ref: string | null
 ): GradeStatusRepositoryRow =>
   createRow(
     student,
@@ -464,7 +462,7 @@ const createRunRow = (
   student: RosterStudent,
   repository: GradingRepositoryTarget,
   workflowPath: string,
-  ref: string,
+  ref: string | null,
   run: GitHubWorkflowRun
 ): GradeStatusRepositoryRow => {
   const status = mapRunStatus(run);
@@ -496,7 +494,7 @@ const createMissingRunRow = (
   student: RosterStudent,
   repository: GradingRepositoryTarget,
   workflowPath: string,
-  ref: string
+  ref: string | null
 ): GradeStatusRepositoryRow =>
   createRow(
     student,
@@ -513,7 +511,7 @@ const createUnknownRunRow = (
   student: RosterStudent,
   repository: GradingRepositoryTarget,
   workflowPath: string,
-  ref: string
+  ref: string | null
 ): GradeStatusRepositoryRow =>
   createRow(
     student,
@@ -530,7 +528,7 @@ const getRepositoryWorkflowStatus = async (
   repository: GradingRepositoryTarget,
   githubClient: GitHubClient,
   workflowPath: string,
-  ref: string
+  ref: string | null
 ): Promise<GradeStatusRepositoryRow> => {
   try {
     const runs = await githubClient.listWorkflowRuns({
@@ -554,9 +552,9 @@ const createRepositoryStatusRowUncached = async (
   targets: NormalizedGradingTargets | undefined,
   githubClient: GitHubClient | undefined
 ): Promise<GradeStatusRepositoryRow> => {
-  const grading = getEffectiveGrading(config);
+  const grading = getEffectiveAssignmentGrading(config);
   const workflowPath = grading.workflow ?? null;
-  const workflowRef = grading.enabled ? config.assignment.template.branch : null;
+  const workflowRef = grading.enabled ? (config.assignment.template?.branch ?? null) : null;
   const repository = findManifestRecord(targets, student);
 
   if (!grading.enabled || workflowPath === null) {
@@ -574,21 +572,10 @@ const createRepositoryStatusRowUncached = async (
   }
 
   if (githubClient === undefined) {
-    return createTokenRequiredRow(
-      student,
-      repository,
-      workflowPath,
-      config.assignment.template.branch
-    );
+    return createTokenRequiredRow(student, repository, workflowPath, workflowRef);
   }
 
-  return getRepositoryWorkflowStatus(
-    student,
-    repository,
-    githubClient,
-    workflowPath,
-    config.assignment.template.branch
-  );
+  return getRepositoryWorkflowStatus(student, repository, githubClient, workflowPath, workflowRef);
 };
 
 const createRepositoryStatusRow = async (
@@ -770,7 +757,7 @@ export const buildAssignmentGradeStatus = async ({
     config.summary.termCode,
     config.summary.assignmentSlug
   );
-  const grading = getEffectiveGrading(config);
+  const grading = getEffectiveAssignmentGrading(config);
   const manifestResult = loadManifest(manifestPath.absolutePath, { required: grading.enabled });
   const manifest = manifestResult.status === "loaded" ? manifestResult.manifest : undefined;
   const normalizedTargets =

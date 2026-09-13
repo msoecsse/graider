@@ -50,6 +50,33 @@ const copyFixtureToTemp = (fixtureName: string): string => {
   return destinationRoot;
 };
 
+const removeAssignmentTemplate = (cwd: string): void => {
+  const assignmentPath = path.join(cwd, ASSIGNMENT_FILE);
+  const content = fs.readFileSync(assignmentPath, "utf8");
+  fs.writeFileSync(
+    assignmentPath,
+    content.replace(/template:\n {2}repository: [^\n]+\n {2}branch: [^\n]+\n/u, ""),
+    "utf8"
+  );
+};
+
+const configureAssignmentPresetGrading = (cwd: string): void => {
+  fs.appendFileSync(
+    path.join(cwd, ASSIGNMENT_FILE),
+    [
+      "grading:",
+      "  enabled: true",
+      "  mode: preset",
+      "  preset: java-junit-checkstyle",
+      "  workflow: .github/workflows/grade.yml",
+      "  artifact: grading-results",
+      "  result_file: results.json",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+};
+
 const templateRepository = (
   branches: readonly string[] = [TEMPLATE_BRANCH]
 ): GitHubTemplateRepository => ({
@@ -144,6 +171,29 @@ const getRow = (
 };
 
 describe("graider assignment apply-preview command", () => {
+  it("keeps Apply ready when no template is configured", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    removeAssignmentTemplate(cwd);
+    const githubClient = createReadyClient([]);
+    const result = await runAssignmentApplyPreviewCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: { json: true },
+      env: APPLY_PREVIEW_ENV,
+      githubClient
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.template).toMatchObject({
+      repository: "",
+      branch: "",
+      status: "not_required"
+    });
+    expect(result.actions?.apply.available).toBe(true);
+    expect(result.plan?.summary.wouldCreateRepositories).toBe(1);
+    expectNoMutations(githubClient);
+  });
+
   it("plans group repositories while keeping Apply unavailable", async () => {
     const cwd = copyFixtureToTemp("active-assignment");
     fs.appendFileSync(
@@ -409,6 +459,36 @@ describe("graider assignment apply-preview command", () => {
     expect(missingDispatchResult.diagnostics).toEqual([
       expect.objectContaining({ code: "assignment_detail_workflow_dispatch_missing" })
     ]);
+  });
+
+  it("does not block Apply when the managed preset workflow is absent from the template", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    configureAssignmentPresetGrading(cwd);
+    const githubClient = new FakeGitHubClient({
+      templateRepositories: [templateRepository()]
+    });
+
+    const result = await runAssignmentApplyPreviewCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: { json: true },
+      env: APPLY_PREVIEW_ENV,
+      githubClient
+    });
+
+    expect(result.diagnostics).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "assignment_detail_grading_workflow_missing" })
+      ])
+    );
+    expect(result.grading).toMatchObject({
+      enabled: true,
+      mode: "preset",
+      workflowStatus: "not_checked",
+      workflowDispatch: "not_checked"
+    });
+    expect(result.actions?.apply.available).toBe(true);
+    expectNoMutations(githubClient);
   });
 
   it("does not require workflow readiness for no-grading assignments", async () => {

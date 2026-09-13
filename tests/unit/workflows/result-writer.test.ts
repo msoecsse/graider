@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { makeTestGitSha } from "../../test-git-sha.js";
 import { renderGradingResultWriterScript } from "../../../src/workflows/result-writer-template.js";
 
 const TEMP_FIXTURE_PREFIX = "graider-result-writer-";
@@ -20,6 +21,16 @@ interface GradingResult {
     readonly name: string;
     readonly status: string;
   }>;
+}
+
+interface GradingEvidenceMetadata {
+  readonly schemaVersion: number;
+  readonly submissionCommitSha: string;
+  readonly workflowRunId: string;
+  readonly workflowRunAttempt: string;
+  readonly compile: { readonly outcome: string };
+  readonly junit: { readonly outcome: string };
+  readonly checkstyle: { readonly outcome: string };
 }
 
 const createTempRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), TEMP_FIXTURE_PREFIX));
@@ -39,6 +50,11 @@ const runWriter = (
     readonly output?: string;
     readonly env?: Record<string, string | undefined>;
     readonly classroomChecks?: readonly string[];
+    readonly evidenceMetadataOutput?: string;
+    readonly evidenceOutcomes?: readonly string[];
+    readonly submissionCommitSha?: string;
+    readonly workflowRunId?: string;
+    readonly workflowRunAttempt?: string;
   } = {}
 ): {
   readonly result: ReturnType<typeof spawnSync>;
@@ -53,7 +69,18 @@ const runWriter = (
     "--output",
     outputPath,
     ...checks.flatMap((check) => ["--check", check]),
-    ...(options.classroomChecks ?? []).flatMap((check) => ["--classroom-check", check])
+    ...(options.classroomChecks ?? []).flatMap((check) => ["--classroom-check", check]),
+    ...(options.evidenceMetadataOutput === undefined
+      ? []
+      : ["--evidence-metadata-output", options.evidenceMetadataOutput]),
+    ...(options.evidenceOutcomes ?? []).flatMap((outcome) => ["--evidence-outcome", outcome]),
+    ...(options.submissionCommitSha === undefined
+      ? []
+      : ["--submission-commit-sha", options.submissionCommitSha]),
+    ...(options.workflowRunId === undefined ? [] : ["--workflow-run-id", options.workflowRunId]),
+    ...(options.workflowRunAttempt === undefined
+      ? []
+      : ["--workflow-run-attempt", options.workflowRunAttempt])
   ];
   const result = spawnSync("python3", args, {
     cwd,
@@ -331,6 +358,52 @@ describe("Graider grading result writer template", () => {
       status: "skipped",
       checks: []
     });
+  });
+
+  it("writes versioned evidence metadata from trusted workflow context and phase outcomes", () => {
+    const metadataOutput = "grading-evidence/metadata.json";
+    const { result, cwd } = runWriter(["CheckStyle=success", "Unit Tests=failure"], {
+      evidenceMetadataOutput: metadataOutput,
+      evidenceOutcomes: ["compile=success", "junit=failure", "checkstyle=success"],
+      submissionCommitSha: makeTestGitSha("a"),
+      workflowRunId: "12345",
+      workflowRunAttempt: "2"
+    });
+    const metadata = JSON.parse(
+      fs.readFileSync(path.join(cwd, metadataOutput), "utf8")
+    ) as GradingEvidenceMetadata;
+
+    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(metadata).toEqual({
+      schemaVersion: 1,
+      submissionCommitSha: makeTestGitSha("a"),
+      workflowRunId: "12345",
+      workflowRunAttempt: "2",
+      compile: { outcome: "success" },
+      junit: { outcome: "failure" },
+      checkstyle: { outcome: "success" }
+    });
+  });
+
+  it("records an omitted evidence phase as skipped without fabricating a report", () => {
+    const metadataOutput = "grading-evidence/metadata.json";
+    const { result, cwd } = runWriter([], {
+      evidenceMetadataOutput: metadataOutput,
+      evidenceOutcomes: ["compile=failure"],
+      submissionCommitSha: makeTestGitSha("b"),
+      workflowRunId: "9",
+      workflowRunAttempt: "1"
+    });
+    const metadata = JSON.parse(
+      fs.readFileSync(path.join(cwd, metadataOutput), "utf8")
+    ) as GradingEvidenceMetadata;
+
+    expect(result.status).toBe(SUCCESS_EXIT_CODE);
+    expect(metadata.compile).toEqual({ outcome: "failure" });
+    expect(metadata.junit).toEqual({ outcome: "skipped" });
+    expect(metadata.checkstyle).toEqual({ outcome: "skipped" });
+    expect(fs.existsSync(path.join(cwd, "grading-evidence/junit"))).toBe(false);
+    expect(fs.existsSync(path.join(cwd, "grading-evidence/checkstyle.xml"))).toBe(false);
   });
 
   it("exits nonzero when output is missing", () => {

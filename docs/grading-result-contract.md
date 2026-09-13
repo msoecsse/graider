@@ -213,12 +213,16 @@ information and must be written only to that student's repository.
 Graider renders the student report from its collected repository and grading
 state, then publishes it to the configured destination.
 
+When the effective Graider-generated destination is absent, the standalone
+grading report defaults to `grading/report.html`. An explicitly configured
+destination, including a `.md` path, remains authoritative.
+
 ```yaml
 reports:
   student_publish:
     enabled: true
     mode: graider-generated
-    destination_file: grading/report.md
+    destination_file: grading/report.html
 ```
 
 ### `faculty-provided`
@@ -248,7 +252,7 @@ reports:
   student_publish:
     enabled: true
     mode: both
-    graider_report_destination: grading/graider-report.md
+    graider_report_destination: grading/graider-report.html
     artifact: grading-results
     faculty_report_source: graider-output/student-report.md
     faculty_report_destination: grading/report.md

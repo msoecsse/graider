@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 import type {
   AssignmentEditModel,
   AssignmentEditPreviewResult,
-  AssignmentEditRequest
+  AssignmentEditRequest,
+  AssignmentRubricCategory
 } from "../../electron/ipc";
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
@@ -47,6 +48,8 @@ export const AssignmentEditPage = ({
   const [facultyOwner, setFacultyOwner] = useState("");
   const [lmsAssignmentId, setLmsAssignmentId] = useState("");
   const [gradingCategory, setGradingCategory] = useState("");
+  const [requiredFiles, setRequiredFiles] = useState<readonly string[]>([]);
+  const [rubric, setRubric] = useState<readonly AssignmentRubricCategory[]>([]);
   useEffect(() => {
     const load = window.graiderUI.getAssignmentForEdit;
     if (load === undefined) {
@@ -77,6 +80,8 @@ export const AssignmentEditPage = ({
           setFacultyOwner(value.facultyOwner);
           setLmsAssignmentId(value.lmsAssignmentId ?? "");
           setGradingCategory(value.gradingCategory);
+          setRequiredFiles(value.requiredFiles);
+          setRubric(value.rubric);
         }
       })
       .catch(() => setMessage("Unable to load assignment.yml for editing."))
@@ -102,6 +107,10 @@ export const AssignmentEditPage = ({
             facultyOwner,
             lmsAssignmentId,
             gradingCategory,
+            gradingMode: model.gradingMode,
+            gradingPreset: model.gradingPreset,
+            requiredFiles,
+            rubric,
             originalContent: model.originalContent,
             confirmed: false
           },
@@ -115,7 +124,9 @@ export const AssignmentEditPage = ({
       lmsAssignmentId,
       model,
       points,
+      requiredFiles,
       repository,
+      rubric,
       sections,
       selection,
       status,
@@ -335,6 +346,199 @@ export const AssignmentEditPage = ({
                   }}
                 />
               </label>
+            </section>
+            <section className="detail-panel">
+              <h2>Required files</h2>
+              <p className="muted-copy">Files are shown to faculty in this order.</p>
+              {requiredFiles.map((file, index) => (
+                <div className="inline-form-row" key={`${index}-${file}`}>
+                  <input
+                    aria-label={`Required file ${String(index + 1)}`}
+                    value={file}
+                    onChange={(event) => {
+                      setRequiredFiles((current) =>
+                        current.map((value, currentIndex) =>
+                          currentIndex === index ? event.target.value : value
+                        )
+                      );
+                      clear();
+                    }}
+                  />
+                  <button
+                    className="secondary-action"
+                    disabled={index === 0}
+                    onClick={() => {
+                      setRequiredFiles((current) => {
+                        const next = [...current];
+                        const previous = next[index - 1];
+                        const selectedItem = next[index];
+                        if (previous !== undefined && selectedItem !== undefined) {
+                          [next[index - 1], next[index]] = [selectedItem, previous];
+                        }
+                        return next;
+                      });
+                      clear();
+                    }}
+                    type="button"
+                  >
+                    Up
+                  </button>
+                  <button
+                    className="secondary-action"
+                    disabled={index === requiredFiles.length - 1}
+                    onClick={() => {
+                      setRequiredFiles((current) => {
+                        const next = [...current];
+                        const selectedItem = next[index];
+                        const following = next[index + 1];
+                        if (selectedItem !== undefined && following !== undefined) {
+                          [next[index], next[index + 1]] = [following, selectedItem];
+                        }
+                        return next;
+                      });
+                      clear();
+                    }}
+                    type="button"
+                  >
+                    Down
+                  </button>
+                  <button
+                    className="secondary-action"
+                    onClick={() => {
+                      setRequiredFiles((current) =>
+                        current.filter((_value, item) => item !== index)
+                      );
+                      clear();
+                    }}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                className="secondary-action"
+                onClick={() => {
+                  setRequiredFiles((current) => [...current, ""]);
+                  clear();
+                }}
+                type="button"
+              >
+                Add required file
+              </button>
+            </section>
+            <section className="detail-panel">
+              <h2>Rubric</h2>
+              <p className="muted-copy">Categories are flat and shown in this order.</p>
+              {rubric.map((category, index) => (
+                <div className="inline-form-row" key={`${index}-${category.id}`}>
+                  <input
+                    aria-label={`Rubric ID ${String(index + 1)}`}
+                    placeholder="ID"
+                    value={category.id}
+                    onChange={(event) => {
+                      setRubric((current) =>
+                        current.map((value, item) =>
+                          item === index ? { ...value, id: event.target.value } : value
+                        )
+                      );
+                      clear();
+                    }}
+                  />
+                  <input
+                    aria-label={`Rubric name ${String(index + 1)}`}
+                    placeholder="Name"
+                    value={category.name}
+                    onChange={(event) => {
+                      setRubric((current) =>
+                        current.map((value, item) =>
+                          item === index ? { ...value, name: event.target.value } : value
+                        )
+                      );
+                      clear();
+                    }}
+                  />
+                  <input
+                    aria-label={`Rubric points ${String(index + 1)}`}
+                    type="number"
+                    value={Number.isFinite(category.points) ? String(category.points) : ""}
+                    onChange={(event) => {
+                      setRubric((current) =>
+                        current.map((value, item) =>
+                          item === index
+                            ? {
+                                ...value,
+                                points:
+                                  event.target.value === ""
+                                    ? Number.NaN
+                                    : Number(event.target.value)
+                              }
+                            : value
+                        )
+                      );
+                      clear();
+                    }}
+                  />
+                  <button
+                    className="secondary-action"
+                    disabled={index === 0}
+                    onClick={() => {
+                      setRubric((current) => {
+                        const next = [...current];
+                        const previous = next[index - 1];
+                        const selectedItem = next[index];
+                        if (previous !== undefined && selectedItem !== undefined) {
+                          [next[index - 1], next[index]] = [selectedItem, previous];
+                        }
+                        return next;
+                      });
+                      clear();
+                    }}
+                    type="button"
+                  >
+                    Up
+                  </button>
+                  <button
+                    className="secondary-action"
+                    disabled={index === rubric.length - 1}
+                    onClick={() => {
+                      setRubric((current) => {
+                        const next = [...current];
+                        const selectedItem = next[index];
+                        const following = next[index + 1];
+                        if (selectedItem !== undefined && following !== undefined) {
+                          [next[index], next[index + 1]] = [following, selectedItem];
+                        }
+                        return next;
+                      });
+                      clear();
+                    }}
+                    type="button"
+                  >
+                    Down
+                  </button>
+                  <button
+                    className="secondary-action"
+                    onClick={() => {
+                      setRubric((current) => current.filter((_value, item) => item !== index));
+                      clear();
+                    }}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                className="secondary-action"
+                onClick={() => {
+                  setRubric((current) => [...current, { id: "", name: "", points: Number.NaN }]);
+                  clear();
+                }}
+                type="button"
+              >
+                Add rubric category
+              </button>
             </section>
             <section className="detail-panel">
               <h2>Save assignment</h2>

@@ -69,7 +69,19 @@ Renderer code may:
 Current IPC channels are specific to app info, course folder registry,
 dashboard refresh, assignment detail, assignment apply preview, and confirmed
 assignment apply, grade dispatch preview, confirmed grade dispatch, and grade
-status, and faculty report generation.
+status, faculty report generation, and narrowly scoped grading workspace reads
+and mutations. Grading evidence loading accepts only canonical grading student
+identity; the main process derives faculty authorization, repository target,
+submission SHA, effective grading configuration, and GitHub credentials.
+Commit-history loading uses the same canonical identity and authorization, then
+derives the trusted local repository and grading submission SHA before running
+a fixed, read-only local Git history query.
+Single-student report publication accepts that canonical identity only; report
+HTML, destination, score, repository, submission SHA, evidence, and history are
+derived in the trusted process. Selective bulk publication accepts canonical
+assignment identity plus a strict, nonempty list of unique student IDs and
+sequentially delegates the same authorized single-student operation. Neither
+endpoint exposes a generic repository write or renderer-selected report path.
 
 ## Command Runner Rules
 

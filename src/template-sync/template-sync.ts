@@ -18,6 +18,13 @@ export interface TemplateSyncAnchors {
   templateSyncBaselineStatus: "initialized" | "baseline_required";
 }
 
+/** A baseline that has both commit identities and can safely drive a three-way update. */
+export interface InitializedTemplateSyncAnchors extends TemplateSyncAnchors {
+  templateCommitSha: string;
+  studentDefaultBranchCommitSha: string;
+  templateSyncBaselineStatus: "initialized";
+}
+
 export type TemplateFileChange =
   | { path: string; status: "added"; after: string }
   | { path: string; status: "deleted"; before: string }
@@ -105,7 +112,7 @@ export interface TemplateSyncInput {
   gateway: TemplateSyncGitGateway;
   pullRequests: TemplateSyncPullRequestGateway;
   /** Persists anchors after reliable recovery or a confirmed non-force push. */
-  updateAnchors(anchors: Required<TemplateSyncAnchors>): Promise<void>;
+  updateAnchors(anchors: InitializedTemplateSyncAnchors): Promise<void>;
 }
 
 export interface TemplateSyncBaselineRequiredResult {
@@ -178,16 +185,17 @@ export type TemplateSyncReconciliationResult =
   | { status: "failure"; error: unknown; failure?: TemplateSyncFailure };
 
 const TEMPLATE_UPDATE_BRANCH_PREFIX = "graider/template-update-";
+const TEMPLATE_UPDATE_BRANCH_SHA_PREFIX_LENGTH = 12;
 const TEMPLATE_UPDATE_TITLE = "Template update";
 const TEMPLATE_UPDATE_BODY =
   "Graider could not merge this faculty template update automatically. Please resolve the conflicts and merge this pull request.";
 
 export const createTemplateUpdateBranchName = (templateCommitSha: string): string =>
-  `${TEMPLATE_UPDATE_BRANCH_PREFIX}${templateCommitSha.slice(0, 12)}`;
+  `${TEMPLATE_UPDATE_BRANCH_PREFIX}${templateCommitSha.slice(0, TEMPLATE_UPDATE_BRANCH_SHA_PREFIX_LENGTH)}`;
 
 const hasInitializedAnchors = (
   anchors: TemplateSyncAnchors
-): anchors is Required<TemplateSyncAnchors> =>
+): anchors is InitializedTemplateSyncAnchors =>
   anchors.templateSyncBaselineStatus === "initialized" &&
   anchors.templateCommitSha !== undefined &&
   anchors.studentDefaultBranchCommitSha !== undefined;
@@ -249,7 +257,7 @@ export const syncTemplateUpdate = async (input: TemplateSyncInput): Promise<Temp
           "Multiple student history commits match the recorded template revision. Initialize the synchronization baseline manually."
       };
 
-    const recoveredAnchors: Required<TemplateSyncAnchors> = {
+    const recoveredAnchors: InitializedTemplateSyncAnchors = {
       templateCommitSha: recordedTemplateCommitSha,
       studentDefaultBranchCommitSha: recovery.studentDefaultBranchCommitSha,
       templateSyncBaselineStatus: "initialized"

@@ -225,6 +225,32 @@ describe("FakeGitHubClient", () => {
     expect(client.mutations.createdRepositories[0]?.repository).toEqual(createdRepository);
   });
 
+  it("creates an empty repository without invoking template creation", async () => {
+    const client = new FakeGitHubClient();
+
+    const createdRepository = await client.createRepository({
+      owner: OWNER,
+      name: REPOSITORY_NAME,
+      private: true
+    });
+
+    expect(createdRepository).toMatchObject({
+      owner: OWNER,
+      name: REPOSITORY_NAME,
+      id: TestNumber.CreatedRepositoryId,
+      defaultBranch: "main"
+    });
+    await expect(client.getRepository(OWNER, REPOSITORY_NAME)).resolves.toEqual(createdRepository);
+    expect(client.mutations.createdRepositoriesWithoutTemplate).toEqual([
+      {
+        input: { owner: OWNER, name: REPOSITORY_NAME, private: true },
+        repository: createdRepository
+      }
+    ]);
+    expect(client.mutations.createdRepositories).toEqual([]);
+    await expect(client.getDefaultBranchCommitSha(OWNER, REPOSITORY_NAME)).resolves.toBeUndefined();
+  });
+
   it("adds and removes collaborator permission state", async () => {
     const client = new FakeGitHubClient();
 

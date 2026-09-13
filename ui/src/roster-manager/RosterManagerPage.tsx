@@ -63,6 +63,8 @@ export const RosterManagerPage = ({
   const [sectionId, setSectionId] = useState("");
   const [isCreatingSection, setIsCreatingSection] = useState(false);
   const [rows, setRows] = useState<readonly RosterRow[]>([]);
+  const [faculty, setFaculty] = useState<readonly string[]>([]);
+  const [facultyInput, setFacultyInput] = useState("");
   const [loadMessage, setLoadMessage] = useState<string | null>(null);
   const [isExisting, setIsExisting] = useState(false);
   const [changeDescription, setChangeDescription] = useState<string | null>(null);
@@ -99,10 +101,11 @@ export const RosterManagerPage = ({
       termCode,
       sectionId,
       rows,
+      faculty,
       createSection: isCreatingSection,
       confirmed: false
     }),
-    [courseFolder.id, courseFolder.path, isCreatingSection, rows, sectionId, termCode]
+    [courseFolder.id, courseFolder.path, faculty, isCreatingSection, rows, sectionId, termCode]
   );
 
   const clearPreview = (): void => {
@@ -114,6 +117,8 @@ export const RosterManagerPage = ({
     setTermCode(value);
     setSectionId("");
     setRows([]);
+    setFaculty([]);
+    setFacultyInput("");
     setIsCreatingSection(false);
     setIsExisting(false);
     setChangeDescription(null);
@@ -125,6 +130,8 @@ export const RosterManagerPage = ({
     setSectionId(value);
     setIsCreatingSection(false);
     setRows([]);
+    setFaculty([]);
+    setFacultyInput("");
     setIsExisting(false);
     setChangeDescription(null);
     clearPreview();
@@ -138,6 +145,7 @@ export const RosterManagerPage = ({
     try {
       const result = await getRosterForSection({ ...request, sectionId: value });
       setRows(result.rows);
+      setFaculty(result.faculty ?? []);
       setIsExisting(result.exists);
       setLoadMessage(result.diagnostics.map((item) => item.message).join(" ") || null);
     } catch {
@@ -345,6 +353,8 @@ export const RosterManagerPage = ({
             onClick={() => {
               setSectionId("");
               setRows([]);
+              setFaculty([]);
+              setFacultyInput("");
               setIsExisting(false);
               setIsCreatingSection(true);
               clearPreview();
@@ -409,6 +419,66 @@ export const RosterManagerPage = ({
             </p>
           )}
         </section>
+        {sectionId.length === 0 ? null : (
+          <section className="detail-panel">
+            <div className="roster-manager__table-header">
+              <h2>Section faculty</h2>
+            </div>
+            <p className="detail-panel__note">MSOE usernames assigned to this section.</p>
+            <label>
+              Faculty username
+              <input
+                value={facultyInput}
+                placeholder="jones"
+                onChange={(event) => setFacultyInput(event.target.value)}
+              />
+            </label>
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={() => {
+                const username = facultyInput.trim();
+                if (username.length === 0) {
+                  setLoadMessage("Faculty username is required.");
+                  return;
+                }
+                setFaculty((current) =>
+                  current.includes(username) ? current : [...current, username]
+                );
+                setFacultyInput("");
+                setLoadMessage(null);
+                setChangeDescription("This preview updates the faculty assigned to this section.");
+                clearPreview();
+              }}
+            >
+              Add faculty
+            </button>
+            {faculty.length === 0 ? (
+              <p className="detail-panel__note">No faculty assigned.</p>
+            ) : (
+              <ul>
+                {faculty.map((username) => (
+                  <li key={username}>
+                    {username}{" "}
+                    <button
+                      className="danger-action"
+                      type="button"
+                      onClick={() => {
+                        setFaculty((current) => current.filter((value) => value !== username));
+                        setChangeDescription(
+                          "This preview updates the faculty assigned to this section."
+                        );
+                        clearPreview();
+                      }}
+                    >
+                      Remove {username}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
         {sectionId.length === 0 ? null : (
           <section className="detail-panel">
             <div className="roster-manager__table-header">

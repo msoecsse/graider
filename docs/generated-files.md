@@ -24,6 +24,13 @@ terms/<term-code>/manifests/<assignment-slug>/manifest.yml
 
 Manifests are durable generated-state records. They include source hashes, template identity, repository records, permission state, Actions state, lifecycle state, operation history, warnings, and errors.
 
+Apply writes a new assignment manifest before its first repository mutation.
+After GitHub returns and Graider observes a newly created repository, Apply
+checkpoints that repository identity before resolving template-sync baselines,
+changing permissions, enabling Actions, deploying a managed workflow, or
+verifying workflows. Later failures therefore leave a resumable tracked record
+instead of an untracked remote repository.
+
 Manifests are safe to commit under the same privacy policy as rosters and faculty reports.
 
 ## Faculty Reports
@@ -58,13 +65,24 @@ Path:
 terms/<term-code>/generated-workflows/<assignment-slug>/grade.yml
 ```
 
-Generated workflows are local starter GitHub Actions workflows produced by
-`graider workflow generate`. The first supported preset is
-`java-junit-checkstyle`. Generation is local-only: Graider does not commit the
-file, write to GitHub, or mutate template repositories.
+`graider workflow generate` writes a local review/export copy of the canonical
+GitHub Actions workflow. The first supported preset is
+`java-junit-checkstyle`. The command itself remains local-only and does not
+write to GitHub or mutate template repositories.
 
-Generated workflows are safe to review and copy into a template repository. The
-command refuses to overwrite an existing workflow file unless `--force` is used.
+For an assignment whose effective grading configuration enables that preset,
+Assignment Apply creates or updates Graider's managed workflow at
+`.github/workflows/grade.yml` in each applicable student repository. A template
+repository is not required. Subsequent Apply runs update a recognized
+Graider-managed workflow, perform no write when it is already canonical, and
+preserve a differing workflow that does not carry Graider's ownership marker.
+The local generation command remains useful for review and export and refuses
+to overwrite an existing local file unless `--force` is used.
+
+The canonical workflow ignores pushes whose only changed path is its own
+`.github/workflows/grade.yml`, so an Apply create/update commit does not start a
+meaningless grading run. Pushes that also contain source changes continue to
+run grading; repository and manual dispatch triggers remain available.
 
 Copyable workflow and assignment examples are maintained under
 [`examples/grading/`](../examples/grading/README.md). Those files are
@@ -93,11 +111,20 @@ repositories do not need Graider or Graider npm dependencies installed.
 Paths in each student repository:
 
 ```text
-grading/report.md
+grading/report.html
 grading/results.json
 ```
 
-Publishing occurs only when `graider report --publish-student-reports` is used. Published files contain only the target student's report/result data. Faculty summaries and other students' data must not be published to student repositories.
+The implicit destination for a Graider-generated standalone grading report is
+`grading/report.html`. Existing explicitly configured report destinations are
+not migrated or rewritten.
+
+Publishing is always explicit. The CLI uses
+`graider report --publish-student-reports`; the grading workspace uses the
+trusted Publish Report or selective Publish Completed Reports actions after
+grading is Complete. Published files contain only the target student's
+report/result data. Faculty summaries and other students' data must not be
+published to student repositories.
 
 For no-grading assignments, Graider-generated student reports still include
 assignment and repository metadata and state that automated grading is not

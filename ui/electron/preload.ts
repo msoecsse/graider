@@ -2,12 +2,43 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type LocalSettingsResult,
   type AssignmentApplyRequest,
   type AssignmentApplyResult,
   type AssignmentApplyPreviewRequest,
   type AssignmentApplyPreviewResult,
   type AssignmentDetailRequest,
   type AssignmentDetailResult,
+  type GradingWorkspacePrepareRequest,
+  type GradingStudentSourceRequest,
+  type GradingStudentViewStateRequest,
+  type SaveGradingStudentViewStateRequest,
+  type GradingStudentViewStateResult,
+  type GradingStudentSnapshotRequest,
+  type GradingStudentSnapshotResult,
+  type GradingStudentEvidenceRequest,
+  type GradingStudentEvidenceResult,
+  type GradingStudentCommitHistoryRequest,
+  type GradingStudentCommitHistoryResult,
+  type AddGradingStudentCommentRequest,
+  type EditGradingStudentCommentRequest,
+  type DeleteGradingStudentCommentRequest,
+  type GradingStudentCommentResult,
+  type AddGradingStudentManualAdjustmentRequest,
+  type EditGradingStudentManualAdjustmentRequest,
+  type DeleteGradingStudentManualAdjustmentRequest,
+  type GradingStudentManualAdjustmentResult,
+  type MarkGradingStudentCompleteRequest,
+  type MarkGradingStudentCompleteResult,
+  type PublishGradingStudentReportRequest,
+  type PublishGradingStudentReportResult,
+  type BulkPublishGradingStudentReportsRequest,
+  type BulkPublishGradingStudentReportsResult,
+  type LoadGradingCommentLibraryRequest,
+  type CreateGradingLibraryCommentRequest,
+  type EditGradingLibraryCommentRequest,
+  type DeleteGradingLibraryCommentRequest,
+  type GradingCommentLibraryResult,
   type AssignmentTemplateSyncAvailability,
   type AssignmentTemplateSyncExecuteRequest,
   type AssignmentTemplateSyncExecutionResult,
@@ -75,6 +106,10 @@ const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<
 
 const graiderUI: GraiderUIApi = {
   getAppInfo: async (): Promise<AppInfo> => await invoke<AppInfo>(IPC_CHANNELS.getAppInfo),
+  getLocalSettings: async (): Promise<LocalSettingsResult> =>
+    await invoke<LocalSettingsResult>(IPC_CHANNELS.getLocalSettings),
+  saveLocalSettings: async (currentFacultyMsoeUsername: string): Promise<LocalSettingsResult> =>
+    await invoke<LocalSettingsResult>(IPC_CHANNELS.saveLocalSettings, currentFacultyMsoeUsername),
   checkGitHubAuth: async (): Promise<GitHubAuthResult> =>
     await invoke<GitHubAuthResult>(IPC_CHANNELS.checkGitHubAuth),
   selectCourseFolder: async (): Promise<SelectCourseFolderResult> =>
@@ -198,6 +233,107 @@ const graiderUI: GraiderUIApi = {
     await invoke<CombinedDashboardResult>(IPC_CHANNELS.refreshDashboard),
   getAssignmentDetail: async (request: AssignmentDetailRequest): Promise<AssignmentDetailResult> =>
     await invoke<AssignmentDetailResult>(IPC_CHANNELS.getAssignmentDetail, request),
+  prepareGradingWorkspace: async (request: GradingWorkspacePrepareRequest): Promise<unknown> =>
+    await invoke<unknown>(IPC_CHANNELS.prepareGradingWorkspace, request),
+  loadGradingStudentSource: async (request: GradingStudentSourceRequest): Promise<unknown> =>
+    await invoke<unknown>(IPC_CHANNELS.loadGradingStudentSource, request),
+  loadGradingStudentViewState: async (
+    request: GradingStudentViewStateRequest
+  ): Promise<GradingStudentViewStateResult> =>
+    await invoke<GradingStudentViewStateResult>(IPC_CHANNELS.loadGradingStudentViewState, request),
+  saveGradingStudentViewState: async (
+    request: SaveGradingStudentViewStateRequest
+  ): Promise<GradingStudentViewStateResult> =>
+    await invoke<GradingStudentViewStateResult>(IPC_CHANNELS.saveGradingStudentViewState, request),
+  clearGradingStudentViewState: async (
+    request: GradingStudentViewStateRequest
+  ): Promise<GradingStudentViewStateResult> =>
+    await invoke<GradingStudentViewStateResult>(IPC_CHANNELS.clearGradingStudentViewState, request),
+  loadGradingStudentSnapshot: async (
+    request: GradingStudentSnapshotRequest
+  ): Promise<GradingStudentSnapshotResult> =>
+    await invoke<GradingStudentSnapshotResult>(IPC_CHANNELS.loadGradingStudentSnapshot, request),
+  loadGradingStudentEvidence: async (
+    request: GradingStudentEvidenceRequest
+  ): Promise<GradingStudentEvidenceResult> =>
+    await invoke<GradingStudentEvidenceResult>(IPC_CHANNELS.loadGradingStudentEvidence, request),
+  loadGradingStudentCommitHistory: async (
+    request: GradingStudentCommitHistoryRequest
+  ): Promise<GradingStudentCommitHistoryResult> =>
+    await invoke<GradingStudentCommitHistoryResult>(
+      IPC_CHANNELS.loadGradingStudentCommitHistory,
+      request
+    ),
+  markGradingStudentComplete: async (
+    request: MarkGradingStudentCompleteRequest
+  ): Promise<MarkGradingStudentCompleteResult> =>
+    await invoke<MarkGradingStudentCompleteResult>(
+      IPC_CHANNELS.markGradingStudentComplete,
+      request
+    ),
+  publishGradingStudentReport: async (
+    request: PublishGradingStudentReportRequest
+  ): Promise<PublishGradingStudentReportResult> =>
+    await invoke<PublishGradingStudentReportResult>(
+      IPC_CHANNELS.publishGradingStudentReport,
+      request
+    ),
+  bulkPublishGradingStudentReports: async (
+    request: BulkPublishGradingStudentReportsRequest
+  ): Promise<BulkPublishGradingStudentReportsResult> =>
+    await invoke<BulkPublishGradingStudentReportsResult>(
+      IPC_CHANNELS.bulkPublishGradingStudentReports,
+      request
+    ),
+  addGradingStudentComment: async (
+    request: AddGradingStudentCommentRequest
+  ): Promise<GradingStudentCommentResult> =>
+    await invoke<GradingStudentCommentResult>(IPC_CHANNELS.addGradingStudentComment, request),
+  editGradingStudentComment: async (
+    request: EditGradingStudentCommentRequest
+  ): Promise<GradingStudentCommentResult> =>
+    await invoke<GradingStudentCommentResult>(IPC_CHANNELS.editGradingStudentComment, request),
+  deleteGradingStudentComment: async (
+    request: DeleteGradingStudentCommentRequest
+  ): Promise<GradingStudentCommentResult> =>
+    await invoke<GradingStudentCommentResult>(IPC_CHANNELS.deleteGradingStudentComment, request),
+  addGradingStudentManualAdjustment: async (
+    request: AddGradingStudentManualAdjustmentRequest
+  ): Promise<GradingStudentManualAdjustmentResult> =>
+    await invoke<GradingStudentManualAdjustmentResult>(
+      IPC_CHANNELS.addGradingStudentManualAdjustment,
+      request
+    ),
+  editGradingStudentManualAdjustment: async (
+    request: EditGradingStudentManualAdjustmentRequest
+  ): Promise<GradingStudentManualAdjustmentResult> =>
+    await invoke<GradingStudentManualAdjustmentResult>(
+      IPC_CHANNELS.editGradingStudentManualAdjustment,
+      request
+    ),
+  deleteGradingStudentManualAdjustment: async (
+    request: DeleteGradingStudentManualAdjustmentRequest
+  ): Promise<GradingStudentManualAdjustmentResult> =>
+    await invoke<GradingStudentManualAdjustmentResult>(
+      IPC_CHANNELS.deleteGradingStudentManualAdjustment,
+      request
+    ),
+  loadGradingCommentLibrary: async (
+    request: LoadGradingCommentLibraryRequest
+  ): Promise<GradingCommentLibraryResult> =>
+    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.loadGradingCommentLibrary, request),
+  createGradingLibraryComment: async (
+    request: CreateGradingLibraryCommentRequest
+  ): Promise<GradingCommentLibraryResult> =>
+    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.createGradingLibraryComment, request),
+  editGradingLibraryComment: async (
+    request: EditGradingLibraryCommentRequest
+  ): Promise<GradingCommentLibraryResult> =>
+    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.editGradingLibraryComment, request),
+  deleteGradingLibraryComment: async (
+    request: DeleteGradingLibraryCommentRequest
+  ): Promise<GradingCommentLibraryResult> =>
+    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.deleteGradingLibraryComment, request),
   prepareAssignmentTemplateSync: async (
     request: AssignmentTemplateSyncRequest
   ): Promise<AssignmentTemplateSyncAvailability> =>

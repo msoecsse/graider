@@ -118,10 +118,12 @@ const validateSchemaVersion = (filePath: string, schemaVersion: number): Diagnos
     ? []
     : [createInvalidSchemaVersionDiagnostic(filePath, schemaVersion)];
 
-const hasAnyWorkflowField = (grading: RawCourseConfig["grading"]): boolean =>
+type GradingConfig = NonNullable<RawCourseConfig["grading"] | RawAssignmentConfig["grading"]>;
+
+const hasAnyWorkflowField = (grading: GradingConfig): boolean =>
   WORKFLOW_GRADING_FIELDS.some((field) => grading[field] !== undefined);
 
-const hasAllWorkflowFields = (grading: RawCourseConfig["grading"]): boolean =>
+const hasAllWorkflowFields = (grading: GradingConfig): boolean =>
   WORKFLOW_GRADING_FIELDS.every((field) => grading[field] !== undefined);
 
 const createMissingGradingFieldDiagnostic = (
@@ -138,7 +140,7 @@ const createMissingGradingFieldDiagnostic = (
 
 const validateEnabledGradingFields = (
   filePath: string,
-  grading: RawCourseConfig["grading"],
+  grading: GradingConfig,
   owner: string
 ): Diagnostic[] => {
   if (grading.workflow === undefined) {
@@ -179,7 +181,7 @@ const validateEnabledGradingFields = (
 
 const validatePresetGrading = (
   filePath: string,
-  grading: RawCourseConfig["grading"],
+  grading: GradingConfig,
   owner: string
 ): Diagnostic[] => {
   if (grading.preset === undefined) {
@@ -213,7 +215,7 @@ const validatePresetGrading = (
 
 const validateEnabledGradingConfig = (
   filePath: string,
-  grading: RawCourseConfig["grading"],
+  grading: GradingConfig,
   owner: string
 ): Diagnostic[] => {
   const mode = grading.mode ?? LEGACY_GRADING_MODE;
@@ -257,7 +259,7 @@ const validateEnabledGradingConfig = (
 
 const validateDisabledGradingConfig = (
   filePath: string,
-  grading: RawCourseConfig["grading"],
+  grading: GradingConfig,
   owner: string
 ): Diagnostic[] => {
   if (grading.mode !== undefined && grading.mode !== DISABLED_GRADING_MODE) {
@@ -293,14 +295,16 @@ const validateDisabledGradingConfig = (
 
 const validateGradingConfig = (
   filePath: string,
-  grading: RawCourseConfig["grading"],
+  grading: RawCourseConfig["grading"] | RawAssignmentConfig["grading"],
   owner: string
 ): Diagnostic[] =>
   grading === undefined
     ? []
-    : grading.enabled
-    ? validateEnabledGradingConfig(filePath, grading, owner)
-    : validateDisabledGradingConfig(filePath, grading, owner);
+    : grading.enabled === undefined
+      ? []
+      : grading.enabled
+        ? validateEnabledGradingConfig(filePath, grading, owner)
+        : validateDisabledGradingConfig(filePath, grading, owner);
 
 const createMissingStudentPublishFieldDiagnostic = (
   filePath: string,
@@ -594,5 +598,18 @@ export const validateAssignmentConfig = (
       ]),
   ...(config.grading === undefined
     ? []
-    : validateGradingConfig(filePath, config.grading, "assignment"))
+    : [
+        ...validateGradingConfig(filePath, config.grading, "assignment"),
+        ...(config.grading.rubric === undefined ||
+        new Set(config.grading.rubric.map((category) => category.id)).size ===
+          config.grading.rubric.length
+          ? []
+          : [
+              createConfigDiagnostic(
+                INVALID_GRADING_CONFIG_CODE,
+                `Rubric category IDs in ${filePath} must be unique.`,
+                { filePath, owner: "assignment" }
+              )
+            ])
+      ])
 ];

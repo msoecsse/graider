@@ -7,8 +7,9 @@ Group configuration, preview, Apply preflight, and public Apply execution exist.
 dependencies. It performs one
 repository operation per group target, never per student; adds deduplicated
 members as `admin` collaborators; applies configured faculty/grader teams; and
-returns in-memory target identities and URLs for manifest-v2 construction. It
-does not write manifests itself.
+returns target identities and URLs for manifest-v2 construction. The public
+Apply orchestrator supplies a checkpoint callback that writes each newly
+observed identity before collaborator, team, Actions, or workflow operations.
 
 It is fail-fast: repository, collaborator, team, and workflow API failures
 stop later targets without cleanup. A workflow that is not observable
@@ -16,29 +17,29 @@ immediately after repository creation is treated as transient without a
 warning; API failure is a safe target error. Confirmed-missing workflow is
 deferred to a future existing-target/reconcile boundary. Untracked existing
 repositories are never adopted; diagnostics identify group ID and repository
-name, and manual cleanup or future reconcile is required.
+name, and an explicit provenance review or future reconcile is required.
 
-Public group Apply now runs preflight → executor → full-success-only manifest-v2
-write. Failed group Apply writes no manifest; partial manifests, lifecycle
-state, recovery, and automatic adoption remain deferred. A failure after GitHub
-mutation may require manual cleanup or a future reconcile workflow.
+Public group Apply writes an initial manifest-v2 checkpoint before repository
+creation, then rewrites it after each newly observed repository. Failed Apply
+runs retain mappings for every observed target. A retry recognizes only those
+manifest-tracked targets and resumes without recreating them; an arbitrary
+untracked repository remains a collision and is never adopted.
 
-The pure group Apply manifest finalizer enforces that full-success boundary
-before producing v2-ready targets and student mappings. Its output is covered
-through the v2 renderer, loader, normalized repository-target view, and
-repository-mappings readback. It remains pure and does not write files.
+The pure group Apply manifest finalizer accepts partial execution results and
+produces mappings only for targets with an observed repository URL. It rejects
+target identities that do not match the plan. Its output is covered through the
+v2 renderer, loader, normalized repository-target view, and repository-mappings
+readback. It remains pure and does not write files.
 
 The internal group manifest writer wraps that finalizer, renders the v2 YAML,
-and writes only the standard assignment manifest path after a full success. It
-refuses partial results and paths outside the course repository. Public Apply
-uses it only after every group target succeeds.
+and writes only the standard assignment manifest path. It supports durable
+partial checkpoints and still refuses paths outside the course repository.
 
 Individual Apply continues to create one repository per active student and
 writes manifest-v1 records. Group Apply creates one repository per `group_id`,
 adds every member as an `admin` collaborator, applies the configured
-faculty/grader team permissions, and writes manifest-v2 only after every planned
-target succeeds. Existing v1 manifests remain readable; no migration is
-required.
+faculty/grader team permissions, and incrementally writes manifest-v2. Existing
+v1 manifests remain readable; no migration is required.
 
 `normalizeManifestRepositories` provides a repository-centric view over both
 manifest versions: repository targets plus student-to-repository mappings.
@@ -56,6 +57,30 @@ status now exposes one target row per shared repository alongside its
 per-student compatibility rows. Faculty report collection reads each group
 repository/workflow/artifact once and projects the shared result to each member.
 Dashboard/status/report presentation and recovery/reconcile remain deferred.
+
+## Interrupted-Apply recovery
+
+If an expected repository exists but no manifest record tracks it, Apply stops
+at the untracked-repository collision before any mutation. Retrying does not
+create a duplicate, overwrite the existing repository, or adopt it.
+
+There is no automatic adoption command. For a known interrupted-Apply incident,
+an administrator must keep Apply paused and reconstruct the manifest in a
+disposable copy of the course repository. Before adding a record, verify the
+expected organization and canonical name against the current roster, the
+assignment identity, repository creation time, privacy/default branch, and—if
+the assignment is template-backed—GitHub template provenance. Establish an
+`initialized` template-sync baseline only when the template revision and the
+repository's initial default-branch tree are proven equivalent; otherwise use
+`baseline_required` so update/template-sync remains safely blocked.
+
+Validate the candidate with the manifest loader plus read-only `assignment
+repository-mappings`, `assignment detail`, and `assignment grade-preview`
+commands. Confirm that every mapping resolves to the reviewed repository and
+that no active student reports `student_repository_missing`. Only then copy the
+reviewed manifest to the standard course path, commit it in the course
+administration repository, and retry Apply. The retry may converge permissions,
+Actions, and workflow state for those explicitly tracked repositories.
 
 `assignment download-repositories --destination <folder> --json` uses the same
 normalized targets. It clones one folder per individual repository or shared
@@ -84,9 +109,9 @@ read-only and builds one in-memory repository target per group ID, using that ID
 in the normal repository naming pattern and assigning each member planned
 `admin` access. Group Apply execution is supported for a valid preview and
 preflight: it creates one repository per group, gives every group member
-`admin` access, applies configured teams, and writes a v2 manifest only after
-all targets succeed. Group grading, status, reporting, and dashboard display
-remain deferred.
+`admin` access, applies configured teams, and writes an initial v2 manifest plus
+one checkpoint per observed repository. Group grading, status, reporting, and
+dashboard display remain deferred.
 
 ## Apply execution identity
 

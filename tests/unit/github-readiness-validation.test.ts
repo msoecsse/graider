@@ -173,8 +173,39 @@ const expectErrorCode = async (
 };
 
 describe("GitHub readiness validation", () => {
+  it("treats an omitted assignment template as ready when other checks pass", async () => {
+    const assignmentWithoutTemplate = { ...assignmentConfig };
+    delete assignmentWithoutTemplate.template;
+    const result = await validateWith(createReadyClient(null), assignmentWithoutTemplate);
+
+    expect(result).toEqual({ warnings: [], errors: [] });
+  });
+
   it("authenticated user check passes", async () => {
     const result = await validateWith(createReadyClient());
+
+    expect(result.errors).toEqual([]);
+  });
+
+  it("does not require a template copy of an Apply-managed preset workflow", async () => {
+    const result = await validateGitHubReadiness({
+      courseConfig,
+      termConfig,
+      assignmentConfig: {
+        ...assignmentConfig,
+        grading: {
+          enabled: true,
+          mode: "preset",
+          preset: "java-junit-checkstyle",
+          workflow: ".github/workflows/grade.yml",
+          artifact: "grading-results",
+          result_file: "results.json"
+        }
+      },
+      students,
+      githubClient: createReadyClient(),
+      validateTemplateWorkflow: true
+    });
 
     expect(result.errors).toEqual([]);
   });

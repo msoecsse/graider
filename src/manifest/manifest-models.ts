@@ -26,7 +26,7 @@ export interface Manifest {
   studentMappings?: ManifestStudentMapping[];
   assignment: ManifestAssignment;
   source: ManifestSource;
-  template: ManifestTemplate;
+  template?: ManifestTemplate;
   repositories: ManifestRepositoryRecord[];
   operationHistory: ManifestOperationRecord[];
   warnings: Diagnostic[];
@@ -92,7 +92,7 @@ export interface ManifestRepositoryIdentity {
   id?: number;
   htmlUrl?: string;
   createdFromTemplate: boolean;
-  templateRepository: string;
+  templateRepository?: string;
   /**
    * The template default-branch revision copied into this repository. Together
    * with studentDefaultBranchCommitSha, this is the template-sync baseline.

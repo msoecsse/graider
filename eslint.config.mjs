@@ -48,5 +48,13 @@ export default tseslint.config(
     files: ["*.js", "*.mjs", "*.cjs", "eslint.config.mjs"],
     extends: [tseslint.configs.disableTypeChecked],
     rules: {}
+  },
+
+  {
+    files: ["ui/scripts/package-win.cjs"],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: { process: "readonly" }
+    }
   }
 );

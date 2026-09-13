@@ -10,10 +10,13 @@ import {
   AddCollaboratorInput,
   AddTeamPermissionInput,
   CreateFromTemplateInput,
+  CreateRepositoryInput,
   DispatchWorkflowInput,
+  DownloadArtifactArchiveInput,
   DownloadArtifactInput,
   DownloadedArtifact,
   GitHubActionsState,
+  GitHubActionsArtifact,
   GitHubCollaboratorResult,
   GitHubFileWriteResult,
   GitHubPermission,
@@ -25,9 +28,12 @@ import {
   GitHubUser,
   GitHubWorkflow,
   GitHubWorkflowRun,
+  GitHubWorkflowRunForCommit,
   GitHubWorkflowRunConclusion,
   GitHubWorkflowRunStatus,
   ListWorkflowRunsInput,
+  ListWorkflowRunArtifactsInput,
+  ListWorkflowRunsForCommitInput,
   RemoveCollaboratorInput,
   WriteRepositoryFileInput,
   CreatePullRequestInput
@@ -93,6 +99,10 @@ export interface OctokitResponseLike {
 
 export type OctokitMethodLike = (parameters?: OctokitParameters) => Promise<OctokitResponseLike>;
 
+type CreatePullRequestMethodLike = (
+  parameters: CreatePullRequestInput
+) => Promise<OctokitResponseLike>;
+
 export interface OctokitRestClientLike {
   rest: {
     actions: {
@@ -108,6 +118,7 @@ export interface OctokitRestClientLike {
     repos: {
       addCollaborator: OctokitMethodLike;
       createOrUpdateFileContents: OctokitMethodLike;
+      createInOrg: OctokitMethodLike;
       createUsingTemplate: OctokitMethodLike;
       get: OctokitMethodLike;
       getCollaboratorPermissionLevel: OctokitMethodLike;
@@ -117,7 +128,7 @@ export interface OctokitRestClientLike {
       removeCollaborator: OctokitMethodLike;
       update: OctokitMethodLike;
     };
-    pulls: { create: OctokitMethodLike; list: OctokitMethodLike };
+    pulls: { create: CreatePullRequestMethodLike; list: OctokitMethodLike };
     git: { deleteRef: OctokitMethodLike };
     teams: {
       addOrUpdateRepoPermissionsInOrg: OctokitMethodLike;
@@ -220,6 +231,20 @@ export class OctokitGitHubClient implements GitHubClient {
         private: input.private,
         template_owner: input.templateOwner,
         template_repo: input.templateRepo
+      })
+    );
+
+    return mapRepository(data);
+  }
+
+  async createRepository(input: CreateRepositoryInput): Promise<GitHubRepository> {
+    const data = await this.run(() =>
+      this.octokit.rest.repos.createInOrg({
+        org: input.owner,
+        name: input.name,
+        private: input.private,
+        auto_init: false,
+        ...(input.description === undefined ? {} : { description: input.description })
       })
     );
 
@@ -449,6 +474,50 @@ export class OctokitGitHubClient implements GitHubClient {
     return runs.map((run) => mapWorkflowRun(run, input.workflowPath));
   }
 
+  async listWorkflowRunsForCommit(
+    input: ListWorkflowRunsForCommitInput
+  ): Promise<GitHubWorkflowRunForCommit[]> {
+    const runs = await this.runPaginated(this.octokit.rest.actions.listWorkflowRuns, {
+      owner: input.owner,
+      repo: input.repo,
+      workflow_id: input.workflowPath,
+      head_sha: input.headSha,
+      status: "completed"
+    });
+
+    return runs.map((run) => mapWorkflowRunForCommit(run, input.workflowPath));
+  }
+
+  async listWorkflowRunArtifacts(
+    input: ListWorkflowRunArtifactsInput
+  ): Promise<GitHubActionsArtifact[]> {
+    const artifacts = await this.runPaginated(this.octokit.rest.actions.listWorkflowRunArtifacts, {
+      owner: input.owner,
+      repo: input.repo,
+      run_id: input.runId
+    });
+
+    return artifacts.map(mapActionsArtifact);
+  }
+
+  async downloadArtifactArchive(input: DownloadArtifactArchiveInput): Promise<Uint8Array> {
+    const archiveResponse = await this.resolveArtifactDownloadResponse(
+      await this.runResponse(() =>
+        this.octokit.rest.actions.downloadArtifact({
+          archive_format: "zip",
+          artifact_id: input.artifactId,
+          owner: input.owner,
+          repo: input.repo,
+          request: {
+            parseSuccessResponseBody: PARSE_SUCCESS_RESPONSE_BODY_DISABLED
+          }
+        })
+      )
+    );
+
+    return Uint8Array.from(await toBuffer(archiveResponse.data));
+  }
+
   async downloadArtifact(input: DownloadArtifactInput): Promise<DownloadedArtifact | null> {
     const artifactsData = await this.run(() =>
       this.octokit.rest.actions.listWorkflowRunArtifacts({
@@ -466,12 +535,10 @@ export class OctokitGitHubClient implements GitHubClient {
     if (artifact === undefined) {
       return null;
     }
-
     const artifactId = asNumber(artifact.id);
     if (artifactId === undefined) {
       return null;
     }
-
     const archiveResponse = await this.resolveArtifactDownloadResponse(
       await this.runResponse(() =>
         this.octokit.rest.actions.downloadArtifact({
@@ -537,7 +604,7 @@ export class OctokitGitHubClient implements GitHubClient {
     head: string,
     base: string
   ): Promise<GitHubPullRequest | null> {
-    const data = await this.run(() =>
+    const data = await this.run<unknown[]>(() =>
       this.octokit.rest.pulls.list({ owner, repo, head: `${owner}:${head}`, base, state: "all" })
     );
     const first = Array.isArray(data) ? data[0] : undefined;
@@ -833,6 +900,26 @@ function mapWorkflowRun(value: unknown, workflowPath: string | undefined): GitHu
     ...(asString(record.status) === "completed"
       ? { completedAt: asString(record.updated_at) ?? "" }
       : {})
+  };
+}
+
+function mapWorkflowRunForCommit(value: unknown, workflowPath: string): GitHubWorkflowRunForCommit {
+  const record = asRecord(value);
+  return {
+    ...mapWorkflowRun(value, workflowPath),
+    runAttempt: asNumber(record.run_attempt) ?? 1
+  };
+}
+
+function mapActionsArtifact(value: unknown): GitHubActionsArtifact {
+  const record = asRecord(value);
+  return {
+    id: asNumber(record.id) ?? UNKNOWN_ID,
+    name: asString(record.name) ?? "",
+    sizeInBytes: asNumber(record.size_in_bytes) ?? 0,
+    expired: asBoolean(record.expired) ?? false,
+    createdAt: asString(record.created_at) ?? "",
+    updatedAt: asString(record.updated_at) ?? ""
   };
 }
 

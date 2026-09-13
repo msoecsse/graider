@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { LoadedGraiderConfig } from "../config/config-models.js";
+import type { LoadedGraiderConfig, RawTermConfig } from "../config/config-models.js";
 import { toForwardSlashPath } from "../core/paths.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { parseCsv } from "../io/csv.js";
@@ -67,17 +67,21 @@ const createSummary = (
 const getTermDirectory = (termConfigPath: string): string =>
   termConfigPath.split("/").slice(EMPTY_COUNT, TERM_DIRECTORY_DEPTH).join("/");
 
-const getSectionSources = (config: LoadedGraiderConfig): RosterSectionSource[] => {
-  const termDirectory = getTermDirectory(config.summary.termConfigPath);
+const getSectionSources = (
+  termConfigPath: string,
+  sections: readonly RawTermConfig["sections"][number][],
+  sectionIds: readonly string[]
+): RosterSectionSource[] => {
+  const termDirectory = getTermDirectory(termConfigPath);
   const sectionsById = new Map(
-    config.term.sections.flatMap((section) =>
+    sections.flatMap((section) =>
       section.roster === undefined
         ? []
         : [[section.id, toForwardSlashPath(path.posix.join(termDirectory, section.roster))]]
     )
   );
 
-  return config.assignment.sections.flatMap((sectionId) => {
+  return sectionIds.flatMap((sectionId) => {
     const rosterPath = sectionsById.get(sectionId);
     return rosterPath === undefined ? [] : [{ sectionId, rosterPath }];
   });
@@ -196,12 +200,17 @@ const loadSectionRoster = (
   };
 };
 
-export const loadAssignmentRosters = (config: LoadedGraiderConfig): RosterLoadResult => {
-  const sources = getSectionSources(config);
+export interface TermRosterLoadRequest {
+  readonly repoRoot: string;
+  readonly termConfigPath: string;
+  readonly sections: readonly RawTermConfig["sections"][number][];
+  readonly sectionIds: readonly string[];
+}
+
+export const loadTermRosters = (request: TermRosterLoadRequest): RosterLoadResult => {
+  const sources = getSectionSources(request.termConfigPath, request.sections, request.sectionIds);
   const rosterFiles = sources.map((source) => source.rosterPath);
-  const loadedSections = sources.map((source) =>
-    loadSectionRoster(config.summary.repoRoot, source)
-  );
+  const loadedSections = sources.map((source) => loadSectionRoster(request.repoRoot, source));
   const students = loadedSections.flatMap((section) => section.students);
   const warnings = loadedSections.flatMap((section) => section.warnings);
   const errors = [
@@ -219,3 +228,11 @@ export const loadAssignmentRosters = (config: LoadedGraiderConfig): RosterLoadRe
         : createSummary(rosterFiles, students)
   };
 };
+
+export const loadAssignmentRosters = (config: LoadedGraiderConfig): RosterLoadResult =>
+  loadTermRosters({
+    repoRoot: config.summary.repoRoot,
+    termConfigPath: config.summary.termConfigPath,
+    sections: config.term.sections,
+    sectionIds: config.assignment.sections
+  });

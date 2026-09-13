@@ -19,7 +19,7 @@ const EMPTY_DIAGNOSTICS: Diagnostic[] = [];
 export interface CreateManifestInput {
   assignment: ManifestAssignment;
   source: ManifestSource;
-  template: ManifestTemplate;
+  template?: ManifestTemplate;
   warnings?: Diagnostic[];
   errors?: Diagnostic[];
 }
@@ -66,7 +66,7 @@ export const createEmptyManifest = ({
   schemaVersion: MANIFEST_SCHEMA_VERSION,
   assignment,
   source,
-  template,
+  ...(template === undefined ? {} : { template }),
   repositories: [],
   operationHistory: [],
   warnings: [...warnings],

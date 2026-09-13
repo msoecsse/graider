@@ -11,6 +11,7 @@ import { formatCommandResultAsJson } from "../../src/cli/output.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { ExitCode } from "../../src/core/exit-codes.js";
 import { FakeGitHubClient } from "../../src/github/fake-github-client.js";
+import { DEFAULT_GITHUB_RETRY_ATTEMPTS } from "../../src/github/github-retry.js";
 import type { GitHubRepository, GitHubTemplateRepository } from "../../src/github/github-models.js";
 import { loadManifest } from "../../src/manifest/manifest-loader.js";
 import { createManifestPath } from "../../src/manifest/manifest-paths.js";
@@ -287,7 +288,7 @@ describe("graider assignment apply command", () => {
     expect(loadWrittenManifest(cwd).status).toBe("missing");
   });
 
-  it("does not write a manifest after an executor failure following earlier mutation", async () => {
+  it("persists every observed group repository after an executor failure following mutation", async () => {
     const cwd = copyFixtureToTemp("active-assignment");
     configureGroupAssignment(cwd, "team-1,jones\nteam-2,patel\n");
     const githubClient = createReadyClient();
@@ -300,16 +301,22 @@ describe("graider assignment apply command", () => {
     };
 
     const result = await runCanonicalApply(cwd, githubClient);
+    const manifest = loadWrittenManifest(cwd);
 
     expect(result.status).toBe("failure");
-    expect(result.warnings.map((diagnostic) => diagnostic.code)).toContain(
-      "group_apply_manifest_not_written"
-    );
     expect(githubClient.mutations.createdRepositories).toHaveLength(1);
-    expect(loadWrittenManifest(cwd).status).toBe("missing");
+    expect(manifest.status).toBe("loaded");
+    if (manifest.status === "loaded") {
+      expect(manifest.manifest.targets?.map((target) => target.repositoryName)).toEqual([
+        "27s1-se2030-lab04-team-1"
+      ]);
+      expect(manifest.manifest.studentMappings?.map((mapping) => mapping.studentId)).toEqual([
+        "jones"
+      ]);
+    }
   });
 
-  it("reports a writer failure without creating a misleading manifest", async () => {
+  it("stops before repository creation when the initial group manifest cannot be written", async () => {
     const cwd = copyFixtureToTemp("active-assignment");
     configureGroupAssignment(cwd, "team-1,jones\nteam-2,patel\n");
     const githubClient = createReadyClient();
@@ -336,11 +343,40 @@ describe("graider assignment apply command", () => {
 
     expect(result.status).toBe("failure");
     expect(getDiagnosticCodes(result.errors)).toContain("manifest_write_failed");
-    expect(result.warnings.map((diagnostic) => diagnostic.code)).toContain(
-      "group_apply_manifest_not_written"
-    );
-    expect(githubClient.mutations.createdRepositories).toHaveLength(2);
+    expect(githubClient.mutations.createdRepositories).toHaveLength(0);
     expect(loadWrittenManifest(cwd).status).toBe("missing");
+  });
+
+  it("reruns safely from a partial group manifest without recreating tracked repositories", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    configureGroupAssignment(cwd, "team-1,jones\nteam-2,patel\n");
+    const githubClient = createReadyClient();
+    const createRepository = githubClient.createRepositoryFromTemplate.bind(githubClient);
+    let createCount = 0;
+    githubClient.createRepositoryFromTemplate = async (input) => {
+      createCount += 1;
+      if (createCount === 2) throw new Error("mock target failure");
+      return createRepository(input);
+    };
+
+    expect((await runCanonicalApply(cwd, githubClient)).status).toBe("failure");
+    githubClient.createRepositoryFromTemplate = createRepository;
+
+    const retry = await runCanonicalApply(cwd, githubClient);
+
+    expect(retry.status).toBe("success");
+    expect(githubClient.mutations.createdRepositories.map((entry) => entry.input.name)).toEqual([
+      "27s1-se2030-lab04-team-1",
+      "27s1-se2030-lab04-team-2"
+    ]);
+    expect(loadWrittenManifest(cwd)).toMatchObject({
+      status: "loaded",
+      manifest: {
+        schemaVersion: 2,
+        repositoryMode: "group",
+        targets: [{ targetId: "team-1" }, { targetId: "team-2" }]
+      }
+    });
   });
 
   it("accepts assignment apply and returns the canonical JSON command name", async () => {
@@ -382,6 +418,24 @@ describe("graider assignment apply command", () => {
     );
     expect(loadWrittenManifest(legacyCwd).status).toBe("loaded");
     expect(loadWrittenManifest(canonicalCwd).status).toBe("loaded");
+  });
+
+  it("uses durable manifest checkpoints on the canonical UI Apply command path", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    const githubClient = createReadyClient();
+    githubClient.failTimes("addCollaborator", "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS);
+
+    const result = await runCanonicalApply(cwd, githubClient);
+    const manifest = loadWrittenManifest(cwd);
+
+    expect(result.commandName).toBe("assignment apply");
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
+    );
+    expect(manifest.status).toBe("loaded");
+    if (manifest.status === "loaded") {
+      expect(manifest.manifest.repositories[0]?.repository.name).toBe(JONES_REPOSITORY);
+    }
   });
 
   it("keeps the existing real apply command working as the legacy alias", async () => {

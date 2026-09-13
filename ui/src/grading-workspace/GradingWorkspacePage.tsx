@@ -1,0 +1,2638 @@
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement
+} from "react";
+import type {
+  GradingEditorViewState,
+  GradingCommentLibraryResult,
+  GradingStudentCommentResult,
+  MarkGradingStudentCompleteResult,
+  GradingStudentManualAdjustmentResult,
+  GradingStudentCommitHistoryResult,
+  GradingStudentEvidenceResult,
+  GradingStudentSnapshotResult,
+  GradingStudentViewStateResult,
+  GradingWorkspacePrepareRequest,
+  BulkPublishGradingStudentReportsResult,
+  PublishGradingStudentReportResult
+} from "../../electron/ipc";
+import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
+import {
+  commitHistoryResultToLoadState,
+  GradingCommitHistoryPanel,
+  type CommitHistoryLoadState
+} from "./GradingCommitHistoryPanel";
+import {
+  evidenceResultToLoadState,
+  GradingEvidencePanel,
+  type EvidenceLoadState
+} from "./GradingEvidencePanel";
+import type { GradingSourceAnnotation } from "./MonacoSourceViewer";
+import { filterReusableComments, listReusableCommentTags } from "./commentLibrarySearch";
+import {
+  isGradingStudentSourceDto,
+  type CanonicalSourceRange,
+  type GradingStudentSourceDto
+} from "./submissionSourceView";
+
+const MonacoSourceViewer = lazy(async () => {
+  const module = await import("./MonacoSourceViewer");
+  return { default: module.MonacoSourceViewer };
+});
+
+type Student = { studentId: string; section: string; gradingStatus: string };
+type Ready = {
+  status: "success";
+  assignment: { title: string; termCode: string; slug: string };
+  requiredFiles: string[];
+  rubric: { id: string; name: string; points: number }[];
+  students: Student[];
+};
+type PreparationResult = Ready | { status: string; studentId?: string };
+const isReady = (value: PreparationResult | null): value is Ready =>
+  value?.status === "success" && "students" in value;
+const label = (status: string): string =>
+  ({
+    not_started: "Not Started",
+    in_progress: "In Progress",
+    complete: "Complete",
+    published: "Published"
+  })[status] ?? status;
+
+type SourceLoadState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading"; readonly studentId: string }
+  | {
+      readonly status: "success";
+      readonly source: GradingStudentSourceDto;
+      readonly initialViewState: GradingEditorViewState | null;
+      readonly autosaveEnabled: boolean;
+    }
+  | { readonly status: "failure"; readonly studentId: string; readonly message: string };
+
+type Snapshot = Extract<GradingStudentSnapshotResult, { readonly status: "success" }>;
+type SnapshotLoadState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading"; readonly studentId: string }
+  | { readonly status: "success"; readonly snapshot: Snapshot }
+  | { readonly status: "failure"; readonly studentId: string; readonly message: string };
+type LoadedLibrary = Extract<
+  GradingCommentLibraryResult,
+  { readonly status: "success"; readonly comments: unknown }
+>;
+type CommentLibraryLoadState =
+  | { readonly status: "loading" }
+  | { readonly status: "success"; readonly comments: LoadedLibrary["comments"] }
+  | { readonly status: "failure"; readonly message: string };
+type ReusableComment = LoadedLibrary["comments"][number];
+
+interface AddCommentEditorState {
+  readonly operation: "add";
+  readonly studentId: string;
+  readonly reusableCommentId?: string;
+  readonly reusableCommentTitle?: string;
+  readonly text: string;
+  readonly deduction: string;
+  readonly rubricCategoryId: string;
+  readonly targetMode: "source" | "general";
+}
+
+interface EditCommentEditorState {
+  readonly operation: "edit";
+  readonly studentId: string;
+  readonly commentId: string;
+  readonly text: string;
+  readonly deduction: string;
+  readonly rubricCategoryId: string;
+  readonly targetMode: "source" | "general";
+  readonly sourceTarget?: CanonicalSourceRange;
+}
+
+type CommentEditorState = AddCommentEditorState | EditCommentEditorState;
+
+interface DeleteCommentConfirmation {
+  readonly studentId: string;
+  readonly commentId: string;
+  readonly text: string;
+  readonly deduction: number;
+  readonly sourceLocation?: CanonicalSourceRange;
+}
+
+interface AddManualAdjustmentEditorState {
+  readonly operation: "add";
+  readonly studentId: string;
+  readonly rubricCategoryId: string;
+  readonly amount: string;
+  readonly note: string;
+}
+
+interface EditManualAdjustmentEditorState {
+  readonly operation: "edit";
+  readonly studentId: string;
+  readonly adjustmentId: string;
+  readonly rubricCategoryId: string;
+  readonly amount: string;
+  readonly note: string;
+}
+
+type ManualAdjustmentEditorState = AddManualAdjustmentEditorState | EditManualAdjustmentEditorState;
+
+interface DeleteManualAdjustmentConfirmation {
+  readonly studentId: string;
+  readonly adjustmentId: string;
+  readonly rubricCategoryId: string;
+  readonly amount: number;
+  readonly note?: string;
+}
+
+interface MarkCompleteConfirmation {
+  readonly studentId: string;
+}
+
+interface ReportPublicationConfirmation {
+  readonly studentId: string;
+  readonly operation: "publish" | "republish";
+}
+
+interface ReportPublicationNotice {
+  readonly studentId: string;
+  readonly tone: "success" | "warning" | "error";
+  readonly message: string;
+  readonly warnings?: readonly string[];
+}
+
+interface BulkPublicationConfirmation {
+  readonly studentIds: readonly string[];
+}
+
+interface BulkPublicationNotice {
+  readonly results: BulkPublishGradingStudentReportsResult["results"];
+  readonly refreshFailedStudentIds: readonly string[];
+}
+
+interface PendingViewStateSave {
+  readonly studentId: string;
+  readonly viewState: GradingEditorViewState;
+}
+
+export const VIEW_STATE_AUTOSAVE_DEBOUNCE_MS = 400;
+
+const submissionChangedWarning =
+  "The local submission changed after grading state was created. Existing grading state was not modified. Editor position restoration and autosave are disabled for this student.";
+
+const viewStateFailureMessage = (result: GradingStudentViewStateResult | undefined): string => {
+  const messages: Readonly<Record<string, string>> = {
+    repository_not_recorded:
+      "This student's local repository is not recorded, so editor position could not be loaded or saved.",
+    repository_unavailable:
+      "This student's local repository is unavailable, so editor position could not be loaded or saved.",
+    registry_error: "The local repository registry could not be read safely.",
+    submission_commit_unavailable:
+      "The local submission commit could not be verified, so editor position was not loaded or saved.",
+    grading_state_error:
+      "Grading state could not be read or saved safely. Existing grading state was not modified.",
+    student_not_accessible: "This student is not accessible to the current faculty member.",
+    faculty_identity_required: "Configure your local faculty MSOE username before grading.",
+    no_assigned_sections: "Your faculty username is not assigned to sections for this term.",
+    roster_error: "Roster data must be corrected before editor position can be saved.",
+    term_config_error: "Term configuration could not be read safely."
+  };
+  return result?.status === "submission_changed"
+    ? submissionChangedWarning
+    : (messages[result?.status ?? ""] ?? "Editor position could not be loaded or saved safely.");
+};
+
+const sourceFailureMessage = (value: unknown): string => {
+  const status =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>).status
+      : undefined;
+  const messages: Readonly<Record<string, string>> = {
+    repository_not_recorded:
+      "Download this student's repository through Graider before grading source can be shown.",
+    repository_unavailable:
+      "The downloaded repository is no longer available. Download it again through Graider.",
+    registry_error: "The local repository registry could not be read.",
+    student_not_accessible: "This student is not accessible to the current faculty member.",
+    faculty_identity_required: "Configure your local faculty MSOE username before grading.",
+    no_assigned_sections: "Your faculty username is not assigned to sections for this term.",
+    roster_error: "Roster data must be corrected before source can be shown.",
+    submission_commit_unavailable:
+      "The local submission commit could not be verified, so source is unavailable.",
+    grading_state_error: "Grading state could not be read safely, so source is unavailable.",
+    assignment_config_error: "Assignment configuration could not be read.",
+    source_error: "The configured source files could not be loaded safely."
+  };
+  if (status === "submission_changed") return snapshotSubmissionChangedWarning;
+  return typeof status === "string"
+    ? (messages[status] ?? "Student source could not be loaded.")
+    : "Student source could not be loaded.";
+};
+
+const snapshotSubmissionChangedWarning =
+  "The local submission changed after grading state was created. Existing grading state belongs to a different local submission and is not being applied.";
+
+const snapshotFailureMessage = (result: GradingStudentSnapshotResult | undefined): string => {
+  if (result?.status === "submission_changed") return snapshotSubmissionChangedWarning;
+  if (result?.status === "grading_state_error" && result.code === "rubric_category_mismatch")
+    return "Grading state references a rubric category that is no longer configured.";
+  const messages: Readonly<Record<string, string>> = {
+    repository_not_recorded:
+      "Download this student's repository through Graider before grading details can be shown.",
+    repository_unavailable:
+      "The downloaded repository is no longer available. Download it again through Graider.",
+    registry_error: "The local repository registry could not be read safely.",
+    submission_commit_unavailable:
+      "The local submission commit could not be verified, so grading details were not loaded.",
+    grading_state_error: "Grading state could not be read safely.",
+    student_not_accessible: "This student is not accessible to the current faculty member.",
+    faculty_identity_required: "Configure your local faculty MSOE username before grading.",
+    no_assigned_sections: "Your faculty username is not assigned to sections for this term.",
+    roster_error: "Roster data must be corrected before grading details can be shown.",
+    term_config_error: "Term configuration could not be read safely.",
+    assignment_config_error: "Assignment configuration could not be read safely."
+  };
+  return messages[result?.status ?? ""] ?? "Grading details could not be loaded safely.";
+};
+
+const gradingMutationFailureMessage = (
+  result:
+    | GradingStudentCommentResult
+    | GradingStudentManualAdjustmentResult
+    | MarkGradingStudentCompleteResult
+    | undefined
+): string => {
+  if (result?.status === "submission_changed") return snapshotSubmissionChangedWarning;
+  const code = "code" in (result ?? {}) ? (result as { readonly code?: string }).code : undefined;
+  const codeMessages: Readonly<Record<string, string>> = {
+    rubric_category_mismatch: "The selected rubric category is no longer configured.",
+    source_location_mismatch:
+      "The selected source location is no longer valid for this assignment.",
+    duplicate_applied_comment_id:
+      "That comment could not be uniquely recorded. Try applying it again."
+  };
+  if (code !== undefined && codeMessages[code] !== undefined) return codeMessages[code];
+  const messages: Readonly<Record<string, string>> = {
+    repository_not_recorded:
+      "Download this student's repository through Graider before applying grading feedback.",
+    repository_unavailable:
+      "The downloaded repository is unavailable, so grading feedback was not applied.",
+    registry_error: "The local repository registry could not be read safely.",
+    submission_commit_unavailable:
+      "The local submission commit could not be verified, so grading feedback was not applied.",
+    grading_state_error: "Grading state could not be updated safely.",
+    assignment_config_error: "Assignment configuration could not be read safely.",
+    student_not_accessible: "This student is not accessible to the current faculty member.",
+    faculty_identity_required: "Configure your local faculty MSOE username before grading.",
+    no_assigned_sections: "Your faculty username is not assigned to sections for this term.",
+    roster_error: "Roster data must be corrected before applying grading feedback.",
+    term_config_error: "Term configuration could not be read safely.",
+    not_found: "The selected grading record could not be found."
+  };
+  return messages[result?.status ?? ""] ?? "The grading change could not be applied safely.";
+};
+
+const publicationWarningMessage = (warning: string): string =>
+  ({
+    automated_evidence_unavailable: "The report was published without automated evidence.",
+    automated_evidence_invalid:
+      "The report was published without automated evidence because the available evidence could not be trusted.",
+    commit_history_unavailable: "The report was published without commit history."
+  })[warning] ?? "The report was published with an informational warning.";
+
+const publicationFailureMessage = (result: PublishGradingStudentReportResult): string => {
+  const messages: Readonly<Record<string, string>> = {
+    grading_state_missing: "Complete this student's grading before publishing the report.",
+    grading_not_complete: "Mark this student's grading Complete before publishing the report.",
+    grading_state_error: "Grading state could not be read safely for publication.",
+    assignment_config_error: "Assignment configuration could not be read safely for publication.",
+    source_unavailable:
+      "The trusted submission source is unavailable, so the report was not published.",
+    repository_not_recorded:
+      "The student's repository is not recorded, so the report was not published.",
+    repository_unavailable:
+      "The student's repository is unavailable, so the report was not published.",
+    registry_error: "The local repository registry could not be read safely.",
+    submission_commit_unavailable:
+      "The submission commit could not be verified, so the report was not published.",
+    report_destination_unavailable:
+      "A Graider report destination is not configured for this assignment.",
+    unsafe_report_destination:
+      "The configured report destination is unsafe, so the report was not published.",
+    github_auth_unavailable:
+      "GitHub authentication is unavailable. Check the configured GitHub token and try again.",
+    report_write_permission_unavailable:
+      "Graider cannot publish the report because the GitHub token lacks repository Contents write permission.",
+    report_render_failed: "The grading report could not be rendered safely.",
+    report_publish_failed: "The grading report could not be published safely.",
+    faculty_identity_required: "Configure your local faculty MSOE username before publishing.",
+    no_assigned_sections: "Your faculty username is not assigned to sections for this term.",
+    student_not_accessible: "This student is not accessible to the current faculty member.",
+    roster_error: "Roster data must be corrected before publishing.",
+    term_config_error: "Term configuration could not be read safely."
+  };
+  return messages[result.status] ?? "The grading report could not be published safely.";
+};
+
+const bulkPublicationResultLabel = (result: PublishGradingStudentReportResult): string => {
+  if (result.status === "success")
+    return result.warnings.length === 0 ? "Published" : "Published with warnings";
+  if (result.status === "publication_state_record_failed")
+    return "Report published; Published status not recorded";
+  if (result.status === "publication_stale") return "Publication stale";
+  if (result.status === "submission_changed") return "Submission changed";
+  if (result.status === "grading_not_complete" || result.status === "grading_state_missing")
+    return "Not eligible";
+  return `Failed: ${publicationFailureMessage(result)}`;
+};
+
+const signedAmount = (amount: number): string => (amount > 0 ? `+${amount}` : String(amount));
+
+const sourceLocationLabel = (location: {
+  readonly file: string;
+  readonly startLine: number;
+  readonly endLine: number;
+}): string =>
+  location.startLine === location.endLine
+    ? `${location.file}, line ${location.startLine}`
+    : `${location.file}, lines ${location.startLine}–${location.endLine}`;
+
+const sourceTargetLabel = (location: CanonicalSourceRange): string =>
+  location.startLine === location.endLine
+    ? `${location.file}: ${location.startLine}`
+    : `${location.file}: ${location.startLine}-${location.endLine}`;
+
+export const GradingWorkspacePage = ({
+  request,
+  onBack
+}: {
+  request: GradingWorkspacePrepareRequest;
+  onBack: () => void;
+}): ReactElement => {
+  const [result, setResult] = useState<PreparationResult | null>(null);
+  const [selected, setSelected] = useState(0);
+  const [source, setSource] = useState<SourceLoadState>({ status: "idle" });
+  const [snapshot, setSnapshot] = useState<SnapshotLoadState>({ status: "idle" });
+  const [evidence, setEvidence] = useState<EvidenceLoadState>({ status: "idle" });
+  const [commitHistory, setCommitHistory] = useState<CommitHistoryLoadState>({ status: "idle" });
+  const [commentLibrary, setCommentLibrary] = useState<CommentLibraryLoadState>({
+    status: "loading"
+  });
+  const [commentSearch, setCommentSearch] = useState("");
+  const [selectedCommentTags, setSelectedCommentTags] = useState<readonly string[]>([]);
+  const [canonicalSourceTarget, setCanonicalSourceTarget] = useState<CanonicalSourceRange>();
+  const [commentEditor, setCommentEditor] = useState<CommentEditorState>();
+  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteCommentConfirmation>();
+  const [manualAdjustmentEditor, setManualAdjustmentEditor] =
+    useState<ManualAdjustmentEditorState>();
+  const [deleteManualAdjustmentConfirmation, setDeleteManualAdjustmentConfirmation] =
+    useState<DeleteManualAdjustmentConfirmation>();
+  const [markCompleteConfirmation, setMarkCompleteConfirmation] =
+    useState<MarkCompleteConfirmation>();
+  const [reportPublicationConfirmation, setReportPublicationConfirmation] =
+    useState<ReportPublicationConfirmation>();
+  const [reportPublicationStudentId, setReportPublicationStudentId] = useState<string>();
+  const [reportPublicationNotice, setReportPublicationNotice] = useState<ReportPublicationNotice>();
+  const [bulkPublicationConfirmation, setBulkPublicationConfirmation] =
+    useState<BulkPublicationConfirmation>();
+  const [bulkPublicationInProgress, setBulkPublicationInProgress] = useState(false);
+  const [bulkPublicationNotice, setBulkPublicationNotice] = useState<BulkPublicationNotice>();
+  const [commentMutationError, setCommentMutationError] = useState<string>();
+  const [commentMutationStudentId, setCommentMutationStudentId] = useState<string>();
+  const [studentStatusOverrides, setStudentStatusOverrides] = useState<
+    Readonly<Record<string, string>>
+  >({});
+  const [viewStateWarnings, setViewStateWarnings] = useState<Readonly<Record<string, string>>>({});
+  const sourceRequestGeneration = useRef(0);
+  const snapshotRequestGeneration = useRef(0);
+  const evidenceRequestGeneration = useRef(0);
+  const commitHistoryRequestGeneration = useRef(0);
+  const reportPublicationRequestGeneration = useRef(0);
+  const bulkPublicationRequestGeneration = useRef(0);
+  const currentStudentId = isReady(result) ? result.students[selected]?.studentId : undefined;
+  const currentStudentIdRef = useRef<string | undefined>(currentStudentId);
+  const pendingViewStateSaves = useRef(new Map<string, GradingEditorViewState>());
+  const autosaveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const viewStateSavePromises = useRef(new Map<string, Promise<void>>());
+  const gradingMutationStudents = useRef(new Set<string>());
+  const commentMutationBlockedStudents = useRef(new Set<string>());
+  const autosaveBlockedStudents = useRef(new Set<string>());
+  const mounted = useRef(true);
+  currentStudentIdRef.current = currentStudentId;
+
+  const setStudentWarning = useCallback((studentId: string, message?: string): void => {
+    if (!mounted.current) return;
+    setViewStateWarnings((current) => {
+      if (message === undefined) {
+        if (!(studentId in current)) return current;
+        const next = { ...current };
+        delete next[studentId];
+        return next;
+      }
+      return current[studentId] === message ? current : { ...current, [studentId]: message };
+    });
+  }, []);
+
+  const cancelPendingForStudent = useCallback((studentId: string): void => {
+    pendingViewStateSaves.current.delete(studentId);
+    const timer = autosaveTimers.current.get(studentId);
+    if (timer !== undefined) clearTimeout(timer);
+    autosaveTimers.current.delete(studentId);
+  }, []);
+
+  const persistViewState = useCallback(
+    (pending: PendingViewStateSave): Promise<void> => {
+      if (autosaveBlockedStudents.current.has(pending.studentId)) return Promise.resolve();
+      const operation = window.graiderUI
+        .saveGradingStudentViewState({
+          courseFolderId: request.courseFolderId,
+          courseFolderPath: request.courseFolderPath,
+          termCode: request.termCode,
+          assignmentSlug: request.assignmentSlug,
+          studentId: pending.studentId,
+          viewState: pending.viewState
+        })
+        .then((saveResult) => {
+          if (saveResult.status === "success") {
+            setStudentWarning(pending.studentId);
+            return;
+          }
+          if (saveResult.status === "submission_changed") {
+            autosaveBlockedStudents.current.add(pending.studentId);
+            commentMutationBlockedStudents.current.add(pending.studentId);
+            cancelPendingForStudent(pending.studentId);
+          }
+          setStudentWarning(pending.studentId, viewStateFailureMessage(saveResult));
+        })
+        .catch(() => {
+          setStudentWarning(
+            pending.studentId,
+            "Editor position could not be saved safely. The source viewer remains read-only."
+          );
+        });
+      viewStateSavePromises.current.set(pending.studentId, operation);
+      void operation.finally(() => {
+        if (viewStateSavePromises.current.get(pending.studentId) === operation)
+          viewStateSavePromises.current.delete(pending.studentId);
+      });
+      return operation;
+    },
+    [
+      cancelPendingForStudent,
+      request.assignmentSlug,
+      request.courseFolderId,
+      request.courseFolderPath,
+      request.termCode,
+      setStudentWarning
+    ]
+  );
+
+  const flushPendingViewState = useCallback(
+    async (studentId?: string, forceDuringCommentMutation = false): Promise<void> => {
+      const studentIds =
+        studentId === undefined
+          ? [
+              ...new Set([
+                ...pendingViewStateSaves.current.keys(),
+                ...autosaveTimers.current.keys()
+              ])
+            ]
+          : [studentId];
+      await Promise.all(
+        studentIds.map(async (pendingStudentId) => {
+          const timer = autosaveTimers.current.get(pendingStudentId);
+          if (timer !== undefined) clearTimeout(timer);
+          autosaveTimers.current.delete(pendingStudentId);
+          const inFlight = viewStateSavePromises.current.get(pendingStudentId);
+          if (inFlight !== undefined) await inFlight;
+          const pending = pendingViewStateSaves.current.get(pendingStudentId);
+          if (
+            pending !== undefined &&
+            (forceDuringCommentMutation || !gradingMutationStudents.current.has(pendingStudentId))
+          ) {
+            pendingViewStateSaves.current.delete(pendingStudentId);
+            await persistViewState({ studentId: pendingStudentId, viewState: pending });
+          }
+        })
+      );
+    },
+    [persistViewState]
+  );
+
+  const scheduleViewStateSave = useCallback(
+    (studentId: string, viewState: GradingEditorViewState): void => {
+      if (
+        currentStudentIdRef.current !== studentId ||
+        autosaveBlockedStudents.current.has(studentId)
+      )
+        return;
+      pendingViewStateSaves.current.set(studentId, viewState);
+      const existingTimer = autosaveTimers.current.get(studentId);
+      if (existingTimer !== undefined) clearTimeout(existingTimer);
+      autosaveTimers.current.delete(studentId);
+      if (gradingMutationStudents.current.has(studentId)) return;
+      const timer = setTimeout(() => {
+        autosaveTimers.current.delete(studentId);
+        const pending = pendingViewStateSaves.current.get(studentId);
+        pendingViewStateSaves.current.delete(studentId);
+        if (pending !== undefined) void persistViewState({ studentId, viewState: pending });
+      }, VIEW_STATE_AUTOSAVE_DEBOUNCE_MS);
+      autosaveTimers.current.set(studentId, timer);
+    },
+    [persistViewState]
+  );
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      void flushPendingViewState();
+    };
+  }, [flushPendingViewState]);
+
+  useEffect(() => {
+    void window.graiderUI.prepareGradingWorkspace(request).then((value) => {
+      setSelected(0);
+      setStudentStatusOverrides({});
+      setResult(value as PreparationResult);
+    });
+  }, [request]);
+
+  useEffect(() => {
+    let active = true;
+    setCommentLibrary({ status: "loading" });
+    setCommentSearch("");
+    setSelectedCommentTags([]);
+    const loadLibrary = window.graiderUI.loadGradingCommentLibrary;
+    if (loadLibrary === undefined) {
+      setCommentLibrary({
+        status: "failure",
+        message: "The shared comment library is unavailable."
+      });
+      return () => {
+        active = false;
+      };
+    }
+    void loadLibrary({ courseFolderId: request.courseFolderId, termCode: request.termCode })
+      .then((value) => {
+        if (!active) return;
+        if (value.status === "success" && "comments" in value) {
+          setCommentLibrary({ status: "success", comments: value.comments });
+          return;
+        }
+        setCommentLibrary({
+          status: "failure",
+          message: "The shared comment library could not be loaded safely."
+        });
+      })
+      .catch(() => {
+        if (active)
+          setCommentLibrary({
+            status: "failure",
+            message: "The shared comment library could not be loaded safely."
+          });
+      });
+    return () => {
+      active = false;
+    };
+  }, [request.courseFolderId, request.termCode]);
+
+  const selectedStudent = isReady(result) ? result.students[selected] : undefined;
+  const completeStudentIds = useMemo(
+    () =>
+      isReady(result)
+        ? result.students
+            .filter(
+              (candidate) =>
+                (studentStatusOverrides[candidate.studentId] ?? candidate.gradingStatus) ===
+                "complete"
+            )
+            .map((candidate) => candidate.studentId)
+        : [],
+    [result, studentStatusOverrides]
+  );
+  const loadEvidence = useCallback(
+    async (studentId: string): Promise<void> => {
+      const generation = evidenceRequestGeneration.current + 1;
+      evidenceRequestGeneration.current = generation;
+      setEvidence({ status: "loading", studentId });
+      const loader = window.graiderUI.loadGradingStudentEvidence;
+      if (loader === undefined) {
+        setEvidence({ status: "not_applicable" });
+        return;
+      }
+      try {
+        const value: GradingStudentEvidenceResult = await loader({
+          courseFolderId: request.courseFolderId,
+          courseFolderPath: request.courseFolderPath,
+          termCode: request.termCode,
+          assignmentSlug: request.assignmentSlug,
+          studentId
+        });
+        if (
+          !mounted.current ||
+          evidenceRequestGeneration.current !== generation ||
+          currentStudentIdRef.current !== studentId
+        )
+          return;
+        setEvidence(evidenceResultToLoadState(value, studentId));
+      } catch {
+        if (
+          !mounted.current ||
+          evidenceRequestGeneration.current !== generation ||
+          currentStudentIdRef.current !== studentId
+        )
+          return;
+        setEvidence({
+          status: "message",
+          studentId,
+          message: "Automated evidence could not be trusted or read. You can continue grading.",
+          tone: "warning"
+        });
+      }
+    },
+    [request.assignmentSlug, request.courseFolderId, request.courseFolderPath, request.termCode]
+  );
+
+  useEffect(() => {
+    if (!isReady(result) || selectedStudent === undefined) {
+      evidenceRequestGeneration.current += 1;
+      setEvidence({ status: "idle" });
+      return;
+    }
+    void loadEvidence(selectedStudent.studentId);
+  }, [loadEvidence, result, selectedStudent]);
+
+  useEffect(() => {
+    const generation = commitHistoryRequestGeneration.current + 1;
+    commitHistoryRequestGeneration.current = generation;
+    if (!isReady(result) || selectedStudent === undefined) {
+      setCommitHistory({ status: "idle" });
+      return;
+    }
+    const studentId = selectedStudent.studentId;
+    setCommitHistory({ status: "loading", studentId });
+    const loader = window.graiderUI.loadGradingStudentCommitHistory;
+    if (loader === undefined) {
+      setCommitHistory({ status: "idle" });
+      return;
+    }
+    void loader({
+      courseFolderId: request.courseFolderId,
+      courseFolderPath: request.courseFolderPath,
+      termCode: request.termCode,
+      assignmentSlug: request.assignmentSlug,
+      studentId
+    })
+      .then((value: GradingStudentCommitHistoryResult) => {
+        if (
+          !mounted.current ||
+          commitHistoryRequestGeneration.current !== generation ||
+          currentStudentIdRef.current !== studentId
+        )
+          return;
+        setCommitHistory(commitHistoryResultToLoadState(value, studentId));
+      })
+      .catch(() => {
+        if (
+          !mounted.current ||
+          commitHistoryRequestGeneration.current !== generation ||
+          currentStudentIdRef.current !== studentId
+        )
+          return;
+        setCommitHistory({
+          status: "message",
+          studentId,
+          message: "Commit history could not be loaded safely.",
+          tone: "warning"
+        });
+      });
+  }, [
+    request.assignmentSlug,
+    request.courseFolderId,
+    request.courseFolderPath,
+    request.termCode,
+    result,
+    selectedStudent
+  ]);
+
+  useEffect(() => {
+    const generation = snapshotRequestGeneration.current + 1;
+    snapshotRequestGeneration.current = generation;
+    if (!isReady(result) || selectedStudent === undefined) {
+      setSnapshot({ status: "idle" });
+      return;
+    }
+    const studentId = selectedStudent.studentId;
+    setSnapshot({ status: "loading", studentId });
+    const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
+    if (loadSnapshot === undefined) {
+      setSnapshot({
+        status: "failure",
+        studentId,
+        message: "Grading details are unavailable."
+      });
+      return;
+    }
+    void loadSnapshot({
+      courseFolderId: request.courseFolderId,
+      courseFolderPath: request.courseFolderPath,
+      termCode: request.termCode,
+      assignmentSlug: request.assignmentSlug,
+      studentId
+    })
+      .then((value) => {
+        if (snapshotRequestGeneration.current !== generation) return;
+        if (value.status === "success" && value.studentId === studentId) {
+          commentMutationBlockedStudents.current.delete(studentId);
+          setSnapshot({ status: "success", snapshot: value });
+          return;
+        }
+        if (value.status === "submission_changed") {
+          commentMutationBlockedStudents.current.add(studentId);
+          autosaveBlockedStudents.current.add(studentId);
+          cancelPendingForStudent(studentId);
+        }
+        setSnapshot({
+          status: "failure",
+          studentId,
+          message: snapshotFailureMessage(value)
+        });
+      })
+      .catch(() => {
+        if (snapshotRequestGeneration.current !== generation) return;
+        setSnapshot({
+          status: "failure",
+          studentId,
+          message: "Grading details could not be loaded safely."
+        });
+      });
+  }, [
+    cancelPendingForStudent,
+    request.assignmentSlug,
+    request.courseFolderId,
+    request.courseFolderPath,
+    request.termCode,
+    result,
+    selectedStudent
+  ]);
+
+  useEffect(() => {
+    setCanonicalSourceTarget(undefined);
+    setCommentEditor(undefined);
+    setDeleteConfirmation(undefined);
+    setManualAdjustmentEditor(undefined);
+    setDeleteManualAdjustmentConfirmation(undefined);
+    setMarkCompleteConfirmation(undefined);
+    setReportPublicationConfirmation(undefined);
+    setReportPublicationNotice(undefined);
+    reportPublicationRequestGeneration.current += 1;
+    setCommentMutationError(undefined);
+  }, [currentStudentId]);
+
+  useEffect(() => {
+    const generation = sourceRequestGeneration.current + 1;
+    sourceRequestGeneration.current = generation;
+    if (!isReady(result) || selectedStudent === undefined) {
+      setSource({ status: "idle" });
+      return;
+    }
+    setSource({ status: "loading", studentId: selectedStudent.studentId });
+    const identity = {
+      courseFolderId: request.courseFolderId,
+      courseFolderPath: request.courseFolderPath,
+      termCode: request.termCode,
+      assignmentSlug: request.assignmentSlug,
+      studentId: selectedStudent.studentId
+    };
+    void window.graiderUI
+      .loadGradingStudentSource(identity)
+      .then(async (value) => {
+        if (sourceRequestGeneration.current !== generation) return;
+        if (!isGradingStudentSourceDto(value) || value.studentId !== selectedStudent.studentId) {
+          setSource({
+            status: "failure",
+            studentId: selectedStudent.studentId,
+            message: sourceFailureMessage(value)
+          });
+          return;
+        }
+        let viewStateResult: GradingStudentViewStateResult;
+        try {
+          viewStateResult = await window.graiderUI.loadGradingStudentViewState(identity);
+        } catch {
+          if (sourceRequestGeneration.current !== generation) return;
+          setStudentWarning(
+            selectedStudent.studentId,
+            "Editor position could not be loaded safely. The source viewer remains read-only."
+          );
+          setSource({
+            status: "success",
+            source: value,
+            initialViewState: null,
+            autosaveEnabled: false
+          });
+          return;
+        }
+        if (sourceRequestGeneration.current !== generation) return;
+        if (
+          viewStateResult.status === "success" &&
+          viewStateResult.studentId === selectedStudent.studentId
+        ) {
+          autosaveBlockedStudents.current.delete(selectedStudent.studentId);
+          setStudentWarning(selectedStudent.studentId);
+          setSource({
+            status: "success",
+            source: value,
+            initialViewState: viewStateResult.viewState,
+            autosaveEnabled: true
+          });
+          return;
+        }
+        if (viewStateResult.status === "submission_changed") {
+          autosaveBlockedStudents.current.add(selectedStudent.studentId);
+          commentMutationBlockedStudents.current.add(selectedStudent.studentId);
+          cancelPendingForStudent(selectedStudent.studentId);
+        }
+        setStudentWarning(selectedStudent.studentId, viewStateFailureMessage(viewStateResult));
+        setSource({
+          status: "success",
+          source: value,
+          initialViewState: null,
+          autosaveEnabled: false
+        });
+      })
+      .catch(() => {
+        if (sourceRequestGeneration.current !== generation) return;
+        setSource({
+          status: "failure",
+          studentId: selectedStudent.studentId,
+          message: "Student source could not be loaded."
+        });
+      });
+  }, [
+    cancelPendingForStudent,
+    request.assignmentSlug,
+    request.courseFolderId,
+    request.courseFolderPath,
+    request.termCode,
+    result,
+    selectedStudent,
+    setStudentWarning
+  ]);
+  const availableCommentTags = useMemo(
+    () =>
+      commentLibrary.status === "success" ? listReusableCommentTags(commentLibrary.comments) : [],
+    [commentLibrary]
+  );
+  const matchingComments = useMemo(
+    () =>
+      commentLibrary.status === "success"
+        ? filterReusableComments(commentLibrary.comments, commentSearch, selectedCommentTags)
+        : [],
+    [commentLibrary, commentSearch, selectedCommentTags]
+  );
+  const sourceAnnotations = useMemo<readonly GradingSourceAnnotation[]>(() => {
+    if (snapshot.status !== "success") return [];
+    return snapshot.snapshot.appliedComments.flatMap((comment) => {
+      if (comment.sourceLocation === undefined) return [];
+      const rubricCategoryName = snapshot.snapshot.grade.categories.find(
+        (category) => category.id === comment.rubricCategoryId
+      )?.name;
+      return [
+        {
+          id: comment.id,
+          text: comment.text,
+          deduction: comment.deduction,
+          ...(rubricCategoryName === undefined ? {} : { rubricCategoryName }),
+          sourceLocation: comment.sourceLocation
+        }
+      ];
+    });
+  }, [snapshot]);
+
+  const openApplyEditor = (comment: ReusableComment): void => {
+    if (!isReady(result) || selectedStudent === undefined) return;
+    const defaultCategory =
+      comment.defaultRubricCategoryId !== undefined &&
+      result.rubric.some((category) => category.id === comment.defaultRubricCategoryId)
+        ? comment.defaultRubricCategoryId
+        : "";
+    setCommentMutationError(undefined);
+    setDeleteConfirmation(undefined);
+    setCommentEditor({
+      operation: "add",
+      studentId: selectedStudent.studentId,
+      reusableCommentId: comment.id,
+      reusableCommentTitle: comment.title,
+      text: comment.text,
+      deduction: String(comment.defaultDeduction),
+      rubricCategoryId: defaultCategory,
+      targetMode: canonicalSourceTarget === undefined ? "general" : "source"
+    });
+  };
+
+  const openAddCommentEditor = (): void => {
+    if (
+      !isReady(result) ||
+      selectedStudent === undefined ||
+      canonicalSourceTarget === undefined ||
+      selectedStudent.studentId !== currentStudentIdRef.current
+    )
+      return;
+    setCommentMutationError(undefined);
+    setDeleteConfirmation(undefined);
+    setCommentEditor({
+      operation: "add",
+      studentId: selectedStudent.studentId,
+      text: "",
+      deduction: "0",
+      rubricCategoryId: "",
+      targetMode: "source"
+    });
+  };
+
+  const openEditEditor = (comment: Snapshot["appliedComments"][number]): void => {
+    if (!isReady(result) || selectedStudent === undefined) return;
+    setCommentMutationError(undefined);
+    setDeleteConfirmation(undefined);
+    setCommentEditor({
+      operation: "edit",
+      studentId: selectedStudent.studentId,
+      commentId: comment.id,
+      text: comment.text,
+      deduction: String(comment.deduction),
+      rubricCategoryId: comment.rubricCategoryId ?? "",
+      targetMode: comment.sourceLocation === undefined ? "general" : "source",
+      ...(comment.sourceLocation === undefined ? {} : { sourceTarget: comment.sourceLocation })
+    });
+  };
+
+  const openAddManualAdjustmentEditor = (): void => {
+    if (!isReady(result) || selectedStudent === undefined || result.rubric.length === 0) return;
+    setCommentMutationError(undefined);
+    setDeleteManualAdjustmentConfirmation(undefined);
+    setManualAdjustmentEditor({
+      operation: "add",
+      studentId: selectedStudent.studentId,
+      rubricCategoryId: "",
+      amount: "",
+      note: ""
+    });
+  };
+
+  const openEditManualAdjustmentEditor = (
+    adjustment: Snapshot["manualAdjustments"][number]
+  ): void => {
+    if (!isReady(result) || selectedStudent === undefined) return;
+    setCommentMutationError(undefined);
+    setDeleteManualAdjustmentConfirmation(undefined);
+    setManualAdjustmentEditor({
+      operation: "edit",
+      studentId: selectedStudent.studentId,
+      adjustmentId: adjustment.id,
+      rubricCategoryId: adjustment.rubricCategoryId,
+      amount: String(adjustment.amount),
+      note: adjustment.note ?? ""
+    });
+  };
+
+  const runGradingMutation = async (
+    studentId: string,
+    mutate: () => Promise<
+      | GradingStudentCommentResult
+      | GradingStudentManualAdjustmentResult
+      | MarkGradingStudentCompleteResult
+    >,
+    closeMutationEditor: () => void = () => {
+      setCommentEditor(undefined);
+      setDeleteConfirmation(undefined);
+    }
+  ): Promise<void> => {
+    if (studentId !== currentStudentIdRef.current || gradingMutationStudents.current.has(studentId))
+      return;
+    if (commentMutationBlockedStudents.current.has(studentId)) {
+      setCommentMutationError(snapshotSubmissionChangedWarning);
+      return;
+    }
+    const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
+    if (loadSnapshot === undefined) {
+      setCommentMutationError("Updating grading comments is unavailable.");
+      return;
+    }
+    gradingMutationStudents.current.add(studentId);
+    setCommentMutationStudentId(studentId);
+    setCommentMutationError(undefined);
+    let commentWasSaved = false;
+    try {
+      await flushPendingViewState(studentId, true);
+      if (commentMutationBlockedStudents.current.has(studentId)) {
+        if (currentStudentIdRef.current === studentId)
+          setCommentMutationError(snapshotSubmissionChangedWarning);
+        return;
+      }
+      const mutationResult = await mutate();
+      if (mutationResult.status !== "success") {
+        if (mutationResult.status === "submission_changed") {
+          commentMutationBlockedStudents.current.add(studentId);
+          autosaveBlockedStudents.current.add(studentId);
+          cancelPendingForStudent(studentId);
+        }
+        if (currentStudentIdRef.current === studentId)
+          setCommentMutationError(gradingMutationFailureMessage(mutationResult));
+        return;
+      }
+      commentWasSaved = true;
+      if (currentStudentIdRef.current === studentId) {
+        closeMutationEditor();
+      }
+      const refreshed = await loadSnapshot({ ...request, studentId });
+      if (refreshed.status !== "success" || refreshed.studentId !== studentId) {
+        if (refreshed.status === "submission_changed") {
+          commentMutationBlockedStudents.current.add(studentId);
+          autosaveBlockedStudents.current.add(studentId);
+          cancelPendingForStudent(studentId);
+        }
+        if (currentStudentIdRef.current === studentId)
+          setCommentMutationError(
+            refreshed.status === "submission_changed"
+              ? snapshotSubmissionChangedWarning
+              : "The grading change was saved, but current grading details could not be reloaded safely."
+          );
+        return;
+      }
+      setStudentStatusOverrides((current) => ({
+        ...current,
+        [studentId]: refreshed.gradingStatus
+      }));
+      if (currentStudentIdRef.current === studentId) {
+        snapshotRequestGeneration.current += 1;
+        setSnapshot({ status: "success", snapshot: refreshed });
+        closeMutationEditor();
+        setCommentMutationError(undefined);
+      }
+    } catch {
+      if (currentStudentIdRef.current === studentId)
+        setCommentMutationError(
+          commentWasSaved
+            ? "The grading change was saved, but current grading details could not be reloaded safely."
+            : "The grading state could not be updated safely."
+        );
+    } finally {
+      gradingMutationStudents.current.delete(studentId);
+      setCommentMutationStudentId((current) => (current === studentId ? undefined : current));
+      void flushPendingViewState(studentId);
+    }
+  };
+
+  const saveCommentEditor = async (): Promise<void> => {
+    if (
+      !isReady(result) ||
+      commentEditor === undefined ||
+      commentEditor.studentId !== currentStudentIdRef.current
+    )
+      return;
+    const deduction = Number(commentEditor.deduction);
+    if (commentEditor.text.trim() === "") {
+      setCommentMutationError("Comment text is required.");
+      return;
+    }
+    if (commentEditor.deduction.trim() === "" || !Number.isFinite(deduction)) {
+      setCommentMutationError("Deduction must be a finite number.");
+      return;
+    }
+    if (
+      commentEditor.rubricCategoryId !== "" &&
+      !result.rubric.some((category) => category.id === commentEditor.rubricCategoryId)
+    ) {
+      setCommentMutationError("Select a configured rubric category or None.");
+      return;
+    }
+    const sourceLocation =
+      commentEditor.targetMode === "source"
+        ? commentEditor.operation === "edit"
+          ? commentEditor.sourceTarget
+          : canonicalSourceTarget
+        : undefined;
+    if (commentEditor.targetMode === "source" && sourceLocation === undefined) {
+      setCommentMutationError("Select a valid source line or range, or choose General.");
+      return;
+    }
+    const studentId = commentEditor.studentId;
+    const identity = { ...request, studentId };
+    if (commentEditor.operation === "add") {
+      const addComment = window.graiderUI.addGradingStudentComment;
+      if (addComment === undefined) {
+        setCommentMutationError("Applying grading comments is unavailable.");
+        return;
+      }
+      const editor = commentEditor;
+      await runGradingMutation(studentId, () =>
+        addComment({
+          ...identity,
+          comment: {
+            id: globalThis.crypto.randomUUID(),
+            ...(editor.reusableCommentId === undefined
+              ? {}
+              : { sourceCommentId: editor.reusableCommentId }),
+            text: editor.text,
+            deduction,
+            ...(editor.rubricCategoryId === ""
+              ? {}
+              : { rubricCategoryId: editor.rubricCategoryId }),
+            ...(sourceLocation === undefined ? {} : { sourceLocation })
+          }
+        })
+      );
+      return;
+    }
+    const editComment = window.graiderUI.editGradingStudentComment;
+    if (editComment === undefined) {
+      setCommentMutationError("Editing grading comments is unavailable.");
+      return;
+    }
+    const editor = commentEditor;
+    await runGradingMutation(studentId, () =>
+      editComment({
+        ...identity,
+        commentId: editor.commentId,
+        replacement: {
+          text: editor.text,
+          deduction,
+          ...(editor.rubricCategoryId === "" ? {} : { rubricCategoryId: editor.rubricCategoryId }),
+          ...(sourceLocation === undefined ? {} : { sourceLocation })
+        }
+      })
+    );
+  };
+
+  const confirmDeleteComment = async (): Promise<void> => {
+    if (
+      deleteConfirmation === undefined ||
+      deleteConfirmation.studentId !== currentStudentIdRef.current
+    )
+      return;
+    const deleteComment = window.graiderUI.deleteGradingStudentComment;
+    if (deleteComment === undefined) {
+      setCommentMutationError("Deleting grading comments is unavailable.");
+      return;
+    }
+    const confirmation = deleteConfirmation;
+    await runGradingMutation(confirmation.studentId, () =>
+      deleteComment({
+        ...request,
+        studentId: confirmation.studentId,
+        commentId: confirmation.commentId
+      })
+    );
+  };
+
+  const saveManualAdjustmentEditor = async (): Promise<void> => {
+    if (
+      !isReady(result) ||
+      manualAdjustmentEditor === undefined ||
+      manualAdjustmentEditor.studentId !== currentStudentIdRef.current
+    )
+      return;
+    if (manualAdjustmentEditor.rubricCategoryId === "") {
+      setCommentMutationError("Select a rubric category.");
+      return;
+    }
+    if (
+      !result.rubric.some((category) => category.id === manualAdjustmentEditor.rubricCategoryId)
+    ) {
+      setCommentMutationError("Select a configured rubric category.");
+      return;
+    }
+    const amount = Number(manualAdjustmentEditor.amount);
+    if (manualAdjustmentEditor.amount.trim() === "" || !Number.isFinite(amount)) {
+      setCommentMutationError("Adjustment amount must be a finite number.");
+      return;
+    }
+    const studentId = manualAdjustmentEditor.studentId;
+    const identity = { ...request, studentId };
+    const note = manualAdjustmentEditor.note.trim();
+    if (manualAdjustmentEditor.operation === "add") {
+      const addAdjustment = window.graiderUI.addGradingStudentManualAdjustment;
+      if (addAdjustment === undefined) {
+        setCommentMutationError("Adding manual adjustments is unavailable.");
+        return;
+      }
+      const editor = manualAdjustmentEditor;
+      await runGradingMutation(
+        studentId,
+        () =>
+          addAdjustment({
+            ...identity,
+            adjustment: {
+              id: globalThis.crypto.randomUUID(),
+              rubricCategoryId: editor.rubricCategoryId,
+              amount,
+              ...(note === "" ? {} : { note })
+            }
+          }),
+        () => {
+          setManualAdjustmentEditor(undefined);
+          setDeleteManualAdjustmentConfirmation(undefined);
+        }
+      );
+      return;
+    }
+    const editAdjustment = window.graiderUI.editGradingStudentManualAdjustment;
+    if (editAdjustment === undefined) {
+      setCommentMutationError("Editing manual adjustments is unavailable.");
+      return;
+    }
+    const editor = manualAdjustmentEditor;
+    await runGradingMutation(
+      studentId,
+      () =>
+        editAdjustment({
+          ...identity,
+          adjustmentId: editor.adjustmentId,
+          replacement: {
+            rubricCategoryId: editor.rubricCategoryId,
+            amount,
+            ...(note === "" ? {} : { note })
+          }
+        }),
+      () => {
+        setManualAdjustmentEditor(undefined);
+        setDeleteManualAdjustmentConfirmation(undefined);
+      }
+    );
+  };
+
+  const confirmDeleteManualAdjustment = async (): Promise<void> => {
+    if (
+      deleteManualAdjustmentConfirmation === undefined ||
+      deleteManualAdjustmentConfirmation.studentId !== currentStudentIdRef.current
+    )
+      return;
+    const deleteAdjustment = window.graiderUI.deleteGradingStudentManualAdjustment;
+    if (deleteAdjustment === undefined) {
+      setCommentMutationError("Deleting manual adjustments is unavailable.");
+      return;
+    }
+    const confirmation = deleteManualAdjustmentConfirmation;
+    await runGradingMutation(
+      confirmation.studentId,
+      () =>
+        deleteAdjustment({
+          ...request,
+          studentId: confirmation.studentId,
+          adjustmentId: confirmation.adjustmentId
+        }),
+      () => {
+        setManualAdjustmentEditor(undefined);
+        setDeleteManualAdjustmentConfirmation(undefined);
+      }
+    );
+  };
+
+  const confirmMarkComplete = async (): Promise<void> => {
+    if (
+      markCompleteConfirmation === undefined ||
+      markCompleteConfirmation.studentId !== currentStudentIdRef.current
+    )
+      return;
+    const markComplete = window.graiderUI.markGradingStudentComplete;
+    if (markComplete === undefined) {
+      setCommentMutationError("Marking grading complete is unavailable.");
+      return;
+    }
+    const confirmation = markCompleteConfirmation;
+    await runGradingMutation(
+      confirmation.studentId,
+      () => markComplete({ ...request, studentId: confirmation.studentId }),
+      () => setMarkCompleteConfirmation(undefined)
+    );
+  };
+
+  const refreshSnapshotAfterPublication = async (
+    studentId: string,
+    publicationGeneration: number
+  ): Promise<boolean> => {
+    const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
+    if (loadSnapshot === undefined) return false;
+    const snapshotGeneration = snapshotRequestGeneration.current + 1;
+    snapshotRequestGeneration.current = snapshotGeneration;
+    try {
+      const refreshed = await loadSnapshot({ ...request, studentId });
+      if (
+        !mounted.current ||
+        reportPublicationRequestGeneration.current !== publicationGeneration ||
+        snapshotRequestGeneration.current !== snapshotGeneration ||
+        currentStudentIdRef.current !== studentId
+      )
+        return false;
+      if (refreshed.status !== "success" || refreshed.studentId !== studentId) {
+        if (refreshed.status === "submission_changed") {
+          commentMutationBlockedStudents.current.add(studentId);
+          autosaveBlockedStudents.current.add(studentId);
+          cancelPendingForStudent(studentId);
+        }
+        return false;
+      }
+      commentMutationBlockedStudents.current.delete(studentId);
+      setStudentStatusOverrides((current) => ({
+        ...current,
+        [studentId]: refreshed.gradingStatus
+      }));
+      setSnapshot({ status: "success", snapshot: refreshed });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const confirmPublishReport = async (): Promise<void> => {
+    if (
+      reportPublicationConfirmation === undefined ||
+      reportPublicationConfirmation.studentId !== currentStudentIdRef.current
+    )
+      return;
+    const studentId = reportPublicationConfirmation.studentId;
+    if (gradingMutationStudents.current.has(studentId)) return;
+    if (commentMutationBlockedStudents.current.has(studentId)) {
+      setReportPublicationNotice({
+        studentId,
+        tone: "warning",
+        message: snapshotSubmissionChangedWarning
+      });
+      setReportPublicationConfirmation(undefined);
+      return;
+    }
+    const publishReport = window.graiderUI.publishGradingStudentReport;
+    if (publishReport === undefined) {
+      setReportPublicationNotice({
+        studentId,
+        tone: "error",
+        message: "Publishing grading reports is unavailable."
+      });
+      setReportPublicationConfirmation(undefined);
+      return;
+    }
+
+    const publicationGeneration = reportPublicationRequestGeneration.current + 1;
+    reportPublicationRequestGeneration.current = publicationGeneration;
+    const isCurrentPublication = (): boolean =>
+      mounted.current &&
+      reportPublicationRequestGeneration.current === publicationGeneration &&
+      currentStudentIdRef.current === studentId;
+    gradingMutationStudents.current.add(studentId);
+    setCommentMutationStudentId(studentId);
+    setReportPublicationStudentId(studentId);
+    setReportPublicationNotice(undefined);
+
+    try {
+      await flushPendingViewState(studentId, true);
+      if (!isCurrentPublication()) return;
+      if (commentMutationBlockedStudents.current.has(studentId)) {
+        setReportPublicationNotice({
+          studentId,
+          tone: "warning",
+          message: snapshotSubmissionChangedWarning
+        });
+        return;
+      }
+
+      const publicationResult = await publishReport({ ...request, studentId });
+      if (!isCurrentPublication()) return;
+      if ("studentId" in publicationResult && publicationResult.studentId !== studentId) {
+        setReportPublicationNotice({
+          studentId,
+          tone: "error",
+          message: "The publication response could not be verified safely."
+        });
+        return;
+      }
+
+      if (publicationResult.status === "success") {
+        const refreshed = await refreshSnapshotAfterPublication(studentId, publicationGeneration);
+        if (!isCurrentPublication()) return;
+        setReportPublicationNotice({
+          studentId,
+          tone: publicationResult.warnings.length === 0 ? "success" : "warning",
+          message: refreshed
+            ? `Published to ${publicationResult.reportPath}.`
+            : `The report was published to ${publicationResult.reportPath}, but the current grading status could not be refreshed.`,
+          ...(publicationResult.warnings.length === 0
+            ? {}
+            : { warnings: publicationResult.warnings.map(publicationWarningMessage) })
+        });
+        return;
+      }
+
+      if (publicationResult.status === "publication_state_record_failed") {
+        await refreshSnapshotAfterPublication(studentId, publicationGeneration);
+        if (!isCurrentPublication()) return;
+        setReportPublicationNotice({
+          studentId,
+          tone: "warning",
+          message:
+            "The report was published to the student repository, but Graider could not record the Published status. You can retry publication safely.",
+          ...(publicationResult.warnings.length === 0
+            ? {}
+            : { warnings: publicationResult.warnings.map(publicationWarningMessage) })
+        });
+        return;
+      }
+
+      if (publicationResult.status === "publication_stale") {
+        await refreshSnapshotAfterPublication(studentId, publicationGeneration);
+        if (!isCurrentPublication()) return;
+        setReportPublicationNotice({
+          studentId,
+          tone: "warning",
+          message: publicationResult.remoteReportPublished
+            ? "Grading changed while publication was in progress. The remote report may contain an earlier grading version. Review the current grading and publish again."
+            : "Grading changed while publication was in progress. Review the current grading and publish again."
+        });
+        return;
+      }
+
+      if (publicationResult.status === "submission_changed") {
+        const remoteReportPublished =
+          "remoteReportPublished" in publicationResult && publicationResult.remoteReportPublished;
+        commentMutationBlockedStudents.current.add(studentId);
+        autosaveBlockedStudents.current.add(studentId);
+        cancelPendingForStudent(studentId);
+        await refreshSnapshotAfterPublication(studentId, publicationGeneration);
+        if (!isCurrentPublication()) return;
+        setReportPublicationNotice({
+          studentId,
+          tone: "warning",
+          message: remoteReportPublished
+            ? `${snapshotSubmissionChangedWarning} The remote report may contain feedback for the earlier submission, but current grading was not marked Published.`
+            : `${snapshotSubmissionChangedWarning} The report was not published.`
+        });
+        return;
+      }
+
+      if (
+        publicationResult.status === "grading_not_complete" ||
+        publicationResult.status === "grading_state_missing"
+      ) {
+        await refreshSnapshotAfterPublication(studentId, publicationGeneration);
+        if (!isCurrentPublication()) return;
+      }
+      setReportPublicationNotice({
+        studentId,
+        tone: "error",
+        message: publicationFailureMessage(publicationResult)
+      });
+    } catch {
+      if (isCurrentPublication())
+        setReportPublicationNotice({
+          studentId,
+          tone: "error",
+          message: "The grading report could not be published safely."
+        });
+    } finally {
+      gradingMutationStudents.current.delete(studentId);
+      setCommentMutationStudentId((current) => (current === studentId ? undefined : current));
+      setReportPublicationStudentId((current) => (current === studentId ? undefined : current));
+      if (reportPublicationRequestGeneration.current === publicationGeneration)
+        setReportPublicationConfirmation(undefined);
+      void flushPendingViewState(studentId);
+    }
+  };
+
+  const confirmBulkPublication = async (): Promise<void> => {
+    const confirmation = bulkPublicationConfirmation;
+    if (
+      confirmation !== undefined &&
+      confirmation.studentIds.length > 0 &&
+      !bulkPublicationInProgress
+    ) {
+      const publishReports = window.graiderUI.bulkPublishGradingStudentReports;
+      if (publishReports === undefined) {
+        setBulkPublicationNotice(undefined);
+        setCommentMutationError("Bulk report publication is unavailable.");
+        setBulkPublicationConfirmation(undefined);
+      } else {
+        const studentIds = [...confirmation.studentIds];
+        const generation = bulkPublicationRequestGeneration.current + 1;
+        bulkPublicationRequestGeneration.current = generation;
+        const isCurrentBulkPublication = (): boolean =>
+          mounted.current && bulkPublicationRequestGeneration.current === generation;
+        setBulkPublicationInProgress(true);
+        setBulkPublicationNotice(undefined);
+        setCommentMutationError(undefined);
+        setReportPublicationConfirmation(undefined);
+        studentIds.forEach((studentId) => gradingMutationStudents.current.add(studentId));
+        setCommentMutationStudentId(studentIds[0]);
+        const selectedStudentId = currentStudentIdRef.current;
+
+        try {
+          if (selectedStudentId !== undefined && studentIds.includes(selectedStudentId))
+            await flushPendingViewState(selectedStudentId, true);
+          if (isCurrentBulkPublication()) {
+            const publicationResult = await publishReports({
+              courseFolderId: request.courseFolderId,
+              courseFolderPath: request.courseFolderPath,
+              termCode: request.termCode,
+              assignmentSlug: request.assignmentSlug,
+              studentIds
+            });
+            if (isCurrentBulkPublication()) {
+              const refreshFailedStudentIds: string[] = [];
+              const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
+              for (const studentId of studentIds) {
+                let refreshed = false;
+                if (loadSnapshot !== undefined) {
+                  const refreshesSelectedStudent = currentStudentIdRef.current === studentId;
+                  const snapshotGeneration = refreshesSelectedStudent
+                    ? snapshotRequestGeneration.current + 1
+                    : undefined;
+                  if (snapshotGeneration !== undefined)
+                    snapshotRequestGeneration.current = snapshotGeneration;
+                  try {
+                    const value = await loadSnapshot({ ...request, studentId });
+                    if (
+                      isCurrentBulkPublication() &&
+                      value.status === "success" &&
+                      value.studentId === studentId
+                    ) {
+                      setStudentStatusOverrides((current) => ({
+                        ...current,
+                        [studentId]: value.gradingStatus
+                      }));
+                      if (
+                        snapshotGeneration !== undefined &&
+                        snapshotRequestGeneration.current === snapshotGeneration &&
+                        currentStudentIdRef.current === studentId
+                      )
+                        setSnapshot({ status: "success", snapshot: value });
+                      refreshed = true;
+                    }
+                  } catch {
+                    refreshed = false;
+                  }
+                }
+                if (!refreshed) refreshFailedStudentIds.push(studentId);
+              }
+              if (isCurrentBulkPublication())
+                setBulkPublicationNotice({
+                  results: publicationResult.results,
+                  refreshFailedStudentIds
+                });
+            }
+          }
+        } catch {
+          if (isCurrentBulkPublication())
+            setCommentMutationError(
+              "Bulk report publication could not be completed safely. Individual results are unavailable."
+            );
+        } finally {
+          studentIds.forEach((studentId) => gradingMutationStudents.current.delete(studentId));
+          setCommentMutationStudentId((current) =>
+            current !== undefined && studentIds.includes(current) ? undefined : current
+          );
+          if (isCurrentBulkPublication()) {
+            setBulkPublicationInProgress(false);
+            setBulkPublicationConfirmation(undefined);
+          }
+          if (selectedStudentId !== undefined) void flushPendingViewState(selectedStudentId);
+        }
+      }
+    }
+  };
+
+  if (result === null)
+    return (
+      <main className="dashboard-shell">
+        <p>Preparing grading workspace…</p>
+      </main>
+    );
+  if (!isReady(result)) {
+    const message: Record<string, string> = {
+      faculty_identity_required: "Configure your local faculty MSOE username before grading.",
+      no_assigned_sections: "Your faculty username is not assigned to sections for this term.",
+      roster_error: "Roster data must be corrected before grading.",
+      term_config_error: "Term configuration could not be prepared.",
+      assignment_config_error: "Assignment configuration could not be prepared.",
+      grading_state_error: `Grading state for ${result.studentId ?? "a student"} could not be read.`
+    };
+    return (
+      <main className="dashboard-shell">
+        <button onClick={onBack}>Back</button>
+        <p>{message[result.status] ?? "Grading workspace could not be prepared."}</p>
+      </main>
+    );
+  }
+  const student = result.students[selected];
+  const bulkPublishedCount =
+    bulkPublicationNotice?.results.filter(
+      ({ result: publicationResult }) =>
+        publicationResult.status === "success" && publicationResult.warnings.length === 0
+    ).length ?? 0;
+  const bulkWarningCount =
+    bulkPublicationNotice?.results.filter(
+      ({ result: publicationResult }) =>
+        publicationResult.status === "success" && publicationResult.warnings.length > 0
+    ).length ?? 0;
+  const bulkFailedCount =
+    bulkPublicationNotice === undefined
+      ? 0
+      : bulkPublicationNotice.results.length - bulkPublishedCount - bulkWarningCount;
+  return (
+    <main className="dashboard-shell grading-workspace">
+      <header>
+        <button onClick={onBack}>Back</button>
+        <h1>{result.assignment.title}</h1>
+        <p>
+          {result.assignment.termCode} · {result.assignment.slug}
+        </p>
+      </header>
+      <div className="grading-workspace__grid">
+        <aside>
+          <h2>Students</h2>
+          {result.students.length === 0 ? (
+            <p>No assigned students.</p>
+          ) : (
+            result.students.map((item, index) => (
+              <button
+                key={item.studentId}
+                className={index === selected ? "selected" : ""}
+                onClick={() => {
+                  void flushPendingViewState(student?.studentId);
+                  setSelected(index);
+                }}
+              >
+                {item.studentId} · Section {item.section} ·{" "}
+                {label(studentStatusOverrides[item.studentId] ?? item.gradingStatus)}
+              </button>
+            ))
+          )}
+          <div>
+            <button
+              disabled={selected <= 0}
+              onClick={() => {
+                void flushPendingViewState(student?.studentId);
+                setSelected((value) => value - 1);
+              }}
+            >
+              Previous
+            </button>
+            <button
+              disabled={selected >= result.students.length - 1}
+              onClick={() => {
+                void flushPendingViewState(student?.studentId);
+                setSelected((value) => value + 1);
+              }}
+            >
+              Next
+            </button>
+          </div>
+          <section className="grading-bulk-publication" aria-labelledby="bulk-publication-heading">
+            <h3 id="bulk-publication-heading">Report Publication</h3>
+            <button
+              type="button"
+              disabled={
+                completeStudentIds.length === 0 ||
+                bulkPublicationInProgress ||
+                commentMutationStudentId !== undefined
+              }
+              onClick={() => {
+                setBulkPublicationNotice(undefined);
+                setCommentMutationError(undefined);
+                setReportPublicationConfirmation(undefined);
+                setBulkPublicationConfirmation({ studentIds: completeStudentIds });
+              }}
+            >
+              {bulkPublicationInProgress
+                ? `Publishing ${bulkPublicationConfirmation?.studentIds.length ?? 0} reports…`
+                : "Publish Completed Reports"}
+            </button>
+            {completeStudentIds.length === 0 && !bulkPublicationInProgress ? (
+              <p>No completed reports are ready to publish.</p>
+            ) : null}
+            {bulkPublicationNotice === undefined ? null : (
+              <div className="grading-bulk-publication__results" role="status">
+                <p>
+                  {bulkPublishedCount} published · {bulkWarningCount} published with warnings ·{" "}
+                  {bulkFailedCount} failed
+                </p>
+                {bulkPublicationNotice.refreshFailedStudentIds.length === 0 ? null : (
+                  <p>
+                    Current grading status could not be refreshed for{" "}
+                    {bulkPublicationNotice.refreshFailedStudentIds.join(", ")}.
+                  </p>
+                )}
+                <ul>
+                  {bulkPublicationNotice.results.map(({ studentId, result: publicationResult }) => (
+                    <li key={studentId}>
+                      <strong>{studentId}</strong> — {bulkPublicationResultLabel(publicationResult)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <ConfirmationWithPreviewModal
+              isOpen={bulkPublicationConfirmation !== undefined}
+              title="Publish completed grading reports?"
+              summary={
+                <p>
+                  This will write {bulkPublicationConfirmation?.studentIds.length ?? 0} completed{" "}
+                  {(bulkPublicationConfirmation?.studentIds.length ?? 0) === 1
+                    ? "report"
+                    : "reports"}{" "}
+                  to student repositories. Publication continues independently if one student fails.
+                </p>
+              }
+              supplementalContent={
+                <fieldset className="grading-bulk-publication__selection">
+                  <legend>Select completed students</legend>
+                  {completeStudentIds.map((studentId) => (
+                    <label key={studentId}>
+                      <input
+                        type="checkbox"
+                        checked={
+                          bulkPublicationConfirmation?.studentIds.includes(studentId) ?? false
+                        }
+                        disabled={bulkPublicationInProgress}
+                        onChange={(event) =>
+                          setBulkPublicationConfirmation((current) => {
+                            if (current === undefined) return current;
+                            return {
+                              studentIds: event.currentTarget.checked
+                                ? [...current.studentIds, studentId]
+                                : current.studentIds.filter((candidate) => candidate !== studentId)
+                            };
+                          })
+                        }
+                      />
+                      {studentId}
+                    </label>
+                  ))}
+                </fieldset>
+              }
+              confirmDisabled={
+                bulkPublicationInProgress ||
+                (bulkPublicationConfirmation?.studentIds.length ?? 0) === 0
+              }
+              confirmLabel="Confirm Publish Reports"
+              onConfirm={confirmBulkPublication}
+              onCancel={() => setBulkPublicationConfirmation(undefined)}
+            />
+          </section>
+        </aside>
+        <section className="grading-workspace__source-pane">
+          <h2>Source</h2>
+          {student !== undefined && viewStateWarnings[student.studentId] !== undefined ? (
+            <div className="grading-source-message" role="alert">
+              {viewStateWarnings[student.studentId]}
+            </div>
+          ) : null}
+          {student === undefined || source.status === "idle" ? (
+            <p>Select a student to begin.</p>
+          ) : source.status === "loading" ? (
+            <p aria-live="polite">Loading source for {source.studentId}…</p>
+          ) : source.status === "failure" ? (
+            <div className="grading-source-message" role="alert">
+              <strong>Source unavailable for {source.studentId}</strong>
+              <p>{source.message}</p>
+            </div>
+          ) : source.source.sections.length === 0 ? (
+            <p className="grading-source-message">No required files are configured.</p>
+          ) : (
+            <Suspense fallback={<p aria-live="polite">Starting source viewer…</p>}>
+              <>
+                <MonacoSourceViewer
+                  annotations={
+                    snapshot.status === "success" &&
+                    snapshot.snapshot.studentId === source.source.studentId
+                      ? sourceAnnotations
+                      : []
+                  }
+                  key={source.source.studentId}
+                  initialViewState={source.initialViewState}
+                  model={source.source}
+                  studentId={source.source.studentId}
+                  onCanonicalSelectionChange={(target: CanonicalSourceRange | undefined) => {
+                    if (currentStudentIdRef.current === source.source.studentId)
+                      setCanonicalSourceTarget(target);
+                  }}
+                  {...(source.autosaveEnabled
+                    ? {
+                        onCanonicalViewStateChange: (viewState: GradingEditorViewState) =>
+                          scheduleViewStateSave(source.source.studentId, viewState)
+                      }
+                    : {})}
+                />
+                <div className="grading-source-comment-action">
+                  <button
+                    type="button"
+                    disabled={
+                      canonicalSourceTarget === undefined ||
+                      commentMutationStudentId !== undefined ||
+                      commentMutationBlockedStudents.current.has(source.source.studentId)
+                    }
+                    onClick={openAddCommentEditor}
+                  >
+                    Add Comment
+                  </button>
+                  {canonicalSourceTarget === undefined ? (
+                    <p>Select a source line or range to add an anchored comment.</p>
+                  ) : (
+                    <p>Selected source: {sourceTargetLabel(canonicalSourceTarget)}</p>
+                  )}
+                </div>
+              </>
+            </Suspense>
+          )}
+        </section>
+        <aside className="grading-workspace__grading-pane">
+          <h2>Grading</h2>
+          {student === undefined || snapshot.status === "idle" ? (
+            <p>Select a student to view grading details.</p>
+          ) : (snapshot.status === "success" ? snapshot.snapshot.studentId : snapshot.studentId) !==
+            student.studentId ? (
+            <p aria-live="polite">Loading grading details for {student.studentId}…</p>
+          ) : snapshot.status === "loading" ? (
+            <p aria-live="polite">Loading grading details for {snapshot.studentId}…</p>
+          ) : snapshot.status === "failure" ? (
+            <div className="grading-panel-message" role="alert">
+              <strong>Grading details unavailable for {snapshot.studentId}</strong>
+              <p>{snapshot.message}</p>
+            </div>
+          ) : (
+            <div className="grading-student-snapshot">
+              <p>
+                Status: <strong>{label(snapshot.snapshot.gradingStatus)}</strong>
+              </p>
+              {snapshot.snapshot.gradingStatus === "not_started" ||
+              snapshot.snapshot.gradingStatus === "in_progress" ? (
+                <div className="grading-complete-action">
+                  <button
+                    type="button"
+                    disabled={
+                      bulkPublicationInProgress ||
+                      commentMutationStudentId !== undefined ||
+                      commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                    }
+                    onClick={() => {
+                      setCommentMutationError(undefined);
+                      setMarkCompleteConfirmation({ studentId: snapshot.snapshot.studentId });
+                    }}
+                  >
+                    Mark Complete
+                  </button>
+                </div>
+              ) : null}
+              {snapshot.snapshot.gradingStatus === "complete" ||
+              snapshot.snapshot.gradingStatus === "published" ? (
+                <div className="grading-publication-action">
+                  <button
+                    type="button"
+                    className={
+                      snapshot.snapshot.gradingStatus === "published" ? "secondary-action" : ""
+                    }
+                    disabled={
+                      commentMutationStudentId !== undefined ||
+                      commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                    }
+                    onClick={() => {
+                      setCommentMutationError(undefined);
+                      setReportPublicationNotice(undefined);
+                      setMarkCompleteConfirmation(undefined);
+                      setReportPublicationConfirmation({
+                        studentId: snapshot.snapshot.studentId,
+                        operation:
+                          snapshot.snapshot.gradingStatus === "published" ? "republish" : "publish"
+                      });
+                    }}
+                  >
+                    {reportPublicationStudentId === snapshot.snapshot.studentId
+                      ? "Publishing…"
+                      : snapshot.snapshot.gradingStatus === "published"
+                        ? "Republish Report"
+                        : "Publish Report"}
+                  </button>
+                </div>
+              ) : null}
+              {reportPublicationNotice !== undefined &&
+              reportPublicationNotice.studentId === snapshot.snapshot.studentId ? (
+                <div
+                  className={`grading-publication-message grading-publication-message--${reportPublicationNotice.tone}`}
+                  role={reportPublicationNotice.tone === "error" ? "alert" : "status"}
+                >
+                  <p>{reportPublicationNotice.message}</p>
+                  {reportPublicationNotice.warnings === undefined ? null : (
+                    <ul>
+                      {reportPublicationNotice.warnings.map((warning, index) => (
+                        <li key={`${index}-${warning}`}>{warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : null}
+              <ConfirmationWithPreviewModal
+                isOpen={
+                  reportPublicationConfirmation?.studentId === snapshot.snapshot.studentId &&
+                  reportPublicationConfirmation.studentId === currentStudentId
+                }
+                title={
+                  reportPublicationConfirmation?.operation === "republish"
+                    ? "Republish grading report?"
+                    : "Publish grading report?"
+                }
+                summary={
+                  reportPublicationConfirmation?.operation === "republish" ? (
+                    <p>
+                      This will regenerate the completed grading report. The existing Graider report
+                      may be updated in the student's repository.
+                    </p>
+                  ) : (
+                    <p>This will write the completed grading report to the student's repository.</p>
+                  )
+                }
+                confirmDisabled={
+                  bulkPublicationInProgress || commentMutationStudentId !== undefined
+                }
+                confirmLabel={
+                  reportPublicationConfirmation?.operation === "republish"
+                    ? "Confirm Republish Report"
+                    : "Confirm Publish Report"
+                }
+                onConfirm={confirmPublishReport}
+                onCancel={() => setReportPublicationConfirmation(undefined)}
+              />
+              {markCompleteConfirmation !== undefined &&
+              markCompleteConfirmation.studentId === snapshot.snapshot.studentId ? (
+                <div
+                  className="grading-delete-comment-confirmation"
+                  role="alertdialog"
+                  aria-labelledby="mark-complete-heading"
+                >
+                  <h3 id="mark-complete-heading">
+                    Mark {markCompleteConfirmation.studentId} grading complete?
+                  </h3>
+                  <p>
+                    Grading feedback can still be edited afterward. This does not publish feedback.
+                  </p>
+                  <div className="grading-apply-comment__actions">
+                    <button
+                      type="button"
+                      disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
+                      onClick={() => void confirmMarkComplete()}
+                    >
+                      {commentMutationStudentId === markCompleteConfirmation.studentId
+                        ? "Marking Complete…"
+                        : "Confirm Mark Complete"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
+                      onClick={() => {
+                        setMarkCompleteConfirmation(undefined);
+                        setCommentMutationError(undefined);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              <section aria-labelledby="grading-score-heading">
+                <h3 id="grading-score-heading">Score</h3>
+                <p className="grading-score-total">
+                  {snapshot.snapshot.grade.totalScore} / {snapshot.snapshot.grade.pointsPossible}
+                </p>
+                {snapshot.snapshot.grade.categories.length === 0 ? (
+                  <p>No rubric categories are configured.</p>
+                ) : (
+                  <ul className="grading-score-categories" aria-label="Rubric categories">
+                    {snapshot.snapshot.grade.categories.map((category) => (
+                      <li key={category.id}>
+                        <span>{category.name}</span>
+                        <span>
+                          {category.score} / {category.pointsPossible}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              <section aria-labelledby="applied-comments-heading">
+                <h3 id="applied-comments-heading">Applied comments</h3>
+                {snapshot.snapshot.appliedComments.length === 0 ? (
+                  <p>No comments applied.</p>
+                ) : (
+                  <ul className="grading-comment-list">
+                    {snapshot.snapshot.appliedComments.map((comment) => (
+                      <li key={comment.id}>
+                        <p>{comment.text}</p>
+                        <p>Adjustment: {comment.deduction}</p>
+                        {comment.rubricCategoryId === undefined ? null : (
+                          <p>
+                            Category:{" "}
+                            {snapshot.snapshot.grade.categories.find(
+                              (category) => category.id === comment.rubricCategoryId
+                            )?.name ?? comment.rubricCategoryId}
+                          </p>
+                        )}
+                        {comment.sourceLocation === undefined ? null : (
+                          <p>Source: {sourceLocationLabel(comment.sourceLocation)}</p>
+                        )}
+                        <div className="grading-applied-comment__actions">
+                          <button
+                            type="button"
+                            aria-label={`Edit comment: ${comment.text}`}
+                            disabled={
+                              commentMutationStudentId !== undefined ||
+                              commentMutationBlockedStudents.current.has(
+                                snapshot.snapshot.studentId
+                              )
+                            }
+                            onClick={() => openEditEditor(comment)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Delete comment: ${comment.text}`}
+                            disabled={
+                              commentMutationStudentId !== undefined ||
+                              commentMutationBlockedStudents.current.has(
+                                snapshot.snapshot.studentId
+                              )
+                            }
+                            onClick={() => {
+                              setCommentMutationError(undefined);
+                              setCommentEditor(undefined);
+                              setDeleteConfirmation({
+                                studentId: snapshot.snapshot.studentId,
+                                commentId: comment.id,
+                                text: comment.text,
+                                deduction: comment.deduction,
+                                ...(comment.sourceLocation === undefined
+                                  ? {}
+                                  : { sourceLocation: comment.sourceLocation })
+                              });
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {deleteConfirmation !== undefined &&
+                deleteConfirmation.studentId === snapshot.snapshot.studentId ? (
+                  <div
+                    className="grading-delete-comment-confirmation"
+                    role="alertdialog"
+                    aria-labelledby="delete-comment-heading"
+                  >
+                    <h4 id="delete-comment-heading">Delete applied comment?</h4>
+                    <p>
+                      “{deleteConfirmation.text.slice(0, 100)}” · Adjustment:{" "}
+                      {deleteConfirmation.deduction}
+                    </p>
+                    {deleteConfirmation.sourceLocation === undefined ? null : (
+                      <p>Source: {sourceLocationLabel(deleteConfirmation.sourceLocation)}</p>
+                    )}
+                    <div className="grading-apply-comment__actions">
+                      <button
+                        type="button"
+                        disabled={commentMutationStudentId === deleteConfirmation.studentId}
+                        onClick={() => void confirmDeleteComment()}
+                      >
+                        {commentMutationStudentId === deleteConfirmation.studentId
+                          ? "Deleting…"
+                          : "Confirm delete"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={commentMutationStudentId === deleteConfirmation.studentId}
+                        onClick={() => {
+                          setDeleteConfirmation(undefined);
+                          setCommentMutationError(undefined);
+                        }}
+                      >
+                        Cancel delete
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+              <section aria-labelledby="manual-adjustments-heading">
+                <h3 id="manual-adjustments-heading">Manual adjustments</h3>
+                <button
+                  type="button"
+                  disabled={
+                    result.rubric.length === 0 ||
+                    commentMutationStudentId !== undefined ||
+                    commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                  }
+                  onClick={openAddManualAdjustmentEditor}
+                >
+                  Add adjustment
+                </button>
+                {result.rubric.length === 0 ? (
+                  <p>Manual adjustments require a rubric category.</p>
+                ) : null}
+                {snapshot.snapshot.manualAdjustments.length === 0 ? (
+                  <p>No manual adjustments.</p>
+                ) : (
+                  <ul className="grading-comment-list">
+                    {snapshot.snapshot.manualAdjustments.map((adjustment) => (
+                      <li key={adjustment.id}>
+                        <p>
+                          Category:{" "}
+                          {snapshot.snapshot.grade.categories.find(
+                            (category) => category.id === adjustment.rubricCategoryId
+                          )?.name ?? adjustment.rubricCategoryId}
+                        </p>
+                        <p>Adjustment: {signedAmount(adjustment.amount)}</p>
+                        {adjustment.note === undefined ? null : <p>{adjustment.note}</p>}
+                        <div className="grading-applied-comment__actions">
+                          <button
+                            type="button"
+                            aria-label={`Edit adjustment: ${adjustment.rubricCategoryId}`}
+                            disabled={
+                              commentMutationStudentId !== undefined ||
+                              commentMutationBlockedStudents.current.has(
+                                snapshot.snapshot.studentId
+                              )
+                            }
+                            onClick={() => openEditManualAdjustmentEditor(adjustment)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Delete adjustment: ${adjustment.rubricCategoryId}`}
+                            disabled={
+                              commentMutationStudentId !== undefined ||
+                              commentMutationBlockedStudents.current.has(
+                                snapshot.snapshot.studentId
+                              )
+                            }
+                            onClick={() => {
+                              setCommentMutationError(undefined);
+                              setManualAdjustmentEditor(undefined);
+                              setDeleteManualAdjustmentConfirmation({
+                                studentId: snapshot.snapshot.studentId,
+                                adjustmentId: adjustment.id,
+                                rubricCategoryId: adjustment.rubricCategoryId,
+                                amount: adjustment.amount,
+                                ...(adjustment.note === undefined ? {} : { note: adjustment.note })
+                              });
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {manualAdjustmentEditor !== undefined &&
+                manualAdjustmentEditor.studentId === snapshot.snapshot.studentId ? (
+                  <form
+                    className="grading-apply-comment"
+                    aria-label={
+                      manualAdjustmentEditor.operation === "add"
+                        ? "Add manual adjustment"
+                        : "Edit manual adjustment"
+                    }
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void saveManualAdjustmentEditor();
+                    }}
+                  >
+                    <h4>
+                      {manualAdjustmentEditor.operation === "add"
+                        ? "Add adjustment"
+                        : "Edit adjustment"}
+                    </h4>
+                    <label>
+                      Rubric category
+                      <select
+                        required
+                        value={manualAdjustmentEditor.rubricCategoryId}
+                        onChange={(event) =>
+                          setManualAdjustmentEditor((current) =>
+                            current === undefined
+                              ? current
+                              : { ...current, rubricCategoryId: event.target.value }
+                          )
+                        }
+                      >
+                        <option value="">Select a category</option>
+                        {manualAdjustmentEditor.rubricCategoryId !== "" &&
+                        !result.rubric.some(
+                          (category) => category.id === manualAdjustmentEditor.rubricCategoryId
+                        ) ? (
+                          <option value={manualAdjustmentEditor.rubricCategoryId} disabled>
+                            Unavailable category ({manualAdjustmentEditor.rubricCategoryId})
+                          </option>
+                        ) : null}
+                        {result.rubric.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Amount
+                      <input
+                        required
+                        type="number"
+                        step="any"
+                        value={manualAdjustmentEditor.amount}
+                        onChange={(event) =>
+                          setManualAdjustmentEditor((current) =>
+                            current === undefined
+                              ? current
+                              : { ...current, amount: event.target.value }
+                          )
+                        }
+                      />
+                    </label>
+                    <p>
+                      Use a positive amount to add points and a negative amount to deduct points.
+                    </p>
+                    <label>
+                      Note (optional)
+                      <input
+                        value={manualAdjustmentEditor.note}
+                        onChange={(event) =>
+                          setManualAdjustmentEditor((current) =>
+                            current === undefined
+                              ? current
+                              : { ...current, note: event.target.value }
+                          )
+                        }
+                      />
+                    </label>
+                    <div className="grading-apply-comment__actions">
+                      <button
+                        type="submit"
+                        disabled={
+                          commentMutationStudentId === manualAdjustmentEditor.studentId ||
+                          commentMutationBlockedStudents.current.has(
+                            manualAdjustmentEditor.studentId
+                          ) ||
+                          manualAdjustmentEditor.rubricCategoryId === "" ||
+                          !result.rubric.some(
+                            (category) => category.id === manualAdjustmentEditor.rubricCategoryId
+                          ) ||
+                          manualAdjustmentEditor.amount.trim() === "" ||
+                          !Number.isFinite(Number(manualAdjustmentEditor.amount))
+                        }
+                      >
+                        {commentMutationStudentId === manualAdjustmentEditor.studentId
+                          ? "Saving…"
+                          : manualAdjustmentEditor.operation === "add"
+                            ? "Add adjustment"
+                            : "Save adjustment"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={commentMutationStudentId === manualAdjustmentEditor.studentId}
+                        onClick={() => {
+                          setManualAdjustmentEditor(undefined);
+                          setCommentMutationError(undefined);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+                {deleteManualAdjustmentConfirmation !== undefined &&
+                deleteManualAdjustmentConfirmation.studentId === snapshot.snapshot.studentId ? (
+                  <div
+                    className="grading-delete-comment-confirmation"
+                    role="alertdialog"
+                    aria-labelledby="delete-adjustment-heading"
+                  >
+                    <h4 id="delete-adjustment-heading">Delete manual adjustment?</h4>
+                    <p>
+                      {snapshot.snapshot.grade.categories.find(
+                        (category) =>
+                          category.id === deleteManualAdjustmentConfirmation.rubricCategoryId
+                      )?.name ?? deleteManualAdjustmentConfirmation.rubricCategoryId}
+                      {" · "}
+                      {signedAmount(deleteManualAdjustmentConfirmation.amount)}
+                    </p>
+                    {deleteManualAdjustmentConfirmation.note === undefined ? null : (
+                      <p>{deleteManualAdjustmentConfirmation.note}</p>
+                    )}
+                    <div className="grading-apply-comment__actions">
+                      <button
+                        type="button"
+                        disabled={
+                          commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
+                        }
+                        onClick={() => void confirmDeleteManualAdjustment()}
+                      >
+                        {commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
+                          ? "Deleting…"
+                          : "Confirm delete"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
+                        }
+                        onClick={() => {
+                          setDeleteManualAdjustmentConfirmation(undefined);
+                          setCommentMutationError(undefined);
+                        }}
+                      >
+                        Cancel delete
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+            </div>
+          )}
+          <GradingEvidencePanel
+            state={evidence}
+            onReload={(studentId) => void loadEvidence(studentId)}
+          />
+          <GradingCommitHistoryPanel state={commitHistory} />
+          <section className="grading-comment-library" aria-labelledby="comment-library-heading">
+            <h3 id="comment-library-heading">Comment library</h3>
+            {commentMutationError === undefined ? null : (
+              <div className="grading-panel-message" role="alert">
+                {commentMutationError}
+              </div>
+            )}
+            {commentEditor !== undefined && commentEditor.studentId === student?.studentId ? (
+              <form
+                className="grading-apply-comment"
+                aria-label={
+                  commentEditor.operation === "add"
+                    ? commentEditor.reusableCommentTitle === undefined
+                      ? "Add comment"
+                      : `Apply ${commentEditor.reusableCommentTitle}`
+                    : "Edit applied comment"
+                }
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveCommentEditor();
+                }}
+              >
+                <h4>
+                  {commentEditor.operation === "add"
+                    ? commentEditor.reusableCommentTitle === undefined
+                      ? "Add comment"
+                      : `Apply ${commentEditor.reusableCommentTitle}`
+                    : "Edit applied comment"}
+                </h4>
+                <label>
+                  Comment
+                  <textarea
+                    value={commentEditor.text}
+                    onChange={(event) =>
+                      setCommentEditor((current) =>
+                        current === undefined ? current : { ...current, text: event.target.value }
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Deduction
+                  <input
+                    type="number"
+                    step="any"
+                    value={commentEditor.deduction}
+                    onChange={(event) =>
+                      setCommentEditor((current) =>
+                        current === undefined
+                          ? current
+                          : { ...current, deduction: event.target.value }
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Rubric category
+                  <select
+                    value={commentEditor.rubricCategoryId}
+                    onChange={(event) =>
+                      setCommentEditor((current) =>
+                        current === undefined
+                          ? current
+                          : { ...current, rubricCategoryId: event.target.value }
+                      )
+                    }
+                  >
+                    <option value="">None</option>
+                    {commentEditor.rubricCategoryId !== "" &&
+                    !result.rubric.some(
+                      (category) => category.id === commentEditor.rubricCategoryId
+                    ) ? (
+                      <option value={commentEditor.rubricCategoryId} disabled>
+                        Unavailable category ({commentEditor.rubricCategoryId})
+                      </option>
+                    ) : null}
+                    {result.rubric.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <fieldset>
+                  <legend>Target</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name="comment-target"
+                      value="source"
+                      checked={commentEditor.targetMode === "source"}
+                      disabled={
+                        canonicalSourceTarget === undefined &&
+                        (commentEditor.operation === "add" ||
+                          commentEditor.sourceTarget === undefined)
+                      }
+                      onChange={() => {
+                        setCommentEditor((current) => {
+                          if (current === undefined) return current;
+                          if (current.operation === "add")
+                            return { ...current, targetMode: "source" };
+                          const sourceTarget = current.sourceTarget ?? canonicalSourceTarget;
+                          return sourceTarget === undefined
+                            ? current
+                            : { ...current, targetMode: "source", sourceTarget };
+                        });
+                      }}
+                    />
+                    Source
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="comment-target"
+                      value="general"
+                      checked={commentEditor.targetMode === "general"}
+                      onChange={() =>
+                        setCommentEditor((current) =>
+                          current === undefined ? current : { ...current, targetMode: "general" }
+                        )
+                      }
+                    />
+                    General
+                  </label>
+                </fieldset>
+                {commentEditor.targetMode === "source" ? (
+                  (commentEditor.operation === "edit"
+                    ? commentEditor.sourceTarget
+                    : canonicalSourceTarget) === undefined ? (
+                    <p>Select a valid source line or range, or choose General.</p>
+                  ) : (
+                    <p>
+                      Source target:{" "}
+                      {sourceTargetLabel(
+                        commentEditor.operation === "edit"
+                          ? (commentEditor.sourceTarget as CanonicalSourceRange)
+                          : (canonicalSourceTarget as CanonicalSourceRange)
+                      )}
+                    </p>
+                  )
+                ) : (
+                  <p>This comment will apply to the overall submission.</p>
+                )}
+                {commentEditor.operation === "edit" && commentEditor.targetMode === "source" ? (
+                  <button
+                    type="button"
+                    disabled={canonicalSourceTarget === undefined}
+                    onClick={() =>
+                      setCommentEditor((current) =>
+                        current?.operation === "edit" && canonicalSourceTarget !== undefined
+                          ? { ...current, sourceTarget: canonicalSourceTarget }
+                          : current
+                      )
+                    }
+                  >
+                    Use current selection
+                  </button>
+                ) : null}
+                <div className="grading-apply-comment__actions">
+                  <button
+                    type="submit"
+                    disabled={
+                      commentMutationStudentId === commentEditor.studentId ||
+                      commentMutationBlockedStudents.current.has(commentEditor.studentId) ||
+                      (commentEditor.rubricCategoryId !== "" &&
+                        !result.rubric.some(
+                          (category) => category.id === commentEditor.rubricCategoryId
+                        )) ||
+                      (commentEditor.targetMode === "source" &&
+                        (commentEditor.operation === "edit"
+                          ? commentEditor.sourceTarget
+                          : canonicalSourceTarget) === undefined)
+                    }
+                  >
+                    {commentMutationStudentId === commentEditor.studentId
+                      ? commentEditor.operation === "add"
+                        ? "Applying…"
+                        : "Saving…"
+                      : commentEditor.operation === "add"
+                        ? "Apply comment"
+                        : "Save comment"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={commentMutationStudentId === commentEditor.studentId}
+                    onClick={() => {
+                      setCommentEditor(undefined);
+                      setCommentMutationError(undefined);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : null}
+            {commentLibrary.status === "loading" ? (
+              <p aria-live="polite">Loading shared comments…</p>
+            ) : commentLibrary.status === "failure" ? (
+              <div className="grading-panel-message" role="alert">
+                {commentLibrary.message}
+              </div>
+            ) : (
+              <>
+                <label>
+                  Search comments
+                  <input
+                    type="search"
+                    value={commentSearch}
+                    onChange={(event) => setCommentSearch(event.currentTarget.value)}
+                  />
+                </label>
+                {availableCommentTags.length === 0 ? null : (
+                  <fieldset className="grading-comment-tags">
+                    <legend>Filter by tags</legend>
+                    {availableCommentTags.map((tag) => (
+                      <label key={tag}>
+                        <input
+                          type="checkbox"
+                          checked={selectedCommentTags.includes(tag)}
+                          onChange={(event) => {
+                            const checked = event.currentTarget.checked;
+                            setSelectedCommentTags((current) =>
+                              checked
+                                ? [...current, tag]
+                                : current.filter((selectedTag) => selectedTag !== tag)
+                            );
+                          }}
+                        />
+                        {tag}
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
+                {matchingComments.length === 0 ? (
+                  <p>No matching reusable comments.</p>
+                ) : (
+                  <ul className="grading-comment-list" aria-label="Reusable comments">
+                    {matchingComments.map((comment) => (
+                      <li key={comment.id}>
+                        <strong>{comment.title}</strong>
+                        <p>{comment.text}</p>
+                        <p>Default adjustment: {comment.defaultDeduction}</p>
+                        {comment.defaultRubricCategoryId === undefined ? null : (
+                          <p>Default category: {comment.defaultRubricCategoryId}</p>
+                        )}
+                        {comment.tags.length === 0 ? null : <p>Tags: {comment.tags.join(", ")}</p>}
+                        <button
+                          type="button"
+                          disabled={
+                            student === undefined ||
+                            commentMutationStudentId !== undefined ||
+                            commentMutationBlockedStudents.current.has(student.studentId)
+                          }
+                          onClick={() => openApplyEditor(comment)}
+                        >
+                          Apply {comment.title}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </section>
+        </aside>
+      </div>
+    </main>
+  );
+};

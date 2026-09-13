@@ -40,16 +40,17 @@ const toRawRepositoryIdentity = (repository: ManifestRepositoryIdentity) => ({
     html_url: repository.htmlUrl
   }),
   created_from_template: repository.createdFromTemplate,
-  template_repository: repository.templateRepository,
   ...optionalEntries({
+    template_repository: repository.templateRepository,
     template_commit_sha: repository.templateCommitSha,
     student_default_branch_commit_sha: repository.studentDefaultBranchCommitSha,
-    template_sync_baseline_status:
-      repository.templateSyncBaselineStatus ??
-      (repository.templateCommitSha !== undefined &&
-      repository.studentDefaultBranchCommitSha !== undefined
-        ? "initialized"
-        : "baseline_required"),
+    template_sync_baseline_status: repository.createdFromTemplate
+      ? (repository.templateSyncBaselineStatus ??
+        (repository.templateCommitSha !== undefined &&
+        repository.studentDefaultBranchCommitSha !== undefined
+          ? "initialized"
+          : "baseline_required"))
+      : undefined,
     created_at: repository.createdAt,
     last_observed_at: repository.lastObservedAt
   })
@@ -145,13 +146,16 @@ const toRawManifest = (manifest: Manifest) => ({
     source_files: manifest.source.sourceFiles,
     input_fingerprint: manifest.source.inputFingerprint
   },
-  template: {
-    repository: manifest.template.repository,
-    branch: manifest.template.branch,
-    ...optionalEntries({
-      commit_sha: manifest.template.commitSha
-    })
-  },
+  ...optionalEntries({
+    template:
+      manifest.template === undefined
+        ? undefined
+        : {
+            repository: manifest.template.repository,
+            branch: manifest.template.branch,
+            ...optionalEntries({ commit_sha: manifest.template.commitSha })
+          }
+  }),
   repositories: sortManifestRepositories(manifest.repositories).map(toRawRepositoryRecord),
   operation_history: manifest.operationHistory.map(toRawOperationHistory),
   warnings: manifest.warnings,

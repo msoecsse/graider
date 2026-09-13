@@ -253,6 +253,87 @@ describe("roster manager service", () => {
     expect(fs.readFileSync(termPath, "utf8")).toContain("roster: rosters/section-001.csv");
   });
 
+  it("preserves faculty assignments when rendering a term after a roster update", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    fs.writeFileSync(
+      termPath,
+      fs
+        .readFileSync(termPath, "utf8")
+        .replace(
+          "    roster: rosters/section-001.csv\n",
+          "    faculty:\n      - jones\n      - smith\n"
+        ),
+      "utf8"
+    );
+    expect(saveRoster({ ...request(root), confirmed: true }).status).toBe("success");
+
+    expect(fs.readFileSync(termPath, "utf8")).toContain("faculty:\n      - jones\n      - smith");
+    expect(fs.readFileSync(termPath, "utf8")).toContain("roster: rosters/section-001.csv");
+  });
+
+  it("loads a legacy section with no faculty as an empty editable list", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    expect(getRosterForSection(loadRequest(root)).faculty).toEqual([]);
+  });
+
+  it("saves trimmed, unique faculty assignments without altering another section", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    fs.appendFileSync(
+      termPath,
+      '  - id: "002"\n    roster: rosters/section-002.csv\n    faculty:\n      - smith\n# preserve-me\n',
+      "utf8"
+    );
+
+    expect(
+      saveRoster({
+        ...request(root),
+        faculty: [" jones ", "smith", "jones"],
+        confirmed: true
+      }).status
+    ).toBe("success");
+
+    expect(getRosterForSection(loadRequest(root)).faculty).toEqual(["jones", "smith"]);
+    expect(fs.readFileSync(termPath, "utf8")).toContain('id: "002"');
+    expect(fs.readFileSync(termPath, "utf8")).toContain("faculty:\n      - smith");
+    expect(fs.readFileSync(termPath, "utf8")).toContain("# preserve-me");
+  });
+
+  it("allows all faculty assignments to be removed", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    fs.writeFileSync(
+      termPath,
+      fs
+        .readFileSync(termPath, "utf8")
+        .replace("    roster:", "    faculty:\n      - jones\n    roster:"),
+      "utf8"
+    );
+
+    expect(saveRoster({ ...request(root), faculty: [], confirmed: true }).status).toBe("success");
+    expect(getRosterForSection(loadRequest(root)).faculty).toEqual([]);
+    expect(fs.readFileSync(termPath, "utf8")).toContain("faculty: []");
+  });
+
+  it("rejects blank faculty usernames without persisting them", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    const result = saveRoster({ ...request(root), faculty: ["  "], confirmed: true });
+
+    expect(result.status).toBe("failure");
+    expect(result.diagnostics.map((item) => item.message)).toContain(
+      "Faculty usernames cannot be blank."
+    );
+    expect(getRosterForSection(loadRequest(root)).faculty).toEqual([]);
+  });
+
   it("removes a section without a roster after confirmation, then allows it to be re-added", () => {
     const root = createRoot();
     createTerm(root);

@@ -512,6 +512,13 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     refreshCourseFolder: vi.fn().mockResolvedValue(createDashboardResult()),
     refreshDashboard: vi.fn().mockResolvedValue(createCombinedDashboardResult([])),
     getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),
+    prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
+      available: false,
+      repositoryCount: 0,
+      templateRepository: null,
+      recordedTemplateRevision: null
+    }),
+    executeAssignmentTemplateSync: vi.fn(),
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createAssignmentApplyPreviewResult()),
     getAssignmentGradePreview: vi.fn().mockResolvedValue(createAssignmentGradePreviewResult()),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
@@ -526,7 +533,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     value: graiderUI
   });
 
-  return graiderUI;
+  return graiderUI as unknown as GraiderUIApi;
 };
 
 const getFirstOpenCourseFolderButton = async (): Promise<HTMLElement> => {
@@ -545,6 +552,19 @@ const getCourseCardHeadingNames = (): string[] =>
     .getAllByRole("heading", { level: 2 })
     .map((heading) => heading.textContent ?? "")
     .filter((text) => text.startsWith("27"));
+
+describe("local faculty settings", () => {
+  it("loads and displays the persisted MSOE username", async () => {
+    mockGraiderUI({
+      getLocalSettings: vi.fn().mockResolvedValue({ currentFacultyMsoeUsername: "jones" }),
+      saveLocalSettings: vi.fn()
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Faculty settings" }));
+    expect(await screen.findByDisplayValue("jones")).toBeInTheDocument();
+  });
+});
 
 const getFirstPreviewApplyButton = (): HTMLElement => {
   const button = screen.getAllByRole("button", { name: "Preview apply" })[0];

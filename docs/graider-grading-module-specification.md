@@ -135,21 +135,21 @@ Rules:
 
 ## 5. Data Scope
 
-| Information | Canonical Scope |
-|---|---|
-| Current faculty MSOE identity | Local Graider settings |
-| Faculty-to-section mapping | Term |
-| Student roster membership | Section |
-| Required files | Assignment |
-| Rubric | Assignment |
-| Comment library | Course |
-| Applied comments | Assignment + student |
-| Manual rubric adjustments | Assignment + student |
-| Grading state | Assignment + student |
-| GitHub Actions evidence | Assignment + student submission |
-| Final HTML report | Student repository |
-| Future Canvas grade | Canvas assignment + student |
-| IntelliJ package workspace | Derived assignment/faculty utility output |
+| Information                   | Canonical Scope                           |
+| ----------------------------- | ----------------------------------------- |
+| Current faculty MSOE identity | Local Graider settings                    |
+| Faculty-to-section mapping    | Term                                      |
+| Student roster membership     | Section                                   |
+| Required files                | Assignment                                |
+| Rubric                        | Assignment                                |
+| Comment library               | Course                                    |
+| Applied comments              | Assignment + student                      |
+| Manual rubric adjustments     | Assignment + student                      |
+| Grading state                 | Assignment + student                      |
+| GitHub Actions evidence       | Assignment + student submission           |
+| Final HTML report             | Student repository                        |
+| Future Canvas grade           | Canvas assignment + student               |
+| IntelliJ package workspace    | Derived assignment/faculty utility output |
 
 ---
 
@@ -224,13 +224,16 @@ Instead, it reads results from the grading workflow already executed by GitHub A
 
 The selected workflow run should correspond to the student's relevant submission/default-branch commit rather than simply being the chronologically latest unrelated workflow.
 
-The grading state should record enough information to identify the evidence used, including conceptually:
+Canonical grading state records the anchored submission identity:
 
 ```text
 submissionCommitSha
-workflowRunId
-workflowCommitSha
 ```
+
+Evidence retrieval resolves the exact workflow/run for that SHA on demand and
+validates the returned metadata's submission SHA, run ID, and run attempt. Run
+identity and evidence contents are not persisted into grading state merely
+because faculty viewed them.
 
 ### 8.1 Faculty Presentation
 
@@ -258,6 +261,43 @@ Faculty decides whether and how many points to deduct.
 ### 8.2 Student Report
 
 The final report includes detailed JUnit and Checkstyle results in substantially the same useful form as the previous grading application.
+
+### 8.3 Electron Evidence Read Boundary
+
+The renderer requests evidence using only the canonical course-folder, term,
+assignment, and student identity used by the grading workspace. The Electron
+boundary authorizes the current MSOE faculty identity against section scope
+before resolving repository or GitHub details. Repository owner/name comes
+from trusted assignment configuration and manifest mappings; workflow,
+artifact, run, token, and submission identifiers are never renderer inputs.
+
+Evidence is anchored to the persisted `submissionCommitSha` when grading state
+exists. When state does not yet exist, the read-only grading snapshot identity
+uses the trusted local repository HEAD without creating grading state. A
+different available local HEAD produces `submission_changed`; it is never
+silently substituted. Existing anchored evidence can still be read when the
+local checkout is unavailable.
+
+Only the enabled `java-junit-checkstyle` managed preset invokes managed
+evidence retrieval. Disabled, rubric-only, contract-only, unsupported, and
+custom-workflow configurations return a safe not-applicable result. The API
+returns a whitelisted normalized evidence DTO and safe result codes. It does
+not cache evidence, persist it, or change grading status.
+
+### 8.4 Automated Checks Panel
+
+The grading workspace may render normalized managed evidence from the trusted
+Electron API as a compact, informational-only Automated Checks panel. Evidence
+loads independently from source and grading state, is cleared on student
+changes, and uses the workspace request-generation guard so late success or
+failure responses cannot cross student boundaries. Faculty may manually reload
+the selected student's evidence; the renderer does not poll or cache it.
+
+The panel presents trusted compile, JUnit, and Checkstyle outcomes without
+translating them into comments, deductions, rubric changes, or grading-status
+mutations. It treats custom workflows and other `not_applicable` results
+neutrally, renders report text through normal React escaping, and does not add
+Monaco navigation or annotations.
 
 ---
 
@@ -611,6 +651,33 @@ Faculty should not need to generate the final report to inspect it.
 
 The final report also includes the appropriate recent commit history.
 
+### 17.1 Trusted Commit-History Boundary
+
+The renderer requests history with canonical grading-student identity only.
+Electron authorizes faculty section access before resolving the trusted local
+repository and canonical grading submission. Existing grading state remains
+anchored to its persisted `submissionCommitSha`; missing state uses trusted
+local HEAD without creating grading state, and a changed HEAD returns
+`submission_changed`.
+
+Graider verifies that exact submission commit locally and returns at most the
+10 newest commits reachable from it, ordered newest to oldest. The fixed,
+shell-free Git query returns full commit SHA, ISO commit timestamp, and the
+commit subject (the first line of the student-authored message). It performs no
+fetch, pull, clone, GitHub request, grading mutation, or history persistence.
+
+### 17.2 Commit History Panel
+
+The grading sidebar displays the trusted anchored history immediately after
+Automated Checks. History loads independently for each selected student and is
+cleared on selection changes; the workspace request-generation guard discards
+late successes and failures. The compact, read-only list preserves backend
+ordering and shows each commit subject, shortened SHA, and a readable timestamp
+backed by the canonical ISO value in a semantic `time` element.
+
+The renderer does not cache history, perform Git operations, add commit
+interactions, or translate history into grading decisions.
+
 ---
 
 ## 18. Keyboard-First Workflow
@@ -672,7 +739,7 @@ One canonical persisted record exists per:
 assignment + student
 ```
 
-It should contain conceptually:
+The canonical persisted record contains:
 
 ```text
 studentId
@@ -680,24 +747,19 @@ submissionCommitSha
 
 status
 
-rubricState
 manualAdjustments
 
 appliedComments
 
-analysis
-  workflow identity
-  junit results
-  checkstyle results
-
-commitHistory
-
 viewState
-
-publicationState
 ```
 
-The exact serialized schema can be determined during implementation.
+Rubric scores are projected from the assignment rubric and these canonical
+grading decisions; they are not independently persisted. Automated evidence,
+commit history, rendered HTML, report destination, and remote publication
+metadata remain trusted read-only or derived inputs and are not cached in this
+record. Publication is represented only by the canonical `Published` status
+after the remote report write succeeds.
 
 Plain JSON is preferred unless an existing Graider convention provides a simpler equivalent.
 
@@ -808,6 +870,23 @@ For each selected student:
 Republishing replaces/regenerates the report from current grading state.
 
 One student publication failure should not unnecessarily prevent other selected students from publishing.
+
+The Electron publication boundary accepts only canonical grading identity. A
+single-student publication reauthorizes faculty section scope, requires
+`Complete` or `Published`, validates the anchored submission, assembles source,
+optional managed evidence, and local commit history on the trusted side, and
+renders the deterministic standalone report. The implicit Graider-generated
+destination is `grading/report.html`; safe explicitly configured destinations
+remain authoritative. The remote report write/no-op succeeds before the
+canonical `markPublished` operation persists status, and publication commits
+use `Publish Graider grading report [skip ci]`.
+
+Selective bulk publication is sequential best-effort orchestration over that
+same single-student operation. The current workspace selects `Complete`
+students only by default and does not bulk-select already `Published` students.
+Every requested student is reauthorized independently, failures do not stop
+later students, and the renderer refreshes authoritative statuses after the
+batch rather than setting them optimistically.
 
 ---
 

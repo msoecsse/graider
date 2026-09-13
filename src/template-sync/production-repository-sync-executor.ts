@@ -5,7 +5,7 @@ import {
 } from "./production-template-sync-workspace.js";
 import {
   syncTemplateUpdate,
-  type TemplateSyncAnchors,
+  type InitializedTemplateSyncAnchors,
   type TemplateSyncResult
 } from "./template-sync.js";
 import { getTemplateSyncFailure } from "./template-sync-failure.js";
@@ -17,8 +17,14 @@ export const runProductionRepositoryTemplateSync = async (
     ProductionTemplateSyncWorkspaceInput,
     "templateCommitSha" | "studentDefaultBranch"
   >
-): Promise<{ result: TemplateSyncResult; anchors?: Required<TemplateSyncAnchors> }> => {
-  let anchors: Required<TemplateSyncAnchors> | undefined;
+): Promise<{ result: TemplateSyncResult; anchors?: InitializedTemplateSyncAnchors }> => {
+  if (repository.repository.templateRepository === undefined) {
+    const error = new Error("Template synchronization requires template repository identity.");
+    return { result: { status: "failure", error } };
+  }
+
+  const templateRepository = repository.repository.templateRepository;
+  let anchors: InitializedTemplateSyncAnchors | undefined;
   let result: TemplateSyncResult;
   try {
     result = await withProductionTemplateSyncWorkspace(
@@ -27,7 +33,7 @@ export const runProductionRepositoryTemplateSync = async (
         await syncTemplateUpdate({
           templateRepository: {
             owner: repository.repository.owner,
-            name: repository.repository.templateRepository.split("/").at(-1) ?? "template"
+            name: templateRepository.split("/").pop() ?? "template"
           },
           studentRepository: {
             owner: repository.repository.owner,
@@ -36,15 +42,22 @@ export const runProductionRepositoryTemplateSync = async (
           },
           currentTemplateCommitSha: targetTemplateCommitSha,
           anchors: {
-            templateCommitSha: repository.repository.templateCommitSha,
-            studentDefaultBranchCommitSha: repository.repository.studentDefaultBranchCommitSha,
+            ...(repository.repository.templateCommitSha === undefined
+              ? {}
+              : { templateCommitSha: repository.repository.templateCommitSha }),
+            ...(repository.repository.studentDefaultBranchCommitSha === undefined
+              ? {}
+              : {
+                  studentDefaultBranchCommitSha: repository.repository.studentDefaultBranchCommitSha
+                }),
             templateSyncBaselineStatus:
               repository.repository.templateSyncBaselineStatus ?? "baseline_required"
           },
           gateway,
           pullRequests,
-          updateAnchors: async (updated) => {
+          updateAnchors: (updated) => {
             anchors = updated;
+            return Promise.resolve();
           }
         })
     );

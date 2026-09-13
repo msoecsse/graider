@@ -25,6 +25,9 @@ export const isRosterSaveRequest = (value: unknown): value is RosterSaveRequest 
           (key) => typeof (row as Record<string, unknown>)[key] === "string"
         )
     ) &&
+    (request.faculty === undefined ||
+      (Array.isArray(request.faculty) &&
+        request.faculty.every((username) => typeof username === "string"))) &&
     (typeof request.createSection === "boolean" || request.createSection === undefined) &&
     typeof request.confirmed === "boolean"
   );

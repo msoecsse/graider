@@ -160,6 +160,9 @@ graider workflow generate terms/27s1/assignments/lab04/assignment.yml --output /
 `workflow generate` currently supports `grading.mode: preset` with
 `grading.preset: java-junit-checkstyle`. It writes only to the local filesystem
 and does not overwrite existing files unless `--force` is provided.
+Confirmed Assignment Apply installs or updates that canonical managed workflow
+in applicable student repositories; the local command remains available for
+review and export.
 
 Assignments with `grading.enabled: false` are supported for repository
 management and reporting. `grade` is a no-op success for those assignments, and

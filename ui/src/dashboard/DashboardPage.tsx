@@ -21,6 +21,7 @@ import { AssignmentEditPage } from "../assignment-edit/AssignmentEditPage";
 import { RosterManagerPage } from "../roster-manager/RosterManagerPage";
 import { GradePreviewPage } from "../grade-preview/GradePreviewPage";
 import { GradeStatusPage } from "../grade-status/GradeStatusPage";
+import { GradingWorkspacePage } from "../grading-workspace/GradingWorkspacePage";
 import type { NormalizedGradeStatus } from "../grade-status/gradeStatusTypes";
 import { CourseCardGrid } from "./CourseCardGrid";
 import { CourseFolderList } from "./CourseFolderList";
@@ -177,6 +178,9 @@ export const DashboardPage = (): ReactElement => {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewFilter, setViewFilter] = useState<DashboardViewFilter>("active");
   const [sortOption, setSortOption] = useState<DashboardSortOption>("newest-first");
+  const [isFacultySettingsOpen, setIsFacultySettingsOpen] = useState(false);
+  const [facultyUsername, setFacultyUsername] = useState("");
+  const [facultySettingsMessage, setFacultySettingsMessage] = useState<string | null>(null);
   const [githubAuthState, setGithubAuthState] = useState<GitHubAuthViewState>({
     status: "checking",
     result: null,
@@ -185,6 +189,7 @@ export const DashboardPage = (): ReactElement => {
   const [selectedAssignment, setSelectedAssignment] = useState<AssignmentDetailSelection | null>(
     null
   );
+  const [gradingSelection, setGradingSelection] = useState<AssignmentDetailSelection | null>(null);
   const [selectedCourseSetupFolderPath, setSelectedCourseSetupFolderPath] = useState<string | null>(
     null
   );
@@ -356,6 +361,38 @@ export const DashboardPage = (): ReactElement => {
       }
     } catch (error) {
       setErrorMessage(getSafeErrorMessage(error));
+    }
+  };
+
+  const handleOpenFacultySettings = async (): Promise<void> => {
+    const getLocalSettings = window.graiderUI.getLocalSettings;
+    if (getLocalSettings === undefined) {
+      setFacultySettingsMessage("Local settings are unavailable in this app build.");
+      return;
+    }
+    try {
+      const settings = await getLocalSettings();
+      setFacultyUsername(settings.currentFacultyMsoeUsername ?? "");
+      setFacultySettingsMessage(null);
+      setIsFacultySettingsOpen(true);
+    } catch {
+      setFacultySettingsMessage("Unable to load local faculty settings.");
+    }
+  };
+
+  const handleSaveFacultySettings = async (): Promise<void> => {
+    const saveLocalSettings = window.graiderUI.saveLocalSettings;
+    if (saveLocalSettings === undefined) return;
+    try {
+      const settings = await saveLocalSettings(facultyUsername);
+      setFacultyUsername(settings.currentFacultyMsoeUsername ?? "");
+      setFacultySettingsMessage(
+        settings.currentFacultyMsoeUsername === null
+          ? "Faculty identity cleared."
+          : "Faculty identity saved."
+      );
+    } catch {
+      setFacultySettingsMessage("Unable to save local faculty settings.");
     }
   };
 
@@ -666,6 +703,25 @@ export const DashboardPage = (): ReactElement => {
     );
   }
 
+  if (gradingSelection !== null) {
+    if (gradingSelection.termSlug === null || gradingSelection.assignmentSlug === null)
+      return (
+        <main className="dashboard-shell">
+          <p>Assignment identity is unavailable.</p>
+        </main>
+      );
+    return (
+      <GradingWorkspacePage
+        request={{
+          courseFolderId: gradingSelection.courseFolderId,
+          courseFolderPath: gradingSelection.courseFolderPath,
+          termCode: gradingSelection.termSlug,
+          assignmentSlug: gradingSelection.assignmentSlug
+        }}
+        onBack={() => setGradingSelection(null)}
+      />
+    );
+  }
   if (selectedAssignment !== null) {
     if (isEditingAssignment) {
       return (
@@ -717,7 +773,10 @@ export const DashboardPage = (): ReactElement => {
           setSelectedAssignment(selection);
           setSelectedAssignmentDetailResult(loadResult);
           setSelectedApplyPreview(null);
-          setSelectedGradePreview({ selection, detail });
+          if (typeof window.graiderUI.prepareGradingWorkspace === "function") {
+            setGradingSelection(selection);
+            setSelectedGradePreview(null);
+          } else setSelectedGradePreview({ selection, detail });
           setSelectedGradeStatus(null);
           setSelectedFacultyReport(null);
         }}
@@ -758,10 +817,45 @@ export const DashboardPage = (): ReactElement => {
           >
             Set up course folder
           </button>
+          <button
+            className="secondary-action"
+            type="button"
+            onClick={() => void handleOpenFacultySettings()}
+          >
+            Faculty settings
+          </button>
         </div>
       </header>
 
       <section className="dashboard-content" aria-label="Course dashboard">
+        {!isFacultySettingsOpen ? null : (
+          <section className="detail-panel" aria-label="Faculty settings">
+            <h2>Faculty settings</h2>
+            <label>
+              Current faculty MSOE username
+              <input
+                value={facultyUsername}
+                placeholder="jones"
+                onChange={(event) => setFacultyUsername(event.target.value)}
+              />
+            </label>
+            <button
+              className="primary-action"
+              type="button"
+              onClick={() => void handleSaveFacultySettings()}
+            >
+              Save faculty settings
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={() => setIsFacultySettingsOpen(false)}
+            >
+              Close
+            </button>
+            {facultySettingsMessage === null ? null : <p role="status">{facultySettingsMessage}</p>}
+          </section>
+        )}
         <DashboardToolbar
           searchQuery={searchQuery}
           viewFilter={viewFilter}

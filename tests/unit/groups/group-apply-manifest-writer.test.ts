@@ -110,7 +110,7 @@ describe("group apply manifest writer", () => {
     );
   });
 
-  it("refuses incomplete execution without creating a partial manifest", () => {
+  it("writes every observed identity from incomplete or failed execution", () => {
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "graider-group-manifest-refusal-"));
     const plannedTargets = [target("team-1", ["alpha"]), target("team-2", ["beta"])];
     const completeExecution = successfulExecution(plannedTargets);
@@ -134,16 +134,18 @@ describe("group apply manifest writer", () => {
       )
     };
 
-    for (const execution of [
+    for (const [execution, expectedCount] of [
       {
-        ...completeExecution,
-        errors: [{ code: "failed", severity: "error" as const, message: "x" }]
+        execution: {
+          ...completeExecution,
+          errors: [{ code: "failed", severity: "error" as const, message: "x" }]
+        },
+        expectedCount: 2
       },
-      incompleteExecution,
-      failedExecution,
-      missingUrlExecution,
-      mismatchedTargetExecution
-    ]) {
+      { execution: incompleteExecution, expectedCount: 1 },
+      { execution: failedExecution, expectedCount: 2 },
+      { execution: missingUrlExecution, expectedCount: 1 }
+    ].map(({ execution, expectedCount }) => [execution, expectedCount] as const)) {
       const result = writeGroupApplyManifestV2({
         repoRoot,
         termCode: "27s1",
@@ -151,10 +153,23 @@ describe("group apply manifest writer", () => {
         plannedTargets,
         execution
       });
-      expect(result.status).toBe("failure");
-      expect(result.diagnostics[0]?.message).not.toContain("token");
-      expect(fs.existsSync(createManifestPath(repoRoot, "27s1", "lab04").absolutePath)).toBe(false);
+      expect(result.status).toBe("success");
+      const loaded = loadManifest(createManifestPath(repoRoot, "27s1", "lab04").absolutePath);
+      expect(loaded.status).toBe("loaded");
+      if (loaded.status === "loaded") {
+        expect(loaded.manifest.targets).toHaveLength(expectedCount);
+      }
     }
+
+    const mismatch = writeGroupApplyManifestV2({
+      repoRoot,
+      termCode: "27s1",
+      assignmentSlug: "lab04",
+      plannedTargets,
+      execution: mismatchedTargetExecution
+    });
+    expect(mismatch.status).toBe("failure");
+    expect(mismatch.diagnostics[0]?.message).not.toContain("token");
   });
 
   it("returns a safe failure when the manifest write fails", () => {
