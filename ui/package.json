@@ -39,5 +39,9 @@
     "typescript": "~5.9.0",
     "vite": "latest",
     "vitest": "latest"
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true,
+    "fsevents@2.3.3": true
   }
 }
