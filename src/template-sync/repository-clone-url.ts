@@ -5,8 +5,7 @@ export type RepositoryCloneUrlResult =
   | { status: "success"; cloneUrl: string }
   | { status: "failure"; message: string };
 
-const toCloneUrl = (owner: string, repo: string): string =>
-  `https://github.com/${owner}/${repo}.git`;
+const toCloneUrl = (owner: string, repo: string): string => `git@github.com:${owner}/${repo}.git`;
 
 export const resolveTemplateCloneUrl = (
   configuredOrganization: string,

@@ -62,7 +62,7 @@ describe("production assignment template-sync service", () => {
     });
     expect(calls[0]).toMatchObject({
       token: "graider",
-      templateCloneUrl: "https://github.com/course/template.git"
+      templateCloneUrl: "git@github.com:course/template.git"
     });
     expect(JSON.stringify(result)).not.toContain("graider");
   });

@@ -68,7 +68,7 @@ describe("production assignment template-sync bridge", () => {
       {
         token: "secret",
         templateCloneUrl: "https://github.com/course/template.git",
-        studentCloneUrl: "https://github.com/course/student.git"
+        studentCloneUrl: "git@github.com:course/student.git"
       }
     ]);
     expect(JSON.stringify(result)).not.toContain("secret");
