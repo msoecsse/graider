@@ -21,6 +21,10 @@ const execFile = promisify(executeFile);
 /** 10 MiB; a repository-sized clone's Git output does not fit execFile's default buffer. */
 const GIT_OUTPUT_MAX_BUFFER_BYTES = 10485760;
 const GIT = "git";
+const TEMPLATE_SYNC_COMMIT_AUTHOR_NAME = "Graider";
+/** users.noreply.github.com addresses are never a real account's private email, so GitHub's
+ * GH007 push protection never blocks a commit authored with this address. */
+const TEMPLATE_SYNC_COMMIT_AUTHOR_EMAIL = "graider-bot@users.noreply.github.com";
 
 export interface ProductionTemplateSyncWorkspaceInput {
   templateCloneUrl: string;
@@ -84,6 +88,20 @@ export const withProductionTemplateSyncWorkspace = async <T>(
       "Unable to clone student repository.",
       async () => {
         await clone(input.studentCloneUrl, studentDirectory, input.token, runGit);
+        // GitHub rejects a push (GH007) whose commit author email is a GitHub account's
+        // private address, and the ambient git identity on the machine running Graider is
+        // arbitrary and often exactly that. Pin a dedicated, non-private identity for the
+        // commits this workspace creates instead of inheriting the caller's global config.
+        await runGit(
+          studentDirectory,
+          ["config", "user.name", TEMPLATE_SYNC_COMMIT_AUTHOR_NAME],
+          input.token
+        );
+        await runGit(
+          studentDirectory,
+          ["config", "user.email", TEMPLATE_SYNC_COMMIT_AUTHOR_EMAIL],
+          input.token
+        );
       }
     );
     await runWorkspaceStage(

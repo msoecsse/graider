@@ -1,5 +1,5 @@
 import { execFile as executeFile } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -169,6 +169,11 @@ describe("production student default-branch checkout", { timeout: GIT_TEST_TIMEO
               `refs/remotes/origin/${remoteDefaultBranch}`
             ])
           ).toBe(student.sha);
+          // A `--no-checkout` clone leaves an empty worktree/index; assert the subsequent
+          // checkout actually populated files rather than only moving the branch ref.
+          await expect(access(join(studentDirectory as string, "README.md"))).resolves
+            .toBeUndefined();
+          expect(await runGit(studentDirectory, ["status", "--porcelain"])).toBe("");
         },
         {
           runGit: async (directory, args) => {
