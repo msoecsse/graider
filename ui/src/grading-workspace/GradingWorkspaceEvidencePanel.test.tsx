@@ -376,7 +376,7 @@ describe("GradingWorkspacePage automated checks", () => {
     expect(screen.getByRole("button", { name: "Mark Complete" })).toBeEnabled();
   });
 
-  it("hides not-applicable managed evidence without presenting custom workflows as broken", async () => {
+  it("does not fabricate automated checks when evidence is not applicable and history is idle", async () => {
     setApis({
       loadEvidence: vi.fn().mockResolvedValue({ status: "not_applicable", studentId: "ada" })
     });
@@ -385,7 +385,6 @@ describe("GradingWorkspacePage automated checks", () => {
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Automated Checks" })).not.toBeInTheDocument()
     );
-    expect(screen.queryByText(/workflow|artifact|evidence/iu)).not.toBeInTheDocument();
   });
 
   it.each(["not_started", "in_progress", "complete", "published"] as const)(

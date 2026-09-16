@@ -142,7 +142,10 @@ const createReadyClient = (repositories: GitHubRepository[] = []): FakeGitHubCli
     }))
   });
 
-class NonPersistingCreateGitHubClient extends FakeGitHubClient {
+class CreateResponseOnlyGitHubClient extends FakeGitHubClient {
+  getRepositoryCalls = 0;
+  private creationCompleted = false;
+
   override createRepositoryFromTemplate(
     input: Parameters<FakeGitHubClient["createRepositoryFromTemplate"]>[0]
   ): Promise<GitHubRepository> {
@@ -152,8 +155,36 @@ class NonPersistingCreateGitHubClient extends FakeGitHubClient {
       input,
       repository
     });
+    this.creationCompleted = true;
 
     return Promise.resolve(repository);
+  }
+
+  override getRepository(
+    owner: string,
+    repo: string
+  ): ReturnType<FakeGitHubClient["getRepository"]> {
+    if (!this.creationCompleted) return super.getRepository(owner, repo);
+    this.getRepositoryCalls += 1;
+    return Promise.reject(new Error("Repository identity must come from the create response."));
+  }
+}
+
+class ManifestCheckpointFailureGitHubClient extends FakeGitHubClient {
+  constructor(
+    private readonly manifestPath: string,
+    state: ConstructorParameters<typeof FakeGitHubClient>[0]
+  ) {
+    super(state);
+  }
+
+  override async createRepositoryFromTemplate(
+    input: Parameters<FakeGitHubClient["createRepositoryFromTemplate"]>[0]
+  ): Promise<GitHubRepository> {
+    const repository = await super.createRepositoryFromTemplate(input);
+    fs.unlinkSync(this.manifestPath);
+    fs.mkdirSync(this.manifestPath);
+    return repository;
   }
 }
 
@@ -673,6 +704,7 @@ describe("graider apply command", () => {
     if (jonesRepository === undefined) throw new Error("Expected Jones manifest record.");
     expect(jonesRepository.repository.templateCommitSha).toBe("template-sha");
     expect(jonesRepository.repository.studentDefaultBranchCommitSha).toEqual(expect.any(String));
+    expect(jonesRepository.repository.templateSyncBaselineStatus).toBe("initialized");
     expect(
       githubClient.mutations.createdRepositories.map((record) => record.repository.name)
     ).toEqual([JONES_REPOSITORY, PATEL_REPOSITORY]);
@@ -787,7 +819,7 @@ describe("graider apply command", () => {
     expect(manifestResult.manifest?.repositories[0]?.repository.name).toBe(JONES_REPOSITORY);
   });
 
-  it("persists template-backed repository identity before the asynchronous template baseline is available", async () => {
+  it("keeps template-backed repository creation successful when the baseline is pending", async () => {
     const cwd = copyFixtureToTemp("grading-disabled");
     const manifestPath = createManifestPath(cwd, "27s1", "lab04");
     const githubClient = new DelayedTemplateMaterializationGitHubClient(manifestPath.absolutePath, {
@@ -811,10 +843,14 @@ describe("graider apply command", () => {
     });
     const manifest = loadManifest(manifestPath.absolutePath);
 
-    expect(result.errors).toEqual(
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(result.errors).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
     );
     expect(githubClient.manifestWasDurableBeforeBaselineLookup).toBe(true);
+    expect(githubClient.mutations.addedCollaborators).toHaveLength(1);
+    expect(githubClient.mutations.teamPermissions).toHaveLength(2);
+    expect(githubClient.mutations.enabledActions).toHaveLength(1);
     expect(manifest.status).toBe("loaded");
     if (manifest.status !== "loaded") throw new Error("Expected written manifest.");
     const [jonesRepository] = manifest.manifest.repositories;
@@ -825,6 +861,10 @@ describe("graider apply command", () => {
       createdFromTemplate: true,
       templateSyncBaselineStatus: "baseline_required"
     });
+    expect(jonesRepository.repository.studentDefaultBranchCommitSha).toBeUndefined();
+    expect(result.summary.repositories).toEqual([
+      expect.objectContaining({ repository: JONES_REPOSITORY, status: "created" })
+    ]);
   });
 
   it("writes a new empty manifest before attempting the first repository creation", async () => {
@@ -848,9 +888,10 @@ describe("graider apply command", () => {
     }
   });
 
-  it("waits for GitHub template contents before recording the template-sync baseline", async () => {
+  it("stops later target operations when the post-creation manifest checkpoint fails", async () => {
     const cwd = copyFixtureToTemp("grading-disabled");
-    const githubClient = new EventuallyMaterializedTemplateGitHubClient({
+    const manifestPath = createManifestPath(cwd, "27s1", "lab04");
+    const githubClient = new ManifestCheckpointFailureGitHubClient(manifestPath.absolutePath, {
       templateRepositories: [templateRepository],
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({
         username
@@ -866,19 +907,57 @@ describe("graider apply command", () => {
       assignmentFile: ASSIGNMENT_FILE,
       options: yesOptions,
       githubClient,
+      clock: fixedClock
+    });
+
+    expect(result.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "manifest_write_failed" })])
+    );
+    expect(result.summary.repositories).toEqual([
+      expect.objectContaining({ repository: JONES_REPOSITORY, status: "failed" })
+    ]);
+    expect(githubClient.mutations.createdRepositories).toHaveLength(1);
+    expect(githubClient.mutations.addedCollaborators).toEqual([]);
+    expect(githubClient.mutations.teamPermissions).toEqual([]);
+    expect(githubClient.mutations.enabledActions).toEqual([]);
+  });
+
+  it("probes a pending template baseline once without sleeping", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    const githubClient = new EventuallyMaterializedTemplateGitHubClient({
+      templateRepositories: [templateRepository],
+      users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({
+        username
+      })),
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ]
+    });
+
+    const sleep = vi.fn(async () => {});
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
       clock: fixedClock,
-      retryOptions: { sleep: async () => {} }
+      retryOptions: { sleep }
     });
     const manifest = loadWrittenManifest(cwd);
 
     expect(result.status).toBe("success");
-    expect(githubClient.materializationReads).toBe(3);
+    expect(githubClient.materializationReads).toBe(1);
+    expect(sleep).not.toHaveBeenCalled();
     expect(manifest.status).toBe("loaded");
     if (manifest.status === "loaded") {
       expect(manifest.manifest.repositories[0]?.repository).toMatchObject({
-        studentDefaultBranchCommitSha: "template-sha",
-        templateSyncBaselineStatus: "initialized"
+        templateCommitSha: "template-sha",
+        templateSyncBaselineStatus: "baseline_required"
       });
+      expect(
+        manifest.manifest.repositories[0]?.repository.studentDefaultBranchCommitSha
+      ).toBeUndefined();
     }
   });
 
@@ -1008,8 +1087,8 @@ describe("graider apply command", () => {
     );
   });
 
-  it("does not write a manifest repository record when repository creation is not observable", async () => {
-    const githubClient = new NonPersistingCreateGitHubClient({
+  it("uses the repository returned by template creation without rediscovery", async () => {
+    const githubClient = new CreateResponseOnlyGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
       teams: [
@@ -1017,36 +1096,22 @@ describe("graider apply command", () => {
         { org: ORGANIZATION, slug: "graders", name: "Graders" }
       ]
     });
-    const { cwd, result } = await runApply("active-assignment", githubClient);
+    const { cwd, result } = await runApply("grading-disabled", githubClient);
     const manifestResult = loadWrittenManifest(cwd);
 
-    expect(result.exitCode).toBe(ExitCode.GitHubOrNetworkFailure);
-    expect(result.errors.map((error) => error.code)).toEqual([
-      "github_api_error",
-      "github_api_error"
-    ]);
-    expect(result.errors.map((error) => error.context)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          operation: "createRepositoryFromTemplate",
-          repositoryName: JONES_REPOSITORY
-        }),
-        expect.objectContaining({
-          operation: "createRepositoryFromTemplate",
-          repositoryName: PATEL_REPOSITORY
-        })
-      ])
-    );
-    expect(result.errors).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: "grading_workflow_missing" }),
-        expect.objectContaining({ code: "workflow_dispatch_unsupported" })
-      ])
-    );
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(githubClient.getRepositoryCalls).toBe(0);
     if (manifestResult.status === "loaded") {
-      expect(manifestResult.manifest.repositories).toEqual([]);
+      expect(manifestResult.manifest.repositories.map((record) => record.repository)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: JONES_REPOSITORY,
+            id: TestNumber.ExistingRepositoryId
+          })
+        ])
+      );
     } else {
-      expect(manifestResult.status).toBe("missing");
+      throw new Error("Expected written manifest.");
     }
   });
 
@@ -1131,6 +1196,48 @@ describe("graider apply command", () => {
     };
 
     expect(json.generatedFiles).toContain(json.summary.manifestFile);
+  });
+
+  it("reports one repository heartbeat before each individual target begins", async () => {
+    const cwd = copyFixtureToTemp("active-assignment");
+    const githubClient = createReadyClient();
+    const progress: Array<{
+      current: number;
+      total: number;
+      studentId?: string;
+      repository: string;
+    }> = [];
+    const mutationsAtProgress: number[] = [];
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} },
+      onRepositoryProgress: (event) => {
+        progress.push(event);
+        mutationsAtProgress.push(githubClient.mutations.createdRepositories.length);
+      }
+    });
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(progress).toEqual([
+      expect.objectContaining({
+        current: 1,
+        total: 2,
+        studentId: "jones",
+        repository: `${ORGANIZATION}/${JONES_REPOSITORY}`
+      }),
+      expect.objectContaining({
+        current: 2,
+        total: 2,
+        studentId: "patel",
+        repository: `${ORGANIZATION}/${PATEL_REPOSITORY}`
+      })
+    ]);
+    expect(mutationsAtProgress).toEqual([0, 1]);
   });
 
   it("manifest YAML is parseable after successful apply", async () => {

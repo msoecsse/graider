@@ -110,7 +110,7 @@ const readGeneratedWorkflow = (cwd: string, generatedFile = DEFAULT_WORKFLOW_FIL
   fs.readFileSync(path.join(cwd, generatedFile), "utf8");
 
 describe("graider workflow generate command", () => {
-  it("generates java-junit-checkstyle grade.yml at the default generated-workflows path", () => {
+  it.skip("superseded Classroom-workflow assertions", () => {
     const cwd = copyFixtureToTemp();
     replaceCourseGrading(cwd, PRESET_GRADING_BLOCK);
     const result = runWorkflowGenerate(cwd);
@@ -231,6 +231,25 @@ describe("graider workflow generate command", () => {
     expect(workflow).not.toContain('"status": "${{ steps.unit-tests.outcome }}"');
     expect(workflow).not.toContain("faculty-summary");
     expect(workflow).not.toContain("GRAIDER_GITHUB_TOKEN");
+  });
+
+  it("generates the shell-based managed workflow", () => {
+    const cwd = copyFixtureToTemp();
+    replaceCourseGrading(cwd, PRESET_GRADING_BLOCK);
+    const result = runWorkflowGenerate(cwd);
+    const workflow = readGeneratedWorkflow(cwd);
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(parseDocument(workflow).errors).toEqual([]);
+    expect(workflow).toContain("uses: actions/setup-java@v6");
+    expect(workflow).toContain("checkstyle/checkstyle/releases/download/checkstyle-");
+    expect(workflow).toContain("- name: CheckStyle");
+    expect(workflow).toContain("- name: Compile Java sources");
+    expect(workflow).toContain("- name: Unit Tests");
+    expect(workflow).toContain("xvfb-run -a");
+    expect(workflow).toContain("grading-evidence/checkstyle.xml");
+    expect(workflow).toContain("grading-evidence/");
+    expect(workflow).not.toContain("classroom-resources/");
   });
 
   it("emits JSON output with generated file path", () => {

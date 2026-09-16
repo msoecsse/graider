@@ -20,6 +20,7 @@ const setup = () => {
       handlers.set(channel, handler);
     })
   };
+  const sender = { send: vi.fn() };
   const service: AssignmentTemplateSyncService = {
     prepare: vi.fn(async () => ({
       available: true,
@@ -42,9 +43,9 @@ const setup = () => {
   const invoke = async (channel: string, request: unknown): Promise<unknown> => {
     const handler = handlers.get(channel);
     if (handler === undefined) throw new Error("Handler missing");
-    return await handler({}, request);
+    return await handler({ sender }, request);
   };
-  return { ipc, service, invoke };
+  return { ipc, sender, service, invoke };
 };
 
 describe("assignment template-sync IPC", () => {
@@ -62,7 +63,7 @@ describe("assignment template-sync IPC", () => {
 
   it("forwards confirmation once and retains only student ID and PR data", async () => {
     const { service, invoke } = setup();
-    const request = { ...identity, confirmed: true };
+    const request = { ...identity, studentId: "S001", confirmed: true };
     const execute = vi.mocked(service.execute);
     execute.mockResolvedValueOnce({
       status: "partial_success",
@@ -82,7 +83,7 @@ describe("assignment template-sync IPC", () => {
       githubClient: {} as never
     } as never);
     const result = await invoke(IPC_CHANNELS.executeAssignmentTemplateSync, request);
-    expect(service.execute).toHaveBeenCalledExactlyOnceWith(request);
+    expect(service.execute).toHaveBeenCalledExactlyOnceWith(request, expect.any(Function));
     expect(result).toEqual({
       status: "partial_success",
       outcomes: [
@@ -100,6 +101,34 @@ describe("assignment template-sync IPC", () => {
     );
   });
 
+  it("forwards only projected trusted repository progress through the event channel", async () => {
+    const { sender, service, invoke } = setup();
+    vi.mocked(service.execute).mockImplementationOnce(async (_request, onProgress) => {
+      onProgress?.({
+        current: 1,
+        total: 2,
+        studentId: "S001",
+        repository: "course/lab-s001",
+        token: "secret-token",
+        workspace: "/private/workspace"
+      } as never);
+      return { status: "success", outcomes: [] };
+    });
+
+    await invoke(IPC_CHANNELS.executeAssignmentTemplateSync, { ...identity, confirmed: true });
+
+    expect(sender.send).toHaveBeenCalledExactlyOnceWith(
+      IPC_CHANNELS.assignmentTemplateSyncProgress,
+      {
+        current: 1,
+        total: 2,
+        studentId: "S001",
+        repository: "course/lab-s001"
+      }
+    );
+    expect(JSON.stringify(sender.send.mock.calls)).not.toMatch(/secret-token|workspace/u);
+  });
+
   it("rejects malformed prepare and execute requests", async () => {
     const { service, invoke } = setup();
     expect(isAssignmentTemplateSyncRequest(null)).toBe(false);
@@ -110,6 +139,14 @@ describe("assignment template-sync IPC", () => {
     await expect(
       invoke(IPC_CHANNELS.executeAssignmentTemplateSync, { ...identity, confirmed: "yes" })
     ).rejects.toThrow("Confirmed assignment template-sync request");
+    expect(
+      isAssignmentTemplateSyncExecuteRequest({
+        ...identity,
+        studentId: "S001",
+        confirmed: true,
+        repository: "course/arbitrary-repository"
+      })
+    ).toBe(false);
     expect(service.prepare).not.toHaveBeenCalled();
     expect(service.execute).not.toHaveBeenCalled();
   });

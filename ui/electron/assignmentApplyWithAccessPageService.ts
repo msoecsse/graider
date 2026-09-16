@@ -1,4 +1,5 @@
 import { applyAssignment } from "./assignmentApplyRunner.js";
+import type { AssignmentApplyRepositoryProgress } from "./assignmentApplyRunner.js";
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import type { ProcessRunner } from "./commandRunner.js";
 import type {
@@ -13,6 +14,7 @@ interface AssignmentApplyWithAccessPageOptions {
   readonly runner: ProcessRunner;
   readonly env?: NodeJS.ProcessEnv;
   readonly pagesRepositoryFolderPath: string | null;
+  readonly onProgress?: (progress: AssignmentApplyRepositoryProgress) => void;
 }
 
 const pageGenerationError = (

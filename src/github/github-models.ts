@@ -169,7 +169,8 @@ export interface ListWorkflowRunsForCommitInput {
   owner: string;
   repo: string;
   workflowPath: string;
-  headSha: string;
+  headSha?: string;
+  limit?: number;
 }
 
 export interface ListWorkflowRunArtifactsInput {

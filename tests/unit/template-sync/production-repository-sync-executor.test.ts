@@ -30,6 +30,7 @@ describe("production repository template-sync resolved branch", () => {
           status: "recovered" as const,
           studentDefaultBranchCommitSha: "student-historical"
         }),
+      recoverTemplateAndStudentBaseline: () => Promise.resolve({ status: "not_found" as const }),
       applyAndPushTemplateDelta: (input) => {
         applied.push(input);
         return Promise.resolve({ status: "conflict" as const });

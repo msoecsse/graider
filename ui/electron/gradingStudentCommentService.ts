@@ -14,6 +14,7 @@ import { readLocalRepositoryHead, type LocalRepositoryHeadResult } from "./local
 export interface AppliedCommentDto {
   readonly id: string;
   readonly sourceCommentId?: string;
+  readonly title?: string;
   readonly text: string;
   readonly deduction: number;
   readonly rubricCategoryId?: string;
@@ -25,6 +26,7 @@ export interface AppliedCommentDto {
 }
 
 export interface AppliedCommentReplacementDto {
+  readonly title?: string | undefined;
   readonly text: string;
   readonly deduction: number;
   readonly rubricCategoryId?: string | undefined;

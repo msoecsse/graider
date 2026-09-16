@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ProcessRunResult, ProcessRunner } from "./commandRunner.js";
-import { applyAssignment, runAssignmentApplyCommand } from "./assignmentApplyRunner.js";
+import {
+  applyAssignment,
+  createAssignmentApplyProgressParser,
+  runAssignmentApplyCommand
+} from "./assignmentApplyRunner.js";
 import type { AssignmentApplyJsonResponse, AssignmentApplyRequest } from "./ipc.js";
 import { GITHUB_TOKEN_ENV_NAME } from "./tokenResolver.js";
 
@@ -67,6 +71,32 @@ const createRunner = (results: readonly ProcessRunResult[]): ProcessRunner => {
 };
 
 describe("assignmentApplyRunner", () => {
+  it("parses split and multiple trusted Apply progress records while ignoring malformed records", () => {
+    const progress = vi.fn();
+    const parse = createAssignmentApplyProgressParser(progress);
+
+    parse('ordinary stderr\nGRAIDER_PROGRESS {"current":1,"total":2,"mode":"individual",');
+    parse(
+      '"studentId":"ada","repository":"course/lab-ada"}\nGRAIDER_PROGRESS {"current":2,"total":2,"mode":"group","groupId":"team-2","repository":"course/lab-team-2"}\nGRAIDER_PROGRESS {bad}\n'
+    );
+
+    expect(progress).toHaveBeenNthCalledWith(1, {
+      current: 1,
+      total: 2,
+      mode: "individual",
+      studentId: "ada",
+      repository: "course/lab-ada"
+    });
+    expect(progress).toHaveBeenNthCalledWith(2, {
+      current: 2,
+      total: 2,
+      mode: "group",
+      groupId: "team-2",
+      repository: "course/lab-team-2"
+    });
+    expect(progress).toHaveBeenCalledTimes(2);
+  });
+
   it("runs graider assignment apply with argv array, course cwd, --yes, and token env", async () => {
     const runner = createRunner([createProcessResult()]);
 
@@ -78,15 +108,24 @@ describe("assignmentApplyRunner", () => {
     });
 
     expect(result.status).toBe("success");
-    expect(runner).toHaveBeenCalledWith({
-      command: "graider",
-      args: ["assignment", "apply", APPLY_REQUEST.assignmentFile, "--json", "--yes"],
-      cwd: APPLY_REQUEST.courseFolderPath,
-      env: {
-        PATH: "/bin",
-        [GITHUB_TOKEN_ENV_NAME]: "secret-token"
-      }
-    });
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "graider",
+        args: [
+          "assignment",
+          "apply",
+          APPLY_REQUEST.assignmentFile,
+          "--json",
+          "--yes",
+          "--progress-json"
+        ],
+        cwd: APPLY_REQUEST.courseFolderPath,
+        env: {
+          PATH: "/bin",
+          [GITHUB_TOKEN_ENV_NAME]: "secret-token"
+        }
+      })
+    );
   });
 
   it("returns apply JSON from a nonzero partial-success exit", async () => {
@@ -141,6 +180,24 @@ describe("assignmentApplyRunner", () => {
     expect(result.status).toBe("failure");
     expect(result.error?.code).toBe("invalid_assignment_apply_json");
     expect(result.error?.stdoutSnippet).toBe("not json");
+  });
+
+  it("removes recognized progress transport records from user-facing stderr errors", async () => {
+    const runner = createRunner([
+      createProcessResult({
+        stdout: "not json",
+        stderr:
+          'real failure\nGRAIDER_PROGRESS {"current":1,"total":1,"mode":"individual","studentId":"ada","repository":"course/lab-ada"}\n'
+      })
+    ]);
+
+    const result = await runAssignmentApplyCommand({
+      request: APPLY_REQUEST,
+      token: "secret-token",
+      runner
+    });
+
+    expect(result.error?.stderrSnippet).toBe("real failure\n");
   });
 
   it("handles missing graider CLI safely", async () => {
@@ -200,11 +257,51 @@ describe("assignmentApplyRunner", () => {
       args: ["auth", "token"],
       env: {}
     });
-    expect(runner).toHaveBeenNthCalledWith(2, {
-      command: "graider",
-      args: ["assignment", "apply", APPLY_REQUEST.assignmentFile, "--json", "--yes"],
-      cwd: APPLY_REQUEST.courseFolderPath,
-      env: { [GITHUB_TOKEN_ENV_NAME]: "secret-token" }
+    expect(runner).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        command: "graider",
+        args: [
+          "assignment",
+          "apply",
+          APPLY_REQUEST.assignmentFile,
+          "--json",
+          "--yes",
+          "--progress-json"
+        ],
+        cwd: APPLY_REQUEST.courseFolderPath,
+        env: { [GITHUB_TOKEN_ENV_NAME]: "secret-token" }
+      })
+    );
+  });
+
+  it("forwards parsed repository progress after token resolution", async () => {
+    const progress = vi.fn();
+    const runner: ProcessRunner = vi.fn(async (request) => {
+      if (request.command === "gh") {
+        return createProcessResult({ stdout: "secret-token" });
+      }
+
+      request.onStderrChunk?.(
+        'GRAIDER_PROGRESS {"current":1,"total":1,"mode":"individual","studentId":"ada","repository":"course/lab-ada"}\n'
+      );
+      return createProcessResult();
+    });
+
+    const result = await applyAssignment(APPLY_REQUEST, {
+      runner,
+      env: {},
+      now: () => FIXED_APPLY_DATE,
+      onProgress: progress
+    });
+
+    expect(result.status).toBe("success");
+    expect(progress).toHaveBeenCalledWith({
+      current: 1,
+      total: 1,
+      mode: "individual",
+      studentId: "ada",
+      repository: "course/lab-ada"
     });
   });
 
@@ -227,12 +324,19 @@ describe("assignmentApplyRunner", () => {
 
     expect(result.status).toBe("success");
     expect(vi.mocked(runner).mock.calls).toContainEqual([
-      {
+      expect.objectContaining({
         command: "graider",
-        args: ["assignment", "apply", APPLY_REQUEST.assignmentFile, "--json", "--yes"],
+        args: [
+          "assignment",
+          "apply",
+          APPLY_REQUEST.assignmentFile,
+          "--json",
+          "--yes",
+          "--progress-json"
+        ],
         cwd: APPLY_REQUEST.courseFolderPath,
         env: {}
-      }
+      })
     ]);
   });
 });

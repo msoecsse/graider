@@ -23,6 +23,7 @@ export interface ProcessRunRequest {
   readonly args: readonly string[];
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly onStderrChunk?: (chunk: string) => void;
 }
 
 export interface ProcessSpawnError {
@@ -201,6 +202,11 @@ export const createNodeProcessRunner =
 
         childProcess.stderr.on("data", (chunk: string) => {
           stderr += chunk;
+          try {
+            request.onStderrChunk?.(chunk);
+          } catch {
+            // Stream observation must not affect the child process.
+          }
         });
 
         childProcess.on("error", (error: Error) => {

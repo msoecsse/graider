@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type {
   AssignmentSetupPreviewResult,
   AssignmentSetupRequest,
@@ -8,6 +8,15 @@ import type {
 } from "../../electron/ipc";
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
+
+interface RequiredFileDraft {
+  readonly key: string;
+  readonly value: string;
+}
+
+interface RubricDraft extends AssignmentRubricCategory {
+  readonly key: string;
+}
 
 const toIsoWithOffset = (value: string): string => {
   const date = new Date(value);
@@ -72,8 +81,9 @@ export const AssignmentSetupPage = ({
   const [facultyOwner, setFacultyOwner] = useState("");
   const [lmsAssignmentId, setLmsAssignmentId] = useState("");
   const [gradingCategory, setGradingCategory] = useState("labs");
-  const [requiredFiles, setRequiredFiles] = useState<readonly string[]>([]);
-  const [rubric, setRubric] = useState<readonly AssignmentRubricCategory[]>([]);
+  const [requiredFiles, setRequiredFiles] = useState<readonly RequiredFileDraft[]>([]);
+  const [rubric, setRubric] = useState<readonly RubricDraft[]>([]);
+  const draftKeyCounter = useRef(0);
   const [preview, setPreview] = useState<AssignmentSetupPreviewResult | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -109,8 +119,12 @@ export const AssignmentSetupPage = ({
         facultyOwner,
         lmsAssignmentId,
         gradingCategory,
-        requiredFiles,
-        rubric
+        requiredFiles: requiredFiles.map((file) => file.value),
+        rubric: rubric.map(({ id, name, points: categoryPoints }) => ({
+          id,
+          name,
+          points: categoryPoints
+        }))
       }),
     [
       assignmentSlug,
@@ -383,13 +397,15 @@ export const AssignmentSetupPage = ({
           <h2>Required files</h2>
           <p className="muted-copy">Files are shown to faculty in this order.</p>
           {requiredFiles.map((file, index) => (
-            <div className="inline-form-row" key={`${index}-${file}`}>
+            <div className="inline-form-row" key={file.key}>
               <input
                 aria-label={`Required file ${String(index + 1)}`}
-                value={file}
+                value={file.value}
                 onChange={(event) => {
                   setRequiredFiles((current) =>
-                    current.map((value, item) => (item === index ? event.target.value : value))
+                    current.map((value, item) =>
+                      item === index ? { ...value, value: event.target.value } : value
+                    )
                   );
                   clearPreview();
                 }}
@@ -447,7 +463,11 @@ export const AssignmentSetupPage = ({
           <button
             className="secondary-action"
             onClick={() => {
-              setRequiredFiles((current) => [...current, ""]);
+              draftKeyCounter.current += 1;
+              setRequiredFiles((current) => [
+                ...current,
+                { key: `required-file-${String(draftKeyCounter.current)}`, value: "" }
+              ]);
               clearPreview();
             }}
             type="button"
@@ -459,7 +479,7 @@ export const AssignmentSetupPage = ({
           <h2>Rubric</h2>
           <p className="muted-copy">Categories are flat and shown in this order.</p>
           {rubric.map((category, index) => (
-            <div className="inline-form-row" key={`${index}-${category.id}`}>
+            <div className="inline-form-row" key={category.key}>
               <input
                 aria-label={`Rubric ID ${String(index + 1)}`}
                 placeholder="ID"
@@ -558,7 +578,16 @@ export const AssignmentSetupPage = ({
           <button
             className="secondary-action"
             onClick={() => {
-              setRubric((current) => [...current, { id: "", name: "", points: Number.NaN }]);
+              draftKeyCounter.current += 1;
+              setRubric((current) => [
+                ...current,
+                {
+                  key: `rubric-${String(draftKeyCounter.current)}`,
+                  id: "",
+                  name: "",
+                  points: Number.NaN
+                }
+              ]);
               clearPreview();
             }}
             type="button"

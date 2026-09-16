@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { copyTextToClipboard } from "../assignment-detail/assignmentDetailClipboard";
+import { OperationStatusBar } from "../components/OperationStatusBar";
 import {
   formatNullableValue,
   formatStatusLabel,
@@ -8,6 +9,7 @@ import {
   hasAttentionStatus
 } from "../assignment-detail/assignmentDetailReadiness";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
+import type { AssignmentApplyProgressEvent } from "../../electron/ipc";
 import { normalizeApplyResult } from "./applyResultNormalization";
 import { normalizeApplyPreview } from "./applyPreviewNormalization";
 import {
@@ -137,6 +139,15 @@ const getCourseTermSubtitle = (preview: NormalizedApplyPreview | null): string =
 
 const getStudentLabel = (row: ApplyPreviewRepositoryRow): string =>
   row.studentId ?? "Unknown student";
+
+const getApplyOperationDetail = (progress: AssignmentApplyProgressEvent | null): string =>
+  progress === null
+    ? "Creating and updating student repositories..."
+    : `Repository ${progress.progress.current} of ${progress.progress.total} · ${
+        progress.progress.mode === "individual"
+          ? progress.progress.studentId
+          : progress.progress.groupId
+      } · ${progress.progress.repository}`;
 
 interface DetailItemProps {
   readonly label: string;
@@ -848,10 +859,12 @@ export const ApplyPreviewPage = ({
   const [applyResult, setApplyResult] = useState<ApplyExecutionLoadResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
+  const [applyProgress, setApplyProgress] = useState<AssignmentApplyProgressEvent | null>(null);
   const [isConfirmingApply, setIsConfirmingApply] = useState(false);
   const [isApplyConfirmed, setIsApplyConfirmed] = useState(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
+  const applyProgressActiveRef = useRef(false);
 
   const preview = useMemo(
     () =>
@@ -909,6 +922,8 @@ export const ApplyPreviewPage = ({
     }
 
     setIsApplying(true);
+    applyProgressActiveRef.current = true;
+    setApplyProgress(null);
 
     try {
       setApplyResult(
@@ -938,6 +953,8 @@ export const ApplyPreviewPage = ({
       });
     } finally {
       setIsApplying(false);
+      applyProgressActiveRef.current = false;
+      setApplyProgress(null);
     }
   };
 
@@ -970,6 +987,23 @@ export const ApplyPreviewPage = ({
     },
     []
   );
+
+  useEffect(() => {
+    const unsubscribe = window.graiderUI.onAssignmentApplyProgress((progress) => {
+      if (
+        applyProgressActiveRef.current &&
+        progress.courseFolderId === selection.courseFolderId &&
+        progress.assignmentFile === selection.assignmentFile
+      ) {
+        setApplyProgress(progress);
+      }
+    });
+
+    return () => {
+      applyProgressActiveRef.current = false;
+      unsubscribe();
+    };
+  }, [selection.assignmentFile, selection.courseFolderId]);
 
   const title = getAssignmentTitle(
     preview,
@@ -1042,6 +1076,13 @@ export const ApplyPreviewPage = ({
         )}
 
         {isApplying ? <p className="loading-state">Applying assignment changes...</p> : null}
+
+        {isApplying ? (
+          <OperationStatusBar
+            label="Applying assignment"
+            detail={getApplyOperationDetail(applyProgress)}
+          />
+        ) : null}
 
         {showTokenGuidance ? (
           <section className="detail-guidance" aria-label="GitHub token guidance">

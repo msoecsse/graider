@@ -56,8 +56,23 @@ export interface RecoverStudentBaselineInput {
   templateCommitSha: string;
 }
 
+export interface RecoverTemplateAndStudentBaselineInput {
+  templateRepository: TemplateRepositoryRef;
+  studentRepository: StudentRepositoryRef;
+  currentTemplateCommitSha: string;
+}
+
 export type TemplateSyncBaselineRecoveryResult =
   | { status: "recovered"; studentDefaultBranchCommitSha: string }
+  | { status: "not_found" }
+  | { status: "ambiguous" };
+
+export type TemplateAndStudentBaselineRecoveryResult =
+  | {
+      status: "recovered";
+      templateCommitSha: string;
+      studentDefaultBranchCommitSha: string;
+    }
   | { status: "not_found" }
   | { status: "ambiguous" };
 
@@ -98,6 +113,9 @@ export interface TemplateSyncGitGateway {
   recoverStudentBaseline(
     input: RecoverStudentBaselineInput
   ): Promise<TemplateSyncBaselineRecoveryResult>;
+  recoverTemplateAndStudentBaseline(
+    input: RecoverTemplateAndStudentBaselineInput
+  ): Promise<TemplateAndStudentBaselineRecoveryResult>;
   applyAndPushTemplateDelta(input: ApplyTemplateDeltaInput): Promise<ApplyTemplateDeltaResult>;
   /** Creates and non-force pushes a branch from studentBaseCommitSha, never main. */
   prepareConflictBranch(input: PrepareConflictBranchInput): Promise<void>;
@@ -223,45 +241,8 @@ export const computeTemplateDelta = (
 export const syncTemplateUpdate = async (input: TemplateSyncInput): Promise<TemplateSyncResult> => {
   let anchors = input.anchors;
   if (!hasInitializedAnchors(anchors)) {
-    if (
-      anchors.templateSyncBaselineStatus !== "baseline_required" ||
-      anchors.templateCommitSha === undefined ||
-      anchors.studentDefaultBranchCommitSha !== undefined
-    )
-      return { status: "baseline_required" };
-    const recordedTemplateCommitSha = anchors.templateCommitSha;
-
-    let recovery: TemplateSyncBaselineRecoveryResult;
-    try {
-      recovery = await input.gateway.recoverStudentBaseline({
-        templateRepository: input.templateRepository,
-        studentRepository: input.studentRepository,
-        templateCommitSha: recordedTemplateCommitSha
-      });
-    } catch (error: unknown) {
-      const failure = getTemplateSyncFailure(error);
-      return { status: "failure", error, ...(failure === undefined ? {} : { failure }) };
-    }
-    if (recovery.status === "not_found")
-      return {
-        status: "baseline_required",
-        reason: "no_reliable_match",
-        message:
-          "No student history commit exactly matches the recorded template revision. Initialize the synchronization baseline manually."
-      };
-    if (recovery.status === "ambiguous")
-      return {
-        status: "baseline_required",
-        reason: "ambiguous_matches",
-        message:
-          "Multiple student history commits match the recorded template revision. Initialize the synchronization baseline manually."
-      };
-
-    const recoveredAnchors: InitializedTemplateSyncAnchors = {
-      templateCommitSha: recordedTemplateCommitSha,
-      studentDefaultBranchCommitSha: recovery.studentDefaultBranchCommitSha,
-      templateSyncBaselineStatus: "initialized"
-    };
+    const recoveredAnchors = await recoverLegacyTemplateSyncAnchors(input);
+    if ("status" in recoveredAnchors) return recoveredAnchors;
     try {
       await input.updateAnchors(recoveredAnchors);
     } catch (error: unknown) {
@@ -331,6 +312,79 @@ export const syncTemplateUpdate = async (input: TemplateSyncInput): Promise<Temp
       templateSyncBaselineStatus: "initialized"
     });
     return { status: "updated", commitSha: applied.commitSha };
+  } catch (error: unknown) {
+    const failure = getTemplateSyncFailure(error);
+    return { status: "failure", error, ...(failure === undefined ? {} : { failure }) };
+  }
+};
+
+const recoverLegacyTemplateSyncAnchors = async (
+  input: TemplateSyncInput
+): Promise<
+  InitializedTemplateSyncAnchors | TemplateSyncBaselineRequiredResult | TemplateSyncResult
+> => {
+  const anchors = input.anchors;
+  if (anchors.templateSyncBaselineStatus !== "baseline_required")
+    return { status: "baseline_required" };
+  if (
+    (anchors.templateCommitSha === undefined &&
+      anchors.studentDefaultBranchCommitSha !== undefined) ||
+    (anchors.templateCommitSha !== undefined && anchors.studentDefaultBranchCommitSha !== undefined)
+  )
+    return { status: "baseline_required" };
+
+  try {
+    if (anchors.templateCommitSha !== undefined) {
+      const recovery = await input.gateway.recoverStudentBaseline({
+        templateRepository: input.templateRepository,
+        studentRepository: input.studentRepository,
+        templateCommitSha: anchors.templateCommitSha
+      });
+      if (recovery.status === "not_found")
+        return {
+          status: "baseline_required",
+          reason: "no_reliable_match",
+          message:
+            "No student history commit exactly matches the recorded template revision. Initialize the synchronization baseline manually."
+        };
+      if (recovery.status === "ambiguous")
+        return {
+          status: "baseline_required",
+          reason: "ambiguous_matches",
+          message:
+            "Multiple student history commits match the recorded template revision. Initialize the synchronization baseline manually."
+        };
+      return {
+        templateCommitSha: anchors.templateCommitSha,
+        studentDefaultBranchCommitSha: recovery.studentDefaultBranchCommitSha,
+        templateSyncBaselineStatus: "initialized"
+      };
+    }
+
+    const recovery = await input.gateway.recoverTemplateAndStudentBaseline({
+      templateRepository: input.templateRepository,
+      studentRepository: input.studentRepository,
+      currentTemplateCommitSha: input.currentTemplateCommitSha
+    });
+    if (recovery.status === "not_found")
+      return {
+        status: "baseline_required",
+        reason: "no_reliable_match",
+        message:
+          "No exact historical template/student tree match could be established safely. Initialize the synchronization baseline manually."
+      };
+    if (recovery.status === "ambiguous")
+      return {
+        status: "baseline_required",
+        reason: "ambiguous_matches",
+        message:
+          "Multiple exact historical template/student tree matches exist, so the synchronization baseline cannot be chosen automatically."
+      };
+    return {
+      templateCommitSha: recovery.templateCommitSha,
+      studentDefaultBranchCommitSha: recovery.studentDefaultBranchCommitSha,
+      templateSyncBaselineStatus: "initialized"
+    };
   } catch (error: unknown) {
     const failure = getTemplateSyncFailure(error);
     return { status: "failure", error, ...(failure === undefined ? {} : { failure }) };

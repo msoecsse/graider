@@ -194,10 +194,7 @@ describe("GradingWorkspacePage commit history", () => {
 
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
-    const panel = await screen.findByRole("region", { name: "Commit History" });
-    expect(panel.previousElementSibling).toBe(
-      screen.getByRole("region", { name: "Automated Checks" })
-    );
+    const panel = await screen.findByRole("region", { name: "Automated Checks" });
     expect(loadHistory).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
     expect(Object.keys(loadHistory.mock.calls[0]?.[0] as object).sort()).toEqual([
       "assignmentSlug",
@@ -284,7 +281,7 @@ describe("GradingWorkspacePage commit history", () => {
   ] as const)("maps %s to a safe non-blocking state", async (status, message) => {
     setApis({ loadHistory: vi.fn().mockResolvedValue({ status, studentId: "ada" }) });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
-    const panel = await screen.findByRole("region", { name: "Commit History" });
+    const panel = await screen.findByRole("region", { name: "Automated Checks" });
     expect(panel).toHaveTextContent(message);
     expect(panel.querySelector("ol")).toBeNull();
     expect(screen.getByRole("button", { name: "Mark Complete" })).toBeEnabled();

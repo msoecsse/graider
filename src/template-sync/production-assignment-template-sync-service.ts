@@ -50,9 +50,11 @@ export const runProductionAssignmentTemplateSyncService = async (
     "token" | "templateCloneUrl"
   > = {
     manifest: input.manifest,
+    ...(input.studentId === undefined ? {} : { studentId: input.studentId }),
     options: input.options,
     resolveCurrentTemplateCommitSha: input.resolveCurrentTemplateCommitSha,
     persistManifest: input.persistManifest,
+    ...(input.onProgress === undefined ? {} : { onProgress: input.onProgress }),
     workspace: input.workspace
   };
   const bridge = injectedBridge ?? runProductionAssignmentTemplateSync;

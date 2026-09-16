@@ -32,6 +32,10 @@ import {
   isManagedGradingWorkflowEligible
 } from "../workflows/managed-workflow-deployment.js";
 import { GRAIDER_MANAGED_WORKFLOW_PATH } from "../workflows/managed-workflow-policy.js";
+import {
+  reportApplyRepositoryProgress,
+  type ApplyRepositoryProgressObserver
+} from "./apply-progress.js";
 
 const EMPTY_COUNT = 0;
 const PRIVATE_REPOSITORY = true;
@@ -39,12 +43,9 @@ const DEFAULT_ACTIONS_ENABLED = true;
 const STUDENT_PERMISSION: Exclude<GitHubPermission, "none"> = "admin";
 const FACULTY_PERMISSION: Exclude<GitHubPermission, "none"> = "admin";
 const GRADER_PERMISSION: Exclude<GitHubPermission, "none"> = "maintain";
-const CREATE_REPOSITORY_OPERATION = "createRepository";
-const CREATE_REPOSITORY_FROM_TEMPLATE_OPERATION = "createRepositoryFromTemplate";
 const CREATE_REPOSITORY_PLAN_TYPE = "create_repository";
 const CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE = "create_repository_from_template";
-const TEMPLATE_MATERIALIZATION_ATTEMPTS = 10;
-const TEMPLATE_MATERIALIZATION_POLL_MS = 1000;
+const FIRST_REPOSITORY_POSITION = 1;
 
 const isRepositoryCreationOperation = (operation: PlanOperation): boolean =>
   operation.type === CREATE_REPOSITORY_PLAN_TYPE ||
@@ -79,6 +80,7 @@ export interface ApplyExecutionInput {
   githubClient: GitHubClient;
   clock: Clock;
   retryOptions?: Partial<RetryOptions>;
+  onRepositoryProgress?: ApplyRepositoryProgressObserver;
 }
 
 export interface ApplySummary {
@@ -142,30 +144,6 @@ const runGitHubOperation = async <T>(
   input: ApplyExecutionInput,
   operation: () => Promise<T>
 ): Promise<T> => withGitHubRetry(operation, input.retryOptions);
-
-const waitForTemplateMaterialization = async (
-  input: ApplyExecutionInput,
-  repository: GitHubRepository
-): Promise<string | undefined> => {
-  const sleep =
-    input.retryOptions?.sleep ??
-    ((milliseconds: number) =>
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, milliseconds);
-      }));
-
-  for (let attempt = 1; attempt <= TEMPLATE_MATERIALIZATION_ATTEMPTS; attempt += 1) {
-    const commitSha = await runGitHubOperation(input, () =>
-      input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
-    );
-    if (commitSha !== undefined) return commitSha;
-    if (attempt < TEMPLATE_MATERIALIZATION_ATTEMPTS) {
-      await sleep(TEMPLATE_MATERIALIZATION_POLL_MS);
-    }
-  }
-
-  return undefined;
-};
 
 const createWorkflowMissingDiagnostic = (operation: PlanOperation): Diagnostic =>
   createConfigDiagnostic(
@@ -261,25 +239,6 @@ const createPermissionWarning = (
       section: operation.section,
       currentPermission,
       expectedPermission
-    }
-  );
-
-const createRepositoryCreationNotObservedDiagnostic = (
-  operation: PlanOperation,
-  owner: string,
-  repositoryName: string,
-  githubOperation: string
-): Diagnostic =>
-  createConfigDiagnostic(
-    DiagnosticCode.GithubApiError,
-    `Repository creation did not produce an observable repository for ${owner}/${repositoryName}.`,
-    {
-      operation: githubOperation,
-      owner,
-      repositoryName,
-      student_id: operation.student_id,
-      github_username: operation.github_username,
-      section: operation.section
     }
   );
 
@@ -487,9 +446,6 @@ const executeCreateRepository = async (
 
   const repositoryName = operation.repository_name;
   const createdFromTemplate = operation.type === CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE;
-  const githubOperation = createdFromTemplate
-    ? CREATE_REPOSITORY_FROM_TEMPLATE_OPERATION
-    : CREATE_REPOSITORY_OPERATION;
   let nextState = state;
 
   try {
@@ -513,7 +469,7 @@ const executeCreateRepository = async (
         return recordError(state, parsedTemplate.diagnostic);
       }
 
-      await runGitHubOperation(input, () =>
+      const repository = await runGitHubOperation(input, () =>
         input.githubClient.createRepositoryFromTemplate({
           templateOwner: parsedTemplate.repository.owner,
           templateRepo: parsedTemplate.repository.repo,
@@ -522,91 +478,75 @@ const executeCreateRepository = async (
           private: PRIVATE_REPOSITORY
         })
       );
+
+      const templateCommitSha = state.manifest.template?.commitSha;
+      nextState = persistManifest(
+        incrementSummary(
+          {
+            ...state,
+            manifest: upsertRepositoryRecord(
+              state.manifest,
+              createManifestRecord(
+                input.config,
+                student,
+                repository,
+                observedAt,
+                true,
+                templateCommitSha
+              )
+            )
+          },
+          "created"
+        ),
+        input.manifestPath
+      );
+      if (nextState.errors.length > state.errors.length) {
+        return nextState;
+      }
+
+      const studentDefaultBranchCommitSha = await runGitHubOperation(input, () =>
+        input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+      );
+
+      return studentDefaultBranchCommitSha === undefined
+        ? nextState
+        : persistManifest(
+            {
+              ...nextState,
+              manifest: updateRepositoryIdentity(nextState.manifest, {
+                studentId: student.studentId,
+                repository: {
+                  ...(templateCommitSha === undefined ? {} : { templateCommitSha }),
+                  studentDefaultBranchCommitSha,
+                  templateSyncBaselineStatus: "initialized"
+                }
+              })
+            },
+            input.manifestPath
+          );
     } else {
-      await runGitHubOperation(input, () =>
+      const repository = await runGitHubOperation(input, () =>
         input.githubClient.createRepository({
           owner: input.config.course.github.organization,
           name: repositoryName,
           private: PRIVATE_REPOSITORY
         })
       );
-    }
 
-    const repository = await runGitHubOperation(input, () =>
-      input.githubClient.getRepository(input.config.course.github.organization, repositoryName)
-    );
-
-    if (repository === null) {
-      return recordError(
-        state,
-        createRepositoryCreationNotObservedDiagnostic(
-          operation,
-          input.config.course.github.organization,
-          repositoryName,
-          githubOperation
-        )
-      );
-    }
-
-    const templateCommitSha = createdFromTemplate ? state.manifest.template?.commitSha : undefined;
-    nextState = persistManifest(
-      incrementSummary(
-        {
-          ...state,
-          manifest: upsertRepositoryRecord(
-            state.manifest,
-            createManifestRecord(
-              input.config,
-              student,
-              repository,
-              observedAt,
-              createdFromTemplate,
-              templateCommitSha
+      return persistManifest(
+        incrementSummary(
+          {
+            ...state,
+            manifest: upsertRepositoryRecord(
+              state.manifest,
+              createManifestRecord(input.config, student, repository, observedAt, false)
             )
-          )
-        },
-        "created"
-      ),
-      input.manifestPath
-    );
-    if (nextState.errors.length > state.errors.length) {
-      return nextState;
-    }
-
-    const studentDefaultBranchCommitSha = createdFromTemplate
-      ? await waitForTemplateMaterialization(input, repository)
-      : undefined;
-
-    if (
-      createdFromTemplate &&
-      (templateCommitSha === undefined || studentDefaultBranchCommitSha === undefined)
-    ) {
-      return recordError(
-        nextState,
-        createConfigDiagnostic(
-          DiagnosticCode.GithubApiError,
-          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
-          { repository: repository.fullName, operation: githubOperation }
-        )
+          },
+          "created"
+        ),
+        input.manifestPath
       );
     }
-
-    return persistManifest(
-      {
-        ...nextState,
-        manifest: updateRepositoryIdentity(nextState.manifest, {
-          studentId: student.studentId,
-          repository: {
-            ...(templateCommitSha === undefined ? {} : { templateCommitSha }),
-            ...(studentDefaultBranchCommitSha === undefined
-              ? {}
-              : { studentDefaultBranchCommitSha }),
-            ...(createdFromTemplate ? { templateSyncBaselineStatus: "initialized" } : {})
-          }
-        })
-      },
-      input.manifestPath
-    );
   } catch (error: unknown) {
     return recordError(nextState, normalizeGitHubError(error));
   }
@@ -1153,6 +1093,21 @@ export const executeApplyPlan = async (
     string,
     { created: boolean; updated: boolean; failed: boolean }
   >();
+  const repositoryTargets = input.plan.operations.reduce<ApplyRepositoryTarget[]>(
+    (targets, operation) => {
+      const target = operation.target_id === undefined ? undefined : findTarget(input, operation);
+      return target === undefined ||
+        target.mode !== "individual" ||
+        targets.some((candidate) => candidate.targetId === target.targetId)
+        ? targets
+        : [...targets, target];
+    },
+    []
+  );
+  const repositoryPositions = new Map(
+    repositoryTargets.map((target, index) => [target.targetId, index + FIRST_REPOSITORY_POSITION])
+  );
+  const reportedTargetIds = new Set<string>();
 
   if (state.errors.length > EMPTY_COUNT) {
     return {
@@ -1170,6 +1125,23 @@ export const executeApplyPlan = async (
   }
 
   for (const operation of input.plan.operations) {
+    const target = operation.target_id === undefined ? undefined : findTarget(input, operation);
+    const repositoryPosition =
+      target === undefined ? undefined : repositoryPositions.get(target.targetId);
+    if (
+      target !== undefined &&
+      repositoryPosition !== undefined &&
+      !reportedTargetIds.has(target.targetId)
+    ) {
+      reportedTargetIds.add(target.targetId);
+      reportApplyRepositoryProgress(input.onRepositoryProgress, {
+        current: repositoryPosition,
+        total: repositoryTargets.length,
+        repository: `${input.config.course.github.organization}/${target.repositoryName}`,
+        mode: "individual",
+        studentId: target.primaryStudentId ?? target.targetId
+      });
+    }
     const errorsBefore = state.errors.length;
     const createdBefore = state.summary.created;
     const verifiedBefore = state.summary.verified;

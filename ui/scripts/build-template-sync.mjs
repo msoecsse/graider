@@ -24,6 +24,9 @@ await build({
     gradingStudentEvidenceBackend: fileURLToPath(
       new URL("../../src/grading/grading-student-evidence-context.ts", import.meta.url)
     ),
+    gradingStudentWorkflowRepairBackend: fileURLToPath(
+      new URL("../../src/grading/grading-student-workflow-repair-context.ts", import.meta.url)
+    ),
     gradingStudentCommitHistoryBackend: fileURLToPath(
       new URL("../../src/grading/grading-submission-context.ts", import.meta.url)
     ),

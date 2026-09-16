@@ -15,9 +15,14 @@ import {
 } from "./gradingStudentViewStateService.js";
 import { loadGradingStudentSnapshot } from "./gradingStudentSnapshotService.js";
 import { loadGradingStudentEvidence } from "./gradingStudentEvidenceService.js";
+import { repairGradingStudentWorkflow } from "./gradingStudentWorkflowRepairService.js";
+import { repairGradingWorkflowsForAssignment } from "./gradingBulkWorkflowRepairService.js";
 import { loadGradingStudentCommitHistory } from "./gradingStudentCommitHistoryService.js";
 import { markGradingStudentComplete } from "./gradingStudentCompleteService.js";
-import { publishGradingStudentReport } from "./gradingStudentReportPublicationService.js";
+import {
+  previewGradingStudentReport,
+  publishGradingStudentReport
+} from "./gradingStudentReportPublicationService.js";
 import { bulkPublishGradingStudentReports } from "./gradingBulkReportPublicationService.js";
 import { isBulkPublishGradingStudentReportsRequest } from "./gradingBulkReportPublicationRequestValidation.js";
 import {
@@ -53,6 +58,8 @@ import {
   isLoadGradingStudentSourceRequest,
   isLoadGradingStudentCommitHistoryRequest,
   isLoadGradingStudentEvidenceRequest,
+  isGradingStudentWorkflowRepairRequest,
+  isGradingBulkWorkflowRepairRequest,
   isMarkGradingStudentCompleteRequest,
   isPublishGradingStudentReportRequest,
   isSaveGradingStudentViewStateRequest
@@ -976,6 +983,33 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
+  ipcMain.handle(IPC_CHANNELS.repairGradingStudentWorkflow, (_event, request: unknown) => {
+    if (
+      !isGradingStudentWorkflowRepairRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder is required for grading workflow repair.");
+    return repairGradingStudentWorkflow({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.repairGradingAssignmentWorkflows, (_event, request: unknown) => {
+    if (!isGradingBulkWorkflowRepairRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder is required for bulk grading workflow repair.");
+    return repairGradingWorkflowsForAssignment({
+      ...request,
+      userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.previewGradingStudentReport, (_event, request: unknown) => {
+    if (
+      !isPublishGradingStudentReportRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder is required for report preview.");
+    return previewGradingStudentReport({ ...request, userDataPath: app.getPath("userData") });
+  });
   ipcMain.handle(IPC_CHANNELS.loadGradingStudentCommitHistory, (_event, request: unknown) => {
     if (
       !isLoadGradingStudentCommitHistoryRequest(request) ||
@@ -1166,7 +1200,7 @@ export const registerIpcHandlers = (): void => {
     });
   });
 
-  ipcMain.handle(IPC_CHANNELS.applyAssignment, async (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.applyAssignment, async (event, request: unknown) => {
     if (!isAssignmentApplyRequest(request)) {
       throw new Error("Assignment apply request is required.");
     }
@@ -1174,6 +1208,13 @@ export const registerIpcHandlers = (): void => {
     return await applyAssignmentWithStudentRepositoryAccessPage(request, {
       runner: processRunner,
       env: process.env,
+      onProgress: (progress) => {
+        event.sender.send(IPC_CHANNELS.assignmentApplyProgress, {
+          courseFolderId: request.courseFolderId,
+          assignmentFile: request.assignmentFile,
+          progress
+        });
+      },
       pagesRepositoryFolderPath:
         withRegisteredPagesFolder(request).pagesRepositoryFolderPath ?? null
     });

@@ -627,9 +627,10 @@ export class FakeGitHubClient implements GitHubClient {
           (record) =>
             repositoryKey(record.owner, record.repo) === repositoryKey(input.owner, input.repo) &&
             record.run.workflowPath === input.workflowPath &&
-            record.run.headSha === input.headSha &&
+            (input.headSha === undefined || record.run.headSha === input.headSha) &&
             record.run.status === "completed"
         )
+        .slice(0, input.limit ?? this.workflowRuns.length)
         .map((record) => ({
           ...record.run,
           runAttempt: "runAttempt" in record.run ? Number(record.run.runAttempt) : 1

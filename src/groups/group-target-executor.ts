@@ -13,6 +13,12 @@ import {
 } from "../workflows/managed-workflow-deployment.js";
 import { GRAIDER_MANAGED_WORKFLOW_PATH } from "../workflows/managed-workflow-policy.js";
 import type { GroupApplyPreviewTarget } from "./group-preview-planner.js";
+import {
+  reportApplyRepositoryProgress,
+  type ApplyRepositoryProgressObserver
+} from "../execution/apply-progress.js";
+
+const FIRST_REPOSITORY_POSITION = 1;
 
 export interface GroupTargetExecutionResult {
   readonly targets: readonly GroupTargetExecutionTargetResult[];
@@ -48,6 +54,7 @@ export const executeGroupTargets = async (input: {
   githubClient: GitHubClient;
   trackedTargetIds?: ReadonlySet<string>;
   onRepositoryObserved?: GroupRepositoryObservedHandler;
+  onRepositoryProgress?: ApplyRepositoryProgressObserver;
 }): Promise<GroupTargetExecutionResult> => {
   const results: GroupTargetExecutionTargetResult[] = [];
   const warnings: Diagnostic[] = [];
@@ -63,7 +70,14 @@ export const executeGroupTargets = async (input: {
   const deployManagedWorkflow = isManagedGradingWorkflowEligible(grading);
   if (template?.status === "failure")
     return { targets: results, warnings, errors: [template.diagnostic] };
-  for (const target of input.targets) {
+  for (const [index, target] of input.targets.entries()) {
+    reportApplyRepositoryProgress(input.onRepositoryProgress, {
+      current: index + FIRST_REPOSITORY_POSITION,
+      total: input.targets.length,
+      repository: `${input.config.course.github.organization}/${target.repositoryName}`,
+      mode: "group",
+      groupId: target.groupId
+    });
     let repository: GitHubRepository | null = null;
     let repositoryCreated = false;
     try {

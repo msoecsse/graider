@@ -16,6 +16,7 @@ import {
 export interface AppliedCommentInput {
   readonly id: string;
   readonly sourceCommentId?: string;
+  readonly title?: string;
   readonly text: string;
   readonly deduction: number;
   readonly rubricCategoryId?: string;
@@ -163,6 +164,8 @@ export const addGradingStudentCommentContext = (
 ): AppliedCommentContextResult => {
   const loaded = loadCurrent(request);
   if (loaded.status === "failure") return loaded.result;
+  if (comment.title === undefined || comment.title.trim() === "")
+    return stateError(request.studentId, "comment_title_required");
   const invalidComment = validateCommentAgainstAssignment(request, comment);
   if (invalidComment !== undefined) return invalidComment;
   let state: GradingState;
@@ -175,7 +178,7 @@ export const addGradingStudentCommentContext = (
     if (initial.status === "failure") return stateError(request.studentId, initial.code);
     state = initial.value;
   }
-  const updated = addAppliedComment(state, comment);
+  const updated = addAppliedComment(state, { ...comment, title: comment.title.trim() });
   return updated.status === "success"
     ? save(request, updated.value)
     : stateError(request.studentId, updated.code);
@@ -190,9 +193,14 @@ export const editGradingStudentCommentContext = (
   if (loaded.status === "failure") return loaded.result;
   if (loaded.status === "missing")
     return { status: "not_found", studentId: request.studentId, code: "applied_comment_not_found" };
+  if (replacement.title !== undefined && replacement.title.trim() === "")
+    return stateError(request.studentId, "comment_title_required");
   const invalidComment = validateCommentAgainstAssignment(request, replacement);
   if (invalidComment !== undefined) return invalidComment;
-  const updated = editAppliedComment(loaded.state, commentId, replacement);
+  const updated = editAppliedComment(loaded.state, commentId, {
+    ...replacement,
+    ...(replacement.title === undefined ? {} : { title: replacement.title.trim() })
+  });
   if (updated.status === "not_found")
     return { status: "not_found", studentId: request.studentId, code: updated.code };
   return updated.status === "success"

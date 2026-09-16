@@ -1254,6 +1254,7 @@ describe("GradingWorkspacePage comment application", () => {
     });
     const directComment = {
       id: "direct-id",
+      title: "Branch explanation",
       text: "Explain this branch.",
       deduction: -3,
       sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
@@ -1283,14 +1284,21 @@ describe("GradingWorkspacePage comment application", () => {
       target: { value: directComment.text }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Deduction" }), {
-      target: { value: "-3" }
+      target: { value: "3" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+
+    expect(addComment).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: `  ${directComment.title}  ` }
     });
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
 
     await waitFor(() => expect(addComment).toHaveBeenCalledTimes(1));
     expect(addComment.mock.calls[0]?.[0].comment).toMatchObject({
+      title: directComment.title,
       text: directComment.text,
-      deduction: -3,
+      deduction: 3,
       sourceLocation: directComment.sourceLocation
     });
     expect(addComment.mock.calls[0]?.[0].comment).not.toHaveProperty("sourceCommentId");
@@ -1347,14 +1355,15 @@ describe("GradingWorkspacePage comment application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply Loop clarity" }));
 
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Use a clearer loop.");
-    expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(-2);
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Loop clarity");
+    expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(2);
     expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("quality");
     expect(screen.getByText("Source target: src/Main.java: 2-5")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
       target: { value: "Customized feedback" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Deduction" }), {
-      target: { value: "-4" }
+      target: { value: "4" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
 
@@ -1365,8 +1374,9 @@ describe("GradingWorkspacePage comment application", () => {
       comment: {
         id: expect.any(String),
         sourceCommentId: "library-one",
+        title: "Loop clarity",
         text: "Customized feedback",
-        deduction: -4,
+        deduction: 4,
         rubricCategoryId: "quality",
         sourceLocation: { file: "src/Main.java", startLine: 2, endLine: 5 }
       }
@@ -1776,6 +1786,40 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     }
   });
 
+  it("shows positive magnitude for a legacy positive applied deduction and rejects negative input", async () => {
+    const addComment = vi.fn();
+    const positiveComment = { ...appliedComment, deduction: 4 };
+    setApis(
+      vi.fn().mockResolvedValue(rubricWorkspace()),
+      vi.fn().mockResolvedValue(source("ada")),
+      undefined,
+      undefined,
+      vi.fn().mockResolvedValue(gradingSnapshot("in_progress", [positiveComment])),
+      undefined,
+      addComment
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
+    expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(4);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "Penalty" }
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "Too broad." }
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Deduction" }), {
+      target: { value: "-1" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Deduction must be zero or greater."
+    );
+    expect(addComment).not.toHaveBeenCalled();
+  });
+
   it("edits snapshot values without sending provenance and refreshes authoritative score and published status", async () => {
     const refreshedComment = {
       ...appliedComment,
@@ -1829,13 +1873,13 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Original feedback");
-    expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(-5);
+    expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(5);
     expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("quality");
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
       target: { value: "Revised feedback" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Deduction" }), {
-      target: { value: "-8" }
+      target: { value: "8" }
     });
     fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
       target: { value: "correctness" }
@@ -1853,7 +1897,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       commentId: "applied-one",
       replacement: {
         text: "Revised feedback",
-        deduction: -8,
+        deduction: 8,
         rubricCategoryId: "correctness"
       }
     });

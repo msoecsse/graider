@@ -33,11 +33,14 @@ import { runGroupApplyPreflight } from "../../groups/group-apply-preflight.js";
 import { executeGroupTargets } from "../../groups/group-target-executor.js";
 import { writeGroupApplyManifestV2 } from "../../groups/group-apply-manifest-writer.js";
 import type { GroupTargetExecutionTargetResult } from "../../groups/group-target-executor.js";
+import type { ApplyRepositoryProgressObserver } from "../../execution/apply-progress.js";
 
 const COMMAND_NAME = "apply";
 const EMPTY_COUNT = 0;
 const GROUP_APPLY_INCOMPLETE_MESSAGE =
   "Group Apply did not complete. Every repository observed as created remains manifest-tracked, so retrying Apply can safely resume without recreating it.";
+
+export const APPLY_PROGRESS_PREFIX = "GRAIDER_PROGRESS ";
 
 export interface ApplyCommandRequest {
   cwd: string;
@@ -49,6 +52,7 @@ export interface ApplyCommandRequest {
   retryOptions?: Partial<RetryOptions>;
   groupTargetExecutor?: typeof executeGroupTargets;
   groupManifestWriter?: typeof writeGroupApplyManifestV2;
+  onRepositoryProgress?: ApplyRepositoryProgressObserver;
 }
 
 const getExecutionStatus = (
@@ -80,7 +84,8 @@ export const runApplyCommand = async ({
   clock = systemClock,
   retryOptions,
   groupTargetExecutor = executeGroupTargets,
-  groupManifestWriter = writeGroupApplyManifestV2
+  groupManifestWriter = writeGroupApplyManifestV2,
+  onRepositoryProgress
 }: ApplyCommandRequest): Promise<CommandResult> => {
   const retryEvents: GitHubRetryEvent[] = [];
   const effectiveRetryOptions: Partial<RetryOptions> = {
@@ -298,7 +303,8 @@ export const runApplyCommand = async ({
           return Promise.resolve(checkpoint.diagnostics);
         }
         return Promise.resolve([]);
-      }
+      },
+      ...(onRepositoryProgress === undefined ? {} : { onRepositoryProgress })
     });
     for (const targetResult of execution.targets) {
       if (targetResult.htmlUrl !== null) {
@@ -466,7 +472,8 @@ export const runApplyCommand = async ({
     students: rosterResult.students,
     githubClient: effectiveGitHubClient,
     clock,
-    retryOptions: effectiveRetryOptions
+    retryOptions: effectiveRetryOptions,
+    ...(onRepositoryProgress === undefined ? {} : { onRepositoryProgress })
   });
   const generatedFiles = fs.existsSync(manifestPath.absolutePath)
     ? [manifestPath.relativePath]
@@ -500,16 +507,29 @@ export const registerApplyCommand = (program: Command): void => {
     .option("--json", "Emit JSON output")
     .option("--verbose", "Emit verbose diagnostics")
     .option("--yes", "Confirm non-interactive execution")
+    .option("--progress-json", "Emit repository heartbeat records to stderr")
     .description("Apply assignment repository changes.")
-    .action(async (assignmentFile: string, rawOptions: RawCommonCommandOptions) => {
-      const options = normalizeCommonCommandOptions(rawOptions);
-      const result = await runApplyCommand({
-        cwd: process.cwd(),
-        assignmentFile,
-        options
-      });
+    .action(
+      async (
+        assignmentFile: string,
+        rawOptions: RawCommonCommandOptions & { progressJson?: boolean }
+      ) => {
+        const options = normalizeCommonCommandOptions(rawOptions);
+        const result = await runApplyCommand({
+          cwd: process.cwd(),
+          assignmentFile,
+          options,
+          ...(rawOptions.progressJson === true
+            ? {
+                onRepositoryProgress: (progress) => {
+                  process.stderr.write(`${APPLY_PROGRESS_PREFIX}${JSON.stringify(progress)}\n`);
+                }
+              }
+            : {})
+        });
 
-      writeCommandResult(result, options.json);
-      process.exitCode = result.exitCode;
-    });
+        writeCommandResult(result, options.json);
+        process.exitCode = result.exitCode;
+      }
+    );
 };

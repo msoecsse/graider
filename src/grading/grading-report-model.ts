@@ -4,6 +4,7 @@ import type { GradingState, GradingStateResult } from "./grading-state.js";
 import type { GradeCalculation, RubricCategory } from "./grading-state-operations.js";
 import { projectGradingStudent } from "./grading-student-projection.js";
 import type { SubmissionSourceModel } from "./submission-source.js";
+import { commentScoreAdjustment } from "./comment-score-adjustment.js";
 
 type AppliedComment = GradingState["appliedComments"][number];
 type ManualAdjustment = GradingState["manualAdjustments"][number];
@@ -45,6 +46,7 @@ export interface BuildGradingReportModelInput {
 export interface GradingReportComment {
   readonly reportIndex: number;
   readonly id: string;
+  readonly title?: string;
   readonly text: string;
   readonly deduction: number;
   readonly rubricCategoryId?: string;
@@ -117,8 +119,9 @@ const reportComment = (
 ): GradingReportComment => ({
   reportIndex,
   id: comment.id,
+  ...(comment.title === undefined ? {} : { title: comment.title }),
   text: comment.text,
-  deduction: comment.deduction,
+  deduction: commentScoreAdjustment(comment.deduction),
   ...(comment.rubricCategoryId === undefined
     ? {}
     : {

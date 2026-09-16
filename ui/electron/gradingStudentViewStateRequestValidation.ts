@@ -10,6 +10,8 @@ import type {
   GradingStudentViewStateRequest,
   SaveGradingStudentViewStateRequest
 } from "./ipc.js";
+import type { GradingStudentWorkflowRepairRequest } from "./gradingStudentWorkflowRepairService.js";
+import type { GradingBulkWorkflowRepairRequest } from "./gradingBulkWorkflowRepairService.js";
 
 type GradingEditorSelection = NonNullable<GradingEditorViewState["selection"]>;
 
@@ -95,6 +97,31 @@ export const isLoadGradingStudentEvidenceRequest = isGradingStudentViewStateRequ
 export const isLoadGradingStudentCommitHistoryRequest = isGradingStudentViewStateRequest;
 export const isPublishGradingStudentReportRequest = isGradingStudentViewStateRequest;
 
+export const isGradingStudentWorkflowRepairRequest = (
+  value: unknown
+): value is GradingStudentWorkflowRepairRequest => {
+  const request = record(value);
+  return (
+    request !== null &&
+    hasOnlyKeys(request, [...IDENTITY_KEYS, "confirmed"]) &&
+    hasIdentity(request) &&
+    typeof request.confirmed === "boolean"
+  );
+};
+
+export const isGradingBulkWorkflowRepairRequest = (
+  value: unknown
+): value is GradingBulkWorkflowRepairRequest => {
+  const request = record(value);
+  const keys = ["courseFolderId", "courseFolderPath", "termCode", "assignmentSlug"];
+  return (
+    request !== null &&
+    hasOnlyKeys(request, [...keys, "confirmed"]) &&
+    keys.every((key) => typeof request[key] === "string" && request[key].trim() !== "") &&
+    typeof request.confirmed === "boolean"
+  );
+};
+
 export const isSaveGradingStudentViewStateRequest = (
   value: unknown
 ): value is SaveGradingStudentViewStateRequest => {
@@ -119,11 +146,12 @@ const isSourceLocation = (value: unknown): boolean => {
   );
 };
 
-const isCommentFields = (value: unknown, includeId: boolean): boolean => {
+const isCommentFields = (value: unknown, includeId: boolean, requireTitle: boolean): boolean => {
   const comment = record(value);
   if (comment === null) return false;
   const optional = [
     ...(includeId ? ["id", "sourceCommentId"] : []),
+    "title",
     "rubricCategoryId",
     "sourceLocation"
   ];
@@ -134,6 +162,10 @@ const isCommentFields = (value: unknown, includeId: boolean): boolean => {
     (!includeId || (typeof comment.id === "string" && comment.id.trim() !== "")) &&
     (comment.sourceCommentId === undefined ||
       (typeof comment.sourceCommentId === "string" && comment.sourceCommentId.trim() !== "")) &&
+    (requireTitle
+      ? typeof comment.title === "string" && comment.title.trim() !== ""
+      : comment.title === undefined ||
+        (typeof comment.title === "string" && comment.title.trim() !== "")) &&
     typeof comment.text === "string" &&
     typeof comment.deduction === "number" &&
     Number.isFinite(comment.deduction) &&
@@ -151,7 +183,7 @@ export const isAddGradingStudentCommentRequest = (
     request !== null &&
     hasOnlyKeys(request, [...IDENTITY_KEYS, "comment"]) &&
     hasIdentity(request) &&
-    isCommentFields(request.comment, true)
+    isCommentFields(request.comment, true, true)
   );
 };
 
@@ -165,7 +197,7 @@ export const isEditGradingStudentCommentRequest = (
     hasIdentity(request) &&
     typeof request.commentId === "string" &&
     request.commentId.trim() !== "" &&
-    isCommentFields(request.replacement, false)
+    isCommentFields(request.replacement, false, false)
   );
 };
 

@@ -133,6 +133,32 @@ describe("grading student report publication Electron service", () => {
     }
   );
 
+  it("previews the same trusted rendered report without publishing or changing grading state", async () => {
+    const { values, publicationBackend } = dependencies();
+    values.readHistory.mockResolvedValue({ status: "commit_history_unavailable" });
+    publicationBackend.retrieveManagedEvidenceForGradingStudentReport.mockResolvedValue({
+      status: "failure",
+      error: { code: "evidence_not_found" }
+    });
+    const service = createGradingStudentReportPublicationService(values);
+
+    await expect(service(request, "preview")).resolves.toEqual({
+      status: "success",
+      studentId: "ada",
+      html: "<!doctype html><p>trusted report</p>",
+      warnings: ["commit_history_unavailable", "automated_evidence_unavailable"]
+    });
+    expect(publicationBackend.renderPreparedGradingStudentReport).toHaveBeenCalledWith(
+      prepared,
+      {}
+    );
+    expect(
+      publicationBackend.revalidatePreparedGradingStudentReportPublication
+    ).not.toHaveBeenCalled();
+    expect(publicationBackend.publishRenderedGradingStudentReport).not.toHaveBeenCalled();
+    expect(publicationBackend.markPreparedGradingStudentReportPublished).not.toHaveBeenCalled();
+  });
+
   it("denies inaccessible students before repository, state, token, or GitHub work", async () => {
     const { values } = dependencies();
     values.resolveFacultyScope.mockReturnValue({ ...authorized, students: [] });

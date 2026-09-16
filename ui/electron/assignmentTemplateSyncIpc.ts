@@ -4,6 +4,7 @@ import {
   type AssignmentTemplateSyncExecuteRequest,
   type AssignmentTemplateSyncExecutionResult,
   type AssignmentTemplateSyncOutcome,
+  type AssignmentTemplateSyncProgress,
   type AssignmentTemplateSyncRequest,
   type AssignmentTemplateSyncService
 } from "./assignmentTemplateSyncService.js";
@@ -12,19 +13,41 @@ import { IPC_CHANNELS } from "./ipc.js";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const hasOnlyRequestFields = (
+  value: Record<string, unknown>,
+  allowed: readonly string[]
+): boolean => Object.keys(value).every((key) => allowed.includes(key));
+
 export const isAssignmentTemplateSyncRequest = (
   value: unknown
 ): value is AssignmentTemplateSyncRequest =>
   isRecord(value) &&
+  hasOnlyRequestFields(value, [
+    "courseFolderId",
+    "courseFolderPath",
+    "assignmentFile",
+    "studentId"
+  ]) &&
   typeof value.courseFolderId === "string" &&
   typeof value.courseFolderPath === "string" &&
-  typeof value.assignmentFile === "string";
+  typeof value.assignmentFile === "string" &&
+  (value.studentId === undefined || typeof value.studentId === "string");
 
 export const isAssignmentTemplateSyncExecuteRequest = (
   value: unknown
 ): value is AssignmentTemplateSyncExecuteRequest =>
-  isAssignmentTemplateSyncRequest(value) &&
-  typeof (value as unknown as Record<string, unknown>).confirmed === "boolean";
+  isRecord(value) &&
+  hasOnlyRequestFields(value, [
+    "courseFolderId",
+    "courseFolderPath",
+    "assignmentFile",
+    "studentId",
+    "confirmed"
+  ]) &&
+  isAssignmentTemplateSyncRequest(
+    Object.fromEntries(Object.entries(value).filter(([key]) => key !== "confirmed"))
+  ) &&
+  typeof value.confirmed === "boolean";
 
 const projectBlocker = (blocker: { code: string; message: string } | undefined) =>
   blocker === undefined ? {} : { blocker: { code: blocker.code, message: blocker.message } };
@@ -36,6 +59,14 @@ export const projectTemplateSyncAvailability = (
   repositoryCount: result.repositoryCount,
   templateRepository: result.templateRepository,
   recordedTemplateRevision: result.recordedTemplateRevision,
+  ...(result.selectedRepository === undefined
+    ? {}
+    : {
+        selectedRepository: {
+          studentId: result.selectedRepository.studentId,
+          repository: result.selectedRepository.repository
+        }
+      }),
   ...projectBlocker(result.blocker)
 });
 
@@ -57,6 +88,15 @@ export const projectTemplateSyncExecutionResult = (
   ...projectBlocker(result.blocker)
 });
 
+export const projectTemplateSyncProgress = (
+  progress: AssignmentTemplateSyncProgress
+): AssignmentTemplateSyncProgress => ({
+  current: progress.current,
+  total: progress.total,
+  studentId: progress.studentId,
+  repository: progress.repository
+});
+
 export const registerAssignmentTemplateSyncIpc = (
   ipc: Pick<IpcMain, "handle">,
   service: AssignmentTemplateSyncService,
@@ -67,9 +107,16 @@ export const registerAssignmentTemplateSyncIpc = (
       throw new Error("Assignment template-sync preview request is required.");
     return projectTemplateSyncAvailability(await service.prepare(request));
   });
-  ipc.handle(IPC_CHANNELS.executeAssignmentTemplateSync, async (_event, request: unknown) => {
+  ipc.handle(IPC_CHANNELS.executeAssignmentTemplateSync, async (event, request: unknown) => {
     if (!isAssignmentTemplateSyncExecuteRequest(request) || !isRegisteredCourse(request))
       throw new Error("Confirmed assignment template-sync request is required.");
-    return projectTemplateSyncExecutionResult(await service.execute(request));
+    return projectTemplateSyncExecutionResult(
+      await service.execute(request, (progress) => {
+        event.sender.send(
+          IPC_CHANNELS.assignmentTemplateSyncProgress,
+          projectTemplateSyncProgress(progress)
+        );
+      })
+    );
   });
 };

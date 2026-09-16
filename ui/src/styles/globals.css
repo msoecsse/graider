@@ -179,6 +179,75 @@ h1 {
   margin: 18px 0;
 }
 
+.operation-status-bar {
+  position: fixed;
+  z-index: 10;
+  right: 24px;
+  bottom: 16px;
+  left: 24px;
+  display: grid;
+  gap: 10px;
+  width: min(920px, calc(100% - 48px));
+  margin: 0 auto;
+  border: 1px solid #1f883d;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgb(140 149 159 / 28%);
+  padding: 14px 18px;
+}
+
+.operation-status-bar__copy {
+  display: grid;
+  gap: 3px;
+}
+
+.operation-status-bar__copy strong {
+  color: #1a7f37;
+  font-size: 1rem;
+}
+
+.operation-status-bar__copy span {
+  color: #57606a;
+}
+
+.operation-status-bar__progress {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #d8dee4;
+}
+
+.operation-status-bar__progress::before,
+.operation-status-bar__progress-value {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  display: block;
+  border-radius: inherit;
+  background: #1f883d;
+}
+
+.operation-status-bar__progress::before {
+  width: 38%;
+  content: "";
+  animation: operation-status-bar-indeterminate 1.4s ease-in-out infinite;
+}
+
+.operation-status-bar__progress-value {
+  width: 0;
+}
+
+@keyframes operation-status-bar-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(270%);
+  }
+}
+
 .confirmation-modal__preview pre {
   max-height: 260px;
   overflow: auto;
@@ -1549,6 +1618,8 @@ h1 {
 }
 
 .apply-confirmation-panel {
+  position: relative;
+  z-index: 11;
   display: grid;
   gap: 12px;
   width: 100%;
@@ -1693,8 +1764,20 @@ h1 {
 }
 
 .grading-workspace__grading-pane {
+  display: flex;
+  flex-direction: column;
   max-height: calc(100vh - 180px);
   overflow-y: auto;
+}
+
+.grading-evidence {
+  order: 20;
+}
+.grading-comment-library {
+  order: 21;
+}
+.grading-workflow-repair {
+  order: 22;
 }
 
 .grading-workspace__grading-pane section {
@@ -1708,7 +1791,33 @@ h1 {
 }
 
 .grading-publication-action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 8px;
+}
+
+.grading-report-preview {
+  width: min(1100px, 100%);
+  max-height: calc(100vh - 48px);
+}
+
+.grading-report-preview__warnings {
+  border-left: 4px solid #bf8700;
+  margin: 12px 0;
+  padding-left: 10px;
+}
+
+.grading-report-preview__warnings p,
+.grading-report-preview__warnings ul {
+  margin: 4px 0;
+}
+
+.grading-report-preview__frame {
+  width: 100%;
+  height: min(680px, calc(100vh - 260px));
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
 }
 
 .grading-publication-message {
@@ -1846,6 +1955,15 @@ h1 {
   display: flex;
   gap: 10px;
   justify-content: space-between;
+}
+
+.grading-evidence > details > summary,
+.grading-evidence__phase > summary {
+  cursor: pointer;
+}
+
+.grading-evidence > details > summary h3 {
+  display: inline;
 }
 
 .grading-evidence__heading button {

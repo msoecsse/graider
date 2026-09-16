@@ -5,6 +5,7 @@ import {
   type GradingState,
   type GradingStateResult
 } from "./grading-state.js";
+import { commentScoreAdjustment } from "./comment-score-adjustment.js";
 
 export type RubricCategory = NonNullable<
   NonNullable<RawAssignmentConfig["grading"]>["rubric"]
@@ -13,6 +14,7 @@ type AppliedComment = GradingState["appliedComments"][number];
 type ManualAdjustment = GradingState["manualAdjustments"][number];
 
 export interface AppliedCommentUpdate {
+  readonly title?: string | undefined;
   readonly text: string;
   readonly deduction: number;
   readonly rubricCategoryId?: string | undefined;
@@ -88,6 +90,11 @@ export const editAppliedComment = (
     ...(existing.sourceCommentId === undefined
       ? {}
       : { sourceCommentId: existing.sourceCommentId }),
+    ...(update.title === undefined
+      ? existing.title === undefined
+        ? {}
+        : { title: existing.title }
+      : { title: update.title }),
     text: update.text,
     deduction: update.deduction,
     ...(update.rubricCategoryId === undefined ? {} : { rubricCategoryId: update.rubricCategoryId }),
@@ -200,7 +207,7 @@ export const calculateGrade = (
   const categories = rubric.map((category) => {
     const categorizedCommentAdjustmentTotal = state.appliedComments
       .filter((comment) => comment.rubricCategoryId === category.id)
-      .reduce((total, comment) => total + comment.deduction, 0);
+      .reduce((total, comment) => total + commentScoreAdjustment(comment.deduction), 0);
     const manualAdjustmentTotal = state.manualAdjustments
       .filter((adjustment) => adjustment.rubricCategoryId === category.id)
       .reduce((total, adjustment) => total + adjustment.amount, 0);
@@ -215,7 +222,7 @@ export const calculateGrade = (
   });
   const uncategorizedCommentAdjustmentTotal = state.appliedComments
     .filter((comment) => comment.rubricCategoryId === undefined)
-    .reduce((total, comment) => total + comment.deduction, 0);
+    .reduce((total, comment) => total + commentScoreAdjustment(comment.deduction), 0);
   return {
     status: "success",
     value: {

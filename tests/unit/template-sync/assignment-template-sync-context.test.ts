@@ -54,6 +54,33 @@ const setup = () => {
 };
 
 describe("assignment template-sync main-process context", () => {
+  it("resolves a selected student to the trusted manifest repository before executing", async () => {
+    const { dependencies, service } = setup();
+
+    await expect(service.prepare({ ...request, studentId: "jones" })).resolves.toMatchObject({
+      available: true,
+      repositoryCount: 1,
+      selectedRepository: { studentId: "jones" }
+    });
+    await service.execute({ ...request, studentId: "jones", confirmed: true });
+    const [runSyncCall] = dependencies.runSync.mock.calls;
+    if (runSyncCall === undefined) throw new Error("Expected selected template-sync invocation.");
+    expect(runSyncCall[0]).toMatchObject({ studentId: "jones" });
+  });
+
+  it("blocks unknown selected students before token or sync work", async () => {
+    const { dependencies, service } = setup();
+
+    await expect(
+      service.execute({ ...request, studentId: "unknown", confirmed: true })
+    ).resolves.toMatchObject({
+      outcomes: [],
+      blocker: { code: "student_repository_unavailable" }
+    });
+    expect(dependencies.resolveToken).not.toHaveBeenCalled();
+    expect(dependencies.runSync).not.toHaveBeenCalled();
+  });
+
   it("uses canonical loaders and shared eligibility without constructing production dependencies", async () => {
     const { dependencies, service, manifest } = setup();
     const [firstRepository] = manifest.manifest.repositories;

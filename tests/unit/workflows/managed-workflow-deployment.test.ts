@@ -6,7 +6,8 @@ import { renderJavaJunitCheckstyleWorkflow } from "../../../src/workflows/java-j
 import {
   MANAGED_GRADING_WORKFLOW_COMMIT_MESSAGE,
   WorkflowDeploymentPermissionError,
-  ensureManagedGradingWorkflow
+  ensureManagedGradingWorkflow,
+  isManagedGradingWorkflowEligible
 } from "../../../src/workflows/managed-workflow-deployment.js";
 import {
   GRAIDER_MANAGED_WORKFLOW_MARKER,
@@ -46,6 +47,11 @@ const ensure = (client: FakeGitHubClient) =>
   });
 
 describe("managed workflow deployment", () => {
+  it("keeps Apply eligibility strict and does not treat the legacy default as a managed preset", () => {
+    expect(isManagedGradingWorkflowEligible(grading)).toBe(true);
+    expect(isManagedGradingWorkflowEligible({ enabled: true })).toBe(false);
+  });
+
   it("creates the canonical workflow as the first and only repository file", async () => {
     const client = new FakeGitHubClient({ repositories: [repository] });
 

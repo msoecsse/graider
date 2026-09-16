@@ -29,6 +29,12 @@ const grading = {
   artifact: "grading-results",
   result_file: "grading-results.json"
 };
+const legacyGrading = {
+  enabled: true as const,
+  workflow: ".github/workflows/grade.yml",
+  artifact: "grading-results",
+  result_file: "grading-results.json"
+};
 const config = (assignmentGrading: unknown = grading, courseGrading: unknown = grading) =>
   ({
     course: {
@@ -209,6 +215,15 @@ describe("grading student evidence context", () => {
       );
       expect(result).toMatchObject({ status: "success", value: { submissionCommitSha: SHA } });
     }
+  });
+
+  it("accepts the wizard's legacy default Graider grading configuration", () => {
+    expect(
+      prepareGradingStudentEvidenceContext(request, {
+        ...deps(),
+        loadConfig: () => ({ status: "success", config: config(legacyGrading), diagnostics: [] })
+      })
+    ).toMatchObject({ status: "success", value: { grading: legacyGrading } });
   });
 
   it("does not require a manifest or remote client for ineligible grading", () => {

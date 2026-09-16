@@ -14,7 +14,7 @@ import {
   findStudentRepositoryMapping,
   normalizeManifestRepositories
 } from "../manifest/repository-targets.js";
-import { isManagedGradingWorkflowEligible } from "../workflows/managed-workflow-deployment.js";
+import { isManualManagedGradingWorkflowEligible } from "../workflows/manual-managed-grading-workflow.js";
 import {
   retrieveGradingEvidence,
   type GradingEvidenceRetrievalResult
@@ -104,7 +104,7 @@ export const prepareGradingStudentEvidenceContext = (
     };
 
   const grading = getEffectiveAssignmentGrading(config.config);
-  if (!isManagedGradingWorkflowEligible(grading))
+  if (!isManualManagedGradingWorkflowEligible(grading))
     return { status: "not_applicable", studentId: request.studentId };
 
   if (submission.status === "missing_submission_commit")

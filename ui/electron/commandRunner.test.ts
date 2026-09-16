@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE,
   BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE,
@@ -45,6 +45,22 @@ describe("commandRunner", () => {
         helperPath: null
       }
     });
+  });
+
+  it("observes stderr chunks without changing captured stderr when an observer fails", async () => {
+    const runner = createNodeProcessRunner();
+    const onStderrChunk = vi.fn(() => {
+      throw new Error("observational only");
+    });
+
+    const result = await runner({
+      command: process.execPath,
+      args: ["-e", "process.stderr.write('heartbeat');"],
+      onStderrChunk
+    });
+
+    expect(result.stderr).toBe("heartbeat");
+    expect(onStderrChunk).toHaveBeenCalled();
   });
 
   it("handles spawn failure without throwing", async () => {

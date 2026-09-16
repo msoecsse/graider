@@ -6,8 +6,19 @@ import type { InitializedTemplateSyncAnchors, TemplateSyncResult } from "./templ
 import { getTemplateSyncFailure } from "./template-sync-failure.js";
 import type { TemplateSyncFailure } from "./template-sync-failure.js";
 
+const FIRST_REPOSITORY_POSITION = 1;
+
+export interface AssignmentTemplateSyncProgress {
+  readonly current: number;
+  readonly total: number;
+  readonly studentId: string;
+  readonly repository: string;
+}
+
 export interface AssignmentTemplateSyncInput {
   manifest: Manifest;
+  /** Optional trusted manifest selector; absence preserves assignment-wide synchronization. */
+  studentId?: string;
   options: CommonCommandOptions;
   resolveCurrentTemplateCommitSha(): Promise<string>;
   runRepositorySync(
@@ -15,6 +26,8 @@ export interface AssignmentTemplateSyncInput {
     targetTemplateCommitSha: string
   ): Promise<{ result: TemplateSyncResult; anchors?: InitializedTemplateSyncAnchors }>;
   persistManifest(manifest: Manifest): Promise<void>;
+  /** Observational only; delivery failures must not affect repository synchronization. */
+  onProgress?: (progress: AssignmentTemplateSyncProgress) => void;
 }
 
 export interface AssignmentTemplateSyncRepositoryOutcome {
@@ -54,6 +67,28 @@ export const syncAssignmentTemplate = async (
 ): Promise<AssignmentTemplateSyncResult> => {
   const guard = evaluateMutationGuard({ options: input.options });
   if (!guard.allowed) return { status: "blocked", guard, outcomes: [] };
+  if (input.studentId !== undefined && input.manifest.repositoryMode === "group")
+    return {
+      status: "failure",
+      error: new Error(
+        "Single-student template synchronization is available only for individual repositories."
+      ),
+      outcomes: []
+    };
+
+  const applicableRepositories = input.manifest.repositories.filter((candidate) =>
+    isApplicableRepository(candidate, input.manifest)
+  );
+  const repositories =
+    input.studentId === undefined
+      ? applicableRepositories
+      : applicableRepositories.filter((repository) => repository.studentId === input.studentId);
+  if (input.studentId !== undefined && repositories.length !== 1)
+    return {
+      status: "failure",
+      error: new Error("The selected student does not have an applicable repository to update."),
+      outcomes: []
+    };
 
   let templateCommitSha: string;
   try {
@@ -72,9 +107,17 @@ export const syncAssignmentTemplate = async (
   const outcomes: AssignmentTemplateSyncRepositoryOutcome[] = [];
   let hasPersistedAnchorChanges = false;
 
-  for (const repository of input.manifest.repositories.filter((candidate) =>
-    isApplicableRepository(candidate, input.manifest)
-  )) {
+  for (const [index, repository] of repositories.entries()) {
+    try {
+      input.onProgress?.({
+        current: index + FIRST_REPOSITORY_POSITION,
+        total: repositories.length,
+        studentId: repository.studentId,
+        repository: repository.repository.fullName
+      });
+    } catch {
+      // Progress delivery is deliberately isolated from synchronization behavior.
+    }
     try {
       const execution = await input.runRepositorySync(repository, templateCommitSha);
       const result = execution.result;

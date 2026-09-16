@@ -16,16 +16,18 @@ import type {
   GradingStudentManualAdjustmentResult,
   GradingStudentCommitHistoryResult,
   GradingStudentEvidenceResult,
+  GradingStudentWorkflowRepairResult,
+  GradingBulkWorkflowRepairResult,
   GradingStudentSnapshotResult,
   GradingStudentViewStateResult,
   GradingWorkspacePrepareRequest,
   BulkPublishGradingStudentReportsResult,
-  PublishGradingStudentReportResult
+  PublishGradingStudentReportResult,
+  PreviewGradingStudentReportResult
 } from "../../electron/ipc";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import {
   commitHistoryResultToLoadState,
-  GradingCommitHistoryPanel,
   type CommitHistoryLoadState
 } from "./GradingCommitHistoryPanel";
 import {
@@ -97,6 +99,7 @@ interface AddCommentEditorState {
   readonly studentId: string;
   readonly reusableCommentId?: string;
   readonly reusableCommentTitle?: string;
+  readonly title: string;
   readonly text: string;
   readonly deduction: string;
   readonly rubricCategoryId: string;
@@ -107,6 +110,8 @@ interface EditCommentEditorState {
   readonly operation: "edit";
   readonly studentId: string;
   readonly commentId: string;
+  readonly title: string;
+  readonly hasPersistedTitle: boolean;
   readonly text: string;
   readonly deduction: string;
   readonly rubricCategoryId: string;
@@ -167,6 +172,22 @@ interface ReportPublicationNotice {
   readonly warnings?: readonly string[];
 }
 
+type SuccessfulReportPreview = Extract<
+  PreviewGradingStudentReportResult,
+  { readonly status: "success" }
+>;
+
+type ReportPreviewState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading"; readonly studentId: string }
+  | {
+      readonly status: "success";
+      readonly studentId: string;
+      readonly html: string;
+      readonly warnings: SuccessfulReportPreview["warnings"];
+    }
+  | { readonly status: "failure"; readonly studentId: string; readonly message: string };
+
 interface BulkPublicationConfirmation {
   readonly studentIds: readonly string[];
 }
@@ -180,6 +201,79 @@ interface PendingViewStateSave {
   readonly studentId: string;
   readonly viewState: GradingEditorViewState;
 }
+
+type WorkflowRepairState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading"; readonly studentId: string }
+  | { readonly status: "ready"; readonly studentId: string; readonly repositoryFullName: string }
+  | { readonly status: "unavailable"; readonly studentId: string; readonly message: string }
+  | { readonly status: "running"; readonly studentId: string; readonly repositoryFullName: string };
+
+interface WorkflowRepairConfirmation {
+  readonly studentId: string;
+  readonly repositoryFullName: string;
+}
+
+interface WorkflowRepairNotice {
+  readonly studentId: string;
+  readonly tone: "success" | "warning" | "error";
+  readonly message: string;
+}
+
+type BulkWorkflowRepairState = "idle" | "running";
+
+const workflowRepairUnavailableMessage = (status: string): string => {
+  const messages: Readonly<Record<string, string>> = {
+    grading_not_eligible:
+      "Workflow repair is unavailable for this assignment's grading configuration.",
+    repository_not_recorded:
+      "Workflow repair is unavailable because this student has no recorded repository.",
+    repository_unavailable:
+      "Workflow repair is unavailable because the recorded repository could not be verified.",
+    github_auth_unavailable:
+      "Workflow repair is unavailable because GitHub authentication could not be resolved.",
+    student_not_accessible: "Workflow repair is unavailable for this student.",
+    assignment_config_error:
+      "Workflow repair is unavailable because assignment configuration could not be read."
+  };
+  return messages[status] ?? "Workflow repair is currently unavailable.";
+};
+
+const workflowRepairResultNotice = (
+  result: Extract<GradingStudentWorkflowRepairResult, { readonly status: "success" }>
+): WorkflowRepairNotice => {
+  const workflowMessages: Readonly<Record<string, string>> = {
+    created: "Graider workflow created.",
+    replaced_managed: "Outdated Graider workflow replaced.",
+    replaced_unmanaged: "Unmanaged workflow replaced with the Graider workflow.",
+    replaced_unsupported:
+      "Unsupported managed workflow replaced with the current Graider workflow.",
+    already_current: "Graider workflow was already current.",
+    write_failed: "Workflow write failed. No grading run was started.",
+    read_failed: "The existing workflow could not be read. No grading run was started.",
+    not_attempted: "Workflow repair was not attempted."
+  };
+  const workflowMessage =
+    workflowMessages[result.result.workflow.status] ?? "Workflow repair finished.";
+  if (result.result.dispatch.status === "dispatched")
+    return {
+      studentId: result.studentId,
+      tone: "success",
+      message: `${workflowMessage} Grading run dispatched successfully.`
+    };
+  if (
+    result.result.dispatch.status === "failed" &&
+    result.result.workflow.status !== "read_failed" &&
+    result.result.workflow.status !== "write_failed" &&
+    result.result.workflow.status !== "not_attempted"
+  )
+    return {
+      studentId: result.studentId,
+      tone: "warning",
+      message: `${workflowMessage} Workflow repair succeeded, but the grading run could not be started.`
+    };
+  return { studentId: result.studentId, tone: "error", message: workflowMessage };
+};
 
 export const VIEW_STATE_AUTOSAVE_DEBOUNCE_MS = 400;
 
@@ -306,6 +400,14 @@ const publicationWarningMessage = (warning: string): string =>
     commit_history_unavailable: "The report was published without commit history."
   })[warning] ?? "The report was published with an informational warning.";
 
+const previewWarningMessage = (warning: string): string =>
+  ({
+    automated_evidence_unavailable: "Automated evidence is unavailable and will be omitted.",
+    automated_evidence_invalid:
+      "Available automated evidence could not be trusted and will be omitted.",
+    commit_history_unavailable: "Commit history is unavailable and will be omitted."
+  })[warning] ?? "This preview includes an informational warning.";
+
 const publicationFailureMessage = (result: PublishGradingStudentReportResult): string => {
   const messages: Readonly<Record<string, string>> = {
     grading_state_missing: "Complete this student's grading before publishing the report.",
@@ -381,6 +483,15 @@ export const GradingWorkspacePage = ({
   const [snapshot, setSnapshot] = useState<SnapshotLoadState>({ status: "idle" });
   const [evidence, setEvidence] = useState<EvidenceLoadState>({ status: "idle" });
   const [commitHistory, setCommitHistory] = useState<CommitHistoryLoadState>({ status: "idle" });
+  const [workflowRepair, setWorkflowRepair] = useState<WorkflowRepairState>({ status: "idle" });
+  const [workflowRepairConfirmation, setWorkflowRepairConfirmation] =
+    useState<WorkflowRepairConfirmation>();
+  const [workflowRepairNotice, setWorkflowRepairNotice] = useState<WorkflowRepairNotice>();
+  const [bulkWorkflowRepairState, setBulkWorkflowRepairState] =
+    useState<BulkWorkflowRepairState>("idle");
+  const [bulkWorkflowRepairConfirmation, setBulkWorkflowRepairConfirmation] = useState(false);
+  const [bulkWorkflowRepairResult, setBulkWorkflowRepairResult] =
+    useState<GradingBulkWorkflowRepairResult>();
   const [commentLibrary, setCommentLibrary] = useState<CommentLibraryLoadState>({
     status: "loading"
   });
@@ -399,6 +510,7 @@ export const GradingWorkspacePage = ({
     useState<ReportPublicationConfirmation>();
   const [reportPublicationStudentId, setReportPublicationStudentId] = useState<string>();
   const [reportPublicationNotice, setReportPublicationNotice] = useState<ReportPublicationNotice>();
+  const [reportPreview, setReportPreview] = useState<ReportPreviewState>({ status: "idle" });
   const [bulkPublicationConfirmation, setBulkPublicationConfirmation] =
     useState<BulkPublicationConfirmation>();
   const [bulkPublicationInProgress, setBulkPublicationInProgress] = useState(false);
@@ -413,7 +525,9 @@ export const GradingWorkspacePage = ({
   const snapshotRequestGeneration = useRef(0);
   const evidenceRequestGeneration = useRef(0);
   const commitHistoryRequestGeneration = useRef(0);
+  const workflowRepairRequestGeneration = useRef(0);
   const reportPublicationRequestGeneration = useRef(0);
+  const reportPreviewRequestGeneration = useRef(0);
   const bulkPublicationRequestGeneration = useRef(0);
   const currentStudentId = isReady(result) ? result.students[selected]?.studentId : undefined;
   const currentStudentIdRef = useRef<string | undefined>(currentStudentId);
@@ -604,6 +718,155 @@ export const GradingWorkspacePage = ({
   }, [request.courseFolderId, request.termCode]);
 
   const selectedStudent = isReady(result) ? result.students[selected] : undefined;
+
+  useEffect(() => {
+    const generation = workflowRepairRequestGeneration.current + 1;
+    workflowRepairRequestGeneration.current = generation;
+    setWorkflowRepairConfirmation(undefined);
+    setWorkflowRepairNotice(undefined);
+    if (!isReady(result) || selectedStudent === undefined) {
+      setWorkflowRepair({ status: "idle" });
+      return;
+    }
+    const studentId = selectedStudent.studentId;
+    const repair = window.graiderUI.repairGradingStudentWorkflow;
+    if (repair === undefined) {
+      setWorkflowRepair({
+        status: "unavailable",
+        studentId,
+        message: "Workflow repair is unavailable in this application build."
+      });
+      return;
+    }
+    setWorkflowRepair({ status: "loading", studentId });
+    void repair({
+      courseFolderId: request.courseFolderId,
+      courseFolderPath: request.courseFolderPath,
+      termCode: request.termCode,
+      assignmentSlug: request.assignmentSlug,
+      studentId,
+      confirmed: false
+    })
+      .then((value) => {
+        if (
+          !mounted.current ||
+          workflowRepairRequestGeneration.current !== generation ||
+          currentStudentIdRef.current !== studentId
+        )
+          return;
+        setWorkflowRepair(
+          value.status === "ready" && value.studentId === studentId
+            ? {
+                status: "ready",
+                studentId,
+                repositoryFullName: value.repositoryFullName
+              }
+            : {
+                status: "unavailable",
+                studentId,
+                message: workflowRepairUnavailableMessage(value.status)
+              }
+        );
+      })
+      .catch(() => {
+        if (
+          workflowRepairRequestGeneration.current === generation &&
+          currentStudentIdRef.current === studentId
+        )
+          setWorkflowRepair({
+            status: "unavailable",
+            studentId,
+            message: "Workflow repair availability could not be checked safely."
+          });
+      });
+  }, [request, result, selectedStudent]);
+
+  const confirmWorkflowRepair = async (): Promise<void> => {
+    const confirmation = workflowRepairConfirmation;
+    const repair = window.graiderUI.repairGradingStudentWorkflow;
+    if (
+      confirmation === undefined ||
+      repair === undefined ||
+      confirmation.studentId !== currentStudentIdRef.current
+    )
+      return;
+    const generation = workflowRepairRequestGeneration.current + 1;
+    workflowRepairRequestGeneration.current = generation;
+    setWorkflowRepair({ status: "running", ...confirmation });
+    setWorkflowRepairNotice(undefined);
+    let value: GradingStudentWorkflowRepairResult;
+    try {
+      value = await repair({
+        courseFolderId: request.courseFolderId,
+        courseFolderPath: request.courseFolderPath,
+        termCode: request.termCode,
+        assignmentSlug: request.assignmentSlug,
+        studentId: confirmation.studentId,
+        confirmed: true
+      });
+    } catch {
+      if (
+        mounted.current &&
+        workflowRepairRequestGeneration.current === generation &&
+        currentStudentIdRef.current === confirmation.studentId
+      ) {
+        setWorkflowRepairConfirmation(undefined);
+        setWorkflowRepairNotice({
+          studentId: confirmation.studentId,
+          tone: "error",
+          message: "Workflow repair could not be completed safely."
+        });
+        setWorkflowRepair({ status: "ready", ...confirmation });
+      }
+      return;
+    }
+    if (
+      !mounted.current ||
+      workflowRepairRequestGeneration.current !== generation ||
+      currentStudentIdRef.current !== confirmation.studentId
+    )
+      return;
+    setWorkflowRepairConfirmation(undefined);
+    if (value.status === "success" && value.studentId === confirmation.studentId) {
+      setWorkflowRepairNotice(workflowRepairResultNotice(value));
+      setWorkflowRepair({
+        status: "ready",
+        studentId: confirmation.studentId,
+        repositoryFullName: value.result.repository.fullName
+      });
+      return;
+    }
+    setWorkflowRepairNotice({
+      studentId: confirmation.studentId,
+      tone: "error",
+      message: workflowRepairUnavailableMessage(value.status)
+    });
+    setWorkflowRepair({
+      status: "unavailable",
+      studentId: confirmation.studentId,
+      message: workflowRepairUnavailableMessage(value.status)
+    });
+  };
+
+  const confirmBulkWorkflowRepair = async (): Promise<void> => {
+    const repair = window.graiderUI.repairGradingAssignmentWorkflows;
+    if (repair === undefined) return;
+    setBulkWorkflowRepairState("running");
+    setBulkWorkflowRepairConfirmation(false);
+    try {
+      setBulkWorkflowRepairResult(
+        await repair({
+          courseFolderId: request.courseFolderId,
+          courseFolderPath: request.courseFolderPath,
+          termCode: request.termCode,
+          assignmentSlug: request.assignmentSlug,
+          confirmed: true
+        })
+      );
+    } finally {
+      if (mounted.current) setBulkWorkflowRepairState("idle");
+    }
+  };
   const completeStudentIds = useMemo(
     () =>
       isReady(result)
@@ -793,6 +1056,8 @@ export const GradingWorkspacePage = ({
     setReportPublicationConfirmation(undefined);
     setReportPublicationNotice(undefined);
     reportPublicationRequestGeneration.current += 1;
+    reportPreviewRequestGeneration.current += 1;
+    setReportPreview({ status: "idle" });
     setCommentMutationError(undefined);
   }, [currentStudentId]);
 
@@ -931,8 +1196,9 @@ export const GradingWorkspacePage = ({
       studentId: selectedStudent.studentId,
       reusableCommentId: comment.id,
       reusableCommentTitle: comment.title,
+      title: comment.title,
       text: comment.text,
-      deduction: String(comment.defaultDeduction),
+      deduction: String(Math.abs(comment.defaultDeduction)),
       rubricCategoryId: defaultCategory,
       targetMode: canonicalSourceTarget === undefined ? "general" : "source"
     });
@@ -951,6 +1217,7 @@ export const GradingWorkspacePage = ({
     setCommentEditor({
       operation: "add",
       studentId: selectedStudent.studentId,
+      title: "",
       text: "",
       deduction: "0",
       rubricCategoryId: "",
@@ -966,8 +1233,10 @@ export const GradingWorkspacePage = ({
       operation: "edit",
       studentId: selectedStudent.studentId,
       commentId: comment.id,
+      title: comment.title ?? "",
+      hasPersistedTitle: comment.title !== undefined,
       text: comment.text,
-      deduction: String(comment.deduction),
+      deduction: String(Math.abs(comment.deduction)),
       rubricCategoryId: comment.rubricCategoryId ?? "",
       targetMode: comment.sourceLocation === undefined ? "general" : "source",
       ...(comment.sourceLocation === undefined ? {} : { sourceTarget: comment.sourceLocation })
@@ -1099,12 +1368,21 @@ export const GradingWorkspacePage = ({
     )
       return;
     const deduction = Number(commentEditor.deduction);
+    const title = commentEditor.title.trim();
+    if (title === "" && (commentEditor.operation === "add" || commentEditor.hasPersistedTitle)) {
+      setCommentMutationError("Comment title is required.");
+      return;
+    }
     if (commentEditor.text.trim() === "") {
       setCommentMutationError("Comment text is required.");
       return;
     }
     if (commentEditor.deduction.trim() === "" || !Number.isFinite(deduction)) {
       setCommentMutationError("Deduction must be a finite number.");
+      return;
+    }
+    if (deduction < 0) {
+      setCommentMutationError("Deduction must be zero or greater.");
       return;
     }
     if (
@@ -1141,6 +1419,7 @@ export const GradingWorkspacePage = ({
             ...(editor.reusableCommentId === undefined
               ? {}
               : { sourceCommentId: editor.reusableCommentId }),
+            title,
             text: editor.text,
             deduction,
             ...(editor.rubricCategoryId === ""
@@ -1163,6 +1442,7 @@ export const GradingWorkspacePage = ({
         ...identity,
         commentId: editor.commentId,
         replacement: {
+          ...(title === "" ? {} : { title }),
           text: editor.text,
           deduction,
           ...(editor.rubricCategoryId === "" ? {} : { rubricCategoryId: editor.rubricCategoryId }),
@@ -1349,6 +1629,60 @@ export const GradingWorkspacePage = ({
       return true;
     } catch {
       return false;
+    }
+  };
+
+  const previewReport = async (studentId: string): Promise<void> => {
+    const preview = window.graiderUI.previewGradingStudentReport;
+    if (preview === undefined) {
+      setReportPreview({
+        status: "failure",
+        studentId,
+        message: "Previewing grading reports is unavailable."
+      });
+      return;
+    }
+
+    const previewGeneration = reportPreviewRequestGeneration.current + 1;
+    reportPreviewRequestGeneration.current = previewGeneration;
+    const isCurrentPreview = (): boolean =>
+      mounted.current &&
+      reportPreviewRequestGeneration.current === previewGeneration &&
+      currentStudentIdRef.current === studentId;
+    setReportPreview({ status: "loading", studentId });
+
+    try {
+      const previewResult = await preview({ ...request, studentId });
+      if (!isCurrentPreview()) return;
+      if ("studentId" in previewResult && previewResult.studentId !== studentId) {
+        setReportPreview({
+          status: "failure",
+          studentId,
+          message: "The report preview response could not be verified safely."
+        });
+        return;
+      }
+      if (previewResult.status === "success") {
+        setReportPreview({
+          status: "success",
+          studentId,
+          html: previewResult.html,
+          warnings: previewResult.warnings
+        });
+        return;
+      }
+      setReportPreview({
+        status: "failure",
+        studentId,
+        message: publicationFailureMessage(previewResult)
+      });
+    } catch {
+      if (isCurrentPreview())
+        setReportPreview({
+          status: "failure",
+          studentId,
+          message: "The grading report could not be previewed safely."
+        });
     }
   };
 
@@ -1893,6 +2227,20 @@ export const GradingWorkspacePage = ({
                 <div className="grading-publication-action">
                   <button
                     type="button"
+                    className="secondary-action"
+                    disabled={
+                      reportPreview.status === "loading" &&
+                      reportPreview.studentId === snapshot.snapshot.studentId
+                    }
+                    onClick={() => void previewReport(snapshot.snapshot.studentId)}
+                  >
+                    {reportPreview.status === "loading" &&
+                    reportPreview.studentId === snapshot.snapshot.studentId
+                      ? "Preparing Preview…"
+                      : "Preview Report"}
+                  </button>
+                  <button
+                    type="button"
                     className={
                       snapshot.snapshot.gradingStatus === "published" ? "secondary-action" : ""
                     }
@@ -1917,6 +2265,15 @@ export const GradingWorkspacePage = ({
                         ? "Republish Report"
                         : "Publish Report"}
                   </button>
+                </div>
+              ) : null}
+              {reportPreview.status === "failure" &&
+              reportPreview.studentId === snapshot.snapshot.studentId ? (
+                <div
+                  className="grading-publication-message grading-publication-message--error"
+                  role="alert"
+                >
+                  <p>{reportPreview.message}</p>
                 </div>
               ) : null}
               {reportPublicationNotice !== undefined &&
@@ -1966,6 +2323,40 @@ export const GradingWorkspacePage = ({
                 onConfirm={confirmPublishReport}
                 onCancel={() => setReportPublicationConfirmation(undefined)}
               />
+              {reportPreview.status === "success" &&
+              reportPreview.studentId === snapshot.snapshot.studentId ? (
+                <div className="confirmation-modal__backdrop">
+                  <div
+                    className="confirmation-modal grading-report-preview"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="grading-report-preview-heading"
+                  >
+                    <h2 id="grading-report-preview-heading">Report Preview</h2>
+                    {reportPreview.warnings.length === 0 ? null : (
+                      <div className="grading-report-preview__warnings" role="status">
+                        <p>This report will be published with these warnings:</p>
+                        <ul>
+                          {reportPreview.warnings.map((warning) => (
+                            <li key={warning}>{previewWarningMessage(warning)}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <iframe
+                      className="grading-report-preview__frame"
+                      title="Grading report preview"
+                      sandbox=""
+                      srcDoc={reportPreview.html}
+                    />
+                    <div className="grading-apply-comment__actions">
+                      <button type="button" onClick={() => setReportPreview({ status: "idle" })}>
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {markCompleteConfirmation !== undefined &&
               markCompleteConfirmation.studentId === snapshot.snapshot.studentId ? (
                 <div
@@ -2030,6 +2421,7 @@ export const GradingWorkspacePage = ({
                   <ul className="grading-comment-list">
                     {snapshot.snapshot.appliedComments.map((comment) => (
                       <li key={comment.id}>
+                        {comment.title === undefined ? null : <h4>{comment.title}</h4>}
                         <p>{comment.text}</p>
                         <p>Adjustment: {comment.deduction}</p>
                         {comment.rubricCategoryId === undefined ? null : (
@@ -2364,9 +2756,104 @@ export const GradingWorkspacePage = ({
           )}
           <GradingEvidencePanel
             state={evidence}
+            commitHistory={commitHistory}
             onReload={(studentId) => void loadEvidence(studentId)}
           />
-          <GradingCommitHistoryPanel state={commitHistory} />
+          <section className="grading-workflow-repair" aria-labelledby="workflow-repair-heading">
+            <h3 id="workflow-repair-heading">Workflow</h3>
+            <button
+              type="button"
+              disabled={workflowRepair.status !== "ready"}
+              onClick={() => {
+                if (workflowRepair.status === "ready")
+                  setWorkflowRepairConfirmation({
+                    studentId: workflowRepair.studentId,
+                    repositoryFullName: workflowRepair.repositoryFullName
+                  });
+              }}
+            >
+              {workflowRepair.status === "running"
+                ? "Replacing workflow…"
+                : "Replace workflow & run"}
+            </button>
+            {workflowRepair.status === "loading" ? (
+              <p aria-live="polite">Checking workflow repair availability…</p>
+            ) : workflowRepair.status === "unavailable" ? (
+              <p>{workflowRepair.message}</p>
+            ) : null}
+            {workflowRepairNotice === undefined ||
+            workflowRepairNotice.studentId !== student?.studentId ? null : (
+              <p
+                role="status"
+                className={`grading-panel-message grading-panel-message--${workflowRepairNotice.tone}`}
+              >
+                {workflowRepairNotice.message}
+              </p>
+            )}
+            <button
+              type="button"
+              disabled={
+                bulkWorkflowRepairState === "running" ||
+                window.graiderUI.repairGradingAssignmentWorkflows === undefined
+              }
+              onClick={() => setBulkWorkflowRepairConfirmation(true)}
+            >
+              {bulkWorkflowRepairState === "running"
+                ? "Replacing workflows…"
+                : "Replace workflows & run for all students"}
+            </button>
+            {bulkWorkflowRepairResult?.status === "success" ? (
+              <div role="status">
+                <p>
+                  {bulkWorkflowRepairResult.counts.succeeded} succeeded ·{" "}
+                  {bulkWorkflowRepairResult.counts.failed} failed ·{" "}
+                  {bulkWorkflowRepairResult.counts.createdOrReplaced} replaced ·{" "}
+                  {bulkWorkflowRepairResult.counts.alreadyCurrent} already current ·{" "}
+                  {bulkWorkflowRepairResult.counts.dispatched} dispatched
+                </p>
+                {bulkWorkflowRepairResult.repositoryResults
+                  .filter((item) => item.status === "failed")
+                  .map((item) => (
+                    <p key={`${item.repository ?? item.studentIds.join("-")}`}>
+                      {item.repository ?? item.studentIds.join(", ")}:{" "}
+                      {item.message ?? "Workflow repair failed."}
+                    </p>
+                  ))}
+              </div>
+            ) : null}
+            <ConfirmationWithPreviewModal
+              isOpen={bulkWorkflowRepairConfirmation}
+              title="Replace workflows and start grading runs?"
+              summary={
+                <p>
+                  Install or replace Graider's managed grade.yml where necessary and run grading for
+                  all mapped, authorized student repositories?
+                </p>
+              }
+              acknowledgementLabel="I understand this replaces repository grading workflows."
+              confirmLabel="Replace workflows & run for all students"
+              onConfirm={confirmBulkWorkflowRepair}
+              onCancel={() => setBulkWorkflowRepairConfirmation(false)}
+            />
+            <ConfirmationWithPreviewModal
+              isOpen={
+                workflowRepairConfirmation !== undefined &&
+                workflowRepairConfirmation.studentId === student?.studentId
+              }
+              title="Replace workflow and start grading run?"
+              summary={
+                <p>
+                  Replace .github/workflows/grade.yml in{" "}
+                  {workflowRepairConfirmation?.repositoryFullName} with the Graider-managed workflow
+                  and start a grading run?
+                </p>
+              }
+              acknowledgementLabel="I understand this replaces the repository's grading workflow."
+              confirmLabel="Replace workflow & run"
+              onConfirm={confirmWorkflowRepair}
+              onCancel={() => setWorkflowRepairConfirmation(undefined)}
+            />
+          </section>
           <section className="grading-comment-library" aria-labelledby="comment-library-heading">
             <h3 id="comment-library-heading">Comment library</h3>
             {commentMutationError === undefined ? null : (
@@ -2396,6 +2883,18 @@ export const GradingWorkspacePage = ({
                       : `Apply ${commentEditor.reusableCommentTitle}`
                     : "Edit applied comment"}
                 </h4>
+                <label>
+                  Title
+                  <input
+                    value={commentEditor.title}
+                    required={commentEditor.operation === "add" || commentEditor.hasPersistedTitle}
+                    onChange={(event) =>
+                      setCommentEditor((current) =>
+                        current === undefined ? current : { ...current, title: event.target.value }
+                      )
+                    }
+                  />
+                </label>
                 <label>
                   Comment
                   <textarea

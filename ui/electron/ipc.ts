@@ -61,6 +61,9 @@ export const IPC_CHANNELS = {
   clearGradingStudentViewState: "graider-ui:grading-student-view-state:clear",
   loadGradingStudentSnapshot: "graider-ui:grading-student-snapshot:load",
   loadGradingStudentEvidence: "graider-ui:grading-student-evidence:load",
+  repairGradingStudentWorkflow: "graider-ui:grading-student-workflow:repair",
+  repairGradingAssignmentWorkflows: "graider-ui:grading-assignment-workflows:repair",
+  previewGradingStudentReport: "graider-ui:grading-student-report:preview",
   loadGradingStudentCommitHistory: "graider-ui:grading-student-commit-history:load",
   addGradingStudentComment: "graider-ui:grading-student-comment:add",
   editGradingStudentComment: "graider-ui:grading-student-comment:edit",
@@ -77,11 +80,13 @@ export const IPC_CHANNELS = {
   deleteGradingLibraryComment: "graider-ui:grading-comment-library:delete",
   prepareAssignmentTemplateSync: "graider-ui:assignment-template-sync:prepare",
   executeAssignmentTemplateSync: "graider-ui:assignment-template-sync:execute",
+  assignmentTemplateSyncProgress: "graider-ui:assignment-template-sync:progress",
   getAssignmentApplyPreview: "graider-ui:assignment-apply-preview:get",
   getAssignmentGradePreview: "graider-ui:assignment-grade-preview:get",
   getAssignmentGradeStatus: "graider-ui:assignment-grade-status:get",
   getFacultyReport: "graider-ui:faculty-report:get",
   applyAssignment: "graider-ui:assignment-apply:run",
+  assignmentApplyProgress: "graider-ui:assignment-apply:progress",
   downloadAssignmentRepositories: "graider-ui:assignment-download:run",
   gradeAssignment: "graider-ui:assignment-grade:run"
 } as const;
@@ -655,6 +660,20 @@ export type GradingStudentSnapshotRequest = GradingStudentSourceRequest;
 export type { GradingStudentSnapshotResult } from "./gradingStudentSnapshotService.js";
 export type GradingStudentEvidenceRequest = GradingStudentSourceRequest;
 export type { GradingStudentEvidenceResult } from "./gradingStudentEvidenceService.js";
+export interface GradingStudentWorkflowRepairRequest extends GradingStudentSourceRequest {
+  readonly confirmed: boolean;
+}
+
+export interface GradingBulkWorkflowRepairRequest extends Omit<
+  GradingStudentSourceRequest,
+  "studentId"
+> {
+  readonly confirmed: boolean;
+}
+
+export type GradingBulkWorkflowRepairResult =
+  import("./gradingBulkWorkflowRepairService.js").GradingBulkWorkflowRepairResult;
+export type { GradingStudentWorkflowRepairResult } from "./gradingStudentWorkflowRepairService.js";
 export type GradingStudentCommitHistoryRequest = GradingStudentSourceRequest;
 export type { GradingStudentCommitHistoryResult } from "./gradingStudentCommitHistoryService.js";
 export interface AddGradingStudentCommentRequest extends GradingStudentViewStateRequest {
@@ -683,6 +702,7 @@ export type MarkGradingStudentCompleteRequest = GradingStudentViewStateRequest;
 export type { MarkGradingStudentCompleteResult } from "./gradingStudentCompleteService.js";
 export type PublishGradingStudentReportRequest = GradingStudentViewStateRequest;
 export type { PublishGradingStudentReportResult } from "./gradingStudentReportPublicationService.js";
+export type { PreviewGradingStudentReportResult } from "./gradingStudentReportPublicationService.js";
 export interface BulkPublishGradingStudentReportsRequest extends Omit<
   GradingStudentViewStateRequest,
   "studentId"
@@ -712,9 +732,11 @@ export type {
   AssignmentTemplateSyncExecutionResult,
   AssignmentTemplateSyncFailureStage,
   AssignmentTemplateSyncOutcome,
+  AssignmentTemplateSyncProgress,
   AssignmentTemplateSyncRequest,
   TemplateSyncBlocker
 } from "./assignmentTemplateSyncService.js";
+export type { AssignmentApplyRepositoryProgress } from "./assignmentApplyRunner.js";
 
 export type AssignmentApplyPreviewRequest = AssignmentDetailRequest;
 
@@ -727,6 +749,12 @@ export interface AssignmentGradeStatusRequest extends AssignmentDetailRequest {
 export type FacultyReportRequest = AssignmentDetailRequest;
 
 export type AssignmentApplyRequest = AssignmentDetailRequest;
+
+export interface AssignmentApplyProgressEvent {
+  readonly courseFolderId: string;
+  readonly assignmentFile: string;
+  readonly progress: import("./assignmentApplyRunner.js").AssignmentApplyRepositoryProgress;
+}
 
 export type AssignmentGradeRequest = AssignmentDetailRequest;
 
@@ -1023,6 +1051,14 @@ export interface GraiderUIApi {
   readonly loadGradingStudentEvidence?: (
     request: GradingStudentEvidenceRequest
   ) => Promise<import("./gradingStudentEvidenceService.js").GradingStudentEvidenceResult>;
+  readonly repairGradingStudentWorkflow?: (
+    request: GradingStudentWorkflowRepairRequest
+  ) => Promise<
+    import("./gradingStudentWorkflowRepairService.js").GradingStudentWorkflowRepairResult
+  >;
+  readonly repairGradingAssignmentWorkflows?: (
+    request: GradingBulkWorkflowRepairRequest
+  ) => Promise<import("./gradingBulkWorkflowRepairService.js").GradingBulkWorkflowRepairResult>;
   readonly loadGradingStudentCommitHistory?: (
     request: GradingStudentCommitHistoryRequest
   ) => Promise<import("./gradingStudentCommitHistoryService.js").GradingStudentCommitHistoryResult>;
@@ -1039,6 +1075,11 @@ export interface GraiderUIApi {
     request: AddGradingStudentManualAdjustmentRequest
   ) => Promise<
     import("./gradingStudentManualAdjustmentService.js").GradingStudentManualAdjustmentResult
+  >;
+  readonly previewGradingStudentReport?: (
+    request: PublishGradingStudentReportRequest
+  ) => Promise<
+    import("./gradingStudentReportPublicationService.js").PreviewGradingStudentReportResult
   >;
   readonly editGradingStudentManualAdjustment?: (
     request: EditGradingStudentManualAdjustmentRequest
@@ -1079,6 +1120,11 @@ export interface GraiderUIApi {
   readonly executeAssignmentTemplateSync: (
     request: import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncExecuteRequest
   ) => Promise<import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncExecutionResult>;
+  readonly onAssignmentTemplateSyncProgress: (
+    listener: (
+      progress: import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncProgress
+    ) => void
+  ) => () => void;
   readonly getAssignmentApplyPreview: (
     request: AssignmentApplyPreviewRequest
   ) => Promise<AssignmentApplyPreviewResult>;
@@ -1090,6 +1136,9 @@ export interface GraiderUIApi {
   ) => Promise<AssignmentGradeStatusResult>;
   readonly getFacultyReport: (request: FacultyReportRequest) => Promise<FacultyReportResult>;
   readonly applyAssignment: (request: AssignmentApplyRequest) => Promise<AssignmentApplyResult>;
+  readonly onAssignmentApplyProgress: (
+    listener: (event: AssignmentApplyProgressEvent) => void
+  ) => () => void;
   readonly downloadAssignmentRepositories?: (
     request: AssignmentRepositoryDownloadRequest
   ) => Promise<AssignmentRepositoryDownloadResult>;

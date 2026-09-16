@@ -5,9 +5,11 @@ import type {
   ApplyTemplateDeltaInput,
   ApplyTemplateDeltaResult,
   PrepareConflictBranchInput,
+  RecoverTemplateAndStudentBaselineInput,
   RecoverStudentBaselineInput,
   StudentRepositoryRef,
   TemplateSyncBaselineRecoveryResult,
+  TemplateAndStudentBaselineRecoveryResult,
   TemplateRepositoryRef,
   TemplateSyncGitGateway,
   TemplateTree
@@ -126,6 +128,38 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
     return matchingCommitSha === undefined
       ? { status: "not_found" }
       : { status: "recovered", studentDefaultBranchCommitSha: matchingCommitSha };
+  }
+
+  async recoverTemplateAndStudentBaseline(
+    input: RecoverTemplateAndStudentBaselineInput
+  ): Promise<TemplateAndStudentBaselineRecoveryResult> {
+    const [templateHistory, studentHistory] = await Promise.all([
+      this.getFirstParentHistory(this.options.templateDirectory, input.currentTemplateCommitSha),
+      this.getFirstParentHistory(
+        this.options.studentDirectory,
+        `refs/remotes/origin/${input.studentRepository.defaultBranch}`
+      )
+    ]);
+    const studentCommitsByTree = new Map<string, string[]>();
+    for (const studentCommit of studentHistory) {
+      const commits = studentCommitsByTree.get(studentCommit.treeSha) ?? [];
+      commits.push(studentCommit.commitSha);
+      studentCommitsByTree.set(studentCommit.treeSha, commits);
+    }
+
+    const candidates = templateHistory.flatMap((templateCommit) =>
+      (studentCommitsByTree.get(templateCommit.treeSha) ?? []).map(
+        (studentDefaultBranchCommitSha) => ({
+          templateCommitSha: templateCommit.commitSha,
+          studentDefaultBranchCommitSha
+        })
+      )
+    );
+    if (candidates.length === 0) return { status: "not_found" };
+    if (candidates.length > 1) return { status: "ambiguous" };
+    const candidate = candidates[0];
+    if (candidate === undefined) return { status: "not_found" };
+    return { status: "recovered", ...candidate };
   }
 
   async applyAndPushTemplateDelta(
@@ -280,6 +314,26 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
           return [record.slice(separator + 1), record.slice(0, separator)];
         })
     );
+  }
+
+  private async getFirstParentHistory(
+    directory: string,
+    revision: string
+  ): Promise<{ commitSha: string; treeSha: string }[]> {
+    const { stdout } = await this.git(directory, [
+      "log",
+      "--first-parent",
+      "--format=%H %T",
+      revision
+    ]);
+    return stdout
+      .trim()
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const separator = line.indexOf(" ");
+        return { commitSha: line.slice(0, separator), treeSha: line.slice(separator + 1) };
+      });
   }
 
   private async templatePatch(base: string, target: string): Promise<string> {

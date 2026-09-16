@@ -85,6 +85,23 @@ describe("grading state", () => {
     }
   });
 
+  it("loads legacy persisted comments without a title", () => {
+    const request = createRequest();
+    const statePath = createGradingStatePath(request);
+    if (statePath.status === "failure") throw new Error(statePath.message);
+    const legacyState = {
+      ...initial(),
+      appliedComments: [{ id: "legacy", text: "Existing feedback", deduction: -1 }]
+    };
+    fs.mkdirSync(path.dirname(statePath.value), { recursive: true });
+    fs.writeFileSync(statePath.value, `${JSON.stringify(legacyState)}\n`, "utf8");
+
+    expect(loadGradingState(request)).toMatchObject({
+      status: "success",
+      value: { appliedComments: [{ id: "legacy", text: "Existing feedback" }] }
+    });
+  });
+
   it("rejects invalid IDs, numeric values, duplicate IDs, and source ranges", () => {
     const request = createRequest();
     expect(

@@ -221,6 +221,7 @@ export const RosterManagerPage = ({
           );
           setIsCreatingSection(false);
         }
+        clearPreview();
         onSaved();
       } else {
         throw new Error(result.diagnostics.map((item) => item.message).join(" "));

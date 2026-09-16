@@ -1,5 +1,9 @@
 import type { ReactElement } from "react";
 import type { GradingStudentEvidenceResult } from "../../electron/ipc";
+import {
+  GradingCommitHistoryContent,
+  type CommitHistoryLoadState
+} from "./GradingCommitHistoryPanel";
 
 type EvidenceSuccess = Extract<GradingStudentEvidenceResult, { readonly status: "success" }>;
 
@@ -118,21 +122,13 @@ const SuccessEvidence = ({ result }: { readonly result: EvidenceSuccess }): Reac
   return (
     <>
       <p className="grading-evidence__student">Automated checks for {result.studentId}</p>
-      <dl className="grading-evidence__outcomes">
-        <div>
-          <dt>Compile</dt>
-          <dd>{outcomeLabel(evidence.metadata.compile.outcome)}</dd>
-        </div>
-        <div>
-          <dt>Unit Tests</dt>
-          <dd>{outcomeLabel(evidence.metadata.junit.outcome)}</dd>
-        </div>
-        <div>
-          <dt>Checkstyle</dt>
-          <dd>{outcomeLabel(evidence.metadata.checkstyle.outcome)}</dd>
-        </div>
-      </dl>
-      <div className="grading-evidence__phase">
+      <details className="grading-evidence__phase" open>
+        <summary>Compile</summary>
+        <p>{outcomeLabel(evidence.metadata.compile.outcome)}</p>
+      </details>
+      <details className="grading-evidence__phase" open>
+        <summary>Unit Tests</summary>
+        <p>{outcomeLabel(evidence.metadata.junit.outcome)}</p>
         <h4>JUnit summary</h4>
         {evidence.junit.available ? (
           <>
@@ -174,9 +170,10 @@ const SuccessEvidence = ({ result }: { readonly result: EvidenceSuccess }): Reac
         ) : (
           <p>No JUnit report was available.</p>
         )}
-      </div>
-      <div className="grading-evidence__phase">
-        <h4>Checkstyle findings</h4>
+      </details>
+      <details className="grading-evidence__phase" open>
+        <summary>Checkstyle</summary>
+        <p>{outcomeLabel(evidence.metadata.checkstyle.outcome)}</p>
         {evidence.checkstyle.available ? (
           <>
             <p>
@@ -203,44 +200,65 @@ const SuccessEvidence = ({ result }: { readonly result: EvidenceSuccess }): Reac
         ) : (
           <p>No Checkstyle report was available.</p>
         )}
-      </div>
+      </details>
     </>
   );
 };
 
 export const GradingEvidencePanel = ({
   state,
+  commitHistory,
   onReload
 }: {
   readonly state: EvidenceLoadState;
+  readonly commitHistory: CommitHistoryLoadState;
   readonly onReload: (studentId: string) => void;
 }): ReactElement | null => {
-  if (state.status === "idle" || state.status === "not_applicable") return null;
-  const studentId = state.status === "success" ? state.result.studentId : state.studentId;
+  const hasEvidence = state.status !== "idle" && state.status !== "not_applicable";
+  const hasHistory = commitHistory.status !== "idle";
+  if (!hasEvidence && !hasHistory) return null;
+  const studentId =
+    state.status === "success"
+      ? state.result.studentId
+      : "studentId" in state
+        ? state.studentId
+        : "";
   return (
-    <section className="grading-evidence" aria-labelledby="automated-checks-heading">
-      <div className="grading-evidence__heading">
-        <h3 id="automated-checks-heading">Automated Checks</h3>
-        <button
-          type="button"
-          disabled={state.status === "loading"}
-          onClick={() => onReload(studentId)}
-        >
-          Reload automated checks
-        </button>
-      </div>
-      {state.status === "loading" ? (
-        <p aria-live="polite">Loading automated checks for {state.studentId}…</p>
-      ) : state.status === "message" ? (
-        <p
-          className={`grading-evidence__message grading-evidence__message--${state.tone}`}
-          role="status"
-        >
-          {state.message}
-        </p>
-      ) : (
-        <SuccessEvidence result={state.result} />
-      )}
+    <section className="grading-evidence" aria-label="Automated Checks">
+      <details>
+        <summary>
+          <h3>Automated Checks</h3>
+        </summary>
+        {hasEvidence ? (
+          <div className="grading-evidence__heading">
+            <button
+              type="button"
+              disabled={state.status === "loading"}
+              onClick={() => onReload(studentId)}
+            >
+              Reload automated checks
+            </button>
+          </div>
+        ) : null}
+        {state.status === "loading" ? (
+          <p aria-live="polite">Loading automated checks for {state.studentId}…</p>
+        ) : state.status === "message" ? (
+          <p
+            className={`grading-evidence__message grading-evidence__message--${state.tone}`}
+            role="status"
+          >
+            {state.message}
+          </p>
+        ) : state.status === "success" ? (
+          <SuccessEvidence result={state.result} />
+        ) : null}
+        {hasHistory ? (
+          <details className="grading-evidence__phase" open>
+            <summary>Commit History</summary>
+            <GradingCommitHistoryContent state={commitHistory} />
+          </details>
+        ) : null}
+      </details>
     </section>
   );
 };

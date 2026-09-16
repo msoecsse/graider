@@ -477,13 +477,21 @@ export class OctokitGitHubClient implements GitHubClient {
   async listWorkflowRunsForCommit(
     input: ListWorkflowRunsForCommitInput
   ): Promise<GitHubWorkflowRunForCommit[]> {
-    const runs = await this.runPaginated(this.octokit.rest.actions.listWorkflowRuns, {
+    const parameters = {
       owner: input.owner,
       repo: input.repo,
       workflow_id: input.workflowPath,
-      head_sha: input.headSha,
-      status: "completed"
-    });
+      status: "completed",
+      ...(input.headSha === undefined ? {} : { head_sha: input.headSha }),
+      ...(input.limit === undefined ? {} : { per_page: input.limit })
+    };
+    const runs =
+      input.limit === undefined
+        ? await this.runPaginated(this.octokit.rest.actions.listWorkflowRuns, parameters)
+        : asArray(
+            asRecord(await this.run(() => this.octokit.rest.actions.listWorkflowRuns(parameters)))
+              .workflow_runs
+          );
 
     return runs.map((run) => mapWorkflowRunForCommit(run, input.workflowPath));
   }

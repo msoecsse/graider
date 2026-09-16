@@ -27,6 +27,12 @@ const grading: EffectiveAssignmentGrading = {
   artifact: ARTIFACT_NAME,
   result_file: "grading-results.json"
 };
+const legacyGrading: EffectiveAssignmentGrading = {
+  enabled: true,
+  workflow: WORKFLOW_PATH,
+  artifact: ARTIFACT_NAME,
+  result_file: "grading-results.json"
+};
 
 const run = (overrides: Partial<GitHubWorkflowRunForCommit> = {}): GitHubWorkflowRunForCommit => ({
   id: RUN_ID,
@@ -218,9 +224,10 @@ describe("retrieveGradingEvidence", () => {
       }
     });
     expect(client.workflowRunForCommitReadRequests).toEqual([
-      { owner: OWNER, repo: REPO, workflowPath: WORKFLOW_PATH, headSha: SHA }
+      { owner: OWNER, repo: REPO, workflowPath: WORKFLOW_PATH, limit: 20 }
     ]);
     expect(client.workflowRunArtifactReadRequests).toEqual([
+      { owner: OWNER, repo: REPO, runId: 999 },
       { owner: OWNER, repo: REPO, runId: RUN_ID }
     ]);
     expect(client.artifactArchiveDownloads).toEqual([
@@ -271,6 +278,12 @@ describe("retrieveGradingEvidence", () => {
     }
   });
 
+  it("looks up workflow runs for the wizard's legacy default Graider configuration", async () => {
+    const client = clientWithEvidence();
+    await retrieve(client, { grading: legacyGrading });
+    expect(client.workflowRunForCommitReadRequests).toHaveLength(1);
+  });
+
   it("reports missing, expired, ambiguous, and oversized artifacts before download", async () => {
     const cases: Array<[GitHubActionsArtifact[], string]> = [
       [[], "evidence_artifact_missing"],
@@ -288,26 +301,36 @@ describe("retrieveGradingEvidence", () => {
     }
   });
 
-  it("does not fall back when the latest exact-SHA run lacks evidence", async () => {
+  it("uses a newer dispatched run at the workflow commit when its artifact identifies the submission", async () => {
     const older = run({ id: 99, completedAt: "2026-09-10T09:00:00Z" });
-    const latest = run({ id: 102, completedAt: "2026-09-10T11:00:00Z", conclusion: "cancelled" });
+    const dispatched = run({
+      id: 102,
+      headSha: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      completedAt: "2026-09-10T11:00:00Z"
+    });
     const client = new FakeGitHubClient({
-      workflowRuns: [older, latest].map((workflowRun) => ({
+      workflowRuns: [older, dispatched].map((workflowRun) => ({
         owner: OWNER,
         repo: REPO,
         run: workflowRun
       })),
       actionsArtifacts: [
-        { owner: OWNER, repo: REPO, runId: older.id, artifact: artifact(), archiveBytes: archive() }
+        {
+          owner: OWNER,
+          repo: REPO,
+          runId: dispatched.id,
+          artifact: artifact(),
+          archiveBytes: archive(metadata({ workflowRunId: String(dispatched.id) }))
+        }
       ]
     });
 
     await expect(retrieve(client)).resolves.toMatchObject({
-      status: "failure",
-      error: { code: "evidence_artifact_missing" }
+      status: "success",
+      value: { runId: dispatched.id, evidence: { metadata: { submissionCommitSha: SHA } } }
     });
     expect(client.workflowRunArtifactReadRequests).toEqual([
-      { owner: OWNER, repo: REPO, runId: latest.id }
+      { owner: OWNER, repo: REPO, runId: dispatched.id }
     ]);
   });
 

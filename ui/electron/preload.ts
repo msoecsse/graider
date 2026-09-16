@@ -5,6 +5,7 @@ import {
   type LocalSettingsResult,
   type AssignmentApplyRequest,
   type AssignmentApplyResult,
+  type AssignmentApplyProgressEvent,
   type AssignmentApplyPreviewRequest,
   type AssignmentApplyPreviewResult,
   type AssignmentDetailRequest,
@@ -18,6 +19,10 @@ import {
   type GradingStudentSnapshotResult,
   type GradingStudentEvidenceRequest,
   type GradingStudentEvidenceResult,
+  type GradingStudentWorkflowRepairRequest,
+  type GradingStudentWorkflowRepairResult,
+  type PublishGradingStudentReportRequest,
+  type GradingBulkWorkflowRepairRequest,
   type GradingStudentCommitHistoryRequest,
   type GradingStudentCommitHistoryResult,
   type AddGradingStudentCommentRequest,
@@ -30,7 +35,6 @@ import {
   type GradingStudentManualAdjustmentResult,
   type MarkGradingStudentCompleteRequest,
   type MarkGradingStudentCompleteResult,
-  type PublishGradingStudentReportRequest,
   type PublishGradingStudentReportResult,
   type BulkPublishGradingStudentReportsRequest,
   type BulkPublishGradingStudentReportsResult,
@@ -42,6 +46,7 @@ import {
   type AssignmentTemplateSyncAvailability,
   type AssignmentTemplateSyncExecuteRequest,
   type AssignmentTemplateSyncExecutionResult,
+  type AssignmentTemplateSyncProgress,
   type AssignmentTemplateSyncRequest,
   type AssignmentGradeRequest,
   type AssignmentGradeResult,
@@ -257,6 +262,22 @@ const graiderUI: GraiderUIApi = {
     request: GradingStudentEvidenceRequest
   ): Promise<GradingStudentEvidenceResult> =>
     await invoke<GradingStudentEvidenceResult>(IPC_CHANNELS.loadGradingStudentEvidence, request),
+  repairGradingStudentWorkflow: async (
+    request: GradingStudentWorkflowRepairRequest
+  ): Promise<GradingStudentWorkflowRepairResult> =>
+    await invoke<GradingStudentWorkflowRepairResult>(
+      IPC_CHANNELS.repairGradingStudentWorkflow,
+      request
+    ),
+  repairGradingAssignmentWorkflows: async (request: GradingBulkWorkflowRepairRequest) =>
+    await invoke<import("./gradingBulkWorkflowRepairService.js").GradingBulkWorkflowRepairResult>(
+      IPC_CHANNELS.repairGradingAssignmentWorkflows,
+      request
+    ),
+  previewGradingStudentReport: async (request: PublishGradingStudentReportRequest) =>
+    await invoke<
+      import("./gradingStudentReportPublicationService.js").PreviewGradingStudentReportResult
+    >(IPC_CHANNELS.previewGradingStudentReport, request),
   loadGradingStudentCommitHistory: async (
     request: GradingStudentCommitHistoryRequest
   ): Promise<GradingStudentCommitHistoryResult> =>
@@ -348,6 +369,20 @@ const graiderUI: GraiderUIApi = {
       IPC_CHANNELS.executeAssignmentTemplateSync,
       request
     ),
+  onAssignmentTemplateSyncProgress: (
+    listener: (progress: AssignmentTemplateSyncProgress) => void
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      progress: AssignmentTemplateSyncProgress
+    ) => {
+      listener(progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.assignmentTemplateSyncProgress, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.assignmentTemplateSyncProgress, handler);
+    };
+  },
   getAssignmentApplyPreview: async (
     request: AssignmentApplyPreviewRequest
   ): Promise<AssignmentApplyPreviewResult> =>
@@ -364,6 +399,15 @@ const graiderUI: GraiderUIApi = {
     await invoke<FacultyReportResult>(IPC_CHANNELS.getFacultyReport, request),
   applyAssignment: async (request: AssignmentApplyRequest): Promise<AssignmentApplyResult> =>
     await invoke<AssignmentApplyResult>(IPC_CHANNELS.applyAssignment, request),
+  onAssignmentApplyProgress: (listener: (event: AssignmentApplyProgressEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: AssignmentApplyProgressEvent) => {
+      listener(progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.assignmentApplyProgress, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.assignmentApplyProgress, handler);
+    };
+  },
   downloadAssignmentRepositories: async (
     request: AssignmentRepositoryDownloadRequest
   ): Promise<AssignmentRepositoryDownloadResult> =>

@@ -52,12 +52,37 @@ afterEach(() => {
 });
 
 describe("applied grading comment context", () => {
+  it("requires a nonblank title for new comments and persists a trimmed snapshot title", () => {
+    const { request, stateRequest } = setup();
+    expect(
+      addGradingStudentCommentContext(request, {
+        id: "untitled",
+        title: "   ",
+        text: "Feedback",
+        deduction: -1
+      })
+    ).toMatchObject({ status: "grading_state_error", code: "comment_title_required" });
+    expect(
+      addGradingStudentCommentContext(request, {
+        id: "titled",
+        title: "  Naming  ",
+        text: "Feedback",
+        deduction: -1
+      })
+    ).toMatchObject({ status: "success" });
+    expect(loadGradingState(stateRequest)).toMatchObject({
+      status: "success",
+      value: { appliedComments: [{ id: "titled", title: "Naming" }] }
+    });
+  });
+
   it("creates state from trusted HEAD, preserves snapshots, and validates rubric/source configuration", () => {
     const { request, stateRequest } = setup();
     expect(
       addGradingStudentCommentContext(request, {
         id: "library-snapshot",
         sourceCommentId: "library-id",
+        title: "Naming",
         text: "Use a clearer name.",
         deduction: -2,
         rubricCategoryId: "design",
@@ -69,7 +94,12 @@ describe("applied grading comment context", () => {
       value: {
         submissionCommitSha: SHA,
         appliedComments: [
-          { id: "library-snapshot", sourceCommentId: "library-id", text: "Use a clearer name." }
+          {
+            id: "library-snapshot",
+            sourceCommentId: "library-id",
+            title: "Naming",
+            text: "Use a clearer name."
+          }
         ]
       }
     });
@@ -79,6 +109,7 @@ describe("applied grading comment context", () => {
     expect(
       addGradingStudentCommentContext(request, {
         id: "bad-category",
+        title: "Category",
         text: "Nope",
         deduction: -1,
         rubricCategoryId: "unknown"
@@ -87,6 +118,7 @@ describe("applied grading comment context", () => {
     expect(
       addGradingStudentCommentContext(request, {
         id: "bad-file",
+        title: "Source",
         text: "Nope",
         deduction: -1,
         sourceLocation: { file: "/tmp/Main.java", startLine: 1, endLine: 1 }
@@ -111,6 +143,7 @@ describe("applied grading comment context", () => {
     });
     expect(
       editGradingStudentCommentContext(request, "edit", {
+        title: "Added later",
         text: "New",
         deduction: -3,
         rubricCategoryId: "design",
@@ -124,6 +157,7 @@ describe("applied grading comment context", () => {
     if (afterRemoval.status !== "success") throw new Error("Expected grading state.");
     expect(afterRemoval.value.appliedComments).toContainEqual({
       id: "edit",
+      title: "Added later",
       text: "General",
       deduction: -2
     });
@@ -157,6 +191,7 @@ describe("applied grading comment context", () => {
     expect(
       addGradingStudentCommentContext(request, {
         id: "resolved-source",
+        title: "Resolved path",
         text: "Use the resolved source identity.",
         deduction: -1,
         sourceLocation: { file: "src/jones/Color.java", startLine: 1, endLine: 1 }

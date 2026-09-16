@@ -12,6 +12,7 @@ import { renderGradingReportHtml } from "../../../src/grading/grading-report-htm
 const COMMIT_SHA_LENGTH = 40;
 const POSITIVE_MANUAL_ADJUSTMENT = 1.5;
 const NEGATIVE_MANUAL_ADJUSTMENT = -0.25;
+const FOUR_POINT_DEDUCTION = 4;
 const SUBMISSION_SHA = "a".repeat(COMMIT_SHA_LENGTH);
 
 const state = (status: GradingState["status"] = "complete"): GradingState => ({
@@ -23,16 +24,18 @@ const state = (status: GradingState["status"] = "complete"): GradingState => ({
     {
       id: "general-1",
       sourceCommentId: "library-copy-1",
+      title: "Design rationale",
       text: "Explain the design choice.",
       deduction: -1
     },
     {
       id: "source-1",
       sourceCommentId: "library-copy-2",
+      title: "Close resources",
       text: "Close the resource on every path.",
       deduction: -2,
       rubricCategoryId: "correctness",
-      sourceLocation: { file: "src/Main.java", startLine: 2, endLine: 2 }
+      sourceLocation: { file: "src/Main.java", startLine: 2, endLine: 3 }
     },
     {
       id: "source-2",
@@ -215,6 +218,7 @@ describe("grading report model", () => {
       uncategorizedCommentAdjustmentTotal: -1
     });
     expect(model.generalComments.map(({ text }) => text)).toEqual(["Explain the design choice."]);
+    expect(model.generalComments.map(({ title }) => title)).toEqual(["Design rationale"]);
     expect(model.sourceFiles.map(({ file }) => file)).toEqual(["src/Main.java", "README.md"]);
     expect(model.sourceFiles[0]?.comments).toHaveLength(2);
     expect(model.unmappedSourceComments).toEqual([
@@ -272,7 +276,7 @@ describe("grading report HTML", () => {
     expect(first.indexOf('id="automated-checks"')).toBeLessThan(
       first.indexOf('id="commit-history"')
     );
-    expect(first.indexOf("Checkstyle")).toBeLessThan(first.indexOf("Unit Tests"));
+    expect(first.indexOf("Unit Tests")).toBeLessThan(first.indexOf("Checkstyle"));
   });
 
   it("renders the identity, canonical score explanation, comments, and adjustments", () => {
@@ -291,19 +295,78 @@ describe("grading report HTML", () => {
     expect(html).toContain("Close the resource on every path.");
   });
 
-  it("renders canonical source files, line anchors, same-range feedback, and missing locations", () => {
+  it("renders legacy and positive stored deductions as negative score adjustments", () => {
+    const positive = buildGradingReportModel({
+      ...baseInput(),
+      gradingState: {
+        ...state(),
+        appliedComments: [{ id: "positive", text: "Deduct four.", deduction: FOUR_POINT_DEDUCTION }]
+      }
+    });
+    if (positive.status !== "success") throw new Error("Expected report model.");
+    expect(positive.value.generalComments[0]?.deduction).toBe(-FOUR_POINT_DEDUCTION);
+    expect(renderGradingReportHtml(positive.value)).toContain("Score adjustment: -4");
+
+    const legacy = buildGradingReportModel({
+      ...baseInput(),
+      gradingState: {
+        ...state(),
+        appliedComments: [{ id: "legacy", text: "Deduct four.", deduction: -FOUR_POINT_DEDUCTION }]
+      }
+    });
+    if (legacy.status !== "success") throw new Error("Expected report model.");
+    expect(renderGradingReportHtml(legacy.value)).toContain("Score adjustment: -4");
+  });
+
+  it("renders a pre-code source-feedback index and inline source comments without duplicates", () => {
     const html = renderGradingReportHtml(buildModel());
 
-    expect(html.indexOf("src/Main.java")).toBeLessThan(html.indexOf("README.md"));
+    expect(html.indexOf('id="source-feedback-index-heading"')).toBeLessThan(
+      html.indexOf('<table class="source-code">')
+    );
+    expect(html).toContain(
+      'href="#source-comment-2">Close resources — src/Main.java, lines 2–3</a>'
+    );
+    expect(html).toContain('href="#source-comment-3">Feedback 3 — src/Main.java, line 2</a>');
+    expect(html).not.toContain('href="#source-comment-4"');
     expect(html).toContain('id="source-file-1-line-2"');
-    expect(html).toContain('href="#source-comment-2"');
-    expect(html).toContain('href="#source-comment-3"');
+    expect(html).toContain('id="source-file-1-line-3" class="has-feedback"');
+    expect(html).toContain('id="source-comment-2"');
+    expect(html).toContain('id="source-comment-3"');
+    expect(html).toContain("<h4>Close resources</h4>");
+    expect(html).toContain("<h4>Feedback 3</h4>");
+    expect(html.indexOf("<h4>Close resources</h4>")).toBeLessThan(
+      html.indexOf("<h4>Feedback 3</h4>")
+    );
+    expect(html).toContain("Rubric: Correctness · Score adjustment: -2");
+    expect(html.match(/Close the resource on every path\./gu)).toHaveLength(1);
+    expect(html.match(/A second note for the same range\./gu)).toHaveLength(1);
     expect(html).toContain("Required file unavailable.");
     expect(html).toContain("Location unavailable in the anchored submission source.");
     expect(html).toContain("src/Removed.java, lines 4–5");
+    expect(html).toContain("This anchored location is no longer present.");
     expect(html).not.toContain("combinedStartLine");
     expect(html).not.toContain("syntheticCombinedLines");
     expect(html).toContain("\tString value");
+  });
+
+  it("escapes source-feedback titles while retaining valid source and Checkstyle anchors", () => {
+    const input = baseInput();
+    const html = renderGradingReportHtml(
+      buildModel({
+        ...input,
+        gradingState: {
+          ...input.gradingState,
+          appliedComments: input.gradingState.appliedComments.map((comment) =>
+            comment.id === "source-1" ? { ...comment, title: '<source & "title">' } : comment
+          )
+        }
+      })
+    );
+
+    expect(html).toContain("&lt;source &amp; &quot;title&quot;&gt;");
+    expect(html).toContain('href="#source-file-1-line-2">src/Main.java:2:3</a>');
+    expect(html).toContain('id="source-file-1-line-2"');
   });
 
   it("renders normalized Checkstyle and JUnit evidence without changing the grade", () => {

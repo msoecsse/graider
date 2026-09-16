@@ -41,7 +41,8 @@ import {
   resolveProductionGitHubClient
 } from "../../github/github-client-factory.js";
 import type { RetryOptions } from "../../github/github-retry.js";
-import { runApplyCommand } from "./apply.command.js";
+import type { ApplyRepositoryProgressObserver } from "../../execution/apply-progress.js";
+import { APPLY_PROGRESS_PREFIX, runApplyCommand } from "./apply.command.js";
 import { runGradeCommand, type GradeRawOptions } from "./grade.command.js";
 import { writeCommandResult } from "../output.js";
 import {
@@ -131,6 +132,7 @@ export interface AssignmentApplyCommandRequest {
   readonly githubClient?: GitHubClient;
   readonly clock?: Clock;
   readonly retryOptions?: Partial<RetryOptions>;
+  readonly onRepositoryProgress?: ApplyRepositoryProgressObserver;
 }
 
 export interface AssignmentGradeCommandRequest {
@@ -367,7 +369,8 @@ export const runAssignmentApplyCommand = ({
   options,
   githubClient,
   clock,
-  retryOptions
+  retryOptions,
+  onRepositoryProgress
 }: AssignmentApplyCommandRequest): Promise<CommandResult> =>
   runApplyCommand({
     cwd,
@@ -376,7 +379,8 @@ export const runAssignmentApplyCommand = ({
     commandName: ASSIGNMENT_APPLY_COMMAND_NAME,
     ...(githubClient === undefined ? {} : { githubClient }),
     ...(clock === undefined ? {} : { clock }),
-    ...(retryOptions === undefined ? {} : { retryOptions })
+    ...(retryOptions === undefined ? {} : { retryOptions }),
+    ...(onRepositoryProgress === undefined ? {} : { onRepositoryProgress })
   });
 
 export const runAssignmentGradeCommand = ({
@@ -533,18 +537,31 @@ export const registerAssignmentCommand = (program: Command): void => {
     .option("--json", "Emit JSON output")
     .option("--verbose", "Emit verbose diagnostics")
     .option("--yes", "Confirm non-interactive execution")
+    .option("--progress-json", "Emit repository heartbeat records to stderr")
     .description("Apply assignment repository changes.")
-    .action(async (assignmentFile: string, rawOptions: RawCommonCommandOptions) => {
-      const options = normalizeCommonCommandOptions(rawOptions);
-      const result = await runAssignmentApplyCommand({
-        cwd: process.cwd(),
-        assignmentFile,
-        options
-      });
+    .action(
+      async (
+        assignmentFile: string,
+        rawOptions: RawCommonCommandOptions & { progressJson?: boolean }
+      ) => {
+        const options = normalizeCommonCommandOptions(rawOptions);
+        const result = await runAssignmentApplyCommand({
+          cwd: process.cwd(),
+          assignmentFile,
+          options,
+          ...(rawOptions.progressJson === true
+            ? {
+                onRepositoryProgress: (progress) => {
+                  process.stderr.write(`${APPLY_PROGRESS_PREFIX}${JSON.stringify(progress)}\n`);
+                }
+              }
+            : {})
+        });
 
-      writeCommandResult(result, options.json);
-      process.exitCode = result.exitCode;
-    });
+        writeCommandResult(result, options.json);
+        process.exitCode = result.exitCode;
+      }
+    );
 
   assignment
     .command(GRADE_COMMAND_NAME)

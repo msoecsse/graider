@@ -32,6 +32,7 @@ describe("RosterManagerPage", () => {
       saveRoster
     });
 
+    const onSaved = vi.fn();
     render(
       <RosterManagerPage
         courseFolder={{
@@ -43,7 +44,7 @@ describe("RosterManagerPage", () => {
           lastDashboardStatus: null
         }}
         onBack={vi.fn()}
-        onSaved={vi.fn()}
+        onSaved={onSaved}
       />
     );
 
@@ -59,6 +60,9 @@ describe("RosterManagerPage", () => {
     await waitFor(() =>
       expect(saveRoster).toHaveBeenCalledWith(expect.objectContaining({ confirmed: true }))
     );
+    expect(screen.queryByRole("dialog", { name: "Save roster changes?" })).not.toBeInTheDocument();
+    expect(screen.getByText("Saved terms/27s1/rosters/001.csv")).toBeInTheDocument();
+    expect(onSaved).toHaveBeenCalledOnce();
   });
 
   it("edits faculty assignments in the selected section before saving", async () => {

@@ -3,7 +3,10 @@ import type { AssignmentDetailRequest } from "./ipc.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { resolveGithubToken, type GithubTokenResolution } from "./tokenResolver.js";
 
-export type AssignmentTemplateSyncRequest = AssignmentDetailRequest;
+export interface AssignmentTemplateSyncRequest extends AssignmentDetailRequest {
+  /** Narrow selector only; repository identity remains manifest-resolved in the main process. */
+  readonly studentId?: string;
+}
 export interface AssignmentTemplateSyncExecuteRequest extends AssignmentTemplateSyncRequest {
   readonly confirmed: boolean;
 }
@@ -19,7 +22,17 @@ export interface AssignmentTemplateSyncAvailability {
   readonly templateRepository: string | null;
   /** Recorded revision, not a claim about the current remote HEAD. */
   readonly recordedTemplateRevision: string | null;
+  /** Trusted preview identity for a single-student confirmation dialog. */
+  readonly selectedRepository?: { readonly studentId: string; readonly repository: string };
   readonly blocker?: TemplateSyncBlocker;
+}
+
+/** Projected repository heartbeat sent from trusted main-process sync state. */
+export interface AssignmentTemplateSyncProgress {
+  readonly current: number;
+  readonly total: number;
+  readonly studentId: string;
+  readonly repository: string;
 }
 
 export type AssignmentTemplateSyncFailureStage =
@@ -58,13 +71,15 @@ export interface AssignmentTemplateSyncExecutionResult {
 export interface AssignmentTemplateSyncService {
   prepare(request: AssignmentTemplateSyncRequest): Promise<AssignmentTemplateSyncAvailability>;
   execute(
-    request: AssignmentTemplateSyncExecuteRequest
+    request: AssignmentTemplateSyncExecuteRequest,
+    onProgress?: (progress: AssignmentTemplateSyncProgress) => void
   ): Promise<AssignmentTemplateSyncExecutionResult>;
 }
 
 interface AssignmentTemplateSyncBackend extends Omit<AssignmentTemplateSyncService, "execute"> {
   execute(
-    request: AssignmentTemplateSyncExecuteRequest & { readonly resolvedGithubToken?: string }
+    request: AssignmentTemplateSyncExecuteRequest & { readonly resolvedGithubToken?: string },
+    onProgress?: (progress: AssignmentTemplateSyncProgress) => void
   ): Promise<AssignmentTemplateSyncExecutionResult>;
 }
 
@@ -84,8 +99,8 @@ export const createAssignmentTemplateSyncService = (
     await resolveGithubToken({ runner: createNodeProcessRunner() })
 ): AssignmentTemplateSyncService => ({
   prepare: async (request) => backend().prepare(request),
-  execute: async (request) => {
-    if (!request.confirmed) return await backend().execute(request);
+  execute: async (request, onProgress) => {
+    if (!request.confirmed) return await backend().execute(request, onProgress);
 
     const tokenResolution = await resolveToken();
     if (tokenResolution.status === "failure") {
@@ -99,10 +114,13 @@ export const createAssignmentTemplateSyncService = (
       };
     }
 
-    return await backend().execute({
+    const executionRequest = {
       ...request,
       resolvedGithubToken: tokenResolution.token
-    });
+    };
+    return onProgress === undefined
+      ? await backend().execute(executionRequest)
+      : await backend().execute(executionRequest, onProgress);
   }
 });
 

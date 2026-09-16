@@ -31,8 +31,10 @@ thead th { background: #f1f5f9; }
 .source-code th, .source-code td { border: 0; border-bottom: 1px solid #e2e8f0; padding: .15rem .4rem; }
 .source-code th { width: 1%; color: #64748b; background: #f8fafc; text-align: right; user-select: none; }
 .source-code code { display: block; min-height: 1.25em; white-space: pre; }
-.source-code .marker { white-space: nowrap; font-family: system-ui, sans-serif; font-size: .75rem; }
 .source-code .has-feedback { background: #fff7ed; }
+.source-code .inline-feedback-row td { padding: 0; background: #fff7ed; }
+.inline-source-feedback { margin: .45rem; }
+.source-feedback-index { margin: .75rem 0 1rem; }
 .phase-grid { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1rem; }
 .phase-grid dt { font-weight: 700; }
 .phase-grid dd { margin: 0; }
@@ -84,6 +86,11 @@ const commentCategory = (comment: GradingReportComment): string =>
     ? "General score adjustment"
     : `Rubric: ${escapeHtml(comment.rubricCategoryName)}`;
 
+const commentLabel = (comment: GradingReportComment): string =>
+  comment.title === undefined
+    ? `Feedback ${formatNumber(comment.reportIndex)}`
+    : escapeHtml(comment.title);
+
 const renderCommentBody = (comment: GradingReportComment): string => `
 <p class="preserve-text">${escapeHtml(comment.text)}</p>
 <p class="secondary">${commentCategory(comment)} · Score adjustment: ${formatSignedNumber(comment.deduction)}</p>`;
@@ -128,6 +135,12 @@ const commentsForLine = (
       line <= comment.sourceLocation.endLine
   );
 
+const renderInlineSourceComment = (comment: GradingReportComment): string =>
+  `<article class="feedback inline-source-feedback" id="source-comment-${formatNumber(comment.reportIndex)}">
+<h4>${commentLabel(comment)}</h4>
+${renderCommentBody(comment)}
+</article>`;
+
 const renderSourceLines = (source: Extract<GradingReportSourceFile, { status: "found" }>): string =>
   source.lines
     .map((line, index) => {
@@ -136,32 +149,16 @@ const renderSourceLines = (source: Extract<GradingReportSourceFile, { status: "f
       const startingComments = comments.filter(
         (comment) => comment.sourceLocation?.startLine === lineNumber
       );
-      const markers = startingComments
+      const sourceRow = `<tr id="source-file-${formatNumber(source.fileIndex)}-line-${formatNumber(lineNumber)}"${comments.length === 0 ? "" : ' class="has-feedback"'}><th scope="row">${formatNumber(lineNumber)}</th><td><code>${escapeHtml(line)}</code></td></tr>`;
+      const inlineComments = startingComments
         .map(
           (comment) =>
-            `<a href="#source-comment-${formatNumber(comment.reportIndex)}">Feedback ${formatNumber(comment.reportIndex)}</a>`
+            `<tr class="inline-feedback-row"><th aria-hidden="true"></th><td>${renderInlineSourceComment(comment)}</td></tr>`
         )
-        .join(", ");
-      return `<tr id="source-file-${formatNumber(source.fileIndex)}-line-${formatNumber(lineNumber)}"${comments.length === 0 ? "" : ' class="has-feedback"'}><th scope="row">${formatNumber(lineNumber)}</th><td><code>${escapeHtml(line)}</code></td><td class="marker">${markers}</td></tr>`;
+        .join("");
+      return `${sourceRow}${inlineComments}`;
     })
     .join("\n");
-
-const renderMappedSourceComments = (
-  source: Extract<GradingReportSourceFile, { status: "found" }>
-): string => {
-  const comments = source.comments.filter((comment) => comment.locationAvailable);
-  if (comments.length === 0) return '<p class="secondary">No source feedback for this file.</p>';
-  return `<ol class="feedback-list">${comments
-    .map((comment) => {
-      const location = comment.sourceLocation;
-      if (location === undefined) return "";
-      return `<li class="feedback" id="source-comment-${formatNumber(comment.reportIndex)}">
-<p><a href="#source-file-${formatNumber(source.fileIndex)}-line-${formatNumber(location.startLine)}">${sourceLocationText(comment)}</a></p>
-${renderCommentBody(comment)}
-</li>`;
-    })
-    .join("")}</ol>`;
-};
 
 const renderSourceFile = (source: GradingReportSourceFile): string => `
 <article class="source-file" id="source-file-${formatNumber(source.fileIndex)}">
@@ -170,13 +167,31 @@ ${
   source.status === "missing"
     ? '<p class="unavailable">Required file unavailable.</p>'
     : `<div class="source-scroll" role="region" aria-label="Source for ${escapeHtml(source.file)}" tabindex="0">
-<table class="source-code"><thead><tr><th scope="col">Line</th><th scope="col">Source</th><th scope="col">Feedback</th></tr></thead><tbody>
+<table class="source-code"><thead><tr><th scope="col">Line</th><th scope="col">Source</th></tr></thead><tbody>
 ${renderSourceLines(source)}
 </tbody></table>
-</div>
-${renderMappedSourceComments(source)}`
+</div>`
 }
 </article>`;
+
+const mappedSourceComments = (model: GradingReportModel): readonly GradingReportComment[] =>
+  model.sourceFiles.flatMap((source) =>
+    source.status === "found" ? source.comments.filter((comment) => comment.locationAvailable) : []
+  );
+
+const renderSourceFeedbackIndex = (model: GradingReportModel): string => {
+  const comments = mappedSourceComments(model);
+  if (comments.length === 0) return "";
+  return `<section class="source-feedback-index" aria-labelledby="source-feedback-index-heading">
+<h3 id="source-feedback-index-heading">Source Feedback</h3>
+<ol>${comments
+    .map(
+      (comment) =>
+        `<li><a href="#source-comment-${formatNumber(comment.reportIndex)}">${commentLabel(comment)} — ${sourceLocationText(comment)}</a></li>`
+    )
+    .join("")}</ol>
+</section>`;
+};
 
 const renderUnmappedSourceComments = (comments: readonly GradingReportComment[]): string =>
   comments.length === 0
@@ -199,6 +214,7 @@ ${renderCommentBody(comment)}
 const renderSource = (model: GradingReportModel): string => `
 <section id="source" aria-labelledby="source-heading">
 <h2 id="source-heading">Submission Source and Feedback</h2>
+${renderSourceFeedbackIndex(model)}
 ${
   model.sourceFiles.length === 0
     ? '<p class="secondary">No source files were supplied for this report.</p>'
@@ -296,9 +312,9 @@ const renderEvidence = (model: GradingReportModel): string => {
 <section id="automated-checks" aria-labelledby="automated-checks-heading">
 <h2 id="automated-checks-heading">Automated Checks</h2>
 <p class="secondary">Informational only; these results do not independently alter the score.</p>
-<dl class="phase-grid"><dt>Compile</dt><dd><span class="outcome">${outcomeLabel(evidence.metadata.compile.outcome)}</span></dd><dt>Checkstyle</dt><dd><span class="outcome">${outcomeLabel(evidence.metadata.checkstyle.outcome)}</span></dd><dt>Unit Tests</dt><dd><span class="outcome">${outcomeLabel(evidence.metadata.junit.outcome)}</span></dd></dl>
-${renderCheckstyle(model)}
+<dl class="phase-grid"><dt>Compile</dt><dd><span class="outcome">${outcomeLabel(evidence.metadata.compile.outcome)}</span></dd><dt>Unit Tests</dt><dd><span class="outcome">${outcomeLabel(evidence.metadata.junit.outcome)}</span></dd><dt>Checkstyle</dt><dd><span class="outcome">${outcomeLabel(evidence.metadata.checkstyle.outcome)}</span></dd></dl>
 ${renderJunit(model)}
+${renderCheckstyle(model)}
 </section>`;
 };
 

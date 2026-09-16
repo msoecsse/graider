@@ -49,15 +49,14 @@ export const commitHistoryResultToLoadState = (
 const formatCommitTimestamp = (committedAt: string): string =>
   new Date(committedAt).toLocaleString();
 
-export const GradingCommitHistoryPanel = ({
+export const GradingCommitHistoryContent = ({
   state
 }: {
   readonly state: CommitHistoryLoadState;
 }): ReactElement | null => {
   if (state.status === "idle") return null;
   return (
-    <section className="grading-commit-history" aria-labelledby="commit-history-heading">
-      <h3 id="commit-history-heading">Commit History</h3>
+    <div className="grading-commit-history">
       {state.status === "loading" ? (
         <p aria-live="polite">Loading commit history for {state.studentId}…</p>
       ) : state.status === "message" ? (
@@ -94,6 +93,17 @@ export const GradingCommitHistoryPanel = ({
           )}
         </>
       )}
-    </section>
+    </div>
   );
 };
+
+export const GradingCommitHistoryPanel = ({
+  state
+}: {
+  readonly state: CommitHistoryLoadState;
+}) => (
+  <section className="grading-commit-history" aria-labelledby="commit-history-heading">
+    <h3 id="commit-history-heading">Commit History</h3>
+    <GradingCommitHistoryContent state={state} />
+  </section>
+);

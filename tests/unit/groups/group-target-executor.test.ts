@@ -27,6 +27,47 @@ const target = (
 });
 
 describe("group target executor", () => {
+  it("reports each group target before its repository work and isolates observer failures", async () => {
+    const loaded = loadGraiderConfig({
+      cwd: path.resolve("tests/fixtures/plan/active-assignment"),
+      assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
+    });
+    if (loaded.status === "failure") throw new Error("Fixture config must load.");
+    const githubClient = new FakeGitHubClient();
+    const progress: Array<{
+      current: number;
+      total: number;
+      groupId?: string;
+      repository: string;
+    }> = [];
+
+    const result = await executeGroupTargets({
+      config: loaded.config,
+      githubClient,
+      targets: [target("team-1", ["alpha"], ["alpha-gh"]), target("team-2", ["beta"], ["beta-gh"])],
+      onRepositoryProgress: (event) => {
+        progress.push(event);
+        throw new Error("Observer delivery must not change execution.");
+      }
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(progress).toEqual([
+      expect.objectContaining({
+        current: 1,
+        total: 2,
+        groupId: "team-1",
+        repository: "example-org/27s1-se2030-lab04-team-1"
+      }),
+      expect.objectContaining({
+        current: 2,
+        total: 2,
+        groupId: "team-2",
+        repository: "example-org/27s1-se2030-lab04-team-2"
+      })
+    ]);
+  });
+
   it("checkpoints a created repository before attempting later permissions", async () => {
     const loaded = loadGraiderConfig({
       cwd: path.resolve("tests/fixtures/plan/active-assignment"),

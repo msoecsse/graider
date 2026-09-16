@@ -7,7 +7,7 @@ import {
   type GradingEvidenceArtifactError
 } from "./grading-evidence-artifact.js";
 import type { GradingEvidence, GradingEvidenceParseError } from "./grading-evidence-parser.js";
-import { isManagedGradingWorkflowEligible } from "../workflows/managed-workflow-deployment.js";
+import { isManualManagedGradingWorkflowEligible } from "../workflows/manual-managed-grading-workflow.js";
 import { GRAIDER_MANAGED_WORKFLOW_PATH } from "../workflows/managed-workflow-policy.js";
 
 const BYTES_PER_MEBIBYTE = 1_048_576;
@@ -16,6 +16,7 @@ const MAX_GRADING_EVIDENCE_ARCHIVE_DOWNLOAD_MEBIBYTES = 32;
 export const MAX_GRADING_EVIDENCE_ARCHIVE_DOWNLOAD_BYTES =
   MAX_GRADING_EVIDENCE_ARCHIVE_DOWNLOAD_MEBIBYTES * BYTES_PER_MEBIBYTE;
 export const DEFAULT_GRADING_EVIDENCE_ARTIFACT_NAME = "grading-results";
+export const MAX_RECENT_GRADING_WORKFLOW_RUNS = 20;
 
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/iu;
 
@@ -96,7 +97,7 @@ export const selectAuthoritativeGradingWorkflowRun = (
 export const retrieveGradingEvidence = async (
   input: GradingEvidenceRetrievalInput
 ): Promise<GradingEvidenceRetrievalResult> => {
-  if (input.grading === undefined || !isManagedGradingWorkflowEligible(input.grading)) {
+  if (input.grading === undefined || !isManualManagedGradingWorkflowEligible(input.grading)) {
     return { status: "not_applicable", reason: "managed_preset_not_enabled" };
   }
   if (!COMMIT_SHA_PATTERN.test(input.submissionCommitSha)) {
@@ -110,108 +111,109 @@ export const retrieveGradingEvidence = async (
       owner: input.repository.owner,
       repo: input.repository.repo,
       workflowPath,
-      headSha: input.submissionCommitSha
+      limit: MAX_RECENT_GRADING_WORKFLOW_RUNS
     });
   } catch (error: unknown) {
     return githubFailure(error, "evidence_retrieval_failed");
   }
 
-  const exactRuns = runs.filter(
-    (run) =>
-      run.status === "completed" &&
-      run.workflowPath === workflowPath &&
-      run.headSha === input.submissionCommitSha
-  );
-  const selectedRun = selectAuthoritativeGradingWorkflowRun(exactRuns);
-  if (selectedRun === undefined) {
+  const candidates = [...runs]
+    .filter((run) => run.status === "completed" && run.workflowPath === workflowPath)
+    .sort((left, right) => {
+      const completionDifference = completionTime(right) - completionTime(left);
+      if (completionDifference !== 0) return completionDifference;
+      const attemptDifference = right.runAttempt - left.runAttempt;
+      return attemptDifference === 0 ? right.id - left.id : attemptDifference;
+    });
+  if (candidates.length === 0) {
     return failure(
       "workflow_run_not_found",
       "No completed managed grading workflow run exists for this submission commit."
     );
   }
-
-  let artifacts;
-  try {
-    artifacts = await input.githubClient.listWorkflowRunArtifacts({
-      owner: input.repository.owner,
-      repo: input.repository.repo,
-      runId: selectedRun.id
-    });
-  } catch (error: unknown) {
-    return githubFailure(error, "evidence_retrieval_failed");
-  }
-
   const artifactName = input.grading.artifact ?? DEFAULT_GRADING_EVIDENCE_ARTIFACT_NAME;
-  const matchingArtifacts = artifacts.filter((artifact) => artifact.name === artifactName);
-  if (matchingArtifacts.length === 0) {
-    return failure(
-      "evidence_artifact_missing",
-      "The selected grading workflow run has no configured evidence artifact."
-    );
-  }
-  if (matchingArtifacts.length > 1) {
-    return failure(
-      "evidence_artifact_ambiguous",
-      "The selected grading workflow run has multiple configured evidence artifacts."
-    );
-  }
-  const artifact = matchingArtifacts[0];
-  if (artifact === undefined) {
-    return failure("evidence_artifact_missing", "The grading evidence artifact is unavailable.");
-  }
-  if (artifact.expired) {
-    return failure("evidence_artifact_expired", "The grading evidence artifact has expired.");
-  }
-  if (artifact.id <= 0 || artifact.sizeInBytes < 0) {
-    return failure("evidence_retrieval_failed", "GitHub returned invalid artifact metadata.");
-  }
-  if (artifact.sizeInBytes > MAX_GRADING_EVIDENCE_ARCHIVE_DOWNLOAD_BYTES) {
-    return failure(
-      "evidence_artifact_too_large",
-      "The grading evidence artifact exceeds the supported download size."
-    );
-  }
-
-  let archiveBytes: Uint8Array;
-  try {
-    archiveBytes = await input.githubClient.downloadArtifactArchive({
-      owner: input.repository.owner,
-      repo: input.repository.repo,
-      artifactId: artifact.id
-    });
-  } catch (error: unknown) {
-    return githubFailure(error, "evidence_artifact_download_failed");
-  }
-  if (archiveBytes.byteLength > MAX_GRADING_EVIDENCE_ARCHIVE_DOWNLOAD_BYTES) {
-    return failure(
-      "evidence_artifact_too_large",
-      "The downloaded grading evidence artifact exceeds the supported size."
-    );
-  }
-
-  const parsed = await parseGradingEvidenceArtifact(archiveBytes);
-  if (parsed.status === "failure") {
-    return parsed;
-  }
-  const evidenceMetadata = parsed.value.metadata;
-  if (
-    evidenceMetadata.submissionCommitSha !== input.submissionCommitSha ||
-    evidenceMetadata.workflowRunId !== String(selectedRun.id) ||
-    evidenceMetadata.workflowRunAttempt !== String(selectedRun.runAttempt)
-  ) {
-    return failure(
-      "evidence_identity_mismatch",
-      "The grading evidence identity does not match the selected submission workflow run."
-    );
-  }
-
-  return {
-    status: "success",
-    value: {
-      runId: selectedRun.id,
-      runAttempt: selectedRun.runAttempt,
-      artifactId: artifact.id,
-      evidence: parsed.value
+  let foundNamedArtifact = false;
+  let candidateFailure: GradingEvidenceRetrievalResult | undefined;
+  for (const candidate of candidates) {
+    let artifacts;
+    try {
+      artifacts = await input.githubClient.listWorkflowRunArtifacts({
+        owner: input.repository.owner,
+        repo: input.repository.repo,
+        runId: candidate.id
+      });
+    } catch (error: unknown) {
+      return githubFailure(error, "evidence_retrieval_failed");
     }
-  };
+    const matchingArtifacts = artifacts.filter((artifact) => artifact.name === artifactName);
+    if (matchingArtifacts.length === 0) continue;
+    foundNamedArtifact = true;
+    if (matchingArtifacts.length > 1)
+      return failure(
+        "evidence_artifact_ambiguous",
+        "The selected grading workflow run has multiple configured evidence artifacts."
+      );
+    const artifact = matchingArtifacts[0];
+    if (artifact === undefined) continue;
+    if (artifact.expired) {
+      candidateFailure ??= failure(
+        "evidence_artifact_expired",
+        "The grading evidence artifact has expired."
+      );
+      continue;
+    }
+    if (artifact.id <= 0 || artifact.sizeInBytes < 0)
+      return failure("evidence_retrieval_failed", "GitHub returned invalid artifact metadata.");
+    if (artifact.sizeInBytes > MAX_GRADING_EVIDENCE_ARCHIVE_DOWNLOAD_BYTES)
+      return failure(
+        "evidence_artifact_too_large",
+        "The grading evidence artifact exceeds the supported download size."
+      );
+    let archiveBytes: Uint8Array;
+    try {
+      archiveBytes = await input.githubClient.downloadArtifactArchive({
+        owner: input.repository.owner,
+        repo: input.repository.repo,
+        artifactId: artifact.id
+      });
+    } catch (error: unknown) {
+      return githubFailure(error, "evidence_artifact_download_failed");
+    }
+    if (archiveBytes.byteLength > MAX_GRADING_EVIDENCE_ARCHIVE_DOWNLOAD_BYTES)
+      return failure(
+        "evidence_artifact_too_large",
+        "The downloaded grading evidence artifact exceeds the supported size."
+      );
+    const parsed = await parseGradingEvidenceArtifact(archiveBytes);
+    if (parsed.status === "failure") {
+      candidateFailure ??= parsed;
+      continue;
+    }
+    const evidenceMetadata = parsed.value.metadata;
+    if (
+      evidenceMetadata.submissionCommitSha !== input.submissionCommitSha ||
+      evidenceMetadata.workflowRunId !== String(candidate.id) ||
+      evidenceMetadata.workflowRunAttempt !== String(candidate.runAttempt)
+    )
+      continue;
+    return {
+      status: "success",
+      value: {
+        runId: candidate.id,
+        runAttempt: candidate.runAttempt,
+        artifactId: artifact.id,
+        evidence: parsed.value
+      }
+    };
+  }
+  return foundNamedArtifact
+    ? (candidateFailure ??
+        failure(
+          "evidence_identity_mismatch",
+          "The grading evidence identity does not match the selected submission workflow run."
+        ))
+    : failure(
+        "evidence_artifact_missing",
+        "No recent grading workflow run has the configured evidence artifact."
+      );
 };

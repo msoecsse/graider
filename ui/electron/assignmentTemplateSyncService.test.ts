@@ -73,4 +73,32 @@ describe("assignment template-sync Electron service", () => {
     expect(backend.execute).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(result)).not.toMatch(/secret-token|credential-value|stderr|stdout/iu);
   });
+
+  it("forwards optional repository progress without changing execution requests", async () => {
+    const backend: AssignmentTemplateSyncService = {
+      prepare: vi.fn(),
+      execute: vi.fn(async (_request, onProgress) => {
+        onProgress?.({ current: 1, total: 1, studentId: "ada", repository: "course/lab-ada" });
+        return { status: "success" as const, outcomes: [] };
+      })
+    };
+    const progress = vi.fn();
+    const service = createAssignmentTemplateSyncService(
+      () => backend,
+      async () => ({ status: "success", token: "secret-token" })
+    );
+
+    await service.execute({ ...request, confirmed: true }, progress);
+
+    expect(progress).toHaveBeenCalledExactlyOnceWith({
+      current: 1,
+      total: 1,
+      studentId: "ada",
+      repository: "course/lab-ada"
+    });
+    expect(backend.execute).toHaveBeenCalledWith(
+      { ...request, confirmed: true, resolvedGithubToken: "secret-token" },
+      progress
+    );
+  });
 });

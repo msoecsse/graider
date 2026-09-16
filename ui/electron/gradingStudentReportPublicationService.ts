@@ -191,6 +191,15 @@ export type PublishGradingStudentReportResult =
         | "report_render_failed";
     };
 
+export type PreviewGradingStudentReportResult =
+  | {
+      readonly status: "success";
+      readonly studentId: string;
+      readonly html: string;
+      readonly warnings: readonly GradingReportPublicationWarning[];
+    }
+  | Exclude<PublishGradingStudentReportResult, { readonly status: "success" }>;
+
 export interface GradingStudentReportPublicationDependencies {
   readonly resolveFacultyScope: (request: FacultyScopeServiceRequest) => FacultyScopeServiceResult;
   readonly resolveRepository: (
@@ -224,8 +233,9 @@ const INVALID_EVIDENCE_CODES = new Set([
 export const createGradingStudentReportPublicationService = (
   overrides: Partial<GradingStudentReportPublicationDependencies> = {}
 ): ((
-  request: PublishGradingStudentReportRequest
-) => Promise<PublishGradingStudentReportResult>) => {
+  request: PublishGradingStudentReportRequest,
+  mode?: "publish" | "preview"
+) => Promise<PublishGradingStudentReportResult | PreviewGradingStudentReportResult>) => {
   const resolveFacultyScope = overrides.resolveFacultyScope ?? resolveCurrentFacultyScope;
   const resolveRepository =
     overrides.resolveRepository ??
@@ -238,7 +248,7 @@ export const createGradingStudentReportPublicationService = (
     (async () => await resolveGithubToken({ runner: createNodeProcessRunner() }));
   const getBackend = overrides.loadBackend ?? loadBackend;
 
-  return async (request) => {
+  return async (request, mode = "publish") => {
     const scope = resolveFacultyScope(request);
     if (scope.status !== "success") return { status: scope.status };
     if (!scope.students.some((student) => student.studentId === request.studentId))
@@ -330,6 +340,8 @@ export const createGradingStudentReportPublicationService = (
       return { status: "report_render_failed" };
     }
     if (rendered.status !== "success") return { status: "report_render_failed" };
+    if (mode === "preview")
+      return { status: "success", studentId: prepared.studentId, html: rendered.html, warnings };
 
     try {
       let prewriteFailure: Exclude<RevalidationResult, { readonly status: "success" }> | undefined;
@@ -408,4 +420,15 @@ export const createGradingStudentReportPublicationService = (
 export const publishGradingStudentReport = (
   request: PublishGradingStudentReportRequest
 ): Promise<PublishGradingStudentReportResult> =>
-  createGradingStudentReportPublicationService()(request);
+  createGradingStudentReportPublicationService()(
+    request,
+    "publish"
+  ) as Promise<PublishGradingStudentReportResult>;
+
+export const previewGradingStudentReport = (
+  request: PublishGradingStudentReportRequest
+): Promise<PreviewGradingStudentReportResult> =>
+  createGradingStudentReportPublicationService()(
+    request,
+    "preview"
+  ) as Promise<PreviewGradingStudentReportResult>;

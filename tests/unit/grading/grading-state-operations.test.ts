@@ -35,6 +35,43 @@ const value = <T>(result: { status: "success"; value: T } | { status: string }):
 };
 
 describe("grading state operations", () => {
+  it("treats comment deductions as negative magnitudes while preserving signed manual adjustments", () => {
+    const category = [{ id: "quality", name: "Quality", points: 20 }];
+    const positive = calculateGrade(
+      { ...initial(), appliedComments: [{ id: "comment", text: "x", deduction: 4 }] },
+      category
+    );
+    expect(positive).toMatchObject({
+      status: "success",
+      value: { totalScore: 16, uncategorizedCommentAdjustmentTotal: -4 }
+    });
+    const legacy = calculateGrade(
+      { ...initial(), appliedComments: [{ id: "comment", text: "x", deduction: -4 }] },
+      category
+    );
+    expect(legacy).toMatchObject({ status: "success", value: { totalScore: 16 } });
+    expect(
+      calculateGrade(
+        {
+          ...initial(),
+          appliedComments: [{ id: "comment", text: "x", deduction: 4 }],
+          manualAdjustments: [{ id: "bonus", rubricCategoryId: "quality", amount: 4 }]
+        },
+        category
+      )
+    ).toMatchObject({ status: "success", value: { totalScore: 20 } });
+    expect(
+      calculateGrade(
+        {
+          ...initial(),
+          appliedComments: [{ id: "comment", text: "x", deduction: 4 }],
+          manualAdjustments: [{ id: "penalty", rubricCategoryId: "quality", amount: -4 }]
+        },
+        category
+      )
+    ).toMatchObject({ status: "success", value: { totalScore: 12 } });
+  });
+
   it("derives ordered category and total scores without mutating state or rubric", () => {
     const state: GradingState = {
       ...initial(),
@@ -51,15 +88,15 @@ describe("grading state operations", () => {
       status: "success",
       value: {
         pointsPossible: 65,
-        totalScore: 59,
+        totalScore: 55,
         uncategorizedCommentAdjustmentTotal: -1,
         categories: [
           {
             id: "correctness",
             name: "Correctness",
             pointsPossible: 40,
-            score: 39,
-            categorizedCommentAdjustmentTotal: -1,
+            score: 35,
+            categorizedCommentAdjustmentTotal: -5,
             manualAdjustmentTotal: 0
           },
           {
@@ -92,10 +129,10 @@ describe("grading state operations", () => {
     expect(calculateGrade(state, rubric)).toMatchObject({
       status: "success",
       value: {
-        totalScore: 165.125,
+        totalScore: -35.125,
         categories: [
           { id: "correctness", score: 40 },
-          { id: "design", score: 125.125 }
+          { id: "design", score: -75.125 }
         ]
       }
     });
@@ -123,6 +160,7 @@ describe("grading state operations", () => {
     const added = value(
       addAppliedComment(initial(), {
         id: "comment",
+        title: "Original title",
         text: "Original",
         deduction: -2,
         rubricCategoryId: "design",
@@ -132,13 +170,16 @@ describe("grading state operations", () => {
     expect(added.status).toBe("in_progress");
     const edited = value(
       editAppliedComment(added, "comment", {
+        title: "Updated title",
         text: "Changed",
         deduction: -1,
         rubricCategoryId: undefined,
         sourceLocation: undefined
       })
     );
-    expect(edited.appliedComments).toEqual([{ id: "comment", text: "Changed", deduction: -1 }]);
+    expect(edited.appliedComments).toEqual([
+      { id: "comment", title: "Updated title", text: "Changed", deduction: -1 }
+    ]);
     expect(value(deleteAppliedComment(edited, "comment")).appliedComments).toEqual([]);
     expect(
       addAppliedComment(added, { id: "comment", text: "Duplicate", deduction: 0 })

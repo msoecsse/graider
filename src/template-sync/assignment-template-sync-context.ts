@@ -138,14 +138,41 @@ export const createAssignmentTemplateSyncContextService = (
         )
       };
     }
-    const repositoryCount = manifest.repositories.filter((record) =>
+    const applicableRepositories = manifest.repositories.filter((record) =>
       isApplicableRepository(record, manifest)
-    ).length;
+    );
+    if (request.studentId !== undefined && manifest.repositoryMode === "group")
+      return {
+        preview: unavailable(
+          "single_repository_unsupported",
+          "Single-repository template updates are available only for individual repositories."
+        )
+      };
+    const selectedRepository =
+      request.studentId === undefined
+        ? undefined
+        : applicableRepositories.find((record) => record.studentId === request.studentId);
+    if (request.studentId !== undefined && selectedRepository === undefined)
+      return {
+        preview: unavailable(
+          "student_repository_unavailable",
+          "The selected student does not have an applicable repository to update."
+        )
+      };
+    const repositoryCount = request.studentId === undefined ? applicableRepositories.length : 1;
     const preview: AssignmentTemplateSyncAvailability = {
       available: repositoryCount > 0,
       repositoryCount,
       templateRepository: template.repository,
       recordedTemplateRevision: manifest.template.commitSha ?? null,
+      ...(selectedRepository === undefined
+        ? {}
+        : {
+            selectedRepository: {
+              studentId: selectedRepository.studentId,
+              repository: selectedRepository.repository.fullName
+            }
+          }),
       ...(repositoryCount === 0
         ? {
             blocker: {
@@ -180,7 +207,7 @@ export const createAssignmentTemplateSyncContextService = (
         );
       }
     },
-    async execute(request) {
+    async execute(request, onProgress) {
       const options = { yes: request.confirmed, json: false, verbose: false };
       const guard = evaluateMutationGuard({ options });
       if (!guard.allowed)
@@ -221,7 +248,9 @@ export const createAssignmentTemplateSyncContextService = (
           configuredTemplateRepository: context.templateConfig.repository,
           resolvedToken: token,
           manifest: context.manifest,
+          ...(request.studentId === undefined ? {} : { studentId: request.studentId }),
           options,
+          ...(onProgress === undefined ? {} : { onProgress }),
           workspace: { githubClient: client },
           resolveCurrentTemplateCommitSha: async () => {
             const template = await client.getTemplateRepository(

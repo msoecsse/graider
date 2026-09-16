@@ -75,6 +75,86 @@ afterEach(async () => {
 });
 
 describe("LocalGitTemplateSyncGateway", () => {
+  it("recovers both anchors from the sole exact full-tree first-parent history match", async () => {
+    const fixture = await setup("main", true);
+    await writeFile(join(fixture.templateDirectory, "shared.txt"), "faculty update\n");
+    await git(fixture.templateDirectory, "commit", "-am", "template update");
+    const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
+    const gateway = new LocalGitTemplateSyncGateway(fixture);
+
+    await expect(
+      gateway.recoverTemplateAndStudentBaseline({
+        templateRepository: template,
+        studentRepository: student,
+        currentTemplateCommitSha: target
+      })
+    ).resolves.toEqual({
+      status: "recovered",
+      templateCommitSha: fixture.base,
+      studentDefaultBranchCommitSha: fixture.studentBase
+    });
+  });
+
+  it("does not recover both anchors when template files are only a subset of student state", async () => {
+    const fixture = await setup("main", true, true);
+    const gateway = new LocalGitTemplateSyncGateway(fixture);
+
+    await expect(
+      gateway.recoverTemplateAndStudentBaseline({
+        templateRepository: template,
+        studentRepository: student,
+        currentTemplateCommitSha: fixture.base
+      })
+    ).resolves.toEqual({ status: "not_found" });
+  });
+
+  it("does not choose among multiple exact full-tree history pairings", async () => {
+    const fixture = await setup("main", true);
+    await git(fixture.templateDirectory, "commit", "--allow-empty", "-m", "same template tree");
+    const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
+    await git(fixture.studentDirectory, "commit", "--allow-empty", "-m", "same student tree");
+    await git(fixture.studentDirectory, "push");
+    const gateway = new LocalGitTemplateSyncGateway(fixture);
+
+    await expect(
+      gateway.recoverTemplateAndStudentBaseline({
+        templateRepository: template,
+        studentRepository: student,
+        currentTemplateCommitSha: target
+      })
+    ).resolves.toEqual({ status: "ambiguous" });
+  });
+
+  it("ignores a matching template commit outside first-parent history", async () => {
+    const fixture = await setup("main", true, true);
+    await git(fixture.templateDirectory, "switch", "-c", "feature");
+    await writeFile(join(fixture.templateDirectory, "shared.txt"), "feature\n");
+    await git(fixture.templateDirectory, "commit", "-am", "feature change");
+    const feature = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
+    await git(fixture.templateDirectory, "switch", "main");
+    await writeFile(join(fixture.templateDirectory, "student.txt"), "main\n");
+    await git(fixture.templateDirectory, "commit", "-am", "main change");
+    await git(fixture.templateDirectory, "merge", "--no-ff", "feature", "-m", "merge feature");
+    const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
+    await git(fixture.studentDirectory, "rm", "student-only.txt");
+    await writeFile(join(fixture.studentDirectory, "shared.txt"), "feature\n");
+    await git(fixture.studentDirectory, "add", ".");
+    await git(fixture.studentDirectory, "commit", "-m", "matches feature only");
+    await git(fixture.studentDirectory, "push");
+    expect((await git(fixture.templateDirectory, "rev-parse", `${feature}^{tree}`)).trim()).toBe(
+      (await git(fixture.studentDirectory, "rev-parse", "HEAD^{tree}")).trim()
+    );
+    const gateway = new LocalGitTemplateSyncGateway(fixture);
+
+    await expect(
+      gateway.recoverTemplateAndStudentBaseline({
+        templateRepository: template,
+        studentRepository: student,
+        currentTemplateCommitSha: target
+      })
+    ).resolves.toEqual({ status: "not_found" });
+  });
+
   it("recovers an independent initial student commit with an identical tree", async () => {
     const fixture = await setup("main", true);
     const gateway = new LocalGitTemplateSyncGateway(fixture);

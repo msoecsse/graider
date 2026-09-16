@@ -78,12 +78,19 @@ const configureApis = ({
     reportPath: "grading/report.html",
     remoteWrite: "created_or_updated",
     warnings: []
+  }),
+  preview = vi.fn().mockResolvedValue({
+    status: "success",
+    studentId: "ada",
+    html: "<!doctype html><html><body><h1>Preview</h1></body></html>",
+    warnings: []
   })
 }: {
   statuses?: Readonly<Record<string, GradingStatus>>;
   loadSnapshot?: ReturnType<typeof vi.fn>;
   saveViewState?: ReturnType<typeof vi.fn>;
   publish?: ReturnType<typeof vi.fn>;
+  preview?: ReturnType<typeof vi.fn>;
 } = {}) => {
   const students = Object.entries(statuses).map(([studentId, gradingStatus], index) => ({
     studentId,
@@ -129,9 +136,10 @@ const configureApis = ({
     saveGradingStudentViewState: saveViewState,
     loadGradingStudentSnapshot: loadSnapshot,
     loadGradingCommentLibrary: vi.fn().mockResolvedValue({ status: "success", comments: [] }),
+    previewGradingStudentReport: preview,
     publishGradingStudentReport: publish
   });
-  return { loadSnapshot, publish, saveViewState };
+  return { loadSnapshot, preview, publish, saveViewState };
 };
 
 describe("GradingWorkspacePage report publication", () => {
@@ -154,10 +162,96 @@ describe("GradingWorkspacePage report publication", () => {
     expect(screen.queryByRole("button", { name: /Publish Report/u })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /linus · Section 003/u }));
+    expect(await screen.findByRole("button", { name: "Preview Report" })).toBeEnabled();
     expect(await screen.findByRole("button", { name: "Publish Report" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: /margaret · Section 004/u }));
     expect(await screen.findByRole("button", { name: "Republish Report" })).toBeEnabled();
+  });
+
+  it("previews the trusted HTML with warnings and closes without publication", async () => {
+    const { preview, publish } = configureApis({
+      preview: vi.fn().mockResolvedValue({
+        status: "success",
+        studentId: "ada",
+        html: "<!doctype html><html><body><h1>Trusted Preview</h1></body></html>",
+        warnings: ["automated_evidence_unavailable", "commit_history_unavailable"]
+      })
+    });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Preview Report" }));
+    await waitFor(() => expect(preview).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" }));
+    expect(Object.keys(preview.mock.calls[0]?.[0] ?? {}).sort()).toEqual([
+      "assignmentSlug",
+      "courseFolderId",
+      "courseFolderPath",
+      "studentId",
+      "termCode"
+    ]);
+    const dialog = await screen.findByRole("dialog", { name: "Report Preview" });
+    const frame = screen.getByTitle("Grading report preview");
+    expect(frame).toHaveAttribute("srcdoc", expect.stringContaining("Trusted Preview"));
+    expect(dialog).toHaveTextContent("Automated evidence is unavailable and will be omitted.");
+    expect(dialog).toHaveTextContent("Commit history is unavailable and will be omitted.");
+    expect(publish).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Report Preview" })).not.toBeInTheDocument();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("prevents duplicate preview requests while a preview is pending", async () => {
+    const pending = deferred<{
+      status: "success";
+      studentId: "ada";
+      html: string;
+      warnings: readonly [];
+    }>();
+    const { preview } = configureApis({ preview: vi.fn().mockReturnValue(pending.promise) });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    const button = await screen.findByRole("button", { name: "Preview Report" });
+    fireEvent.click(button);
+    expect(await screen.findByRole("button", { name: "Preparing Preview…" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Preparing Preview…" }));
+    expect(preview).toHaveBeenCalledOnce();
+
+    await act(async () =>
+      pending.resolve({
+        status: "success",
+        studentId: "ada",
+        html: "<!doctype html><p>ready</p>",
+        warnings: []
+      })
+    );
+  });
+
+  it("does not show a stale preview after switching students", async () => {
+    const pending = deferred<{
+      status: "success";
+      studentId: "ada";
+      html: string;
+      warnings: readonly [];
+    }>();
+    const { preview } = configureApis({
+      statuses: { ada: "complete", grace: "complete" },
+      preview: vi.fn().mockReturnValue(pending.promise)
+    });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Preview Report" }));
+    await waitFor(() => expect(preview).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await act(async () =>
+      pending.resolve({
+        status: "success",
+        studentId: "ada",
+        html: "<!doctype html><p>stale</p>",
+        warnings: []
+      })
+    );
+    expect(screen.queryByRole("dialog", { name: "Report Preview" })).not.toBeInTheDocument();
   });
 
   it("requires confirmation and sends only canonical identity", async () => {

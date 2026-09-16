@@ -207,14 +207,26 @@ describe("course comment library", () => {
     if (state.status === "failure") throw new Error(state.message);
     saveGradingState(request, {
       ...state.value,
-      appliedComments: [{ id: "applied", sourceCommentId: "one", text: "Snapshot", deduction: 3 }]
+      appliedComments: [
+        {
+          id: "applied",
+          sourceCommentId: "one",
+          title: "Original title",
+          text: "Snapshot",
+          deduction: 3
+        }
+      ]
     });
     createReusableComment(root, comment("one"));
     editReusableComment(root, "one", { ...comment("replacement"), title: "Changed" });
     deleteReusableComment(root, "one");
     expect(loadGradingState(request)).toMatchObject({
       status: "success",
-      value: { appliedComments: [{ id: "applied", text: "Snapshot", deduction: 3 }] }
+      value: {
+        appliedComments: [
+          { id: "applied", title: "Original title", text: "Snapshot", deduction: 3 }
+        ]
+      }
     });
   });
 });

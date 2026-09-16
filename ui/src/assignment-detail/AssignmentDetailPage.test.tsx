@@ -286,6 +286,17 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
       recordedTemplateRevision: null
     }),
     executeAssignmentTemplateSync: vi.fn(),
+    onAssignmentTemplateSyncProgress: vi.fn(() => () => undefined),
+    getAssignmentGroupConfig: vi.fn().mockResolvedValue({
+      status: "ready",
+      repositoryMode: "individual",
+      groupsFile: "groups.csv",
+      groupsCsv: "group_id,student_id\n",
+      groupCount: 0,
+      groupedStudentCount: 0,
+      ungroupedActiveStudentCount: 3,
+      diagnostics: []
+    }),
     getAssignmentApplyPreview: vi.fn(),
     getAssignmentGradePreview: vi.fn(),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
@@ -378,6 +389,185 @@ const renderAssignmentDetailPage = (
   );
 
 describe("AssignmentDetailPage", () => {
+  it("offers a trusted single-repository update action for individual student rows", async () => {
+    const prepareAssignmentTemplateSync = vi
+      .fn()
+      .mockResolvedValueOnce({
+        available: true,
+        repositoryCount: 3,
+        templateRepository: "graider-sandbox/csc1120L2Template",
+        recordedTemplateRevision: "0123456789abcdef"
+      })
+      .mockResolvedValueOnce({
+        available: true,
+        repositoryCount: 1,
+        templateRepository: "graider-sandbox/csc1120L2Template",
+        recordedTemplateRevision: "0123456789abcdef",
+        selectedRepository: {
+          studentId: "s001",
+          repository: "graider-sandbox/csc1120-lab02-ada"
+        }
+      });
+    const executeAssignmentTemplateSync = vi.fn();
+    mockGraiderUI({ prepareAssignmentTemplateSync, executeAssignmentTemplateSync });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
+    const dialog = await screen.findByRole("dialog", { name: "Update repository for s001" });
+    expect(within(dialog).getByText("s001")).toBeInTheDocument();
+    expect(within(dialog).getByText("graider-sandbox/csc1120-lab02-ada")).toBeInTheDocument();
+    expect(within(dialog).getByText("graider-sandbox/csc1120L2Template")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(executeAssignmentTemplateSync).not.toHaveBeenCalled();
+  });
+
+  it("executes a confirmed single-repository update without renderer repository coordinates", async () => {
+    const prepareAssignmentTemplateSync = vi
+      .fn()
+      .mockResolvedValueOnce({
+        available: true,
+        repositoryCount: 3,
+        templateRepository: "graider-sandbox/csc1120L2Template",
+        recordedTemplateRevision: "0123456789abcdef"
+      })
+      .mockResolvedValueOnce({
+        available: true,
+        repositoryCount: 1,
+        templateRepository: "graider-sandbox/csc1120L2Template",
+        recordedTemplateRevision: "0123456789abcdef",
+        selectedRepository: {
+          studentId: "s001",
+          repository: "graider-sandbox/csc1120-lab02-ada"
+        }
+      });
+    const executeAssignmentTemplateSync = vi.fn().mockResolvedValue({
+      status: "success",
+      outcomes: [{ studentId: "s001", status: "updated" }]
+    });
+    mockGraiderUI({ prepareAssignmentTemplateSync, executeAssignmentTemplateSync });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
+    const dialog = await screen.findByRole("dialog", { name: "Update repository for s001" });
+    fireEvent.click(
+      within(dialog).getByLabelText(
+        "I understand this will update this student repository or create a pull request."
+      )
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Update Repository" }));
+
+    await waitFor(() =>
+      expect(executeAssignmentTemplateSync).toHaveBeenCalledWith({
+        courseFolderId: SELECTION.courseFolderId,
+        courseFolderPath: SELECTION.courseFolderPath,
+        assignmentFile: SELECTION.assignmentFile,
+        studentId: "s001",
+        confirmed: true
+      })
+    );
+    expect(await screen.findByText("Updated")).toBeInTheDocument();
+  });
+
+  it("disables single and bulk template-sync actions while a single update is pending", async () => {
+    let resolveExecution: (value: { status: "success"; outcomes: [] }) => void = () => undefined;
+    let progressListener:
+      | ((progress: {
+          current: number;
+          total: number;
+          studentId: string;
+          repository: string;
+        }) => void)
+      | undefined;
+    const prepareAssignmentTemplateSync = vi
+      .fn()
+      .mockResolvedValueOnce({
+        available: true,
+        repositoryCount: 3,
+        templateRepository: "graider-sandbox/csc1120L2Template",
+        recordedTemplateRevision: "0123456789abcdef"
+      })
+      .mockResolvedValueOnce({
+        available: true,
+        repositoryCount: 1,
+        templateRepository: "graider-sandbox/csc1120L2Template",
+        recordedTemplateRevision: "0123456789abcdef",
+        selectedRepository: {
+          studentId: "s001",
+          repository: "graider-sandbox/csc1120-lab02-ada"
+        }
+      });
+    mockGraiderUI({
+      prepareAssignmentTemplateSync,
+      executeAssignmentTemplateSync: vi.fn(
+        async () =>
+          await new Promise<{ status: "success"; outcomes: [] }>((resolve) => {
+            resolveExecution = resolve;
+          })
+      ),
+      onAssignmentTemplateSyncProgress: vi.fn((listener) => {
+        progressListener = listener;
+        return () => undefined;
+      })
+    });
+    renderAssignmentDetailPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
+    const dialog = await screen.findByRole("dialog", { name: "Update repository for s001" });
+    fireEvent.click(
+      within(dialog).getByLabelText(
+        "I understand this will update this student repository or create a pull request."
+      )
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Update Repository" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Updating Student Repositories..." })
+      ).toBeDisabled()
+    );
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("Updating repository")).toBeInTheDocument();
+    expect(
+      screen.getByText("Updating s001 · graider-sandbox/csc1120-lab02-ada...")
+    ).toBeInTheDocument();
+    progressListener?.({
+      current: 1,
+      total: 1,
+      studentId: "s001",
+      repository: "graider-sandbox/csc1120-lab02-ada"
+    });
+    expect(
+      await screen.findByText("Repository 1 of 1 · s001 · graider-sandbox/csc1120-lab02-ada")
+    ).toBeInTheDocument();
+    for (const action of screen.getAllByRole("button", { name: /Update repository for /u })) {
+      expect(action).toBeDisabled();
+    }
+    resolveExecution({ status: "success", outcomes: [] });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Update Student Repositories" })).not.toBeDisabled()
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("does not expose per-student updates for group repositories", async () => {
+    mockGraiderUI({
+      getAssignmentGroupConfig: vi.fn().mockResolvedValue({
+        status: "ready",
+        repositoryMode: "group",
+        groupsFile: "groups.csv",
+        groupsCsv: "group_id,student_id\ng1,s001\n",
+        groupCount: 1,
+        groupedStudentCount: 1,
+        ungroupedActiveStudentCount: 2,
+        diagnostics: []
+      })
+    });
+    renderAssignmentDetailPage();
+
+    await screen.findByText("Grade status summary");
+    expect(screen.queryByRole("button", { name: "Update repository for s001" })).toBeNull();
+  });
+
   it("uses template-sync preparation to control action availability and show a blocker", async () => {
     const prepareAssignmentTemplateSync = vi.fn().mockResolvedValue({
       available: false,
@@ -449,6 +639,14 @@ describe("AssignmentDetailPage", () => {
           }
         )
     );
+    let progressListener:
+      | ((progress: {
+          current: number;
+          total: number;
+          studentId: string;
+          repository: string;
+        }) => void)
+      | undefined;
     mockGraiderUI({
       prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
         available: true,
@@ -456,7 +654,11 @@ describe("AssignmentDetailPage", () => {
         templateRepository: "graider-sandbox/csc1120L2Template",
         recordedTemplateRevision: "0123456789abcdef"
       }),
-      executeAssignmentTemplateSync
+      executeAssignmentTemplateSync,
+      onAssignmentTemplateSyncProgress: vi.fn((listener) => {
+        progressListener = listener;
+        return () => undefined;
+      })
     });
     renderAssignmentDetailPage();
 
@@ -473,12 +675,36 @@ describe("AssignmentDetailPage", () => {
     expect(confirming).toBeDisabled();
     fireEvent.click(confirming);
     expect(executeAssignmentTemplateSync).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("Updating student repositories")).toBeInTheDocument();
+    expect(
+      screen.getByText("Synchronizing template changes across student repositories...")
+    ).toBeInTheDocument();
     expect(executeAssignmentTemplateSync).toHaveBeenCalledWith({
       courseFolderId: SELECTION.courseFolderId,
       courseFolderPath: SELECTION.courseFolderPath,
       assignmentFile: SELECTION.assignmentFile,
       confirmed: true
     });
+
+    progressListener?.({
+      current: 1,
+      total: 6,
+      studentId: "s001",
+      repository: "graider-sandbox/csc1120-lab02-ada"
+    });
+    expect(
+      await screen.findByText("Repository 1 of 6 · s001 · graider-sandbox/csc1120-lab02-ada")
+    ).toBeInTheDocument();
+    progressListener?.({
+      current: 2,
+      total: 6,
+      studentId: "s002",
+      repository: "graider-sandbox/csc1120-lab02-grace"
+    });
+    expect(
+      await screen.findByText("Repository 2 of 6 · s002 · graider-sandbox/csc1120-lab02-grace")
+    ).toBeInTheDocument();
 
     resolveExecution({
       status: "partial_success",
@@ -510,6 +736,14 @@ describe("AssignmentDetailPage", () => {
     });
 
     const results = await screen.findByLabelText("Template update results");
+    expect(screen.queryByRole("status")).toBeNull();
+    progressListener?.({
+      current: 6,
+      total: 6,
+      studentId: "stale",
+      repository: "graider-sandbox/stale"
+    });
+    expect(screen.queryByRole("status")).toBeNull();
     expect(within(results).getByText("s001")).toBeInTheDocument();
     expect(within(results).getByText("Updated")).toBeInTheDocument();
     expect(within(results).getByText("Already current")).toBeInTheDocument();

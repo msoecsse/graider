@@ -12,6 +12,9 @@ const GRAIDER_COMMAND = "graider";
 const ASSIGNMENT_APPLY_ARGS_PREFIX = ["assignment", "apply"] as const;
 const JSON_FLAG = "--json";
 const YES_FLAG = "--yes";
+const PROGRESS_JSON_FLAG = "--progress-json";
+const APPLY_PROGRESS_PREFIX = "GRAIDER_PROGRESS ";
+const PROGRESS_LINE_DELIMITER = "\n";
 const SUCCESS_EXIT_CODE = 0;
 const DEFAULT_NOW = (): Date => new Date();
 
@@ -19,6 +22,7 @@ interface AssignmentApplyRunnerOptions {
   readonly runner: ProcessRunner;
   readonly env?: NodeJS.ProcessEnv;
   readonly now?: () => Date;
+  readonly onProgress?: (progress: AssignmentApplyRepositoryProgress) => void;
 }
 
 interface AssignmentApplyCommandOptions extends AssignmentApplyRunnerOptions {
@@ -26,8 +30,92 @@ interface AssignmentApplyCommandOptions extends AssignmentApplyRunnerOptions {
   readonly token: string | null;
 }
 
+export interface AssignmentApplyRepositoryProgress {
+  readonly current: number;
+  readonly total: number;
+  readonly repository: string;
+  readonly mode: "individual" | "group";
+  readonly studentId?: string;
+  readonly groupId?: string;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const projectAssignmentApplyRepositoryProgress = (
+  value: unknown
+): AssignmentApplyRepositoryProgress | null => {
+  if (
+    !isRecord(value) ||
+    !Number.isInteger(value.current) ||
+    (value.current as number) <= 0 ||
+    !Number.isInteger(value.total) ||
+    (value.total as number) <= 0 ||
+    (value.current as number) > (value.total as number) ||
+    typeof value.repository !== "string"
+  ) {
+    return null;
+  }
+
+  if (value.mode === "individual" && typeof value.studentId === "string") {
+    return {
+      current: value.current as number,
+      total: value.total as number,
+      repository: value.repository,
+      mode: "individual",
+      studentId: value.studentId
+    };
+  }
+
+  if (value.mode === "group" && typeof value.groupId === "string") {
+    return {
+      current: value.current as number,
+      total: value.total as number,
+      repository: value.repository,
+      mode: "group",
+      groupId: value.groupId
+    };
+  }
+
+  return null;
+};
+
+const parseProgressLine = (line: string): AssignmentApplyRepositoryProgress | null => {
+  if (!line.startsWith(APPLY_PROGRESS_PREFIX)) return null;
+  try {
+    const parsed = JSON.parse(line.slice(APPLY_PROGRESS_PREFIX.length)) as unknown;
+    return projectAssignmentApplyRepositoryProgress(parsed);
+  } catch {
+    return null;
+  }
+};
+
+export const createAssignmentApplyProgressParser = (
+  onProgress: ((progress: AssignmentApplyRepositoryProgress) => void) | undefined
+) => {
+  let pending = "";
+
+  return (chunk: string): void => {
+    const lines = `${pending}${chunk}`.split(PROGRESS_LINE_DELIMITER);
+    pending = lines.pop() ?? "";
+    for (const line of lines) {
+      const progress = parseProgressLine(line);
+      if (progress !== null) {
+        try {
+          onProgress?.(progress);
+        } catch {
+          // Renderer delivery is observational.
+        }
+      }
+    }
+  };
+};
+
+const removeProgressTransportLines = (stderr: string): string =>
+  stderr
+    .split(PROGRESS_LINE_DELIMITER)
+    .filter((line) => parseProgressLine(line) === null)
+    .join(PROGRESS_LINE_DELIMITER);
 
 export const isAssignmentApplyJsonResponse = (
   value: unknown
@@ -110,14 +198,24 @@ export const runAssignmentApplyCommand = async ({
   request,
   token,
   runner,
-  env = process.env
+  env = process.env,
+  onProgress
 }: AssignmentApplyCommandOptions): Promise<Omit<AssignmentApplyResult, "appliedAt">> => {
+  const observeProgress = createAssignmentApplyProgressParser(onProgress);
   const result = await runner({
     command: GRAIDER_COMMAND,
-    args: [...ASSIGNMENT_APPLY_ARGS_PREFIX, request.assignmentFile, JSON_FLAG, YES_FLAG],
+    args: [
+      ...ASSIGNMENT_APPLY_ARGS_PREFIX,
+      request.assignmentFile,
+      JSON_FLAG,
+      YES_FLAG,
+      PROGRESS_JSON_FLAG
+    ],
     cwd: request.courseFolderPath,
-    env: token === null ? env : { ...env, [GITHUB_TOKEN_ENV_NAME]: token }
+    env: token === null ? env : { ...env, [GITHUB_TOKEN_ENV_NAME]: token },
+    onStderrChunk: observeProgress
   });
+  const stderr = removeProgressTransportLines(result.stderr);
 
   if (result.error !== null) {
     const cliStartError = getGraiderCliStartError(result.error.code);
@@ -128,7 +226,7 @@ export const runAssignmentApplyCommand = async ({
       ...request,
       status: "failure",
       apply: null,
-      error: createCommandError(code, message, null, result.stdout, result.stderr, token)
+      error: createCommandError(code, message, null, result.stdout, stderr, token)
     };
   }
 
@@ -161,7 +259,7 @@ export const runAssignmentApplyCommand = async ({
       errorMessage,
       result.exitCode,
       result.stdout,
-      result.stderr,
+      stderr,
       token
     )
   };
@@ -180,7 +278,8 @@ export const applyAssignment = async (
     request,
     token,
     runner: options.runner,
-    ...(options.env === undefined ? {} : { env: options.env })
+    ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress })
   });
 
   return {

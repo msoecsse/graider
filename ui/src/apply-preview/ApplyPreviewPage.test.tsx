@@ -375,6 +375,7 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getAssignmentGradeStatus: vi.fn(),
     getFacultyReport: vi.fn(),
     applyAssignment: vi.fn().mockResolvedValue(createApplyResult()),
+    onAssignmentApplyProgress: vi.fn(() => () => undefined),
     gradeAssignment: vi.fn(),
     ...api
   };
@@ -461,6 +462,7 @@ describe("ApplyPreviewPage", () => {
     });
     renderApplyPreviewPage();
 
+    expect(screen.queryByRole("status")).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -642,6 +644,10 @@ describe("ApplyPreviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Applying..." }));
 
     expect(await screen.findByText("Applying assignment changes...")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.getByText("Applying assignment")).toBeInTheDocument();
+    expect(screen.getByText("Creating and updating student repositories...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Applying..." })).toBeDisabled();
     expect(applyAssignment).toHaveBeenCalledTimes(1);
     expect(applyAssignment).toHaveBeenCalledWith({
       courseFolderId: SELECTION.courseFolderId,
@@ -652,7 +658,79 @@ describe("ApplyPreviewPage", () => {
     resolveApply(createApplyResult());
 
     expect(await screen.findByText("Apply Result Summary")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).toBeNull();
     expect(applyAssignment).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces generic Apply feedback with active repository heartbeats and clears it when settled", async () => {
+    let resolveApply: (value: AssignmentApplyResult) => void = () => undefined;
+    const progressListeners: Array<
+      (event: import("../../electron/ipc").AssignmentApplyProgressEvent) => void
+    > = [];
+    const applyAssignment = vi.fn(
+      async () =>
+        await new Promise<AssignmentApplyResult>((resolve) => {
+          resolveApply = resolve;
+        })
+    );
+
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment,
+      onAssignmentApplyProgress: vi.fn((listener) => {
+        progressListeners.push(listener);
+        return () => undefined;
+      })
+    });
+    renderApplyPreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(
+      await screen.findByText("Creating and updating student repositories...")
+    ).toBeInTheDocument();
+    const progressListener = progressListeners[0];
+    if (progressListener === undefined) throw new Error("Expected Apply progress listener.");
+    progressListener({
+      courseFolderId: SELECTION.courseFolderId,
+      assignmentFile: ASSIGNMENT_FILE,
+      progress: {
+        current: 1,
+        total: 2,
+        mode: "individual",
+        studentId: "ada",
+        repository: "graider-sandbox/csc1120-lab02-ada"
+      }
+    });
+
+    expect(
+      await screen.findByText("Repository 1 of 2 · ada · graider-sandbox/csc1120-lab02-ada")
+    ).toBeInTheDocument();
+    progressListener({
+      courseFolderId: SELECTION.courseFolderId,
+      assignmentFile: ASSIGNMENT_FILE,
+      progress: {
+        current: 2,
+        total: 2,
+        mode: "group",
+        groupId: "team-2",
+        repository: "graider-sandbox/csc1120-lab02-team-2"
+      }
+    });
+    expect(
+      await screen.findByText("Repository 2 of 2 · team-2 · graider-sandbox/csc1120-lab02-team-2")
+    ).toBeInTheDocument();
+
+    resolveApply(createApplyResult());
+
+    await screen.findByText("Apply Result Summary");
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("renders success result summary, completed rows, and post-apply actions", async () => {
@@ -770,6 +848,7 @@ describe("ApplyPreviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
 
     expect(await screen.findByText("Graider returned invalid apply JSON.")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText(/Authorization/u)).toBeNull();
   });
 
