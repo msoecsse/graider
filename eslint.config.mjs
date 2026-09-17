@@ -56,5 +56,20 @@ export default tseslint.config(
       sourceType: "commonjs",
       globals: { process: "readonly" }
     }
+  },
+
+  {
+    files: ["tools/ui-snapshots/*.cjs"],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: { process: "readonly", console: "readonly", setTimeout: "readonly" }
+    }
+  },
+
+  {
+    files: ["tools/ui-snapshots/*.mjs"],
+    languageOptions: {
+      globals: { process: "readonly", console: "readonly" }
+    }
   }
 );
