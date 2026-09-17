@@ -83,6 +83,9 @@ describe("UI security boundary", () => {
       "graider-ui:grading-student-view-state:clear",
       "graider-ui:grading-student-snapshot:load",
       "graider-ui:grading-student-evidence:load",
+      "graider-ui:grading-student-workflow:repair",
+      "graider-ui:grading-assignment-workflows:repair",
+      "graider-ui:grading-student-report:preview",
       "graider-ui:grading-student-commit-history:load",
       "graider-ui:grading-student-comment:add",
       "graider-ui:grading-student-comment:edit",
@@ -99,11 +102,13 @@ describe("UI security boundary", () => {
       "graider-ui:grading-comment-library:delete",
       "graider-ui:assignment-template-sync:prepare",
       "graider-ui:assignment-template-sync:execute",
+      "graider-ui:assignment-template-sync:progress",
       "graider-ui:assignment-apply-preview:get",
       "graider-ui:assignment-grade-preview:get",
       "graider-ui:assignment-grade-status:get",
       "graider-ui:faculty-report:get",
       "graider-ui:assignment-apply:run",
+      "graider-ui:assignment-apply:progress",
       "graider-ui:assignment-download:run",
       "graider-ui:assignment-grade:run"
     ]);

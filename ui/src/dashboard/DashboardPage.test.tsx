@@ -519,11 +519,13 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
       recordedTemplateRevision: null
     }),
     executeAssignmentTemplateSync: vi.fn(),
+    onAssignmentTemplateSyncProgress: vi.fn(() => () => undefined),
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createAssignmentApplyPreviewResult()),
     getAssignmentGradePreview: vi.fn().mockResolvedValue(createAssignmentGradePreviewResult()),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
     getFacultyReport: vi.fn().mockResolvedValue(createFacultyReportResult()),
     applyAssignment: vi.fn(),
+    onAssignmentApplyProgress: vi.fn(() => () => undefined),
     gradeAssignment: vi.fn().mockResolvedValue(createAssignmentGradeResult()),
     ...api
   };

@@ -1957,7 +1957,9 @@ export const GradingWorkspacePage = ({
     };
     return (
       <main className="dashboard-shell">
-        <button onClick={onBack}>Back</button>
+        <button className="secondary-action" type="button" onClick={onBack}>
+          Back
+        </button>
         <p>{message[result.status] ?? "Grading workspace could not be prepared."}</p>
       </main>
     );
@@ -1979,12 +1981,16 @@ export const GradingWorkspacePage = ({
       : bulkPublicationNotice.results.length - bulkPublishedCount - bulkWarningCount;
   return (
     <main className="dashboard-shell grading-workspace">
-      <header>
-        <button onClick={onBack}>Back</button>
-        <h1>{result.assignment.title}</h1>
-        <p>
-          {result.assignment.termCode} · {result.assignment.slug}
-        </p>
+      <header className="grading-workspace__header">
+        <button className="secondary-action" type="button" onClick={onBack}>
+          Back
+        </button>
+        <div className="grading-workspace__header-titles">
+          <h1>{result.assignment.title}</h1>
+          <p>
+            {result.assignment.termCode} · {result.assignment.slug}
+          </p>
+        </div>
       </header>
       <div className="grading-workspace__grid">
         <aside>
@@ -1995,7 +2001,11 @@ export const GradingWorkspacePage = ({
             result.students.map((item, index) => (
               <button
                 key={item.studentId}
-                className={index === selected ? "selected" : ""}
+                className={
+                  index === selected
+                    ? "grading-workspace__student-row selected"
+                    : "grading-workspace__student-row"
+                }
                 onClick={() => {
                   void flushPendingViewState(student?.studentId);
                   setSelected(index);
@@ -2006,8 +2016,10 @@ export const GradingWorkspacePage = ({
               </button>
             ))
           )}
-          <div>
+          <div className="grading-workspace__pagination">
             <button
+              className="secondary-action"
+              type="button"
               disabled={selected <= 0}
               onClick={() => {
                 void flushPendingViewState(student?.studentId);
@@ -2017,6 +2029,8 @@ export const GradingWorkspacePage = ({
               Previous
             </button>
             <button
+              className="secondary-action"
+              type="button"
               disabled={selected >= result.students.length - 1}
               onClick={() => {
                 void flushPendingViewState(student?.studentId);
@@ -2029,6 +2043,7 @@ export const GradingWorkspacePage = ({
           <section className="grading-bulk-publication" aria-labelledby="bulk-publication-heading">
             <h3 id="bulk-publication-heading">Report Publication</h3>
             <button
+              className="secondary-action"
               type="button"
               disabled={
                 completeStudentIds.length === 0 ||
@@ -2164,6 +2179,7 @@ export const GradingWorkspacePage = ({
                 />
                 <div className="grading-source-comment-action">
                   <button
+                    className="secondary-action"
                     type="button"
                     disabled={
                       canonicalSourceTarget === undefined ||
@@ -2207,6 +2223,7 @@ export const GradingWorkspacePage = ({
               snapshot.snapshot.gradingStatus === "in_progress" ? (
                 <div className="grading-complete-action">
                   <button
+                    className="primary-action"
                     type="button"
                     disabled={
                       bulkPublicationInProgress ||
@@ -2242,7 +2259,9 @@ export const GradingWorkspacePage = ({
                   <button
                     type="button"
                     className={
-                      snapshot.snapshot.gradingStatus === "published" ? "secondary-action" : ""
+                      snapshot.snapshot.gradingStatus === "published"
+                        ? "secondary-action"
+                        : "primary-action"
                     }
                     disabled={
                       commentMutationStudentId !== undefined ||
@@ -2350,7 +2369,11 @@ export const GradingWorkspacePage = ({
                       srcDoc={reportPreview.html}
                     />
                     <div className="grading-apply-comment__actions">
-                      <button type="button" onClick={() => setReportPreview({ status: "idle" })}>
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        onClick={() => setReportPreview({ status: "idle" })}
+                      >
                         Close
                       </button>
                     </div>
@@ -2372,6 +2395,7 @@ export const GradingWorkspacePage = ({
                   </p>
                   <div className="grading-apply-comment__actions">
                     <button
+                      className="primary-action"
                       type="button"
                       disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
                       onClick={() => void confirmMarkComplete()}
@@ -2381,6 +2405,7 @@ export const GradingWorkspacePage = ({
                         : "Confirm Mark Complete"}
                     </button>
                     <button
+                      className="secondary-action"
                       type="button"
                       disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
                       onClick={() => {
@@ -2437,6 +2462,7 @@ export const GradingWorkspacePage = ({
                         )}
                         <div className="grading-applied-comment__actions">
                           <button
+                            className="secondary-action"
                             type="button"
                             aria-label={`Edit comment: ${comment.text}`}
                             disabled={
@@ -2450,6 +2476,7 @@ export const GradingWorkspacePage = ({
                             Edit
                           </button>
                           <button
+                            className="danger-action"
                             type="button"
                             aria-label={`Delete comment: ${comment.text}`}
                             disabled={
@@ -2496,6 +2523,7 @@ export const GradingWorkspacePage = ({
                     )}
                     <div className="grading-apply-comment__actions">
                       <button
+                        className="danger-action"
                         type="button"
                         disabled={commentMutationStudentId === deleteConfirmation.studentId}
                         onClick={() => void confirmDeleteComment()}
@@ -2505,6 +2533,7 @@ export const GradingWorkspacePage = ({
                           : "Confirm delete"}
                       </button>
                       <button
+                        className="secondary-action"
                         type="button"
                         disabled={commentMutationStudentId === deleteConfirmation.studentId}
                         onClick={() => {
@@ -2521,6 +2550,7 @@ export const GradingWorkspacePage = ({
               <section aria-labelledby="manual-adjustments-heading">
                 <h3 id="manual-adjustments-heading">Manual adjustments</h3>
                 <button
+                  className="secondary-action"
                   type="button"
                   disabled={
                     result.rubric.length === 0 ||
@@ -2550,6 +2580,7 @@ export const GradingWorkspacePage = ({
                         {adjustment.note === undefined ? null : <p>{adjustment.note}</p>}
                         <div className="grading-applied-comment__actions">
                           <button
+                            className="secondary-action"
                             type="button"
                             aria-label={`Edit adjustment: ${adjustment.rubricCategoryId}`}
                             disabled={
@@ -2563,6 +2594,7 @@ export const GradingWorkspacePage = ({
                             Edit
                           </button>
                           <button
+                            className="danger-action"
                             type="button"
                             aria-label={`Delete adjustment: ${adjustment.rubricCategoryId}`}
                             disabled={
@@ -2672,6 +2704,7 @@ export const GradingWorkspacePage = ({
                     </label>
                     <div className="grading-apply-comment__actions">
                       <button
+                        className="primary-action"
                         type="submit"
                         disabled={
                           commentMutationStudentId === manualAdjustmentEditor.studentId ||
@@ -2693,6 +2726,7 @@ export const GradingWorkspacePage = ({
                             : "Save adjustment"}
                       </button>
                       <button
+                        className="secondary-action"
                         type="button"
                         disabled={commentMutationStudentId === manualAdjustmentEditor.studentId}
                         onClick={() => {
@@ -2726,6 +2760,7 @@ export const GradingWorkspacePage = ({
                     )}
                     <div className="grading-apply-comment__actions">
                       <button
+                        className="danger-action"
                         type="button"
                         disabled={
                           commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
@@ -2737,6 +2772,7 @@ export const GradingWorkspacePage = ({
                           : "Confirm delete"}
                       </button>
                       <button
+                        className="secondary-action"
                         type="button"
                         disabled={
                           commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
@@ -2762,6 +2798,7 @@ export const GradingWorkspacePage = ({
           <section className="grading-workflow-repair" aria-labelledby="workflow-repair-heading">
             <h3 id="workflow-repair-heading">Workflow</h3>
             <button
+              className="secondary-action"
               type="button"
               disabled={workflowRepair.status !== "ready"}
               onClick={() => {
@@ -2791,6 +2828,7 @@ export const GradingWorkspacePage = ({
               </p>
             )}
             <button
+              className="secondary-action"
               type="button"
               disabled={
                 bulkWorkflowRepairState === "running" ||
@@ -3011,6 +3049,7 @@ export const GradingWorkspacePage = ({
                 )}
                 {commentEditor.operation === "edit" && commentEditor.targetMode === "source" ? (
                   <button
+                    className="secondary-action"
                     type="button"
                     disabled={canonicalSourceTarget === undefined}
                     onClick={() =>
@@ -3026,6 +3065,7 @@ export const GradingWorkspacePage = ({
                 ) : null}
                 <div className="grading-apply-comment__actions">
                   <button
+                    className="primary-action"
                     type="submit"
                     disabled={
                       commentMutationStudentId === commentEditor.studentId ||
@@ -3049,6 +3089,7 @@ export const GradingWorkspacePage = ({
                         : "Save comment"}
                   </button>
                   <button
+                    className="secondary-action"
                     type="button"
                     disabled={commentMutationStudentId === commentEditor.studentId}
                     onClick={() => {
@@ -3113,6 +3154,7 @@ export const GradingWorkspacePage = ({
                         )}
                         {comment.tags.length === 0 ? null : <p>Tags: {comment.tags.join(", ")}</p>}
                         <button
+                          className="secondary-action"
                           type="button"
                           disabled={
                             student === undefined ||

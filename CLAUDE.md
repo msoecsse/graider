@@ -178,7 +178,7 @@ the whole tree.
 
 ### Test health
 
-At the time this file was written the UI suite was 277 passing tests. Treat a
+At the time this file was written the UI suite was 662 passing tests. Treat a
 drop in that number as a regression to explain, not a detail to move past.
 
 ---
