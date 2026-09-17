@@ -37,6 +37,17 @@
   --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
 
+  --font-size-page-title: 20px;
+  --font-size-step-title: 24px;
+  --font-size-section: 15px;
+  --font-size-body: 14px;
+  --font-size-body-sm: 13px;
+  --font-size-caption: 12px;
+  --font-size-eyebrow: 11px;
+
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+
   --radius-control: 8px;
   --radius-card: 10px;
   --radius-modal: 14px;
@@ -1820,14 +1831,14 @@ h1 {
 .grading-workspace__header-titles h1 {
   margin: 0;
   color: var(--text);
-  font-size: 20px;
-  font-weight: 600;
+  font-size: var(--font-size-page-title);
+  font-weight: var(--font-weight-semibold);
 }
 
 .grading-workspace__header-titles p {
   margin: 4px 0 0;
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--font-size-body-sm);
 }
 
 .grading-workspace__grid {

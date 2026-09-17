@@ -104,11 +104,19 @@ const createCommandError = (
   stdoutSnippet: createOutputSnippet(stdout, token),
   stderrSnippet: createOutputSnippet(stderr, token),
   commandName: "dashboard",
-  cwd: result.diagnostic?.cwd ?? request.cwd,
+  ...((result.diagnostic?.cwd ?? request.cwd) === undefined
+    ? {}
+    : { cwd: result.diagnostic?.cwd ?? request.cwd }),
   argv: [request.command, ...request.args],
-  runnerMode: result.diagnostic?.runnerMode,
-  executablePath: result.diagnostic?.executablePath,
-  helperPath: result.diagnostic?.helperPath,
+  ...(result.diagnostic?.runnerMode === undefined
+    ? {}
+    : { runnerMode: result.diagnostic.runnerMode }),
+  ...(result.diagnostic?.executablePath === undefined
+    ? {}
+    : { executablePath: result.diagnostic.executablePath }),
+  ...(result.diagnostic?.helperPath === undefined
+    ? {}
+    : { helperPath: result.diagnostic.helperPath }),
   signal: result.signal ?? null
 });
 
@@ -279,7 +287,7 @@ const refreshKnownCourseFolder = async (
       courseFolder,
       token,
       runner: options.runner,
-      env: options.env
+      ...(options.env === undefined ? {} : { env: options.env })
     }),
     refreshedAt
   );
@@ -321,8 +329,8 @@ export const refreshCourseFolder = async (
   }
 
   const tokenResult = await resolveGithubToken({
-    env: options.env,
-    runner: options.runner
+    runner: options.runner,
+    ...(options.env === undefined ? {} : { env: options.env })
   });
 
   if (tokenResult.status === "failure") {
@@ -350,8 +358,8 @@ export const refreshDashboard = async (
 ): Promise<CombinedDashboardResult> => {
   const registry = loadCourseRegistry(registryPath);
   const tokenResult = await resolveGithubToken({
-    env: options.env,
-    runner: options.runner
+    runner: options.runner,
+    ...(options.env === undefined ? {} : { env: options.env })
   });
 
   if (tokenResult.status === "failure") {
