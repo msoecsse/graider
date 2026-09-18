@@ -179,6 +179,13 @@ const setApis = ({
   return { loadSource, loadSnapshot, loadEvidence, mutations };
 };
 
+const showAllStudents = async (): Promise<void> => {
+  const pill =
+    screen.queryByRole("button", { name: /^All\b/u }) ??
+    (await screen.findByRole("button", { name: /^All\b/u }));
+  fireEvent.click(pill);
+};
+
 describe("GradingWorkspacePage commit history", () => {
   it("loads canonical identity independently and renders trusted commits in supplied order", async () => {
     const pendingSource = deferred<ReturnType<typeof source>>();
@@ -226,7 +233,8 @@ describe("GradingWorkspacePage commit history", () => {
     );
     setApis({ loadHistory });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /grace · Section 002/u }));
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByText("Loading commit history for grace…")).toBeInTheDocument();
     await act(async () => grace.resolve(history("grace")));
     expect(await screen.findByText("Commit history for grace")).toBeInTheDocument();
@@ -255,6 +263,7 @@ describe("GradingWorkspacePage commit history", () => {
     setApis({ loadHistory });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     await screen.findByText("Commit history for ada");
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await screen.findByText("Commit history for grace");
     fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));

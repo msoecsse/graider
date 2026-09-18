@@ -91,14 +91,14 @@ describe("assignment setup service", () => {
     expect(preview.files[0]?.content).toContain("points: 100");
   });
 
-  it("omits grading when no execution grading or grading configuration is requested", () => {
+  it("writes an explicit disabled grading block when grading is unchecked", () => {
     const root = createRoot();
     createTerm(root);
 
     const preview = previewAssignmentSetup(createRequest(root, { gradingEnabled: false }));
 
     expect(preview).toMatchObject({ status: "ready" });
-    expect(preview.files[0]?.content).not.toContain("grading:");
+    expect(preview.files[0]?.content).toContain("grading:\n  enabled: false\n  mode: no-grading");
   });
 
   it("creates ordered configuration-only required files and rubric categories", () => {
@@ -118,7 +118,7 @@ describe("assignment setup service", () => {
     expect(preview).toMatchObject({ status: "ready" });
     expect(preview.files[0]?.content).toContain('    - "src/Second.java"');
     expect(preview.files[0]?.content).toContain('    - id: "design"');
-    expect(preview.files[0]?.content).not.toContain("enabled:");
+    expect(preview.files[0]?.content).toContain("grading:\n  enabled: false\n  mode: no-grading");
   });
 
   it("rejects blank required files and invalid rubric categories", () => {
@@ -240,13 +240,13 @@ describe("assignment setup service", () => {
     );
   });
 
-  it("omits grading when execution grading and configuration are both absent", () => {
+  it("keeps disabled grading explicit when execution grading and configuration are absent", () => {
     const root = createRoot();
     createTerm(root);
     const preview = previewAssignmentSetup(createRequest(root, { gradingEnabled: false }));
 
     expect(preview.status).toBe("ready");
-    expect(preview.files[0]?.content).not.toContain("grading:");
+    expect(preview.files[0]?.content).toContain("grading:\n  enabled: false\n  mode: no-grading");
   });
 
   it("does not write during preview and blocks conflicts without explicit replacement", () => {

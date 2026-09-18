@@ -126,6 +126,13 @@ const configure = ({
   return { bulkPublish, loadSnapshot, saveViewState };
 };
 
+const showAllStudents = async (): Promise<void> => {
+  const pill =
+    screen.queryByRole("button", { name: /^All\b/u }) ??
+    (await screen.findByRole("button", { name: /^All\b/u }));
+  fireEvent.click(pill);
+};
+
 describe("GradingWorkspacePage bulk report publication", () => {
   it("selects Complete students by default and excludes Published and unfinished students", async () => {
     const { bulkPublish } = configure({
@@ -244,6 +251,7 @@ describe("GradingWorkspacePage bulk report publication", () => {
     expect(loadSnapshot).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
     expect(loadSnapshot).toHaveBeenCalledWith({ ...REQUEST, studentId: "grace" });
     expect(loadSnapshot).toHaveBeenCalledWith({ ...REQUEST, studentId: "linus" });
+    await showAllStudents();
     expect(
       screen.getByRole("button", { name: /ada · Section 001 · Published/u })
     ).toBeInTheDocument();

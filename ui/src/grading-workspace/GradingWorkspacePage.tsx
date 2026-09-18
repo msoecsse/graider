@@ -26,6 +26,7 @@ import type {
   PreviewGradingStudentReportResult
 } from "../../electron/ipc";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
+import { FilterPills } from "../components/FilterPills";
 import {
   commitHistoryResultToLoadState,
   type CommitHistoryLoadState
@@ -66,6 +67,23 @@ const label = (status: string): string =>
     complete: "Complete",
     published: "Published"
   })[status] ?? status;
+
+const effectiveGradingStatus = (
+  overrides: Readonly<Record<string, string>>,
+  studentId: string,
+  fallbackStatus: string
+): string => overrides[studentId] ?? fallbackStatus;
+
+const UNGRADED_STATUSES: readonly string[] = ["not_started", "in_progress"];
+
+type StudentFilterId = "to_grade" | "graded" | "published" | "all";
+
+const STUDENT_FILTER_EMPTY_MESSAGE: Readonly<Record<StudentFilterId, string>> = {
+  to_grade: "No students need grading right now.",
+  graded: "No graded reports are waiting to be published.",
+  published: "No reports have been published yet.",
+  all: "No assigned students."
+};
 
 type SourceLoadState =
   | { readonly status: "idle" }
@@ -479,6 +497,7 @@ export const GradingWorkspacePage = ({
 }): ReactElement => {
   const [result, setResult] = useState<PreparationResult | null>(null);
   const [selected, setSelected] = useState(0);
+  const [studentFilter, setStudentFilter] = useState<StudentFilterId>("to_grade");
   const [source, setSource] = useState<SourceLoadState>({ status: "idle" });
   const [snapshot, setSnapshot] = useState<SnapshotLoadState>({ status: "idle" });
   const [evidence, setEvidence] = useState<EvidenceLoadState>({ status: "idle" });
@@ -867,19 +886,56 @@ export const GradingWorkspacePage = ({
       if (mounted.current) setBulkWorkflowRepairState("idle");
     }
   };
-  const completeStudentIds = useMemo(
+  const studentsWithStatus = useMemo(
     () =>
       isReady(result)
-        ? result.students
-            .filter(
-              (candidate) =>
-                (studentStatusOverrides[candidate.studentId] ?? candidate.gradingStatus) ===
-                "complete"
+        ? result.students.map((candidate, index) => ({
+            student: candidate,
+            index,
+            status: effectiveGradingStatus(
+              studentStatusOverrides,
+              candidate.studentId,
+              candidate.gradingStatus
             )
-            .map((candidate) => candidate.studentId)
+          }))
         : [],
     [result, studentStatusOverrides]
   );
+  const completeStudentIds = useMemo(
+    () =>
+      studentsWithStatus
+        .filter((entry) => entry.status === "complete")
+        .map((entry) => entry.student.studentId),
+    [studentsWithStatus]
+  );
+  const toGradeCount = studentsWithStatus.filter((entry) =>
+    UNGRADED_STATUSES.includes(entry.status)
+  ).length;
+  const gradedOnlyCount = studentsWithStatus.filter((entry) => entry.status === "complete").length;
+  const publishedCount = studentsWithStatus.filter((entry) => entry.status === "published").length;
+  const allStudentsCount = studentsWithStatus.length;
+  const gradedOrPublishedCount = gradedOnlyCount + publishedCount;
+  const filteredStudents = useMemo(
+    () =>
+      studentsWithStatus.filter((entry) => {
+        if (studentFilter === "all") return true;
+        if (studentFilter === "to_grade") return UNGRADED_STATUSES.includes(entry.status);
+        if (studentFilter === "graded") return entry.status === "complete";
+        return entry.status === "published";
+      }),
+    [studentsWithStatus, studentFilter]
+  );
+  const nextUngradedStudentIndex = useMemo(() => {
+    const total = studentsWithStatus.length;
+    if (total === 0) return undefined;
+    const searchOrder = Array.from(
+      { length: total - 1 },
+      (_, offset) => (selected + offset + 1) % total
+    );
+    return searchOrder.find((index) =>
+      UNGRADED_STATUSES.includes(studentsWithStatus[index]?.status ?? "")
+    );
+  }, [studentsWithStatus, selected]);
   const loadEvidence = useCallback(
     async (studentId: string): Promise<void> => {
       const generation = evidenceRequestGeneration.current + 1;
@@ -1015,6 +1071,11 @@ export const GradingWorkspacePage = ({
         if (value.status === "success" && value.studentId === studentId) {
           commentMutationBlockedStudents.current.delete(studentId);
           setSnapshot({ status: "success", snapshot: value });
+          setStudentStatusOverrides((current) =>
+            current[studentId] === value.gradingStatus
+              ? current
+              : { ...current, [studentId]: value.gradingStatus }
+          );
           return;
         }
         if (value.status === "submission_changed") {
@@ -1979,6 +2040,30 @@ export const GradingWorkspacePage = ({
     bulkPublicationNotice === undefined
       ? 0
       : bulkPublicationNotice.results.length - bulkPublishedCount - bulkWarningCount;
+  const publishedProgressPercent =
+    allStudentsCount === 0 ? 0 : (publishedCount / allStudentsCount) * 100;
+  const gradedNotPublishedProgressPercent =
+    allStudentsCount === 0
+      ? 0
+      : ((gradedOrPublishedCount - publishedCount) / allStudentsCount) * 100;
+  const goToPreviousStudent = (): void => {
+    if (selected <= 0) return;
+    void flushPendingViewState(student?.studentId);
+    setSelected((value) => value - 1);
+  };
+  const goToNextUngradedStudent = (): void => {
+    if (nextUngradedStudentIndex === undefined) return;
+    void flushPendingViewState(student?.studentId);
+    setSelected(nextUngradedStudentIndex);
+  };
+  const currentEffectiveStatus =
+    snapshot.status === "success"
+      ? effectiveGradingStatus(
+          studentStatusOverrides,
+          snapshot.snapshot.studentId,
+          snapshot.snapshot.gradingStatus
+        )
+      : undefined;
   return (
     <main className="dashboard-shell grading-workspace">
       <header className="grading-workspace__header">
@@ -1991,14 +2076,46 @@ export const GradingWorkspacePage = ({
             {result.assignment.termCode} · {result.assignment.slug}
           </p>
         </div>
+        {allStudentsCount === 0 ? null : (
+          <div className="grading-workspace__header-progress">
+            <p className="grading-workspace__header-progress-text">
+              {gradedOrPublishedCount} of {allStudentsCount} graded · {publishedCount} published
+            </p>
+            <div className="grading-workspace__header-progress-bar" aria-hidden="true">
+              <span
+                className="grading-workspace__header-progress-bar-segment grading-workspace__header-progress-bar-segment--published"
+                style={{ width: `${publishedProgressPercent}%` }}
+              />
+              <span
+                className="grading-workspace__header-progress-bar-segment grading-workspace__header-progress-bar-segment--graded"
+                style={{ width: `${gradedNotPublishedProgressPercent}%` }}
+              />
+            </div>
+          </div>
+        )}
       </header>
       <div className="grading-workspace__grid">
         <aside>
           <h2>Students</h2>
+          {result.students.length === 0 ? null : (
+            <FilterPills
+              pills={[
+                { id: "to_grade", label: "To grade", count: toGradeCount },
+                { id: "graded", label: "Graded", count: gradedOnlyCount },
+                { id: "published", label: "Published", count: publishedCount },
+                { id: "all", label: "All", count: allStudentsCount }
+              ]}
+              activeId={studentFilter}
+              onSelect={(id) => setStudentFilter(id as StudentFilterId)}
+              aria-label="Filter students by grading status"
+            />
+          )}
           {result.students.length === 0 ? (
             <p>No assigned students.</p>
+          ) : filteredStudents.length === 0 ? (
+            <p>{STUDENT_FILTER_EMPTY_MESSAGE[studentFilter]}</p>
           ) : (
-            result.students.map((item, index) => (
+            filteredStudents.map(({ student: item, index, status }) => (
               <button
                 key={item.studentId}
                 className={
@@ -2011,8 +2128,7 @@ export const GradingWorkspacePage = ({
                   setSelected(index);
                 }}
               >
-                {item.studentId} · Section {item.section} ·{" "}
-                {label(studentStatusOverrides[item.studentId] ?? item.gradingStatus)}
+                {item.studentId} · Section {item.section} · {label(status)}
               </button>
             ))
           )}
@@ -2021,25 +2137,22 @@ export const GradingWorkspacePage = ({
               className="secondary-action"
               type="button"
               disabled={selected <= 0}
-              onClick={() => {
-                void flushPendingViewState(student?.studentId);
-                setSelected((value) => value - 1);
-              }}
+              onClick={goToPreviousStudent}
             >
               Previous
             </button>
             <button
-              className="secondary-action"
+              className="primary-action"
               type="button"
-              disabled={selected >= result.students.length - 1}
-              onClick={() => {
-                void flushPendingViewState(student?.studentId);
-                setSelected((value) => value + 1);
-              }}
+              disabled={nextUngradedStudentIndex === undefined}
+              onClick={goToNextUngradedStudent}
             >
-              Next
+              Next ungraded
             </button>
           </div>
+          {nextUngradedStudentIndex === undefined ? (
+            <p className="grading-workspace__pagination-note">No other students need grading.</p>
+          ) : null}
           <section className="grading-bulk-publication" aria-labelledby="bulk-publication-heading">
             <h3 id="bulk-publication-heading">Report Publication</h3>
             <button
@@ -2217,10 +2330,10 @@ export const GradingWorkspacePage = ({
           ) : (
             <div className="grading-student-snapshot">
               <p>
-                Status: <strong>{label(snapshot.snapshot.gradingStatus)}</strong>
+                Status: <strong>{label(currentEffectiveStatus ?? "")}</strong>
               </p>
-              {snapshot.snapshot.gradingStatus === "not_started" ||
-              snapshot.snapshot.gradingStatus === "in_progress" ? (
+              {currentEffectiveStatus === "not_started" ||
+              currentEffectiveStatus === "in_progress" ? (
                 <div className="grading-complete-action">
                   <button
                     className="primary-action"
@@ -2239,8 +2352,7 @@ export const GradingWorkspacePage = ({
                   </button>
                 </div>
               ) : null}
-              {snapshot.snapshot.gradingStatus === "complete" ||
-              snapshot.snapshot.gradingStatus === "published" ? (
+              {currentEffectiveStatus === "complete" || currentEffectiveStatus === "published" ? (
                 <div className="grading-publication-action">
                   <button
                     type="button"
@@ -2259,9 +2371,7 @@ export const GradingWorkspacePage = ({
                   <button
                     type="button"
                     className={
-                      snapshot.snapshot.gradingStatus === "published"
-                        ? "secondary-action"
-                        : "primary-action"
+                      currentEffectiveStatus === "published" ? "secondary-action" : "primary-action"
                     }
                     disabled={
                       commentMutationStudentId !== undefined ||
@@ -2273,14 +2383,13 @@ export const GradingWorkspacePage = ({
                       setMarkCompleteConfirmation(undefined);
                       setReportPublicationConfirmation({
                         studentId: snapshot.snapshot.studentId,
-                        operation:
-                          snapshot.snapshot.gradingStatus === "published" ? "republish" : "publish"
+                        operation: currentEffectiveStatus === "published" ? "republish" : "publish"
                       });
                     }}
                   >
                     {reportPublicationStudentId === snapshot.snapshot.studentId
                       ? "Publishing…"
-                      : snapshot.snapshot.gradingStatus === "published"
+                      : currentEffectiveStatus === "published"
                         ? "Republish Report"
                         : "Publish Report"}
                   </button>
@@ -2420,9 +2529,13 @@ export const GradingWorkspacePage = ({
               ) : null}
               <section aria-labelledby="grading-score-heading">
                 <h3 id="grading-score-heading">Score</h3>
-                <p className="grading-score-total">
-                  {snapshot.snapshot.grade.totalScore} / {snapshot.snapshot.grade.pointsPossible}
-                </p>
+                {snapshot.snapshot.grade.categories.length === 0 ? (
+                  <p className="grading-score-total">No rubric — enter a score manually</p>
+                ) : (
+                  <p className="grading-score-total">
+                    {snapshot.snapshot.grade.totalScore} / {snapshot.snapshot.grade.pointsPossible}
+                  </p>
+                )}
                 {snapshot.snapshot.grade.categories.length === 0 ? (
                   <p>No rubric categories are configured.</p>
                 ) : (

@@ -188,6 +188,13 @@ const setApis = ({
   return { loadSource, loadSnapshot, mutations };
 };
 
+const showAllStudents = async (): Promise<void> => {
+  const pill =
+    screen.queryByRole("button", { name: /^All\b/u }) ??
+    (await screen.findByRole("button", { name: /^All\b/u }));
+  fireEvent.click(pill);
+};
+
 describe("GradingWorkspacePage automated checks", () => {
   it("loads independently with canonical identity and renders normalized JUnit and Checkstyle", async () => {
     const pendingSource = deferred<ReturnType<typeof source>>();
@@ -235,7 +242,8 @@ describe("GradingWorkspacePage automated checks", () => {
     );
     setApis({ loadEvidence });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /grace · Section 002/u }));
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(loadEvidence).toHaveBeenCalledTimes(2));
     await act(async () => grace.resolve(evidence("grace")));
     expect(await screen.findByText("Automated checks for grace")).toBeInTheDocument();
@@ -264,6 +272,7 @@ describe("GradingWorkspacePage automated checks", () => {
     setApis({ loadEvidence });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     await screen.findByText("Automated checks for ada");
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await screen.findByText("Automated checks for grace");
     fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
@@ -291,6 +300,7 @@ describe("GradingWorkspacePage automated checks", () => {
     expect(loadSnapshot).toHaveBeenCalledTimes(1);
     for (const mutation of Object.values(mutations)) expect(mutation).not.toHaveBeenCalled();
 
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByText("Automated checks for grace")).toBeInTheDocument();
     await act(async () => staleReload.resolve(evidence("ada")));

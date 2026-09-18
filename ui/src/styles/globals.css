@@ -1841,6 +1841,41 @@ h1 {
   font-size: var(--font-size-body-sm);
 }
 
+.grading-workspace__header-progress {
+  display: grid;
+  gap: var(--space-1);
+  margin-left: auto;
+  min-width: 12rem;
+}
+
+.grading-workspace__header-progress-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-body-sm);
+  text-align: right;
+}
+
+.grading-workspace__header-progress-bar {
+  display: flex;
+  overflow: hidden;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+}
+
+.grading-workspace__header-progress-bar-segment {
+  display: block;
+  height: 100%;
+}
+
+.grading-workspace__header-progress-bar-segment--published {
+  background: var(--accent-soft);
+}
+
+.grading-workspace__header-progress-bar-segment--graded {
+  background: var(--accent);
+}
+
 .grading-workspace__grid {
   display: grid;
   flex: 1 1 auto;
@@ -2310,6 +2345,12 @@ h1 {
   display: flex;
   gap: var(--space-1);
   margin: var(--space-1) 0;
+}
+
+.grading-workspace__pagination-note {
+  margin: 0 0 var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--font-size-body-sm);
 }
 
 .grading-complete-action .primary-action,

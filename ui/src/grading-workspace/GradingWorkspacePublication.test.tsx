@@ -142,6 +142,13 @@ const configureApis = ({
   return { loadSnapshot, preview, publish, saveViewState };
 };
 
+const showAllStudents = async (): Promise<void> => {
+  const pill =
+    screen.queryByRole("button", { name: /^All\b/u }) ??
+    (await screen.findByRole("button", { name: /^All\b/u }));
+  fireEvent.click(pill);
+};
+
 describe("GradingWorkspacePage report publication", () => {
   it("shows publication controls only for Complete and Published students", async () => {
     configureApis({
@@ -161,6 +168,7 @@ describe("GradingWorkspacePage report publication", () => {
     await screen.findByText("In Progress");
     expect(screen.queryByRole("button", { name: /Publish Report/u })).not.toBeInTheDocument();
 
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /linus · Section 003/u }));
     expect(await screen.findByRole("button", { name: "Preview Report" })).toBeEnabled();
     expect(await screen.findByRole("button", { name: "Publish Report" })).toBeEnabled();
@@ -242,6 +250,7 @@ describe("GradingWorkspacePage report publication", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Preview Report" }));
     await waitFor(() => expect(preview).toHaveBeenCalledOnce());
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await act(async () =>
       pending.resolve({
@@ -422,6 +431,7 @@ describe("GradingWorkspacePage report publication", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Publish Report" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Report" }));
     await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await screen.findByText("Status:");
@@ -477,6 +487,7 @@ describe("GradingWorkspacePage report publication", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Publish Report" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Report" }));
     await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await screen.findByText("Status:");
 

@@ -118,9 +118,7 @@ const createAssignmentYaml = (
   const hasGradingConfiguration = request.requiredFiles.length > 0 || request.rubric.length > 0;
   const grading = request.gradingEnabled
     ? `grading:\n  enabled: true\n  workflow: .github/workflows/grade.yml\n  artifact: grading-results\n  result_file: grading-results.json\n${renderGradingConfiguration(request)}`
-    : hasGradingConfiguration
-      ? `grading:\n${renderGradingConfiguration(request)}`
-      : "";
+    : `grading:\n  enabled: false\n  mode: no-grading\n${hasGradingConfiguration ? renderGradingConfiguration(request) : ""}`;
   const deadline =
     request.dueAt.trim() === ""
       ? ""

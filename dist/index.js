@@ -6051,12 +6051,8 @@ var DEFAULT_ACTIONS_ENABLED = true;
 var STUDENT_PERMISSION2 = "admin";
 var FACULTY_PERMISSION2 = "admin";
 var GRADER_PERMISSION2 = "maintain";
-var CREATE_REPOSITORY_OPERATION = "createRepository";
-var CREATE_REPOSITORY_FROM_TEMPLATE_OPERATION = "createRepositoryFromTemplate";
 var CREATE_REPOSITORY_PLAN_TYPE = "create_repository";
 var CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE = "create_repository_from_template";
-var TEMPLATE_MATERIALIZATION_ATTEMPTS = 10;
-var TEMPLATE_MATERIALIZATION_POLL_MS = 1e3;
 var FIRST_REPOSITORY_POSITION = 1;
 var isRepositoryCreationOperation = (operation) => operation.type === CREATE_REPOSITORY_PLAN_TYPE || operation.type === CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE;
 var isRepositoryUpdateOperation = (operation) => operation.type === "add_student_collaborator" || operation.type === "add_faculty_team_permission" || operation.type === "add_grader_team_permission" || operation.type === "enable_actions" || operation.type === "ensure_managed_grading_workflow";
@@ -6085,22 +6081,6 @@ var normalizeGitHubError = (error) => error instanceof GitHubClientError ? creat
   "Unexpected GitHub client failure during apply."
 );
 var runGitHubOperation = async (input, operation) => withGitHubRetry(operation, input.retryOptions);
-var waitForTemplateMaterialization = async (input, repository) => {
-  const sleep = input.retryOptions?.sleep ?? ((milliseconds) => new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  }));
-  for (let attempt = 1; attempt <= TEMPLATE_MATERIALIZATION_ATTEMPTS; attempt += 1) {
-    const commitSha = await runGitHubOperation(
-      input,
-      () => input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
-    );
-    if (commitSha !== void 0) return commitSha;
-    if (attempt < TEMPLATE_MATERIALIZATION_ATTEMPTS) {
-      await sleep(TEMPLATE_MATERIALIZATION_POLL_MS);
-    }
-  }
-  return void 0;
-};
 var createWorkflowMissingDiagnostic2 = (operation) => createConfigDiagnostic(
   DiagnosticCode.GradingWorkflowMissing,
   `Grading workflow was not found for ${operation.repository_name ?? "repository"}.`,
@@ -6161,18 +6141,6 @@ var createPermissionWarning = (operation, currentPermission, expectedPermission)
     section: operation.section,
     currentPermission,
     expectedPermission
-  }
-);
-var createRepositoryCreationNotObservedDiagnostic = (operation, owner, repositoryName, githubOperation) => createConfigDiagnostic(
-  DiagnosticCode.GithubApiError,
-  `Repository creation did not produce an observable repository for ${owner}/${repositoryName}.`,
-  {
-    operation: githubOperation,
-    owner,
-    repositoryName,
-    student_id: operation.student_id,
-    github_username: operation.github_username,
-    section: operation.section
   }
 );
 var findTarget = (input, operation) => (input.targets ?? input.plan.targets).find((target) => target.targetId === operation.target_id);
@@ -6308,7 +6276,6 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
   }
   const repositoryName = operation.repository_name;
   const createdFromTemplate = operation.type === CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE;
-  const githubOperation = createdFromTemplate ? CREATE_REPOSITORY_FROM_TEMPLATE_OPERATION : CREATE_REPOSITORY_OPERATION;
   let nextState = state;
   try {
     if (createdFromTemplate) {
@@ -6329,7 +6296,7 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
       if (parsedTemplate.status === "failure") {
         return recordError(state, parsedTemplate.diagnostic);
       }
-      await runGitHubOperation(
+      const repository = await runGitHubOperation(
         input,
         () => input.githubClient.createRepositoryFromTemplate({
           templateOwner: parsedTemplate.repository.owner,
@@ -6339,8 +6306,50 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
           private: PRIVATE_REPOSITORY
         })
       );
+      const templateCommitSha = state.manifest.template?.commitSha;
+      nextState = persistManifest(
+        incrementSummary(
+          {
+            ...state,
+            manifest: upsertRepositoryRecord(
+              state.manifest,
+              createManifestRecord(
+                input.config,
+                student,
+                repository,
+                observedAt,
+                true,
+                templateCommitSha
+              )
+            )
+          },
+          "created"
+        ),
+        input.manifestPath
+      );
+      if (nextState.errors.length > state.errors.length) {
+        return nextState;
+      }
+      const studentDefaultBranchCommitSha = await runGitHubOperation(
+        input,
+        () => input.githubClient.getDefaultBranchCommitSha(repository.owner, repository.name)
+      );
+      return studentDefaultBranchCommitSha === void 0 ? nextState : persistManifest(
+        {
+          ...nextState,
+          manifest: updateRepositoryIdentity(nextState.manifest, {
+            studentId: student.studentId,
+            repository: {
+              ...templateCommitSha === void 0 ? {} : { templateCommitSha },
+              studentDefaultBranchCommitSha,
+              templateSyncBaselineStatus: "initialized"
+            }
+          })
+        },
+        input.manifestPath
+      );
     } else {
-      await runGitHubOperation(
+      const repository = await runGitHubOperation(
         input,
         () => input.githubClient.createRepository({
           owner: input.config.course.github.organization,
@@ -6348,71 +6357,20 @@ var executeCreateRepository = async (input, state, operation, observedAt) => {
           private: PRIVATE_REPOSITORY
         })
       );
-    }
-    const repository = await runGitHubOperation(
-      input,
-      () => input.githubClient.getRepository(input.config.course.github.organization, repositoryName)
-    );
-    if (repository === null) {
-      return recordError(
-        state,
-        createRepositoryCreationNotObservedDiagnostic(
-          operation,
-          input.config.course.github.organization,
-          repositoryName,
-          githubOperation
-        )
-      );
-    }
-    const templateCommitSha = createdFromTemplate ? state.manifest.template?.commitSha : void 0;
-    nextState = persistManifest(
-      incrementSummary(
-        {
-          ...state,
-          manifest: upsertRepositoryRecord(
-            state.manifest,
-            createManifestRecord(
-              input.config,
-              student,
-              repository,
-              observedAt,
-              createdFromTemplate,
-              templateCommitSha
+      return persistManifest(
+        incrementSummary(
+          {
+            ...state,
+            manifest: upsertRepositoryRecord(
+              state.manifest,
+              createManifestRecord(input.config, student, repository, observedAt, false)
             )
-          )
-        },
-        "created"
-      ),
-      input.manifestPath
-    );
-    if (nextState.errors.length > state.errors.length) {
-      return nextState;
-    }
-    const studentDefaultBranchCommitSha = createdFromTemplate ? await waitForTemplateMaterialization(input, repository) : void 0;
-    if (createdFromTemplate && (templateCommitSha === void 0 || studentDefaultBranchCommitSha === void 0)) {
-      return recordError(
-        nextState,
-        createConfigDiagnostic(
-          DiagnosticCode.GithubApiError,
-          `Unable to establish a template-sync baseline for ${repository.fullName}.`,
-          { repository: repository.fullName, operation: githubOperation }
-        )
+          },
+          "created"
+        ),
+        input.manifestPath
       );
     }
-    return persistManifest(
-      {
-        ...nextState,
-        manifest: updateRepositoryIdentity(nextState.manifest, {
-          studentId: student.studentId,
-          repository: {
-            ...templateCommitSha === void 0 ? {} : { templateCommitSha },
-            ...studentDefaultBranchCommitSha === void 0 ? {} : { studentDefaultBranchCommitSha },
-            ...createdFromTemplate ? { templateSyncBaselineStatus: "initialized" } : {}
-          }
-        })
-      },
-      input.manifestPath
-    );
   } catch (error) {
     return recordError(nextState, normalizeGitHubError(error));
   }
