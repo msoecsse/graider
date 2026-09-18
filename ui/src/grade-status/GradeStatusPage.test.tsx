@@ -243,6 +243,42 @@ describe("GradeStatusPage", () => {
     expect(await screen.findByText("Completed — failure")).toHaveClass("status-chip--error");
   });
 
+  it("renders disabled grading neutrally without auto-refreshing or blocking rows", async () => {
+    const disabledRow = {
+      ...(createGradeStatusJson().repositories[0] as Record<string, unknown>),
+      workflow: null,
+      ref: null,
+      runId: null,
+      runUrl: null,
+      status: "not_configured",
+      reason: "grading_not_configured",
+      needsAttention: false
+    };
+    const getAssignmentGradeStatus = vi.fn().mockResolvedValue(
+      createGradeStatusResult(
+        createGradeStatusJson([disabledRow], {
+          grading: {
+            enabled: false,
+            resolvedFrom: "assignment_override",
+            mode: "no-grading",
+            workflow: null,
+            artifact: null,
+            resultFile: null,
+            workflowRef: null
+          }
+        })
+      )
+    );
+    mockGraiderUI({ getAssignmentGradeStatus });
+    renderGradeStatusPage();
+
+    expect(await screen.findByText("Grading disabled")).toBeInTheDocument();
+    expect(screen.getByText("Grading is disabled for this assignment.")).toBeInTheDocument();
+    expect(screen.queryByText("Blocked")).toBeNull();
+    expect(screen.getByText("Needs attention").nextElementSibling).toHaveTextContent("0");
+    expect(getAssignmentGradeStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("manual refresh runs full grade status and keeps prior rows visible while refreshing", async () => {
     let resolveRefresh: (value: AssignmentGradeStatusResult) => void = () => {};
     const refreshPromise = new Promise<AssignmentGradeStatusResult>((resolve) => {

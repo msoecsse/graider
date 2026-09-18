@@ -27,6 +27,7 @@ import type {
 } from "../../electron/ipc";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { FilterPills } from "../components/FilterPills";
+import { KbdHint } from "../components/KbdHint";
 import {
   commitHistoryResultToLoadState,
   type CommitHistoryLoadState
@@ -34,7 +35,8 @@ import {
 import {
   evidenceResultToLoadState,
   GradingEvidencePanel,
-  type EvidenceLoadState
+  type EvidenceLoadState,
+  type GradingEvidenceFocusRequest
 } from "./GradingEvidencePanel";
 import type { GradingSourceAnnotation } from "./MonacoSourceViewer";
 import { filterReusableComments, listReusableCommentTags } from "./commentLibrarySearch";
@@ -540,6 +542,11 @@ export const GradingWorkspacePage = ({
     Readonly<Record<string, string>>
   >({});
   const [viewStateWarnings, setViewStateWarnings] = useState<Readonly<Record<string, string>>>({});
+  const [evidencePanelOpen, setEvidencePanelOpen] = useState(false);
+  const [evidenceFocusRequest, setEvidenceFocusRequest] = useState<GradingEvidenceFocusRequest>();
+  const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
+  const filterPillsContainerRef = useRef<HTMLDivElement>(null);
+  const evidencePanelPriorFocusRef = useRef<HTMLElement | null>(null);
   const sourceRequestGeneration = useRef(0);
   const snapshotRequestGeneration = useRef(0);
   const evidenceRequestGeneration = useRef(0);
@@ -1120,6 +1127,7 @@ export const GradingWorkspacePage = ({
     reportPreviewRequestGeneration.current += 1;
     setReportPreview({ status: "idle" });
     setCommentMutationError(undefined);
+    evidencePanelPriorFocusRef.current = null;
   }, [currentStudentId]);
 
   useEffect(() => {
@@ -1344,17 +1352,17 @@ export const GradingWorkspacePage = ({
       setCommentEditor(undefined);
       setDeleteConfirmation(undefined);
     }
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     if (studentId !== currentStudentIdRef.current || gradingMutationStudents.current.has(studentId))
-      return;
+      return false;
     if (commentMutationBlockedStudents.current.has(studentId)) {
       setCommentMutationError(snapshotSubmissionChangedWarning);
-      return;
+      return false;
     }
     const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
     if (loadSnapshot === undefined) {
       setCommentMutationError("Updating grading comments is unavailable.");
-      return;
+      return false;
     }
     gradingMutationStudents.current.add(studentId);
     setCommentMutationStudentId(studentId);
@@ -1365,7 +1373,7 @@ export const GradingWorkspacePage = ({
       if (commentMutationBlockedStudents.current.has(studentId)) {
         if (currentStudentIdRef.current === studentId)
           setCommentMutationError(snapshotSubmissionChangedWarning);
-        return;
+        return false;
       }
       const mutationResult = await mutate();
       if (mutationResult.status !== "success") {
@@ -1376,7 +1384,7 @@ export const GradingWorkspacePage = ({
         }
         if (currentStudentIdRef.current === studentId)
           setCommentMutationError(gradingMutationFailureMessage(mutationResult));
-        return;
+        return false;
       }
       commentWasSaved = true;
       if (currentStudentIdRef.current === studentId) {
@@ -1395,7 +1403,7 @@ export const GradingWorkspacePage = ({
               ? snapshotSubmissionChangedWarning
               : "The grading change was saved, but current grading details could not be reloaded safely."
           );
-        return;
+        return false;
       }
       setStudentStatusOverrides((current) => ({
         ...current,
@@ -1407,6 +1415,7 @@ export const GradingWorkspacePage = ({
         closeMutationEditor();
         setCommentMutationError(undefined);
       }
+      return true;
     } catch {
       if (currentStudentIdRef.current === studentId)
         setCommentMutationError(
@@ -1414,6 +1423,7 @@ export const GradingWorkspacePage = ({
             ? "The grading change was saved, but current grading details could not be reloaded safely."
             : "The grading state could not be updated safely."
         );
+      return false;
     } finally {
       gradingMutationStudents.current.delete(studentId);
       setCommentMutationStudentId((current) => (current === studentId ? undefined : current));
@@ -1637,19 +1647,19 @@ export const GradingWorkspacePage = ({
     );
   };
 
-  const confirmMarkComplete = async (): Promise<void> => {
+  const confirmMarkComplete = async (): Promise<boolean> => {
     if (
       markCompleteConfirmation === undefined ||
       markCompleteConfirmation.studentId !== currentStudentIdRef.current
     )
-      return;
+      return false;
     const markComplete = window.graiderUI.markGradingStudentComplete;
     if (markComplete === undefined) {
       setCommentMutationError("Marking grading complete is unavailable.");
-      return;
+      return false;
     }
     const confirmation = markCompleteConfirmation;
-    await runGradingMutation(
+    return runGradingMutation(
       confirmation.studentId,
       () => markComplete({ ...request, studentId: confirmation.studentId }),
       () => setMarkCompleteConfirmation(undefined)
@@ -2001,6 +2011,212 @@ export const GradingWorkspacePage = ({
     }
   };
 
+  const currentEffectiveStatus =
+    snapshot.status === "success"
+      ? effectiveGradingStatus(
+          studentStatusOverrides,
+          snapshot.snapshot.studentId,
+          snapshot.snapshot.gradingStatus
+        )
+      : undefined;
+  const goToPreviousStudent = (): void => {
+    if (selected <= 0) return;
+    void flushPendingViewState(currentStudentId);
+    setSelected((value) => value - 1);
+  };
+  const goToNextUngradedStudent = (): void => {
+    if (nextUngradedStudentIndex === undefined) return;
+    void flushPendingViewState(currentStudentId);
+    setSelected(nextUngradedStudentIndex);
+  };
+  const focusStudentFilter = (): void => {
+    const container = filterPillsContainerRef.current;
+    if (container === null) return;
+    const activePill = container.querySelector<HTMLElement>('button[aria-pressed="true"]');
+    (activePill ?? container.querySelector<HTMLElement>("button"))?.focus();
+  };
+  const handleAutomatedChecksShortcut = (): void => {
+    if (evidencePanelPriorFocusRef.current !== null) {
+      const target = evidencePanelPriorFocusRef.current;
+      evidencePanelPriorFocusRef.current = null;
+      target.focus();
+      return;
+    }
+    const activeElement = document.activeElement;
+    evidencePanelPriorFocusRef.current =
+      activeElement instanceof HTMLElement ? activeElement : document.body;
+    setEvidencePanelOpen(true);
+    setEvidenceFocusRequest((current) => ({ target: "checks", token: (current?.token ?? 0) + 1 }));
+  };
+  const handleCommitHistoryShortcut = (): void => {
+    setEvidencePanelOpen(true);
+    setEvidenceFocusRequest((current) => ({ target: "history", token: (current?.token ?? 0) + 1 }));
+  };
+  const markCompleteAndAdvance = (): void => {
+    if (
+      markCompleteConfirmation !== undefined &&
+      markCompleteConfirmation.studentId === currentStudentId
+    ) {
+      void confirmMarkComplete().then((succeeded) => {
+        if (succeeded) goToNextUngradedStudent();
+      });
+      return;
+    }
+    if (
+      currentStudentId !== undefined &&
+      (currentEffectiveStatus === "not_started" || currentEffectiveStatus === "in_progress") &&
+      !bulkPublicationInProgress &&
+      commentMutationStudentId === undefined &&
+      !commentMutationBlockedStudents.current.has(currentStudentId)
+    ) {
+      setCommentMutationError(undefined);
+      setMarkCompleteConfirmation({ studentId: currentStudentId });
+    }
+  };
+  const publishOrConfirmReport = (): void => {
+    if (
+      reportPublicationConfirmation !== undefined &&
+      reportPublicationConfirmation.studentId === currentStudentId
+    ) {
+      void confirmPublishReport();
+      return;
+    }
+    if (
+      currentStudentId !== undefined &&
+      (currentEffectiveStatus === "complete" || currentEffectiveStatus === "published") &&
+      commentMutationStudentId === undefined &&
+      !commentMutationBlockedStudents.current.has(currentStudentId)
+    ) {
+      setCommentMutationError(undefined);
+      setReportPublicationNotice(undefined);
+      setMarkCompleteConfirmation(undefined);
+      setReportPublicationConfirmation({
+        studentId: currentStudentId,
+        operation: currentEffectiveStatus === "published" ? "republish" : "publish"
+      });
+    }
+  };
+  const applyReusableCommentByPosition = (position: number): void => {
+    if (
+      currentStudentId === undefined ||
+      commentMutationStudentId !== undefined ||
+      commentMutationBlockedStudents.current.has(currentStudentId)
+    )
+      return;
+    const comment = matchingComments[position - 1];
+    if (comment === undefined) return;
+    openApplyEditor(comment);
+  };
+  const closeTopmostPanel = (): void => {
+    if (cheatSheetOpen) {
+      setCheatSheetOpen(false);
+      return;
+    }
+    if (commentEditor !== undefined) {
+      setCommentEditor(undefined);
+      setCommentMutationError(undefined);
+      return;
+    }
+    if (deleteConfirmation !== undefined) {
+      setDeleteConfirmation(undefined);
+      setCommentMutationError(undefined);
+      return;
+    }
+    if (manualAdjustmentEditor !== undefined) {
+      setManualAdjustmentEditor(undefined);
+      setCommentMutationError(undefined);
+      return;
+    }
+    if (deleteManualAdjustmentConfirmation !== undefined) {
+      setDeleteManualAdjustmentConfirmation(undefined);
+      setCommentMutationError(undefined);
+      return;
+    }
+    if (markCompleteConfirmation !== undefined) {
+      setMarkCompleteConfirmation(undefined);
+      setCommentMutationError(undefined);
+      return;
+    }
+    if (reportPreview.status === "success") {
+      setReportPreview({ status: "idle" });
+    }
+  };
+
+  useEffect(() => {
+    const isTypingElement = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (isTypingElement(event.target)) return;
+      const key = event.key;
+      if (key === "j" || key === "J") {
+        event.preventDefault();
+        goToNextUngradedStudent();
+        return;
+      }
+      if (key === "k" || key === "K") {
+        event.preventDefault();
+        goToPreviousStudent();
+        return;
+      }
+      if (key === "/") {
+        event.preventDefault();
+        focusStudentFilter();
+        return;
+      }
+      if (key === "c" || key === "C") {
+        event.preventDefault();
+        openAddCommentEditor();
+        return;
+      }
+      if (key === "m" || key === "M") {
+        event.preventDefault();
+        openAddManualAdjustmentEditor();
+        return;
+      }
+      if (key === "h" || key === "H") {
+        event.preventDefault();
+        handleCommitHistoryShortcut();
+        return;
+      }
+      if (key === "a" || key === "A") {
+        event.preventDefault();
+        handleAutomatedChecksShortcut();
+        return;
+      }
+      if (key === "Enter") {
+        event.preventDefault();
+        markCompleteAndAdvance();
+        return;
+      }
+      if (key === "p" || key === "P") {
+        event.preventDefault();
+        publishOrConfirmReport();
+        return;
+      }
+      if (key === "Escape") {
+        closeTopmostPanel();
+        return;
+      }
+      if (key === "?") {
+        event.preventDefault();
+        setCheatSheetOpen(true);
+        return;
+      }
+      if (key >= "1" && key <= "9") {
+        event.preventDefault();
+        applyReusableCommentByPosition(Number(key));
+      }
+    };
+    // Re-registered every render (cheap: one listener, infrequent event) so the
+    // handler always closes over the latest state instead of a stale render's.
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
+
   if (result === null)
     return (
       <main className="dashboard-shell">
@@ -2046,24 +2262,6 @@ export const GradingWorkspacePage = ({
     allStudentsCount === 0
       ? 0
       : ((gradedOrPublishedCount - publishedCount) / allStudentsCount) * 100;
-  const goToPreviousStudent = (): void => {
-    if (selected <= 0) return;
-    void flushPendingViewState(student?.studentId);
-    setSelected((value) => value - 1);
-  };
-  const goToNextUngradedStudent = (): void => {
-    if (nextUngradedStudentIndex === undefined) return;
-    void flushPendingViewState(student?.studentId);
-    setSelected(nextUngradedStudentIndex);
-  };
-  const currentEffectiveStatus =
-    snapshot.status === "success"
-      ? effectiveGradingStatus(
-          studentStatusOverrides,
-          snapshot.snapshot.studentId,
-          snapshot.snapshot.gradingStatus
-        )
-      : undefined;
   return (
     <main className="dashboard-shell grading-workspace">
       <header className="grading-workspace__header">
@@ -2093,22 +2291,32 @@ export const GradingWorkspacePage = ({
             </div>
           </div>
         )}
+        <button
+          className="secondary-action"
+          type="button"
+          aria-label="Keyboard shortcuts"
+          onClick={() => setCheatSheetOpen(true)}
+        >
+          ?
+        </button>
       </header>
       <div className="grading-workspace__grid">
         <aside>
           <h2>Students</h2>
           {result.students.length === 0 ? null : (
-            <FilterPills
-              pills={[
-                { id: "to_grade", label: "To grade", count: toGradeCount },
-                { id: "graded", label: "Graded", count: gradedOnlyCount },
-                { id: "published", label: "Published", count: publishedCount },
-                { id: "all", label: "All", count: allStudentsCount }
-              ]}
-              activeId={studentFilter}
-              onSelect={(id) => setStudentFilter(id as StudentFilterId)}
-              aria-label="Filter students by grading status"
-            />
+            <div ref={filterPillsContainerRef}>
+              <FilterPills
+                pills={[
+                  { id: "to_grade", label: "To grade", count: toGradeCount },
+                  { id: "graded", label: "Graded", count: gradedOnlyCount },
+                  { id: "published", label: "Published", count: publishedCount },
+                  { id: "all", label: "All", count: allStudentsCount }
+                ]}
+                activeId={studentFilter}
+                onSelect={(id) => setStudentFilter(id as StudentFilterId)}
+                aria-label="Filter students by grading status"
+              />
+            </div>
           )}
           {result.students.length === 0 ? (
             <p>No assigned students.</p>
@@ -2907,6 +3115,9 @@ export const GradingWorkspacePage = ({
             state={evidence}
             commitHistory={commitHistory}
             onReload={(studentId) => void loadEvidence(studentId)}
+            open={evidencePanelOpen}
+            onOpenChange={setEvidencePanelOpen}
+            focusRequest={evidenceFocusRequest}
           />
           <section className="grading-workflow-repair" aria-labelledby="workflow-repair-heading">
             <h3 id="workflow-repair-heading">Workflow</h3>
@@ -3287,6 +3498,108 @@ export const GradingWorkspacePage = ({
           </section>
         </aside>
       </div>
+      <footer className="grading-workspace__footer">
+        <ul className="grading-workspace__footer-hints" aria-label="Keyboard shortcut hints">
+          <li className="grading-workspace__footer-hint">
+            <KbdHint label="J" /> Next student
+          </li>
+          <li className="grading-workspace__footer-hint">
+            <KbdHint label="K" /> Previous
+          </li>
+          <li className="grading-workspace__footer-hint">
+            <KbdHint label="C" /> Comment
+          </li>
+          <li className="grading-workspace__footer-hint">
+            <KbdHint label="A" /> Checks
+          </li>
+          <li className="grading-workspace__footer-hint">
+            <KbdHint label="⏎" /> Complete
+          </li>
+          <li className="grading-workspace__footer-hint">
+            <KbdHint label="?" /> All shortcuts
+          </li>
+        </ul>
+        <p className="grading-workspace__footer-status">Saved automatically</p>
+      </footer>
+      {cheatSheetOpen ? (
+        <div className="confirmation-modal__backdrop">
+          <div
+            className="confirmation-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="grading-shortcuts-heading"
+          >
+            <h2 id="grading-shortcuts-heading">Keyboard shortcuts</h2>
+            <div className="grading-shortcut-groups">
+              <div className="grading-shortcut-group">
+                <h3>Move</h3>
+                <div>
+                  <KbdHint label="J" /> <span>Next ungraded student</span>
+                </div>
+                <div>
+                  <KbdHint label="K" /> <span>Previous student</span>
+                </div>
+                <div>
+                  <KbdHint label="/" /> <span>Focus the student filter</span>
+                </div>
+              </div>
+              <div className="grading-shortcut-group">
+                <h3>Read</h3>
+                <div>
+                  <KbdHint label="A" /> <span>Open automated checks, or return focus</span>
+                </div>
+                <div>
+                  <KbdHint label="R" /> <span>Reload automated checks (panel focused)</span>
+                </div>
+                <div>
+                  <KbdHint label="N" /> <KbdHint label="⇧N" />{" "}
+                  <span>Next / previous JUnit failure (panel focused)</span>
+                </div>
+                <div>
+                  <KbdHint label="H" /> <span>Open commit history</span>
+                </div>
+              </div>
+              <div className="grading-shortcut-group">
+                <h3>Grade</h3>
+                <div>
+                  <KbdHint label="C" /> <span>Add a comment on the selected source</span>
+                </div>
+                <div>
+                  <KbdHint label="M" /> <span>Add a manual adjustment</span>
+                </div>
+                <div>
+                  <KbdHint label="1–9" /> <span>Apply that library comment</span>
+                </div>
+              </div>
+              <div className="grading-shortcut-group">
+                <h3>Finish</h3>
+                <div>
+                  <KbdHint label="⏎" /> <span>Mark complete and go to next ungraded</span>
+                </div>
+                <div>
+                  <KbdHint label="P" /> <span>Publish or confirm publishing the report</span>
+                </div>
+                <div>
+                  <KbdHint label="Esc" /> <span>Close an open panel or dialog</span>
+                </div>
+                <div>
+                  <KbdHint label="?" /> <span>Open this cheat sheet</span>
+                </div>
+              </div>
+            </div>
+            <p>Shortcuts are disabled while typing in a text field.</p>
+            <div className="grading-apply-comment__actions">
+              <button
+                className="secondary-action"
+                type="button"
+                onClick={() => setCheatSheetOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 };

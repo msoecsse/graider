@@ -1098,6 +1098,10 @@ const formatGradeStatusSummaryLabel = (row: GradeStatusRepositoryRow): string =>
     return "Token required";
   }
 
+  if (row.status === "not_configured") {
+    return "Grading disabled";
+  }
+
   return row.status === "blocked" ? "Blocked" : "Unknown";
 };
 
@@ -1140,6 +1144,10 @@ const formatGradeStatusLastUpdate = (row: GradeStatusRepositoryRow): string => {
 };
 
 const getGradeStatusSummaryText = (status: NormalizedGradeStatus): string => {
+  if (!status.grading.enabled) {
+    return "Grading is disabled for this assignment.";
+  }
+
   const activeRuns = status.summary.queued + status.summary.inProgress;
   const parts = [
     status.summary.needsAttention > 0

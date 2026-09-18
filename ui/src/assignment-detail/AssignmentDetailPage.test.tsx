@@ -1364,6 +1364,86 @@ describe("AssignmentDetailPage", () => {
     expect(within(summary).getAllByText("No run link")).toHaveLength(3);
   });
 
+  it("renders disabled grading status neutrally instead of as blocked", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({
+            grading: {
+              enabled: false,
+              mode: "no-grading",
+              workflow: null,
+              artifact: null,
+              resultFile: null,
+              workflowStatus: "not_required",
+              workflowDispatch: "not_required"
+            }
+          })
+        )
+      ),
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(
+        createAssignmentGradeStatusResult(
+          createAssignmentGradeStatusJson({
+            grading: {
+              enabled: false,
+              resolvedFrom: "assignment_override",
+              mode: "no-grading",
+              workflow: null,
+              artifact: null,
+              resultFile: null,
+              workflowRef: null
+            },
+            summary: {
+              totalRepositories: 1,
+              queued: 0,
+              inProgress: 0,
+              completed: 0,
+              successful: 0,
+              failed: 0,
+              cancelled: 0,
+              timedOut: 0,
+              missing: 0,
+              unknown: 0,
+              blocked: 0,
+              needsAttention: 0,
+              readyForReport: false
+            },
+            repositories: [
+              {
+                studentId: "s001",
+                githubUsername: "adalovelace",
+                section: "001",
+                repository: "graider-sandbox/csc1120-lab02-ada",
+                workflow: null,
+                ref: null,
+                runId: null,
+                runUrl: null,
+                status: "not_configured",
+                conclusion: "unknown",
+                startedAt: null,
+                completedAt: null,
+                selectionStrategy: "no_configured_workflow_run",
+                reason: "grading_not_configured",
+                needsAttention: false,
+                diagnostics: []
+              }
+            ]
+          })
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const summary = await screen.findByLabelText("Grade status summary");
+    expect(within(summary).getByText("Grading disabled")).toBeInTheDocument();
+    expect(
+      within(summary).getByText("Grading is disabled for this assignment.")
+    ).toBeInTheDocument();
+    expect(within(summary).queryByText("Blocked")).toBeNull();
+    expect(within(summary).getByText("Grading disabled")).not.toHaveClass("status-chip--attention");
+  });
+
   it("keeps an MSOE username distinct from its GitHub repository URL", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult()),

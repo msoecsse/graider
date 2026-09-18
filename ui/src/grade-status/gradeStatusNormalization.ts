@@ -55,6 +55,7 @@ const normalizeRepositoryStatus = (status: string | null): GradeStatusRepository
     status === "missing" ||
     status === "unknown" ||
     status === "blocked" ||
+    status === "not_configured" ||
     status === "token_required"
   ) {
     return status;
@@ -103,7 +104,10 @@ const countRows = (
 ): number => rows.filter(predicate).length;
 
 export const isTerminalGradeStatusRow = (row: GradeStatusRepositoryRow): boolean =>
-  row.status === "completed" || row.status === "missing" || row.status === "blocked";
+  row.status === "completed" ||
+  row.status === "missing" ||
+  row.status === "blocked" ||
+  row.status === "not_configured";
 
 export const isNonTerminalGradeStatusRow = (row: GradeStatusRepositoryRow): boolean =>
   !isTerminalGradeStatusRow(row);

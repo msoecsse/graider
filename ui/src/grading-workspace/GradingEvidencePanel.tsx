@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactElement } from "react";
 import type { GradingStudentEvidenceResult } from "../../electron/ipc";
 import {
   GradingCommitHistoryContent,
@@ -96,6 +96,13 @@ export const evidenceResultToLoadState = (
     };
   return { status: "message", studentId, message: genericEvidenceWarning, tone: "warning" };
 };
+
+export interface GradingEvidenceFocusRequest {
+  readonly target: "checks" | "history";
+  readonly token: number;
+}
+
+const FAILURE_SUMMARY_SELECTOR = ".grading-evidence__findings > li > details > summary";
 
 const outcomeLabel = (outcome: "success" | "failure" | "skipped"): string =>
   ({ success: "Passed", failure: "Failed", skipped: "Skipped" })[outcome];
@@ -208,14 +215,39 @@ const SuccessEvidence = ({ result }: { readonly result: EvidenceSuccess }): Reac
 export const GradingEvidencePanel = ({
   state,
   commitHistory,
-  onReload
+  onReload,
+  open,
+  onOpenChange,
+  focusRequest
 }: {
   readonly state: EvidenceLoadState;
   readonly commitHistory: CommitHistoryLoadState;
   readonly onReload: (studentId: string) => void;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly focusRequest: GradingEvidenceFocusRequest | undefined;
 }): ReactElement | null => {
+  const sectionRef = useRef<HTMLElement>(null);
+  const summaryRef = useRef<HTMLElement>(null);
+  const loadingRef = useRef<HTMLParagraphElement>(null);
+  const historySummaryRef = useRef<HTMLElement>(null);
   const hasEvidence = state.status !== "idle" && state.status !== "not_applicable";
   const hasHistory = commitHistory.status !== "idle";
+
+  useEffect(() => {
+    if (!open || focusRequest === undefined) return;
+    sectionRef.current?.scrollIntoView?.({ block: "nearest" });
+    if (focusRequest.target === "history") {
+      historySummaryRef.current?.focus();
+      return;
+    }
+    if (state.status === "loading") {
+      loadingRef.current?.focus();
+      return;
+    }
+    summaryRef.current?.focus();
+  }, [open, focusRequest]);
+
   if (!hasEvidence && !hasHistory) return null;
   const studentId =
     state.status === "success"
@@ -223,10 +255,45 @@ export const GradingEvidencePanel = ({
       : "studentId" in state
         ? state.studentId
         : "";
+
+  const handlePanelKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key === "r") {
+      if (!hasEvidence || state.status === "loading") return;
+      event.preventDefault();
+      onReload(studentId);
+      return;
+    }
+    if (key === "n") {
+      const container = sectionRef.current;
+      if (container === null) return;
+      const summaries = Array.from(
+        container.querySelectorAll<HTMLElement>(FAILURE_SUMMARY_SELECTOR)
+      );
+      if (summaries.length === 0) return;
+      event.preventDefault();
+      const currentIndex = summaries.indexOf(document.activeElement as HTMLElement);
+      const direction = event.shiftKey ? -1 : 1;
+      const nextIndex =
+        currentIndex === -1
+          ? direction === 1
+            ? 0
+            : summaries.length - 1
+          : (currentIndex + direction + summaries.length) % summaries.length;
+      summaries[nextIndex]?.focus();
+    }
+  };
+
   return (
-    <section className="grading-evidence" aria-label="Automated Checks">
-      <details>
-        <summary>
+    <section
+      className="grading-evidence"
+      aria-label="Automated Checks"
+      ref={sectionRef}
+      onKeyDown={handlePanelKeyDown}
+    >
+      <details open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
+        <summary ref={summaryRef}>
           <h3>Automated Checks</h3>
         </summary>
         {hasEvidence ? (
@@ -241,7 +308,9 @@ export const GradingEvidencePanel = ({
           </div>
         ) : null}
         {state.status === "loading" ? (
-          <p aria-live="polite">Loading automated checks for {state.studentId}…</p>
+          <p aria-live="polite" tabIndex={-1} ref={loadingRef}>
+            Loading automated checks for {state.studentId}…
+          </p>
         ) : state.status === "message" ? (
           <p
             className={`grading-evidence__message grading-evidence__message--${state.tone}`}
@@ -254,7 +323,7 @@ export const GradingEvidencePanel = ({
         ) : null}
         {hasHistory ? (
           <details className="grading-evidence__phase" open>
-            <summary>Commit History</summary>
+            <summary ref={historySummaryRef}>Commit History</summary>
             <GradingCommitHistoryContent state={commitHistory} />
           </details>
         ) : null}

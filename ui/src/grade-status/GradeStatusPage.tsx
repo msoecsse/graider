@@ -109,6 +109,10 @@ const formatGradeStatusRowLabel = (row: GradeStatusRepositoryRow): string => {
     return "Token required";
   }
 
+  if (row.status === "not_configured") {
+    return "Grading disabled";
+  }
+
   return row.status === "blocked" ? "Blocked" : "Unknown";
 };
 
@@ -121,6 +125,10 @@ const getGradeStatusChipClassName = (row: GradeStatusRepositoryRow): string => {
 };
 
 const getNotReadyReason = (status: NormalizedGradeStatus): string => {
+  if (!status.grading.enabled) {
+    return "Grading is disabled for this assignment.";
+  }
+
   const parts = [
     status.summary.queued + status.summary.inProgress > 0
       ? `${status.summary.queued + status.summary.inProgress} runs still in progress.`

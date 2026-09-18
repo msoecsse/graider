@@ -404,7 +404,7 @@ const createGradingDisabledRow = (
   createRow(
     student,
     repository?.fullName ?? null,
-    "blocked",
+    "not_configured",
     GRADING_NOT_CONFIGURED_CODE,
     null,
     null
