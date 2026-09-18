@@ -2962,35 +2962,36 @@ export const GradingWorkspacePage = ({
                         ? "Add adjustment"
                         : "Edit adjustment"}
                     </h4>
-                    <label>
-                      Rubric category
-                      <select
-                        required
-                        value={manualAdjustmentEditor.rubricCategoryId}
-                        onChange={(event) =>
-                          setManualAdjustmentEditor((current) =>
-                            current === undefined
-                              ? current
-                              : { ...current, rubricCategoryId: event.target.value }
-                          )
-                        }
-                      >
-                        <option value="">Select a category</option>
-                        {manualAdjustmentEditor.rubricCategoryId !== "" &&
-                        !result.rubric.some(
-                          (category) => category.id === manualAdjustmentEditor.rubricCategoryId
-                        ) ? (
-                          <option value={manualAdjustmentEditor.rubricCategoryId} disabled>
-                            Unavailable category ({manualAdjustmentEditor.rubricCategoryId})
-                          </option>
-                        ) : null}
-                        {result.rubric.map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                          </option>
-                        ))}
-                      </select>
+                    <label htmlFor="grading-adjustment-rubric-category">
+                      Adjustment rubric category
                     </label>
+                    <select
+                      id="grading-adjustment-rubric-category"
+                      required
+                      value={manualAdjustmentEditor.rubricCategoryId}
+                      onChange={(event) =>
+                        setManualAdjustmentEditor((current) =>
+                          current === undefined
+                            ? current
+                            : { ...current, rubricCategoryId: event.target.value }
+                        )
+                      }
+                    >
+                      <option value="">Select a category</option>
+                      {manualAdjustmentEditor.rubricCategoryId !== "" &&
+                      !result.rubric.some(
+                        (category) => category.id === manualAdjustmentEditor.rubricCategoryId
+                      ) ? (
+                        <option value={manualAdjustmentEditor.rubricCategoryId} disabled>
+                          Unavailable category ({manualAdjustmentEditor.rubricCategoryId})
+                        </option>
+                      ) : null}
+                      {result.rubric.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
                     <label>
                       Amount
                       <input
@@ -3283,34 +3284,33 @@ export const GradingWorkspacePage = ({
                     }
                   />
                 </label>
-                <label>
-                  Rubric category
-                  <select
-                    value={commentEditor.rubricCategoryId}
-                    onChange={(event) =>
-                      setCommentEditor((current) =>
-                        current === undefined
-                          ? current
-                          : { ...current, rubricCategoryId: event.target.value }
-                      )
-                    }
-                  >
-                    <option value="">None</option>
-                    {commentEditor.rubricCategoryId !== "" &&
-                    !result.rubric.some(
-                      (category) => category.id === commentEditor.rubricCategoryId
-                    ) ? (
-                      <option value={commentEditor.rubricCategoryId} disabled>
-                        Unavailable category ({commentEditor.rubricCategoryId})
-                      </option>
-                    ) : null}
-                    {result.rubric.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <label htmlFor="grading-comment-rubric-category">Comment rubric category</label>
+                <select
+                  id="grading-comment-rubric-category"
+                  value={commentEditor.rubricCategoryId}
+                  onChange={(event) =>
+                    setCommentEditor((current) =>
+                      current === undefined
+                        ? current
+                        : { ...current, rubricCategoryId: event.target.value }
+                    )
+                  }
+                >
+                  <option value="">None</option>
+                  {commentEditor.rubricCategoryId !== "" &&
+                  !result.rubric.some(
+                    (category) => category.id === commentEditor.rubricCategoryId
+                  ) ? (
+                    <option value={commentEditor.rubricCategoryId} disabled>
+                      Unavailable category ({commentEditor.rubricCategoryId})
+                    </option>
+                  ) : null}
+                  {result.rubric.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
                 <fieldset>
                   <legend>Target</legend>
                   <label>

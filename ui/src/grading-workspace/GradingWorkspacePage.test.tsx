@@ -1411,7 +1411,9 @@ describe("GradingWorkspacePage comment application", () => {
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Use a clearer loop.");
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Loop clarity");
     expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(2);
-    expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("quality");
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue(
+      "quality"
+    );
     expect(screen.getByText("Source target: src/Main.java: 2-5")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
       target: { value: "Customized feedback" }
@@ -1491,7 +1493,7 @@ describe("GradingWorkspacePage comment application", () => {
     await screen.findByTestId("mock-monaco");
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
 
-    expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue("");
     expect(screen.getByRole("radio", { name: "General" })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
     await waitFor(() => expect(addComment).toHaveBeenCalledTimes(1));
@@ -1525,7 +1527,7 @@ describe("GradingWorkspacePage comment application", () => {
     );
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
@@ -1550,7 +1552,7 @@ describe("GradingWorkspacePage comment application", () => {
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Apply Loop clarity" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Select ada invalid" }));
@@ -1931,14 +1933,16 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Original feedback");
     expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(5);
-    expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("quality");
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue(
+      "quality"
+    );
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
       target: { value: "Revised feedback" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Deduction" }), {
       target: { value: "8" }
     });
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "correctness" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
@@ -2059,7 +2063,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     );
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
     });
     fireEvent.click(screen.getByRole("radio", { name: "General" }));
@@ -2396,7 +2400,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
     fireEvent.click(await screen.findByRole("button", { name: "Add adjustment" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
       target: { value: "quality" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
@@ -2460,10 +2464,12 @@ describe("GradingWorkspacePage manual adjustments", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit adjustment: quality" }));
-    expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("quality");
+    expect(screen.getByRole("combobox", { name: "Adjustment rubric category" })).toHaveValue(
+      "quality"
+    );
     expect(screen.getByRole("spinbutton", { name: "Amount" })).toHaveValue(-2);
     expect(screen.getByRole("textbox", { name: "Note (optional)" })).toHaveValue("Late");
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
       target: { value: "correctness" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
@@ -2549,7 +2555,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add adjustment" }));
     const save = screen.getAllByRole("button", { name: "Add adjustment" })[1] as HTMLElement;
     expect(save).toBeDisabled();
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
       target: { value: "quality" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
@@ -2640,7 +2646,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Add adjustment" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
       target: { value: "quality" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
