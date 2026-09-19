@@ -46,7 +46,7 @@ describe("grading student view-state IPC request validation", () => {
   });
 
   it("accepts only narrow applied-comment mutations", () => {
-    const comment = { id: "comment", text: "Feedback", deduction: -1 };
+    const comment = { id: "comment", title: "Style", text: "Feedback", deduction: -1 };
     expect(isAddGradingStudentCommentRequest({ ...identity, comment })).toBe(true);
     expect(
       isEditGradingStudentCommentRequest({

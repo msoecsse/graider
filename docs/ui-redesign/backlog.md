@@ -37,7 +37,7 @@ workspace, and removes the reason the concurrency cap exists.
 
 ---
 
-## 2. CI does not run any UI checks — **Should fix**
+## 2. CI does not run any UI checks — **Resolved**
 
 `.github/workflows/ci.yml` runs root `typecheck`, `lint`, `format:check`,
 `test`, `build`, and `audit`. It never runs anything with `--prefix ui`.
@@ -52,6 +52,14 @@ Related: `ui/electron/commandRunner.test.ts:159` hardcodes `/private/tmp`, so
 that test passes only on macOS and will fail the moment CI runs the UI suite on
 Linux. Use `os.tmpdir()` instead. Fix this in the same PR or CI goes red
 immediately.
+
+Fixed: `ci.yml` now installs UI dependencies and runs `typecheck`,
+`format:check`, `test`, and `build` with `--prefix ui`, and the
+`/private/tmp` hardcode was replaced with `os.tmpdir()`. The workflow has
+never actually triggered on this branch (push-only, no PR opened), so this
+was verified by running every CI command locally from a clean checkout
+instead — all pass. See the PR that resolved this for the full command list
+and results.
 
 ---
 
