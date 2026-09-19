@@ -173,7 +173,7 @@ the whole tree.
 
 - `npm run test:live` or anything under `tests/live` — these hit real GitHub.
 - `npm run package`, `package:mac`, `package:win`, `make`, `release:rc1`.
-- `git push`, branch deletion, force operations, or opening pull requests.
+- branch deletion, force operations, or opening pull requests.
 - Anything that mutates a real GitHub organization, repository, or roster.
 
 ### Test health
@@ -264,13 +264,12 @@ Additionally, for any renderer change:
 
 ## 9. Working rhythm
 
-- One task per session. Ask the user to clear context between tasks.
-- Read before writing. Inspect the existing implementation enough to preserve
-  current behaviour and terminology.
-- Make the change, run the relevant validation commands, then report.
-- Commit only when validation passes, and only when asked to commit.
-- If a validation command fails for a reason unrelated to your change, report
-  the command, the failure, and the risk. Do not work around it.
+- When validation passes, commit with a descriptive message and push
+  to the current branch. Never force-push, never push to main or
+  master, and never commit files you did not change — if `git status`
+  shows unrelated modified files, stage your own files explicitly
+  rather than using `git add -A`, and say so in your report.
+- If validation fails, do not commit. Report and stop.
 
 ---
 
