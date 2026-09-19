@@ -240,9 +240,10 @@ readout `7 of 24 graded · 3 published` above a two-segment progress bar (accent
 for graded, pale green for published); primary button `Publish N reports` with a
 `P` key badge; overflow `⋯`.
 
-**Left pane (300px).** Filter input with a `/` key badge. Filter pills:
-`To grade N` / `Graded N` / `Published N` / `All N`, defaulting to **To grade**.
-Scrolling student list; each row is a button with a status dot
+**Left pane (300px).** Filter pills `To grade N` / `Graded N` / `Published N` /
+`All N`, defaulting to **To grade**, with a `/` key badge that focuses the
+active pill. (PR3 built filter pills, not a text input; PR4 mapped `/` to
+focus the active pill accordingly.) Scrolling student list; each row is a button with a status dot
 (grey = ungraded, green = graded, blue = published), name, `Section 001 · @user`,
 and score or an em dash. Selected row gets `--accent-tint` background and a 3px
 accent inset shadow on the left edge.
@@ -285,7 +286,7 @@ is keyboard-only.
 | `J` / `K`       | Next ungraded / previous student  |
 | `⇧J`            | Next student including graded     |
 | `G G`           | Jump to first ungraded            |
-| `/`             | Focus the student filter          |
+| `/`             | Focus the active filter pill      |
 | `⇥` / `⇧⇥`      | Next / previous file              |
 | `H`             | Commit history                    |
 | `A`             | Automated checks                  |
@@ -312,8 +313,10 @@ reports are committed to each student's repository and visible immediately.
 
 Three sections: **Ready to publish** (checkbox per row, student, section, score,
 comment summary — all checked by default), **Already published** (check icon,
-greyed, with publish timestamps), **Not graded yet** (count only, with a line
-explaining they are excluded and can be published later in the week).
+greyed — no timestamp; the bulk publication result carries none, and PR5
+correctly omitted it. Adding one would need a backend change), **Not graded
+yet** (count only, with a line explaining they are excluded and can be
+published later in the week).
 
 Footer states the effect in plain terms — "4 reports will be committed to 4
 repositories" — with Cancel and `Publish 4 reports`.
@@ -336,12 +339,26 @@ Primary action by state:
 | Everything published          | `View faculty report`              |
 | Blocked                       | The fix for the blocker, in orange |
 
+This five-state table assumes a roster-wide grading/publication aggregate
+that does not exist (backlog item 1 — blocker). PR6a shipped a collapsed
+three-state version instead: `Apply to N students` (not applied), `Continue
+grading` (applied — no count, and no distinction between submissions in
+progress, all graded, and published), and the blocker's fix (blocked).
+Restore the table above once item 1 lands.
+
 **Lifecycle strip (92px).** Five steps separated by chevrons:
 `Created` (date) → `Applied` (N repositories) → `Submissions` (N of M in) →
 `Grading` (N of M done) → `Published` (N of M sent). Completed steps get a
 filled accent circle with a check; the current step gets a ring and bold label;
 future steps are grey outline. A blocked step gets a filled orange circle with
 an exclamation and an orange detail line.
+
+**`Submissions`, `Grading`, and `Published` are blocked on backlog item 1**,
+not buildable as specified today: `GradingState` persists per-student status
+on disk with nothing aggregated across a roster, and
+`GradeStatusRepositoryStatus` tracks CI workflow-run status, not human
+grading progress. Only `Created` and `Applied` can be built until item 1
+lands.
 
 This replaces the readiness panel that currently displays "Needs attention" and
 a "Ready" chip simultaneously.
