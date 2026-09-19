@@ -10,6 +10,10 @@ import type {
 import type { ReusableCommentFieldsDto } from "./gradingCommentLibraryService.js";
 import type { MarkGradingStudentCompleteResult } from "./gradingStudentCompleteService.js";
 import type { PublishGradingStudentReportResult } from "./gradingStudentReportPublicationService.js";
+import type {
+  AssignmentGradingLifecycleRequest,
+  AssignmentGradingLifecycleResult
+} from "./assignmentGradingLifecycleService.js";
 
 export const IPC_CHANNELS = {
   getAppInfo: "graider-ui:get-app-info",
@@ -84,6 +88,7 @@ export const IPC_CHANNELS = {
   getAssignmentApplyPreview: "graider-ui:assignment-apply-preview:get",
   getAssignmentGradePreview: "graider-ui:assignment-grade-preview:get",
   getAssignmentGradeStatus: "graider-ui:assignment-grade-status:get",
+  getAssignmentGradingLifecycle: "graider-ui:assignment-grading-lifecycle:get",
   getFacultyReport: "graider-ui:faculty-report:get",
   applyAssignment: "graider-ui:assignment-apply:run",
   assignmentApplyProgress: "graider-ui:assignment-apply:progress",
@@ -725,6 +730,10 @@ export interface DeleteGradingLibraryCommentRequest extends LoadGradingCommentLi
   readonly commentId: string;
 }
 export type { GradingCommentLibraryResult } from "./gradingCommentLibraryService.js";
+export type {
+  AssignmentGradingLifecycleRequest,
+  AssignmentGradingLifecycleResult
+} from "./assignmentGradingLifecycleService.js";
 
 export type {
   AssignmentTemplateSyncAvailability,
@@ -1134,6 +1143,9 @@ export interface GraiderUIApi {
   readonly getAssignmentGradeStatus: (
     request: AssignmentGradeStatusRequest
   ) => Promise<AssignmentGradeStatusResult>;
+  readonly getAssignmentGradingLifecycle?: (
+    request: AssignmentGradingLifecycleRequest
+  ) => Promise<AssignmentGradingLifecycleResult>;
   readonly getFacultyReport: (request: FacultyReportRequest) => Promise<FacultyReportResult>;
   readonly applyAssignment: (request: AssignmentApplyRequest) => Promise<AssignmentApplyResult>;
   readonly onAssignmentApplyProgress: (

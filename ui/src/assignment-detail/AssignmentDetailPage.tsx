@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type {
+  AssignmentGradingLifecycleResult,
   AssignmentTemplateSyncAvailability,
   AssignmentTemplateSyncExecutionResult,
   AssignmentTemplateSyncOutcome,
@@ -15,6 +16,11 @@ import type {
 } from "../../electron/ipc";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
+import {
+  LifecycleStrip,
+  type LifecycleStep,
+  type LifecycleStepState
+} from "../components/LifecycleStrip";
 import { OperationStatusBar } from "../components/OperationStatusBar";
 import { OverflowMenu, type OverflowMenuGroup } from "../components/OverflowMenu";
 import { PageHeader } from "../components/PageHeader";
@@ -97,6 +103,72 @@ const revealExistingSection = (headingId: string, detailsId?: string): void => {
   const heading = document.getElementById(headingId);
   heading?.scrollIntoView?.({ block: "start" });
   heading?.focus();
+};
+
+interface AssignmentLifecycleStripInput {
+  readonly activeStudentCount: number;
+  readonly isApplied: boolean;
+  readonly gradingDoneCount: number;
+  readonly publishedCount: number;
+  readonly unknownStatusCount: number;
+  readonly isBlocked: boolean;
+  readonly blockedDetail: string;
+}
+
+// Created is always complete once the page can render at all -- the
+// assignment already exists -- but there is no "assignment created" date
+// anywhere in the current data model, so its detail is intentionally left
+// blank rather than inventing one. See the PR report.
+const buildAssignmentLifecycleSteps = (
+  input: AssignmentLifecycleStripInput
+): readonly LifecycleStep[] => {
+  const total = input.activeStudentCount;
+  const gradingDone = input.isApplied && (total === 0 || input.gradingDoneCount >= total);
+  const publishedDone = gradingDone && (total === 0 || input.publishedCount >= total);
+
+  const appliedState: LifecycleStepState = input.isApplied ? "complete" : "current";
+  const gradingState: LifecycleStepState = !input.isApplied
+    ? "upcoming"
+    : gradingDone
+      ? "complete"
+      : "current";
+  const publishedState: LifecycleStepState = !gradingDone
+    ? "upcoming"
+    : publishedDone
+      ? "complete"
+      : "current";
+
+  const steps: readonly LifecycleStep[] = [
+    { id: "created", label: "Created", state: "complete" },
+    {
+      id: "applied",
+      label: "Applied",
+      detail: `${total} repositor${total === 1 ? "y" : "ies"}`,
+      state: appliedState
+    },
+    {
+      id: "grading",
+      label: "Grading",
+      detail:
+        input.unknownStatusCount > 0
+          ? `${input.gradingDoneCount} of ${total} done · ${input.unknownStatusCount} unknown`
+          : `${input.gradingDoneCount} of ${total} done`,
+      state: gradingState
+    },
+    {
+      id: "published",
+      label: "Published",
+      detail: `${input.publishedCount} of ${total} sent`,
+      state: publishedState
+    }
+  ];
+
+  // Blocked takes precedence over whichever step is otherwise "current" —
+  // the same precedence the primary action already applies.
+  if (!input.isBlocked) return steps;
+  return steps.map((step) =>
+    step.state === "current" ? { ...step, state: "blocked", detail: input.blockedDetail } : step
+  );
 };
 
 const derivePagesBaseUrl = (repository: string): string => {
@@ -1456,6 +1528,8 @@ export const AssignmentDetailPage = ({
   const [gradeStatusLoadResult, setGradeStatusLoadResult] = useState<GradeStatusLoadResult | null>(
     null
   );
+  const [gradingLifecycleResult, setGradingLifecycleResult] =
+    useState<AssignmentGradingLifecycleResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloadingRepositories, setIsDownloadingRepositories] = useState(false);
   const [repositoryDownloadError, setRepositoryDownloadError] = useState<string | null>(null);
@@ -1638,6 +1712,30 @@ export const AssignmentDetailPage = ({
       }));
     } finally {
       setIsLoadingGradeStatus(false);
+    }
+  };
+
+  const loadGradingLifecycleSummary = async (): Promise<void> => {
+    const getGradingLifecycle = window.graiderUI.getAssignmentGradingLifecycle;
+    if (
+      getGradingLifecycle === undefined ||
+      selection.termSlug === null ||
+      selection.assignmentSlug === null
+    ) {
+      setGradingLifecycleResult(null);
+      return;
+    }
+    try {
+      setGradingLifecycleResult(
+        await getGradingLifecycle({
+          courseFolderId: selection.courseFolderId,
+          courseFolderPath: selection.courseFolderPath,
+          termCode: selection.termSlug,
+          assignmentSlug: selection.assignmentSlug
+        })
+      );
+    } catch {
+      setGradingLifecycleResult(null);
     }
   };
 
@@ -1949,6 +2047,11 @@ export const AssignmentDetailPage = ({
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   useEffect(() => {
+    setGradingLifecycleResult(null);
+    void loadGradingLifecycleSummary();
+  }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
+
+  useEffect(() => {
     let isCurrent = true;
     const prepareTemplateSync = window.graiderUI.prepareAssignmentTemplateSync;
     setTemplateSyncAvailability(null);
@@ -2106,6 +2209,33 @@ export const AssignmentDetailPage = ({
                 onPreviewApply(selection, detail, loadResult);
               }
             };
+
+  const assignmentLifecycleSteps: readonly LifecycleStep[] =
+    detail === null
+      ? []
+      : buildAssignmentLifecycleSteps({
+          activeStudentCount: detail.roster?.activeStudentCount ?? 0,
+          isApplied:
+            detail.applyState.status === "applied" ||
+            detail.applyState.status === "partially_applied",
+          gradingDoneCount:
+            gradingLifecycleResult?.status === "success"
+              ? gradingLifecycleResult.gradingDoneCount
+              : 0,
+          publishedCount:
+            gradingLifecycleResult?.status === "success"
+              ? gradingLifecycleResult.publishedCount
+              : 0,
+          unknownStatusCount:
+            gradingLifecycleResult?.status === "success"
+              ? gradingLifecycleResult.unknownStatusCount
+              : 0,
+          isBlocked,
+          blockedDetail:
+            blockerItem === undefined
+              ? "Review readiness checks"
+              : (BLOCKER_FIX_LABELS[blockerItem.id] ?? "Review readiness checks")
+        });
 
   const overflowGroups: readonly OverflowMenuGroup[] =
     detail === null
@@ -2277,6 +2407,7 @@ export const AssignmentDetailPage = ({
           </>
         }
       />
+      {detail === null ? null : <LifecycleStrip steps={assignmentLifecycleSteps} />}
       <ConfirmationWithPreviewModal
         isOpen={isTemplateSyncModalOpen}
         title={

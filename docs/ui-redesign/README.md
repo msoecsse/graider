@@ -339,26 +339,34 @@ Primary action by state:
 | Everything published          | `View faculty report`              |
 | Blocked                       | The fix for the blocker, in orange |
 
-This five-state table assumes a roster-wide grading/publication aggregate
-that does not exist (backlog item 1 — blocker). PR6a shipped a collapsed
-three-state version instead: `Apply to N students` (not applied), `Continue
-grading` (applied — no count, and no distinction between submissions in
-progress, all graded, and published), and the blocker's fix (blocked).
-Restore the table above once item 1 lands.
+This five-state table assumed a roster-wide grading/publication aggregate
+that did not exist when PR6a shipped (backlog item 1). That aggregate now
+exists and backs the `Grading` and `Published` counts in the lifecycle strip
+below. PR6a's collapsed three-state primary action — `Apply to N students`
+(not applied), `Continue grading` (applied, no count), and the blocker's fix
+(blocked) — is still what ships; restoring the finer states above is a
+deliberate future decision, not a blocked one. The `Submissions` row and its
+"submissions arriving" wording will not return in any form — see the
+lifecycle strip note below for why.
 
-**Lifecycle strip (92px).** Five steps separated by chevrons:
-`Created` (date) → `Applied` (N repositories) → `Submissions` (N of M in) →
-`Grading` (N of M done) → `Published` (N of M sent). Completed steps get a
-filled accent circle with a check; the current step gets a ring and bold label;
-future steps are grey outline. A blocked step gets a filled orange circle with
-an exclamation and an orange detail line.
+**Lifecycle strip (92px).** Four steps separated by chevrons: `Created` →
+`Applied` (N repositories) → `Grading` (N of M done) → `Published` (N of M
+sent). Completed steps get a filled accent circle with a check; the current
+step gets a ring and bold label; future steps are grey outline. A blocked
+step gets a filled orange circle.
 
-**`Submissions`, `Grading`, and `Published` are blocked on backlog item 1**,
-not buildable as specified today: `GradingState` persists per-student status
-on disk with nothing aggregated across a roster, and
-`GradeStatusRepositoryStatus` tracks CI workflow-run status, not human
-grading progress. Only `Created` and `Applied` can be built until item 1
-lands.
+**`Submissions` was dropped from the original five-step mockup, permanently
+— not deferred, not blocked on anything.** Generated grading workflows
+trigger on `push` and `workflow_dispatch`. A workflow run existing does not
+mean a student submitted: it can equally mean the initial template push when
+the repository was created, or a faculty-triggered grading run. Approximating
+"submitted" from that signal would repeat exactly the CI-status-as-human-
+status conflation this redesign avoids everywhere else (see backlog item 1's
+history). Do not re-add a `Submissions` step from the original mockup
+without a real, direct, per-student submission signal — none exists today.
+
+`Created` has no reliable date anywhere in the current data model. The step
+still renders, always complete, but without a date detail until one exists.
 
 This replaces the readiness panel that currently displays "Needs attention" and
 a "Ready" chip simultaneously.

@@ -54,6 +54,8 @@ import {
   type AssignmentGradePreviewResult,
   type AssignmentGradeStatusRequest,
   type AssignmentGradeStatusResult,
+  type AssignmentGradingLifecycleRequest,
+  type AssignmentGradingLifecycleResult,
   type CombinedDashboardResult,
   type CourseFolderDashboardResult,
   type CourseFolderRecord,
@@ -395,6 +397,13 @@ const graiderUI: GraiderUIApi = {
     request: AssignmentGradeStatusRequest
   ): Promise<AssignmentGradeStatusResult> =>
     await invoke<AssignmentGradeStatusResult>(IPC_CHANNELS.getAssignmentGradeStatus, request),
+  getAssignmentGradingLifecycle: async (
+    request: AssignmentGradingLifecycleRequest
+  ): Promise<AssignmentGradingLifecycleResult> =>
+    await invoke<AssignmentGradingLifecycleResult>(
+      IPC_CHANNELS.getAssignmentGradingLifecycle,
+      request
+    ),
   getFacultyReport: async (request: FacultyReportRequest): Promise<FacultyReportResult> =>
     await invoke<FacultyReportResult>(IPC_CHANNELS.getFacultyReport, request),
   applyAssignment: async (request: AssignmentApplyRequest): Promise<AssignmentApplyResult> =>
