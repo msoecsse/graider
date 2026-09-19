@@ -22,6 +22,14 @@ vi.mock("./MonacoSourceViewer", () => ({
       >
         Select {studentId} line
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          onCanonicalSelectionChange?.({ file: "src/Main.java", startLine: 2, endLine: 5 })
+        }
+      >
+        Select {studentId} range
+      </button>
     </div>
   )
 }));
@@ -42,7 +50,8 @@ const appliedComment = {
   title: "Feedback",
   text: "Original feedback",
   deduction: 5,
-  rubricCategoryId: "quality"
+  rubricCategoryId: "quality",
+  sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
 };
 
 const manualAdjustment = {
@@ -77,19 +86,32 @@ const snapshot = (studentId: string, gradingStatus: GradingStatus) => ({
   }
 });
 
+const defaultStudents = [
+  { studentId: "ada", section: "001", gradingStatus: "in_progress" as const }
+];
+
 const setApis = ({
-  gradingStatus = "in_progress" as GradingStatus,
-  loadSnapshot = vi.fn().mockResolvedValue(snapshot("ada", gradingStatus)),
-  markComplete = vi
-    .fn()
-    .mockResolvedValue({ status: "success", studentId: "ada", gradingStatus: "complete" }),
-  repairGradingStudentWorkflow = vi.fn().mockResolvedValue({
-    status: "ready",
-    studentId: "ada",
-    repositoryFullName: "trusted-org/lab1-ada"
-  })
+  students = defaultStudents,
+  loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+    Promise.resolve(
+      snapshot(
+        studentId,
+        students.find((entry) => entry.studentId === studentId)?.gradingStatus ?? "in_progress"
+      )
+    )
+  ),
+  markComplete = vi.fn(({ studentId }: { studentId: string }) =>
+    Promise.resolve({ status: "success", studentId, gradingStatus: "complete" })
+  ),
+  repairGradingStudentWorkflow = vi.fn(({ studentId }: { studentId: string }) =>
+    Promise.resolve({
+      status: "ready",
+      studentId,
+      repositoryFullName: `trusted-org/lab1-${studentId}`
+    })
+  )
 }: {
-  gradingStatus?: GradingStatus;
+  students?: readonly { studentId: string; section: string; gradingStatus: GradingStatus }[];
   loadSnapshot?: ReturnType<typeof vi.fn>;
   markComplete?: ReturnType<typeof vi.fn>;
   repairGradingStudentWorkflow?: ReturnType<typeof vi.fn>;
@@ -100,32 +122,37 @@ const setApis = ({
       assignment: { title: "Lab 1", termCode: "27s1", slug: "lab1" },
       requiredFiles: ["src/Main.java"],
       rubric,
-      students: [{ studentId: "ada", section: "001", gradingStatus }]
+      students
     }),
-    loadGradingStudentSource: vi.fn().mockResolvedValue({
-      status: "success",
-      studentId: "ada",
-      combinedText: "class ada {}",
-      syntheticCombinedLines: [],
-      sections: [
-        {
-          status: "found",
-          file: "src/Main.java",
-          sourceText: "class ada {}",
-          sourceLineCount: 1,
-          combinedStartLine: 1,
-          combinedEndLine: 1,
-          insertionLine: 1
-        }
-      ]
-    }),
-    loadGradingStudentViewState: vi.fn().mockResolvedValue({
-      status: "success",
-      studentId: "ada",
-      submissionCommitSha: "a".repeat(40),
-      gradingStatus,
-      viewState: null
-    }),
+    loadGradingStudentSource: vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve({
+        status: "success",
+        studentId,
+        combinedText: `class ${studentId} {}`,
+        syntheticCombinedLines: [],
+        sections: [
+          {
+            status: "found",
+            file: "src/Main.java",
+            sourceText: `class ${studentId} {}`,
+            sourceLineCount: 1,
+            combinedStartLine: 1,
+            combinedEndLine: 1,
+            insertionLine: 1
+          }
+        ]
+      })
+    ),
+    loadGradingStudentViewState: vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve({
+        status: "success",
+        studentId,
+        submissionCommitSha: "a".repeat(40),
+        gradingStatus:
+          students.find((entry) => entry.studentId === studentId)?.gradingStatus ?? "in_progress",
+        viewState: null
+      })
+    ),
     loadGradingStudentSnapshot: loadSnapshot,
     loadGradingCommentLibrary: vi.fn().mockResolvedValue({ status: "success", comments: [] }),
     addGradingStudentComment: vi.fn(),
@@ -356,5 +383,147 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard adjustment" }));
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Delete applied comment?");
     assertNoDuplicateAccessibleNames();
+  });
+});
+
+const twoStudents = [
+  { studentId: "ada", section: "001", gradingStatus: "in_progress" as const },
+  { studentId: "grace", section: "002", gradingStatus: "in_progress" as const }
+];
+
+describe("GradingWorkspacePage sibling panel invariant — switching students", () => {
+  it("pressing J while a comment draft is dirty prompts, and declining keeps the student and the draft", async () => {
+    setApis({ students: twoStudents });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "Still typing" }
+    });
+
+    fireEvent.keyDown(window, { key: "j" });
+    expect(
+      screen.getByRole("dialog", { name: "Discard the unsaved comment?" })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(
+      screen.queryByRole("dialog", { name: "Discard the unsaved comment?" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Source for ada");
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Still typing");
+    assertNoDuplicateAccessibleNames();
+  });
+
+  it("confirming the discard prompt while pressing J discards the draft and advances to the next student", async () => {
+    setApis({ students: twoStudents });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "Still typing" }
+    });
+
+    fireEvent.keyDown(window, { key: "j" });
+    fireEvent.click(screen.getByRole("button", { name: "Discard comment" }));
+
+    expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("Source for grace");
+    expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument();
+  });
+
+  it("pressing K while an adjustment draft is dirty prompts, and confirming discards and navigates back", async () => {
+    setApis({ students: twoStudents });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await screen.findByTestId("mock-monaco");
+
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("Source for grace");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add adjustment" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
+      target: { value: "3" }
+    });
+
+    fireEvent.keyDown(window, { key: "k" });
+    expect(
+      screen.getByRole("dialog", { name: "Discard the unsaved adjustment?" })
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Source for grace");
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard adjustment" }));
+    expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("Source for ada");
+  });
+
+  it("clicking a different student row while a draft is dirty prompts instead of switching silently", async () => {
+    setApis({ students: twoStudents });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "Still typing" }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    expect(
+      screen.getByRole("dialog", { name: "Discard the unsaved comment?" })
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Source for ada");
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard comment" }));
+    expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("Source for grace");
+    assertNoDuplicateAccessibleNames();
+  });
+
+  it("clicking the already-selected student row is a no-op and never prompts", async () => {
+    setApis({ students: twoStudents });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "Still typing" }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+    expect(
+      screen.queryByRole("dialog", { name: "Discard the unsaved comment?" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Still typing");
+  });
+
+  it("re-anchoring an edited comment to a different source range counts as an unsaved change", async () => {
+    setApis({ students: twoStudents });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
+    expect(screen.getByRole("radio", { name: "Source" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Select ada range" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use current selection" }));
+
+    fireEvent.keyDown(window, { key: "j" });
+    expect(
+      screen.getByRole("dialog", { name: "Discard the unsaved comment?" })
+    ).toBeInTheDocument();
+  });
+
+  it("changing the student filter does not touch the selected student or prompt for a dirty draft", async () => {
+    setApis({ students: twoStudents });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "Draft" }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^All\b/u }));
+    expect(
+      screen.queryByRole("dialog", { name: "Discard the unsaved comment?" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Draft");
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Source for ada");
   });
 });

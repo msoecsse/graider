@@ -1327,24 +1327,41 @@ export const GradingWorkspacePage = ({
 
   // Only one editor or confirmation panel may be open at a time (the sibling-panel
   // invariant): every panel-open path funnels through requestPanelOpen, which
-  // closes every other panel first. The comment and manual-adjustment editors are
-  // the only panels that can hold unsaved typed input, so opening anything else
-  // while one of them has unsaved changes is routed through a discard prompt
-  // instead of silently overwriting it.
+  // closes every other panel first. Switching the selected student is gated the
+  // same way through requestStudentSwitch, since the student-switch effect below
+  // clears every panel just as silently. The comment and manual-adjustment editors
+  // are the only panels that can hold unsaved typed input, so opening anything
+  // else, or switching students, while one of them has unsaved changes is routed
+  // through a discard prompt instead of silently overwriting or abandoning it.
+  // For the comment editor, "unsaved changes" includes re-anchoring an edited
+  // comment to different source lines (targetMode / sourceTarget), not just the
+  // typed title, text, deduction, and rubric category.
   const commentEditorContentKey = (editor: CommentEditorState): string =>
-    JSON.stringify([editor.title, editor.text, editor.deduction, editor.rubricCategoryId]);
+    JSON.stringify([
+      editor.title,
+      editor.text,
+      editor.deduction,
+      editor.rubricCategoryId,
+      editor.targetMode,
+      editor.operation === "edit" ? editor.sourceTarget : undefined
+    ]);
 
   const manualAdjustmentEditorContentKey = (editor: ManualAdjustmentEditorState): string =>
     JSON.stringify([editor.rubricCategoryId, editor.amount, editor.note]);
 
+  // A save already in flight for this exact editor is not "unsaved" — the user
+  // already committed to saving it, and runGradingMutation resolves it correctly
+  // regardless of which student ends up selected by the time it completes.
   const hasUnsavedCommentDraft = (): boolean =>
     commentEditor !== undefined &&
+    commentMutationStudentId !== commentEditor.studentId &&
     commentEditorBaseline.current !== undefined &&
     commentEditorContentKey(commentEditor) !==
       commentEditorContentKey(commentEditorBaseline.current);
 
   const hasUnsavedManualAdjustmentDraft = (): boolean =>
     manualAdjustmentEditor !== undefined &&
+    commentMutationStudentId !== manualAdjustmentEditor.studentId &&
     manualAdjustmentEditorBaseline.current !== undefined &&
     manualAdjustmentEditorContentKey(manualAdjustmentEditor) !==
       manualAdjustmentEditorContentKey(manualAdjustmentEditorBaseline.current);
@@ -1363,7 +1380,10 @@ export const GradingWorkspacePage = ({
     setCommentMutationError(undefined);
   };
 
-  const requestPanelOpen = (perform: () => void): void => {
+  // Shared by every action that must not silently clobber a dirty draft:
+  // opening a different panel and switching the selected student both call
+  // this, and only differ in what they do once they're clear to proceed.
+  const withDraftGuard = (perform: () => void): void => {
     if (hasUnsavedCommentDraft()) {
       setDiscardDraftConfirmation({ kind: "comment", perform });
       return;
@@ -1372,9 +1392,19 @@ export const GradingWorkspacePage = ({
       setDiscardDraftConfirmation({ kind: "adjustment", perform });
       return;
     }
-    closeAllGradingPanels();
     perform();
   };
+
+  const requestPanelOpen = (perform: () => void): void =>
+    withDraftGuard(() => {
+      closeAllGradingPanels();
+      perform();
+    });
+
+  // Switching students already clears every panel via the effect below once
+  // the selection changes, so this only needs to guard against a dirty draft —
+  // it does not need to close panels itself the way requestPanelOpen does.
+  const requestStudentSwitch = (perform: () => void): void => withDraftGuard(perform);
 
   const confirmDiscardDraft = (): void => {
     const pending = discardDraftConfirmation;
@@ -2315,13 +2345,18 @@ export const GradingWorkspacePage = ({
       : undefined;
   const goToPreviousStudent = (): void => {
     if (selected <= 0) return;
-    void flushPendingViewState(currentStudentId);
-    setSelected((value) => value - 1);
+    requestStudentSwitch(() => {
+      void flushPendingViewState(currentStudentId);
+      setSelected((value) => value - 1);
+    });
   };
   const goToNextUngradedStudent = (): void => {
     if (nextUngradedStudentIndex === undefined) return;
-    void flushPendingViewState(currentStudentId);
-    setSelected(nextUngradedStudentIndex);
+    const targetIndex = nextUngradedStudentIndex;
+    requestStudentSwitch(() => {
+      void flushPendingViewState(currentStudentId);
+      setSelected(targetIndex);
+    });
   };
   const focusStudentFilter = (): void => {
     const container = filterPillsContainerRef.current;
@@ -2789,8 +2824,11 @@ export const GradingWorkspacePage = ({
                     : "grading-workspace__student-row"
                 }
                 onClick={() => {
-                  void flushPendingViewState(student?.studentId);
-                  setSelected(index);
+                  if (index === selected) return;
+                  requestStudentSwitch(() => {
+                    void flushPendingViewState(student?.studentId);
+                    setSelected(index);
+                  });
                 }}
               >
                 {item.studentId} · Section {item.section} · {label(status)}
