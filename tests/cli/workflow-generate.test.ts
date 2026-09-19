@@ -155,7 +155,7 @@ describe("graider workflow generate command", () => {
     expect(workflow).toContain("    paths-ignore:");
     expect(workflow).toContain("      - .github/workflows/grade.yml");
     expect(workflow).not.toContain(".github/**");
-    expect(workflow).toContain("  repository_dispatch:");
+    expect(workflow).not.toContain("repository_dispatch");
     expect(workflow).toContain("  workflow_dispatch:");
     expect(workflow).toContain(".graider/write-grading-result.py");
     expect(workflow).toContain("python3 .graider/write-grading-result.py");

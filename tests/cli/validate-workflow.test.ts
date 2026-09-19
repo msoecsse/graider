@@ -95,7 +95,6 @@ const REPORT_PUBLISHING_BLOCK = `reports:
 const LIST_STYLE_DISPATCH_WORKFLOW = `name: Grade
 on:
   - push
-  - repository_dispatch
   - workflow_dispatch
 jobs:
   grade:
@@ -106,7 +105,6 @@ jobs:
 const OBJECT_STYLE_DISPATCH_WORKFLOW = `name: Grade
 on:
   push:
-  repository_dispatch:
   workflow_dispatch:
 jobs:
   grade:

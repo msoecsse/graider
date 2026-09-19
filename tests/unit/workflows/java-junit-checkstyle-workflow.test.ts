@@ -61,9 +61,9 @@ describe("java-junit-checkstyle workflow", () => {
     expect(workflow).toContain('"${TAG_ARGS[@]}" --scan-class-path');
     expect(workflow).toContain('xvfb-run -a -s "-screen 0 1280x1024x24"');
     expect(workflow).toContain('--reports-dir "$EVIDENCE_DIR/junit"');
-    expect(workflow).toContain("repository_dispatch:");
     expect(workflow).toContain("paths-ignore:");
     expect(workflow).toContain("- .github/workflows/grade.yml");
+    expect(workflow).not.toContain("repository_dispatch");
   });
 
   it("substitutes only the configured artifact and result file locations", () => {
