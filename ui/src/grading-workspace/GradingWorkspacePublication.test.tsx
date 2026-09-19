@@ -204,7 +204,7 @@ describe("GradingWorkspacePage report publication", () => {
     expect(dialog).toHaveTextContent("Commit history is unavailable and will be omitted.");
     expect(publish).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close report preview" }));
     expect(screen.queryByRole("dialog", { name: "Report Preview" })).not.toBeInTheDocument();
     expect(publish).not.toHaveBeenCalled();
   });

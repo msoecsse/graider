@@ -6,3 +6,4 @@ ui/dist-graider-cli/
 ui/release/
 ui/dist-release/
 node_modules/
+dist/

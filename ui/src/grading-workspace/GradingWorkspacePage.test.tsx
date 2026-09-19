@@ -812,7 +812,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Mark Complete" }));
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Mark ada grading complete?");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel marking complete" }));
     expect(markComplete).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Mark Complete" }));
@@ -1374,7 +1374,7 @@ describe("GradingWorkspacePage comment application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select ada range" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
     expect(screen.getByText("Source target: src/Main.java: 2-5")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
@@ -1557,7 +1557,7 @@ describe("GradingWorkspacePage comment application", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Select ada invalid" }));
     expect(screen.getByRole("button", { name: "Apply comment" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
     expect(addComment).not.toHaveBeenCalled();
     expect(screen.queryByRole("form", { name: "Apply Loop clarity" })).not.toBeInTheDocument();
   });
@@ -1860,7 +1860,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(4);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
     fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
@@ -2122,10 +2122,10 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Original feedback");
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Adjustment: -5");
     expect(screen.getByRole("alertdialog")).toHaveTextContent("src/Main.java, line 1");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel deleting comment" }));
     expect(deleteComment).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Delete comment: Original feedback" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting comment" }));
 
     await waitFor(() => expect(deleteComment).toHaveBeenCalledTimes(1));
     expect(deleteComment).toHaveBeenCalledWith({
@@ -2177,7 +2177,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     expect(screen.getByTestId("mock-annotations")).toHaveTextContent("Original feedback");
 
     fireEvent.click(screen.getByRole("button", { name: "Delete comment: Original feedback" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting comment" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "selected grading record could not be found"
     );
@@ -2231,7 +2231,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Move ada once" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete comment: Original feedback" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting comment" }));
     await waitFor(() => expect(saveView).toHaveBeenCalledTimes(1));
     expect(deleteComment).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Move ada latest" }));
@@ -2406,7 +2406,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
       target: { value: "1.5" }
     });
-    fireEvent.click(screen.getAllByRole("button", { name: "Add adjustment" })[1] as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Save new adjustment" }));
 
     await waitFor(() => expect(addAdjustment).toHaveBeenCalledTimes(1));
     expect(saveView.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER).toBeLessThan(
@@ -2495,10 +2495,10 @@ describe("GradingWorkspacePage manual adjustments", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete adjustment: correctness" }));
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Correctness");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel deleting adjustment" }));
     expect(deleteAdjustment).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Delete adjustment: correctness" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting adjustment" }));
     await waitFor(() => expect(deleteAdjustment).toHaveBeenCalledTimes(1));
     expect(deleteAdjustment).toHaveBeenCalledWith({
       ...REQUEST,
@@ -2553,7 +2553,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
     expect(await screen.findByText("Adjustment: -0.25")).toBeInTheDocument();
     expect(screen.getByTestId("mock-annotations")).toHaveTextContent("Keep this annotation");
     fireEvent.click(screen.getByRole("button", { name: "Add adjustment" }));
-    const save = screen.getAllByRole("button", { name: "Add adjustment" })[1] as HTMLElement;
+    const save = screen.getByRole("button", { name: "Save new adjustment" });
     expect(save).toBeDisabled();
     fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
       target: { value: "quality" }
@@ -2605,7 +2605,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("could not be updated safely");
 
     fireEvent.click(screen.getByRole("button", { name: "Delete adjustment: quality" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting adjustment" }));
     await waitFor(() => expect(deleteAdjustment).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Adjustment: -2")).toBeInTheDocument();
     expect(screen.getByText("98 / 100")).toBeInTheDocument();
@@ -2652,7 +2652,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
       target: { value: "1" }
     });
-    fireEvent.click(screen.getAllByRole("button", { name: "Add adjustment" })[1] as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Save new adjustment" }));
     await waitFor(() => expect(addAdjustment).toHaveBeenCalledTimes(1));
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));

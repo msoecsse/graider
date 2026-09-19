@@ -202,6 +202,40 @@ describe("GradingWorkspacePage publish review", () => {
     expect(screen.getByText("2 reports will be committed to 2 repositories.")).toBeInTheDocument();
   });
 
+  it("stops dispatching further snapshot fetches once the review is cancelled", async () => {
+    const pending = deferred<ReturnType<typeof snapshot>>();
+    const loadSnapshot = vi.fn().mockReturnValue(pending.promise);
+    configure({
+      statuses: {
+        s1: "complete",
+        s2: "complete",
+        s3: "complete",
+        s4: "complete",
+        s5: "complete",
+        s6: "complete",
+        s7: "complete"
+      },
+      loadSnapshot
+    });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await openPublishReview();
+
+    // The concurrency bound keeps some of the 7 ready students queued rather
+    // than dispatching all of them (plus the selected student's own snapshot
+    // load) at once.
+    await waitFor(() => expect(loadSnapshot.mock.calls.length).toBeGreaterThan(1));
+    const callsWhileOpen = loadSnapshot.mock.calls.length;
+    expect(callsWhileOpen).toBeLessThan(8);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await act(async () => {
+      pending.resolve(snapshot("s1", "complete"));
+    });
+
+    expect(loadSnapshot.mock.calls.length).toBe(callsWhileOpen);
+  });
+
   it("flushes the current student's pending view state before one bulk call", async () => {
     const save = deferred<ReturnType<typeof snapshot> & { viewState: GradingEditorViewState }>();
     const saveViewState = vi.fn().mockReturnValue(save.promise);
