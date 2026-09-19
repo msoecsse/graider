@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createGitHubClient, readGitHubToken } from "../../src/github/github-client-factory.js";
+import type { GitHubClient } from "../../src/github/github-client.js";
 
 const LIVE_TESTS_ENABLED = "true";
 const DESTRUCTIVE_LIVE_TESTS_ENABLED = "true";
@@ -30,7 +31,12 @@ const describeLive = liveTestsReady ? describe : describe.skip;
 const itDestructive = destructiveLiveTestsReady ? it : it.skip;
 
 describeLive("OctokitGitHubClient live sandbox tests", () => {
-  const client = createGitHubClient();
+  // Constructed in beforeAll, not here: vitest runs a suite's callback body
+  // at collection time even under describe.skip, so calling
+  // createGitHubClient() here would throw for every unconfigured run instead
+  // of skipping cleanly. beforeAll only runs when the suite actually
+  // executes, which a skipped suite never does.
+  let client: GitHubClient;
   const org = process.env.GRAIDER_LIVE_ORG ?? "";
   const templateRepo = process.env.GRAIDER_LIVE_TEMPLATE_REPO ?? "";
   const templateBranch = process.env.GRAIDER_LIVE_TEMPLATE_BRANCH ?? "";
@@ -38,6 +44,10 @@ describeLive("OctokitGitHubClient live sandbox tests", () => {
   const facultyTeam = process.env.GRAIDER_LIVE_FACULTY_TEAM ?? "";
   const graderTeam = process.env.GRAIDER_LIVE_GRADER_TEAM ?? "";
   const sandboxRepoPrefix = process.env.GRAIDER_LIVE_SANDBOX_REPO_PREFIX ?? "";
+
+  beforeAll(() => {
+    client = createGitHubClient();
+  });
 
   it("TC-LIVE-001 validates a real template repository", async () => {
     const repository = await client.getTemplateRepository(org, templateRepo);
