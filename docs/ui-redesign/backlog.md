@@ -6,7 +6,8 @@ decision. Each entry says what it is, why it matters, and how big it is.
 
 Work these between PR6a and PR6b. Item 1 is a hard prerequisite for PR6b.
 
-Status key: **Blocker** · **Should fix** · **Worth fixing** · **Optional**
+Status key: **Blocker** · **Should fix** · **Worth fixing** · **Optional** ·
+**Resolved**
 
 ---
 
@@ -133,7 +134,7 @@ Mostly resolved, two known remainders:
 
 ---
 
-## 9. Spec gaps found during implementation — **Optional**
+## 9. Spec gaps found during implementation — **Resolved**
 
 Errors in `docs/ui-redesign/README.md`, not in the code:
 
@@ -143,7 +144,10 @@ Errors in `docs/ui-redesign/README.md`, not in the code:
   shortcut focuses the filter pills instead.
 - Section 5.3's lifecycle strip assumes data that does not exist (item 1).
 
-Fix: correct the brief so later PRs are not built against fiction.
+Fixed in the doc-correction PR after PR6a: all three corrected, the
+five-state primary action table annotated as assuming data that doesn't
+exist, and the lifecycle strip's `Submissions`/`Grading`/`Published` steps
+marked blocked on item 1.
 
 ---
 
@@ -178,7 +182,6 @@ screen by screen.
 3. Item 3 — shared status-mapping module
 4. Item 4 — rename `commentMutationStudentId`
 5. Item 6 — decide the two-primary-actions question
-6. Item 9 — correct the brief
-7. Then PR6b
+6. Then PR6b
 
 Items 5, 7, 8, 10 can wait until after the redesign.

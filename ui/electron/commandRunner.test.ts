@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -156,7 +157,9 @@ describe("commandRunner", () => {
   });
 
   it("executes bundled helper mode with a cwd containing spaces", async () => {
-    const tempRoot = fs.mkdtempSync(path.join("/private/tmp", "graider bundled helper-"));
+    const tempRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "graider bundled helper-"))
+    );
     const appPath = path.join(tempRoot, "app.asar");
     const helperPath = getBundledGraiderCliPath(appPath);
     const courseFolderPath = path.join(tempRoot, "Box Sync", "course root");

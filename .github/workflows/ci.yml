@@ -24,8 +24,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install UI dependencies
+        run: npm ci --prefix ui
+
       - name: Typecheck
         run: npm run typecheck
+
+      - name: UI typecheck
+        run: npm --prefix ui run typecheck
 
       - name: Lint
         run: npm run lint
@@ -33,11 +39,20 @@ jobs:
       - name: Check formatting
         run: npm run format:check
 
+      - name: UI check formatting
+        run: npm --prefix ui run format:check
+
       - name: Test
         run: npm test
 
+      - name: UI test
+        run: npm --prefix ui test
+
       - name: Build
         run: npm run build
+
+      - name: UI build
+        run: npm --prefix ui run build
 
       - name: Audit dependencies
         run: npm run audit
