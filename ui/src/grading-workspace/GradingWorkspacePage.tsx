@@ -194,6 +194,11 @@ interface ReportPublicationConfirmation {
   readonly operation: "publish" | "republish";
 }
 
+interface DiscardDraftConfirmation {
+  readonly kind: "comment" | "adjustment";
+  readonly perform: () => void;
+}
+
 interface ReportPublicationNotice {
   readonly studentId: string;
   readonly tone: "success" | "warning" | "error";
@@ -571,6 +576,8 @@ export const GradingWorkspacePage = ({
     useState<ReportPublicationConfirmation>();
   const [reportPublicationStudentId, setReportPublicationStudentId] = useState<string>();
   const [reportPublicationNotice, setReportPublicationNotice] = useState<ReportPublicationNotice>();
+  const [discardDraftConfirmation, setDiscardDraftConfirmation] =
+    useState<DiscardDraftConfirmation>();
   const [reportPreview, setReportPreview] = useState<ReportPreviewState>({ status: "idle" });
   const [publishReviewOpen, setPublishReviewOpen] = useState(false);
   const [publishReviewSelectedIds, setPublishReviewSelectedIds] = useState<readonly string[]>([]);
@@ -594,6 +601,8 @@ export const GradingWorkspacePage = ({
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
   const filterPillsContainerRef = useRef<HTMLDivElement>(null);
   const evidencePanelPriorFocusRef = useRef<HTMLElement | null>(null);
+  const commentEditorBaseline = useRef<CommentEditorState | undefined>(undefined);
+  const manualAdjustmentEditorBaseline = useRef<ManualAdjustmentEditorState | undefined>(undefined);
   const sourceRequestGeneration = useRef(0);
   const snapshotRequestGeneration = useRef(0);
   const evidenceRequestGeneration = useRef(0);
@@ -1179,12 +1188,15 @@ export const GradingWorkspacePage = ({
   useEffect(() => {
     setCanonicalSourceTarget(undefined);
     setCommentEditor(undefined);
+    commentEditorBaseline.current = undefined;
     setDeleteConfirmation(undefined);
     setManualAdjustmentEditor(undefined);
+    manualAdjustmentEditorBaseline.current = undefined;
     setDeleteManualAdjustmentConfirmation(undefined);
     setMarkCompleteConfirmation(undefined);
     setReportPublicationConfirmation(undefined);
     setReportPublicationNotice(undefined);
+    setDiscardDraftConfirmation(undefined);
     reportPublicationRequestGeneration.current += 1;
     reportPreviewRequestGeneration.current += 1;
     setReportPreview({ status: "idle" });
@@ -1313,6 +1325,69 @@ export const GradingWorkspacePage = ({
     });
   }, [snapshot]);
 
+  // Only one editor or confirmation panel may be open at a time (the sibling-panel
+  // invariant): every panel-open path funnels through requestPanelOpen, which
+  // closes every other panel first. The comment and manual-adjustment editors are
+  // the only panels that can hold unsaved typed input, so opening anything else
+  // while one of them has unsaved changes is routed through a discard prompt
+  // instead of silently overwriting it.
+  const commentEditorContentKey = (editor: CommentEditorState): string =>
+    JSON.stringify([editor.title, editor.text, editor.deduction, editor.rubricCategoryId]);
+
+  const manualAdjustmentEditorContentKey = (editor: ManualAdjustmentEditorState): string =>
+    JSON.stringify([editor.rubricCategoryId, editor.amount, editor.note]);
+
+  const hasUnsavedCommentDraft = (): boolean =>
+    commentEditor !== undefined &&
+    commentEditorBaseline.current !== undefined &&
+    commentEditorContentKey(commentEditor) !==
+      commentEditorContentKey(commentEditorBaseline.current);
+
+  const hasUnsavedManualAdjustmentDraft = (): boolean =>
+    manualAdjustmentEditor !== undefined &&
+    manualAdjustmentEditorBaseline.current !== undefined &&
+    manualAdjustmentEditorContentKey(manualAdjustmentEditor) !==
+      manualAdjustmentEditorContentKey(manualAdjustmentEditorBaseline.current);
+
+  const closeAllGradingPanels = (): void => {
+    setCommentEditor(undefined);
+    commentEditorBaseline.current = undefined;
+    setDeleteConfirmation(undefined);
+    setManualAdjustmentEditor(undefined);
+    manualAdjustmentEditorBaseline.current = undefined;
+    setDeleteManualAdjustmentConfirmation(undefined);
+    setMarkCompleteConfirmation(undefined);
+    setReportPublicationConfirmation(undefined);
+    setWorkflowRepairConfirmation(undefined);
+    setBulkWorkflowRepairConfirmation(false);
+    setCommentMutationError(undefined);
+  };
+
+  const requestPanelOpen = (perform: () => void): void => {
+    if (hasUnsavedCommentDraft()) {
+      setDiscardDraftConfirmation({ kind: "comment", perform });
+      return;
+    }
+    if (hasUnsavedManualAdjustmentDraft()) {
+      setDiscardDraftConfirmation({ kind: "adjustment", perform });
+      return;
+    }
+    closeAllGradingPanels();
+    perform();
+  };
+
+  const confirmDiscardDraft = (): void => {
+    const pending = discardDraftConfirmation;
+    if (pending === undefined) return;
+    closeAllGradingPanels();
+    pending.perform();
+    setDiscardDraftConfirmation(undefined);
+  };
+
+  const cancelDiscardDraft = (): void => {
+    setDiscardDraftConfirmation(undefined);
+  };
+
   const openApplyEditor = (comment: ReusableComment): void => {
     if (!isReady(result) || selectedStudent === undefined) return;
     const defaultCategory =
@@ -1320,9 +1395,7 @@ export const GradingWorkspacePage = ({
       result.rubric.some((category) => category.id === comment.defaultRubricCategoryId)
         ? comment.defaultRubricCategoryId
         : "";
-    setCommentMutationError(undefined);
-    setDeleteConfirmation(undefined);
-    setCommentEditor({
+    const nextEditor: CommentEditorState = {
       operation: "add",
       studentId: selectedStudent.studentId,
       reusableCommentId: comment.id,
@@ -1332,6 +1405,10 @@ export const GradingWorkspacePage = ({
       deduction: String(Math.abs(comment.defaultDeduction)),
       rubricCategoryId: defaultCategory,
       targetMode: canonicalSourceTarget === undefined ? "general" : "source"
+    };
+    requestPanelOpen(() => {
+      setCommentEditor(nextEditor);
+      commentEditorBaseline.current = nextEditor;
     });
   };
 
@@ -1343,9 +1420,7 @@ export const GradingWorkspacePage = ({
       selectedStudent.studentId !== currentStudentIdRef.current
     )
       return;
-    setCommentMutationError(undefined);
-    setDeleteConfirmation(undefined);
-    setCommentEditor({
+    const nextEditor: CommentEditorState = {
       operation: "add",
       studentId: selectedStudent.studentId,
       title: "",
@@ -1353,14 +1428,16 @@ export const GradingWorkspacePage = ({
       deduction: "0",
       rubricCategoryId: "",
       targetMode: "source"
+    };
+    requestPanelOpen(() => {
+      setCommentEditor(nextEditor);
+      commentEditorBaseline.current = nextEditor;
     });
   };
 
   const openEditEditor = (comment: Snapshot["appliedComments"][number]): void => {
     if (!isReady(result) || selectedStudent === undefined) return;
-    setCommentMutationError(undefined);
-    setDeleteConfirmation(undefined);
-    setCommentEditor({
+    const nextEditor: CommentEditorState = {
       operation: "edit",
       studentId: selectedStudent.studentId,
       commentId: comment.id,
@@ -1371,19 +1448,25 @@ export const GradingWorkspacePage = ({
       rubricCategoryId: comment.rubricCategoryId ?? "",
       targetMode: comment.sourceLocation === undefined ? "general" : "source",
       ...(comment.sourceLocation === undefined ? {} : { sourceTarget: comment.sourceLocation })
+    };
+    requestPanelOpen(() => {
+      setCommentEditor(nextEditor);
+      commentEditorBaseline.current = nextEditor;
     });
   };
 
   const openAddManualAdjustmentEditor = (): void => {
     if (!isReady(result) || selectedStudent === undefined || result.rubric.length === 0) return;
-    setCommentMutationError(undefined);
-    setDeleteManualAdjustmentConfirmation(undefined);
-    setManualAdjustmentEditor({
+    const nextEditor: ManualAdjustmentEditorState = {
       operation: "add",
       studentId: selectedStudent.studentId,
       rubricCategoryId: "",
       amount: "",
       note: ""
+    };
+    requestPanelOpen(() => {
+      setManualAdjustmentEditor(nextEditor);
+      manualAdjustmentEditorBaseline.current = nextEditor;
     });
   };
 
@@ -1391,16 +1474,71 @@ export const GradingWorkspacePage = ({
     adjustment: Snapshot["manualAdjustments"][number]
   ): void => {
     if (!isReady(result) || selectedStudent === undefined) return;
-    setCommentMutationError(undefined);
-    setDeleteManualAdjustmentConfirmation(undefined);
-    setManualAdjustmentEditor({
+    const nextEditor: ManualAdjustmentEditorState = {
       operation: "edit",
       studentId: selectedStudent.studentId,
       adjustmentId: adjustment.id,
       rubricCategoryId: adjustment.rubricCategoryId,
       amount: String(adjustment.amount),
       note: adjustment.note ?? ""
+    };
+    requestPanelOpen(() => {
+      setManualAdjustmentEditor(nextEditor);
+      manualAdjustmentEditorBaseline.current = nextEditor;
     });
+  };
+
+  const openDeleteCommentConfirmation = (comment: Snapshot["appliedComments"][number]): void => {
+    if (!isReady(result) || selectedStudent === undefined) return;
+    const confirmation: DeleteCommentConfirmation = {
+      studentId: selectedStudent.studentId,
+      commentId: comment.id,
+      text: comment.text,
+      deduction: comment.deduction,
+      ...(comment.sourceLocation === undefined ? {} : { sourceLocation: comment.sourceLocation })
+    };
+    requestPanelOpen(() => setDeleteConfirmation(confirmation));
+  };
+
+  const openDeleteManualAdjustmentConfirmation = (
+    adjustment: Snapshot["manualAdjustments"][number]
+  ): void => {
+    if (!isReady(result) || selectedStudent === undefined) return;
+    const confirmation: DeleteManualAdjustmentConfirmation = {
+      studentId: selectedStudent.studentId,
+      adjustmentId: adjustment.id,
+      rubricCategoryId: adjustment.rubricCategoryId,
+      amount: adjustment.amount,
+      ...(adjustment.note === undefined ? {} : { note: adjustment.note })
+    };
+    requestPanelOpen(() => setDeleteManualAdjustmentConfirmation(confirmation));
+  };
+
+  const openMarkCompleteConfirmation = (studentId: string): void => {
+    requestPanelOpen(() => setMarkCompleteConfirmation({ studentId }));
+  };
+
+  const openReportPublicationConfirmation = (
+    studentId: string,
+    operation: "publish" | "republish"
+  ): void => {
+    requestPanelOpen(() => {
+      setReportPublicationNotice(undefined);
+      setReportPublicationConfirmation({ studentId, operation });
+    });
+  };
+
+  const openWorkflowRepairConfirmation = (): void => {
+    if (workflowRepair.status !== "ready") return;
+    const confirmation: WorkflowRepairConfirmation = {
+      studentId: workflowRepair.studentId,
+      repositoryFullName: workflowRepair.repositoryFullName
+    };
+    requestPanelOpen(() => setWorkflowRepairConfirmation(confirmation));
+  };
+
+  const openBulkWorkflowRepairConfirmation = (): void => {
+    requestPanelOpen(() => setBulkWorkflowRepairConfirmation(true));
   };
 
   const runGradingMutation = async (
@@ -1973,12 +2111,13 @@ export const GradingWorkspacePage = ({
   };
 
   const openPublishReview = (): void => {
-    void flushPendingViewState(currentStudentId);
-    setCommentMutationError(undefined);
-    setPublishReviewResults(undefined);
-    setPublishReviewRefreshFailedStudentIds([]);
-    setPublishReviewSelectedIds(publishReviewReadyEntries.map((entry) => entry.studentId));
-    setPublishReviewOpen(true);
+    requestPanelOpen(() => {
+      void flushPendingViewState(currentStudentId);
+      setPublishReviewResults(undefined);
+      setPublishReviewRefreshFailedStudentIds([]);
+      setPublishReviewSelectedIds(publishReviewReadyEntries.map((entry) => entry.studentId));
+      setPublishReviewOpen(true);
+    });
   };
 
   const cancelPublishReview = (): void => {
@@ -2224,8 +2363,7 @@ export const GradingWorkspacePage = ({
       commentMutationStudentId === undefined &&
       !commentMutationBlockedStudents.current.has(currentStudentId)
     ) {
-      setCommentMutationError(undefined);
-      setMarkCompleteConfirmation({ studentId: currentStudentId });
+      openMarkCompleteConfirmation(currentStudentId);
     }
   };
   const applyReusableCommentByPosition = (position: number): void => {
@@ -2578,6 +2716,23 @@ export const GradingWorkspacePage = ({
     </div>
   );
 
+  const discardDraftPrompt =
+    discardDraftConfirmation === undefined ? null : (
+      <ConfirmationWithPreviewModal
+        isOpen
+        title={`Discard the unsaved ${discardDraftConfirmation.kind}?`}
+        summary={
+          <p>
+            You have unsaved changes in the {discardDraftConfirmation.kind} you were editing.
+            Continuing will discard them. This cannot be undone.
+          </p>
+        }
+        confirmLabel={`Discard ${discardDraftConfirmation.kind}`}
+        onConfirm={() => confirmDiscardDraft()}
+        onCancel={cancelDiscardDraft}
+      />
+    );
+
   if (publishReviewOpen)
     return (
       <main className="dashboard-shell grading-workspace">
@@ -2595,6 +2750,7 @@ export const GradingWorkspacePage = ({
         />
         {footer}
         {cheatSheet}
+        {discardDraftPrompt}
       </main>
     );
 
@@ -2759,10 +2915,7 @@ export const GradingWorkspacePage = ({
                       commentMutationStudentId !== undefined ||
                       commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
                     }
-                    onClick={() => {
-                      setCommentMutationError(undefined);
-                      setMarkCompleteConfirmation({ studentId: snapshot.snapshot.studentId });
-                    }}
+                    onClick={() => openMarkCompleteConfirmation(snapshot.snapshot.studentId)}
                   >
                     Mark Complete
                   </button>
@@ -2793,15 +2946,12 @@ export const GradingWorkspacePage = ({
                       commentMutationStudentId !== undefined ||
                       commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
                     }
-                    onClick={() => {
-                      setCommentMutationError(undefined);
-                      setReportPublicationNotice(undefined);
-                      setMarkCompleteConfirmation(undefined);
-                      setReportPublicationConfirmation({
-                        studentId: snapshot.snapshot.studentId,
-                        operation: currentEffectiveStatus === "published" ? "republish" : "publish"
-                      });
-                    }}
+                    onClick={() =>
+                      openReportPublicationConfirmation(
+                        snapshot.snapshot.studentId,
+                        currentEffectiveStatus === "published" ? "republish" : "publish"
+                      )
+                    }
                   >
                     {reportPublicationStudentId === snapshot.snapshot.studentId
                       ? "Publishing…"
@@ -3012,19 +3162,7 @@ export const GradingWorkspacePage = ({
                                 snapshot.snapshot.studentId
                               )
                             }
-                            onClick={() => {
-                              setCommentMutationError(undefined);
-                              setCommentEditor(undefined);
-                              setDeleteConfirmation({
-                                studentId: snapshot.snapshot.studentId,
-                                commentId: comment.id,
-                                text: comment.text,
-                                deduction: comment.deduction,
-                                ...(comment.sourceLocation === undefined
-                                  ? {}
-                                  : { sourceLocation: comment.sourceLocation })
-                              });
-                            }}
+                            onClick={() => openDeleteCommentConfirmation(comment)}
                           >
                             Delete
                           </button>
@@ -3130,17 +3268,7 @@ export const GradingWorkspacePage = ({
                                 snapshot.snapshot.studentId
                               )
                             }
-                            onClick={() => {
-                              setCommentMutationError(undefined);
-                              setManualAdjustmentEditor(undefined);
-                              setDeleteManualAdjustmentConfirmation({
-                                studentId: snapshot.snapshot.studentId,
-                                adjustmentId: adjustment.id,
-                                rubricCategoryId: adjustment.rubricCategoryId,
-                                amount: adjustment.amount,
-                                ...(adjustment.note === undefined ? {} : { note: adjustment.note })
-                              });
-                            }}
+                            onClick={() => openDeleteManualAdjustmentConfirmation(adjustment)}
                           >
                             Delete
                           </button>
@@ -3332,13 +3460,7 @@ export const GradingWorkspacePage = ({
               className="secondary-action"
               type="button"
               disabled={workflowRepair.status !== "ready"}
-              onClick={() => {
-                if (workflowRepair.status === "ready")
-                  setWorkflowRepairConfirmation({
-                    studentId: workflowRepair.studentId,
-                    repositoryFullName: workflowRepair.repositoryFullName
-                  });
-              }}
+              onClick={openWorkflowRepairConfirmation}
             >
               {workflowRepair.status === "running"
                 ? "Replacing workflow…"
@@ -3365,7 +3487,7 @@ export const GradingWorkspacePage = ({
                 bulkWorkflowRepairState === "running" ||
                 window.graiderUI.repairGradingAssignmentWorkflows === undefined
               }
-              onClick={() => setBulkWorkflowRepairConfirmation(true)}
+              onClick={openBulkWorkflowRepairConfirmation}
             >
               {bulkWorkflowRepairState === "running"
                 ? "Replacing workflows…"
@@ -3706,6 +3828,7 @@ export const GradingWorkspacePage = ({
       </div>
       {footer}
       {cheatSheet}
+      {discardDraftPrompt}
     </main>
   );
 };

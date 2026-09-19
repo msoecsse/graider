@@ -2176,7 +2176,10 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     expect(screen.getByText("95 / 100")).toBeInTheDocument();
     expect(screen.getByTestId("mock-annotations")).toHaveTextContent("Original feedback");
 
+    // The failed edit left the comment editor open with unsaved changes, so
+    // opening the delete confirmation must ask before discarding that draft.
     fireEvent.click(screen.getByRole("button", { name: "Delete comment: Original feedback" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard comment" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm deleting comment" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "selected grading record could not be found"
@@ -2604,7 +2607,10 @@ describe("GradingWorkspacePage manual adjustments", () => {
     expect(screen.getByText("Late")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("could not be updated safely");
 
+    // The failed edit left the adjustment editor open with unsaved changes, so
+    // opening the delete confirmation must ask before discarding that draft.
     fireEvent.click(screen.getByRole("button", { name: "Delete adjustment: quality" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard adjustment" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm deleting adjustment" }));
     await waitFor(() => expect(deleteAdjustment).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Adjustment: -2")).toBeInTheDocument();
