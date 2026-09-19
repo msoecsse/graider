@@ -126,17 +126,41 @@ be decided before PR6a's header pattern is copied to other screens.
 
 ---
 
-## 7. Intermittent test failures — **Worth fixing**
+## 7. Intermittent test failures — **Resolved**
 
-Two unrelated flakes seen so far, neither reproducible on immediate rerun:
+Three flakes seen so far, all in different files, all passing in isolation
+and on immediate rerun:
 
 - An "Add faculty" test in `RosterManagerPage` failed once in four runs during
   the sibling-panel PR. Nobody has touched roster code during the redesign.
 - `GradingWorkspaceKeyboardShortcuts.test.tsx` failed once during PR6a and
   passed on rerun. PR6a did not touch the grading workspace.
+- `GradingWorkspaceSiblingPanels.test.tsx` failed once with "Unable to find
+  role=button and name 'Select ada line'" — the first `findByRole` in the
+  first test of the file.
 
-Two flakes in different files now. Watch for recurrence. Chase before the
-roster work (PR12) if it happens again, not now.
+Diagnosis: all three await a `findByRole`/`findByText` shortly after
+`render(<GradingWorkspacePage .../>)`, which must resolve
+`prepareGradingWorkspace` and a student snapshot before the awaited element
+exists. Testing Library's `findBy*`/`waitFor` default timeout is 1000ms;
+`ui/vitest.config.ts` set no `asyncUtilTimeout`. Measured the clearest case
+(`GradingWorkspaceSiblingPanels`'s first test) at 500ms in isolation but
+620–760ms across 8 full-suite runs on an 8-core machine — a real, consistent
+contention tax from 90 parallel test files (several backend git-based test
+files alone routinely take 900–1800ms), landing close enough to 1000ms that
+worse contention (a slower CI runner, a GC pause) plausibly tips it over.
+Confirmed this is genuinely a timing issue, not a component race: every
+awaited element reliably appears given enough time, in 8 pre-fix and 11
+post-fix full-suite runs with zero reproductions in this session.
+
+Fixed: `configure({ asyncUtilTimeout: 5000 })` in `src/test/setup.ts`
+(≈6x the worst full-suite render observed), and `testTimeout: 10000` in
+`vitest.config.ts` so a genuine hang still fails with Testing Library's
+specific "unable to find" message rather than a generic timeout. Ran the
+full UI suite 10 times after the change: 10/10 clean at 718/718. Could not
+directly reproduce a failure before or after the change in 18 total runs
+this session, so this confirms increased headroom, not a captured
+before/after flip.
 
 ---
 
@@ -201,6 +225,6 @@ screen by screen.
 3. Item 6 — decide the two-primary-actions question
 4. Then PR6b
 
-Items 2, 4, and 9 are resolved and no longer part of this sequence.
+Items 2, 4, 7, and 9 are resolved and no longer part of this sequence.
 
-Items 5, 7, 8, 10 can wait until after the redesign.
+Items 5, 8, 10 can wait until after the redesign.

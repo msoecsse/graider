@@ -1,6 +1,19 @@
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, vi } from "vitest";
+
+// Testing Library's findBy*/waitFor default (1000ms) is tuned for an
+// isolated test. Under a full-suite parallel run, GradingWorkspacePage's
+// cold first render (it must resolve prepareGradingWorkspace and a student
+// snapshot before the elements these tests wait for exist) measured
+// 500ms in isolation but 620-760ms across repeated full-suite runs on an
+// 8-core machine, competing with other test files for CPU. 5000ms gives
+// roughly 6x headroom over the worst full-suite render observed, while
+// staying comfortably under testTimeout so a genuinely hung component
+// still fails fast with Testing Library's specific "unable to find"
+// message instead of a generic test-timeout error.
+const ASYNC_UTIL_TIMEOUT_MS = 5000;
+configure({ asyncUtilTimeout: ASYNC_UTIL_TIMEOUT_MS });
 
 afterEach(() => {
   cleanup();
