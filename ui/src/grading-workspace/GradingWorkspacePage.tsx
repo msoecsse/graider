@@ -38,6 +38,13 @@ import {
   type EvidenceLoadState,
   type GradingEvidenceFocusRequest
 } from "./GradingEvidencePanel";
+import {
+  GradingPublishReviewPanel,
+  type PublishReviewDetailState,
+  type PublishReviewOutcome,
+  type PublishReviewPublishedRow,
+  type PublishReviewReadyRow
+} from "./GradingPublishReviewPanel";
 import type { GradingSourceAnnotation } from "./MonacoSourceViewer";
 import { filterReusableComments, listReusableCommentTags } from "./commentLibrarySearch";
 import {
@@ -207,15 +214,6 @@ type ReportPreviewState =
       readonly warnings: SuccessfulReportPreview["warnings"];
     }
   | { readonly status: "failure"; readonly studentId: string; readonly message: string };
-
-interface BulkPublicationConfirmation {
-  readonly studentIds: readonly string[];
-}
-
-interface BulkPublicationNotice {
-  readonly results: BulkPublishGradingStudentReportsResult["results"];
-  readonly refreshFailedStudentIds: readonly string[];
-}
 
 interface PendingViewStateSave {
   readonly studentId: string;
@@ -463,8 +461,10 @@ const publicationFailureMessage = (result: PublishGradingStudentReportResult): s
 };
 
 const bulkPublicationResultLabel = (result: PublishGradingStudentReportResult): string => {
-  if (result.status === "success")
-    return result.warnings.length === 0 ? "Published" : "Published with warnings";
+  if (result.status === "success") {
+    const base = result.remoteWrite === "unchanged" ? "Already up to date" : "Published";
+    return result.warnings.length === 0 ? base : `${base} with warnings`;
+  }
   if (result.status === "publication_state_record_failed")
     return "Report published; Published status not recorded";
   if (result.status === "publication_stale") return "Publication stale";
@@ -472,6 +472,44 @@ const bulkPublicationResultLabel = (result: PublishGradingStudentReportResult): 
   if (result.status === "grading_not_complete" || result.status === "grading_state_missing")
     return "Not eligible";
   return `Failed: ${publicationFailureMessage(result)}`;
+};
+
+const publishReviewOutcomeTone = (
+  result: PublishGradingStudentReportResult
+): "success" | "warning" | "error" => {
+  if (result.status === "success") return result.warnings.length === 0 ? "success" : "warning";
+  if (
+    result.status === "publication_state_record_failed" ||
+    result.status === "publication_stale" ||
+    result.status === "submission_changed"
+  )
+    return "warning";
+  return "error";
+};
+
+const publishReviewOutcomeFromResult = (
+  result: PublishGradingStudentReportResult
+): PublishReviewOutcome => ({
+  tone: publishReviewOutcomeTone(result),
+  message: bulkPublicationResultLabel(result),
+  warnings: result.status === "success" ? result.warnings.map(publicationWarningMessage) : []
+});
+
+const scoreSummaryLabel = (grade: Snapshot["grade"]): string =>
+  grade.categories.length === 0
+    ? "No rubric — enter a score manually"
+    : `${grade.totalScore} / ${grade.pointsPossible}`;
+
+const reportContentSummaryLabel = (studentSnapshot: Snapshot): string => {
+  const commentCount = studentSnapshot.appliedComments.length;
+  const adjustmentCount = studentSnapshot.manualAdjustments.length;
+  if (commentCount === 0 && adjustmentCount === 0) return "No comments or adjustments yet";
+  const parts: string[] = [];
+  if (commentCount > 0)
+    parts.push(`${commentCount} ${commentCount === 1 ? "comment" : "comments"}`);
+  if (adjustmentCount > 0)
+    parts.push(`${adjustmentCount} manual ${adjustmentCount === 1 ? "adjustment" : "adjustments"}`);
+  return parts.join(" · ");
 };
 
 const signedAmount = (amount: number): string => (amount > 0 ? `+${amount}` : String(amount));
@@ -532,10 +570,17 @@ export const GradingWorkspacePage = ({
   const [reportPublicationStudentId, setReportPublicationStudentId] = useState<string>();
   const [reportPublicationNotice, setReportPublicationNotice] = useState<ReportPublicationNotice>();
   const [reportPreview, setReportPreview] = useState<ReportPreviewState>({ status: "idle" });
-  const [bulkPublicationConfirmation, setBulkPublicationConfirmation] =
-    useState<BulkPublicationConfirmation>();
-  const [bulkPublicationInProgress, setBulkPublicationInProgress] = useState(false);
-  const [bulkPublicationNotice, setBulkPublicationNotice] = useState<BulkPublicationNotice>();
+  const [publishReviewOpen, setPublishReviewOpen] = useState(false);
+  const [publishReviewSelectedIds, setPublishReviewSelectedIds] = useState<readonly string[]>([]);
+  const [publishReviewDetails, setPublishReviewDetails] = useState<
+    Readonly<Record<string, PublishReviewDetailState>>
+  >({});
+  const [publishReviewRunning, setPublishReviewRunning] = useState(false);
+  const [publishReviewResults, setPublishReviewResults] =
+    useState<BulkPublishGradingStudentReportsResult["results"]>();
+  const [publishReviewRefreshFailedStudentIds, setPublishReviewRefreshFailedStudentIds] = useState<
+    readonly string[]
+  >([]);
   const [commentMutationError, setCommentMutationError] = useState<string>();
   const [commentMutationStudentId, setCommentMutationStudentId] = useState<string>();
   const [studentStatusOverrides, setStudentStatusOverrides] = useState<
@@ -555,6 +600,7 @@ export const GradingWorkspacePage = ({
   const reportPublicationRequestGeneration = useRef(0);
   const reportPreviewRequestGeneration = useRef(0);
   const bulkPublicationRequestGeneration = useRef(0);
+  const publishReviewDetailGeneration = useRef(0);
   const currentStudentId = isReady(result) ? result.students[selected]?.studentId : undefined;
   const currentStudentIdRef = useRef<string | undefined>(currentStudentId);
   const pendingViewStateSaves = useRef(new Map<string, GradingEditorViewState>());
@@ -913,6 +959,20 @@ export const GradingWorkspacePage = ({
       studentsWithStatus
         .filter((entry) => entry.status === "complete")
         .map((entry) => entry.student.studentId),
+    [studentsWithStatus]
+  );
+  const publishReviewReadyEntries = useMemo(
+    () =>
+      studentsWithStatus
+        .filter((entry) => entry.status === "complete")
+        .map((entry) => ({ studentId: entry.student.studentId, section: entry.student.section })),
+    [studentsWithStatus]
+  );
+  const publishReviewPublishedEntries = useMemo(
+    () =>
+      studentsWithStatus
+        .filter((entry) => entry.status === "published")
+        .map((entry) => ({ studentId: entry.student.studentId, section: entry.student.section })),
     [studentsWithStatus]
   );
   const toGradeCount = studentsWithStatus.filter((entry) =>
@@ -1910,106 +1970,160 @@ export const GradingWorkspacePage = ({
     }
   };
 
-  const confirmBulkPublication = async (): Promise<void> => {
-    const confirmation = bulkPublicationConfirmation;
-    if (
-      confirmation !== undefined &&
-      confirmation.studentIds.length > 0 &&
-      !bulkPublicationInProgress
-    ) {
-      const publishReports = window.graiderUI.bulkPublishGradingStudentReports;
-      if (publishReports === undefined) {
-        setBulkPublicationNotice(undefined);
-        setCommentMutationError("Bulk report publication is unavailable.");
-        setBulkPublicationConfirmation(undefined);
-      } else {
-        const studentIds = [...confirmation.studentIds];
-        const generation = bulkPublicationRequestGeneration.current + 1;
-        bulkPublicationRequestGeneration.current = generation;
-        const isCurrentBulkPublication = (): boolean =>
-          mounted.current && bulkPublicationRequestGeneration.current === generation;
-        setBulkPublicationInProgress(true);
-        setBulkPublicationNotice(undefined);
-        setCommentMutationError(undefined);
-        setReportPublicationConfirmation(undefined);
-        studentIds.forEach((studentId) => gradingMutationStudents.current.add(studentId));
-        setCommentMutationStudentId(studentIds[0]);
-        const selectedStudentId = currentStudentIdRef.current;
+  const openPublishReview = (): void => {
+    void flushPendingViewState(currentStudentId);
+    setCommentMutationError(undefined);
+    setPublishReviewResults(undefined);
+    setPublishReviewRefreshFailedStudentIds([]);
+    setPublishReviewSelectedIds(publishReviewReadyEntries.map((entry) => entry.studentId));
+    setPublishReviewOpen(true);
+  };
 
-        try {
-          if (selectedStudentId !== undefined && studentIds.includes(selectedStudentId))
-            await flushPendingViewState(selectedStudentId, true);
-          if (isCurrentBulkPublication()) {
-            const publicationResult = await publishReports({
-              courseFolderId: request.courseFolderId,
-              courseFolderPath: request.courseFolderPath,
-              termCode: request.termCode,
-              assignmentSlug: request.assignmentSlug,
-              studentIds
-            });
-            if (isCurrentBulkPublication()) {
-              const refreshFailedStudentIds: string[] = [];
-              const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
-              for (const studentId of studentIds) {
-                let refreshed = false;
-                if (loadSnapshot !== undefined) {
-                  const refreshesSelectedStudent = currentStudentIdRef.current === studentId;
-                  const snapshotGeneration = refreshesSelectedStudent
-                    ? snapshotRequestGeneration.current + 1
-                    : undefined;
-                  if (snapshotGeneration !== undefined)
-                    snapshotRequestGeneration.current = snapshotGeneration;
-                  try {
-                    const value = await loadSnapshot({ ...request, studentId });
-                    if (
-                      isCurrentBulkPublication() &&
-                      value.status === "success" &&
-                      value.studentId === studentId
-                    ) {
-                      setStudentStatusOverrides((current) => ({
-                        ...current,
-                        [studentId]: value.gradingStatus
-                      }));
-                      if (
-                        snapshotGeneration !== undefined &&
-                        snapshotRequestGeneration.current === snapshotGeneration &&
-                        currentStudentIdRef.current === studentId
-                      )
-                        setSnapshot({ status: "success", snapshot: value });
-                      refreshed = true;
+  const cancelPublishReview = (): void => {
+    if (publishReviewRunning) return;
+    setPublishReviewOpen(false);
+  };
+
+  const togglePublishReviewSelection = (studentId: string, isSelected: boolean): void => {
+    setPublishReviewSelectedIds((current) =>
+      isSelected
+        ? current.includes(studentId)
+          ? current
+          : [...current, studentId]
+        : current.filter((candidate) => candidate !== studentId)
+    );
+  };
+
+  const runPublishReview = async (): Promise<void> => {
+    const studentIds = [...publishReviewSelectedIds];
+    if (studentIds.length === 0 || publishReviewRunning) return;
+    const publishReports = window.graiderUI.bulkPublishGradingStudentReports;
+    if (publishReports === undefined) {
+      setCommentMutationError("Bulk report publication is unavailable.");
+      return;
+    }
+    const generation = bulkPublicationRequestGeneration.current + 1;
+    bulkPublicationRequestGeneration.current = generation;
+    const isCurrentPublishReview = (): boolean =>
+      mounted.current && bulkPublicationRequestGeneration.current === generation;
+    setPublishReviewRunning(true);
+    setPublishReviewResults(undefined);
+    setPublishReviewRefreshFailedStudentIds([]);
+    setCommentMutationError(undefined);
+    setReportPublicationConfirmation(undefined);
+    studentIds.forEach((studentId) => gradingMutationStudents.current.add(studentId));
+    setCommentMutationStudentId(studentIds[0]);
+    const selectedStudentId = currentStudentIdRef.current;
+
+    try {
+      if (selectedStudentId !== undefined && studentIds.includes(selectedStudentId))
+        await flushPendingViewState(selectedStudentId, true);
+      if (isCurrentPublishReview()) {
+        const publicationResult = await publishReports({
+          courseFolderId: request.courseFolderId,
+          courseFolderPath: request.courseFolderPath,
+          termCode: request.termCode,
+          assignmentSlug: request.assignmentSlug,
+          studentIds
+        });
+        if (isCurrentPublishReview()) {
+          const refreshFailedStudentIds: string[] = [];
+          const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
+          for (const studentId of studentIds) {
+            let refreshed = false;
+            if (loadSnapshot !== undefined) {
+              try {
+                const value = await loadSnapshot({ ...request, studentId });
+                if (
+                  isCurrentPublishReview() &&
+                  value.status === "success" &&
+                  value.studentId === studentId
+                ) {
+                  setStudentStatusOverrides((current) => ({
+                    ...current,
+                    [studentId]: value.gradingStatus
+                  }));
+                  setPublishReviewDetails((current) => ({
+                    ...current,
+                    [studentId]: {
+                      status: "success",
+                      scoreLabel: scoreSummaryLabel(value.grade),
+                      summaryLabel: reportContentSummaryLabel(value)
                     }
-                  } catch {
-                    refreshed = false;
-                  }
+                  }));
+                  if (currentStudentIdRef.current === studentId)
+                    setSnapshot({ status: "success", snapshot: value });
+                  refreshed = true;
                 }
-                if (!refreshed) refreshFailedStudentIds.push(studentId);
+              } catch {
+                refreshed = false;
               }
-              if (isCurrentBulkPublication())
-                setBulkPublicationNotice({
-                  results: publicationResult.results,
-                  refreshFailedStudentIds
-                });
             }
+            if (!refreshed) refreshFailedStudentIds.push(studentId);
           }
-        } catch {
-          if (isCurrentBulkPublication())
-            setCommentMutationError(
-              "Bulk report publication could not be completed safely. Individual results are unavailable."
-            );
-        } finally {
-          studentIds.forEach((studentId) => gradingMutationStudents.current.delete(studentId));
-          setCommentMutationStudentId((current) =>
-            current !== undefined && studentIds.includes(current) ? undefined : current
-          );
-          if (isCurrentBulkPublication()) {
-            setBulkPublicationInProgress(false);
-            setBulkPublicationConfirmation(undefined);
+          if (isCurrentPublishReview()) {
+            setPublishReviewResults(publicationResult.results);
+            setPublishReviewRefreshFailedStudentIds(refreshFailedStudentIds);
           }
-          if (selectedStudentId !== undefined) void flushPendingViewState(selectedStudentId);
         }
       }
+    } catch {
+      if (isCurrentPublishReview())
+        setCommentMutationError(
+          "Bulk report publication could not be completed safely. Individual results are unavailable."
+        );
+    } finally {
+      studentIds.forEach((studentId) => gradingMutationStudents.current.delete(studentId));
+      setCommentMutationStudentId((current) =>
+        current !== undefined && studentIds.includes(current) ? undefined : current
+      );
+      if (isCurrentPublishReview()) setPublishReviewRunning(false);
+      if (selectedStudentId !== undefined) void flushPendingViewState(selectedStudentId);
     }
   };
+
+  useEffect(() => {
+    if (!publishReviewOpen) return;
+    const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
+    if (loadSnapshot === undefined) return;
+    const missingIds = publishReviewReadyEntries
+      .map((entry) => entry.studentId)
+      .filter((studentId) => publishReviewDetails[studentId] === undefined);
+    if (missingIds.length === 0) return;
+    const generation = publishReviewDetailGeneration.current + 1;
+    publishReviewDetailGeneration.current = generation;
+    setPublishReviewDetails((current) => {
+      const next = { ...current };
+      missingIds.forEach((studentId) => {
+        next[studentId] = { status: "loading" };
+      });
+      return next;
+    });
+    missingIds.forEach((studentId) => {
+      void loadSnapshot({ ...request, studentId })
+        .then((value) => {
+          if (!mounted.current || publishReviewDetailGeneration.current !== generation) return;
+          setPublishReviewDetails((current) => ({
+            ...current,
+            [studentId]:
+              value.status === "success"
+                ? {
+                    status: "success",
+                    scoreLabel: scoreSummaryLabel(value.grade),
+                    summaryLabel: reportContentSummaryLabel(value)
+                  }
+                : { status: "unavailable" }
+          }));
+        })
+        .catch(() => {
+          if (!mounted.current || publishReviewDetailGeneration.current !== generation) return;
+          setPublishReviewDetails((current) => ({
+            ...current,
+            [studentId]: { status: "unavailable" }
+          }));
+        });
+    });
+  }, [publishReviewOpen, publishReviewReadyEntries, publishReviewDetails, request]);
 
   const currentEffectiveStatus =
     snapshot.status === "success"
@@ -2065,35 +2179,12 @@ export const GradingWorkspacePage = ({
     if (
       currentStudentId !== undefined &&
       (currentEffectiveStatus === "not_started" || currentEffectiveStatus === "in_progress") &&
-      !bulkPublicationInProgress &&
+      !publishReviewRunning &&
       commentMutationStudentId === undefined &&
       !commentMutationBlockedStudents.current.has(currentStudentId)
     ) {
       setCommentMutationError(undefined);
       setMarkCompleteConfirmation({ studentId: currentStudentId });
-    }
-  };
-  const publishOrConfirmReport = (): void => {
-    if (
-      reportPublicationConfirmation !== undefined &&
-      reportPublicationConfirmation.studentId === currentStudentId
-    ) {
-      void confirmPublishReport();
-      return;
-    }
-    if (
-      currentStudentId !== undefined &&
-      (currentEffectiveStatus === "complete" || currentEffectiveStatus === "published") &&
-      commentMutationStudentId === undefined &&
-      !commentMutationBlockedStudents.current.has(currentStudentId)
-    ) {
-      setCommentMutationError(undefined);
-      setReportPublicationNotice(undefined);
-      setMarkCompleteConfirmation(undefined);
-      setReportPublicationConfirmation({
-        studentId: currentStudentId,
-        operation: currentEffectiveStatus === "published" ? "republish" : "publish"
-      });
     }
   };
   const applyReusableCommentByPosition = (position: number): void => {
@@ -2110,6 +2201,10 @@ export const GradingWorkspacePage = ({
   const closeTopmostPanel = (): void => {
     if (cheatSheetOpen) {
       setCheatSheetOpen(false);
+      return;
+    }
+    if (publishReviewOpen) {
+      cancelPublishReview();
       return;
     }
     if (commentEditor !== undefined) {
@@ -2152,6 +2247,17 @@ export const GradingWorkspacePage = ({
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
       if (isTypingElement(event.target)) return;
       const key = event.key;
+      if (publishReviewOpen) {
+        if (key === "Escape") {
+          closeTopmostPanel();
+          return;
+        }
+        if (key === "?") {
+          event.preventDefault();
+          setCheatSheetOpen(true);
+        }
+        return;
+      }
       if (key === "j" || key === "J") {
         event.preventDefault();
         goToNextUngradedStudent();
@@ -2194,7 +2300,7 @@ export const GradingWorkspacePage = ({
       }
       if (key === "p" || key === "P") {
         event.preventDefault();
-        publishOrConfirmReport();
+        openPublishReview();
         return;
       }
       if (key === "Escape") {
@@ -2242,20 +2348,33 @@ export const GradingWorkspacePage = ({
     );
   }
   const student = result.students[selected];
-  const bulkPublishedCount =
-    bulkPublicationNotice?.results.filter(
-      ({ result: publicationResult }) =>
-        publicationResult.status === "success" && publicationResult.warnings.length === 0
-    ).length ?? 0;
-  const bulkWarningCount =
-    bulkPublicationNotice?.results.filter(
-      ({ result: publicationResult }) =>
-        publicationResult.status === "success" && publicationResult.warnings.length > 0
-    ).length ?? 0;
-  const bulkFailedCount =
-    bulkPublicationNotice === undefined
-      ? 0
-      : bulkPublicationNotice.results.length - bulkPublishedCount - bulkWarningCount;
+  const publishReviewOutcomeByStudentId: Readonly<Record<string, PublishReviewOutcome>> =
+    Object.fromEntries(
+      (publishReviewResults ?? []).map(({ studentId, result: publicationResult }) => [
+        studentId,
+        publishReviewOutcomeFromResult(publicationResult)
+      ])
+    );
+  const publishReviewReadyRows: readonly PublishReviewReadyRow[] = publishReviewReadyEntries.map(
+    (entry) => {
+      const outcome = publishReviewOutcomeByStudentId[entry.studentId];
+      return {
+        studentId: entry.studentId,
+        section: entry.section,
+        detail: publishReviewDetails[entry.studentId] ?? { status: "loading" },
+        ...(outcome === undefined ? {} : { outcome })
+      };
+    }
+  );
+  const publishReviewPublishedRows: readonly PublishReviewPublishedRow[] =
+    publishReviewPublishedEntries.map((entry) => {
+      const outcome = publishReviewOutcomeByStudentId[entry.studentId];
+      return {
+        studentId: entry.studentId,
+        section: entry.section,
+        ...(outcome === undefined ? {} : { outcome })
+      };
+    });
   const publishedProgressPercent =
     allStudentsCount === 0 ? 0 : (publishedCount / allStudentsCount) * 100;
   const gradedNotPublishedProgressPercent =
@@ -2291,6 +2410,17 @@ export const GradingWorkspacePage = ({
             </div>
           </div>
         )}
+        {publishReviewOpen ? null : (
+          <button
+            className="primary-action"
+            type="button"
+            disabled={allStudentsCount === 0}
+            onClick={openPublishReview}
+          >
+            Publish {completeStudentIds.length}{" "}
+            {completeStudentIds.length === 1 ? "report" : "reports"}
+          </button>
+        )}
         <button
           className="secondary-action"
           type="button"
@@ -2300,1204 +2430,1141 @@ export const GradingWorkspacePage = ({
           ?
         </button>
       </header>
-      <div className="grading-workspace__grid">
-        <aside>
-          <h2>Students</h2>
-          {result.students.length === 0 ? null : (
-            <div ref={filterPillsContainerRef}>
-              <FilterPills
-                pills={[
-                  { id: "to_grade", label: "To grade", count: toGradeCount },
-                  { id: "graded", label: "Graded", count: gradedOnlyCount },
-                  { id: "published", label: "Published", count: publishedCount },
-                  { id: "all", label: "All", count: allStudentsCount }
-                ]}
-                activeId={studentFilter}
-                onSelect={(id) => setStudentFilter(id as StudentFilterId)}
-                aria-label="Filter students by grading status"
-              />
-            </div>
-          )}
-          {result.students.length === 0 ? (
-            <p>No assigned students.</p>
-          ) : filteredStudents.length === 0 ? (
-            <p>{STUDENT_FILTER_EMPTY_MESSAGE[studentFilter]}</p>
-          ) : (
-            filteredStudents.map(({ student: item, index, status }) => (
-              <button
-                key={item.studentId}
-                className={
-                  index === selected
-                    ? "grading-workspace__student-row selected"
-                    : "grading-workspace__student-row"
-                }
-                onClick={() => {
-                  void flushPendingViewState(student?.studentId);
-                  setSelected(index);
-                }}
-              >
-                {item.studentId} · Section {item.section} · {label(status)}
-              </button>
-            ))
-          )}
-          <div className="grading-workspace__pagination">
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={selected <= 0}
-              onClick={goToPreviousStudent}
-            >
-              Previous
-            </button>
-            <button
-              className="primary-action"
-              type="button"
-              disabled={nextUngradedStudentIndex === undefined}
-              onClick={goToNextUngradedStudent}
-            >
-              Next ungraded
-            </button>
-          </div>
-          {nextUngradedStudentIndex === undefined ? (
-            <p className="grading-workspace__pagination-note">No other students need grading.</p>
-          ) : null}
-          <section className="grading-bulk-publication" aria-labelledby="bulk-publication-heading">
-            <h3 id="bulk-publication-heading">Report Publication</h3>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={
-                completeStudentIds.length === 0 ||
-                bulkPublicationInProgress ||
-                commentMutationStudentId !== undefined
-              }
-              onClick={() => {
-                setBulkPublicationNotice(undefined);
-                setCommentMutationError(undefined);
-                setReportPublicationConfirmation(undefined);
-                setBulkPublicationConfirmation({ studentIds: completeStudentIds });
-              }}
-            >
-              {bulkPublicationInProgress
-                ? `Publishing ${bulkPublicationConfirmation?.studentIds.length ?? 0} reports…`
-                : "Publish Completed Reports"}
-            </button>
-            {completeStudentIds.length === 0 && !bulkPublicationInProgress ? (
-              <p>No completed reports are ready to publish.</p>
-            ) : null}
-            {bulkPublicationNotice === undefined ? null : (
-              <div className="grading-bulk-publication__results" role="status">
-                <p>
-                  {bulkPublishedCount} published · {bulkWarningCount} published with warnings ·{" "}
-                  {bulkFailedCount} failed
-                </p>
-                {bulkPublicationNotice.refreshFailedStudentIds.length === 0 ? null : (
-                  <p>
-                    Current grading status could not be refreshed for{" "}
-                    {bulkPublicationNotice.refreshFailedStudentIds.join(", ")}.
-                  </p>
-                )}
-                <ul>
-                  {bulkPublicationNotice.results.map(({ studentId, result: publicationResult }) => (
-                    <li key={studentId}>
-                      <strong>{studentId}</strong> — {bulkPublicationResultLabel(publicationResult)}
-                    </li>
-                  ))}
-                </ul>
+      {publishReviewOpen ? (
+        <GradingPublishReviewPanel
+          readyRows={publishReviewReadyRows}
+          publishedRows={publishReviewPublishedRows}
+          notGradedCount={toGradeCount}
+          selectedIds={publishReviewSelectedIds}
+          onToggle={togglePublishReviewSelection}
+          onCancel={cancelPublishReview}
+          onPublish={() => void runPublishReview()}
+          running={publishReviewRunning}
+          refreshFailedStudentIds={publishReviewRefreshFailedStudentIds}
+        />
+      ) : (
+        <div className="grading-workspace__grid">
+          <aside>
+            <h2>Students</h2>
+            {result.students.length === 0 ? null : (
+              <div ref={filterPillsContainerRef}>
+                <FilterPills
+                  pills={[
+                    { id: "to_grade", label: "To grade", count: toGradeCount },
+                    { id: "graded", label: "Graded", count: gradedOnlyCount },
+                    { id: "published", label: "Published", count: publishedCount },
+                    { id: "all", label: "All", count: allStudentsCount }
+                  ]}
+                  activeId={studentFilter}
+                  onSelect={(id) => setStudentFilter(id as StudentFilterId)}
+                  aria-label="Filter students by grading status"
+                />
               </div>
             )}
-            <ConfirmationWithPreviewModal
-              isOpen={bulkPublicationConfirmation !== undefined}
-              title="Publish completed grading reports?"
-              summary={
-                <p>
-                  This will write {bulkPublicationConfirmation?.studentIds.length ?? 0} completed{" "}
-                  {(bulkPublicationConfirmation?.studentIds.length ?? 0) === 1
-                    ? "report"
-                    : "reports"}{" "}
-                  to student repositories. Publication continues independently if one student fails.
-                </p>
-              }
-              supplementalContent={
-                <fieldset className="grading-bulk-publication__selection">
-                  <legend>Select completed students</legend>
-                  {completeStudentIds.map((studentId) => (
-                    <label key={studentId}>
-                      <input
-                        type="checkbox"
-                        checked={
-                          bulkPublicationConfirmation?.studentIds.includes(studentId) ?? false
-                        }
-                        disabled={bulkPublicationInProgress}
-                        onChange={(event) =>
-                          setBulkPublicationConfirmation((current) => {
-                            if (current === undefined) return current;
-                            return {
-                              studentIds: event.currentTarget.checked
-                                ? [...current.studentIds, studentId]
-                                : current.studentIds.filter((candidate) => candidate !== studentId)
-                            };
-                          })
-                        }
-                      />
-                      {studentId}
-                    </label>
-                  ))}
-                </fieldset>
-              }
-              confirmDisabled={
-                bulkPublicationInProgress ||
-                (bulkPublicationConfirmation?.studentIds.length ?? 0) === 0
-              }
-              confirmLabel="Confirm Publish Reports"
-              onConfirm={confirmBulkPublication}
-              onCancel={() => setBulkPublicationConfirmation(undefined)}
-            />
-          </section>
-        </aside>
-        <section className="grading-workspace__source-pane">
-          <h2>Source</h2>
-          {student !== undefined && viewStateWarnings[student.studentId] !== undefined ? (
-            <div className="grading-source-message" role="alert">
-              {viewStateWarnings[student.studentId]}
-            </div>
-          ) : null}
-          {student === undefined || source.status === "idle" ? (
-            <p>Select a student to begin.</p>
-          ) : source.status === "loading" ? (
-            <p aria-live="polite">Loading source for {source.studentId}…</p>
-          ) : source.status === "failure" ? (
-            <div className="grading-source-message" role="alert">
-              <strong>Source unavailable for {source.studentId}</strong>
-              <p>{source.message}</p>
-            </div>
-          ) : source.source.sections.length === 0 ? (
-            <p className="grading-source-message">No required files are configured.</p>
-          ) : (
-            <Suspense fallback={<p aria-live="polite">Starting source viewer…</p>}>
-              <>
-                <MonacoSourceViewer
-                  annotations={
-                    snapshot.status === "success" &&
-                    snapshot.snapshot.studentId === source.source.studentId
-                      ? sourceAnnotations
-                      : []
+            {result.students.length === 0 ? (
+              <p>No assigned students.</p>
+            ) : filteredStudents.length === 0 ? (
+              <p>{STUDENT_FILTER_EMPTY_MESSAGE[studentFilter]}</p>
+            ) : (
+              filteredStudents.map(({ student: item, index, status }) => (
+                <button
+                  key={item.studentId}
+                  className={
+                    index === selected
+                      ? "grading-workspace__student-row selected"
+                      : "grading-workspace__student-row"
                   }
-                  key={source.source.studentId}
-                  initialViewState={source.initialViewState}
-                  model={source.source}
-                  studentId={source.source.studentId}
-                  onCanonicalSelectionChange={(target: CanonicalSourceRange | undefined) => {
-                    if (currentStudentIdRef.current === source.source.studentId)
-                      setCanonicalSourceTarget(target);
+                  onClick={() => {
+                    void flushPendingViewState(student?.studentId);
+                    setSelected(index);
                   }}
-                  {...(source.autosaveEnabled
-                    ? {
-                        onCanonicalViewStateChange: (viewState: GradingEditorViewState) =>
-                          scheduleViewStateSave(source.source.studentId, viewState)
-                      }
-                    : {})}
-                />
-                <div className="grading-source-comment-action">
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    disabled={
-                      canonicalSourceTarget === undefined ||
-                      commentMutationStudentId !== undefined ||
-                      commentMutationBlockedStudents.current.has(source.source.studentId)
-                    }
-                    onClick={openAddCommentEditor}
-                  >
-                    Add Comment
-                  </button>
-                  {canonicalSourceTarget === undefined ? (
-                    <p>Select a source line or range to add an anchored comment.</p>
-                  ) : (
-                    <p>Selected source: {sourceTargetLabel(canonicalSourceTarget)}</p>
-                  )}
-                </div>
-              </>
-            </Suspense>
-          )}
-        </section>
-        <aside className="grading-workspace__grading-pane">
-          <h2>Grading</h2>
-          {student === undefined || snapshot.status === "idle" ? (
-            <p>Select a student to view grading details.</p>
-          ) : (snapshot.status === "success" ? snapshot.snapshot.studentId : snapshot.studentId) !==
-            student.studentId ? (
-            <p aria-live="polite">Loading grading details for {student.studentId}…</p>
-          ) : snapshot.status === "loading" ? (
-            <p aria-live="polite">Loading grading details for {snapshot.studentId}…</p>
-          ) : snapshot.status === "failure" ? (
-            <div className="grading-panel-message" role="alert">
-              <strong>Grading details unavailable for {snapshot.studentId}</strong>
-              <p>{snapshot.message}</p>
+                >
+                  {item.studentId} · Section {item.section} · {label(status)}
+                </button>
+              ))
+            )}
+            <div className="grading-workspace__pagination">
+              <button
+                className="secondary-action"
+                type="button"
+                disabled={selected <= 0}
+                onClick={goToPreviousStudent}
+              >
+                Previous
+              </button>
+              <button
+                className="primary-action"
+                type="button"
+                disabled={nextUngradedStudentIndex === undefined}
+                onClick={goToNextUngradedStudent}
+              >
+                Next ungraded
+              </button>
             </div>
-          ) : (
-            <div className="grading-student-snapshot">
-              <p>
-                Status: <strong>{label(currentEffectiveStatus ?? "")}</strong>
-              </p>
-              {currentEffectiveStatus === "not_started" ||
-              currentEffectiveStatus === "in_progress" ? (
-                <div className="grading-complete-action">
-                  <button
-                    className="primary-action"
-                    type="button"
-                    disabled={
-                      bulkPublicationInProgress ||
-                      commentMutationStudentId !== undefined ||
-                      commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+            {nextUngradedStudentIndex === undefined ? (
+              <p className="grading-workspace__pagination-note">No other students need grading.</p>
+            ) : null}
+          </aside>
+          <section className="grading-workspace__source-pane">
+            <h2>Source</h2>
+            {student !== undefined && viewStateWarnings[student.studentId] !== undefined ? (
+              <div className="grading-source-message" role="alert">
+                {viewStateWarnings[student.studentId]}
+              </div>
+            ) : null}
+            {student === undefined || source.status === "idle" ? (
+              <p>Select a student to begin.</p>
+            ) : source.status === "loading" ? (
+              <p aria-live="polite">Loading source for {source.studentId}…</p>
+            ) : source.status === "failure" ? (
+              <div className="grading-source-message" role="alert">
+                <strong>Source unavailable for {source.studentId}</strong>
+                <p>{source.message}</p>
+              </div>
+            ) : source.source.sections.length === 0 ? (
+              <p className="grading-source-message">No required files are configured.</p>
+            ) : (
+              <Suspense fallback={<p aria-live="polite">Starting source viewer…</p>}>
+                <>
+                  <MonacoSourceViewer
+                    annotations={
+                      snapshot.status === "success" &&
+                      snapshot.snapshot.studentId === source.source.studentId
+                        ? sourceAnnotations
+                        : []
                     }
-                    onClick={() => {
-                      setCommentMutationError(undefined);
-                      setMarkCompleteConfirmation({ studentId: snapshot.snapshot.studentId });
+                    key={source.source.studentId}
+                    initialViewState={source.initialViewState}
+                    model={source.source}
+                    studentId={source.source.studentId}
+                    onCanonicalSelectionChange={(target: CanonicalSourceRange | undefined) => {
+                      if (currentStudentIdRef.current === source.source.studentId)
+                        setCanonicalSourceTarget(target);
                     }}
-                  >
-                    Mark Complete
-                  </button>
-                </div>
-              ) : null}
-              {currentEffectiveStatus === "complete" || currentEffectiveStatus === "published" ? (
-                <div className="grading-publication-action">
-                  <button
-                    type="button"
-                    className="secondary-action"
-                    disabled={
-                      reportPreview.status === "loading" &&
-                      reportPreview.studentId === snapshot.snapshot.studentId
-                    }
-                    onClick={() => void previewReport(snapshot.snapshot.studentId)}
-                  >
-                    {reportPreview.status === "loading" &&
-                    reportPreview.studentId === snapshot.snapshot.studentId
-                      ? "Preparing Preview…"
-                      : "Preview Report"}
-                  </button>
-                  <button
-                    type="button"
-                    className={
-                      currentEffectiveStatus === "published" ? "secondary-action" : "primary-action"
-                    }
-                    disabled={
-                      commentMutationStudentId !== undefined ||
-                      commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
-                    }
-                    onClick={() => {
-                      setCommentMutationError(undefined);
-                      setReportPublicationNotice(undefined);
-                      setMarkCompleteConfirmation(undefined);
-                      setReportPublicationConfirmation({
-                        studentId: snapshot.snapshot.studentId,
-                        operation: currentEffectiveStatus === "published" ? "republish" : "publish"
-                      });
-                    }}
-                  >
-                    {reportPublicationStudentId === snapshot.snapshot.studentId
-                      ? "Publishing…"
-                      : currentEffectiveStatus === "published"
-                        ? "Republish Report"
-                        : "Publish Report"}
-                  </button>
-                </div>
-              ) : null}
-              {reportPreview.status === "failure" &&
-              reportPreview.studentId === snapshot.snapshot.studentId ? (
-                <div
-                  className="grading-publication-message grading-publication-message--error"
-                  role="alert"
-                >
-                  <p>{reportPreview.message}</p>
-                </div>
-              ) : null}
-              {reportPublicationNotice !== undefined &&
-              reportPublicationNotice.studentId === snapshot.snapshot.studentId ? (
-                <div
-                  className={`grading-publication-message grading-publication-message--${reportPublicationNotice.tone}`}
-                  role={reportPublicationNotice.tone === "error" ? "alert" : "status"}
-                >
-                  <p>{reportPublicationNotice.message}</p>
-                  {reportPublicationNotice.warnings === undefined ? null : (
-                    <ul>
-                      {reportPublicationNotice.warnings.map((warning, index) => (
-                        <li key={`${index}-${warning}`}>{warning}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ) : null}
-              <ConfirmationWithPreviewModal
-                isOpen={
-                  reportPublicationConfirmation?.studentId === snapshot.snapshot.studentId &&
-                  reportPublicationConfirmation.studentId === currentStudentId
-                }
-                title={
-                  reportPublicationConfirmation?.operation === "republish"
-                    ? "Republish grading report?"
-                    : "Publish grading report?"
-                }
-                summary={
-                  reportPublicationConfirmation?.operation === "republish" ? (
-                    <p>
-                      This will regenerate the completed grading report. The existing Graider report
-                      may be updated in the student's repository.
-                    </p>
-                  ) : (
-                    <p>This will write the completed grading report to the student's repository.</p>
-                  )
-                }
-                confirmDisabled={
-                  bulkPublicationInProgress || commentMutationStudentId !== undefined
-                }
-                confirmLabel={
-                  reportPublicationConfirmation?.operation === "republish"
-                    ? "Confirm Republish Report"
-                    : "Confirm Publish Report"
-                }
-                onConfirm={confirmPublishReport}
-                onCancel={() => setReportPublicationConfirmation(undefined)}
-              />
-              {reportPreview.status === "success" &&
-              reportPreview.studentId === snapshot.snapshot.studentId ? (
-                <div className="confirmation-modal__backdrop">
-                  <div
-                    className="confirmation-modal grading-report-preview"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="grading-report-preview-heading"
-                  >
-                    <h2 id="grading-report-preview-heading">Report Preview</h2>
-                    {reportPreview.warnings.length === 0 ? null : (
-                      <div className="grading-report-preview__warnings" role="status">
-                        <p>This report will be published with these warnings:</p>
-                        <ul>
-                          {reportPreview.warnings.map((warning) => (
-                            <li key={warning}>{previewWarningMessage(warning)}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    <iframe
-                      className="grading-report-preview__frame"
-                      title="Grading report preview"
-                      sandbox=""
-                      srcDoc={reportPreview.html}
-                    />
-                    <div className="grading-apply-comment__actions">
-                      <button
-                        className="secondary-action"
-                        type="button"
-                        onClick={() => setReportPreview({ status: "idle" })}
-                      >
-                        Close
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              {markCompleteConfirmation !== undefined &&
-              markCompleteConfirmation.studentId === snapshot.snapshot.studentId ? (
-                <div
-                  className="grading-delete-comment-confirmation"
-                  role="alertdialog"
-                  aria-labelledby="mark-complete-heading"
-                >
-                  <h3 id="mark-complete-heading">
-                    Mark {markCompleteConfirmation.studentId} grading complete?
-                  </h3>
-                  <p>
-                    Grading feedback can still be edited afterward. This does not publish feedback.
-                  </p>
-                  <div className="grading-apply-comment__actions">
-                    <button
-                      className="primary-action"
-                      type="button"
-                      disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
-                      onClick={() => void confirmMarkComplete()}
-                    >
-                      {commentMutationStudentId === markCompleteConfirmation.studentId
-                        ? "Marking Complete…"
-                        : "Confirm Mark Complete"}
-                    </button>
+                    {...(source.autosaveEnabled
+                      ? {
+                          onCanonicalViewStateChange: (viewState: GradingEditorViewState) =>
+                            scheduleViewStateSave(source.source.studentId, viewState)
+                        }
+                      : {})}
+                  />
+                  <div className="grading-source-comment-action">
                     <button
                       className="secondary-action"
                       type="button"
-                      disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
+                      disabled={
+                        canonicalSourceTarget === undefined ||
+                        commentMutationStudentId !== undefined ||
+                        commentMutationBlockedStudents.current.has(source.source.studentId)
+                      }
+                      onClick={openAddCommentEditor}
+                    >
+                      Add Comment
+                    </button>
+                    {canonicalSourceTarget === undefined ? (
+                      <p>Select a source line or range to add an anchored comment.</p>
+                    ) : (
+                      <p>Selected source: {sourceTargetLabel(canonicalSourceTarget)}</p>
+                    )}
+                  </div>
+                </>
+              </Suspense>
+            )}
+          </section>
+          <aside className="grading-workspace__grading-pane">
+            <h2>Grading</h2>
+            {student === undefined || snapshot.status === "idle" ? (
+              <p>Select a student to view grading details.</p>
+            ) : (snapshot.status === "success"
+                ? snapshot.snapshot.studentId
+                : snapshot.studentId) !== student.studentId ? (
+              <p aria-live="polite">Loading grading details for {student.studentId}…</p>
+            ) : snapshot.status === "loading" ? (
+              <p aria-live="polite">Loading grading details for {snapshot.studentId}…</p>
+            ) : snapshot.status === "failure" ? (
+              <div className="grading-panel-message" role="alert">
+                <strong>Grading details unavailable for {snapshot.studentId}</strong>
+                <p>{snapshot.message}</p>
+              </div>
+            ) : (
+              <div className="grading-student-snapshot">
+                <p>
+                  Status: <strong>{label(currentEffectiveStatus ?? "")}</strong>
+                </p>
+                {currentEffectiveStatus === "not_started" ||
+                currentEffectiveStatus === "in_progress" ? (
+                  <div className="grading-complete-action">
+                    <button
+                      className="primary-action"
+                      type="button"
+                      disabled={
+                        publishReviewRunning ||
+                        commentMutationStudentId !== undefined ||
+                        commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                      }
                       onClick={() => {
-                        setMarkCompleteConfirmation(undefined);
                         setCommentMutationError(undefined);
+                        setMarkCompleteConfirmation({ studentId: snapshot.snapshot.studentId });
                       }}
                     >
-                      Cancel
+                      Mark Complete
                     </button>
                   </div>
-                </div>
-              ) : null}
-              <section aria-labelledby="grading-score-heading">
-                <h3 id="grading-score-heading">Score</h3>
-                {snapshot.snapshot.grade.categories.length === 0 ? (
-                  <p className="grading-score-total">No rubric — enter a score manually</p>
-                ) : (
-                  <p className="grading-score-total">
-                    {snapshot.snapshot.grade.totalScore} / {snapshot.snapshot.grade.pointsPossible}
-                  </p>
-                )}
-                {snapshot.snapshot.grade.categories.length === 0 ? (
-                  <p>No rubric categories are configured.</p>
-                ) : (
-                  <ul className="grading-score-categories" aria-label="Rubric categories">
-                    {snapshot.snapshot.grade.categories.map((category) => (
-                      <li key={category.id}>
-                        <span>{category.name}</span>
-                        <span>
-                          {category.score} / {category.pointsPossible}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-              <section aria-labelledby="applied-comments-heading">
-                <h3 id="applied-comments-heading">Applied comments</h3>
-                {snapshot.snapshot.appliedComments.length === 0 ? (
-                  <p>No comments applied.</p>
-                ) : (
-                  <ul className="grading-comment-list">
-                    {snapshot.snapshot.appliedComments.map((comment) => (
-                      <li key={comment.id}>
-                        {comment.title === undefined ? null : <h4>{comment.title}</h4>}
-                        <p>{comment.text}</p>
-                        <p>Adjustment: {comment.deduction}</p>
-                        {comment.rubricCategoryId === undefined ? null : (
-                          <p>
-                            Category:{" "}
-                            {snapshot.snapshot.grade.categories.find(
-                              (category) => category.id === comment.rubricCategoryId
-                            )?.name ?? comment.rubricCategoryId}
-                          </p>
-                        )}
-                        {comment.sourceLocation === undefined ? null : (
-                          <p>Source: {sourceLocationLabel(comment.sourceLocation)}</p>
-                        )}
-                        <div className="grading-applied-comment__actions">
-                          <button
-                            className="secondary-action"
-                            type="button"
-                            aria-label={`Edit comment: ${comment.text}`}
-                            disabled={
-                              commentMutationStudentId !== undefined ||
-                              commentMutationBlockedStudents.current.has(
-                                snapshot.snapshot.studentId
-                              )
-                            }
-                            onClick={() => openEditEditor(comment)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="danger-action"
-                            type="button"
-                            aria-label={`Delete comment: ${comment.text}`}
-                            disabled={
-                              commentMutationStudentId !== undefined ||
-                              commentMutationBlockedStudents.current.has(
-                                snapshot.snapshot.studentId
-                              )
-                            }
-                            onClick={() => {
-                              setCommentMutationError(undefined);
-                              setCommentEditor(undefined);
-                              setDeleteConfirmation({
-                                studentId: snapshot.snapshot.studentId,
-                                commentId: comment.id,
-                                text: comment.text,
-                                deduction: comment.deduction,
-                                ...(comment.sourceLocation === undefined
-                                  ? {}
-                                  : { sourceLocation: comment.sourceLocation })
-                              });
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {deleteConfirmation !== undefined &&
-                deleteConfirmation.studentId === snapshot.snapshot.studentId ? (
+                ) : null}
+                {currentEffectiveStatus === "complete" || currentEffectiveStatus === "published" ? (
+                  <div className="grading-publication-action">
+                    <button
+                      type="button"
+                      className="secondary-action"
+                      disabled={
+                        reportPreview.status === "loading" &&
+                        reportPreview.studentId === snapshot.snapshot.studentId
+                      }
+                      onClick={() => void previewReport(snapshot.snapshot.studentId)}
+                    >
+                      {reportPreview.status === "loading" &&
+                      reportPreview.studentId === snapshot.snapshot.studentId
+                        ? "Preparing Preview…"
+                        : "Preview Report"}
+                    </button>
+                    <button
+                      type="button"
+                      className={
+                        currentEffectiveStatus === "published"
+                          ? "secondary-action"
+                          : "primary-action"
+                      }
+                      disabled={
+                        commentMutationStudentId !== undefined ||
+                        commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                      }
+                      onClick={() => {
+                        setCommentMutationError(undefined);
+                        setReportPublicationNotice(undefined);
+                        setMarkCompleteConfirmation(undefined);
+                        setReportPublicationConfirmation({
+                          studentId: snapshot.snapshot.studentId,
+                          operation:
+                            currentEffectiveStatus === "published" ? "republish" : "publish"
+                        });
+                      }}
+                    >
+                      {reportPublicationStudentId === snapshot.snapshot.studentId
+                        ? "Publishing…"
+                        : currentEffectiveStatus === "published"
+                          ? "Republish Report"
+                          : "Publish Report"}
+                    </button>
+                  </div>
+                ) : null}
+                {reportPreview.status === "failure" &&
+                reportPreview.studentId === snapshot.snapshot.studentId ? (
                   <div
-                    className="grading-delete-comment-confirmation"
-                    role="alertdialog"
-                    aria-labelledby="delete-comment-heading"
+                    className="grading-publication-message grading-publication-message--error"
+                    role="alert"
                   >
-                    <h4 id="delete-comment-heading">Delete applied comment?</h4>
-                    <p>
-                      “{deleteConfirmation.text.slice(0, 100)}” · Adjustment:{" "}
-                      {deleteConfirmation.deduction}
-                    </p>
-                    {deleteConfirmation.sourceLocation === undefined ? null : (
-                      <p>Source: {sourceLocationLabel(deleteConfirmation.sourceLocation)}</p>
+                    <p>{reportPreview.message}</p>
+                  </div>
+                ) : null}
+                {reportPublicationNotice !== undefined &&
+                reportPublicationNotice.studentId === snapshot.snapshot.studentId ? (
+                  <div
+                    className={`grading-publication-message grading-publication-message--${reportPublicationNotice.tone}`}
+                    role={reportPublicationNotice.tone === "error" ? "alert" : "status"}
+                  >
+                    <p>{reportPublicationNotice.message}</p>
+                    {reportPublicationNotice.warnings === undefined ? null : (
+                      <ul>
+                        {reportPublicationNotice.warnings.map((warning, index) => (
+                          <li key={`${index}-${warning}`}>{warning}</li>
+                        ))}
+                      </ul>
                     )}
-                    <div className="grading-apply-comment__actions">
-                      <button
-                        className="danger-action"
-                        type="button"
-                        disabled={commentMutationStudentId === deleteConfirmation.studentId}
-                        onClick={() => void confirmDeleteComment()}
-                      >
-                        {commentMutationStudentId === deleteConfirmation.studentId
-                          ? "Deleting…"
-                          : "Confirm delete"}
-                      </button>
-                      <button
-                        className="secondary-action"
-                        type="button"
-                        disabled={commentMutationStudentId === deleteConfirmation.studentId}
-                        onClick={() => {
-                          setDeleteConfirmation(undefined);
-                          setCommentMutationError(undefined);
-                        }}
-                      >
-                        Cancel delete
-                      </button>
+                  </div>
+                ) : null}
+                <ConfirmationWithPreviewModal
+                  isOpen={
+                    reportPublicationConfirmation?.studentId === snapshot.snapshot.studentId &&
+                    reportPublicationConfirmation.studentId === currentStudentId
+                  }
+                  title={
+                    reportPublicationConfirmation?.operation === "republish"
+                      ? "Republish grading report?"
+                      : "Publish grading report?"
+                  }
+                  summary={
+                    reportPublicationConfirmation?.operation === "republish" ? (
+                      <p>
+                        This will regenerate the completed grading report. The existing Graider
+                        report may be updated in the student's repository.
+                      </p>
+                    ) : (
+                      <p>
+                        This will write the completed grading report to the student's repository.
+                      </p>
+                    )
+                  }
+                  confirmDisabled={publishReviewRunning || commentMutationStudentId !== undefined}
+                  confirmLabel={
+                    reportPublicationConfirmation?.operation === "republish"
+                      ? "Confirm Republish Report"
+                      : "Confirm Publish Report"
+                  }
+                  onConfirm={confirmPublishReport}
+                  onCancel={() => setReportPublicationConfirmation(undefined)}
+                />
+                {reportPreview.status === "success" &&
+                reportPreview.studentId === snapshot.snapshot.studentId ? (
+                  <div className="confirmation-modal__backdrop">
+                    <div
+                      className="confirmation-modal grading-report-preview"
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="grading-report-preview-heading"
+                    >
+                      <h2 id="grading-report-preview-heading">Report Preview</h2>
+                      {reportPreview.warnings.length === 0 ? null : (
+                        <div className="grading-report-preview__warnings" role="status">
+                          <p>This report will be published with these warnings:</p>
+                          <ul>
+                            {reportPreview.warnings.map((warning) => (
+                              <li key={warning}>{previewWarningMessage(warning)}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      <iframe
+                        className="grading-report-preview__frame"
+                        title="Grading report preview"
+                        sandbox=""
+                        srcDoc={reportPreview.html}
+                      />
+                      <div className="grading-apply-comment__actions">
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          onClick={() => setReportPreview({ status: "idle" })}
+                        >
+                          Close
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : null}
-              </section>
-              <section aria-labelledby="manual-adjustments-heading">
-                <h3 id="manual-adjustments-heading">Manual adjustments</h3>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  disabled={
-                    result.rubric.length === 0 ||
-                    commentMutationStudentId !== undefined ||
-                    commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
-                  }
-                  onClick={openAddManualAdjustmentEditor}
-                >
-                  Add adjustment
-                </button>
-                {result.rubric.length === 0 ? (
-                  <p>Manual adjustments require a rubric category.</p>
-                ) : null}
-                {snapshot.snapshot.manualAdjustments.length === 0 ? (
-                  <p>No manual adjustments.</p>
-                ) : (
-                  <ul className="grading-comment-list">
-                    {snapshot.snapshot.manualAdjustments.map((adjustment) => (
-                      <li key={adjustment.id}>
-                        <p>
-                          Category:{" "}
-                          {snapshot.snapshot.grade.categories.find(
-                            (category) => category.id === adjustment.rubricCategoryId
-                          )?.name ?? adjustment.rubricCategoryId}
-                        </p>
-                        <p>Adjustment: {signedAmount(adjustment.amount)}</p>
-                        {adjustment.note === undefined ? null : <p>{adjustment.note}</p>}
-                        <div className="grading-applied-comment__actions">
-                          <button
-                            className="secondary-action"
-                            type="button"
-                            aria-label={`Edit adjustment: ${adjustment.rubricCategoryId}`}
-                            disabled={
-                              commentMutationStudentId !== undefined ||
-                              commentMutationBlockedStudents.current.has(
-                                snapshot.snapshot.studentId
-                              )
-                            }
-                            onClick={() => openEditManualAdjustmentEditor(adjustment)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="danger-action"
-                            type="button"
-                            aria-label={`Delete adjustment: ${adjustment.rubricCategoryId}`}
-                            disabled={
-                              commentMutationStudentId !== undefined ||
-                              commentMutationBlockedStudents.current.has(
-                                snapshot.snapshot.studentId
-                              )
-                            }
-                            onClick={() => {
-                              setCommentMutationError(undefined);
-                              setManualAdjustmentEditor(undefined);
-                              setDeleteManualAdjustmentConfirmation({
-                                studentId: snapshot.snapshot.studentId,
-                                adjustmentId: adjustment.id,
-                                rubricCategoryId: adjustment.rubricCategoryId,
-                                amount: adjustment.amount,
-                                ...(adjustment.note === undefined ? {} : { note: adjustment.note })
-                              });
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {manualAdjustmentEditor !== undefined &&
-                manualAdjustmentEditor.studentId === snapshot.snapshot.studentId ? (
-                  <form
-                    className="grading-apply-comment"
-                    aria-label={
-                      manualAdjustmentEditor.operation === "add"
-                        ? "Add manual adjustment"
-                        : "Edit manual adjustment"
-                    }
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void saveManualAdjustmentEditor();
-                    }}
+                {markCompleteConfirmation !== undefined &&
+                markCompleteConfirmation.studentId === snapshot.snapshot.studentId ? (
+                  <div
+                    className="grading-delete-comment-confirmation"
+                    role="alertdialog"
+                    aria-labelledby="mark-complete-heading"
                   >
-                    <h4>
-                      {manualAdjustmentEditor.operation === "add"
-                        ? "Add adjustment"
-                        : "Edit adjustment"}
-                    </h4>
-                    <label htmlFor="grading-adjustment-rubric-category">
-                      Adjustment rubric category
-                    </label>
-                    <select
-                      id="grading-adjustment-rubric-category"
-                      required
-                      value={manualAdjustmentEditor.rubricCategoryId}
-                      onChange={(event) =>
-                        setManualAdjustmentEditor((current) =>
-                          current === undefined
-                            ? current
-                            : { ...current, rubricCategoryId: event.target.value }
-                        )
-                      }
-                    >
-                      <option value="">Select a category</option>
-                      {manualAdjustmentEditor.rubricCategoryId !== "" &&
-                      !result.rubric.some(
-                        (category) => category.id === manualAdjustmentEditor.rubricCategoryId
-                      ) ? (
-                        <option value={manualAdjustmentEditor.rubricCategoryId} disabled>
-                          Unavailable category ({manualAdjustmentEditor.rubricCategoryId})
-                        </option>
-                      ) : null}
-                      {result.rubric.map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name}
-                        </option>
-                      ))}
-                    </select>
-                    <label>
-                      Amount
-                      <input
-                        required
-                        type="number"
-                        step="any"
-                        value={manualAdjustmentEditor.amount}
-                        onChange={(event) =>
-                          setManualAdjustmentEditor((current) =>
-                            current === undefined
-                              ? current
-                              : { ...current, amount: event.target.value }
-                          )
-                        }
-                      />
-                    </label>
+                    <h3 id="mark-complete-heading">
+                      Mark {markCompleteConfirmation.studentId} grading complete?
+                    </h3>
                     <p>
-                      Use a positive amount to add points and a negative amount to deduct points.
+                      Grading feedback can still be edited afterward. This does not publish
+                      feedback.
                     </p>
-                    <label>
-                      Note (optional)
-                      <input
-                        value={manualAdjustmentEditor.note}
-                        onChange={(event) =>
-                          setManualAdjustmentEditor((current) =>
-                            current === undefined
-                              ? current
-                              : { ...current, note: event.target.value }
-                          )
-                        }
-                      />
-                    </label>
                     <div className="grading-apply-comment__actions">
                       <button
                         className="primary-action"
-                        type="submit"
-                        disabled={
-                          commentMutationStudentId === manualAdjustmentEditor.studentId ||
-                          commentMutationBlockedStudents.current.has(
-                            manualAdjustmentEditor.studentId
-                          ) ||
-                          manualAdjustmentEditor.rubricCategoryId === "" ||
-                          !result.rubric.some(
-                            (category) => category.id === manualAdjustmentEditor.rubricCategoryId
-                          ) ||
-                          manualAdjustmentEditor.amount.trim() === "" ||
-                          !Number.isFinite(Number(manualAdjustmentEditor.amount))
-                        }
+                        type="button"
+                        disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
+                        onClick={() => void confirmMarkComplete()}
                       >
-                        {commentMutationStudentId === manualAdjustmentEditor.studentId
-                          ? "Saving…"
-                          : manualAdjustmentEditor.operation === "add"
-                            ? "Add adjustment"
-                            : "Save adjustment"}
+                        {commentMutationStudentId === markCompleteConfirmation.studentId
+                          ? "Marking Complete…"
+                          : "Confirm Mark Complete"}
                       </button>
                       <button
                         className="secondary-action"
                         type="button"
-                        disabled={commentMutationStudentId === manualAdjustmentEditor.studentId}
+                        disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
                         onClick={() => {
-                          setManualAdjustmentEditor(undefined);
+                          setMarkCompleteConfirmation(undefined);
                           setCommentMutationError(undefined);
                         }}
                       >
                         Cancel
                       </button>
                     </div>
-                  </form>
-                ) : null}
-                {deleteManualAdjustmentConfirmation !== undefined &&
-                deleteManualAdjustmentConfirmation.studentId === snapshot.snapshot.studentId ? (
-                  <div
-                    className="grading-delete-comment-confirmation"
-                    role="alertdialog"
-                    aria-labelledby="delete-adjustment-heading"
-                  >
-                    <h4 id="delete-adjustment-heading">Delete manual adjustment?</h4>
-                    <p>
-                      {snapshot.snapshot.grade.categories.find(
-                        (category) =>
-                          category.id === deleteManualAdjustmentConfirmation.rubricCategoryId
-                      )?.name ?? deleteManualAdjustmentConfirmation.rubricCategoryId}
-                      {" · "}
-                      {signedAmount(deleteManualAdjustmentConfirmation.amount)}
-                    </p>
-                    {deleteManualAdjustmentConfirmation.note === undefined ? null : (
-                      <p>{deleteManualAdjustmentConfirmation.note}</p>
-                    )}
-                    <div className="grading-apply-comment__actions">
-                      <button
-                        className="danger-action"
-                        type="button"
-                        disabled={
-                          commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
-                        }
-                        onClick={() => void confirmDeleteManualAdjustment()}
-                      >
-                        {commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
-                          ? "Deleting…"
-                          : "Confirm delete"}
-                      </button>
-                      <button
-                        className="secondary-action"
-                        type="button"
-                        disabled={
-                          commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
-                        }
-                        onClick={() => {
-                          setDeleteManualAdjustmentConfirmation(undefined);
-                          setCommentMutationError(undefined);
-                        }}
-                      >
-                        Cancel delete
-                      </button>
-                    </div>
                   </div>
                 ) : null}
-              </section>
-            </div>
-          )}
-          <GradingEvidencePanel
-            state={evidence}
-            commitHistory={commitHistory}
-            onReload={(studentId) => void loadEvidence(studentId)}
-            open={evidencePanelOpen}
-            onOpenChange={setEvidencePanelOpen}
-            focusRequest={evidenceFocusRequest}
-          />
-          <section className="grading-workflow-repair" aria-labelledby="workflow-repair-heading">
-            <h3 id="workflow-repair-heading">Workflow</h3>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={workflowRepair.status !== "ready"}
-              onClick={() => {
-                if (workflowRepair.status === "ready")
-                  setWorkflowRepairConfirmation({
-                    studentId: workflowRepair.studentId,
-                    repositoryFullName: workflowRepair.repositoryFullName
-                  });
-              }}
-            >
-              {workflowRepair.status === "running"
-                ? "Replacing workflow…"
-                : "Replace workflow & run"}
-            </button>
-            {workflowRepair.status === "loading" ? (
-              <p aria-live="polite">Checking workflow repair availability…</p>
-            ) : workflowRepair.status === "unavailable" ? (
-              <p>{workflowRepair.message}</p>
-            ) : null}
-            {workflowRepairNotice === undefined ||
-            workflowRepairNotice.studentId !== student?.studentId ? null : (
-              <p
-                role="status"
-                className={`grading-panel-message grading-panel-message--${workflowRepairNotice.tone}`}
-              >
-                {workflowRepairNotice.message}
-              </p>
-            )}
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={
-                bulkWorkflowRepairState === "running" ||
-                window.graiderUI.repairGradingAssignmentWorkflows === undefined
-              }
-              onClick={() => setBulkWorkflowRepairConfirmation(true)}
-            >
-              {bulkWorkflowRepairState === "running"
-                ? "Replacing workflows…"
-                : "Replace workflows & run for all students"}
-            </button>
-            {bulkWorkflowRepairResult?.status === "success" ? (
-              <div role="status">
-                <p>
-                  {bulkWorkflowRepairResult.counts.succeeded} succeeded ·{" "}
-                  {bulkWorkflowRepairResult.counts.failed} failed ·{" "}
-                  {bulkWorkflowRepairResult.counts.createdOrReplaced} replaced ·{" "}
-                  {bulkWorkflowRepairResult.counts.alreadyCurrent} already current ·{" "}
-                  {bulkWorkflowRepairResult.counts.dispatched} dispatched
-                </p>
-                {bulkWorkflowRepairResult.repositoryResults
-                  .filter((item) => item.status === "failed")
-                  .map((item) => (
-                    <p key={`${item.repository ?? item.studentIds.join("-")}`}>
-                      {item.repository ?? item.studentIds.join(", ")}:{" "}
-                      {item.message ?? "Workflow repair failed."}
-                    </p>
-                  ))}
-              </div>
-            ) : null}
-            <ConfirmationWithPreviewModal
-              isOpen={bulkWorkflowRepairConfirmation}
-              title="Replace workflows and start grading runs?"
-              summary={
-                <p>
-                  Install or replace Graider's managed grade.yml where necessary and run grading for
-                  all mapped, authorized student repositories?
-                </p>
-              }
-              acknowledgementLabel="I understand this replaces repository grading workflows."
-              confirmLabel="Replace workflows & run for all students"
-              onConfirm={confirmBulkWorkflowRepair}
-              onCancel={() => setBulkWorkflowRepairConfirmation(false)}
-            />
-            <ConfirmationWithPreviewModal
-              isOpen={
-                workflowRepairConfirmation !== undefined &&
-                workflowRepairConfirmation.studentId === student?.studentId
-              }
-              title="Replace workflow and start grading run?"
-              summary={
-                <p>
-                  Replace .github/workflows/grade.yml in{" "}
-                  {workflowRepairConfirmation?.repositoryFullName} with the Graider-managed workflow
-                  and start a grading run?
-                </p>
-              }
-              acknowledgementLabel="I understand this replaces the repository's grading workflow."
-              confirmLabel="Replace workflow & run"
-              onConfirm={confirmWorkflowRepair}
-              onCancel={() => setWorkflowRepairConfirmation(undefined)}
-            />
-          </section>
-          <section className="grading-comment-library" aria-labelledby="comment-library-heading">
-            <h3 id="comment-library-heading">Comment library</h3>
-            {commentMutationError === undefined ? null : (
-              <div className="grading-panel-message" role="alert">
-                {commentMutationError}
-              </div>
-            )}
-            {commentEditor !== undefined && commentEditor.studentId === student?.studentId ? (
-              <form
-                className="grading-apply-comment"
-                aria-label={
-                  commentEditor.operation === "add"
-                    ? commentEditor.reusableCommentTitle === undefined
-                      ? "Add comment"
-                      : `Apply ${commentEditor.reusableCommentTitle}`
-                    : "Edit applied comment"
-                }
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void saveCommentEditor();
-                }}
-              >
-                <h4>
-                  {commentEditor.operation === "add"
-                    ? commentEditor.reusableCommentTitle === undefined
-                      ? "Add comment"
-                      : `Apply ${commentEditor.reusableCommentTitle}`
-                    : "Edit applied comment"}
-                </h4>
-                <label>
-                  Title
-                  <input
-                    value={commentEditor.title}
-                    required={commentEditor.operation === "add" || commentEditor.hasPersistedTitle}
-                    onChange={(event) =>
-                      setCommentEditor((current) =>
-                        current === undefined ? current : { ...current, title: event.target.value }
-                      )
-                    }
-                  />
-                </label>
-                <label>
-                  Comment
-                  <textarea
-                    value={commentEditor.text}
-                    onChange={(event) =>
-                      setCommentEditor((current) =>
-                        current === undefined ? current : { ...current, text: event.target.value }
-                      )
-                    }
-                  />
-                </label>
-                <label>
-                  Deduction
-                  <input
-                    type="number"
-                    step="any"
-                    value={commentEditor.deduction}
-                    onChange={(event) =>
-                      setCommentEditor((current) =>
-                        current === undefined
-                          ? current
-                          : { ...current, deduction: event.target.value }
-                      )
-                    }
-                  />
-                </label>
-                <label htmlFor="grading-comment-rubric-category">Comment rubric category</label>
-                <select
-                  id="grading-comment-rubric-category"
-                  value={commentEditor.rubricCategoryId}
-                  onChange={(event) =>
-                    setCommentEditor((current) =>
-                      current === undefined
-                        ? current
-                        : { ...current, rubricCategoryId: event.target.value }
-                    )
-                  }
-                >
-                  <option value="">None</option>
-                  {commentEditor.rubricCategoryId !== "" &&
-                  !result.rubric.some(
-                    (category) => category.id === commentEditor.rubricCategoryId
-                  ) ? (
-                    <option value={commentEditor.rubricCategoryId} disabled>
-                      Unavailable category ({commentEditor.rubricCategoryId})
-                    </option>
-                  ) : null}
-                  {result.rubric.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-                <fieldset>
-                  <legend>Target</legend>
-                  <label>
-                    <input
-                      type="radio"
-                      name="comment-target"
-                      value="source"
-                      checked={commentEditor.targetMode === "source"}
-                      disabled={
-                        canonicalSourceTarget === undefined &&
-                        (commentEditor.operation === "add" ||
-                          commentEditor.sourceTarget === undefined)
-                      }
-                      onChange={() => {
-                        setCommentEditor((current) => {
-                          if (current === undefined) return current;
-                          if (current.operation === "add")
-                            return { ...current, targetMode: "source" };
-                          const sourceTarget = current.sourceTarget ?? canonicalSourceTarget;
-                          return sourceTarget === undefined
-                            ? current
-                            : { ...current, targetMode: "source", sourceTarget };
-                        });
-                      }}
-                    />
-                    Source
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="comment-target"
-                      value="general"
-                      checked={commentEditor.targetMode === "general"}
-                      onChange={() =>
-                        setCommentEditor((current) =>
-                          current === undefined ? current : { ...current, targetMode: "general" }
-                        )
-                      }
-                    />
-                    General
-                  </label>
-                </fieldset>
-                {commentEditor.targetMode === "source" ? (
-                  (commentEditor.operation === "edit"
-                    ? commentEditor.sourceTarget
-                    : canonicalSourceTarget) === undefined ? (
-                    <p>Select a valid source line or range, or choose General.</p>
+                <section aria-labelledby="grading-score-heading">
+                  <h3 id="grading-score-heading">Score</h3>
+                  {snapshot.snapshot.grade.categories.length === 0 ? (
+                    <p className="grading-score-total">No rubric — enter a score manually</p>
                   ) : (
-                    <p>
-                      Source target:{" "}
-                      {sourceTargetLabel(
-                        commentEditor.operation === "edit"
-                          ? (commentEditor.sourceTarget as CanonicalSourceRange)
-                          : (canonicalSourceTarget as CanonicalSourceRange)
-                      )}
+                    <p className="grading-score-total">
+                      {snapshot.snapshot.grade.totalScore} /{" "}
+                      {snapshot.snapshot.grade.pointsPossible}
                     </p>
-                  )
-                ) : (
-                  <p>This comment will apply to the overall submission.</p>
-                )}
-                {commentEditor.operation === "edit" && commentEditor.targetMode === "source" ? (
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    disabled={canonicalSourceTarget === undefined}
-                    onClick={() =>
-                      setCommentEditor((current) =>
-                        current?.operation === "edit" && canonicalSourceTarget !== undefined
-                          ? { ...current, sourceTarget: canonicalSourceTarget }
-                          : current
-                      )
-                    }
-                  >
-                    Use current selection
-                  </button>
-                ) : null}
-                <div className="grading-apply-comment__actions">
-                  <button
-                    className="primary-action"
-                    type="submit"
-                    disabled={
-                      commentMutationStudentId === commentEditor.studentId ||
-                      commentMutationBlockedStudents.current.has(commentEditor.studentId) ||
-                      (commentEditor.rubricCategoryId !== "" &&
-                        !result.rubric.some(
-                          (category) => category.id === commentEditor.rubricCategoryId
-                        )) ||
-                      (commentEditor.targetMode === "source" &&
-                        (commentEditor.operation === "edit"
-                          ? commentEditor.sourceTarget
-                          : canonicalSourceTarget) === undefined)
-                    }
-                  >
-                    {commentMutationStudentId === commentEditor.studentId
-                      ? commentEditor.operation === "add"
-                        ? "Applying…"
-                        : "Saving…"
-                      : commentEditor.operation === "add"
-                        ? "Apply comment"
-                        : "Save comment"}
-                  </button>
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    disabled={commentMutationStudentId === commentEditor.studentId}
-                    onClick={() => {
-                      setCommentEditor(undefined);
-                      setCommentMutationError(undefined);
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            ) : null}
-            {commentLibrary.status === "loading" ? (
-              <p aria-live="polite">Loading shared comments…</p>
-            ) : commentLibrary.status === "failure" ? (
-              <div className="grading-panel-message" role="alert">
-                {commentLibrary.message}
-              </div>
-            ) : (
-              <>
-                <label>
-                  Search comments
-                  <input
-                    type="search"
-                    value={commentSearch}
-                    onChange={(event) => setCommentSearch(event.currentTarget.value)}
-                  />
-                </label>
-                {availableCommentTags.length === 0 ? null : (
-                  <fieldset className="grading-comment-tags">
-                    <legend>Filter by tags</legend>
-                    {availableCommentTags.map((tag) => (
-                      <label key={tag}>
-                        <input
-                          type="checkbox"
-                          checked={selectedCommentTags.includes(tag)}
-                          onChange={(event) => {
-                            const checked = event.currentTarget.checked;
-                            setSelectedCommentTags((current) =>
-                              checked
-                                ? [...current, tag]
-                                : current.filter((selectedTag) => selectedTag !== tag)
-                            );
+                  )}
+                  {snapshot.snapshot.grade.categories.length === 0 ? (
+                    <p>No rubric categories are configured.</p>
+                  ) : (
+                    <ul className="grading-score-categories" aria-label="Rubric categories">
+                      {snapshot.snapshot.grade.categories.map((category) => (
+                        <li key={category.id}>
+                          <span>{category.name}</span>
+                          <span>
+                            {category.score} / {category.pointsPossible}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+                <section aria-labelledby="applied-comments-heading">
+                  <h3 id="applied-comments-heading">Applied comments</h3>
+                  {snapshot.snapshot.appliedComments.length === 0 ? (
+                    <p>No comments applied.</p>
+                  ) : (
+                    <ul className="grading-comment-list">
+                      {snapshot.snapshot.appliedComments.map((comment) => (
+                        <li key={comment.id}>
+                          {comment.title === undefined ? null : <h4>{comment.title}</h4>}
+                          <p>{comment.text}</p>
+                          <p>Adjustment: {comment.deduction}</p>
+                          {comment.rubricCategoryId === undefined ? null : (
+                            <p>
+                              Category:{" "}
+                              {snapshot.snapshot.grade.categories.find(
+                                (category) => category.id === comment.rubricCategoryId
+                              )?.name ?? comment.rubricCategoryId}
+                            </p>
+                          )}
+                          {comment.sourceLocation === undefined ? null : (
+                            <p>Source: {sourceLocationLabel(comment.sourceLocation)}</p>
+                          )}
+                          <div className="grading-applied-comment__actions">
+                            <button
+                              className="secondary-action"
+                              type="button"
+                              aria-label={`Edit comment: ${comment.text}`}
+                              disabled={
+                                commentMutationStudentId !== undefined ||
+                                commentMutationBlockedStudents.current.has(
+                                  snapshot.snapshot.studentId
+                                )
+                              }
+                              onClick={() => openEditEditor(comment)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="danger-action"
+                              type="button"
+                              aria-label={`Delete comment: ${comment.text}`}
+                              disabled={
+                                commentMutationStudentId !== undefined ||
+                                commentMutationBlockedStudents.current.has(
+                                  snapshot.snapshot.studentId
+                                )
+                              }
+                              onClick={() => {
+                                setCommentMutationError(undefined);
+                                setCommentEditor(undefined);
+                                setDeleteConfirmation({
+                                  studentId: snapshot.snapshot.studentId,
+                                  commentId: comment.id,
+                                  text: comment.text,
+                                  deduction: comment.deduction,
+                                  ...(comment.sourceLocation === undefined
+                                    ? {}
+                                    : { sourceLocation: comment.sourceLocation })
+                                });
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {deleteConfirmation !== undefined &&
+                  deleteConfirmation.studentId === snapshot.snapshot.studentId ? (
+                    <div
+                      className="grading-delete-comment-confirmation"
+                      role="alertdialog"
+                      aria-labelledby="delete-comment-heading"
+                    >
+                      <h4 id="delete-comment-heading">Delete applied comment?</h4>
+                      <p>
+                        “{deleteConfirmation.text.slice(0, 100)}” · Adjustment:{" "}
+                        {deleteConfirmation.deduction}
+                      </p>
+                      {deleteConfirmation.sourceLocation === undefined ? null : (
+                        <p>Source: {sourceLocationLabel(deleteConfirmation.sourceLocation)}</p>
+                      )}
+                      <div className="grading-apply-comment__actions">
+                        <button
+                          className="danger-action"
+                          type="button"
+                          disabled={commentMutationStudentId === deleteConfirmation.studentId}
+                          onClick={() => void confirmDeleteComment()}
+                        >
+                          {commentMutationStudentId === deleteConfirmation.studentId
+                            ? "Deleting…"
+                            : "Confirm delete"}
+                        </button>
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          disabled={commentMutationStudentId === deleteConfirmation.studentId}
+                          onClick={() => {
+                            setDeleteConfirmation(undefined);
+                            setCommentMutationError(undefined);
                           }}
-                        />
-                        {tag}
+                        >
+                          Cancel delete
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+                <section aria-labelledby="manual-adjustments-heading">
+                  <h3 id="manual-adjustments-heading">Manual adjustments</h3>
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    disabled={
+                      result.rubric.length === 0 ||
+                      commentMutationStudentId !== undefined ||
+                      commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                    }
+                    onClick={openAddManualAdjustmentEditor}
+                  >
+                    Add adjustment
+                  </button>
+                  {result.rubric.length === 0 ? (
+                    <p>Manual adjustments require a rubric category.</p>
+                  ) : null}
+                  {snapshot.snapshot.manualAdjustments.length === 0 ? (
+                    <p>No manual adjustments.</p>
+                  ) : (
+                    <ul className="grading-comment-list">
+                      {snapshot.snapshot.manualAdjustments.map((adjustment) => (
+                        <li key={adjustment.id}>
+                          <p>
+                            Category:{" "}
+                            {snapshot.snapshot.grade.categories.find(
+                              (category) => category.id === adjustment.rubricCategoryId
+                            )?.name ?? adjustment.rubricCategoryId}
+                          </p>
+                          <p>Adjustment: {signedAmount(adjustment.amount)}</p>
+                          {adjustment.note === undefined ? null : <p>{adjustment.note}</p>}
+                          <div className="grading-applied-comment__actions">
+                            <button
+                              className="secondary-action"
+                              type="button"
+                              aria-label={`Edit adjustment: ${adjustment.rubricCategoryId}`}
+                              disabled={
+                                commentMutationStudentId !== undefined ||
+                                commentMutationBlockedStudents.current.has(
+                                  snapshot.snapshot.studentId
+                                )
+                              }
+                              onClick={() => openEditManualAdjustmentEditor(adjustment)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="danger-action"
+                              type="button"
+                              aria-label={`Delete adjustment: ${adjustment.rubricCategoryId}`}
+                              disabled={
+                                commentMutationStudentId !== undefined ||
+                                commentMutationBlockedStudents.current.has(
+                                  snapshot.snapshot.studentId
+                                )
+                              }
+                              onClick={() => {
+                                setCommentMutationError(undefined);
+                                setManualAdjustmentEditor(undefined);
+                                setDeleteManualAdjustmentConfirmation({
+                                  studentId: snapshot.snapshot.studentId,
+                                  adjustmentId: adjustment.id,
+                                  rubricCategoryId: adjustment.rubricCategoryId,
+                                  amount: adjustment.amount,
+                                  ...(adjustment.note === undefined
+                                    ? {}
+                                    : { note: adjustment.note })
+                                });
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {manualAdjustmentEditor !== undefined &&
+                  manualAdjustmentEditor.studentId === snapshot.snapshot.studentId ? (
+                    <form
+                      className="grading-apply-comment"
+                      aria-label={
+                        manualAdjustmentEditor.operation === "add"
+                          ? "Add manual adjustment"
+                          : "Edit manual adjustment"
+                      }
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveManualAdjustmentEditor();
+                      }}
+                    >
+                      <h4>
+                        {manualAdjustmentEditor.operation === "add"
+                          ? "Add adjustment"
+                          : "Edit adjustment"}
+                      </h4>
+                      <label htmlFor="grading-adjustment-rubric-category">
+                        Adjustment rubric category
                       </label>
-                    ))}
-                  </fieldset>
-                )}
-                {matchingComments.length === 0 ? (
-                  <p>No matching reusable comments.</p>
-                ) : (
-                  <ul className="grading-comment-list" aria-label="Reusable comments">
-                    {matchingComments.map((comment) => (
-                      <li key={comment.id}>
-                        <strong>{comment.title}</strong>
-                        <p>{comment.text}</p>
-                        <p>Default adjustment: {comment.defaultDeduction}</p>
-                        {comment.defaultRubricCategoryId === undefined ? null : (
-                          <p>Default category: {comment.defaultRubricCategoryId}</p>
-                        )}
-                        {comment.tags.length === 0 ? null : <p>Tags: {comment.tags.join(", ")}</p>}
+                      <select
+                        id="grading-adjustment-rubric-category"
+                        required
+                        value={manualAdjustmentEditor.rubricCategoryId}
+                        onChange={(event) =>
+                          setManualAdjustmentEditor((current) =>
+                            current === undefined
+                              ? current
+                              : { ...current, rubricCategoryId: event.target.value }
+                          )
+                        }
+                      >
+                        <option value="">Select a category</option>
+                        {manualAdjustmentEditor.rubricCategoryId !== "" &&
+                        !result.rubric.some(
+                          (category) => category.id === manualAdjustmentEditor.rubricCategoryId
+                        ) ? (
+                          <option value={manualAdjustmentEditor.rubricCategoryId} disabled>
+                            Unavailable category ({manualAdjustmentEditor.rubricCategoryId})
+                          </option>
+                        ) : null}
+                        {result.rubric.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+                      <label>
+                        Amount
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          value={manualAdjustmentEditor.amount}
+                          onChange={(event) =>
+                            setManualAdjustmentEditor((current) =>
+                              current === undefined
+                                ? current
+                                : { ...current, amount: event.target.value }
+                            )
+                          }
+                        />
+                      </label>
+                      <p>
+                        Use a positive amount to add points and a negative amount to deduct points.
+                      </p>
+                      <label>
+                        Note (optional)
+                        <input
+                          value={manualAdjustmentEditor.note}
+                          onChange={(event) =>
+                            setManualAdjustmentEditor((current) =>
+                              current === undefined
+                                ? current
+                                : { ...current, note: event.target.value }
+                            )
+                          }
+                        />
+                      </label>
+                      <div className="grading-apply-comment__actions">
+                        <button
+                          className="primary-action"
+                          type="submit"
+                          disabled={
+                            commentMutationStudentId === manualAdjustmentEditor.studentId ||
+                            commentMutationBlockedStudents.current.has(
+                              manualAdjustmentEditor.studentId
+                            ) ||
+                            manualAdjustmentEditor.rubricCategoryId === "" ||
+                            !result.rubric.some(
+                              (category) => category.id === manualAdjustmentEditor.rubricCategoryId
+                            ) ||
+                            manualAdjustmentEditor.amount.trim() === "" ||
+                            !Number.isFinite(Number(manualAdjustmentEditor.amount))
+                          }
+                        >
+                          {commentMutationStudentId === manualAdjustmentEditor.studentId
+                            ? "Saving…"
+                            : manualAdjustmentEditor.operation === "add"
+                              ? "Add adjustment"
+                              : "Save adjustment"}
+                        </button>
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          disabled={commentMutationStudentId === manualAdjustmentEditor.studentId}
+                          onClick={() => {
+                            setManualAdjustmentEditor(undefined);
+                            setCommentMutationError(undefined);
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+                  {deleteManualAdjustmentConfirmation !== undefined &&
+                  deleteManualAdjustmentConfirmation.studentId === snapshot.snapshot.studentId ? (
+                    <div
+                      className="grading-delete-comment-confirmation"
+                      role="alertdialog"
+                      aria-labelledby="delete-adjustment-heading"
+                    >
+                      <h4 id="delete-adjustment-heading">Delete manual adjustment?</h4>
+                      <p>
+                        {snapshot.snapshot.grade.categories.find(
+                          (category) =>
+                            category.id === deleteManualAdjustmentConfirmation.rubricCategoryId
+                        )?.name ?? deleteManualAdjustmentConfirmation.rubricCategoryId}
+                        {" · "}
+                        {signedAmount(deleteManualAdjustmentConfirmation.amount)}
+                      </p>
+                      {deleteManualAdjustmentConfirmation.note === undefined ? null : (
+                        <p>{deleteManualAdjustmentConfirmation.note}</p>
+                      )}
+                      <div className="grading-apply-comment__actions">
+                        <button
+                          className="danger-action"
+                          type="button"
+                          disabled={
+                            commentMutationStudentId ===
+                            deleteManualAdjustmentConfirmation.studentId
+                          }
+                          onClick={() => void confirmDeleteManualAdjustment()}
+                        >
+                          {commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
+                            ? "Deleting…"
+                            : "Confirm delete"}
+                        </button>
                         <button
                           className="secondary-action"
                           type="button"
                           disabled={
-                            student === undefined ||
-                            commentMutationStudentId !== undefined ||
-                            commentMutationBlockedStudents.current.has(student.studentId)
+                            commentMutationStudentId ===
+                            deleteManualAdjustmentConfirmation.studentId
                           }
-                          onClick={() => openApplyEditor(comment)}
+                          onClick={() => {
+                            setDeleteManualAdjustmentConfirmation(undefined);
+                            setCommentMutationError(undefined);
+                          }}
                         >
-                          Apply {comment.title}
+                          Cancel delete
                         </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+              </div>
             )}
-          </section>
-        </aside>
-      </div>
+            <GradingEvidencePanel
+              state={evidence}
+              commitHistory={commitHistory}
+              onReload={(studentId) => void loadEvidence(studentId)}
+              open={evidencePanelOpen}
+              onOpenChange={setEvidencePanelOpen}
+              focusRequest={evidenceFocusRequest}
+            />
+            <section className="grading-workflow-repair" aria-labelledby="workflow-repair-heading">
+              <h3 id="workflow-repair-heading">Workflow</h3>
+              <button
+                className="secondary-action"
+                type="button"
+                disabled={workflowRepair.status !== "ready"}
+                onClick={() => {
+                  if (workflowRepair.status === "ready")
+                    setWorkflowRepairConfirmation({
+                      studentId: workflowRepair.studentId,
+                      repositoryFullName: workflowRepair.repositoryFullName
+                    });
+                }}
+              >
+                {workflowRepair.status === "running"
+                  ? "Replacing workflow…"
+                  : "Replace workflow & run"}
+              </button>
+              {workflowRepair.status === "loading" ? (
+                <p aria-live="polite">Checking workflow repair availability…</p>
+              ) : workflowRepair.status === "unavailable" ? (
+                <p>{workflowRepair.message}</p>
+              ) : null}
+              {workflowRepairNotice === undefined ||
+              workflowRepairNotice.studentId !== student?.studentId ? null : (
+                <p
+                  role="status"
+                  className={`grading-panel-message grading-panel-message--${workflowRepairNotice.tone}`}
+                >
+                  {workflowRepairNotice.message}
+                </p>
+              )}
+              <button
+                className="secondary-action"
+                type="button"
+                disabled={
+                  bulkWorkflowRepairState === "running" ||
+                  window.graiderUI.repairGradingAssignmentWorkflows === undefined
+                }
+                onClick={() => setBulkWorkflowRepairConfirmation(true)}
+              >
+                {bulkWorkflowRepairState === "running"
+                  ? "Replacing workflows…"
+                  : "Replace workflows & run for all students"}
+              </button>
+              {bulkWorkflowRepairResult?.status === "success" ? (
+                <div role="status">
+                  <p>
+                    {bulkWorkflowRepairResult.counts.succeeded} succeeded ·{" "}
+                    {bulkWorkflowRepairResult.counts.failed} failed ·{" "}
+                    {bulkWorkflowRepairResult.counts.createdOrReplaced} replaced ·{" "}
+                    {bulkWorkflowRepairResult.counts.alreadyCurrent} already current ·{" "}
+                    {bulkWorkflowRepairResult.counts.dispatched} dispatched
+                  </p>
+                  {bulkWorkflowRepairResult.repositoryResults
+                    .filter((item) => item.status === "failed")
+                    .map((item) => (
+                      <p key={`${item.repository ?? item.studentIds.join("-")}`}>
+                        {item.repository ?? item.studentIds.join(", ")}:{" "}
+                        {item.message ?? "Workflow repair failed."}
+                      </p>
+                    ))}
+                </div>
+              ) : null}
+              <ConfirmationWithPreviewModal
+                isOpen={bulkWorkflowRepairConfirmation}
+                title="Replace workflows and start grading runs?"
+                summary={
+                  <p>
+                    Install or replace Graider's managed grade.yml where necessary and run grading
+                    for all mapped, authorized student repositories?
+                  </p>
+                }
+                acknowledgementLabel="I understand this replaces repository grading workflows."
+                confirmLabel="Replace workflows & run for all students"
+                onConfirm={confirmBulkWorkflowRepair}
+                onCancel={() => setBulkWorkflowRepairConfirmation(false)}
+              />
+              <ConfirmationWithPreviewModal
+                isOpen={
+                  workflowRepairConfirmation !== undefined &&
+                  workflowRepairConfirmation.studentId === student?.studentId
+                }
+                title="Replace workflow and start grading run?"
+                summary={
+                  <p>
+                    Replace .github/workflows/grade.yml in{" "}
+                    {workflowRepairConfirmation?.repositoryFullName} with the Graider-managed
+                    workflow and start a grading run?
+                  </p>
+                }
+                acknowledgementLabel="I understand this replaces the repository's grading workflow."
+                confirmLabel="Replace workflow & run"
+                onConfirm={confirmWorkflowRepair}
+                onCancel={() => setWorkflowRepairConfirmation(undefined)}
+              />
+            </section>
+            <section className="grading-comment-library" aria-labelledby="comment-library-heading">
+              <h3 id="comment-library-heading">Comment library</h3>
+              {commentMutationError === undefined ? null : (
+                <div className="grading-panel-message" role="alert">
+                  {commentMutationError}
+                </div>
+              )}
+              {commentEditor !== undefined && commentEditor.studentId === student?.studentId ? (
+                <form
+                  className="grading-apply-comment"
+                  aria-label={
+                    commentEditor.operation === "add"
+                      ? commentEditor.reusableCommentTitle === undefined
+                        ? "Add comment"
+                        : `Apply ${commentEditor.reusableCommentTitle}`
+                      : "Edit applied comment"
+                  }
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveCommentEditor();
+                  }}
+                >
+                  <h4>
+                    {commentEditor.operation === "add"
+                      ? commentEditor.reusableCommentTitle === undefined
+                        ? "Add comment"
+                        : `Apply ${commentEditor.reusableCommentTitle}`
+                      : "Edit applied comment"}
+                  </h4>
+                  <label>
+                    Title
+                    <input
+                      value={commentEditor.title}
+                      required={
+                        commentEditor.operation === "add" || commentEditor.hasPersistedTitle
+                      }
+                      onChange={(event) =>
+                        setCommentEditor((current) =>
+                          current === undefined
+                            ? current
+                            : { ...current, title: event.target.value }
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Comment
+                    <textarea
+                      value={commentEditor.text}
+                      onChange={(event) =>
+                        setCommentEditor((current) =>
+                          current === undefined ? current : { ...current, text: event.target.value }
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Deduction
+                    <input
+                      type="number"
+                      step="any"
+                      value={commentEditor.deduction}
+                      onChange={(event) =>
+                        setCommentEditor((current) =>
+                          current === undefined
+                            ? current
+                            : { ...current, deduction: event.target.value }
+                        )
+                      }
+                    />
+                  </label>
+                  <label htmlFor="grading-comment-rubric-category">Comment rubric category</label>
+                  <select
+                    id="grading-comment-rubric-category"
+                    value={commentEditor.rubricCategoryId}
+                    onChange={(event) =>
+                      setCommentEditor((current) =>
+                        current === undefined
+                          ? current
+                          : { ...current, rubricCategoryId: event.target.value }
+                      )
+                    }
+                  >
+                    <option value="">None</option>
+                    {commentEditor.rubricCategoryId !== "" &&
+                    !result.rubric.some(
+                      (category) => category.id === commentEditor.rubricCategoryId
+                    ) ? (
+                      <option value={commentEditor.rubricCategoryId} disabled>
+                        Unavailable category ({commentEditor.rubricCategoryId})
+                      </option>
+                    ) : null}
+                    {result.rubric.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                  <fieldset>
+                    <legend>Target</legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="comment-target"
+                        value="source"
+                        checked={commentEditor.targetMode === "source"}
+                        disabled={
+                          canonicalSourceTarget === undefined &&
+                          (commentEditor.operation === "add" ||
+                            commentEditor.sourceTarget === undefined)
+                        }
+                        onChange={() => {
+                          setCommentEditor((current) => {
+                            if (current === undefined) return current;
+                            if (current.operation === "add")
+                              return { ...current, targetMode: "source" };
+                            const sourceTarget = current.sourceTarget ?? canonicalSourceTarget;
+                            return sourceTarget === undefined
+                              ? current
+                              : { ...current, targetMode: "source", sourceTarget };
+                          });
+                        }}
+                      />
+                      Source
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="comment-target"
+                        value="general"
+                        checked={commentEditor.targetMode === "general"}
+                        onChange={() =>
+                          setCommentEditor((current) =>
+                            current === undefined ? current : { ...current, targetMode: "general" }
+                          )
+                        }
+                      />
+                      General
+                    </label>
+                  </fieldset>
+                  {commentEditor.targetMode === "source" ? (
+                    (commentEditor.operation === "edit"
+                      ? commentEditor.sourceTarget
+                      : canonicalSourceTarget) === undefined ? (
+                      <p>Select a valid source line or range, or choose General.</p>
+                    ) : (
+                      <p>
+                        Source target:{" "}
+                        {sourceTargetLabel(
+                          commentEditor.operation === "edit"
+                            ? (commentEditor.sourceTarget as CanonicalSourceRange)
+                            : (canonicalSourceTarget as CanonicalSourceRange)
+                        )}
+                      </p>
+                    )
+                  ) : (
+                    <p>This comment will apply to the overall submission.</p>
+                  )}
+                  {commentEditor.operation === "edit" && commentEditor.targetMode === "source" ? (
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      disabled={canonicalSourceTarget === undefined}
+                      onClick={() =>
+                        setCommentEditor((current) =>
+                          current?.operation === "edit" && canonicalSourceTarget !== undefined
+                            ? { ...current, sourceTarget: canonicalSourceTarget }
+                            : current
+                        )
+                      }
+                    >
+                      Use current selection
+                    </button>
+                  ) : null}
+                  <div className="grading-apply-comment__actions">
+                    <button
+                      className="primary-action"
+                      type="submit"
+                      disabled={
+                        commentMutationStudentId === commentEditor.studentId ||
+                        commentMutationBlockedStudents.current.has(commentEditor.studentId) ||
+                        (commentEditor.rubricCategoryId !== "" &&
+                          !result.rubric.some(
+                            (category) => category.id === commentEditor.rubricCategoryId
+                          )) ||
+                        (commentEditor.targetMode === "source" &&
+                          (commentEditor.operation === "edit"
+                            ? commentEditor.sourceTarget
+                            : canonicalSourceTarget) === undefined)
+                      }
+                    >
+                      {commentMutationStudentId === commentEditor.studentId
+                        ? commentEditor.operation === "add"
+                          ? "Applying…"
+                          : "Saving…"
+                        : commentEditor.operation === "add"
+                          ? "Apply comment"
+                          : "Save comment"}
+                    </button>
+                    <button
+                      className="secondary-action"
+                      type="button"
+                      disabled={commentMutationStudentId === commentEditor.studentId}
+                      onClick={() => {
+                        setCommentEditor(undefined);
+                        setCommentMutationError(undefined);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+              {commentLibrary.status === "loading" ? (
+                <p aria-live="polite">Loading shared comments…</p>
+              ) : commentLibrary.status === "failure" ? (
+                <div className="grading-panel-message" role="alert">
+                  {commentLibrary.message}
+                </div>
+              ) : (
+                <>
+                  <label>
+                    Search comments
+                    <input
+                      type="search"
+                      value={commentSearch}
+                      onChange={(event) => setCommentSearch(event.currentTarget.value)}
+                    />
+                  </label>
+                  {availableCommentTags.length === 0 ? null : (
+                    <fieldset className="grading-comment-tags">
+                      <legend>Filter by tags</legend>
+                      {availableCommentTags.map((tag) => (
+                        <label key={tag}>
+                          <input
+                            type="checkbox"
+                            checked={selectedCommentTags.includes(tag)}
+                            onChange={(event) => {
+                              const checked = event.currentTarget.checked;
+                              setSelectedCommentTags((current) =>
+                                checked
+                                  ? [...current, tag]
+                                  : current.filter((selectedTag) => selectedTag !== tag)
+                              );
+                            }}
+                          />
+                          {tag}
+                        </label>
+                      ))}
+                    </fieldset>
+                  )}
+                  {matchingComments.length === 0 ? (
+                    <p>No matching reusable comments.</p>
+                  ) : (
+                    <ul className="grading-comment-list" aria-label="Reusable comments">
+                      {matchingComments.map((comment) => (
+                        <li key={comment.id}>
+                          <strong>{comment.title}</strong>
+                          <p>{comment.text}</p>
+                          <p>Default adjustment: {comment.defaultDeduction}</p>
+                          {comment.defaultRubricCategoryId === undefined ? null : (
+                            <p>Default category: {comment.defaultRubricCategoryId}</p>
+                          )}
+                          {comment.tags.length === 0 ? null : (
+                            <p>Tags: {comment.tags.join(", ")}</p>
+                          )}
+                          <button
+                            className="secondary-action"
+                            type="button"
+                            disabled={
+                              student === undefined ||
+                              commentMutationStudentId !== undefined ||
+                              commentMutationBlockedStudents.current.has(student.studentId)
+                            }
+                            onClick={() => openApplyEditor(comment)}
+                          >
+                            Apply {comment.title}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </section>
+          </aside>
+        </div>
+      )}
       <footer className="grading-workspace__footer">
         <ul className="grading-workspace__footer-hints" aria-label="Keyboard shortcut hints">
           <li className="grading-workspace__footer-hint">
@@ -3577,7 +3644,7 @@ export const GradingWorkspacePage = ({
                   <KbdHint label="⏎" /> <span>Mark complete and go to next ungraded</span>
                 </div>
                 <div>
-                  <KbdHint label="P" /> <span>Publish or confirm publishing the report</span>
+                  <KbdHint label="P" /> <span>Open publish review</span>
                 </div>
                 <div>
                   <KbdHint label="Esc" /> <span>Close an open panel or dialog</span>

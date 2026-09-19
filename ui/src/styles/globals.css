@@ -1970,33 +1970,98 @@ h1 {
   margin: 4px 0;
 }
 
-.grading-bulk-publication {
-  border-top: 1px solid #d8dee4;
-  margin-top: 16px;
-  padding-top: 12px;
-}
-
-.grading-bulk-publication h3,
-.grading-bulk-publication p {
-  margin: 0 0 8px;
-}
-
-.grading-bulk-publication__selection {
-  display: grid;
-  gap: 6px;
-  max-height: 16rem;
+.grading-publish-review {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-3);
   overflow-y: auto;
 }
 
-.grading-bulk-publication__selection label {
-  align-items: center;
-  display: flex;
-  gap: 6px;
+.grading-publish-review__intro {
+  margin: 0;
+  color: var(--text-muted);
 }
 
-.grading-bulk-publication__results ul {
-  margin: 8px 0 0;
-  padding-left: 20px;
+.grading-publish-review__refresh-warning {
+  border-left: 4px solid #bf8700;
+  margin: 0;
+  padding-left: 10px;
+}
+
+.grading-publish-review__section {
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 0.5rem;
+  padding: var(--space-3);
+  background: var(--surface);
+}
+
+.grading-publish-review__section h3 {
+  margin: 0 0 8px;
+}
+
+.grading-publish-review__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.grading-publish-review__table th,
+.grading-publish-review__table td {
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-color, #d0d7de);
+}
+
+.grading-publish-review__outcome p {
+  margin: 0;
+}
+
+.grading-publish-review__outcome ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.grading-publish-review__outcome--warning {
+  color: #7d4e00;
+}
+
+.grading-publish-review__outcome--error {
+  color: #b91c1c;
+}
+
+.grading-publish-review__published-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.grading-publish-review__published-row {
+  color: var(--text-muted);
+}
+
+.grading-publish-review__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.grading-publish-review__footer p {
+  margin: 0;
+}
+
+.grading-publish-review__footer-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 .grading-score-total {
@@ -2433,6 +2498,11 @@ h1 {
   .grading-workspace__grid > aside,
   .grading-workspace__grid > section {
     overflow-y: visible;
+  }
+
+  .grading-publish-review__table {
+    display: block;
+    overflow-x: auto;
   }
 
   .grading-shortcut-groups {

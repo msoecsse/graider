@@ -217,73 +217,43 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace"));
   });
 
-  it("P opens the publish confirmation for a completed student and confirms it", async () => {
+  it("P opens the publish review screen, showing the completed student as ready to publish", async () => {
     const loadSnapshot = vi.fn().mockResolvedValue(snapshot("ada", "complete"));
     setApis({ loadSnapshot });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     await screen.findByTestId("mock-monaco");
-    await screen.findByRole("button", { name: "Publish Report" });
 
     fireEvent.keyDown(window, { key: "p" });
-    expect(
-      await screen.findByRole("dialog", { name: "Publish grading report?" })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Publish review" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select ada to publish" })).toBeChecked();
+  });
+
+  it("Escape cancels the publish review and returns to the grading grid", async () => {
+    setApis({});
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "p" });
+    expect(await screen.findByRole("heading", { name: "Publish review" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() =>
-      expect(
-        screen.queryByRole("dialog", { name: "Publish grading report?" })
-      ).not.toBeInTheDocument()
+      expect(screen.queryByRole("heading", { name: "Publish review" })).not.toBeInTheDocument()
     );
+    expect(screen.getByTestId("mock-monaco")).toBeInTheDocument();
   });
 
-  it("Enter does nothing while the publish confirmation is open, not the mark-complete one", async () => {
-    const loadSnapshot = vi.fn().mockResolvedValue(snapshot("ada", "complete"));
-    const markComplete = vi.fn();
-    const publishReport = vi.fn().mockResolvedValue({
-      status: "success",
-      studentId: "ada",
-      gradingStatus: "published",
-      reportPath: "grading/report.html",
-      remoteWrite: "created_or_updated",
-      warnings: []
-    });
-    setApis({ loadSnapshot, markComplete, publishReport });
+  it("suspends grading shortcuts while the publish review is open", async () => {
+    setApis({});
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     await screen.findByTestId("mock-monaco");
-    await screen.findByRole("button", { name: "Publish Report" });
 
     fireEvent.keyDown(window, { key: "p" });
-    expect(
-      await screen.findByRole("dialog", { name: "Publish grading report?" })
-    ).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Publish review" });
 
     fireEvent.keyDown(window, { key: "Enter" });
-
-    expect(markComplete).not.toHaveBeenCalled();
-    expect(publishReport).not.toHaveBeenCalled();
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Publish grading report?" })).toBeInTheDocument();
-  });
-
-  it("P does nothing while the mark-complete confirmation is open, not the publish one", async () => {
-    const markComplete = vi.fn();
-    const publishReport = vi.fn();
-    setApis({ markComplete, publishReport });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
-    await screen.findByTestId("mock-monaco");
-
-    fireEvent.keyDown(window, { key: "Enter" });
-    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Mark ada grading complete?");
-
-    fireEvent.keyDown(window, { key: "p" });
-
-    expect(markComplete).not.toHaveBeenCalled();
-    expect(publishReport).not.toHaveBeenCalled();
-    expect(
-      screen.queryByRole("dialog", { name: "Publish grading report?" })
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("alertdialog")).toHaveTextContent("Mark ada grading complete?");
+    expect(screen.getByRole("heading", { name: "Publish review" })).toBeInTheDocument();
   });
 
   it("C opens the add-comment editor once a source line is selected", async () => {
