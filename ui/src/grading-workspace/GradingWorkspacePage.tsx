@@ -590,8 +590,8 @@ export const GradingWorkspacePage = ({
   const [publishReviewRefreshFailedStudentIds, setPublishReviewRefreshFailedStudentIds] = useState<
     readonly string[]
   >([]);
-  const [commentMutationError, setCommentMutationError] = useState<string>();
-  const [commentMutationStudentId, setCommentMutationStudentId] = useState<string>();
+  const [gradingMutationError, setGradingMutationError] = useState<string>();
+  const [gradingMutationStudentId, setGradingMutationStudentId] = useState<string>();
   const [studentStatusOverrides, setStudentStatusOverrides] = useState<
     Readonly<Record<string, string>>
   >({});
@@ -618,7 +618,7 @@ export const GradingWorkspacePage = ({
   const autosaveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const viewStateSavePromises = useRef(new Map<string, Promise<void>>());
   const gradingMutationStudents = useRef(new Set<string>());
-  const commentMutationBlockedStudents = useRef(new Set<string>());
+  const gradingMutationBlockedStudents = useRef(new Set<string>());
   const autosaveBlockedStudents = useRef(new Set<string>());
   const mounted = useRef(true);
   currentStudentIdRef.current = currentStudentId;
@@ -662,7 +662,7 @@ export const GradingWorkspacePage = ({
           }
           if (saveResult.status === "submission_changed") {
             autosaveBlockedStudents.current.add(pending.studentId);
-            commentMutationBlockedStudents.current.add(pending.studentId);
+            gradingMutationBlockedStudents.current.add(pending.studentId);
             cancelPendingForStudent(pending.studentId);
           }
           setStudentWarning(pending.studentId, viewStateFailureMessage(saveResult));
@@ -691,7 +691,7 @@ export const GradingWorkspacePage = ({
   );
 
   const flushPendingViewState = useCallback(
-    async (studentId?: string, forceDuringCommentMutation = false): Promise<void> => {
+    async (studentId?: string, forceDuringGradingMutation = false): Promise<void> => {
       const studentIds =
         studentId === undefined
           ? [
@@ -711,7 +711,7 @@ export const GradingWorkspacePage = ({
           const pending = pendingViewStateSaves.current.get(pendingStudentId);
           if (
             pending !== undefined &&
-            (forceDuringCommentMutation || !gradingMutationStudents.current.has(pendingStudentId))
+            (forceDuringGradingMutation || !gradingMutationStudents.current.has(pendingStudentId))
           ) {
             pendingViewStateSaves.current.delete(pendingStudentId);
             await persistViewState({ studentId: pendingStudentId, viewState: pending });
@@ -1147,7 +1147,7 @@ export const GradingWorkspacePage = ({
       .then((value) => {
         if (snapshotRequestGeneration.current !== generation) return;
         if (value.status === "success" && value.studentId === studentId) {
-          commentMutationBlockedStudents.current.delete(studentId);
+          gradingMutationBlockedStudents.current.delete(studentId);
           setSnapshot({ status: "success", snapshot: value });
           setStudentStatusOverrides((current) =>
             current[studentId] === value.gradingStatus
@@ -1157,7 +1157,7 @@ export const GradingWorkspacePage = ({
           return;
         }
         if (value.status === "submission_changed") {
-          commentMutationBlockedStudents.current.add(studentId);
+          gradingMutationBlockedStudents.current.add(studentId);
           autosaveBlockedStudents.current.add(studentId);
           cancelPendingForStudent(studentId);
         }
@@ -1200,7 +1200,7 @@ export const GradingWorkspacePage = ({
     reportPublicationRequestGeneration.current += 1;
     reportPreviewRequestGeneration.current += 1;
     setReportPreview({ status: "idle" });
-    setCommentMutationError(undefined);
+    setGradingMutationError(undefined);
     evidencePanelPriorFocusRef.current = null;
   }, [currentStudentId]);
 
@@ -1265,7 +1265,7 @@ export const GradingWorkspacePage = ({
         }
         if (viewStateResult.status === "submission_changed") {
           autosaveBlockedStudents.current.add(selectedStudent.studentId);
-          commentMutationBlockedStudents.current.add(selectedStudent.studentId);
+          gradingMutationBlockedStudents.current.add(selectedStudent.studentId);
           cancelPendingForStudent(selectedStudent.studentId);
         }
         setStudentWarning(selectedStudent.studentId, viewStateFailureMessage(viewStateResult));
@@ -1354,14 +1354,14 @@ export const GradingWorkspacePage = ({
   // regardless of which student ends up selected by the time it completes.
   const hasUnsavedCommentDraft = (): boolean =>
     commentEditor !== undefined &&
-    commentMutationStudentId !== commentEditor.studentId &&
+    gradingMutationStudentId !== commentEditor.studentId &&
     commentEditorBaseline.current !== undefined &&
     commentEditorContentKey(commentEditor) !==
       commentEditorContentKey(commentEditorBaseline.current);
 
   const hasUnsavedManualAdjustmentDraft = (): boolean =>
     manualAdjustmentEditor !== undefined &&
-    commentMutationStudentId !== manualAdjustmentEditor.studentId &&
+    gradingMutationStudentId !== manualAdjustmentEditor.studentId &&
     manualAdjustmentEditorBaseline.current !== undefined &&
     manualAdjustmentEditorContentKey(manualAdjustmentEditor) !==
       manualAdjustmentEditorContentKey(manualAdjustmentEditorBaseline.current);
@@ -1377,7 +1377,7 @@ export const GradingWorkspacePage = ({
     setReportPublicationConfirmation(undefined);
     setWorkflowRepairConfirmation(undefined);
     setBulkWorkflowRepairConfirmation(false);
-    setCommentMutationError(undefined);
+    setGradingMutationError(undefined);
   };
 
   // Shared by every action that must not silently clobber a dirty draft:
@@ -1585,35 +1585,35 @@ export const GradingWorkspacePage = ({
   ): Promise<boolean> => {
     if (studentId !== currentStudentIdRef.current || gradingMutationStudents.current.has(studentId))
       return false;
-    if (commentMutationBlockedStudents.current.has(studentId)) {
-      setCommentMutationError(snapshotSubmissionChangedWarning);
+    if (gradingMutationBlockedStudents.current.has(studentId)) {
+      setGradingMutationError(snapshotSubmissionChangedWarning);
       return false;
     }
     const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
     if (loadSnapshot === undefined) {
-      setCommentMutationError("Updating grading comments is unavailable.");
+      setGradingMutationError("Updating grading comments is unavailable.");
       return false;
     }
     gradingMutationStudents.current.add(studentId);
-    setCommentMutationStudentId(studentId);
-    setCommentMutationError(undefined);
+    setGradingMutationStudentId(studentId);
+    setGradingMutationError(undefined);
     let commentWasSaved = false;
     try {
       await flushPendingViewState(studentId, true);
-      if (commentMutationBlockedStudents.current.has(studentId)) {
+      if (gradingMutationBlockedStudents.current.has(studentId)) {
         if (currentStudentIdRef.current === studentId)
-          setCommentMutationError(snapshotSubmissionChangedWarning);
+          setGradingMutationError(snapshotSubmissionChangedWarning);
         return false;
       }
       const mutationResult = await mutate();
       if (mutationResult.status !== "success") {
         if (mutationResult.status === "submission_changed") {
-          commentMutationBlockedStudents.current.add(studentId);
+          gradingMutationBlockedStudents.current.add(studentId);
           autosaveBlockedStudents.current.add(studentId);
           cancelPendingForStudent(studentId);
         }
         if (currentStudentIdRef.current === studentId)
-          setCommentMutationError(gradingMutationFailureMessage(mutationResult));
+          setGradingMutationError(gradingMutationFailureMessage(mutationResult));
         return false;
       }
       commentWasSaved = true;
@@ -1623,12 +1623,12 @@ export const GradingWorkspacePage = ({
       const refreshed = await loadSnapshot({ ...request, studentId });
       if (refreshed.status !== "success" || refreshed.studentId !== studentId) {
         if (refreshed.status === "submission_changed") {
-          commentMutationBlockedStudents.current.add(studentId);
+          gradingMutationBlockedStudents.current.add(studentId);
           autosaveBlockedStudents.current.add(studentId);
           cancelPendingForStudent(studentId);
         }
         if (currentStudentIdRef.current === studentId)
-          setCommentMutationError(
+          setGradingMutationError(
             refreshed.status === "submission_changed"
               ? snapshotSubmissionChangedWarning
               : "The grading change was saved, but current grading details could not be reloaded safely."
@@ -1643,12 +1643,12 @@ export const GradingWorkspacePage = ({
         snapshotRequestGeneration.current += 1;
         setSnapshot({ status: "success", snapshot: refreshed });
         closeMutationEditor();
-        setCommentMutationError(undefined);
+        setGradingMutationError(undefined);
       }
       return true;
     } catch {
       if (currentStudentIdRef.current === studentId)
-        setCommentMutationError(
+        setGradingMutationError(
           commentWasSaved
             ? "The grading change was saved, but current grading details could not be reloaded safely."
             : "The grading state could not be updated safely."
@@ -1656,7 +1656,7 @@ export const GradingWorkspacePage = ({
       return false;
     } finally {
       gradingMutationStudents.current.delete(studentId);
-      setCommentMutationStudentId((current) => (current === studentId ? undefined : current));
+      setGradingMutationStudentId((current) => (current === studentId ? undefined : current));
       void flushPendingViewState(studentId);
     }
   };
@@ -1671,26 +1671,26 @@ export const GradingWorkspacePage = ({
     const deduction = Number(commentEditor.deduction);
     const title = commentEditor.title.trim();
     if (title === "" && (commentEditor.operation === "add" || commentEditor.hasPersistedTitle)) {
-      setCommentMutationError("Comment title is required.");
+      setGradingMutationError("Comment title is required.");
       return;
     }
     if (commentEditor.text.trim() === "") {
-      setCommentMutationError("Comment text is required.");
+      setGradingMutationError("Comment text is required.");
       return;
     }
     if (commentEditor.deduction.trim() === "" || !Number.isFinite(deduction)) {
-      setCommentMutationError("Deduction must be a finite number.");
+      setGradingMutationError("Deduction must be a finite number.");
       return;
     }
     if (deduction < 0) {
-      setCommentMutationError("Deduction must be zero or greater.");
+      setGradingMutationError("Deduction must be zero or greater.");
       return;
     }
     if (
       commentEditor.rubricCategoryId !== "" &&
       !result.rubric.some((category) => category.id === commentEditor.rubricCategoryId)
     ) {
-      setCommentMutationError("Select a configured rubric category or None.");
+      setGradingMutationError("Select a configured rubric category or None.");
       return;
     }
     const sourceLocation =
@@ -1700,7 +1700,7 @@ export const GradingWorkspacePage = ({
           : canonicalSourceTarget
         : undefined;
     if (commentEditor.targetMode === "source" && sourceLocation === undefined) {
-      setCommentMutationError("Select a valid source line or range, or choose General.");
+      setGradingMutationError("Select a valid source line or range, or choose General.");
       return;
     }
     const studentId = commentEditor.studentId;
@@ -1708,7 +1708,7 @@ export const GradingWorkspacePage = ({
     if (commentEditor.operation === "add") {
       const addComment = window.graiderUI.addGradingStudentComment;
       if (addComment === undefined) {
-        setCommentMutationError("Applying grading comments is unavailable.");
+        setGradingMutationError("Applying grading comments is unavailable.");
         return;
       }
       const editor = commentEditor;
@@ -1734,7 +1734,7 @@ export const GradingWorkspacePage = ({
     }
     const editComment = window.graiderUI.editGradingStudentComment;
     if (editComment === undefined) {
-      setCommentMutationError("Editing grading comments is unavailable.");
+      setGradingMutationError("Editing grading comments is unavailable.");
       return;
     }
     const editor = commentEditor;
@@ -1761,7 +1761,7 @@ export const GradingWorkspacePage = ({
       return;
     const deleteComment = window.graiderUI.deleteGradingStudentComment;
     if (deleteComment === undefined) {
-      setCommentMutationError("Deleting grading comments is unavailable.");
+      setGradingMutationError("Deleting grading comments is unavailable.");
       return;
     }
     const confirmation = deleteConfirmation;
@@ -1782,18 +1782,18 @@ export const GradingWorkspacePage = ({
     )
       return;
     if (manualAdjustmentEditor.rubricCategoryId === "") {
-      setCommentMutationError("Select a rubric category.");
+      setGradingMutationError("Select a rubric category.");
       return;
     }
     if (
       !result.rubric.some((category) => category.id === manualAdjustmentEditor.rubricCategoryId)
     ) {
-      setCommentMutationError("Select a configured rubric category.");
+      setGradingMutationError("Select a configured rubric category.");
       return;
     }
     const amount = Number(manualAdjustmentEditor.amount);
     if (manualAdjustmentEditor.amount.trim() === "" || !Number.isFinite(amount)) {
-      setCommentMutationError("Adjustment amount must be a finite number.");
+      setGradingMutationError("Adjustment amount must be a finite number.");
       return;
     }
     const studentId = manualAdjustmentEditor.studentId;
@@ -1802,7 +1802,7 @@ export const GradingWorkspacePage = ({
     if (manualAdjustmentEditor.operation === "add") {
       const addAdjustment = window.graiderUI.addGradingStudentManualAdjustment;
       if (addAdjustment === undefined) {
-        setCommentMutationError("Adding manual adjustments is unavailable.");
+        setGradingMutationError("Adding manual adjustments is unavailable.");
         return;
       }
       const editor = manualAdjustmentEditor;
@@ -1827,7 +1827,7 @@ export const GradingWorkspacePage = ({
     }
     const editAdjustment = window.graiderUI.editGradingStudentManualAdjustment;
     if (editAdjustment === undefined) {
-      setCommentMutationError("Editing manual adjustments is unavailable.");
+      setGradingMutationError("Editing manual adjustments is unavailable.");
       return;
     }
     const editor = manualAdjustmentEditor;
@@ -1858,7 +1858,7 @@ export const GradingWorkspacePage = ({
       return;
     const deleteAdjustment = window.graiderUI.deleteGradingStudentManualAdjustment;
     if (deleteAdjustment === undefined) {
-      setCommentMutationError("Deleting manual adjustments is unavailable.");
+      setGradingMutationError("Deleting manual adjustments is unavailable.");
       return;
     }
     const confirmation = deleteManualAdjustmentConfirmation;
@@ -1885,7 +1885,7 @@ export const GradingWorkspacePage = ({
       return false;
     const markComplete = window.graiderUI.markGradingStudentComplete;
     if (markComplete === undefined) {
-      setCommentMutationError("Marking grading complete is unavailable.");
+      setGradingMutationError("Marking grading complete is unavailable.");
       return false;
     }
     const confirmation = markCompleteConfirmation;
@@ -1915,13 +1915,13 @@ export const GradingWorkspacePage = ({
         return false;
       if (refreshed.status !== "success" || refreshed.studentId !== studentId) {
         if (refreshed.status === "submission_changed") {
-          commentMutationBlockedStudents.current.add(studentId);
+          gradingMutationBlockedStudents.current.add(studentId);
           autosaveBlockedStudents.current.add(studentId);
           cancelPendingForStudent(studentId);
         }
         return false;
       }
-      commentMutationBlockedStudents.current.delete(studentId);
+      gradingMutationBlockedStudents.current.delete(studentId);
       setStudentStatusOverrides((current) => ({
         ...current,
         [studentId]: refreshed.gradingStatus
@@ -1995,7 +1995,7 @@ export const GradingWorkspacePage = ({
       return;
     const studentId = reportPublicationConfirmation.studentId;
     if (gradingMutationStudents.current.has(studentId)) return;
-    if (commentMutationBlockedStudents.current.has(studentId)) {
+    if (gradingMutationBlockedStudents.current.has(studentId)) {
       setReportPublicationNotice({
         studentId,
         tone: "warning",
@@ -2022,14 +2022,14 @@ export const GradingWorkspacePage = ({
       reportPublicationRequestGeneration.current === publicationGeneration &&
       currentStudentIdRef.current === studentId;
     gradingMutationStudents.current.add(studentId);
-    setCommentMutationStudentId(studentId);
+    setGradingMutationStudentId(studentId);
     setReportPublicationStudentId(studentId);
     setReportPublicationNotice(undefined);
 
     try {
       await flushPendingViewState(studentId, true);
       if (!isCurrentPublication()) return;
-      if (commentMutationBlockedStudents.current.has(studentId)) {
+      if (gradingMutationBlockedStudents.current.has(studentId)) {
         setReportPublicationNotice({
           studentId,
           tone: "warning",
@@ -2096,7 +2096,7 @@ export const GradingWorkspacePage = ({
       if (publicationResult.status === "submission_changed") {
         const remoteReportPublished =
           "remoteReportPublished" in publicationResult && publicationResult.remoteReportPublished;
-        commentMutationBlockedStudents.current.add(studentId);
+        gradingMutationBlockedStudents.current.add(studentId);
         autosaveBlockedStudents.current.add(studentId);
         cancelPendingForStudent(studentId);
         await refreshSnapshotAfterPublication(studentId, publicationGeneration);
@@ -2132,7 +2132,7 @@ export const GradingWorkspacePage = ({
         });
     } finally {
       gradingMutationStudents.current.delete(studentId);
-      setCommentMutationStudentId((current) => (current === studentId ? undefined : current));
+      setGradingMutationStudentId((current) => (current === studentId ? undefined : current));
       setReportPublicationStudentId((current) => (current === studentId ? undefined : current));
       if (reportPublicationRequestGeneration.current === publicationGeneration)
         setReportPublicationConfirmation(undefined);
@@ -2182,7 +2182,7 @@ export const GradingWorkspacePage = ({
     if (studentIds.length === 0 || publishReviewRunning) return;
     const publishReports = window.graiderUI.bulkPublishGradingStudentReports;
     if (publishReports === undefined) {
-      setCommentMutationError("Bulk report publication is unavailable.");
+      setGradingMutationError("Bulk report publication is unavailable.");
       return;
     }
     const generation = bulkPublicationRequestGeneration.current + 1;
@@ -2192,10 +2192,10 @@ export const GradingWorkspacePage = ({
     setPublishReviewRunning(true);
     setPublishReviewResults(undefined);
     setPublishReviewRefreshFailedStudentIds([]);
-    setCommentMutationError(undefined);
+    setGradingMutationError(undefined);
     setReportPublicationConfirmation(undefined);
     studentIds.forEach((studentId) => gradingMutationStudents.current.add(studentId));
-    setCommentMutationStudentId(studentIds[0]);
+    setGradingMutationStudentId(studentIds[0]);
     const selectedStudentId = currentStudentIdRef.current;
 
     try {
@@ -2252,12 +2252,12 @@ export const GradingWorkspacePage = ({
       }
     } catch {
       if (isCurrentPublishReview())
-        setCommentMutationError(
+        setGradingMutationError(
           "Bulk report publication could not be completed safely. Individual results are unavailable."
         );
     } finally {
       studentIds.forEach((studentId) => gradingMutationStudents.current.delete(studentId));
-      setCommentMutationStudentId((current) =>
+      setGradingMutationStudentId((current) =>
         current !== undefined && studentIds.includes(current) ? undefined : current
       );
       if (isCurrentPublishReview()) setPublishReviewRunning(false);
@@ -2395,8 +2395,8 @@ export const GradingWorkspacePage = ({
       currentStudentId !== undefined &&
       (currentEffectiveStatus === "not_started" || currentEffectiveStatus === "in_progress") &&
       !publishReviewRunning &&
-      commentMutationStudentId === undefined &&
-      !commentMutationBlockedStudents.current.has(currentStudentId)
+      gradingMutationStudentId === undefined &&
+      !gradingMutationBlockedStudents.current.has(currentStudentId)
     ) {
       openMarkCompleteConfirmation(currentStudentId);
     }
@@ -2404,8 +2404,8 @@ export const GradingWorkspacePage = ({
   const applyReusableCommentByPosition = (position: number): void => {
     if (
       currentStudentId === undefined ||
-      commentMutationStudentId !== undefined ||
-      commentMutationBlockedStudents.current.has(currentStudentId)
+      gradingMutationStudentId !== undefined ||
+      gradingMutationBlockedStudents.current.has(currentStudentId)
     )
       return;
     const comment = matchingComments[position - 1];
@@ -2423,27 +2423,27 @@ export const GradingWorkspacePage = ({
     }
     if (commentEditor !== undefined) {
       setCommentEditor(undefined);
-      setCommentMutationError(undefined);
+      setGradingMutationError(undefined);
       return;
     }
     if (deleteConfirmation !== undefined) {
       setDeleteConfirmation(undefined);
-      setCommentMutationError(undefined);
+      setGradingMutationError(undefined);
       return;
     }
     if (manualAdjustmentEditor !== undefined) {
       setManualAdjustmentEditor(undefined);
-      setCommentMutationError(undefined);
+      setGradingMutationError(undefined);
       return;
     }
     if (deleteManualAdjustmentConfirmation !== undefined) {
       setDeleteManualAdjustmentConfirmation(undefined);
-      setCommentMutationError(undefined);
+      setGradingMutationError(undefined);
       return;
     }
     if (markCompleteConfirmation !== undefined) {
       setMarkCompleteConfirmation(undefined);
-      setCommentMutationError(undefined);
+      setGradingMutationError(undefined);
       return;
     }
     if (reportPreview.status === "success") {
@@ -2906,8 +2906,8 @@ export const GradingWorkspacePage = ({
                     type="button"
                     disabled={
                       canonicalSourceTarget === undefined ||
-                      commentMutationStudentId !== undefined ||
-                      commentMutationBlockedStudents.current.has(source.source.studentId)
+                      gradingMutationStudentId !== undefined ||
+                      gradingMutationBlockedStudents.current.has(source.source.studentId)
                     }
                     onClick={openAddCommentEditor}
                   >
@@ -2950,8 +2950,8 @@ export const GradingWorkspacePage = ({
                     type="button"
                     disabled={
                       publishReviewRunning ||
-                      commentMutationStudentId !== undefined ||
-                      commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                      gradingMutationStudentId !== undefined ||
+                      gradingMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
                     }
                     onClick={() => openMarkCompleteConfirmation(snapshot.snapshot.studentId)}
                   >
@@ -2981,8 +2981,8 @@ export const GradingWorkspacePage = ({
                       currentEffectiveStatus === "published" ? "secondary-action" : "primary-action"
                     }
                     disabled={
-                      commentMutationStudentId !== undefined ||
-                      commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                      gradingMutationStudentId !== undefined ||
+                      gradingMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
                     }
                     onClick={() =>
                       openReportPublicationConfirmation(
@@ -3044,7 +3044,7 @@ export const GradingWorkspacePage = ({
                     <p>This will write the completed grading report to the student's repository.</p>
                   )
                 }
-                confirmDisabled={publishReviewRunning || commentMutationStudentId !== undefined}
+                confirmDisabled={publishReviewRunning || gradingMutationStudentId !== undefined}
                 confirmLabel={
                   reportPublicationConfirmation?.operation === "republish"
                     ? "Confirm Republish Report"
@@ -3108,20 +3108,20 @@ export const GradingWorkspacePage = ({
                     <button
                       className="primary-action"
                       type="button"
-                      disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
+                      disabled={gradingMutationStudentId === markCompleteConfirmation.studentId}
                       onClick={() => void confirmMarkComplete()}
                     >
-                      {commentMutationStudentId === markCompleteConfirmation.studentId
+                      {gradingMutationStudentId === markCompleteConfirmation.studentId
                         ? "Marking Complete…"
                         : "Confirm Mark Complete"}
                     </button>
                     <button
                       className="secondary-action"
                       type="button"
-                      disabled={commentMutationStudentId === markCompleteConfirmation.studentId}
+                      disabled={gradingMutationStudentId === markCompleteConfirmation.studentId}
                       onClick={() => {
                         setMarkCompleteConfirmation(undefined);
-                        setCommentMutationError(undefined);
+                        setGradingMutationError(undefined);
                       }}
                     >
                       Cancel marking complete
@@ -3181,8 +3181,8 @@ export const GradingWorkspacePage = ({
                             type="button"
                             aria-label={`Edit comment: ${comment.text}`}
                             disabled={
-                              commentMutationStudentId !== undefined ||
-                              commentMutationBlockedStudents.current.has(
+                              gradingMutationStudentId !== undefined ||
+                              gradingMutationBlockedStudents.current.has(
                                 snapshot.snapshot.studentId
                               )
                             }
@@ -3195,8 +3195,8 @@ export const GradingWorkspacePage = ({
                             type="button"
                             aria-label={`Delete comment: ${comment.text}`}
                             disabled={
-                              commentMutationStudentId !== undefined ||
-                              commentMutationBlockedStudents.current.has(
+                              gradingMutationStudentId !== undefined ||
+                              gradingMutationBlockedStudents.current.has(
                                 snapshot.snapshot.studentId
                               )
                             }
@@ -3228,20 +3228,20 @@ export const GradingWorkspacePage = ({
                       <button
                         className="danger-action"
                         type="button"
-                        disabled={commentMutationStudentId === deleteConfirmation.studentId}
+                        disabled={gradingMutationStudentId === deleteConfirmation.studentId}
                         onClick={() => void confirmDeleteComment()}
                       >
-                        {commentMutationStudentId === deleteConfirmation.studentId
+                        {gradingMutationStudentId === deleteConfirmation.studentId
                           ? "Deleting comment…"
                           : "Confirm deleting comment"}
                       </button>
                       <button
                         className="secondary-action"
                         type="button"
-                        disabled={commentMutationStudentId === deleteConfirmation.studentId}
+                        disabled={gradingMutationStudentId === deleteConfirmation.studentId}
                         onClick={() => {
                           setDeleteConfirmation(undefined);
-                          setCommentMutationError(undefined);
+                          setGradingMutationError(undefined);
                         }}
                       >
                         Cancel deleting comment
@@ -3257,8 +3257,8 @@ export const GradingWorkspacePage = ({
                   type="button"
                   disabled={
                     result.rubric.length === 0 ||
-                    commentMutationStudentId !== undefined ||
-                    commentMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                    gradingMutationStudentId !== undefined ||
+                    gradingMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
                   }
                   onClick={openAddManualAdjustmentEditor}
                 >
@@ -3287,8 +3287,8 @@ export const GradingWorkspacePage = ({
                             type="button"
                             aria-label={`Edit adjustment: ${adjustment.rubricCategoryId}`}
                             disabled={
-                              commentMutationStudentId !== undefined ||
-                              commentMutationBlockedStudents.current.has(
+                              gradingMutationStudentId !== undefined ||
+                              gradingMutationBlockedStudents.current.has(
                                 snapshot.snapshot.studentId
                               )
                             }
@@ -3301,8 +3301,8 @@ export const GradingWorkspacePage = ({
                             type="button"
                             aria-label={`Delete adjustment: ${adjustment.rubricCategoryId}`}
                             disabled={
-                              commentMutationStudentId !== undefined ||
-                              commentMutationBlockedStudents.current.has(
+                              gradingMutationStudentId !== undefined ||
+                              gradingMutationBlockedStudents.current.has(
                                 snapshot.snapshot.studentId
                               )
                             }
@@ -3401,8 +3401,8 @@ export const GradingWorkspacePage = ({
                         className="primary-action"
                         type="submit"
                         disabled={
-                          commentMutationStudentId === manualAdjustmentEditor.studentId ||
-                          commentMutationBlockedStudents.current.has(
+                          gradingMutationStudentId === manualAdjustmentEditor.studentId ||
+                          gradingMutationBlockedStudents.current.has(
                             manualAdjustmentEditor.studentId
                           ) ||
                           manualAdjustmentEditor.rubricCategoryId === "" ||
@@ -3413,7 +3413,7 @@ export const GradingWorkspacePage = ({
                           !Number.isFinite(Number(manualAdjustmentEditor.amount))
                         }
                       >
-                        {commentMutationStudentId === manualAdjustmentEditor.studentId
+                        {gradingMutationStudentId === manualAdjustmentEditor.studentId
                           ? "Saving…"
                           : manualAdjustmentEditor.operation === "add"
                             ? "Save new adjustment"
@@ -3422,10 +3422,10 @@ export const GradingWorkspacePage = ({
                       <button
                         className="secondary-action"
                         type="button"
-                        disabled={commentMutationStudentId === manualAdjustmentEditor.studentId}
+                        disabled={gradingMutationStudentId === manualAdjustmentEditor.studentId}
                         onClick={() => {
                           setManualAdjustmentEditor(undefined);
-                          setCommentMutationError(undefined);
+                          setGradingMutationError(undefined);
                         }}
                       >
                         Cancel adjustment
@@ -3457,11 +3457,11 @@ export const GradingWorkspacePage = ({
                         className="danger-action"
                         type="button"
                         disabled={
-                          commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
+                          gradingMutationStudentId === deleteManualAdjustmentConfirmation.studentId
                         }
                         onClick={() => void confirmDeleteManualAdjustment()}
                       >
-                        {commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
+                        {gradingMutationStudentId === deleteManualAdjustmentConfirmation.studentId
                           ? "Deleting adjustment…"
                           : "Confirm deleting adjustment"}
                       </button>
@@ -3469,11 +3469,11 @@ export const GradingWorkspacePage = ({
                         className="secondary-action"
                         type="button"
                         disabled={
-                          commentMutationStudentId === deleteManualAdjustmentConfirmation.studentId
+                          gradingMutationStudentId === deleteManualAdjustmentConfirmation.studentId
                         }
                         onClick={() => {
                           setDeleteManualAdjustmentConfirmation(undefined);
-                          setCommentMutationError(undefined);
+                          setGradingMutationError(undefined);
                         }}
                       >
                         Cancel deleting adjustment
@@ -3585,9 +3585,9 @@ export const GradingWorkspacePage = ({
           </section>
           <section className="grading-comment-library" aria-labelledby="comment-library-heading">
             <h3 id="comment-library-heading">Comment library</h3>
-            {commentMutationError === undefined ? null : (
+            {gradingMutationError === undefined ? null : (
               <div className="grading-panel-message" role="alert">
-                {commentMutationError}
+                {gradingMutationError}
               </div>
             )}
             {commentEditor !== undefined && commentEditor.studentId === student?.studentId ? (
@@ -3758,8 +3758,8 @@ export const GradingWorkspacePage = ({
                     className="primary-action"
                     type="submit"
                     disabled={
-                      commentMutationStudentId === commentEditor.studentId ||
-                      commentMutationBlockedStudents.current.has(commentEditor.studentId) ||
+                      gradingMutationStudentId === commentEditor.studentId ||
+                      gradingMutationBlockedStudents.current.has(commentEditor.studentId) ||
                       (commentEditor.rubricCategoryId !== "" &&
                         !result.rubric.some(
                           (category) => category.id === commentEditor.rubricCategoryId
@@ -3770,7 +3770,7 @@ export const GradingWorkspacePage = ({
                           : canonicalSourceTarget) === undefined)
                     }
                   >
-                    {commentMutationStudentId === commentEditor.studentId
+                    {gradingMutationStudentId === commentEditor.studentId
                       ? commentEditor.operation === "add"
                         ? "Applying…"
                         : "Saving…"
@@ -3781,10 +3781,10 @@ export const GradingWorkspacePage = ({
                   <button
                     className="secondary-action"
                     type="button"
-                    disabled={commentMutationStudentId === commentEditor.studentId}
+                    disabled={gradingMutationStudentId === commentEditor.studentId}
                     onClick={() => {
                       setCommentEditor(undefined);
-                      setCommentMutationError(undefined);
+                      setGradingMutationError(undefined);
                     }}
                   >
                     Cancel comment
@@ -3848,8 +3848,8 @@ export const GradingWorkspacePage = ({
                           type="button"
                           disabled={
                             student === undefined ||
-                            commentMutationStudentId !== undefined ||
-                            commentMutationBlockedStudents.current.has(student.studentId)
+                            gradingMutationStudentId !== undefined ||
+                            gradingMutationBlockedStudents.current.has(student.studentId)
                           }
                           onClick={() => openApplyEditor(comment)}
                         >

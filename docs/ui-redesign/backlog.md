@@ -80,7 +80,7 @@ Do this before PR6b, which rewrites one of the two call sites.
 
 ---
 
-## 4. `commentMutationStudentId` is misnamed — **Worth fixing**
+## 4. `commentMutationStudentId` is misnamed — **Resolved**
 
 Declared at `GradingWorkspacePage.tsx:594`, but it is set by the publish path
 (~2198) and the bulk path (~2260) as well. It is a general grading-mutation
@@ -89,6 +89,17 @@ draft guard.
 
 A variable named for one thing that tracks three will eventually cause a real
 bug. Pure rename, no behaviour change.
+
+Fixed: renamed to `gradingMutationStudentId`/`setGradingMutationStudentId`.
+Three sibling identifiers had the identical problem and were renamed too:
+`commentMutationError` → `gradingMutationError`, `commentMutationBlockedStudents`
+→ `gradingMutationBlockedStudents`, and the `flushPendingViewState` parameter
+`forceDuringCommentMutation` → `forceDuringGradingMutation` — all four are set
+or read from the comment, manual-adjustment, single-publish, and bulk-publish
+paths alike. Audited the rest of the file for the same pattern (every
+comment-, manual-adjustment-, publish-, workflow-repair-, and
+mark-complete-prefixed name); found nothing else mis-scoped. Pure rename —
+both suites unchanged (1024 root / 718 UI), no test needed changing.
 
 ---
 
@@ -186,10 +197,10 @@ screen by screen.
 ## Suggested order
 
 1. Item 1 — grading status aggregate (blocker for PR6b)
-2. Item 2 — CI runs UI checks, plus the `/private/tmp` fix
-3. Item 3 — shared status-mapping module
-4. Item 4 — rename `commentMutationStudentId`
-5. Item 6 — decide the two-primary-actions question
-6. Then PR6b
+2. Item 3 — shared status-mapping module
+3. Item 6 — decide the two-primary-actions question
+4. Then PR6b
+
+Items 2, 4, and 9 are resolved and no longer part of this sequence.
 
 Items 5, 7, 8, 10 can wait until after the redesign.
