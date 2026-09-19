@@ -11,29 +11,79 @@ Status key: **Blocker** · **Should fix** · **Worth fixing** · **Optional** ·
 
 ---
 
-## 1. No roster-wide grading status aggregate — **Blocker**
+## 1. Assignment detail has no roster-wide grading status source — **Blocker**
 
-`GradingState` persists a per-student grading status on disk, and
-`projectGradingStudent` reads one student at a time. Nothing aggregates across
-a roster.
+**Corrected 2026-09 — the original framing of this item was wrong.** A
+roster-wide aggregate already exists: `resolveGradingWorkspaceContext`
+(`src/grading/grading-workspace-context.ts`) takes a roster and returns
+every student's `gradingStatus` (`not_started` / `in_progress` / `complete`
+/ `published`) in one call. It is cheap — `loadGradingState` per student is
+a synchronous local JSON file read, no network, no subprocess; 24 reads for
+a 24-student roster is negligible. The grading workspace already uses it
+this way: `prepareGradingWorkspace` returns it once at workspace-open, and
+the workspace's status counts and filter pills read that field directly
+(`effectiveGradingStatus`), not from per-student snapshot loads. The
+previous claim that the workspace "works around" a missing aggregate by
+loading every student individually was wrong — the publish review's
+concurrency cap of 5 exists for a different, still-real reason (below), not
+because this aggregate was missing.
 
-Consequences:
+What's actually true, and what still blocks PR6b:
 
-- `AssignmentDetailPage` cannot tell "submissions arriving" from "all graded"
-  from "everything published". PR6a collapsed the primary action to a plain
-  "Continue grading" because of this.
-- **PR6b's lifecycle strip cannot be built.** Section 5.3 specifies
-  `Grading N of M done` and `Published N of M sent`; neither number exists.
-- The grading workspace works around it by loading every student individually,
-  which is why the publish review needed a concurrency cap of 5 to avoid
-  spawning one `git` process per student.
+- **No CLI command exposes this — there isn't a CLI command involved at
+  all.** The path is `window.graiderUI.prepareGradingWorkspace` → IPC
+  channel `graider-ui:grading-workspace:prepare` → `ipcMain.handle` in
+  `main.ts` → `gradingWorkspaceService.ts` → a bundled backend module
+  (`gradingWorkspaceBackend.cjs`, built straight from
+  `grading-workspace-context.ts` by `ui/scripts/build-template-sync.mjs`)
+  loaded in-process via `require()`. This is the same established pattern
+  used for ~13 other grading-workspace backends (comments, manual
+  adjustments, workflow repair, …) — not a novel or hacky path, just not
+  the CLI-subprocess-JSON pattern the rest of the architecture doc
+  describes.
+- **The roster it resolves is scoped to the current faculty member's
+  assigned sections, not the whole assignment.** `prepareGradingWorkspace`
+  gets its roster from `resolveFacultyScope`, filtered by
+  `currentFacultyMsoeUsername`'s sections. `AssignmentDetailPage`'s existing
+  `roster.activeStudentCount` (used by "Apply to N students" and the
+  "Applied" lifecycle step) is assignment-wide, all sections, no faculty
+  filter. Wiring the lifecycle strip through the existing endpoint as-is
+  would put two different "N of M" populations on the same strip — wrong,
+  not merely incomplete. `resolveGradingWorkspaceContext` itself is
+  roster-agnostic (it takes whatever `students` array it is given, the same
+  three fields — `studentId`, `githubUsername`, `section` — that
+  `assignment-detail-builder.ts` already loads for `activeStudentCount`), so
+  this is a matter of feeding it the assignment-wide roster instead of the
+  faculty-scoped one, not rewriting it.
+- **One bad grading-state file fails the whole call.**
+  `resolveGradingWorkspaceContext` returns `grading_state_error` and
+  discards every other student's status the moment one `loadGradingState`
+  call fails (corrupt JSON, unsupported schema version). Tolerable for the
+  grading workspace (one faculty member, their own section, their own file
+  to fix); not tolerable for a page that must render a lifecycle strip on
+  every load regardless. Needs per-student fault tolerance, not
+  all-or-nothing.
+- **`Grading N of M done` and `Published N of M sent` are directly
+  derivable** from `gradingStatus` counts once the two problems above are
+  addressed. **`Submissions N of M in` is not derivable from this aggregate
+  at all** — it carries no submission-presence field, only grading status.
+  Assignment detail's already-fetched `getAssignmentGradeStatus` CI-run data
+  (`GradeStatusRepositoryStatus`, fetched on every page load already, so no
+  new network cost) could approximate it — a workflow run existing at all
+  (anything other than `"missing"`) plausibly means the student pushed
+  something — but that is an approximation of submission presence, not a
+  measurement of it, and needs an explicit decision before building rather
+  than a silent default.
 
-Fix: a CLI command returning per-student grading status for an assignment in
-one call, surfaced through IPC. Belongs in the CLI, matching the existing
-architecture where the CLI owns logic and emits JSON.
+Fix: not a new command — a small, scoped addition. Feed
+`resolveGradingWorkspaceContext` the assignment-wide roster (via a new or
+adjusted IPC path; the resolver itself needs no changes for this part),
+harden its per-student failure handling so one bad file cannot blank the
+whole strip, and decide how — or whether — to source `Submissions`.
 
-Do this first. It unblocks PR6b, retroactively simplifies the grading
-workspace, and removes the reason the concurrency cap exists.
+Do this first. It still unblocks PR6b, but as a scoped addition to
+already-existing, already-cheap logic, not as new aggregation
+infrastructure.
 
 ---
 
