@@ -2664,6 +2664,44 @@ h1 {
   color: var(--danger);
 }
 
+.primary-action--blocked {
+  border-color: var(--warn);
+  background: var(--warn);
+}
+
+.page-header__refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-header__refresh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1.1rem;
+}
+
+.page-header__refresh-button:disabled {
+  color: var(--text-disabled);
+}
+
+.page-header__refresh-status {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.assignment-detail__back {
+  margin-bottom: var(--space-2);
+}
+
 .lifecycle-strip {
   display: flex;
   flex-wrap: wrap;

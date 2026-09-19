@@ -13,8 +13,11 @@ import type {
   TemplateWorkflowSavePreview,
   TemplateWorkflowSaveResult
 } from "../../electron/ipc";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { OperationStatusBar } from "../components/OperationStatusBar";
+import { OverflowMenu, type OverflowMenuGroup } from "../components/OverflowMenu";
+import { PageHeader } from "../components/PageHeader";
 import { copyTextToClipboard } from "./assignmentDetailClipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
 import { normalizeGradeStatus } from "../grade-status/gradeStatusNormalization";
@@ -35,7 +38,6 @@ import {
   hasTokenRequiredReadiness
 } from "./assignmentDetailReadiness";
 import type {
-  AssignmentDetailAction,
   AssignmentDetailDiagnostic,
   AssignmentDetailLoadResult,
   AssignmentDetailPageProps,
@@ -43,32 +45,59 @@ import type {
   NormalizedAssignmentDetail
 } from "./assignmentDetailTypes";
 
-const ACTION_LABELS = {
-  validate: "Validate / Refresh detail",
-  apply: "Preview apply",
-  grade: "Grade submissions",
-  report: "Generate report",
-  publishStudentReports: "Publish student reports",
-  generateWorkflow: "Generate/update workflow"
-} as const;
-
-type ActionKey = keyof typeof ACTION_LABELS;
-
 interface StudentAccessPagesConfigSaveOutcome {
   readonly ok: boolean;
   readonly diagnostics: readonly string[];
 }
 
-const ACTION_ORDER: readonly ActionKey[] = [
-  "validate",
-  "apply",
-  "grade",
-  "report",
-  "publishStudentReports",
-  "generateWorkflow"
-];
-
 const COPY_FEEDBACK_TIMEOUT_MS = 2200;
+const REFRESH_MINUTE_MS = 60_000;
+const REFRESH_HOUR_MS = 60 * REFRESH_MINUTE_MS;
+const REFRESH_DAY_MS = 24 * REFRESH_HOUR_MS;
+
+const ADVANCED_DETAILS_ID = "assignment-advanced-details";
+
+const BLOCKER_FIX_LABELS: Readonly<Record<string, string>> = {
+  "github-token-required": "Fix GitHub authentication",
+  "template-repository": "Fix template repository",
+  "template-branch": "Fix template branch",
+  "grading-workflow": "Fix grading workflow",
+  "workflow-dispatch": "Fix workflow dispatch",
+  "roster-summary": "Fix roster data",
+  "partial-success": "Review readiness checks"
+};
+
+const formatRefreshedAgo = (refreshedAt: string | null): string => {
+  if (refreshedAt === null) return "Not yet refreshed";
+  const refreshedTime = new Date(refreshedAt).getTime();
+  if (Number.isNaN(refreshedTime)) return "Not yet refreshed";
+  const elapsedMs = Math.max(0, Date.now() - refreshedTime);
+  if (elapsedMs < REFRESH_MINUTE_MS) return "Updated just now";
+  if (elapsedMs < REFRESH_HOUR_MS) {
+    const minutes = Math.floor(elapsedMs / REFRESH_MINUTE_MS);
+    return `Updated ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  }
+  if (elapsedMs < REFRESH_DAY_MS) {
+    const hours = Math.floor(elapsedMs / REFRESH_HOUR_MS);
+    return `Updated ${hours} hour${hours === 1 ? "" : "s"} ago`;
+  }
+  const days = Math.floor(elapsedMs / REFRESH_DAY_MS);
+  return `Updated ${days} day${days === 1 ? "" : "s"} ago`;
+};
+
+// Reveals a section that already exists on the page (optionally inside the
+// Advanced details disclosure) instead of performing an action of its own —
+// these panels are out of scope to restructure this PR, so the overflow menu
+// points faculty at the existing control rather than duplicating it.
+const revealExistingSection = (headingId: string, detailsId?: string): void => {
+  if (detailsId !== undefined) {
+    const detailsElement = document.getElementById(detailsId);
+    if (detailsElement instanceof HTMLDetailsElement) detailsElement.open = true;
+  }
+  const heading = document.getElementById(headingId);
+  heading?.scrollIntoView?.({ block: "start" });
+  heading?.focus();
+};
 
 const derivePagesBaseUrl = (repository: string): string => {
   const [owner, name] = repository.trim().split("/");
@@ -330,7 +359,9 @@ const ReadinessPanel = ({
     >
       <div className="readiness-summary__header">
         <div>
-          <h2 id="assignment-readiness-title">Readiness</h2>
+          <h2 id="assignment-readiness-title" tabIndex={-1}>
+            Readiness
+          </h2>
           <p className="readiness-summary__status">{readiness.label}</p>
         </div>
         <span className="status-chip">{formatStatusLabel(detail.status)}</span>
@@ -514,7 +545,9 @@ const GradeWorkflowPanel = ({
     <section className="detail-panel grade-workflow-panel" aria-labelledby="grade-workflow-title">
       <div className="grade-workflow-panel__header">
         <div>
-          <h2 id="grade-workflow-title">Grade workflow</h2>
+          <h2 id="grade-workflow-title" tabIndex={-1}>
+            Grade workflow
+          </h2>
           <p className="detail-panel__note">
             Workflow changes are not saved in this version. Saving to the template repository will
             be added in a later slice.
@@ -676,7 +709,9 @@ const StudentRepositoryAccessPagePanel = ({
   };
   return (
     <section className="detail-panel" aria-labelledby="student-repository-access-page-title">
-      <h2 id="student-repository-access-page-title">Student repository access page</h2>
+      <h2 id="student-repository-access-page-title" tabIndex={-1}>
+        Student repository access page
+      </h2>
       <p className="detail-panel__note">
         Apply generates this HTML page in the configured Pages repository. Regenerate it here after
         roster or repository-link corrections. Course repository files remain the source for
@@ -1403,104 +1438,6 @@ const CollapsibleDiagnosticsPanel = ({
   </details>
 );
 
-const getActionDescription = (
-  action: AssignmentDetailAction,
-  actionKey: ActionKey,
-  canGenerateFacultyReport: boolean
-): string => {
-  if (actionKey === "validate") {
-    return action.available ? "Runs assignment detail again." : "Unavailable for this assignment";
-  }
-
-  if (!action.available) {
-    return action.reason ?? "Unavailable for this assignment";
-  }
-
-  if (actionKey === "apply") {
-    return "Preview what apply would do. No changes are made.";
-  }
-
-  if (actionKey === "grade") {
-    return "Preview grading workflow dispatches. No workflows are started.";
-  }
-
-  if (actionKey === "report") {
-    return canGenerateFacultyReport
-      ? "Generate and view the faculty report."
-      : "A course folder and assignment file are required to generate a faculty report.";
-  }
-
-  if (!action.implemented) {
-    return "This action is not available in this view.";
-  }
-
-  return "This action is not available in this view.";
-};
-
-const ActionsPanel = ({
-  detail,
-  isLoading,
-  onRefresh,
-  onPreviewApply,
-  onPreviewGrade,
-  onViewFacultyReport,
-  canGenerateFacultyReport
-}: {
-  readonly detail: NormalizedAssignmentDetail;
-  readonly isLoading: boolean;
-  readonly onRefresh: () => void;
-  readonly onPreviewApply: () => void;
-  readonly onPreviewGrade: () => void;
-  readonly onViewFacultyReport: () => void;
-  readonly canGenerateFacultyReport: boolean;
-}): ReactElement => (
-  <section className="detail-panel" aria-labelledby="assignment-actions-title">
-    <h2 id="assignment-actions-title">Available actions</h2>
-    <div className="assignment-actions">
-      {ACTION_ORDER.map((actionKey) => {
-        const action = detail.actions[actionKey];
-        const isValidate = actionKey === "validate";
-        const isApplyPreview = actionKey === "apply";
-        const isGradePreview = actionKey === "grade";
-        const isFacultyReport = actionKey === "report";
-
-        return (
-          <div className="assignment-action" key={actionKey}>
-            <button
-              className={
-                isValidate ? "secondary-action" : "secondary-action assignment-action__button"
-              }
-              type="button"
-              disabled={
-                (!isValidate && !isApplyPreview && !isGradePreview && !isFacultyReport) ||
-                isLoading ||
-                (isFacultyReport ? !canGenerateFacultyReport : !action.available)
-              }
-              onClick={
-                isValidate
-                  ? onRefresh
-                  : isApplyPreview
-                    ? onPreviewApply
-                    : isGradePreview
-                      ? onPreviewGrade
-                      : isFacultyReport
-                        ? onViewFacultyReport
-                        : undefined
-              }
-              aria-describedby={`assignment-action-${actionKey}-description`}
-            >
-              {ACTION_LABELS[actionKey]}
-            </button>
-            <p id={`assignment-action-${actionKey}-description`}>
-              {getActionDescription(action, actionKey, canGenerateFacultyReport)}
-            </p>
-          </div>
-        );
-      })}
-    </div>
-  </section>
-);
-
 export const AssignmentDetailPage = ({
   selection,
   initialLoadResult = null,
@@ -1550,7 +1487,6 @@ export const AssignmentDetailPage = ({
   const [isSavingGroupConfig, setIsSavingGroupConfig] = useState(false);
   const [groupConfigFeedback, setGroupConfigFeedback] = useState<string | null>(null);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [templateSyncAvailability, setTemplateSyncAvailability] =
@@ -1627,7 +1563,7 @@ export const AssignmentDetailPage = ({
   };
 
   const deleteLocalAssignment = async (): Promise<void> => {
-    if (!isDeleteConfirmed || window.graiderUI.deleteAssignment === undefined) return;
+    if (window.graiderUI.deleteAssignment === undefined) return;
     setIsDeleting(true);
     setDeleteError(null);
     try {
@@ -2129,112 +2065,218 @@ export const AssignmentDetailPage = ({
         : "Synchronizing template changes across student repositories..."
       : `Repository ${templateSyncProgress.current} of ${templateSyncProgress.total} · ${templateSyncProgress.studentId} · ${templateSyncProgress.repository}`;
 
-  return (
-    <main className="dashboard-shell" aria-labelledby="assignment-detail-title">
-      <header className="app-header">
-        <div className="app-header__inner">
-          <div>
-            <p className="app-header__eyebrow">Graider</p>
-            <h1 id="assignment-detail-title">{title}</h1>
-            <p className="assignment-detail__subtitle">{getCourseTermSubtitle(detail)}</p>
-          </div>
-          <div className="assignment-detail__header-actions">
-            <button className="secondary-action" type="button" onClick={onBack}>
-              Back to dashboard
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null}
-              onClick={onEditAssignment}
-            >
-              Edit assignment
-            </button>
-            <button
-              className="danger-action"
-              type="button"
-              disabled={detail === null || isDeleting}
-              onClick={() => {
-                setIsConfirmingDelete(true);
-                setIsDeleteConfirmed(false);
-                setDeleteError(null);
-              }}
-            >
-              Delete assignment
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null}
-              onClick={() => {
-                onPreviewApply(selection, detail, loadResult);
-              }}
-            >
-              Preview apply
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null}
-              onClick={() => {
+  // Primary action label depends on lifecycle state: blocked (a readiness item
+  // needs attention) takes precedence over apply state, which is otherwise
+  // either "not yet applied" (derive the student count and go to apply) or
+  // "applied" (go grade). The finer-grained applied/submissions/graded/
+  // published split from the design doc is intentionally not implemented here
+  // — see the PR report for why.
+  const readiness = detail === null ? null : deriveAssignmentReadiness(detail);
+  const isBlocked = readiness?.status === "needs_attention";
+  // A missing GitHub token is a lesser concern than the readiness checks it
+  // merely prevented from running (deriveAssignmentReadiness treats it the
+  // same way — see hasNonTokenAttention above) so the primary action features
+  // the first non-token blocker when one exists.
+  const blockerItem =
+    needsAttentionItems.find((item) => item.id !== "github-token-required") ??
+    needsAttentionItems[0];
+  const primaryHeaderAction =
+    detail === null
+      ? undefined
+      : isBlocked
+        ? {
+            label:
+              blockerItem === undefined
+                ? "Review readiness checks"
+                : (BLOCKER_FIX_LABELS[blockerItem.id] ?? "Review readiness checks"),
+            onClick: () => revealExistingSection("assignment-readiness-title")
+          }
+        : detail.applyState.status === "applied" || detail.applyState.status === "partially_applied"
+          ? {
+              label: "Continue grading",
+              onClick: () => {
                 onPreviewGrade(selection, detail, loadResult);
-              }}
-            >
-              Preview grading
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null || isDownloadingRepositories}
-              onClick={() => void downloadStudentRepositories()}
-            >
-              {isDownloadingRepositories
-                ? "Downloading repositories..."
-                : "Download Student Repositories"}
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={
-                detail === null ||
-                isPreparingTemplateSync ||
-                isExecutingTemplateSync ||
-                templateSyncAvailability?.available !== true ||
-                templateSyncAvailability.repositoryCount === 0
               }
-              onClick={() => {
-                setTemplateSyncError(null);
-                setTemplateSyncTarget(null);
-                setIsTemplateSyncModalOpen(true);
-              }}
-            >
-              {isExecutingTemplateSync
-                ? "Updating Student Repositories..."
-                : "Update Student Repositories"}
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null}
-              onClick={() => {
-                onViewGradeStatus(selection, detail, loadResult);
-              }}
-            >
-              View grading status
-            </button>
-            <button
-              className="primary-action"
-              type="button"
-              disabled={isLoading}
-              onClick={() => {
-                void loadDetail();
-              }}
-            >
-              {isLoading ? "Refreshing detail..." : "Refresh detail"}
-            </button>
-          </div>
-        </div>
-      </header>
+            }
+          : {
+              label: `Apply to ${detail.roster?.activeStudentCount ?? 0} student${
+                (detail.roster?.activeStudentCount ?? 0) === 1 ? "" : "s"
+              }`,
+              onClick: () => {
+                onPreviewApply(selection, detail, loadResult);
+              }
+            };
+
+  const overflowGroups: readonly OverflowMenuGroup[] =
+    detail === null
+      ? []
+      : [
+          {
+            id: "assignment",
+            heading: "Assignment",
+            items: [
+              {
+                id: "edit-assignment",
+                label: "Edit assignment",
+                caption: "Change assignment settings, points, and due date.",
+                onSelect: onEditAssignment
+              },
+              {
+                id: "group-settings",
+                label: "Group settings",
+                caption: "Switch between individual and shared group repositories.",
+                disabled: groupConfig === null,
+                onSelect: () => revealExistingSection("repository-mode-title", ADVANCED_DETAILS_ID)
+              },
+              {
+                id: "student-access-page",
+                label: "Student access page",
+                caption: "Generate the public page students use to find their repository.",
+                disabled: accessPage === null,
+                onSelect: () => revealExistingSection("student-repository-access-page-title")
+              }
+            ]
+          },
+          {
+            id: "repositories",
+            heading: "Repositories",
+            items: [
+              {
+                id: "apply-new-students",
+                label: "Apply to new students",
+                caption: "Create repositories for students not yet applied.",
+                onSelect: () => {
+                  onPreviewApply(selection, detail, loadResult);
+                }
+              },
+              {
+                id: "download-repositories",
+                label: "Download student repositories",
+                caption: "Clone all student repositories locally.",
+                disabled: isDownloadingRepositories,
+                onSelect: () => void downloadStudentRepositories()
+              }
+            ]
+          },
+          {
+            id: "grading-setup",
+            heading: "Grading setup",
+            items: [
+              {
+                id: "regenerate-workflow",
+                label: "Regenerate grading workflow",
+                caption: "View, edit, and push the grading workflow file.",
+                disabled: !detail.grading.enabled,
+                onSelect: () => revealExistingSection("grade-workflow-title", ADVANCED_DETAILS_ID)
+              },
+              {
+                id: "view-grading-status",
+                label: "View grading status",
+                caption: "See automated check status for every repository.",
+                onSelect: () => {
+                  onViewGradeStatus(selection, detail, loadResult);
+                }
+              }
+            ]
+          },
+          {
+            id: "reports",
+            heading: "Reports",
+            items: [
+              {
+                id: "faculty-report",
+                label: "Faculty report",
+                caption: canGenerateFacultyReport
+                  ? "Generate and view the faculty report."
+                  : "A course folder and assignment file are required to generate a faculty report.",
+                disabled: !canGenerateFacultyReport,
+                onSelect: () => {
+                  onViewFacultyReport(selection, detail, loadResult);
+                }
+              }
+            ]
+          },
+          {
+            id: "danger",
+            items: [
+              {
+                id: "delete-assignment",
+                label: "Delete assignment",
+                caption: "Remove the local assignment configuration only.",
+                destructive: true,
+                disabled: isDeleting,
+                onSelect: () => {
+                  setIsConfirmingDelete(true);
+                  setDeleteError(null);
+                }
+              }
+            ]
+          }
+        ];
+
+  return (
+    <main className="dashboard-shell" aria-label={title}>
+      <button className="secondary-action assignment-detail__back" type="button" onClick={onBack}>
+        Back to dashboard
+      </button>
+      <PageHeader
+        eyebrow="Graider"
+        title={title}
+        meta={getCourseTermSubtitle(detail)}
+        secondaryActions={
+          detail === null
+            ? []
+            : [
+                {
+                  label: isExecutingTemplateSync
+                    ? "Updating Student Repositories..."
+                    : "Update Student Repositories",
+                  disabled:
+                    isPreparingTemplateSync ||
+                    isExecutingTemplateSync ||
+                    templateSyncAvailability?.available !== true ||
+                    templateSyncAvailability.repositoryCount === 0,
+                  onClick: () => {
+                    setTemplateSyncError(null);
+                    setTemplateSyncTarget(null);
+                    setIsTemplateSyncModalOpen(true);
+                  }
+                }
+              ]
+        }
+        overflow={
+          <>
+            {primaryHeaderAction === undefined ? null : (
+              <button
+                className={isBlocked ? "primary-action primary-action--blocked" : "primary-action"}
+                type="button"
+                onClick={primaryHeaderAction.onClick}
+              >
+                {primaryHeaderAction.label}
+              </button>
+            )}
+            <span className="page-header__refresh">
+              <button
+                className="page-header__refresh-button"
+                type="button"
+                aria-label="Refresh assignment detail"
+                disabled={isLoading}
+                onClick={() => {
+                  void loadDetail();
+                }}
+              >
+                ↻
+              </button>
+              <span className="page-header__refresh-status">
+                {isLoading ? "Refreshing…" : formatRefreshedAgo(loadResult?.refreshedAt ?? null)}
+              </span>
+            </span>
+            {detail === null ? null : (
+              <OverflowMenu groups={overflowGroups} aria-label="More assignment actions" />
+            )}
+          </>
+        }
+      />
       <ConfirmationWithPreviewModal
         isOpen={isTemplateSyncModalOpen}
         title={
@@ -2309,45 +2351,25 @@ export const AssignmentDetailPage = ({
           detail={templateSyncStatusDetail}
         />
       ) : null}
-      {!isConfirmingDelete ? null : (
-        <section className="detail-panel" role="dialog" aria-labelledby="delete-assignment-title">
-          <h2 id="delete-assignment-title">Delete assignment</h2>
+      {isDownloadingRepositories ? (
+        <OperationStatusBar label="Downloading student repositories" />
+      ) : null}
+      <ConfirmDialog
+        isOpen={isConfirmingDelete}
+        title="Delete assignment?"
+        summary={
           <p>
             This deletes only the local assignment configuration file. It does not delete GitHub
             repositories, student repositories, GitHub Classroom resources, or other remote
             resources.
           </p>
-          <label className="confirmation-check">
-            <input
-              type="checkbox"
-              checked={isDeleteConfirmed}
-              onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
-            />
-            I understand this deletes the local assignment configuration.
-          </label>
-          <div className="apply-confirmation-actions">
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={isDeleting}
-              onClick={() => {
-                setIsConfirmingDelete(false);
-                setIsDeleteConfirmed(false);
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              className="danger-action"
-              type="button"
-              disabled={!isDeleteConfirmed || isDeleting}
-              onClick={() => void deleteLocalAssignment()}
-            >
-              {isDeleting ? "Deleting assignment..." : "Delete assignment"}
-            </button>
-          </div>
-        </section>
-      )}
+        }
+        confirmationWord={title}
+        confirmLabel="Delete assignment"
+        isConfirming={isDeleting}
+        onConfirm={() => void deleteLocalAssignment()}
+        onCancel={() => setIsConfirmingDelete(false)}
+      />
       {deleteError === null ? null : (
         <p className="error-message" role="alert">
           {deleteError}
@@ -2463,24 +2485,10 @@ export const AssignmentDetailPage = ({
                 />
               )}
               <RosterPanel detail={detail} />
-              <ActionsPanel
-                detail={detail}
-                isLoading={isLoading}
-                onRefresh={() => {
-                  void loadDetail();
-                }}
-                onPreviewApply={() => {
-                  onPreviewApply(selection, detail, loadResult);
-                }}
-                onPreviewGrade={() => {
-                  onPreviewGrade(selection, detail, loadResult);
-                }}
-                onViewFacultyReport={() => {
-                  onViewFacultyReport(selection, detail, loadResult);
-                }}
-                canGenerateFacultyReport={canGenerateFacultyReport}
-              />
-              <details className="detail-panel assignment-detail__advanced">
+              <details
+                className="detail-panel assignment-detail__advanced"
+                id={ADVANCED_DETAILS_ID}
+              >
                 <summary>Advanced details</summary>
                 <p className="assignment-detail__path">Assignment file: {detail.assignment.file}</p>
                 <TemplatePanel detail={detail} copyState={copyState} onCopy={handleCopy} />
@@ -2518,7 +2526,9 @@ export const AssignmentDetailPage = ({
                 <StudentReportsPanel detail={detail} />
                 {groupConfig === null ? null : (
                   <section className="detail-panel" aria-labelledby="repository-mode-title">
-                    <h2 id="repository-mode-title">Repository mode</h2>
+                    <h2 id="repository-mode-title" tabIndex={-1}>
+                      Repository mode
+                    </h2>
                     <label>
                       Repository mode
                       <select

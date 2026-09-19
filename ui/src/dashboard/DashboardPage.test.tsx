@@ -568,14 +568,23 @@ describe("local faculty settings", () => {
   });
 });
 
-const getFirstPreviewApplyButton = (): HTMLElement => {
-  const button = screen.getAllByRole("button", { name: "Preview apply" })[0];
+const getApplyPrimaryButton = (): HTMLElement => {
+  const button = screen.getByRole("button", { name: /^Apply to \d+ students?$/u });
 
   if (button === undefined) {
-    throw new Error("Expected a Preview apply button.");
+    throw new Error("Expected an Apply to N students primary button.");
   }
 
   return button;
+};
+
+const openAssignmentOverflowMenu = async (): Promise<void> => {
+  fireEvent.click(await screen.findByRole("button", { name: "More assignment actions" }));
+};
+
+const clickAssignmentOverflowItem = async (label: string): Promise<void> => {
+  await openAssignmentOverflowMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(`^${label}`, "u") }));
 };
 
 const createDeferred = <T,>(): {
@@ -2331,10 +2340,11 @@ describe("DashboardPage", () => {
     expect(screen.getByText("workflow_dispatch status")).toBeInTheDocument();
     expect(screen.getAllByText("3").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
-    expect(getFirstPreviewApplyButton()).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Preview grading" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Generate report" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "View grading status" })).toBeEnabled();
+    expect(getApplyPrimaryButton()).toBeEnabled();
+    await openAssignmentOverflowMenu();
+    expect(screen.getByRole("menuitem", { name: /^Faculty report/u })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: /^View grading status/u })).toBeEnabled();
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(
       within(gradeSummary).getByRole("button", { name: "View full grade status" })
     ).toBeEnabled();
@@ -2362,7 +2372,7 @@ describe("DashboardPage", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
 
-    fireEvent.click(getFirstPreviewApplyButton());
+    fireEvent.click(getApplyPrimaryButton());
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Apply Preview" })
@@ -2383,7 +2393,17 @@ describe("DashboardPage", () => {
   });
 
   it("opens grade dispatch preview from assignment detail and returns to assignment detail", async () => {
-    const getAssignmentDetail = vi.fn().mockResolvedValue(createAssignmentDetailResult());
+    // The grade preview entry point is the header's primary "Continue grading"
+    // action once the assignment is applied — not_applied assignments show
+    // "Apply to N students" instead, so this scenario applies the assignment.
+    const getAssignmentDetail = vi
+      .fn()
+      .mockResolvedValue(
+        createAssignmentDetailResult(
+          {},
+          createAssignmentDetailJson({ applyState: { status: "applied" } })
+        )
+      );
     const getAssignmentGradePreview = vi
       .fn()
       .mockResolvedValue(createAssignmentGradePreviewResult());
@@ -2404,7 +2424,7 @@ describe("DashboardPage", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Preview grading" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue grading" }));
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Grade Dispatch Preview" })
@@ -2446,7 +2466,7 @@ describe("DashboardPage", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "View grading status" }));
+    await clickAssignmentOverflowItem("View grading status");
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Grade Status" })
@@ -2490,7 +2510,8 @@ describe("DashboardPage", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Generate report" }));
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
+    await clickAssignmentOverflowItem("Faculty report");
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Faculty Report" })
@@ -2531,11 +2552,11 @@ describe("DashboardPage", () => {
     );
     expect(await screen.findByText("100")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh detail" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
 
     expect(await screen.findByText("Loading assignment detail...")).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refreshing detail..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh assignment detail" })).toBeDisabled();
 
     resolveSecondRefresh(
       createAssignmentDetailResult(

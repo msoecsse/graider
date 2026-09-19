@@ -388,6 +388,17 @@ const renderAssignmentDetailPage = (
     />
   );
 
+const openOverflowMenu = async (): Promise<void> => {
+  fireEvent.click(await screen.findByRole("button", { name: "More assignment actions" }));
+};
+
+const clickOverflowItem = async (label: string): Promise<void> => {
+  await openOverflowMenu();
+  // The menu item's accessible name is its label immediately followed by its
+  // caption (no separator), so match on the label as a prefix.
+  fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(`^${label}`, "u") }));
+};
+
 describe("AssignmentDetailPage", () => {
   it("offers a trusted single-repository update action for individual student rows", async () => {
     const prepareAssignmentTemplateSync = vi
@@ -782,14 +793,15 @@ describe("AssignmentDetailPage", () => {
     mockGraiderUI({ deleteAssignment });
     renderAssignmentDetailPage({ onDeleted });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Delete assignment" }));
+    await clickOverflowItem("Delete assignment");
     expect(deleteAssignment).not.toHaveBeenCalled();
-    const dialog = screen.getByRole("dialog", { name: "Delete assignment" });
+    const dialog = screen.getByRole("dialog", { name: "Delete assignment?" });
     expect(dialog).toBeInTheDocument();
-    fireEvent.click(
-      within(dialog).getByLabelText("I understand this deletes the local assignment configuration.")
-    );
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete assignment" }));
+    const confirmButton = within(dialog).getByRole("button", { name: "Delete assignment" });
+    expect(confirmButton).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Lab 02" } });
+    expect(confirmButton).toBeEnabled();
+    fireEvent.click(confirmButton);
 
     await waitFor(() =>
       expect(deleteAssignment).toHaveBeenCalledWith({
@@ -1261,10 +1273,12 @@ describe("AssignmentDetailPage", () => {
 
     expect(await screen.findByRole("heading", { level: 2, name: "Readiness" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Preview apply" })[0]).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Preview grading" })[0]).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "View grading status" })[0]).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Refresh detail" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Fix template repository" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh assignment detail" })).toBeEnabled();
+    await openOverflowMenu();
+    expect(screen.getByRole("menuitem", { name: /^Apply to new students/u })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^View grading status/u })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getAllByText("Needs attention").length).toBeGreaterThan(0);
     expect(screen.getByText("Template repository is missing.")).toBeInTheDocument();
     expect(
@@ -1283,7 +1297,7 @@ describe("AssignmentDetailPage", () => {
     expect(summaryHeading.closest("details")).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
     expect(screen.getByText("assignment_detail_template_repository_missing")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish student reports" })).toBeDisabled();
+    expect(screen.queryByRole("heading", { name: "Available actions" })).not.toBeInTheDocument();
   });
 
   it("renders neutral placeholders and missing grade-status data without crashing", async () => {
@@ -1639,11 +1653,17 @@ describe("AssignmentDetailPage", () => {
     const onPreviewGrade = vi.fn();
 
     mockGraiderUI({
-      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+      getAssignmentDetail: vi
+        .fn()
+        .mockResolvedValue(
+          createAssignmentDetailResult(
+            createAssignmentDetailJson({ applyState: { status: "applied" } })
+          )
+        )
     });
     renderAssignmentDetailPage({ onPreviewGrade });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Preview grading" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue grading" }));
 
     expect(onPreviewGrade).toHaveBeenCalledTimes(1);
     expect(onPreviewGrade).toHaveBeenCalledWith(
@@ -1664,8 +1684,9 @@ describe("AssignmentDetailPage", () => {
       getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
     });
     renderAssignmentDetailPage({ onViewGradeStatus });
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "View grading status" }));
+    await clickOverflowItem("View grading status");
 
     expect(onViewGradeStatus).toHaveBeenCalledTimes(1);
     expect(onViewGradeStatus).toHaveBeenCalledWith(
@@ -1686,13 +1707,14 @@ describe("AssignmentDetailPage", () => {
       getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
     });
     renderAssignmentDetailPage({ onViewFacultyReport });
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    const reportButton = await screen.findByRole("button", { name: "Generate report" });
-    expect(reportButton).toBeEnabled();
+    await openOverflowMenu();
+    const reportItem = screen.getByRole("menuitem", { name: /^Faculty report/u });
+    expect(reportItem).toBeEnabled();
     expect(screen.getByText("Generate and view the faculty report.")).toBeInTheDocument();
-    expect(screen.queryByText("Coming in a future slice")).toBeNull();
 
-    fireEvent.click(reportButton);
+    fireEvent.click(reportItem);
 
     expect(onViewFacultyReport).toHaveBeenCalledWith(
       SELECTION,
@@ -1714,8 +1736,10 @@ describe("AssignmentDetailPage", () => {
     renderAssignmentDetailPage({
       selection: { ...SELECTION, courseFolderPath: "" }
     });
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    expect(await screen.findByRole("button", { name: "Generate report" })).toBeDisabled();
+    await openOverflowMenu();
+    expect(screen.getByRole("menuitem", { name: /^Faculty report/u })).toBeDisabled();
     expect(
       screen.getByText(
         "A course folder and assignment file are required to generate a faculty report."
@@ -1900,11 +1924,12 @@ describe("AssignmentDetailPage", () => {
     renderAssignmentDetailPage();
 
     expect(await screen.findByText("100")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh detail" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
 
     expect(await screen.findByText("Loading assignment detail...")).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refreshing detail..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh assignment detail" })).toBeDisabled();
+    expect(screen.getByText("Refreshing…")).toBeInTheDocument();
 
     resolveRefresh(
       createAssignmentDetailResult(
@@ -1957,8 +1982,9 @@ describe("AssignmentDetailPage", () => {
       .mockResolvedValue(createRepositoryDownloadResult());
     mockGraiderUI({ selectRepositoryDownloadFolder, downloadAssignmentRepositories });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
 
     await waitFor(() => expect(downloadAssignmentRepositories).toHaveBeenCalledTimes(1));
     expect(selectRepositoryDownloadFolder).toHaveBeenCalledTimes(1);
@@ -1975,8 +2001,9 @@ describe("AssignmentDetailPage", () => {
     const downloadAssignmentRepositories = vi.fn();
     mockGraiderUI({ selectRepositoryDownloadFolder, downloadAssignmentRepositories });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
 
     await waitFor(() => expect(selectRepositoryDownloadFolder).toHaveBeenCalledTimes(1));
     expect(downloadAssignmentRepositories).not.toHaveBeenCalled();
@@ -1999,12 +2026,11 @@ describe("AssignmentDetailPage", () => {
       downloadAssignmentRepositories
     });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
 
-    expect(
-      await screen.findByRole("button", { name: "Downloading repositories..." })
-    ).toBeDisabled();
+    expect(await screen.findByText("Downloading student repositories")).toBeInTheDocument();
     resolveDownload(createRepositoryDownloadResult());
 
     const results = await screen.findByLabelText("Repository download results");
@@ -2043,8 +2069,9 @@ describe("AssignmentDetailPage", () => {
       downloadAssignmentRepositories: vi.fn().mockResolvedValue(groupResult)
     });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
 
     const results = await screen.findByLabelText("Repository download results");
     expect(within(results).getByText(/1 cloned, 0 failed of 1/u)).toBeInTheDocument();
@@ -2087,9 +2114,9 @@ describe("AssignmentDetailPage", () => {
       downloadAssignmentRepositories
     });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    const button = await screen.findByRole("button", { name: "Download Student Repositories" });
-    fireEvent.click(button);
+    await clickOverflowItem("Download student repositories");
     const results = await screen.findByLabelText("Repository download results");
     expect(within(results).getByText("27s1-csc1120-lab02-alpha")).toBeInTheDocument();
     expect(within(results).getByText("27s1-csc1120-lab02-beta")).toBeInTheDocument();
@@ -2098,12 +2125,13 @@ describe("AssignmentDetailPage", () => {
       within(results).getByText(/One repository could not be downloaded/u)
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
     expect(await screen.findByText("Unable to download student repositories.")).toHaveAttribute(
       "role",
       "alert"
     );
-    expect(screen.getByRole("button", { name: "Download Student Repositories" })).toBeEnabled();
+    await openOverflowMenu();
+    expect(screen.getByRole("menuitem", { name: /^Download student repositories/u })).toBeEnabled();
     expect(screen.queryByText("command failure")).toBeNull();
   });
 });
