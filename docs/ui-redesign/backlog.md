@@ -229,7 +229,7 @@ source of truth. Best done at a natural boundary rather than mid-screen.
 
 ---
 
-## 6. Two primary actions coexist on the grading workspace — **Worth fixing**
+## 6. Two primary actions coexist on the grading workspace — **Resolved**
 
 Section 2.1 says one primary action per screen. The grading workspace has the
 per-student action (Mark Complete / Publish Report) in the grading pane and
@@ -239,6 +239,26 @@ This is arguably a legitimate exception: one acts on the current student, the
 other on the session. But it should be resolved deliberately, by making the two
 scopes look different from each other rather than demoting one — and it should
 be decided before PR6a's header pattern is copied to other screens.
+
+Decision: the real problem was never "two scopes" — it was two primary
+actions sharing the same verb. "Mark Complete" (per-student) and "Publish N
+reports" (session) are both primary and both stay filled: different
+scopes, different verbs, no risk of mistaking one for the other. But
+"Publish Report" (per-student) and "Publish N reports" (session) share the
+verb "Publish" while differing only in scope — two filled green buttons,
+same word, ~800px apart. Someone finishing a session could publish one
+student, believe they were done, and leave the rest unsent. Demoting the
+per-student action removes the ambiguity without losing the scope
+distinction, because the label now states the scope in words instead of
+relying on position to imply it.
+
+Fixed: "Publish Report"/"Republish Report" are now `secondary-action`,
+renamed "Publish this student's report"/"Republish this student's report"
+(button, confirmation dialog title, and confirm button all updated to
+match). They stay in the same place and keep working. The header's
+"Publish N reports" and the per-student "Mark Complete" are both
+unchanged — still primary, per the decision above. The general rule is
+recorded in README section 2.1 so it isn't rediscovered per screen.
 
 ---
 
@@ -352,9 +372,8 @@ detail line.
 
 ## Suggested order
 
-1. Item 6 — decide the two-primary-actions question
-2. Then PR6b
+Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 2, 3, 4, 7, and 9 are resolved and no longer part of this sequence.
+Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this sequence.
 
 Items 5, 8, 10, 12 can wait until after the redesign.

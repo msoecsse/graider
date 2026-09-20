@@ -2977,9 +2977,7 @@ export const GradingWorkspacePage = ({
                   </button>
                   <button
                     type="button"
-                    className={
-                      currentEffectiveStatus === "published" ? "secondary-action" : "primary-action"
-                    }
+                    className="secondary-action"
                     disabled={
                       gradingMutationStudentId !== undefined ||
                       gradingMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
@@ -2994,8 +2992,8 @@ export const GradingWorkspacePage = ({
                     {reportPublicationStudentId === snapshot.snapshot.studentId
                       ? "Publishing…"
                       : currentEffectiveStatus === "published"
-                        ? "Republish Report"
-                        : "Publish Report"}
+                        ? "Republish this student's report"
+                        : "Publish this student's report"}
                   </button>
                 </div>
               ) : null}
@@ -3031,8 +3029,8 @@ export const GradingWorkspacePage = ({
                 }
                 title={
                   reportPublicationConfirmation?.operation === "republish"
-                    ? "Republish grading report?"
-                    : "Publish grading report?"
+                    ? "Republish this student's grading report?"
+                    : "Publish this student's grading report?"
                 }
                 summary={
                   reportPublicationConfirmation?.operation === "republish" ? (
@@ -3047,8 +3045,8 @@ export const GradingWorkspacePage = ({
                 confirmDisabled={publishReviewRunning || gradingMutationStudentId !== undefined}
                 confirmLabel={
                   reportPublicationConfirmation?.operation === "republish"
-                    ? "Confirm Republish Report"
-                    : "Confirm Publish Report"
+                    ? "Confirm republish this student's report"
+                    : "Confirm publish this student's report"
                 }
                 onConfirm={confirmPublishReport}
                 onCancel={() => setReportPublicationConfirmation(undefined)}

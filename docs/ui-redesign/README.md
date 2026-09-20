@@ -43,6 +43,16 @@ wrong.
 - **Exactly one primary action per screen.** It is filled, it is the accent
   colour, and it names the next step in the workflow. "Refresh" is never the
   primary action.
+- **Deliberate exception:** a screen may carry two filled primary actions
+  only when they operate at genuinely different scopes (one item vs. the
+  whole session) **and** use different verbs. Where two actions share a
+  verb, the narrower-scoped one demotes to secondary. Otherwise one primary
+  per screen still holds. The grading workspace is the reference case:
+  "Mark Complete" (one student, the grading loop) and "Publish N reports"
+  (the whole session) are both primary — different scopes, different
+  verbs. "Publish this student's report" shares the "Publish" verb with
+  the header's session-wide action, so it is secondary, not primary, even
+  though it also acts on one student.
 - **At most two secondary actions.** Outlined, in the header.
 - **Everything else goes in an overflow menu** (`⋯`). Rare, administrative,
   and destructive actions live there, grouped under headings with a one-line

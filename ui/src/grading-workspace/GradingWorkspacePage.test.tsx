@@ -2494,7 +2494,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
     expect(
       screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish Report" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete adjustment: correctness" }));
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Correctness");
