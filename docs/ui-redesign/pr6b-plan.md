@@ -29,13 +29,13 @@ are not touched here.
 
 What the page can actually feed a student table today, before any change:
 
-| Column  | Source                                                   | State                |
-| ------- | -------------------------------------------------------- | -------------------- |
-| Student | lifecycle rows — `studentId`, `githubUsername`           | available            |
-| Section | lifecycle rows — `section`                               | available            |
-| Grade   | —                                                        | added by PR6b-2      |
-| Checks  | `getAssignmentGradeStatus` — `status`, `conclusion`      | available, no counts |
-| Status  | lifecycle rows — `gradingStatus`                         | available            |
+| Column  | Source                                              | State                |
+| ------- | --------------------------------------------------- | -------------------- |
+| Student | lifecycle rows — `studentId`, `githubUsername`      | available            |
+| Section | lifecycle rows — `section`                          | available            |
+| Grade   | —                                                   | added by PR6b-2      |
+| Checks  | `getAssignmentGradeStatus` — `status`, `conclusion` | available, no counts |
+| Status  | lifecycle rows — `gradingStatus`                    | available            |
 
 `AssignmentGradingLifecycleStudentRow` (`16dc033`) carries four fields:
 `studentId`, `githubUsername`, `section`, `gradingStatus`. The grade-status

@@ -98,7 +98,7 @@ lifecycle strip now renders four steps: `Created` → `Applied` → `Grading` �
 
 ---
 
-## 2. CI does not run any UI checks — **Reopened — Blocker**
+## 2. CI does not run any UI checks — **Resolved**
 
 `.github/workflows/ci.yml` runs root `typecheck`, `lint`, `format:check`,
 `test`, `build`, and `audit`. It never runs anything with `--prefix ui`.
@@ -153,6 +153,24 @@ PR "passes CI".
 
 Do not close this item again on the strength of a local run. Close it when a
 run appears in the repository's Actions tab.
+
+**One mechanism worth recording explicitly: fixing `ci.yml` on `master`
+alone would not have fixed this.** GitHub Actions reads a workflow file as
+it exists on the branch receiving the push, not from `master` or any other
+branch. A trigger naming `main` was dead on every branch, `ui-redesign`
+included, until the fix was itself pushed to `ui-redesign` — merging or
+rebasing a `master`-only fix into `ui-redesign` later would have worked too,
+but a fix landed on `master` and left there would not have.
+
+Fixed: the trigger fix landed in `436b3b5` (`push: branches: [master,
+ui-redesign]`), pushed directly to `ui-redesign`. Its own run
+(`35540217254`) appears in the repository's Actions tab and completed
+successfully end to end in 3m43s — typecheck, lint, format check, test,
+build, and their UI equivalents, all green. Two subsequent runs on this
+branch failed, but at "Check formatting" only, on an unrelated pre-existing
+issue (see the CI note on the PR6b-1 sidebar work) — not a regression of
+this fix. The workflow now runs on every push to `master` and
+`ui-redesign`, and on every pull request.
 
 ---
 
@@ -402,12 +420,69 @@ detail line.
 
 ---
 
+## 13. Raw assignment file path in Advanced details — **Should fix**
+
+`AssignmentDetailPage.tsx:2530` renders
+`<p className="assignment-detail__path">Assignment file: {detail.assignment.file}</p>`
+inside the `Advanced details` disclosure. A literal section 7 violation —
+no raw filesystem path should appear outside Technical details — and
+pre-existing, not introduced by PR6b-1.
+
+It is now also awkward: the same path is properly disclosed, with a copy
+button, in Technical details a few hundred lines away in the same file.
+
+Fix: delete the paragraph. The path is already available where section 2.4
+says it should be.
+
+---
+
+## 14. Advanced details overlaps Technical details — **Worth fixing**
+
+`Advanced details` is a pre-redesign collapsed disclosure holding
+`TemplatePanel`, `GradingPanel`, `GradeWorkflowPanel`, `StudentReportsPanel`,
+repository-mode settings, the access-page publish panel, and diagnostics.
+`Technical details` is the section 2.4 disclosure PR6b-1 added, holding the
+five implementation identifiers section 5.3 names.
+
+`Workflow path` now renders in both: once in Technical details (PR6b-1,
+sourced from `detail.grading.workflow`), once in `GradingPanel` inside
+Advanced details (pre-existing, untouched). Section 2.4 says there is
+exactly one such disclosure per screen; assignment detail now has two.
+
+The underlying question — what `Advanced details` is for, and what (if
+anything) survives once Technical details and the eventual student table
+exist — is a screen-level decision the brief never made, so PR6b-1 left the
+whole panel alone rather than guessing.
+
+Fix: decide what belongs in `Advanced details` going forward (template and
+grading configuration panels plausibly stay; the raw path in item 13 and
+the duplicated workflow path do not), then reconcile the two disclosures.
+Bigger than a one-line fix — likely its own small PR.
+
+---
+
+## 15. `Sections` renders twice — **Optional**
+
+Once in the Assignment facts card, per section 5.3's explicit field list;
+once in the untouched Roster card, which already showed it before PR6b-1
+and was deliberately not rewritten.
+
+This is redundancy between two legitimately visible cards, not the
+hidden-implementation duplication PR6b-1 fixed elsewhere (moving slug, LMS
+id, and the two path fields out of visible text and into Technical
+details). Both renderings show the same faculty-authored fact in a
+reasonable place for it.
+
+Fix, if ever: drop it from one of the two cards. Low priority — it is not
+incorrect, just repeated.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 3, 4, 6, 7, and 9 are resolved and no longer part of this sequence.
-Item 2 is reopened: CI has never actually run. Fix the trigger before
-relying on any "passes CI" claim.
+Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this
+sequence.
 
-Items 5, 8, 10, 12 can wait until after the redesign.
+Items 5, 8, 10, 11, 12, 13, 14, and 15 can wait until after the redesign.

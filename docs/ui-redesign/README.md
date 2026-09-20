@@ -388,17 +388,48 @@ still renders, always complete, but without a date detail until one exists.
 This replaces the readiness panel that currently displays "Needs attention" and
 a "Ready" chip simultaneously.
 
-**Main column.** An informational notice when relevant ("6 students have not
-submitted yet. The due date is in 2 days.") with a View list action. Then a
-student table: Student, Section, Submitted, Checks, Grade, Status — with filter
-pills `Needs grading` / `Not submitted` / `Done` / `All`, defaulting to
-**Needs grading**. Checks read "All passed", "3 warnings", "Tests failed".
-Status chips read "Published", "Graded", "Needs grading", "No submission".
+**Main column.** A student table: Student, Section, Checks, Grade, Status —
+with filter pills `Needs grading` / `Done` / `All`, defaulting to **Needs
+grading**. Checks read "All passed", "3 warnings", "Tests failed". Status
+chips read "Published", "Graded", "Needs grading".
+
+**The `Submitted` column, the `Not submitted` filter pill, the `No
+submission` status chip, and the not-submitted informational notice ("6
+students have not submitted yet. The due date is in 2 days.") were dropped
+from the original mockup, permanently — not deferred, not blocked on
+anything.** No per-student submission signal exists, and approximating one
+from workflow-run presence would repeat exactly the CI-status-as-human-
+status conflation this section already rejects for the `Submissions`
+lifecycle step above, for the same reason: a workflow run existing does not
+mean a student submitted. Do not re-add any of the four without a real,
+direct, per-student submission signal — none exists today.
 
 **Sidebar (380px).** Assignment facts — Due, Points, Type, Sections, Grading,
-Late policy, Template (as a link). Then a Roster card. Then **Technical
-details**, collapsed, holding assignment file path, course folder, workflow
-path, slug and LMS id.
+Late policy, Template (as a link), Faculty owner, Grading category. Then a
+Roster card. Then **Technical details**, collapsed, holding assignment file
+path, course folder, workflow path, slug and LMS id.
+
+**The facts card carries nine rows, not the seven originally listed here.**
+`Faculty owner` and `Grading category` are user-authored — editable in
+`AssignmentSetupPage.tsx` and `AssignmentEditPage.tsx`, with
+`gradingCategory` defaulting to `"labs"` at creation — so dropping them from
+the facts card would let a faculty member enter a value they can never read
+back on this screen. The original seven-item list here was a sketch of the
+screen, not an inventory audited against the previous `SummaryPanel`'s
+thirteen fields, and missed them.
+
+`Grading` renders `grading.enabled` and `grading.mode` in plain language
+(for example "Grading enabled (Preset)", or "No grading"), not
+`grading_category`. Beside Due, Points and Type, faculty read `Grading` as
+whether automated grading is configured for this assignment;
+`grading_category` is the LMS gradebook bucket a score is filed under — a
+different fact, and it stays its own row.
+
+The sidebar's final two-column layout — this 380px sidebar beside the main
+column — arrives with PR6b-3. PR6b-1 grouped the three cards (Assignment
+facts, Roster, Technical details) into one structural sidebar block without
+committing to a two-column layout whose other half, the student table, did
+not exist yet.
 
 **Delete the "Available actions" panel entirely.** Its explanatory captions
 become helper text on the real controls or captions in the overflow menu.
