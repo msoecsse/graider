@@ -27,6 +27,12 @@ import { PageHeader } from "../components/PageHeader";
 import { copyTextToClipboard } from "./assignmentDetailClipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
 import { normalizeGradeStatus } from "../grade-status/gradeStatusNormalization";
+import {
+  formatGradeStatusLabel,
+  formatReadableDateTime,
+  getGradeStatusChipClassName,
+  getGradeStatusSummaryText
+} from "../grade-status/gradeStatusLabels";
 import { getGradeStatusRunUrl } from "../grade-status/gradeStatusRunUrl";
 import type {
   GradeStatusLoadResult,
@@ -473,7 +479,10 @@ const SummaryPanel = ({
       <DetailItem label="Type" value={detail.assignment.type} />
       <DetailItem label="Status" value={detail.assignment.status} />
       <DetailItem label="Points" value={detail.metadata.points} />
-      <DetailItem label="Due date" value={detail.deadline.dueAt} />
+      <DetailItem
+        label="Due date"
+        value={formatReadableDateTime(detail.deadline.dueAt) ?? detail.deadline.dueAt}
+      />
       <DetailItem label="Late policy" value={detail.deadline.latePolicy} />
       <DetailItem label="Sections" value={detail.sections.join(", ") || null} />
       <DetailItem label="Faculty owner" value={detail.metadata.facultyOwner} />
@@ -579,7 +588,7 @@ const GradingPanel = ({
         <DetailItem label="Artifact name" value={detail.grading.artifact} />
         <DetailItem label="Result file" value={detail.grading.resultFile} />
         <StatusItem label="Workflow status" value={detail.grading.workflowStatus} />
-        <StatusItem label="workflow_dispatch status" value={detail.grading.workflowDispatch} />
+        <StatusItem label="Workflow dispatch status" value={detail.grading.workflowDispatch} />
       </dl>
     )}
   </section>
@@ -1154,85 +1163,11 @@ const DiagnosticsPanel = ({
   </section>
 );
 
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "numeric",
-  minute: "2-digit"
-});
-
 const getGradeStatusStudentLabel = (row: GradeStatusRepositoryRow): string =>
   row.studentId ?? "Unknown student";
 
 const getRepositoryShortName = (repository: string | null): string =>
   repository?.split("/").at(-1) ?? "Not configured";
-
-const formatGradeStatusSummaryLabel = (row: GradeStatusRepositoryRow): string => {
-  if (row.status === "queued") {
-    return "Queued";
-  }
-
-  if (row.status === "in_progress") {
-    return "In progress";
-  }
-
-  if (row.status === "completed") {
-    if (row.conclusion === "success") {
-      return "Completed — success";
-    }
-
-    if (row.conclusion === "failure") {
-      return "Completed — failure";
-    }
-
-    if (row.conclusion === "cancelled") {
-      return "Cancelled";
-    }
-
-    if (row.conclusion === "timed_out") {
-      return "Timed out";
-    }
-
-    return "Completed — unknown";
-  }
-
-  if (row.status === "missing") {
-    return "Missing";
-  }
-
-  if (row.status === "token_required") {
-    return "Token required";
-  }
-
-  if (row.status === "not_configured") {
-    return "Grading disabled";
-  }
-
-  return row.status === "blocked" ? "Blocked" : "Unknown";
-};
-
-const getGradeStatusSummaryChipClassName = (row: GradeStatusRepositoryRow): string => {
-  if (row.status === "completed" && row.conclusion === "success") {
-    return "status-chip status-chip--success";
-  }
-
-  if (row.status === "completed" && row.conclusion === "failure") {
-    return "status-chip status-chip--error";
-  }
-
-  return row.needsAttention ? "status-chip status-chip--attention" : "status-chip";
-};
-
-const formatReadableDateTime = (timestamp: string | null): string | null => {
-  if (timestamp === null) {
-    return null;
-  }
-
-  const date = new Date(timestamp);
-
-  return Number.isNaN(date.getTime()) ? null : DATE_TIME_FORMATTER.format(date);
-};
 
 const formatGradeStatusLastUpdate = (row: GradeStatusRepositoryRow): string => {
   const completedAt = formatReadableDateTime(row.completedAt);
@@ -1248,35 +1183,6 @@ const formatGradeStatusLastUpdate = (row: GradeStatusRepositoryRow): string => {
   }
 
   return "No run time available";
-};
-
-const getGradeStatusSummaryText = (status: NormalizedGradeStatus): string => {
-  if (!status.grading.enabled) {
-    return "Grading is disabled for this assignment.";
-  }
-
-  const activeRuns = status.summary.queued + status.summary.inProgress;
-  const parts = [
-    status.summary.needsAttention > 0
-      ? `${status.summary.needsAttention} grading runs need attention.`
-      : null,
-    activeRuns > 0 ? `${activeRuns} runs still in progress.` : null,
-    status.summary.missing > 0
-      ? `${status.summary.missing} repositories are missing completed grading runs.`
-      : null,
-    status.summary.unknown > 0 ? `${status.summary.unknown} repositories are unknown.` : null,
-    status.summary.blocked > 0 ? `${status.summary.blocked} repositories are blocked.` : null
-  ].filter((part): part is string => part !== null);
-
-  if (parts.length > 0) {
-    return parts.join(" ");
-  }
-
-  if (status.repositories.length === 0) {
-    return "No repository status rows were returned.";
-  }
-
-  return "No grading runs need attention.";
 };
 
 const GradeStatusSummaryPanel = ({
@@ -1362,8 +1268,8 @@ const GradeStatusSummaryPanel = ({
                     )}
                   </td>
                   <td>
-                    <span className={getGradeStatusSummaryChipClassName(row)}>
-                      {formatGradeStatusSummaryLabel(row)}
+                    <span className={getGradeStatusChipClassName(row)}>
+                      {formatGradeStatusLabel(row)}
                     </span>
                   </td>
                   <td>{formatGradeStatusLastUpdate(row)}</td>

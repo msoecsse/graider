@@ -11,7 +11,7 @@ Status key: **Blocker** · **Should fix** · **Worth fixing** · **Optional** ·
 
 ---
 
-## 1. Assignment detail has no roster-wide grading status source — **Blocker**
+## 1. Assignment detail has no roster-wide grading status source — **Resolved**
 
 **Corrected 2026-09 — the original framing of this item was wrong.** A
 roster-wide aggregate already exists: `resolveGradingWorkspaceContext`
@@ -85,6 +85,17 @@ Do this first. It still unblocks PR6b, but as a scoped addition to
 already-existing, already-cheap logic, not as new aggregation
 infrastructure.
 
+Fixed: built as scoped here — a new IPC path
+(`getAssignmentGradingLifecycle`) feeds `resolveGradingWorkspaceContext`
+the assignment-wide roster via a new bundled backend
+(`assignment-grading-lifecycle-context.ts`), the resolver gained an opt-in
+`tolerateStudentStatusErrors` flag (via a function overload, so the grading
+workspace's own behaviour and types are unchanged) so one bad grading-state
+file no longer blanks the whole strip, and `Submissions` was dropped
+permanently rather than approximated — see README section 5.3. The
+lifecycle strip now renders four steps: `Created` → `Applied` → `Grading` →
+`Published`. See item 12 for the one known gap this left behind.
+
 ---
 
 ## 2. CI does not run any UI checks — **Resolved**
@@ -113,7 +124,7 @@ and results.
 
 ---
 
-## 3. Status-to-label logic is duplicated — **Should fix**
+## 3. Status-to-label logic is duplicated — **Resolved**
 
 `AssignmentDetailPage.tsx` (~line 1100) and `GradeStatusPage.tsx` (~line 109)
 contain near-identical helpers mapping `GradeStatusRepositoryStatus` to display
@@ -127,6 +138,61 @@ Fix: extract to a shared module. Note there are now six statuses, not five —
 `not_configured` is recent and easy to drop during a rewrite.
 
 Do this before PR6b, which rewrites one of the two call sites.
+
+Fixed: extracted to `ui/src/grade-status/gradeStatusLabels.ts`, enumerated
+from `GradeStatusRepositoryStatus` (actually eight values, not six or
+five — the backlog note undercounted; the new mapping is a `switch` with a
+compiler-enforced `never` check, so a future addition fails to typecheck
+instead of silently falling through). Two real differences between the old
+versions were found and reconciled, not silently picked:
+
+- `GradeStatusPage.tsx`'s completed-run label used
+  `` `Completed — ${row.conclusion ?? "unknown"}` ``, which leaked the raw
+  GitHub Actions conclusion string for `skipped`/`neutral`/`action_required`
+  — a section 2.3 violation. Adopted `AssignmentDetailPage.tsx`'s safer
+  version (explicit `success`/`failure`/`cancelled`/`timed_out` cases, a
+  `"Completed — unknown"` catch-all for everything else) for both files.
+- `AssignmentDetailPage.tsx`'s summary text included an
+  `"N grading runs need attention."` bucket that `GradeStatusPage.tsx`'s
+  version lacked, so the latter could fall through to a generic message on
+  `token_required` or failed/cancelled/timed-out repositories even though a
+  more specific one was available. Added it to the shared logic both
+  functions use, so `GradeStatusPage.tsx`'s rendered text changes (gets more
+  specific) for that case.
+- The two functions' _fallback_ message when nothing needs attention was
+  kept deliberately different, not unified: `GradeStatusPage.tsx`'s
+  `getNotReadyReason` is only ever called when `readyForReport` is already
+  false, so an empty reason list there means "not ready for a reason these
+  counts don't capture" — falling back to a positive message would be
+  wrong. `AssignmentDetailPage.tsx`'s `getGradeStatusSummaryText` is called
+  unconditionally, so its empty-list fallback is positive. Both still share
+  the same reason-enumeration logic.
+
+While auditing both files for other raw values per section 2.3, also fixed
+(all within these two files): a raw ISO timestamp in
+`GradeStatusPage.tsx`'s per-row "Started"/"Completed" times and its "Last
+refreshed" line; a raw ISO timestamp in `AssignmentDetailPage.tsx`'s "Due
+date" field; and a raw `label="workflow_dispatch status"` in
+`AssignmentDetailPage.tsx` (the value was already translated via
+`formatStatusLabel` — only the label text itself was raw) — this is the
+exact example in README section 2.3's own table.
+
+Found but left unfixed, reported instead (outside these two files, or
+disproportionate to this refactor):
+
+- `ui/src/apply-preview/ApplyPreviewPage.tsx:325` has the identical raw
+  `"workflow_dispatch status"` label — a different file.
+- `GradeStatusPage.tsx` shows a workflow file path and an assignment file
+  path directly in the table/page with no "Technical details" disclosure
+  on this page to hide them behind (section 2.4); adding one is a bigger
+  change than this refactor.
+- `resolvedFrom` (`"course_default"` / `"assignment_override"` / `"none"`)
+  and grading `mode` (`"custom-workflow"`, `"no-grading"`, …) render as raw
+  config identifiers in both files — legible but not plain English; would
+  need a new translation table unrelated to `GradeStatusRepositoryStatus`.
+- `getStudentLabel`/`getGradeStatusStudentLabel` remain duplicated
+  (identical one-liners, studentId → label) — not a status enum, so left
+  out of this module's scope.
 
 ---
 
@@ -268,13 +334,27 @@ screen by screen.
 
 ---
 
+## 12. Lifecycle strip's `Created` step has no date — **Optional**
+
+The assignment detail lifecycle strip's `Created` step (item 1) always
+renders complete, but with no date detail: no field anywhere in the data
+model records when an assignment was created. Adding one needs a backend
+model change (a new field on `AssignmentDetailResult`/`assignment-detail-
+builder.ts`, sourced from something like the assignment file's creation
+time or a recorded creation timestamp), which was out of scope for the
+lifecycle-strip PR.
+
+Low priority — the step still renders and is unambiguous (first, always
+complete) — but it is a visible blank next to three steps that do show a
+detail line.
+
+---
+
 ## Suggested order
 
-1. Item 1 — grading status aggregate (blocker for PR6b)
-2. Item 3 — shared status-mapping module
-3. Item 6 — decide the two-primary-actions question
-4. Then PR6b
+1. Item 6 — decide the two-primary-actions question
+2. Then PR6b
 
-Items 2, 4, 7, and 9 are resolved and no longer part of this sequence.
+Items 1, 2, 3, 4, 7, and 9 are resolved and no longer part of this sequence.
 
-Items 5, 8, 10 can wait until after the redesign.
+Items 5, 8, 10, 12 can wait until after the redesign.

@@ -209,6 +209,19 @@ describe("GradeStatusPage", () => {
     expect(graiderUI.gradeAssignment).not.toHaveBeenCalled();
   });
 
+  it("shows started and completed times in readable form, never the raw ISO timestamp", async () => {
+    mockGraiderUI({
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(createGradeStatusResult())
+    });
+
+    renderGradeStatusPage();
+
+    expect((await screen.findAllByText(/Started Jun 10, 2026/u)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Completed Jun 10, 2026/u)).toBeInTheDocument();
+    expect(screen.queryByText(/2026-06-10T12:00:00/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/2026-06-10T12:05:00/u)).not.toBeInTheDocument();
+  });
+
   it("opens faculty report from the latest loaded status", async () => {
     const onViewFacultyReport = vi.fn();
 

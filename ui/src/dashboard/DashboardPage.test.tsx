@@ -2334,10 +2334,11 @@ describe("DashboardPage", () => {
     expect(within(gradeSummary).getByText("Completed — success")).toBeInTheDocument();
     expect(within(gradeSummary).queryByRole("columnheader", { name: "Workflow" })).toBeNull();
     expect(screen.getByText("100")).toBeInTheDocument();
-    expect(screen.getByText("2027-06-15T23:59:00+09:00")).toBeInTheDocument();
+    expect(screen.getByText(/Jun 1[45], 2027/u)).toBeInTheDocument();
+    expect(screen.queryByText("2027-06-15T23:59:00+09:00")).not.toBeInTheDocument();
     expect(screen.getAllByText("graider-sandbox/csc1120L2Template").length).toBeGreaterThan(0);
     expect(screen.getAllByText(".github/workflows/grade.yml").length).toBeGreaterThan(0);
-    expect(screen.getByText("workflow_dispatch status")).toBeInTheDocument();
+    expect(screen.getByText("Workflow dispatch status")).toBeInTheDocument();
     expect(screen.getAllByText("3").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
     expect(getApplyPrimaryButton()).toBeEnabled();
