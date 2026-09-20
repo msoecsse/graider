@@ -98,7 +98,7 @@ lifecycle strip now renders four steps: `Created` → `Applied` → `Grading` �
 
 ---
 
-## 2. CI does not run any UI checks — **Resolved**
+## 2. CI does not run any UI checks — **Reopened — Blocker**
 
 `.github/workflows/ci.yml` runs root `typecheck`, `lint`, `format:check`,
 `test`, `build`, and `audit`. It never runs anything with `--prefix ui`.
@@ -114,13 +114,45 @@ that test passes only on macOS and will fail the moment CI runs the UI suite on
 Linux. Use `os.tmpdir()` instead. Fix this in the same PR or CI goes red
 immediately.
 
-Fixed: `ci.yml` now installs UI dependencies and runs `typecheck`,
+Partly fixed: `ci.yml` now installs UI dependencies and runs `typecheck`,
 `format:check`, `test`, and `build` with `--prefix ui`, and the
-`/private/tmp` hardcode was replaced with `os.tmpdir()`. The workflow has
-never actually triggered on this branch (push-only, no PR opened), so this
-was verified by running every CI command locally from a clean checkout
-instead — all pass. See the PR that resolved this for the full command list
-and results.
+`/private/tmp` hardcode was replaced with `os.tmpdir()`. Verified by running
+every CI command locally from a clean checkout — all pass.
+
+**Reopened 2026-09-20. The workflow content is correct; the workflow has
+never run, and not for the reason recorded above.**
+
+The original note said "push-only, no PR opened". The mechanism is
+different and worse:
+
+```yaml
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+```
+
+This repository's default branch is `master`. `main` exists as a separate
+branch whose tip is `c9a800d "Initial commit"` (2026-05-28); it has diverged
+from `master`, which is 82 commits ahead of it and 1 behind. Nothing has
+been pushed to `main` since the repository was created.
+
+So the `push` trigger names a branch that is effectively dead, and the
+`pull_request` trigger has nothing to fire on because no pull requests are
+opened. `ci.yml` was added on 2026-06-09 (`5a5db23`). **No CI run has
+happened on any branch, including `master`, in the three months since.**
+Every commit on `master` in that window is unverified by CI, not just the
+redesign branch. The UI steps added during the cleanup run were not the
+thing that was missing.
+
+Fix: point the `push` trigger at `master` — and at `ui-redesign` while the
+redesign is in progress, so the branch is protected before it merges rather
+than after. One-line change, and it is a prerequisite for any claim that a
+PR "passes CI".
+
+Do not close this item again on the strength of a local run. Close it when a
+run appears in the repository's Actions tab.
 
 ---
 
@@ -374,6 +406,8 @@ detail line.
 
 Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this sequence.
+Items 1, 3, 4, 6, 7, and 9 are resolved and no longer part of this sequence.
+Item 2 is reopened: CI has never actually run. Fix the trigger before
+relying on any "passes CI" claim.
 
 Items 5, 8, 10, 12 can wait until after the redesign.
