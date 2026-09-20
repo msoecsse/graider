@@ -2787,6 +2787,28 @@ describe("GradingWorkspacePage grading progress and filters", () => {
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
   });
 
+  it("gives navigation secondary weight so it never competes with Mark Complete or the header publish action", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(workspace()),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await screen.findByTestId("mock-monaco");
+
+    expect(screen.getByRole("button", { name: "Previous" })).toHaveClass("secondary-action");
+    expect(screen.getByRole("button", { name: "Previous" })).not.toHaveClass("primary-action");
+    expect(screen.getByRole("button", { name: "Next ungraded" })).toHaveClass("secondary-action");
+    expect(screen.getByRole("button", { name: "Next ungraded" })).not.toHaveClass("primary-action");
+
+    const markComplete = screen.getByRole("button", { name: "Mark Complete" });
+    expect(markComplete).toHaveClass("primary-action");
+    expect(markComplete).not.toHaveClass("secondary-action");
+
+    const headerPublish = screen.getByRole("button", { name: /^Publish \d+ reports?$/u });
+    expect(headerPublish).toHaveClass("primary-action");
+    expect(headerPublish).not.toHaveClass("secondary-action");
+  });
+
   it("keeps the student list and grading pane in agreement about status after a fresh snapshot load", async () => {
     setApis(
       vi.fn().mockResolvedValue(

@@ -2845,7 +2845,7 @@ export const GradingWorkspacePage = ({
               Previous
             </button>
             <button
-              className="primary-action"
+              className="secondary-action"
               type="button"
               disabled={nextUngradedStudentIndex === undefined}
               onClick={goToNextUngradedStudent}

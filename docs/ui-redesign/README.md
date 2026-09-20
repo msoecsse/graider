@@ -53,6 +53,13 @@ wrong.
   verbs. "Publish this student's report" shares the "Publish" verb with
   the header's session-wide action, so it is secondary, not primary, even
   though it also acts on one student.
+- **Navigation and disclosure controls are never primary, regardless of
+  frequency of use.** A primary action names a mutation — the next step
+  that changes state. "Next ungraded" changes what you're looking at, not
+  any state, no matter how often it gets clicked in a grading session; it
+  is secondary, matching "Previous". Opening a panel, a cheat sheet, or any
+  other disclosure is the same: never primary, even for a help affordance
+  used constantly.
 - **At most two secondary actions.** Outlined, in the header.
 - **Everything else goes in an overflow menu** (`⋯`). Rare, administrative,
   and destructive actions live there, grouped under headings with a one-line
