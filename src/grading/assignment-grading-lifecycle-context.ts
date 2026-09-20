@@ -1,7 +1,10 @@
 import { loadGraiderConfig } from "../config/config-loader.js";
 import { loadAssignmentRosters } from "../roster/roster-loader.js";
 import { ROSTER_STATUS_ACTIVE } from "../roster/roster-models.js";
-import { resolveGradingWorkspaceContext } from "./grading-workspace-context.js";
+import {
+  resolveGradingWorkspaceContext,
+  type GradingWorkspaceStudentStatus
+} from "./grading-workspace-context.js";
 
 export interface AssignmentGradingLifecycleContextRequest {
   readonly courseFolderPath: string;
@@ -9,9 +12,17 @@ export interface AssignmentGradingLifecycleContextRequest {
   readonly assignmentSlug: string;
 }
 
+export interface AssignmentGradingLifecycleStudentRow {
+  readonly studentId: string;
+  readonly githubUsername: string;
+  readonly section: string;
+  readonly gradingStatus: GradingWorkspaceStudentStatus | "unknown";
+}
+
 export type AssignmentGradingLifecycleContextResult =
   | {
       readonly status: "success";
+      readonly students: readonly AssignmentGradingLifecycleStudentRow[];
       readonly totalStudentCount: number;
       readonly gradingDoneCount: number;
       readonly publishedCount: number;
@@ -25,11 +36,12 @@ const assignmentFile = (termCode: string, assignmentSlug: string): string =>
 const GRADING_DONE_STATUSES: ReadonlySet<string> = new Set(["complete", "published"]);
 
 /**
- * Aggregates grading-lifecycle counts for the assignment detail lifecycle
- * strip. Uses the same assignment-wide, active-only roster that
- * assignment-detail-builder.ts already loads for roster.activeStudentCount —
- * not the faculty-scoped roster the grading workspace uses — so the strip's
- * "N of M" figures agree with the rest of the page.
+ * Returns per-student grading status rows, plus the lifecycle-strip counts
+ * derived from them, for an assignment. Uses the same assignment-wide,
+ * active-only roster that assignment-detail-builder.ts already loads for
+ * roster.activeStudentCount — not the faculty-scoped roster the grading
+ * workspace uses — so the strip's "N of M" figures, and the student table
+ * rows PR6b adds, agree with the rest of the page.
  */
 export const resolveAssignmentGradingLifecycleContext = (
   request: AssignmentGradingLifecycleContextRequest
@@ -64,17 +76,18 @@ export const resolveAssignmentGradingLifecycleContext = (
 
   if (workspaceResult.status !== "success") return { status: "assignment_config_error" };
 
+  // Counts are derived from `students` below, the exact array being
+  // returned, in the same statement — not recomputed separately — so a
+  // future change to one cannot silently leave the other stale.
+  const students: readonly AssignmentGradingLifecycleStudentRow[] = workspaceResult.students;
+
   return {
     status: "success",
-    totalStudentCount: workspaceResult.students.length,
-    gradingDoneCount: workspaceResult.students.filter((student) =>
-      GRADING_DONE_STATUSES.has(student.gradingStatus)
-    ).length,
-    publishedCount: workspaceResult.students.filter(
-      (student) => student.gradingStatus === "published"
-    ).length,
-    unknownStatusCount: workspaceResult.students.filter(
-      (student) => student.gradingStatus === "unknown"
-    ).length
+    students,
+    totalStudentCount: students.length,
+    gradingDoneCount: students.filter((student) => GRADING_DONE_STATUSES.has(student.gradingStatus))
+      .length,
+    publishedCount: students.filter((student) => student.gradingStatus === "published").length,
+    unknownStatusCount: students.filter((student) => student.gradingStatus === "unknown").length
   };
 };

@@ -1,8 +1,16 @@
 import path from "node:path";
 
+export interface AssignmentGradingLifecycleStudentRow {
+  readonly studentId: string;
+  readonly githubUsername: string;
+  readonly section: string;
+  readonly gradingStatus: "not_started" | "in_progress" | "complete" | "published" | "unknown";
+}
+
 export type AssignmentGradingLifecycleResult =
   | {
       readonly status: "success";
+      readonly students: readonly AssignmentGradingLifecycleStudentRow[];
       readonly totalStudentCount: number;
       readonly gradingDoneCount: number;
       readonly publishedCount: number;

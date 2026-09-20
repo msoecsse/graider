@@ -86,6 +86,21 @@ describe("assignment grading lifecycle aggregation", () => {
 
     expect(service()(requestFor(paths))).toEqual({
       status: "success",
+      students: [
+        {
+          studentId: "jones",
+          githubUsername: "seanjones",
+          section: "001",
+          gradingStatus: "not_started"
+        },
+        {
+          studentId: "smith",
+          githubUsername: "janesmith",
+          section: "001",
+          gradingStatus: "in_progress"
+        },
+        { studentId: "lee", githubUsername: "alexlee", section: "002", gradingStatus: "complete" }
+      ],
       totalStudentCount: 3,
       gradingDoneCount: 1,
       publishedCount: 0,
@@ -99,6 +114,26 @@ describe("assignment grading lifecycle aggregation", () => {
 
     expect(service()(requestFor(paths))).toEqual({
       status: "success",
+      students: [
+        {
+          studentId: "jones",
+          githubUsername: "seanjones",
+          section: "001",
+          gradingStatus: "published"
+        },
+        {
+          studentId: "smith",
+          githubUsername: "janesmith",
+          section: "001",
+          gradingStatus: "not_started"
+        },
+        {
+          studentId: "lee",
+          githubUsername: "alexlee",
+          section: "002",
+          gradingStatus: "not_started"
+        }
+      ],
       totalStudentCount: 3,
       gradingDoneCount: 1,
       publishedCount: 1,
@@ -121,11 +156,72 @@ describe("assignment grading lifecycle aggregation", () => {
 
     expect(service()(requestFor(paths))).toEqual({
       status: "success",
+      students: [
+        {
+          studentId: "jones",
+          githubUsername: "seanjones",
+          section: "001",
+          gradingStatus: "not_started"
+        },
+        {
+          studentId: "smith",
+          githubUsername: "janesmith",
+          section: "001",
+          gradingStatus: "complete"
+        },
+        { studentId: "lee", githubUsername: "alexlee", section: "002", gradingStatus: "unknown" }
+      ],
       totalStudentCount: 3,
       gradingDoneCount: 1,
       publishedCount: 0,
       unknownStatusCount: 1
     });
+  });
+
+  it("returns a row for every gradingStatus value, including unknown", () => {
+    const paths = createCourse();
+    setGradingStatus(paths.courseFolderPath, "smith", "in_progress");
+    setGradingStatus(paths.courseFolderPath, "lee", "published");
+    const statePath = createGradingStatePath({
+      courseRoot: paths.courseFolderPath,
+      termCode: TERM_CODE,
+      assignmentSlug: ASSIGNMENT_SLUG,
+      studentId: "jones"
+    });
+    if (statePath.status === "failure") throw new Error(statePath.message);
+    fs.mkdirSync(path.dirname(statePath.value), { recursive: true });
+    fs.writeFileSync(statePath.value, "{bad", "utf8");
+
+    const result = service()(requestFor(paths));
+    if (result.status !== "success") throw new Error("expected success");
+
+    expect(result.students.map((student) => student.gradingStatus).sort()).toEqual(
+      ["in_progress", "published", "unknown"].sort()
+    );
+  });
+
+  it("derives its counts from the rows it returns, and cannot disagree with them", () => {
+    const paths = createCourse();
+    setGradingStatus(paths.courseFolderPath, "smith", "complete");
+    setGradingStatus(paths.courseFolderPath, "lee", "published");
+
+    const result = service()(requestFor(paths));
+    if (result.status !== "success") throw new Error("expected success");
+
+    const expectedGradingDone = result.students.filter(
+      (student) => student.gradingStatus === "complete" || student.gradingStatus === "published"
+    ).length;
+    const expectedPublished = result.students.filter(
+      (student) => student.gradingStatus === "published"
+    ).length;
+    const expectedUnknown = result.students.filter(
+      (student) => student.gradingStatus === "unknown"
+    ).length;
+
+    expect(result.totalStudentCount).toBe(result.students.length);
+    expect(result.gradingDoneCount).toBe(expectedGradingDone);
+    expect(result.publishedCount).toBe(expectedPublished);
+    expect(result.unknownStatusCount).toBe(expectedUnknown);
   });
 
   it("uses the assignment-wide roster rather than a faculty-scoped subset", () => {
