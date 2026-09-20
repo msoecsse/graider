@@ -1093,6 +1093,12 @@ h1 {
   margin-bottom: 16px;
 }
 
+.assignment-detail__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
 .status-chip {
   display: inline-block;
   border: 1px solid #d0d7de;

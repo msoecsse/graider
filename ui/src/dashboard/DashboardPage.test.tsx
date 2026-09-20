@@ -2323,7 +2323,9 @@ describe("DashboardPage", () => {
       await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
     );
 
-    expect(await screen.findByRole("heading", { level: 2, name: "Summary" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
+    ).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Template" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Grading" })).toBeInTheDocument();
     expect(
@@ -2606,7 +2608,9 @@ describe("DashboardPage", () => {
       await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
     );
 
-    expect(await screen.findByText("No grading")).toBeInTheDocument();
+    // "No grading" appears twice by design: the status badge, and the
+    // Assignment facts card's Grading row, which reuses the same wording.
+    expect(await screen.findAllByText("No grading")).toHaveLength(2);
     expect(
       screen.getByRole("heading", { level: 2, name: "Grade status summary" })
     ).toBeInTheDocument();

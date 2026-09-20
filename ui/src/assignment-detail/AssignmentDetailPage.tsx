@@ -24,6 +24,7 @@ import {
 import { OperationStatusBar } from "../components/OperationStatusBar";
 import { OverflowMenu, type OverflowMenuGroup } from "../components/OverflowMenu";
 import { PageHeader } from "../components/PageHeader";
+import { TechnicalDetails, type TechnicalDetailsItem } from "../components/TechnicalDetails";
 import { copyTextToClipboard } from "./assignmentDetailClipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
 import { normalizeGradeStatus } from "../grade-status/gradeStatusNormalization";
@@ -203,13 +204,7 @@ const hasFacultyReportContext = ({
   courseFolderPath.trim().length > 0 &&
   assignmentFile.trim().length > 0;
 
-type CopyKey =
-  | "assignment-path"
-  | "course-folder-path"
-  | "template-repository"
-  | "workflow-path"
-  | "canvas-link"
-  | "publish-commands";
+type CopyKey = "template-repository" | "workflow-path" | "canvas-link" | "publish-commands";
 
 interface CopyState {
   readonly key: CopyKey;
@@ -460,65 +455,102 @@ const ReadinessPanel = ({
   );
 };
 
-const SummaryPanel = ({
-  detail,
-  courseFolderPath,
-  copyState,
-  onCopy
+const GRADING_MODE_LABELS: Readonly<Record<string, string>> = {
+  preset: "Preset",
+  "custom-workflow": "Custom workflow",
+  "contract-only": "Contract only"
+};
+
+// Reuses the exact "Grading enabled" / "No grading" phrasing already shown in
+// the status badges (see getStatusBadges) and extends it with the mode, so
+// the facts card reads as "is automated grading configured, and how" rather
+// than duplicating the grading_category gradebook-bucket concept.
+const getGradingFactValue = (grading: NormalizedAssignmentDetail["grading"]): string => {
+  if (!grading.enabled) {
+    return "No grading";
+  }
+
+  const modeLabel = grading.mode === null ? undefined : GRADING_MODE_LABELS[grading.mode];
+  return modeLabel === undefined ? "Grading enabled" : `Grading enabled (${modeLabel})`;
+};
+
+const AssignmentFactsPanel = ({
+  detail
 }: {
   readonly detail: NormalizedAssignmentDetail;
-  readonly courseFolderPath: string;
-  readonly copyState: CopyState | null;
-  readonly onCopy: (copyKey: CopyKey, value: string) => void;
 }): ReactElement => (
-  <section className="detail-panel" aria-labelledby="assignment-summary-title">
-    <h2 id="assignment-summary-title">Summary</h2>
+  <section className="detail-panel" aria-labelledby="assignment-facts-title">
+    <h2 id="assignment-facts-title">Assignment facts</h2>
     <dl className="detail-grid">
-      <DetailItem label="Title" value={detail.assignment.title} />
-      <DetailItem label="Slug" value={detail.assignment.slug} />
-      <DetailItem label="Type" value={detail.assignment.type} />
-      <DetailItem label="Status" value={detail.assignment.status} />
-      <DetailItem label="Points" value={detail.metadata.points} />
       <DetailItem
-        label="Due date"
+        label="Due"
         value={formatReadableDateTime(detail.deadline.dueAt) ?? detail.deadline.dueAt}
       />
-      <DetailItem label="Late policy" value={detail.deadline.latePolicy} />
+      <DetailItem label="Points" value={detail.metadata.points} />
+      <DetailItem label="Type" value={detail.assignment.type} />
       <DetailItem label="Sections" value={detail.sections.join(", ") || null} />
+      <DetailItem label="Grading" value={getGradingFactValue(detail.grading)} />
+      <DetailItem label="Late policy" value={detail.deadline.latePolicy} />
+      <div className="detail-item">
+        <dt>Template</dt>
+        <dd>
+          {detail.template.repository === null ? (
+            <span>{formatNullableValue(detail.template.repository)}</span>
+          ) : (
+            <a
+              href={`https://github.com/${detail.template.repository}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {getRepositoryShortName(detail.template.repository)}
+            </a>
+          )}
+        </dd>
+      </div>
       <DetailItem label="Faculty owner" value={detail.metadata.facultyOwner} />
-      <DetailItem label="LMS assignment ID" value={detail.metadata.lmsAssignmentId} />
       <DetailItem label="Grading category" value={detail.metadata.gradingCategory} />
-      <DetailItem
-        label="Assignment file path"
-        value={detail.assignment.file}
-        valueClassName="copyable-value"
-        action={
-          <CopyButton
-            label="Copy assignment path"
-            value={detail.assignment.file}
-            copyKey="assignment-path"
-            copyState={copyState}
-            onCopy={onCopy}
-          />
-        }
-      />
-      <DetailItem
-        label="Course folder path"
-        value={courseFolderPath}
-        valueClassName="copyable-value"
-        action={
-          <CopyButton
-            label="Copy course folder path"
-            value={courseFolderPath}
-            copyKey="course-folder-path"
-            copyState={copyState}
-            onCopy={onCopy}
-          />
-        }
-      />
     </dl>
   </section>
 );
+
+// The five implementation identifiers section 5.3 puts behind Technical
+// details. Sourced from data the page already has -- assignment.file and
+// assignment.slug from the detail response, grading.workflow from the same
+// response's grading block, lmsAssignmentId from its metadata block, and
+// courseFolderPath from the page's own selection -- no new field or fetch.
+const buildTechnicalDetailsItems = (
+  detail: NormalizedAssignmentDetail,
+  courseFolderPath: string
+): readonly TechnicalDetailsItem[] => [
+  {
+    id: "assignment-file-path",
+    label: "Assignment file path",
+    value: formatNullableValue(detail.assignment.file),
+    copyable: detail.assignment.file !== null
+  },
+  {
+    id: "course-folder-path",
+    label: "Course folder path",
+    value: courseFolderPath,
+    copyable: true
+  },
+  {
+    id: "workflow-path",
+    label: "Workflow path",
+    value: formatNullableValue(detail.grading.workflow),
+    copyable: detail.grading.workflow !== null
+  },
+  {
+    id: "slug",
+    label: "Slug",
+    value: formatNullableValue(detail.assignment.slug)
+  },
+  {
+    id: "lms-assignment-id",
+    label: "LMS assignment ID",
+    value: formatNullableValue(detail.metadata.lmsAssignmentId)
+  }
+];
 
 const TemplatePanel = ({
   detail,
@@ -2492,12 +2524,13 @@ export const AssignmentDetailPage = ({
             </div>
 
             <div className="assignment-detail-grid">
-              <SummaryPanel
-                detail={detail}
-                courseFolderPath={selection.courseFolderPath}
-                copyState={copyState}
-                onCopy={handleCopy}
-              />
+              <aside className="assignment-detail__sidebar">
+                <AssignmentFactsPanel detail={detail} />
+                <RosterPanel detail={detail} />
+                <TechnicalDetails
+                  items={buildTechnicalDetailsItems(detail, selection.courseFolderPath)}
+                />
+              </aside>
               {accessPage === null ? null : (
                 <StudentRepositoryAccessPagePanel
                   result={accessPage}
@@ -2521,7 +2554,6 @@ export const AssignmentDetailPage = ({
                   }}
                 />
               )}
-              <RosterPanel detail={detail} />
               <details
                 className="detail-panel assignment-detail__advanced"
                 id={ADVANCED_DETAILS_ID}

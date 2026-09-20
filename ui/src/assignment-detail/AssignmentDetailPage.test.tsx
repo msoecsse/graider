@@ -1284,7 +1284,7 @@ describe("AssignmentDetailPage", () => {
     expect(
       screen.getByText("GitHub authentication needed for readiness checks.")
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Summary" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Assignment facts" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Template" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Grading" })).toBeInTheDocument();
     expect(
@@ -1298,6 +1298,113 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
     expect(screen.getByText("assignment_detail_template_repository_missing")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Available actions" })).not.toBeInTheDocument();
+  });
+
+  it("moves the assignment file path, course folder, workflow path, slug, and LMS id into a collapsed Technical details disclosure", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+
+    renderAssignmentDetailPage();
+
+    await screen.findByRole("heading", { level: 2, name: "Assignment facts" });
+
+    const details = screen.getByText("Technical details").closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+
+    const insideDetails = within(details as HTMLDetailsElement);
+    expect(insideDetails.getByText("Assignment file path")).toBeInTheDocument();
+    expect(insideDetails.getByText(ASSIGNMENT_FILE)).toBeInTheDocument();
+    expect(insideDetails.getByText("Course folder path")).toBeInTheDocument();
+    expect(insideDetails.getByText(COURSE_FOLDER_PATH)).toBeInTheDocument();
+    expect(insideDetails.getByText("Workflow path")).toBeInTheDocument();
+    expect(insideDetails.getByText(".github/workflows/grade.yml")).toBeInTheDocument();
+    expect(insideDetails.getByText("Slug")).toBeInTheDocument();
+    expect(insideDetails.getByText("lab02")).toBeInTheDocument();
+    expect(insideDetails.getByText("LMS assignment ID")).toBeInTheDocument();
+    expect(insideDetails.getByText("lms-123")).toBeInTheDocument();
+
+    const factsSection = screen
+      .getByRole("heading", { level: 2, name: "Assignment facts" })
+      .closest("section");
+    expect(factsSection).not.toBeNull();
+    const insideFacts = within(factsSection as HTMLElement);
+    expect(insideFacts.queryByText("Slug")).toBeNull();
+    expect(insideFacts.queryByText("LMS assignment ID")).toBeNull();
+    expect(insideFacts.queryByText(ASSIGNMENT_FILE)).toBeNull();
+    expect(insideFacts.queryByText(COURSE_FOLDER_PATH)).toBeNull();
+  });
+
+  it("renders the assignment facts Template row as a link to the repository, not a raw path", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+
+    renderAssignmentDetailPage();
+
+    const factsSection = (
+      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
+    ).closest("section") as HTMLElement;
+    const templateLink = within(factsSection).getByRole("link", { name: "csc1120L2Template" });
+    expect(templateLink).toHaveAttribute(
+      "href",
+      "https://github.com/graider-sandbox/csc1120L2Template"
+    );
+    expect(within(factsSection).queryByText("graider-sandbox/csc1120L2Template")).toBeNull();
+  });
+
+  it("shows a plain placeholder, not a broken link, when no template repository is configured", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({
+            template: {
+              repository: null,
+              branch: null,
+              status: "missing",
+              repositoryStatus: "missing",
+              branchStatus: "not_checked"
+            }
+          })
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const factsSection = (
+      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
+    ).closest("section") as HTMLElement;
+    expect(within(factsSection).queryByRole("link")).toBeNull();
+    expect(within(factsSection).getByText("Not configured")).toBeInTheDocument();
+  });
+
+  it("shows the Grading fact in plain language, combining enabled state and mode", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({
+            grading: {
+              enabled: true,
+              mode: "preset",
+              workflow: ".github/workflows/grade.yml",
+              artifact: "grading-results",
+              resultFile: "grading-results.json",
+              workflowStatus: "available",
+              workflowDispatch: "available"
+            }
+          })
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const factsSection = (
+      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
+    ).closest("section") as HTMLElement;
+    expect(within(factsSection).getByText("Grading enabled (Preset)")).toBeInTheDocument();
   });
 
   it("renders neutral placeholders and missing grade-status data without crashing", async () => {
@@ -1336,7 +1443,9 @@ describe("AssignmentDetailPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Grade status data is not available yet.")).toBeInTheDocument();
     expect(screen.getByText("Roster counts could not be loaded.")).toBeInTheDocument();
-    expect(screen.getByText("No grading")).toBeInTheDocument();
+    // "No grading" now appears twice by design: the status badge, and the
+    // Assignment facts card's Grading row, which reuses the same wording.
+    expect(screen.getAllByText("No grading")).toHaveLength(2);
     expect(screen.getAllByText("Not configured").length).toBeGreaterThanOrEqual(4);
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
   });
@@ -1625,15 +1734,15 @@ describe("AssignmentDetailPage", () => {
 
     renderAssignmentDetailPage();
 
-    await screen.findByRole("button", { name: "Copy assignment path" });
+    await screen.findByRole("button", { name: "Copy Assignment file path" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy assignment path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy Assignment file path" }));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(ASSIGNMENT_FILE);
     });
     expect(await screen.findByText("Copied")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy course folder path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy Course folder path" }));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(COURSE_FOLDER_PATH);
     });
@@ -1903,9 +2012,11 @@ describe("AssignmentDetailPage", () => {
 
     renderAssignmentDetailPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Copy assignment path" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Copy Assignment file path" }));
 
-    expect(await screen.findByText("Unable to copy.")).toBeInTheDocument();
+    // Technical details owns its own copy affordance (built in PR1) with its
+    // own feedback text, distinct from the page-level CopyButton's.
+    expect(await screen.findByText("Unable to copy")).toBeInTheDocument();
   });
 
   it("keeps prior detail visible and disables refresh while loading", async () => {
