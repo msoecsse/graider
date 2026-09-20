@@ -99,13 +99,15 @@ const createLifecycleResult = (
   overrides: Partial<Extract<AssignmentGradingLifecycleResult, { status: "success" }>> = {}
 ): AssignmentGradingLifecycleResult => ({
   status: "success",
-  // The strip only reads the counts below; the per-student rows exist for
-  // PR6b's student table and are irrelevant to every assertion in this file.
+  // The strip only reads the counts below; the per-student rows, and each
+  // student's score, exist for PR6b's student table and are irrelevant to
+  // every assertion in this file.
   students: [],
   totalStudentCount: 24,
   gradingDoneCount: 0,
   publishedCount: 0,
   unknownStatusCount: 0,
+  pointsPossible: 0,
   ...overrides
 });
 

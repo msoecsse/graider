@@ -17,6 +17,7 @@ export interface AssignmentGradingLifecycleStudentRow {
   readonly githubUsername: string;
   readonly section: string;
   readonly gradingStatus: GradingWorkspaceStudentStatus | "unknown";
+  readonly score: number | null;
 }
 
 export type AssignmentGradingLifecycleContextResult =
@@ -27,6 +28,7 @@ export type AssignmentGradingLifecycleContextResult =
       readonly gradingDoneCount: number;
       readonly publishedCount: number;
       readonly unknownStatusCount: number;
+      readonly pointsPossible: number;
     }
   | { readonly status: "assignment_config_error" };
 
@@ -36,9 +38,10 @@ const assignmentFile = (termCode: string, assignmentSlug: string): string =>
 const GRADING_DONE_STATUSES: ReadonlySet<string> = new Set(["complete", "published"]);
 
 /**
- * Returns per-student grading status rows, plus the lifecycle-strip counts
- * derived from them, for an assignment. Uses the same assignment-wide,
- * active-only roster that assignment-detail-builder.ts already loads for
+ * Returns per-student grading status and score rows, plus the
+ * lifecycle-strip counts and the assignment's pointsPossible derived from
+ * them, for an assignment. Uses the same assignment-wide, active-only
+ * roster that assignment-detail-builder.ts already loads for
  * roster.activeStudentCount — not the faculty-scoped roster the grading
  * workspace uses — so the strip's "N of M" figures, and the student table
  * rows PR6b adds, agree with the rest of the page.
@@ -81,6 +84,13 @@ export const resolveAssignmentGradingLifecycleContext = (
   // future change to one cannot silently leave the other stale.
   const students: readonly AssignmentGradingLifecycleStudentRow[] = workspaceResult.students;
 
+  // Same rubric, same total for every student, so it goes on the result
+  // once rather than being repeated (and risking disagreement) per row.
+  const pointsPossible = workspaceResult.rubric.reduce(
+    (total, category) => total + category.points,
+    0
+  );
+
   return {
     status: "success",
     students,
@@ -88,6 +98,7 @@ export const resolveAssignmentGradingLifecycleContext = (
     gradingDoneCount: students.filter((student) => GRADING_DONE_STATUSES.has(student.gradingStatus))
       .length,
     publishedCount: students.filter((student) => student.gradingStatus === "published").length,
-    unknownStatusCount: students.filter((student) => student.gradingStatus === "unknown").length
+    unknownStatusCount: students.filter((student) => student.gradingStatus === "unknown").length,
+    pointsPossible
   };
 };

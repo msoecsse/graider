@@ -70,6 +70,66 @@ const setGradingStatus = (
   );
 };
 
+// Appended to the fixture's own copy of assignment.yml, not the checked-in
+// fixture itself, which several other test files also load without a
+// rubric. workflow, artifact, and result_file are required whenever
+// grading is enabled, regardless of rubric -- config-validation.ts rejects
+// enabled grading without them.
+const CORRECTNESS_POINTS_POSSIBLE = 60;
+const STYLE_POINTS_POSSIBLE = 40;
+const RUBRIC_POINTS_POSSIBLE = CORRECTNESS_POINTS_POSSIBLE + STYLE_POINTS_POSSIBLE;
+const CORRECTNESS_DEDUCTION = 10;
+const SCORE_AFTER_CORRECTNESS_DEDUCTION = RUBRIC_POINTS_POSSIBLE - CORRECTNESS_DEDUCTION;
+
+const RUBRIC_YAML =
+  "grading:\n" +
+  "  enabled: true\n" +
+  "  workflow: .github/workflows/grade.yml\n" +
+  "  artifact: grading-results\n" +
+  "  result_file: grading-results.json\n" +
+  "  rubric:\n" +
+  "    - id: correctness\n" +
+  "      name: Correctness\n" +
+  "      points: " +
+  String(CORRECTNESS_POINTS_POSSIBLE) +
+  "\n" +
+  "    - id: style\n" +
+  "      name: Style\n" +
+  "      points: " +
+  String(STYLE_POINTS_POSSIBLE) +
+  "\n";
+
+const addRubricToCourse = (courseFolderPath: string): void => {
+  fs.appendFileSync(
+    path.join(courseFolderPath, "terms/27s1/assignments/lab04/assignment.yml"),
+    RUBRIC_YAML,
+    "utf8"
+  );
+};
+
+const setGradingStatusWithManualAdjustments = (
+  courseFolderPath: string,
+  studentId: string,
+  status: "in_progress" | "complete" | "published",
+  manualAdjustments: readonly {
+    readonly id: string;
+    readonly rubricCategoryId: string;
+    readonly amount: number;
+  }[]
+): void => {
+  const state = createInitialGradingState(studentId, "sha");
+  if (state.status === "failure") throw new Error(state.message);
+  saveGradingState(
+    {
+      courseRoot: courseFolderPath,
+      termCode: TERM_CODE,
+      assignmentSlug: ASSIGNMENT_SLUG,
+      studentId
+    },
+    { ...state.value, status, manualAdjustments: [...manualAdjustments] }
+  );
+};
+
 afterEach(() => {
   roots.splice(0).forEach((root) => {
     fs.rmSync(root, { recursive: true, force: true });
@@ -84,6 +144,11 @@ describe("assignment grading lifecycle aggregation", () => {
     // jones has no grading-state file at all, which resolves to not_started.
     // patel is dropped in the roster and must not be counted at all.
 
+    // No rubric is configured on this fixture's assignment, so every
+    // student who has a grading-state file at all nets a real,
+    // zero-point total (0 of 0) rather than null -- only the missing
+    // file (jones) is null. See the dedicated score tests below for
+    // rubric-backed, nonzero, and calculateGrade-failure cases.
     expect(service()(requestFor(paths))).toEqual({
       status: "success",
       students: [
@@ -91,20 +156,29 @@ describe("assignment grading lifecycle aggregation", () => {
           studentId: "jones",
           githubUsername: "seanjones",
           section: "001",
-          gradingStatus: "not_started"
+          gradingStatus: "not_started",
+          score: null
         },
         {
           studentId: "smith",
           githubUsername: "janesmith",
           section: "001",
-          gradingStatus: "in_progress"
+          gradingStatus: "in_progress",
+          score: 0
         },
-        { studentId: "lee", githubUsername: "alexlee", section: "002", gradingStatus: "complete" }
+        {
+          studentId: "lee",
+          githubUsername: "alexlee",
+          section: "002",
+          gradingStatus: "complete",
+          score: 0
+        }
       ],
       totalStudentCount: 3,
       gradingDoneCount: 1,
       publishedCount: 0,
-      unknownStatusCount: 0
+      unknownStatusCount: 0,
+      pointsPossible: 0
     });
   });
 
@@ -119,25 +193,29 @@ describe("assignment grading lifecycle aggregation", () => {
           studentId: "jones",
           githubUsername: "seanjones",
           section: "001",
-          gradingStatus: "published"
+          gradingStatus: "published",
+          score: 0
         },
         {
           studentId: "smith",
           githubUsername: "janesmith",
           section: "001",
-          gradingStatus: "not_started"
+          gradingStatus: "not_started",
+          score: null
         },
         {
           studentId: "lee",
           githubUsername: "alexlee",
           section: "002",
-          gradingStatus: "not_started"
+          gradingStatus: "not_started",
+          score: null
         }
       ],
       totalStudentCount: 3,
       gradingDoneCount: 1,
       publishedCount: 1,
-      unknownStatusCount: 0
+      unknownStatusCount: 0,
+      pointsPossible: 0
     });
   });
 
@@ -161,20 +239,29 @@ describe("assignment grading lifecycle aggregation", () => {
           studentId: "jones",
           githubUsername: "seanjones",
           section: "001",
-          gradingStatus: "not_started"
+          gradingStatus: "not_started",
+          score: null
         },
         {
           studentId: "smith",
           githubUsername: "janesmith",
           section: "001",
-          gradingStatus: "complete"
+          gradingStatus: "complete",
+          score: 0
         },
-        { studentId: "lee", githubUsername: "alexlee", section: "002", gradingStatus: "unknown" }
+        {
+          studentId: "lee",
+          githubUsername: "alexlee",
+          section: "002",
+          gradingStatus: "unknown",
+          score: null
+        }
       ],
       totalStudentCount: 3,
       gradingDoneCount: 1,
       publishedCount: 0,
-      unknownStatusCount: 1
+      unknownStatusCount: 1,
+      pointsPossible: 0
     });
   });
 
@@ -222,6 +309,88 @@ describe("assignment grading lifecycle aggregation", () => {
     expect(result.gradingDoneCount).toBe(expectedGradingDone);
     expect(result.publishedCount).toBe(expectedPublished);
     expect(result.unknownStatusCount).toBe(expectedUnknown);
+  });
+
+  it("carries the score for a graded student, computed from the rubric and manual adjustments", () => {
+    const paths = createCourse();
+    addRubricToCourse(paths.courseFolderPath);
+    setGradingStatusWithManualAdjustments(paths.courseFolderPath, "smith", "complete", [
+      { id: "adj1", rubricCategoryId: "correctness", amount: -CORRECTNESS_DEDUCTION }
+    ]);
+
+    const result = service()(requestFor(paths));
+    if (result.status !== "success") throw new Error("expected success");
+
+    const smithRow = result.students.find((student) => student.studentId === "smith");
+    expect(smithRow?.score).toBe(SCORE_AFTER_CORRECTNESS_DEDUCTION);
+  });
+
+  it("reports null, not a score, for a student with no grading state at all", () => {
+    const paths = createCourse();
+    addRubricToCourse(paths.courseFolderPath);
+    // jones has no grading-state file. See createCourse's roster comment.
+
+    const result = service()(requestFor(paths));
+    if (result.status !== "success") throw new Error("expected success");
+
+    const jonesRow = result.students.find((student) => student.studentId === "jones");
+    expect(jonesRow?.gradingStatus).toBe("not_started");
+    expect(jonesRow?.score).toBeNull();
+  });
+
+  it("reports a genuinely zero score as 0, not null", () => {
+    const paths = createCourse();
+    addRubricToCourse(paths.courseFolderPath);
+    setGradingStatusWithManualAdjustments(paths.courseFolderPath, "smith", "complete", [
+      { id: "adj1", rubricCategoryId: "correctness", amount: -CORRECTNESS_POINTS_POSSIBLE },
+      { id: "adj2", rubricCategoryId: "style", amount: -STYLE_POINTS_POSSIBLE }
+    ]);
+
+    const result = service()(requestFor(paths));
+    if (result.status !== "success") throw new Error("expected success");
+
+    const smithRow = result.students.find((student) => student.studentId === "smith");
+    expect(smithRow?.score).toBe(0);
+    expect(smithRow?.score).not.toBeNull();
+  });
+
+  it("reports null score when calculateGrade fails, without blanking the row or the rest of the roster", () => {
+    const paths = createCourse();
+    addRubricToCourse(paths.courseFolderPath);
+    // smith's adjustment references a rubric category that does not exist
+    // on this assignment's rubric -- calculateGrade fails for smith alone.
+    setGradingStatusWithManualAdjustments(paths.courseFolderPath, "smith", "complete", [
+      { id: "adj1", rubricCategoryId: "no-such-category", amount: -5 }
+    ]);
+    setGradingStatus(paths.courseFolderPath, "lee", "published");
+
+    const result = service()(requestFor(paths));
+    if (result.status !== "success") throw new Error("expected success");
+
+    const smithRow = result.students.find((student) => student.studentId === "smith");
+    const leeRow = result.students.find((student) => student.studentId === "lee");
+    // smith's row keeps its real status; only the score is null.
+    expect(smithRow?.gradingStatus).toBe("complete");
+    expect(smithRow?.score).toBeNull();
+    // lee is unaffected by smith's calculateGrade failure: no deductions,
+    // so lee's score is the full points possible.
+    expect(leeRow?.gradingStatus).toBe("published");
+    expect(leeRow?.score).toBe(RUBRIC_POINTS_POSSIBLE);
+    // Counts reflect the real statuses -- smith's score failure does not
+    // push it into unknownStatusCount or drop it from gradingDoneCount.
+    expect(result.gradingDoneCount).toBe(2);
+    expect(result.publishedCount).toBe(1);
+    expect(result.unknownStatusCount).toBe(0);
+  });
+
+  it("reports pointsPossible on the result matching the rubric, once, not per row", () => {
+    const paths = createCourse();
+    addRubricToCourse(paths.courseFolderPath);
+
+    const result = service()(requestFor(paths));
+    if (result.status !== "success") throw new Error("expected success");
+
+    expect(result.pointsPossible).toBe(RUBRIC_POINTS_POSSIBLE);
   });
 
   it("uses the assignment-wide roster rather than a faculty-scoped subset", () => {

@@ -1,5 +1,6 @@
 import { loadGraiderConfig } from "../config/config-loader.js";
-import { loadGradingState } from "./grading-state.js";
+import { loadGradingState, type GradingState } from "./grading-state.js";
+import { calculateGrade, type RubricCategory } from "./grading-state-operations.js";
 
 export interface GradingWorkspaceScopedStudent {
   readonly studentId: string;
@@ -35,7 +36,12 @@ export interface TolerantGradingWorkspaceContextRequest extends Omit<
   readonly tolerateStudentStatusErrors: true;
 }
 
-interface GradingWorkspaceSuccessResult<Status extends string> {
+interface GradingWorkspaceSuccessResult<
+  Status extends string,
+  StudentRow extends GradingWorkspaceScopedStudent & {
+    readonly gradingStatus: Status;
+  } = GradingWorkspaceScopedStudent & { readonly gradingStatus: Status }
+> {
   readonly status: "success";
   readonly assignment: {
     readonly termCode: string;
@@ -48,9 +54,7 @@ interface GradingWorkspaceSuccessResult<Status extends string> {
     readonly name: string;
     readonly points: number;
   }[];
-  readonly students: readonly (GradingWorkspaceScopedStudent & {
-    readonly gradingStatus: Status;
-  })[];
+  readonly students: readonly StudentRow[];
 }
 
 export type GradingWorkspaceContextResult =
@@ -58,22 +62,53 @@ export type GradingWorkspaceContextResult =
   | { readonly status: "assignment_config_error" }
   | { readonly status: "grading_state_error"; readonly studentId: string; readonly code: string };
 
+/**
+ * The lifecycle context (the only caller that sets
+ * tolerateStudentStatusErrors) also needs each student's score, for the
+ * student table's Grade column -- see assignment-grading-lifecycle-context.ts.
+ * That is expressed only here, not on GradingWorkspaceContextResult: the
+ * grading workspace never asked for a score, so its result type -- and its
+ * actual returned objects, not just their declared type -- gain nothing.
+ */
 export type TolerantGradingWorkspaceContextResult =
-  | GradingWorkspaceSuccessResult<GradingWorkspaceStudentStatus | "unknown">
+  | GradingWorkspaceSuccessResult<
+      GradingWorkspaceStudentStatus | "unknown",
+      GradingWorkspaceScopedStudent & {
+        readonly gradingStatus: GradingWorkspaceStudentStatus | "unknown";
+        readonly score: number | null;
+      }
+    >
   | { readonly status: "assignment_config_error" };
 
 const assignmentFile = (termCode: string, assignmentSlug: string): string =>
   `terms/${termCode}/assignments/${assignmentSlug}/assignment.yml`;
 
 type StudentGradingStatusOutcome =
-  | { readonly status: "ok"; readonly gradingStatus: GradingWorkspaceStudentStatus }
+  | {
+      readonly status: "ok";
+      readonly gradingStatus: GradingWorkspaceStudentStatus;
+      readonly score: number | null;
+    }
   | { readonly status: "error"; readonly code: string };
+
+// A student whose applied comments or manual adjustments reference a
+// rubric category that no longer exists fails calculateGrade. That must not
+// blank the row or fail the whole call (the same per-student tolerance
+// established for status below) -- it just means no score for that student.
+const resolveStudentScore = (
+  state: GradingState,
+  rubric: readonly RubricCategory[]
+): number | null => {
+  const calculation = calculateGrade(state, rubric);
+  return calculation.status === "success" ? calculation.value.totalScore : null;
+};
 
 const resolveStudentGradingStatusOutcome = (
   courseRoot: string,
   termCode: string,
   assignmentSlug: string,
-  studentId: string
+  studentId: string,
+  rubric: readonly RubricCategory[]
 ): StudentGradingStatusOutcome => {
   const state = loadGradingState({ courseRoot, termCode, assignmentSlug, studentId });
   if (state.status === "failure") return { status: "error", code: state.code };
@@ -81,7 +116,12 @@ const resolveStudentGradingStatusOutcome = (
     return { status: "error", code: "grading_state_student_mismatch" };
   return {
     status: "ok",
-    gradingStatus: state.status === "missing" ? "not_started" : state.value.status
+    gradingStatus: state.status === "missing" ? "not_started" : state.value.status,
+    // No grading state file yet -> not started -> no score, distinct from
+    // a real score of zero. Computed here (state and rubric are already in
+    // hand) whether or not the caller ends up using it -- cheap, and the
+    // tolerant branch below is the only one that keeps it.
+    score: state.status === "success" ? resolveStudentScore(state.value, rubric) : null
   };
 };
 
@@ -105,34 +145,47 @@ export function resolveGradingWorkspaceContext(
   )
     return { status: "assignment_config_error" };
 
-  const students = [] as (GradingWorkspaceScopedStudent & {
-    readonly gradingStatus: GradingWorkspaceStudentStatus | "unknown";
-  })[];
-  for (const student of request.students) {
-    const outcome = resolveStudentGradingStatusOutcome(
+  const grading = config.config.assignment.grading;
+  const rubric = grading?.rubric ?? [];
+  const assignment = {
+    termCode: request.termCode,
+    slug: request.assignmentSlug,
+    title: config.config.assignment.assignment.title
+  };
+  const requiredFiles = grading?.required_files ?? [];
+  const resolveOutcome = (studentId: string): StudentGradingStatusOutcome =>
+    resolveStudentGradingStatusOutcome(
       config.config.summary.repoRoot,
       request.termCode,
       request.assignmentSlug,
-      student.studentId
+      studentId,
+      rubric
     );
-    if (outcome.status === "error" && !request.tolerateStudentStatusErrors)
-      return { status: "grading_state_error", studentId: student.studentId, code: outcome.code };
-    students.push({
-      ...student,
-      gradingStatus: outcome.status === "ok" ? outcome.gradingStatus : "unknown"
-    });
+
+  if (request.tolerateStudentStatusErrors) {
+    const students: (GradingWorkspaceScopedStudent & {
+      readonly gradingStatus: GradingWorkspaceStudentStatus | "unknown";
+      readonly score: number | null;
+    })[] = [];
+    for (const student of request.students) {
+      const outcome = resolveOutcome(student.studentId);
+      students.push({
+        ...student,
+        gradingStatus: outcome.status === "ok" ? outcome.gradingStatus : "unknown",
+        score: outcome.status === "ok" ? outcome.score : null
+      });
+    }
+    return { status: "success", assignment, requiredFiles, rubric, students };
   }
 
-  const grading = config.config.assignment.grading;
-  return {
-    status: "success",
-    assignment: {
-      termCode: request.termCode,
-      slug: request.assignmentSlug,
-      title: config.config.assignment.assignment.title
-    },
-    requiredFiles: grading?.required_files ?? [],
-    rubric: grading?.rubric ?? [],
-    students
-  };
+  const students: (GradingWorkspaceScopedStudent & {
+    readonly gradingStatus: GradingWorkspaceStudentStatus;
+  })[] = [];
+  for (const student of request.students) {
+    const outcome = resolveOutcome(student.studentId);
+    if (outcome.status === "error")
+      return { status: "grading_state_error", studentId: student.studentId, code: outcome.code };
+    students.push({ ...student, gradingStatus: outcome.gradingStatus });
+  }
+  return { status: "success", assignment, requiredFiles, rubric, students };
 }

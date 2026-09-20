@@ -5,6 +5,7 @@ export interface AssignmentGradingLifecycleStudentRow {
   readonly githubUsername: string;
   readonly section: string;
   readonly gradingStatus: "not_started" | "in_progress" | "complete" | "published" | "unknown";
+  readonly score: number | null;
 }
 
 export type AssignmentGradingLifecycleResult =
@@ -15,6 +16,7 @@ export type AssignmentGradingLifecycleResult =
       readonly gradingDoneCount: number;
       readonly publishedCount: number;
       readonly unknownStatusCount: number;
+      readonly pointsPossible: number;
     }
   | { readonly status: "assignment_config_error" };
 
