@@ -31,7 +31,9 @@ describe("formatStatusLabel", () => {
     ["closed", "Closed"],
     ["archived", "Archived"],
     ["cloned", "Cloned"],
-    ["failed", "Failed"]
+    ["failed", "Failed"],
+    ["blocked", "Blocked"],
+    ["pending", "Pending"]
   ])("maps %s to %s", (status, label) => {
     expect(formatStatusLabel(status)).toBe(label);
   });

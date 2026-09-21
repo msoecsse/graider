@@ -50,7 +50,13 @@ const STATUS_LABELS: Readonly<Record<string, string>> = {
   archived: "Archived",
   // Repository download per-target outcome
   cloned: "Cloned",
-  failed: "Failed"
+  failed: "Failed",
+  // Group-mode apply result target outcome (src/groups/group-target-executor.ts,
+  // src/cli/commands/apply.command.ts): "created"/"updated"/"failed" route through
+  // formatApplyResultRepositoryStatus instead (the same mapping individual apply
+  // rows use); "blocked" and "pending" are the two values unique to this vocabulary.
+  blocked: "Blocked",
+  pending: "Pending"
 };
 
 export const formatStatusLabel = (status: string | null): string => {

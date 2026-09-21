@@ -626,6 +626,35 @@ The same one-job-three-implementations pattern PR8-1 fixed for dates.
 
 ---
 
+## 23. Raw enum text in status `<option>` labels — **Should fix**
+
+`RosterManagerPage.tsx:538–539` renders `<option value="active">active</option>`
+— the machine value is correct and also used verbatim as the visible label, so
+faculty read lowercase enum words in a dropdown. `AssignmentEditPage.tsx:219`'s
+select has the same shape. A §2.3 violation that PR8-2's instructions excluded
+by treating the whole control as off-limits; the bound value must stay
+machine-readable, the option text should not.
+
+---
+
+## 24. Diagnostic severity renders lowercase, and a test pins it — **Should fix**
+
+`formatStatusLabel` has an entry for `error` but not `warning` or `info`, so
+those reach the fallback and render lowercase. `DashboardPage.test.tsx`
+explicitly asserts the lowercase text, so the violation is now held in place
+by a passing test. Fixing it means changing that assertion.
+
+---
+
+## 25. Raw filesystem path in the repository-download results panel — **Should fix**
+
+`AssignmentDetailPage.tsx:2475` renders
+`{target.repositoryName} — {target.status} — {target.localPath}`. PR8-2 fixed
+the status; the path remains, outside any disclosure, on a screen that has
+been through the redesign. Deciding where it should live is a §2.4 question.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -633,5 +662,5 @@ Nothing is blocking PR6b anymore — proceed to it directly.
 Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this
 sequence.
 
-Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, and 22 can wait
-until after the redesign.
+Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, and 25
+can wait until after the redesign.
