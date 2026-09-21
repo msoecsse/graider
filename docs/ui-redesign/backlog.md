@@ -590,8 +590,7 @@ single value — the race disappears rather than needing to be tested.
 with no confirmation step of any kind — not a typed word, not even a
 Cancel/Confirm prompt.
 
-PR7-2 gated the three actions the destructive-action rule (README section
-2) actually reaches: they affect a roster or student repositories. This one
+PR7-2 gated the three actions the destructive-action rule (README section 2) actually reaches: they affect a roster or student repositories. This one
 doesn't. `removeCourseFolder` resolves to `removeCourseFolderFromRegistry`
 (`main.ts:512`), which only unregisters the folder from Graider's own local
 registry (`courseRegistry.ts:349`) — it deletes nothing on disk and touches
@@ -599,7 +598,7 @@ no student repository. The rule's typed-word requirement does not reach
 it, and PR7-2 deliberately left it ungated rather than inventing a
 requirement the rule doesn't impose.
 
-It is still an unconfirmed, destructive-*looking* action on a single
+It is still an unconfirmed, destructive-_looking_ action on a single
 click. Re-adding the folder is easy — nothing was actually destroyed — but
 a faculty member who clicks it by accident today gets no warning and no
 way back except knowing to re-add it.
