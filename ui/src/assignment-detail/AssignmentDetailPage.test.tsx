@@ -6,6 +6,7 @@ import type {
   AssignmentDetailResult,
   AssignmentGradeStatusJsonResponse,
   AssignmentGradeStatusResult,
+  AssignmentGradingLifecycleResult,
   AssignmentRepositoryDownloadResult,
   GraiderUIApi
 } from "../../electron/ipc";
@@ -313,6 +314,19 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
 
   return graiderUI as unknown as GraiderUIApi;
 };
+
+const createLifecycleResult = (
+  overrides: Partial<Extract<AssignmentGradingLifecycleResult, { status: "success" }>> = {}
+): AssignmentGradingLifecycleResult => ({
+  status: "success",
+  students: [],
+  totalStudentCount: 0,
+  gradingDoneCount: 0,
+  publishedCount: 0,
+  unknownStatusCount: 0,
+  pointsPossible: 0,
+  ...overrides
+});
 
 const mockClipboard = (writeText: ReturnType<typeof vi.fn>): void => {
   Object.defineProperty(navigator, "clipboard", {
@@ -1237,6 +1251,43 @@ describe("AssignmentDetailPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View workflow" })).toBeDisabled();
     expect(getTemplateWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("wires the lifecycle rows and grade status into the student table in the main column", async () => {
+    mockGraiderUI({
+      getAssignmentGradingLifecycle: vi.fn().mockResolvedValue(
+        createLifecycleResult({
+          students: [
+            {
+              studentId: "ada",
+              githubUsername: "adalovelace",
+              section: "001",
+              gradingStatus: "published",
+              score: 90
+            }
+          ],
+          totalStudentCount: 1,
+          gradingDoneCount: 1,
+          publishedCount: 1,
+          pointsPossible: 100
+        })
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const table = await screen.findByRole("heading", { level: 2, name: "Students" });
+    const section = table.closest("section") as HTMLElement;
+    fireEvent.click(within(section).getByRole("button", { name: "Done 1" }));
+    expect(within(section).getByText("ada")).toBeInTheDocument();
+    expect(within(section).getByText("90 / 100")).toBeInTheDocument();
+    expect(within(section).getByText("Published")).toBeInTheDocument();
+
+    const main = section.closest(".assignment-detail__main");
+    const sidebar = document.querySelector(".assignment-detail__sidebar");
+    expect(main).not.toBeNull();
+    expect(sidebar).not.toBeNull();
+    expect(main).not.toBe(sidebar);
   });
 
   it("renders the existing assignment panels with the repository list outside Advanced details", async () => {
