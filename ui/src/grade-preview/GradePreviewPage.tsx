@@ -9,23 +9,28 @@ import {
   formatStatusLabel,
   hasAttentionStatus
 } from "../components/statusLabels";
+import { formatReadableDateTime } from "../components/dateTime";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
 import { normalizeGradeDispatchResult } from "./gradeResultNormalization";
 import { normalizeGradePreview } from "./gradePreviewNormalization";
 import {
   canDispatchGradePreview,
-  formatGradePreviewRepositoryStatus,
   getGradeDispatchBlockerReasons,
   getGradePreviewReadinessLabel,
   getGradePreviewStatusItems,
   hasGradePreviewTokenRequirement
 } from "./gradePreviewReadiness";
+import {
+  formatMergedGradeRowStatus,
+  getGradePlanSummaryText,
+  mergedGradeRowNeedsAttention,
+  mergeGradeRows
+} from "./gradePreviewMerge";
 import type {
-  GradeDispatchResultRepositoryRow,
   GradeExecutionLoadResult,
   GradePreviewLoadResult,
   GradePreviewPageProps,
-  GradePreviewRepositoryRow,
+  GradeRowState,
   NormalizedGradeDispatchResult,
   NormalizedGradePreview
 } from "./gradePreviewTypes";
@@ -117,11 +122,7 @@ const getCourseTermSubtitle = (preview: NormalizedGradePreview | null): string =
   return course ?? term ?? "Course assignment";
 };
 
-const getStudentLabel = (row: GradePreviewRepositoryRow): string =>
-  row.studentId ?? "Unknown student";
-
-const getDispatchResultStudentLabel = (row: GradeDispatchResultRepositoryRow): string =>
-  row.studentId ?? "Unknown student";
+const getStudentLabel = (row: GradeRowState): string => row.studentId ?? "Unknown student";
 
 interface DetailItemProps {
   readonly label: string;
@@ -254,33 +255,43 @@ const WorkflowPanel = ({ preview }: { readonly preview: NormalizedGradePreview }
   </section>
 );
 
-const RepositorySummaryPanel = ({
-  preview
+const getDispatchedAtLabel = (dispatchedAt: string | null): string | null =>
+  dispatchedAt === null ? null : formatReadableDateTime(dispatchedAt);
+
+/**
+ * README section 5.4: "one summary sentence, not ten counter boxes" -- here,
+ * two four-box panels. The sentence is computed from the same merged rows
+ * the table below renders, so its counts agree with the rows shown by
+ * construction -- see gradePreviewMerge.ts. The result metadata block
+ * (status/exit code/dispatched time) only appears once dispatch has run;
+ * the rest of `DispatchResultSummaryPanel`'s old fields (Assignment, Course,
+ * Term, Workflow file, Dispatch ref) were dropped rather than carried over
+ * -- they duplicated `ContextPanel`/`WorkflowPanel`, which stay unconditional
+ * and unchanged (see the PR9-2 summary).
+ */
+const PlanSummaryPanel = ({
+  result,
+  rows
 }: {
-  readonly preview: NormalizedGradePreview;
-}): ReactElement => (
-  <section className="detail-panel apply-preview-summary" aria-labelledby="grade-plan-summary">
-    <h2 id="grade-plan-summary">Repository dispatch preview</h2>
-    <dl className="apply-preview-counts">
-      <div>
-        <dt>Would dispatch</dt>
-        <dd>{preview.plan.summary.wouldDispatch}</dd>
-      </div>
-      <div>
-        <dt>Would skip</dt>
-        <dd>{preview.plan.summary.wouldSkip}</dd>
-      </div>
-      <div>
-        <dt>Blocked</dt>
-        <dd>{preview.plan.summary.blocked}</dd>
-      </div>
-      <div>
-        <dt>Unknown</dt>
-        <dd>{preview.plan.summary.unknown}</dd>
-      </div>
-    </dl>
-  </section>
-);
+  readonly result: NormalizedGradeDispatchResult | null;
+  readonly rows: readonly GradeRowState[];
+}): ReactElement => {
+  const dispatchedAtLabel = result === null ? null : getDispatchedAtLabel(result.dispatchedAt);
+
+  return (
+    <section className="detail-panel apply-preview-summary" aria-labelledby="grade-plan-summary">
+      <h2 id="grade-plan-summary">Repository dispatch plan</h2>
+      <p>{getGradePlanSummaryText(result !== null, rows)}</p>
+      {result === null ? null : (
+        <div className="apply-result-meta">
+          <span className="status-chip">{formatStatusLabel(result.status)}</span>
+          <span>Exit code {result.exitCode}</span>
+          {dispatchedAtLabel === null ? null : <span>Dispatched {dispatchedAtLabel}</span>}
+        </div>
+      )}
+    </section>
+  );
+};
 
 const RowDiagnostics = ({
   diagnostics
@@ -304,29 +315,36 @@ const RowDiagnostics = ({
   );
 };
 
+/**
+ * One row per student, its preview and (once dispatch has run) result
+ * status joined. README section 5.4: "one plan table... updates that
+ * table's Status column in place" -- there is no second table appended once
+ * dispatch runs; this same table's Status/Reason cells just start reading
+ * differently for rows the result covers.
+ */
 const RepositoryRowsPanel = ({
-  preview
+  rows
 }: {
-  readonly preview: NormalizedGradePreview;
+  readonly rows: readonly GradeRowState[];
 }): ReactElement => (
   <section
     className="detail-panel apply-preview-repositories"
     aria-labelledby="grade-preview-rows-title"
   >
     <h2 id="grade-preview-rows-title">Repository rows</h2>
-    {preview.plan.repositories.length === 0 ? (
-      <p className="detail-panel__note">No repository preview rows.</p>
+    {rows.length === 0 ? (
+      <p className="detail-panel__note">No repository rows.</p>
     ) : (
-      <div className="apply-preview-table" role="table" aria-label="Grade dispatch preview rows">
+      <div className="apply-preview-table" role="table" aria-label="Repository rows">
         <div className="apply-preview-table__header" role="row">
           <span role="columnheader">Student</span>
           <span role="columnheader">Section</span>
           <span role="columnheader">Repository</span>
-          <span role="columnheader">Preview status</span>
+          <span role="columnheader">Status</span>
           <span role="columnheader">Workflow / ref</span>
           <span role="columnheader">Reason</span>
         </div>
-        {preview.plan.repositories.map((row) => (
+        {rows.map((row) => (
           <div
             className="apply-preview-table__row"
             role="row"
@@ -340,14 +358,12 @@ const RepositoryRowsPanel = ({
             <span role="cell">
               <span
                 className={
-                  row.status === "blocked" ||
-                  row.status === "unknown" ||
-                  row.status === "token_required"
+                  mergedGradeRowNeedsAttention(row)
                     ? "status-chip status-chip--attention"
                     : "status-chip"
                 }
               >
-                {formatGradePreviewRepositoryStatus(row.status)}
+                {formatMergedGradeRowStatus(row)}
               </span>
             </span>
             <span role="cell">
@@ -355,135 +371,7 @@ const RepositoryRowsPanel = ({
               {row.ref === null ? null : <span className="muted-inline"> @ {row.ref}</span>}
             </span>
             <span role="cell">
-              {formatReasonLabel(row.reason)}
-              <RowDiagnostics diagnostics={row.diagnostics} />
-            </span>
-          </div>
-        ))}
-      </div>
-    )}
-  </section>
-);
-
-const formatGradeDispatchResultStatus = (
-  status: GradeDispatchResultRepositoryRow["status"]
-): string => {
-  if (status === "dispatched") {
-    return "Dispatched";
-  }
-
-  if (status === "skipped") {
-    return "Skipped";
-  }
-
-  if (status === "blocked") {
-    return "Blocked";
-  }
-
-  return "Failed";
-};
-
-const DispatchResultSummaryPanel = ({
-  preview,
-  result
-}: {
-  readonly preview: NormalizedGradePreview;
-  readonly result: NormalizedGradeDispatchResult;
-}): ReactElement => (
-  <section className="detail-panel apply-preview-summary" aria-labelledby="grade-result-title">
-    <h2 id="grade-result-title">Grade Dispatch Result Summary</h2>
-    <div className="apply-result-meta">
-      <span className="status-chip">{formatStatusLabel(result.status)}</span>
-      <span>Exit code {result.exitCode}</span>
-      {result.dispatchedAt === null ? null : <span>Dispatched at {result.dispatchedAt}</span>}
-    </div>
-    <dl className="apply-preview-counts">
-      <div>
-        <dt>Workflow dispatched</dt>
-        <dd>{result.summary.dispatchAttempted > 0 ? "Yes" : "No"}</dd>
-      </div>
-      <div>
-        <dt>Targeted</dt>
-        <dd>{result.summary.targetsSelected}</dd>
-      </div>
-      <div>
-        <dt>Dispatched</dt>
-        <dd>{result.summary.dispatchSucceeded}</dd>
-      </div>
-      <div>
-        <dt>Skipped</dt>
-        <dd>{result.summary.skipped}</dd>
-      </div>
-      <div>
-        <dt>Failed / blocked</dt>
-        <dd>{result.summary.failedOrBlocked}</dd>
-      </div>
-    </dl>
-    <dl className="detail-grid apply-result-files">
-      <DetailItem label="Assignment" value={preview.assignment.title ?? preview.assignment.slug} />
-      <DetailItem label="Course" value={preview.course.title ?? preview.course.slug} />
-      <DetailItem label="Term" value={preview.term.title ?? preview.term.slug} />
-      <DetailItem label="Assignment file" value={result.assignmentFile} />
-      <DetailItem
-        label="Workflow file"
-        value={preview.files.workflowFile ?? preview.grading.workflow}
-      />
-      <DetailItem label="Dispatch ref" value={preview.grading.workflowRef} />
-    </dl>
-  </section>
-);
-
-const DispatchResultRowsPanel = ({
-  result
-}: {
-  readonly result: NormalizedGradeDispatchResult;
-}): ReactElement => (
-  <section className="detail-panel apply-preview-repositories" aria-labelledby="grade-result-rows">
-    <h2 id="grade-result-rows">Repository dispatch result rows</h2>
-    {result.rows.length === 0 ? (
-      <p className="detail-panel__note">No per-student grade dispatch result rows were returned.</p>
-    ) : (
-      <div
-        className="apply-preview-table"
-        role="table"
-        aria-label="Repository grade dispatch result rows"
-      >
-        <div className="apply-preview-table__header" role="row">
-          <span role="columnheader">Student</span>
-          <span role="columnheader">Section</span>
-          <span role="columnheader">Repository</span>
-          <span role="columnheader">Result status</span>
-          <span role="columnheader">Workflow / ref</span>
-          <span role="columnheader">Reason</span>
-        </div>
-        {result.rows.map((row) => (
-          <div
-            className="apply-preview-table__row"
-            role="row"
-            key={`${row.studentId ?? row.githubUsername ?? row.repository ?? "row"}-${row.section ?? "section"}`}
-          >
-            <span role="cell">{getDispatchResultStudentLabel(row)}</span>
-            <span role="cell">{formatNullableValue(row.section)}</span>
-            <span role="cell" className="apply-preview-table__repository">
-              {formatNullableValue(row.repository)}
-            </span>
-            <span role="cell">
-              <span
-                className={
-                  row.status === "failed" || row.status === "blocked"
-                    ? "status-chip status-chip--attention"
-                    : "status-chip"
-                }
-              >
-                {formatGradeDispatchResultStatus(row.status)}
-              </span>
-            </span>
-            <span role="cell">
-              {formatNullableValue(row.workflow)}
-              {row.ref === null ? null : <span className="muted-inline"> @ {row.ref}</span>}
-            </span>
-            <span role="cell">
-              {formatReasonLabel(row.reason)}
+              {formatReasonLabel(row.resultStatus === null ? row.previewReason : row.resultReason)}
               <RowDiagnostics diagnostics={row.diagnostics} />
             </span>
           </div>
@@ -516,6 +404,12 @@ const DiagnosticEntry = ({
   </li>
 );
 
+/**
+ * README section 5.4: "one diagnostics region, shown only when there is
+ * something to say" -- callers only render this when `diagnostics` is
+ * non-empty, so unlike its predecessor this component never needs its own
+ * empty state.
+ */
 const DiagnosticsPanel = ({
   diagnostics
 }: {
@@ -523,25 +417,21 @@ const DiagnosticsPanel = ({
 }): ReactElement => (
   <section className="detail-panel" aria-labelledby="grade-preview-diagnostics-title">
     <h2 id="grade-preview-diagnostics-title">Diagnostics / blockers</h2>
-    {diagnostics.length === 0 ? (
-      <p className="detail-panel__note">No blockers or warnings.</p>
-    ) : (
-      <div className="diagnostic-groups">
-        {groupDiagnostics(diagnostics).map((group) => (
-          <section className="diagnostic-group" aria-label={group.label} key={group.key}>
-            <h3>{group.key === "needs_attention" ? "Blockers" : group.label}</h3>
-            <ul className="assignment-detail-diagnostics">
-              {group.diagnostics.map((diagnostic, index) => (
-                <DiagnosticEntry
-                  diagnostic={diagnostic}
-                  key={`${diagnostic.code ?? "diagnostic"}-${index}`}
-                />
-              ))}
-            </ul>
-          </section>
-        ))}
-      </div>
-    )}
+    <div className="diagnostic-groups">
+      {groupDiagnostics(diagnostics).map((group) => (
+        <section className="diagnostic-group" aria-label={group.label} key={group.key}>
+          <h3>{group.key === "needs_attention" ? "Blockers" : group.label}</h3>
+          <ul className="assignment-detail-diagnostics">
+            {group.diagnostics.map((diagnostic, index) => (
+              <DiagnosticEntry
+                diagnostic={diagnostic}
+                key={`${diagnostic.code ?? "diagnostic"}-${index}`}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
   </section>
 );
 
@@ -645,52 +535,49 @@ const ConfirmationPanel = ({
   );
 };
 
-const GradeDispatchResultPanel = ({
-  preview,
-  result,
+/**
+ * The one part of the old design that genuinely was a single panel whose
+ * content changes: pre-dispatch this slot holds `ConfirmationPanel`,
+ * post-dispatch it holds this. Never both at once, so it was never part of
+ * the stacking defect README section 5.4 describes.
+ */
+const PostDispatchActionsPanel = ({
   onBack,
   onViewGradeStatus,
   onRefreshAssignmentDetail,
   onBackToDashboard
 }: {
-  readonly preview: NormalizedGradePreview;
-  readonly result: NormalizedGradeDispatchResult;
   readonly onBack: () => void;
   readonly onViewGradeStatus?: () => void;
   readonly onRefreshAssignmentDetail?: () => void;
   readonly onBackToDashboard?: () => void;
 }): ReactElement => (
-  <>
-    <DispatchResultSummaryPanel preview={preview} result={result} />
-    <DispatchResultRowsPanel result={result} />
-    <DiagnosticsPanel diagnostics={result.diagnostics} />
-    <section
-      className="detail-panel apply-preview-final-action"
-      aria-labelledby="post-grade-dispatch-title"
-    >
-      <h2 id="post-grade-dispatch-title">Post-dispatch actions</h2>
-      <div className="apply-confirmation-actions">
-        <button className="secondary-action" type="button" onClick={onBack}>
-          Back to assignment detail
+  <section
+    className="detail-panel apply-preview-final-action"
+    aria-labelledby="post-grade-dispatch-title"
+  >
+    <h2 id="post-grade-dispatch-title">Post-dispatch actions</h2>
+    <div className="apply-confirmation-actions">
+      <button className="secondary-action" type="button" onClick={onBack}>
+        Back to assignment detail
+      </button>
+      {onViewGradeStatus === undefined ? null : (
+        <button className="primary-action" type="button" onClick={onViewGradeStatus}>
+          View grading status
         </button>
-        {onViewGradeStatus === undefined ? null : (
-          <button className="primary-action" type="button" onClick={onViewGradeStatus}>
-            View grading status
-          </button>
-        )}
-        {onRefreshAssignmentDetail === undefined ? null : (
-          <button className="primary-action" type="button" onClick={onRefreshAssignmentDetail}>
-            Refresh assignment detail
-          </button>
-        )}
-        {onBackToDashboard === undefined ? null : (
-          <button className="secondary-action" type="button" onClick={onBackToDashboard}>
-            Back to dashboard
-          </button>
-        )}
-      </div>
-    </section>
-  </>
+      )}
+      {onRefreshAssignmentDetail === undefined ? null : (
+        <button className="primary-action" type="button" onClick={onRefreshAssignmentDetail}>
+          Refresh assignment detail
+        </button>
+      )}
+      {onBackToDashboard === undefined ? null : (
+        <button className="secondary-action" type="button" onClick={onBackToDashboard}>
+          Back to dashboard
+        </button>
+      )}
+    </div>
+  </section>
 );
 
 export const GradePreviewPage = ({
@@ -722,6 +609,11 @@ export const GradePreviewPage = ({
         ? null
         : normalizeGradeDispatchResult(gradeResult.grade, gradeResult.dispatchedAt),
     [gradeResult]
+  );
+
+  const mergedRows = useMemo(
+    () => (preview === null ? [] : mergeGradeRows(preview, normalizedGradeResult)),
+    [preview, normalizedGradeResult]
   );
 
   const loadPreview = async (): Promise<void> => {
@@ -813,6 +705,11 @@ export const GradePreviewPage = ({
   const commandErrorMessage = getCommandErrorMessage(loadResult);
   const gradeErrorMessage = getGradeCommandErrorMessage(gradeResult);
   const showTokenGuidance = preview !== null && hasGradePreviewTokenRequirement(preview);
+  const activeDiagnostics =
+    normalizedGradeResult === null
+      ? (preview?.diagnostics ?? [])
+      : normalizedGradeResult.diagnostics;
+  const refreshedAtLabel = preview === null ? null : formatReadableDateTime(preview.refreshedAt);
 
   return (
     <main className="dashboard-shell" aria-labelledby="grade-preview-title">
@@ -847,13 +744,13 @@ export const GradePreviewPage = ({
         <p className="preview-only-notice">
           {normalizedGradeResult === null
             ? "Preview only — no GitHub Actions workflows will be started."
-            : "Grade dispatch result — preview context remains visible below."}
+            : "Grading workflows have been dispatched. The plan below reflects what happened."}
         </p>
         <p className="assignment-detail__path">
           Assignment file: {preview?.files.assignmentFile ?? selection.assignmentFile}
         </p>
-        {preview?.refreshedAt === null || preview?.refreshedAt === undefined ? null : (
-          <p className="assignment-detail__path">Last refreshed: {preview.refreshedAt}</p>
+        {refreshedAtLabel === null ? null : (
+          <p className="assignment-detail__path">Last refreshed: {refreshedAtLabel}</p>
         )}
 
         {isLoading ? <p className="loading-state">Loading grade preview...</p> : null}
@@ -892,9 +789,11 @@ export const GradePreviewPage = ({
               <TargetPanel preview={preview} />
               <GradingPanel preview={preview} />
               <WorkflowPanel preview={preview} />
-              <RepositorySummaryPanel preview={preview} />
-              <RepositoryRowsPanel preview={preview} />
-              <DiagnosticsPanel diagnostics={preview.diagnostics} />
+              <PlanSummaryPanel result={normalizedGradeResult} rows={mergedRows} />
+              <RepositoryRowsPanel rows={mergedRows} />
+              {activeDiagnostics.length === 0 ? null : (
+                <DiagnosticsPanel diagnostics={activeDiagnostics} />
+              )}
               {normalizedGradeResult === null ? (
                 <ConfirmationPanel
                   preview={preview}
@@ -915,9 +814,7 @@ export const GradePreviewPage = ({
                   }}
                 />
               ) : (
-                <GradeDispatchResultPanel
-                  preview={preview}
-                  result={normalizedGradeResult}
+                <PostDispatchActionsPanel
                   onBack={onBack}
                   {...(onViewGradeStatus === undefined ? {} : { onViewGradeStatus })}
                   {...(onRefreshAssignmentDetail === undefined

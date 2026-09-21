@@ -148,3 +148,27 @@ export interface NormalizedGradeDispatchResult {
   readonly rows: readonly GradeDispatchResultRepositoryRow[];
   readonly rawSummary: Readonly<Record<string, unknown>>;
 }
+
+/**
+ * One merged repository row: preview and (once dispatch has run) result,
+ * joined by student identity. README section 5.4 -- "one plan table... updates
+ * that table's Status column in place" -- mirrors
+ * apply-preview/applyPreviewTypes.ts's `ApplyRowState` (PR9-1). There is no
+ * group-mode counterpart here: unlike apply, grade dispatch always produces
+ * one row per student even when the underlying repository is shared by a
+ * group (src/grade-preview/grade-preview-builder.ts:568-594) -- see the PR9-2
+ * summary.
+ */
+export interface GradeRowState {
+  readonly studentId: string | null;
+  readonly githubUsername: string | null;
+  readonly section: string | null;
+  readonly repository: string | null;
+  readonly workflow: string | null;
+  readonly ref: string | null;
+  readonly previewStatus: GradePreviewRepositoryStatus;
+  readonly previewReason: string | null;
+  readonly resultStatus: GradeDispatchResultRepositoryStatus | null;
+  readonly resultReason: string | null;
+  readonly diagnostics: readonly AssignmentDetailDiagnostic[];
+}

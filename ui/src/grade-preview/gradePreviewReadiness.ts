@@ -1,5 +1,9 @@
 import { formatStatusLabel, hasAttentionStatus } from "../components/statusLabels";
-import type { GradePreviewRepositoryStatus, NormalizedGradePreview } from "./gradePreviewTypes";
+import type {
+  GradeDispatchResultRepositoryStatus,
+  GradePreviewRepositoryStatus,
+  NormalizedGradePreview
+} from "./gradePreviewTypes";
 
 export const formatGradePreviewRepositoryStatus = (
   status: GradePreviewRepositoryStatus
@@ -21,6 +25,30 @@ export const formatGradePreviewRepositoryStatus = (
   }
 
   return "Unknown";
+};
+
+/**
+ * Moved here from GradePreviewPage.tsx (PR9-2), matching where its
+ * apply-preview counterpart (`formatApplyResultRepositoryStatus`) already
+ * lived in applyPreviewReadiness.ts -- the merge module needs to import both
+ * preview and result formatters from one place, not from the page.
+ */
+export const formatGradeDispatchResultStatus = (
+  status: GradeDispatchResultRepositoryStatus
+): string => {
+  if (status === "dispatched") {
+    return "Dispatched";
+  }
+
+  if (status === "skipped") {
+    return "Skipped";
+  }
+
+  if (status === "blocked") {
+    return "Blocked";
+  }
+
+  return "Failed";
 };
 
 export const hasGradePreviewTokenRequirement = (preview: NormalizedGradePreview): boolean =>
