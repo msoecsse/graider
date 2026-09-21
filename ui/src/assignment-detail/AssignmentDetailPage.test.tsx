@@ -1537,10 +1537,10 @@ describe("AssignmentDetailPage", () => {
     expect(within(summary).queryByText("github-only")).toBeNull();
     expect(within(summary).queryByRole("columnheader", { name: "Workflow" })).toBeNull();
     expect(screen.queryByText("2026-06-12T17:33:39Z")).toBeNull();
-    expect(within(summary).getAllByText(/Last completed .*Jun 12, 2026/u).length).toBeGreaterThan(
-      0
-    );
-    expect(within(summary).getByText(/Started .*Jun 12, 2026/u)).toBeInTheDocument();
+    expect(
+      within(summary).getAllByText(/Last completed .*[A-Za-z]{3} Jun 12,/u).length
+    ).toBeGreaterThan(0);
+    expect(within(summary).getByText(/Started .*[A-Za-z]{3} Jun 12,/u)).toBeInTheDocument();
     expect(within(summary).getByText("No run time available")).toBeInTheDocument();
     expect(within(summary).getByText("Completed — success")).toHaveClass("status-chip--success");
     expect(within(summary).getByText("Completed — failure")).toHaveClass("status-chip--error");

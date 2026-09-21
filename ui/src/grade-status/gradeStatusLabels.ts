@@ -4,24 +4,6 @@ import type {
   NormalizedGradeStatus
 } from "./gradeStatusTypes";
 
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "numeric",
-  minute: "2-digit"
-});
-
-export const formatReadableDateTime = (timestamp: string | null): string | null => {
-  if (timestamp === null) {
-    return null;
-  }
-
-  const date = new Date(timestamp);
-
-  return Number.isNaN(date.getTime()) ? null : DATE_TIME_FORMATTER.format(date);
-};
-
 // Mirrors GradeStatusRepositoryConclusion in src/grade-status/grade-status-models.ts.
 // Can't import it directly: ui/src/ never imports from the CLI package (src/), only
 // from ui/electron via window.graiderUI, so the frontend keeps its own copy — the

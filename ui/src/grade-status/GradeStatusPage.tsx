@@ -6,6 +6,7 @@ import {
   groupDiagnostics
 } from "../assignment-detail/assignmentDetailReadiness";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
+import { formatReadableDateTime } from "../components/dateTime";
 import {
   createGradeStatusSummary,
   isNonTerminalGradeStatusRow,
@@ -14,7 +15,6 @@ import {
 } from "./gradeStatusNormalization";
 import {
   formatGradeStatusLabel,
-  formatReadableDateTime,
   getGradeStatusChipClassName,
   getNotReadyReason
 } from "./gradeStatusLabels";

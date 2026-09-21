@@ -99,6 +99,12 @@ Faculty are the users; the file format is an implementation detail.
 Any status enum that reaches the UI needs a display-string mapping. Put these in
 one module so they are reviewable in one place.
 
+**Clarification (PR8-1):** the date/time example above omits the year
+because it's illustrative, not because the year is always dropped. The
+shared formatter (`ui/src/components/dateTime.ts`) includes the year only
+when the timestamp falls outside the current year — a due date from the
+current term doesn't need one; one from a past term does.
+
 ### 2.4 Hide the plumbing
 
 File paths, slugs, LMS assignment IDs, manifest paths, workflow paths, artifact

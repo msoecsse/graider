@@ -29,10 +29,10 @@ import { Toast, useToast } from "../components/Toast";
 import { AssignmentDetailStudentTable } from "./AssignmentDetailStudentTable";
 import { copyTextToClipboard } from "./assignmentDetailClipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
+import { formatReadableDateTime } from "../components/dateTime";
 import { normalizeGradeStatus } from "../grade-status/gradeStatusNormalization";
 import {
   formatGradeStatusLabel,
-  formatReadableDateTime,
   getGradeStatusChipClassName,
   getGradeStatusSummaryText
 } from "../grade-status/gradeStatusLabels";

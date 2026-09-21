@@ -855,6 +855,8 @@ describe("DashboardPage", () => {
     expect(screen.getAllByText(COURSE_FOLDER.path).length).toBeGreaterThan(0);
     expect(screen.getAllByText(SECOND_COURSE_FOLDER.path).length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { level: 2, name: "No courses added yet." })).toBeNull();
+    expect(screen.getAllByText(/Last opened [A-Za-z]{3} Jun 9,/u)).toHaveLength(2);
+    expect(screen.queryByText(/2026-06-09T19:30:00/u)).toBeNull();
   });
 
   it("auto-runs dashboard refresh for one cached folder on startup", async () => {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   formatGradeStatusLabel,
-  formatReadableDateTime,
   getGradeStatusChipClassName,
   getGradeStatusSummaryText,
   getNotReadyReason
@@ -159,24 +158,6 @@ describe("getGradeStatusChipClassName", () => {
         createRow({ status: "queued", conclusion: null, needsAttention: false })
       )
     ).toBe("status-chip");
-  });
-});
-
-describe("formatReadableDateTime", () => {
-  it("returns null for a null timestamp", () => {
-    expect(formatReadableDateTime(null)).toBeNull();
-  });
-
-  it("returns null for an unparseable timestamp", () => {
-    expect(formatReadableDateTime("not-a-date")).toBeNull();
-  });
-
-  it("formats a valid ISO timestamp into a human-readable date, not the raw string", () => {
-    const formatted = formatReadableDateTime("2026-06-10T12:00:00.000Z");
-
-    expect(formatted).not.toBeNull();
-    expect(formatted).not.toContain("2026-06-10T12:00:00");
-    expect(formatted).toContain("2026");
   });
 });
 

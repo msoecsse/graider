@@ -223,6 +223,10 @@ describe("GradingWorkspacePage commit history", () => {
       "datetime",
       "2026-09-11T10:15:30-05:00"
     );
+    expect(items[0]!.querySelector("time")).toHaveTextContent(
+      /^[A-Za-z]{3} Sep 11, \d{1,2}:\d{2} [AP]M$/u
+    );
+    expect(items[0]).not.toHaveTextContent("2026-09-11T10:15:30-05:00");
   });
 
   it("clears A immediately and ignores stale A success and failure after selecting B", async () => {
