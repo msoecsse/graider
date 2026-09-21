@@ -3,6 +3,7 @@ import type { ReactElement, ReactNode } from "react";
 export interface EmptyStateAction {
   readonly label: string;
   readonly onClick: () => void;
+  readonly disabled?: boolean;
 }
 
 export interface EmptyStateProps {
@@ -18,7 +19,12 @@ export const EmptyState = ({ title, description, action }: EmptyStateProps): Rea
     <p>{description}</p>
     {action === undefined ? null : (
       <p className="empty-state__note">
-        <button className="primary-action" type="button" onClick={action.onClick}>
+        <button
+          className="primary-action"
+          type="button"
+          disabled={action.disabled === true}
+          onClick={action.onClick}
+        >
           {action.label}
         </button>
       </p>

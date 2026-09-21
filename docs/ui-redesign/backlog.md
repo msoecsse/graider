@@ -609,6 +609,23 @@ folder from the list.
 
 ---
 
+## 21. Raw ISO fallback defeats the date formatter — **Should fix**
+
+`AssignmentDetailPage.tsx:489` (Due) and `GradeStatusPage.tsx:488` (Last
+refreshed) fall back to the raw ISO string (`?? detail.deadline.dueAt`,
+`?? activeStatus.refreshedAt`) when `formatReadableDateTime` returns null.
+The shared module guards invalid dates correctly; these two callers print
+the raw value anyway. A real §2.3 violation that survived the fix that
+found it.
+
+---
+
+## 22. `assignmentDetailClipboard.ts` duplicates `components/clipboard.ts` verbatim — **Worth fixing**
+
+The same one-job-three-implementations pattern PR8-1 fixed for dates.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -616,5 +633,5 @@ Nothing is blocking PR6b anymore — proceed to it directly.
 Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this
 sequence.
 
-Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, and 20 can wait until
-after the redesign.
+Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, and 22 can wait
+until after the redesign.

@@ -23,6 +23,7 @@ import { GradePreviewPage } from "../grade-preview/GradePreviewPage";
 import { GradeStatusPage } from "../grade-status/GradeStatusPage";
 import { GradingWorkspacePage } from "../grading-workspace/GradingWorkspacePage";
 import type { NormalizedGradeStatus } from "../grade-status/gradeStatusTypes";
+import { EmptyState } from "../components/EmptyState";
 import { CourseCardGrid } from "./CourseCardGrid";
 import { CourseFolderList } from "./CourseFolderList";
 import { DashboardToolbar } from "./DashboardToolbar";
@@ -806,24 +807,28 @@ export const DashboardPage = (): ReactElement => {
         <div className="app-header__inner">
           <div>
             <p className="app-header__eyebrow">Graider</p>
-            <h1 id="dashboard-title">Your Courses</h1>
+            <h1 id="dashboard-title" className="app-header__title">
+              Your Courses
+            </h1>
           </div>
-          <button
-            className="secondary-action"
-            type="button"
-            onClick={() => {
-              void handleOpenCourseSetup();
-            }}
-          >
-            Set up course folder
-          </button>
-          <button
-            className="secondary-action"
-            type="button"
-            onClick={() => void handleOpenFacultySettings()}
-          >
-            Faculty settings
-          </button>
+          <div className="app-header__actions">
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={() => {
+                void handleOpenCourseSetup();
+              }}
+            >
+              Set up course folder
+            </button>
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={() => void handleOpenFacultySettings()}
+            >
+              Faculty settings
+            </button>
+          </div>
         </div>
       </header>
 
@@ -964,21 +969,24 @@ export const DashboardPage = (): ReactElement => {
         {isLoadingFolders ? <p className="loading-state">Loading course folders...</p> : null}
 
         {!isLoadingFolders && !hasCourseFolders ? (
-          <section className="empty-state" aria-labelledby="empty-state-title">
-            <div className="empty-state__marker" aria-hidden="true" />
-            <h2 id="empty-state-title">No courses added yet.</h2>
-            <p>Open a Graider course folder to get started.</p>
-            <button
-              className="primary-action"
-              type="button"
-              disabled={isSelectingFolder}
-              onClick={() => {
-                void handleOpenCourseFolder();
+          <section aria-label="No courses added yet.">
+            <EmptyState
+              title="No courses added yet."
+              description={
+                <>
+                  <span>Open a Graider course folder to get started.</span>
+                  <br />
+                  <span className="empty-state__note">Dashboard cards arrive in UI-1D.</span>
+                </>
+              }
+              action={{
+                label: "Open course folder",
+                disabled: isSelectingFolder,
+                onClick: () => {
+                  void handleOpenCourseFolder();
+                }
               }}
-            >
-              Open course folder
-            </button>
-            <p className="empty-state__note">Dashboard cards arrive in UI-1D.</p>
+            />
           </section>
         ) : null}
 
@@ -1000,25 +1008,31 @@ export const DashboardPage = (): ReactElement => {
             {isRefreshingAll ? <p className="loading-state">Loading dashboard...</p> : null}
 
             {!isRefreshingAll && !aggregatedDashboard.hasRefreshResults ? (
-              <section className="dashboard-placeholder" aria-label="Dashboard loading prompt">
-                <h2>Refresh to load course cards.</h2>
-                <p>Graider will run dashboard checks for each registered course folder.</p>
+              <section aria-label="Dashboard loading prompt">
+                <EmptyState
+                  title="Refresh to load course cards."
+                  description="Graider will run dashboard checks for each registered course folder."
+                />
               </section>
             ) : null}
 
             {!isRefreshingAll &&
             aggregatedDashboard.hasRefreshResults &&
             aggregatedDashboard.cards.length === 0 ? (
-              <section className="dashboard-placeholder" aria-label="No course cards">
-                <h2>No course-term cards found.</h2>
-                <p>Review the registered folder status or diagnostics, then refresh again.</p>
+              <section aria-label="No course cards">
+                <EmptyState
+                  title="No course-term cards found."
+                  description="Review the registered folder status or diagnostics, then refresh again."
+                />
               </section>
             ) : null}
 
             {hasFilteredOutCards ? (
-              <section className="dashboard-placeholder" aria-label="No matching courses">
-                <h2>No matching courses found.</h2>
-                <p>Try a different search or change the view filter.</p>
+              <section aria-label="No matching courses">
+                <EmptyState
+                  title="No matching courses found."
+                  description="Try a different search or change the view filter."
+                />
               </section>
             ) : null}
 
