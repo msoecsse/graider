@@ -829,8 +829,26 @@ describe("DashboardPage", () => {
       await screen.findByRole("heading", { level: 2, name: "No courses added yet." })
     ).toBeInTheDocument();
     expect(screen.getByText("Open a Graider course folder to get started.")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Open course folder" })).toHaveLength(2);
+    expect(
+      screen.getByText("Once you add one, its courses and assignments will appear here.")
+    ).toBeInTheDocument();
+    // Only the empty state's action renders while there is nothing on screen yet; the
+    // toolbar's identical "Open course folder" button would otherwise duplicate it.
+    expect(screen.getAllByRole("button", { name: "Open course folder" })).toHaveLength(1);
     expect(refreshDashboard).not.toHaveBeenCalled();
+  });
+
+  it("shows the toolbar's Open course folder action once folders are registered", async () => {
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER])
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("button", { name: `Refresh ${COURSE_FOLDER.path}` })
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Open course folder" })).toHaveLength(1);
   });
 
   it("renders accessible toolbar controls", async () => {
@@ -900,6 +918,41 @@ describe("DashboardPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "27s1-csc4641" })).toBeInTheDocument();
     expect(refreshDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the assignment table because it carries assignments the recent-assignments cards omit", async () => {
+    // dashboard-builder.ts filters and caps `recentAssignments` (active/completed/unknown
+    // status, top 5), while `assignments` (what the table renders) is the unfiltered,
+    // uncapped list. An "inactive" assignment like this one only ever reaches the table.
+    const archivedAssignment = {
+      slug: "archived-quiz",
+      title: "Archived Quiz",
+      status: "inactive",
+      assignmentFile: "terms/27s1/assignments/archived-quiz/assignment.yml",
+      needsAttention: false,
+      diagnostics: []
+    };
+    const cardWithArchivedAssignment = {
+      ...COURSE_TERM_CARD,
+      assignments: [...COURSE_TERM_CARD.recentAssignments, archivedAssignment]
+    };
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(
+          createCombinedDashboardResult([createDashboardResult({}, [cardWithArchivedAssignment])])
+        )
+    });
+    render(<DashboardPage />);
+
+    await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" });
+
+    expect(
+      screen.queryByRole("button", { name: "Open assignment detail for Archived Quiz" })
+    ).toBeNull();
+    expect(screen.getByRole("cell", { name: "Archived Quiz" })).toBeInTheDocument();
   });
 
   it("does not show the no-card state while startup refresh is still running", async () => {

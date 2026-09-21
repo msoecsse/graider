@@ -976,7 +976,9 @@ export const DashboardPage = (): ReactElement => {
                 <>
                   <span>Open a Graider course folder to get started.</span>
                   <br />
-                  <span className="empty-state__note">Dashboard cards arrive in UI-1D.</span>
+                  <span className="empty-state__note">
+                    Once you add one, its courses and assignments will appear here.
+                  </span>
                 </>
               }
               action={{

@@ -93,13 +93,15 @@ export const DashboardToolbar = ({
     >
       {isRefreshing ? "Refreshing..." : "Refresh"}
     </button>
-    <button
-      className="primary-action"
-      type="button"
-      disabled={isSelectingFolder}
-      onClick={onOpenCourseFolder}
-    >
-      Open course folder
-    </button>
+    {hasCourseFolders ? (
+      <button
+        className="primary-action"
+        type="button"
+        disabled={isSelectingFolder}
+        onClick={onOpenCourseFolder}
+      >
+        Open course folder
+      </button>
+    ) : null}
   </div>
 );
