@@ -7,7 +7,7 @@ decision. Each entry says what it is, why it matters, and how big it is.
 Work these between PR6a and PR6b. Item 1 is a hard prerequisite for PR6b.
 
 Status key: **Blocker** · **Should fix** · **Worth fixing** · **Optional** ·
-**Resolved**
+**Resolved** · **Accepted limitation**
 
 ---
 
@@ -478,6 +478,111 @@ incorrect, just repeated.
 
 ---
 
+## 16. `tools/ui-snapshots` was never set up — **Should fix**
+
+Section 7 requires screenshots attached to the PR, pointing at
+`tools/ui-snapshots`. The directory has `capture.cjs`, `snapshot-setup.ts`,
+`wrap.mjs`, and a README, all from PR1 — but no
+`vitest.snapshot.config.ts`, no `package.json` script, and no `.gitignore`
+entry for its output.
+
+So the capture code exists and has never been runnable. No PR in this
+redesign — PR1 through PR7-1a — has satisfied the screenshot requirement,
+and none could have. This is the definition of done being partially
+unmeetable from the start, not a series of individual omissions. Section 7
+now says so directly, with a pointer back here.
+
+Fix: a one-time setup task — the vitest config, the package script, the
+`.gitignore` entry, and whatever the Electron-driven capture step needs to
+run headless. Small, but it belongs to nobody's feature PR, which is why it
+has stayed undone through eight of them.
+
+---
+
+## 17. `AssignmentEditPage.tsx` has no test file — **Should fix**
+
+There is no `AssignmentEditPage.test.tsx`. PR7-1 changed production code in
+this file — added the required `onSuccess` prop and wired the toast — with
+no coverage beyond typecheck and the absence of regressions elsewhere.
+
+The page renders `ConfirmationWithPreviewModal`, so it is one of the eight
+call sites (across five caller files, `GradingWorkspacePage.tsx` alone
+accounting for four) affected by both the double-submit fix (`bbd6bee`) and
+the lockup fix (`c7d8000`) — and it is the only one of the five caller
+files with no test file at all. `AssignmentSetupPage`, `RosterManagerPage`,
+`AssignmentDetailPage`, and `GradingWorkspacePage` each have an existing
+suite that at least renders the page and exercises some of its flows.
+
+Fix: a new `AssignmentEditPage.test.tsx` covering, at minimum, the preview
+and confirm flow through to a successful save, so the modal wiring in this
+file has the same floor of coverage as its siblings.
+
+---
+
+## 18. Page-level fixtures never mock `getAssignmentGradingLifecycle` — **Worth fixing**
+
+Neither `AssignmentDetailPage.test.tsx` nor `DashboardPage.test.tsx` mocks
+`getAssignmentGradingLifecycle` in its default fixture, so the endpoint is
+`undefined` in every page-level test but one. Two consequences worth
+stating plainly:
+
+- The lifecycle strip has never been exercised through the page — only in
+  its own isolated `AssignmentDetailLifecycleStrip.test.tsx`.
+- PR6b-3's student table saw zero students in every pre-existing page test
+  (the lifecycle fetch resolves to nothing, so `AssignmentDetailStudentTable`
+  renders its "No active students yet" empty state), which is why none of
+  those existing tests needed updating when the table was added.
+
+PR6b-3 added one integration test
+(`AssignmentDetailPage.test.tsx`, "wires the lifecycle rows and grade
+status into the student table in the main column") that mocks the fetch
+and drives real data through the page. That closes the gap for the student
+table specifically, but the general gap — every other page-level test
+still renders this screen as if the lifecycle endpoint does not exist —
+remains.
+
+Fix: a shared fixture (a default `getAssignmentGradingLifecycle` mock with
+a small, realistic roster) that page-level tests can pull in, so
+lifecycle-dependent UI is exercised through the page by default rather
+than by one exception.
+
+---
+
+## 19. A concurrency path jsdom cannot reach — **Accepted limitation**
+
+`confirmPublishReport`'s mutation-in-flight guard
+(`gradingMutationStudents.current.has(studentId)`, in
+`GradingWorkspacePage.tsx`) is genuinely reachable by a user, and is the
+path that produced the modal lockup fixed in `c7d8000`. It has no
+regression test, and the reason is structural rather than an omission.
+
+Every button that opens a per-student confirmation modal is disabled on
+`gradingMutationStudentId !== undefined` — a single value, not scoped to a
+specific student — while the guard itself reads
+`gradingMutationStudents.current`, a ref-backed set. Reaching a state where
+the single flag has cleared (re-enabling the button) while the set still
+holds a stale entry for that student requires a cleanup-ordering race
+between two independently updated pieces of state. Testing Library's
+synchronous `act()` model collapses exactly this kind of race: updates that
+would interleave under real async and paint timing land in the same commit
+in a test, so the divergent-but-momentarily-consistent state a real user
+could hit is not producible through `fireEvent`.
+
+This is the same class of problem as item 7's intermittent failures — real
+behaviour the test environment cannot represent — though item 7 was a
+timing/contention issue that resolved given enough wall-clock time, where
+this is structural and cannot be reached in jsdom regardless of timeout.
+
+Recorded as an accepted limitation with its reasoning, so the next person
+who notices the missing test finds the analysis instead of repeating it.
+
+Fix, if ever: make the two pieces of state one. If the guard and the
+button's disabled condition both read the same source — the ref-backed set
+directly, or a value derived from it, rather than a separately updated
+single value — the race disappears rather than needing to be tested.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -485,4 +590,5 @@ Nothing is blocking PR6b anymore — proceed to it directly.
 Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this
 sequence.
 
-Items 5, 8, 10, 11, 12, 13, 14, and 15 can wait until after the redesign.
+Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, and 19 can wait until after
+the redesign.

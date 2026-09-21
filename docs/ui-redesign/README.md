@@ -564,4 +564,7 @@ PR 7 can jump the queue; it is a real bug.
 - No `onClick` on a non-interactive element.
 - Empty regions have real empty states.
 - Existing tests updated rather than deleted; new behaviour gets new tests.
-- Screenshots attached to the PR (see `tools/ui-snapshots`).
+- Screenshots attached to the PR (see `tools/ui-snapshots`) — currently
+  unmeetable: the capture code exists but has never had a vitest config or
+  a package script wired up, so no PR has been able to run it. See backlog
+  item 16 before going looking for the script.
