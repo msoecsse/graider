@@ -199,7 +199,7 @@ describe("GradingWorkspacePage commit history", () => {
       loadEvidence: vi.fn().mockReturnValue(pendingEvidence.promise)
     });
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     const panel = await screen.findByRole("region", { name: "Automated Checks" });
     expect(loadHistory).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
@@ -236,7 +236,7 @@ describe("GradingWorkspacePage commit history", () => {
       studentId === "ada" ? ada.promise : grace.promise
     );
     setApis({ loadHistory });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByText("Loading commit history for grace…")).toBeInTheDocument();
@@ -265,7 +265,7 @@ describe("GradingWorkspacePage commit history", () => {
       .mockResolvedValueOnce(history("grace"))
       .mockReturnValueOnce(reloadedAda.promise);
     setApis({ loadHistory });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByText("Commit history for ada");
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
@@ -280,7 +280,7 @@ describe("GradingWorkspacePage commit history", () => {
 
   it("shows an empty successful history neutrally", async () => {
     setApis({ loadHistory: vi.fn().mockResolvedValue(history("ada", [])) });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     expect(await screen.findByText("No commits available.")).toBeInTheDocument();
   });
 
@@ -293,7 +293,7 @@ describe("GradingWorkspacePage commit history", () => {
     ["submission_changed", "different local submission"]
   ] as const)("maps %s to a safe non-blocking state", async (status, message) => {
     setApis({ loadHistory: vi.fn().mockResolvedValue({ status, studentId: "ada" }) });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     const panel = await screen.findByRole("region", { name: "Automated Checks" });
     expect(panel).toHaveTextContent(message);
     expect(panel.querySelector("ol")).toBeNull();
@@ -303,7 +303,7 @@ describe("GradingWorkspacePage commit history", () => {
   it("keeps history failures independent while automated checks and grading remain functional", async () => {
     const loadHistory = vi.fn().mockRejectedValue(new Error("raw path and git stderr"));
     const { loadSource, loadSnapshot, loadEvidence, mutations } = setApis({ loadHistory });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     expect(
       await screen.findByText("Commit history could not be loaded safely.")
     ).toBeInTheDocument();
@@ -327,7 +327,7 @@ describe("GradingWorkspacePage commit history", () => {
         loadHistory: vi.fn().mockResolvedValue(history("ada")),
         loadSnapshot: vi.fn().mockResolvedValue(snapshot("ada", gradingStatus))
       });
-      render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+      render(<GradingWorkspacePage request={REQUEST} />);
       await screen.findByText("Commit history for ada");
       expect(
         screen.getByText(

@@ -142,7 +142,7 @@ describe("GradingWorkspacePage publish review", () => {
         edsger: "not_started"
       }
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await openPublishReview();
 
     expect(screen.getByRole("checkbox", { name: "Select ada to publish" })).toBeChecked();
@@ -168,7 +168,7 @@ describe("GradingWorkspacePage publish review", () => {
     const { bulkPublish } = configure({
       statuses: { ada: "complete", grace: "complete" }
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await openPublishReview();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select grace to publish" }));
@@ -187,7 +187,7 @@ describe("GradingWorkspacePage publish review", () => {
 
   it("toggling a checkbox reads its checked value before updating selection, and does not crash", async () => {
     configure({ statuses: { ada: "complete", grace: "complete" } });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await openPublishReview();
 
     const graceCheckbox = screen.getByRole("checkbox", { name: "Select grace to publish" });
@@ -217,7 +217,7 @@ describe("GradingWorkspacePage publish review", () => {
       },
       loadSnapshot
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await openPublishReview();
 
     // The concurrency bound keeps some of the 7 ready students queued rather
@@ -243,7 +243,7 @@ describe("GradingWorkspacePage publish review", () => {
       statuses: { ada: "complete", grace: "complete" },
       saveViewState
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Move ada" }));
     await openPublishReview();
@@ -301,7 +301,7 @@ describe("GradingWorkspacePage publish review", () => {
       bulkPublish,
       loadSnapshot
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await openPublishReview();
 
     fireEvent.click(screen.getByRole("button", { name: "Publish 3 reports" }));
@@ -332,7 +332,7 @@ describe("GradingWorkspacePage publish review", () => {
 
   it("shows the empty state when there are no completed reports ready to publish", async () => {
     configure({ statuses: { ada: "published", grace: "in_progress" } });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await openPublishReview();
 
     expect(screen.getByText("No completed reports are ready to publish.")).toBeInTheDocument();

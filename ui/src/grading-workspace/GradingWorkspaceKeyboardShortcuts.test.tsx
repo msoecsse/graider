@@ -182,7 +182,7 @@ const setApis = ({
 describe("GradingWorkspacePage keyboard shortcuts", () => {
   it("moves to the next ungraded student with J and back with K", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada");
 
@@ -195,7 +195,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("ignores shortcuts while focus is in a text field", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search comments" }), {
@@ -207,7 +207,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("Enter opens the mark-complete confirmation, then confirms it and advances to the next ungraded student", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "Enter" });
@@ -220,7 +220,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
   it("P opens the publish review screen, showing the completed student as ready to publish", async () => {
     const loadSnapshot = vi.fn().mockResolvedValue(snapshot("ada", "complete"));
     setApis({ loadSnapshot });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "p" });
@@ -230,7 +230,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("Escape cancels the publish review and returns to the grading grid", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "p" });
@@ -245,7 +245,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("suspends grading shortcuts while the publish review is open", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "p" });
@@ -258,7 +258,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("C opens the add-comment editor once a source line is selected", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "c" });
@@ -271,7 +271,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("M opens the add-adjustment editor when a rubric is configured", async () => {
     setApis({ rubric: [{ id: "quality", name: "Code Quality", points: 100 }] });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "m" });
@@ -287,7 +287,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
       ]
     });
     setApis({ loadCommentLibrary });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByText("First comment");
 
     fireEvent.keyDown(window, { key: "2" });
@@ -296,7 +296,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("A opens and focuses the automated checks panel, and pressing A again returns focus", async () => {
     setApis({ loadEvidence: vi.fn().mockResolvedValue(evidenceWithFailures("ada")) });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     const filterButton = await screen.findByRole("button", { name: "To grade 2" });
     filterButton.focus();
     expect(filterButton).toHaveFocus();
@@ -312,7 +312,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
   it("says evidence is still loading instead of focusing an empty panel", async () => {
     const pendingEvidence = new Promise<GradingStudentEvidenceResult>(() => {});
     setApis({ loadEvidence: vi.fn().mockReturnValue(pendingEvidence) });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "a" });
@@ -323,7 +323,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
   it("R reloads automated checks while the panel has focus", async () => {
     const loadEvidence = vi.fn().mockResolvedValue(evidenceWithFailures("ada"));
     setApis({ loadEvidence });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     await waitFor(() => expect(loadEvidence).toHaveBeenCalledTimes(1));
 
@@ -335,7 +335,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("N and Shift+N step focus between JUnit failures", async () => {
     setApis({ loadEvidence: vi.fn().mockResolvedValue(evidenceWithFailures("ada")) });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "a" });
@@ -360,7 +360,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("H opens the panel and focuses commit history", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "h" });
@@ -373,7 +373,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
       appliedComments: [{ id: "applied", text: "Existing feedback", deduction: -1 }]
     });
     setApis({ loadSnapshot });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(
       await screen.findByRole("button", { name: "Delete comment: Existing feedback" })
     );
@@ -385,7 +385,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("opens the shortcut cheat sheet with ? and closes it with Escape", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "?" });
@@ -399,7 +399,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("focuses the active filter pill with /", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "/" });
@@ -408,7 +408,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
 
   it("shows a persistent hint bar with the six most useful shortcuts and a save indicator", async () => {
     setApis({});
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     const hints = screen.getByRole("list", { name: "Keyboard shortcut hints" });

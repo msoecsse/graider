@@ -188,7 +188,7 @@ const assertNoDuplicateAccessibleNames = (): void => {
 describe("GradingWorkspacePage sibling panel invariant", () => {
   it("opening the manual adjustment editor closes an open, unmodified comment editor", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -202,7 +202,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
 
   it("opening the comment editor closes an open, unmodified manual adjustment editor", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Add adjustment" }));
     expect(screen.getByRole("button", { name: "Cancel adjustment" })).toBeInTheDocument();
@@ -216,7 +216,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
 
   it("opening the mark-complete confirmation closes an open comment editor", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -230,7 +230,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
 
   it("opening a delete-comment confirmation closes an open manual adjustment editor", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Add adjustment" }));
     expect(screen.getByRole("button", { name: "Cancel adjustment" })).toBeInTheDocument();
@@ -243,7 +243,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
 
   it("opening the workflow-repair confirmation closes an open comment editor", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -261,7 +261,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
 
   it("declining the discard prompt keeps the dirty comment draft open and untouched", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -287,7 +287,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
 
   it("confirming the discard prompt discards the dirty draft and opens the requested panel", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -309,7 +309,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
 
   it("C, M, and Enter close whichever panel is open, exactly like their buttons", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.keyDown(window, { key: "m" });
@@ -328,7 +328,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
 
   it("M and P route through the discard prompt instead of silently switching when the comment draft is dirty", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -357,7 +357,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
 
   it("regression: forcing two panels open in sequence never leaves duplicate-named controls mounted", async () => {
     setApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit comment: Original feedback" }));
@@ -395,7 +395,7 @@ const twoStudents = [
 describe("GradingWorkspacePage sibling panel invariant — switching students", () => {
   it("pressing J while a comment draft is dirty prompts, and declining keeps the student and the draft", async () => {
     setApis({ students: twoStudents });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -419,7 +419,7 @@ describe("GradingWorkspacePage sibling panel invariant — switching students", 
 
   it("confirming the discard prompt while pressing J discards the draft and advances to the next student", async () => {
     setApis({ students: twoStudents });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -436,7 +436,7 @@ describe("GradingWorkspacePage sibling panel invariant — switching students", 
 
   it("pressing K while an adjustment draft is dirty prompts, and confirming discards and navigates back", async () => {
     setApis({ students: twoStudents });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
@@ -459,7 +459,7 @@ describe("GradingWorkspacePage sibling panel invariant — switching students", 
 
   it("clicking a different student row while a draft is dirty prompts instead of switching silently", async () => {
     setApis({ students: twoStudents });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -480,7 +480,7 @@ describe("GradingWorkspacePage sibling panel invariant — switching students", 
 
   it("clicking the already-selected student row is a no-op and never prompts", async () => {
     setApis({ students: twoStudents });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -497,7 +497,7 @@ describe("GradingWorkspacePage sibling panel invariant — switching students", 
 
   it("re-anchoring an edited comment to a different source range counts as an unsaved change", async () => {
     setApis({ students: twoStudents });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     expect(screen.getByRole("radio", { name: "Source" })).toBeChecked();
@@ -512,7 +512,7 @@ describe("GradingWorkspacePage sibling panel invariant — switching students", 
 
   it("changing the student filter does not touch the selected student or prompt for a dirty draft", async () => {
     setApis({ students: twoStudents });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));

@@ -542,15 +542,11 @@ const ConfirmationPanel = ({
  * the stacking defect README section 5.4 describes.
  */
 const PostDispatchActionsPanel = ({
-  onBack,
   onViewGradeStatus,
-  onRefreshAssignmentDetail,
-  onBackToDashboard
+  onRefreshAssignmentDetail
 }: {
-  readonly onBack: () => void;
   readonly onViewGradeStatus?: () => void;
   readonly onRefreshAssignmentDetail?: () => void;
-  readonly onBackToDashboard?: () => void;
 }): ReactElement => (
   <section
     className="detail-panel apply-preview-final-action"
@@ -558,9 +554,6 @@ const PostDispatchActionsPanel = ({
   >
     <h2 id="post-grade-dispatch-title">Post-dispatch actions</h2>
     <div className="apply-confirmation-actions">
-      <button className="secondary-action" type="button" onClick={onBack}>
-        Back to assignment detail
-      </button>
       {onViewGradeStatus === undefined ? null : (
         <button className="primary-action" type="button" onClick={onViewGradeStatus}>
           View grading status
@@ -571,11 +564,6 @@ const PostDispatchActionsPanel = ({
           Refresh assignment detail
         </button>
       )}
-      {onBackToDashboard === undefined ? null : (
-        <button className="secondary-action" type="button" onClick={onBackToDashboard}>
-          Back to dashboard
-        </button>
-      )}
     </div>
   </section>
 );
@@ -583,10 +571,8 @@ const PostDispatchActionsPanel = ({
 export const GradePreviewPage = ({
   selection,
   assignmentDetail,
-  onBack,
   onViewGradeStatus,
-  onRefreshAssignmentDetail,
-  onBackToDashboard
+  onRefreshAssignmentDetail
 }: GradePreviewPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<GradePreviewLoadResult | null>(null);
   const [gradeResult, setGradeResult] = useState<GradeExecutionLoadResult | null>(null);
@@ -722,9 +708,6 @@ export const GradePreviewPage = ({
             <p className="assignment-detail__subtitle">{getCourseTermSubtitle(preview)}</p>
           </div>
           <div className="assignment-detail__header-actions">
-            <button className="secondary-action" type="button" onClick={onBack}>
-              Back to assignment detail
-            </button>
             <button
               className="primary-action"
               type="button"
@@ -815,12 +798,10 @@ export const GradePreviewPage = ({
                 />
               ) : (
                 <PostDispatchActionsPanel
-                  onBack={onBack}
                   {...(onViewGradeStatus === undefined ? {} : { onViewGradeStatus })}
                   {...(onRefreshAssignmentDetail === undefined
                     ? {}
                     : { onRefreshAssignmentDetail })}
-                  {...(onBackToDashboard === undefined ? {} : { onBackToDashboard })}
                 />
               )}
             </div>

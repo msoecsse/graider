@@ -209,27 +209,80 @@ If the team prefers to stay on Inter, that is a one-line change in
 
 These make the screen work possible and should land early.
 
-### 4.1 Add a router
+### 4.1 Add a router (shipped in PR10-1)
 
-`App.tsx` currently renders `DashboardPage` and nothing else. `DashboardPage`
-holds ~20 `useState` hooks, seven of which are nullable "selection" values used
-as navigation, resolved with early returns.
+`App.tsx` used to render `DashboardPage` and nothing else. `DashboardPage` held
+nine nullable "selection" values used as navigation, resolved with early
+returns.
 
-Replace with real routes:
+**This is what actually shipped, not the table originally drafted here.** That
+first draft named six routes; it turned out three of the six named a screen
+that either didn't exist as a component (course page, term setup wizard) or
+wasn't a screen at all (publish review is a state of the grading workspace,
+`GradingPublishReviewPanel`), while five real, already-built screens
+(`ApplyPreviewPage`, `GradePreviewPage`, `GradeStatusPage`,
+`FacultyReportPage`, `AssignmentEditPage`) had no route at all — each was
+still reached only through one of `DashboardPage`'s nullable selection
+states, which is exactly the mechanism this section exists to remove. Routing
+only the original six would have left that mechanism standing for five
+screens. See the note at the end of this section: this is the fourth time
+this document's description of the code has diverged from the code itself.
+
+The routes, as shipped:
 
 ```
-/                                             dashboard
-/course/:courseSlug/:termSlug                 course
-/course/:courseSlug/:termSlug/roster          roster manager
-/course/:courseSlug/:termSlug/setup           term setup wizard (step in query)
-/course/:courseSlug/:termSlug/:assignment     assignment detail
-/course/:courseSlug/:termSlug/:assignment/grade    grading workspace
-/course/:courseSlug/:termSlug/:assignment/publish  publish review
+/                                                    dashboard
+/course/:courseSlug/:termSlug/roster                roster manager
+/course/:courseSlug/:termSlug/:assignment           assignment detail
+/course/:courseSlug/:termSlug/:assignment/apply     apply preview       (extension)
+/course/:courseSlug/:termSlug/:assignment/grade     grading workspace
+/course/:courseSlug/:termSlug/:assignment/grade-preview  grade dispatch preview (extension)
+/course/:courseSlug/:termSlug/:assignment/status    grade status         (extension)
+/course/:courseSlug/:termSlug/:assignment/report    faculty report       (extension)
+/course/:courseSlug/:termSlug/:assignment/edit      assignment edit      (extension)
 ```
 
-This gives breadcrumbs, browser back/forward, and links faculty can share with
-each other. It also removes every hand-placed "Back to dashboard" button and the
-two separate "Back" buttons in the grading workspace.
+The four unmarked routes are the ones this section originally called for
+(dashboard, roster, assignment detail, grading workspace). The five marked
+"extension" were added in PR10-1 so that every screen `DashboardPage` used to
+reach through nullable selection state has a real route.
+
+Three things this section used to ask for are deliberately **not** routes:
+
+- **Publish review** (`.../publish`) isn't a missing screen. It's
+  `GradingPublishReviewPanel`, a state inside the grading workspace (section
+  5.2), not its own component. It may become its own route when section 4.2
+  splits `GradingWorkspacePage.tsx`, but that split, not this router, is what
+  would create it.
+- **The term setup wizard** (`.../setup`) is left unclaimed for section 6,
+  step 11. `CourseSetupPage` and `AssignmentSetupPage` stay reachable exactly
+  as they work today — folder-picker driven, not slug-gated — because they
+  don't have course/term identity to route on until the wizard exists.
+- **A standalone course page** (`/course/:courseSlug/:termSlug`) was never
+  built. No section of this document says what it's for, and no component
+  exists for it. **Open question for whoever builds it: what does a course
+  page do that the dashboard doesn't already do?** See the backlog.
+
+Routing uses `HashRouter`, not `BrowserRouter`: production loads through
+`window.loadFile` (`file://`), which has no server to resolve an arbitrary
+path back to `index.html`, so `BrowserRouter` doesn't work. `HashRouter` keeps
+the route in the URL fragment (`#/course/...`), which `file://` serves
+unchanged, and unlike `MemoryRouter` it gives a URL that identifies where you
+are. None of this gives a link that opens in _another_ window or another
+faculty member's copy of the app — that needs a registered custom protocol
+and an `open-url` handler in `main.ts`, which PR10-1 did not add. See the
+backlog.
+
+Routing gives breadcrumbs, browser back/forward, and (within one running
+copy of the app) real URLs in place of opaque in-memory state. It also
+removed every hand-placed "Back to dashboard" button and the two separate
+"Back" buttons in the grading workspace — with one exception:
+`FacultyReportPage`'s "Back to grading status" button stays, because no
+breadcrumb crumb represents grade status (the breadcrumb trail treats
+assignment detail as faculty report's parent, since that is the more direct
+path); it is the only way back to grade status. Screens that aren't routed
+(`CourseSetupPage`, `AssignmentSetupPage`) keep their own "Back to dashboard"
+buttons too, since they have no breadcrumb trail to replace them with.
 
 ### 4.2 Split the large components
 

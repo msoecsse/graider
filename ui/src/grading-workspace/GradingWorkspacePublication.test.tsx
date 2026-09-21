@@ -174,7 +174,7 @@ describe("GradingWorkspacePage report publication", () => {
         margaret: "published"
       }
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     await screen.findByText("Status:");
     expect(
@@ -202,7 +202,7 @@ describe("GradingWorkspacePage report publication", () => {
 
   it("keeps the per-student publish action secondary-weight so it never competes with the header's session-wide primary action", async () => {
     configureApis({ statuses: { ada: "complete", grace: "published" } });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     const perStudentButton = await screen.findByRole("button", {
       name: "Publish this student's report"
@@ -237,7 +237,7 @@ describe("GradingWorkspacePage report publication", () => {
         warnings: ["automated_evidence_unavailable", "commit_history_unavailable"]
       })
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Preview Report" }));
     await waitFor(() => expect(preview).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" }));
@@ -268,7 +268,7 @@ describe("GradingWorkspacePage report publication", () => {
       warnings: readonly [];
     }>();
     const { preview } = configureApis({ preview: vi.fn().mockReturnValue(pending.promise) });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     const button = await screen.findByRole("button", { name: "Preview Report" });
     fireEvent.click(button);
@@ -297,7 +297,7 @@ describe("GradingWorkspacePage report publication", () => {
       statuses: { ada: "complete", grace: "complete" },
       preview: vi.fn().mockReturnValue(pending.promise)
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Preview Report" }));
     await waitFor(() => expect(preview).toHaveBeenCalledOnce());
@@ -316,7 +316,7 @@ describe("GradingWorkspacePage report publication", () => {
 
   it("requires confirmation and sends only canonical identity", async () => {
     const { publish } = configureApis();
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
     const dialog = screen.getByRole("dialog", { name: "Publish this student's grading report?" });
@@ -356,7 +356,7 @@ describe("GradingWorkspacePage report publication", () => {
       );
     });
     const { publish } = configureApis({ loadSnapshot, saveViewState });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Move ada" }));
     fireEvent.click(screen.getByRole("button", { name: "Publish this student's report" }));
@@ -401,7 +401,7 @@ describe("GradingWorkspacePage report publication", () => {
       warnings: ["automated_evidence_unavailable", "commit_history_unavailable"]
     });
     configureApis({ statuses: { ada: "published" }, loadSnapshot, publish });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Republish this student's report" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("existing Graider report may be updated");
@@ -454,7 +454,7 @@ describe("GradingWorkspacePage report publication", () => {
         Promise.resolve(studentSnapshot(studentId, "complete"))
       );
       configureApis({ loadSnapshot, publish: vi.fn().mockResolvedValue(result) });
-      render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+      render(<GradingWorkspacePage request={REQUEST} />);
 
       fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
       fireEvent.click(
@@ -481,7 +481,7 @@ describe("GradingWorkspacePage report publication", () => {
     }>();
     const publish = vi.fn().mockReturnValue(pending.promise);
     configureApis({ statuses: { ada: "complete", grace: "complete" }, publish });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm publish this student's report" }));
@@ -513,7 +513,7 @@ describe("GradingWorkspacePage report publication", () => {
       .mockResolvedValueOnce(studentSnapshot("ada", "complete"))
       .mockRejectedValueOnce(new Error("private snapshot detail"));
     configureApis({ loadSnapshot });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm publish this student's report" }));
@@ -537,7 +537,7 @@ describe("GradingWorkspacePage report publication", () => {
     });
     const publish = vi.fn().mockReturnValue(pending);
     configureApis({ statuses: { ada: "complete", grace: "complete" }, publish });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm publish this student's report" }));

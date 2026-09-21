@@ -1452,7 +1452,6 @@ const CollapsibleDiagnosticsPanel = ({
 export const AssignmentDetailPage = ({
   selection,
   initialLoadResult = null,
-  onBack,
   onPreviewApply,
   onPreviewGrade,
   onViewFacultyReport,
@@ -2286,9 +2285,6 @@ export const AssignmentDetailPage = ({
 
   return (
     <main className="dashboard-shell" aria-label={title}>
-      <button className="secondary-action assignment-detail__back" type="button" onClick={onBack}>
-        Back to dashboard
-      </button>
       <PageHeader
         eyebrow="Graider"
         title={title}

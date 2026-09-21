@@ -19,10 +19,8 @@ export type GradePreviewRepositoryStatus =
 export interface GradePreviewPageProps {
   readonly selection: AssignmentDetailSelection;
   readonly assignmentDetail: NormalizedAssignmentDetail | null;
-  readonly onBack: () => void;
   readonly onViewGradeStatus?: () => void;
   readonly onRefreshAssignmentDetail?: () => void;
-  readonly onBackToDashboard?: () => void;
 }
 
 export interface GradePreviewAssignment {

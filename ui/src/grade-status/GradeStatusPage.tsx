@@ -303,7 +303,6 @@ const DiagnosticsPanel = ({
 export const GradeStatusPage = ({
   selection,
   assignmentDetail,
-  onBack,
   onViewFacultyReport
 }: GradeStatusPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<GradeStatusLoadResult | null>(null);
@@ -458,9 +457,6 @@ export const GradeStatusPage = ({
             <p className="assignment-detail__subtitle">{getCourseTermSubtitle(activeStatus)}</p>
           </div>
           <div className="assignment-detail__header-actions">
-            <button className="secondary-action" type="button" onClick={onBack}>
-              Back to assignment detail
-            </button>
             <button
               className="primary-action"
               type="button"

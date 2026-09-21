@@ -316,8 +316,7 @@ export const FacultyReportPage = ({
   selection,
   assignmentDetail,
   gradeStatus,
-  onBackToGradeStatus,
-  onBackToAssignmentDetail
+  onBackToGradeStatus
 }: FacultyReportPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<FacultyReportLoadResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -395,9 +394,6 @@ export const FacultyReportPage = ({
           <div className="assignment-detail__header-actions">
             <button className="secondary-action" type="button" onClick={onBackToGradeStatus}>
               Back to grading status
-            </button>
-            <button className="secondary-action" type="button" onClick={onBackToAssignmentDetail}>
-              Back to assignment detail
             </button>
             <button
               className="primary-action"

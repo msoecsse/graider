@@ -166,12 +166,11 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   return graiderUI as unknown as GraiderUIApi;
 };
 
-const renderGradeStatusPage = (onBack = vi.fn(), onViewFacultyReport = vi.fn()) =>
+const renderGradeStatusPage = (onViewFacultyReport = vi.fn()) =>
   render(
     <GradeStatusPage
       selection={SELECTION}
       assignmentDetail={null}
-      onBack={onBack}
       onViewFacultyReport={onViewFacultyReport}
     />
   );
@@ -226,7 +225,7 @@ describe("GradeStatusPage", () => {
     const onViewFacultyReport = vi.fn();
 
     mockGraiderUI({});
-    renderGradeStatusPage(vi.fn(), onViewFacultyReport);
+    renderGradeStatusPage(onViewFacultyReport);
 
     fireEvent.click(await screen.findByRole("button", { name: "View faculty report" }));
 

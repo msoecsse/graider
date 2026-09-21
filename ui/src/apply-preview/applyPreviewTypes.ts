@@ -20,9 +20,7 @@ export type ApplyPreviewRepositoryStatus =
 export interface ApplyPreviewPageProps {
   readonly selection: AssignmentDetailSelection;
   readonly assignmentDetail: NormalizedAssignmentDetail | null;
-  readonly onBack: () => void;
   readonly onRefreshAssignmentDetail?: () => void;
-  readonly onBackToDashboard?: () => void;
 }
 
 export interface ApplyPreviewAssignment {
