@@ -14,6 +14,7 @@ export type GradeStatusRepositoryStatus =
   | "missing"
   | "unknown"
   | "blocked"
+  | "not_configured"
   | "token_required";
 
 export interface GradeStatusPageProps {

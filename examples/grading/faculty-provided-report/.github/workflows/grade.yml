@@ -2,7 +2,6 @@ name: Grading With Faculty Feedback
 
 on:
   - push
-  - repository_dispatch
   - workflow_dispatch
 
 permissions:

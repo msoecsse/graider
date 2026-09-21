@@ -142,6 +142,28 @@ const configureApis = ({
   return { loadSnapshot, preview, publish, saveViewState };
 };
 
+const showAllStudents = async (): Promise<void> => {
+  const pill =
+    screen.queryByRole("button", { name: /^All\b/u }) ??
+    (await screen.findByRole("button", { name: /^All\b/u }));
+  fireEvent.click(pill);
+};
+
+const assertNoDuplicateAccessibleNames = (): void => {
+  const names = screen.getAllByRole("button").map((button) => {
+    const label = button.getAttribute("aria-label");
+    return (label ?? button.textContent ?? "").trim();
+  });
+  const seen = new Set<string>();
+  const duplicates = names.filter((name) => {
+    if (name === "") return false;
+    if (seen.has(name)) return true;
+    seen.add(name);
+    return false;
+  });
+  expect(duplicates).toEqual([]);
+};
+
 describe("GradingWorkspacePage report publication", () => {
   it("shows publication controls only for Complete and Published students", async () => {
     configureApis({
@@ -155,18 +177,55 @@ describe("GradingWorkspacePage report publication", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
     await screen.findByText("Status:");
-    expect(screen.queryByRole("button", { name: /Publish Report/u })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /publish this student's report/iu })
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await screen.findByText("In Progress");
-    expect(screen.queryByRole("button", { name: /Publish Report/u })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /publish this student's report/iu })
+    ).not.toBeInTheDocument();
 
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /linus · Section 003/u }));
     expect(await screen.findByRole("button", { name: "Preview Report" })).toBeEnabled();
-    expect(await screen.findByRole("button", { name: "Publish Report" })).toBeEnabled();
+    expect(
+      await screen.findByRole("button", { name: "Publish this student's report" })
+    ).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: /margaret · Section 004/u }));
-    expect(await screen.findByRole("button", { name: "Republish Report" })).toBeEnabled();
+    expect(
+      await screen.findByRole("button", { name: "Republish this student's report" })
+    ).toBeEnabled();
+  });
+
+  it("keeps the per-student publish action secondary-weight so it never competes with the header's session-wide primary action", async () => {
+    configureApis({ statuses: { ada: "complete", grace: "published" } });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    const perStudentButton = await screen.findByRole("button", {
+      name: "Publish this student's report"
+    });
+    expect(perStudentButton).toHaveClass("secondary-action");
+    expect(perStudentButton).not.toHaveClass("primary-action");
+
+    const headerButton = screen.getByRole("button", { name: /^Publish \d+ reports?$/u });
+    expect(headerButton).toHaveClass("primary-action");
+    expect(headerButton).not.toHaveClass("secondary-action");
+    assertNoDuplicateAccessibleNames();
+
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    const republishButton = await screen.findByRole("button", {
+      name: "Republish this student's report"
+    });
+    expect(republishButton).toHaveClass("secondary-action");
+    expect(republishButton).not.toHaveClass("primary-action");
+    expect(screen.getByRole("button", { name: /^Publish \d+ reports?$/u })).toHaveClass(
+      "primary-action"
+    );
+    assertNoDuplicateAccessibleNames();
   });
 
   it("previews the trusted HTML with warnings and closes without publication", async () => {
@@ -196,7 +255,7 @@ describe("GradingWorkspacePage report publication", () => {
     expect(dialog).toHaveTextContent("Commit history is unavailable and will be omitted.");
     expect(publish).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close report preview" }));
     expect(screen.queryByRole("dialog", { name: "Report Preview" })).not.toBeInTheDocument();
     expect(publish).not.toHaveBeenCalled();
   });
@@ -242,6 +301,7 @@ describe("GradingWorkspacePage report publication", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Preview Report" }));
     await waitFor(() => expect(preview).toHaveBeenCalledOnce());
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await act(async () =>
       pending.resolve({
@@ -258,16 +318,16 @@ describe("GradingWorkspacePage report publication", () => {
     const { publish } = configureApis();
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Publish Report" }));
-    const dialog = screen.getByRole("dialog", { name: "Publish grading report?" });
+    fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
+    const dialog = screen.getByRole("dialog", { name: "Publish this student's grading report?" });
     expect(dialog).toHaveTextContent(
       "This will write the completed grading report to the student's repository."
     );
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(publish).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Publish Report" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish this student's report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm publish this student's report" }));
     await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
     expect(publish).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
     expect(Object.keys(publish.mock.calls[0]?.[0] ?? {}).sort()).toEqual([
@@ -299,8 +359,8 @@ describe("GradingWorkspacePage report publication", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Move ada" }));
-    fireEvent.click(screen.getByRole("button", { name: "Publish Report" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish this student's report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm publish this student's report" }));
     await waitFor(() => expect(saveViewState).toHaveBeenCalledTimes(1));
     expect(publish).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Publishing…" })).toBeDisabled();
@@ -322,7 +382,7 @@ describe("GradingWorkspacePage report publication", () => {
     expect(
       screen.getByText("Published", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Republish Report" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Republish this student's report" })).toBeEnabled();
     expect(loadSnapshot).toHaveBeenCalledTimes(2);
   });
 
@@ -343,9 +403,11 @@ describe("GradingWorkspacePage report publication", () => {
     configureApis({ statuses: { ada: "published" }, loadSnapshot, publish });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Republish Report" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Republish this student's report" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("existing Graider report may be updated");
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Republish Report" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm republish this student's report" })
+    );
 
     expect(await screen.findByText("Published to feedback/custom.html.")).toBeInTheDocument();
     expect(
@@ -394,8 +456,10 @@ describe("GradingWorkspacePage report publication", () => {
       configureApis({ loadSnapshot, publish: vi.fn().mockResolvedValue(result) });
       render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "Publish Report" }));
-      fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Report" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Confirm publish this student's report" })
+      );
       expect(await screen.findByText(new RegExp(message, "u"))).toBeInTheDocument();
       expect(
         screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
@@ -419,9 +483,10 @@ describe("GradingWorkspacePage report publication", () => {
     configureApis({ statuses: { ada: "complete", grace: "complete" }, publish });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Publish Report" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Report" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm publish this student's report" }));
     await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await screen.findByText("Status:");
@@ -450,8 +515,8 @@ describe("GradingWorkspacePage report publication", () => {
     configureApis({ loadSnapshot });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Publish Report" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Report" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm publish this student's report" }));
 
     expect(
       await screen.findByText(
@@ -462,7 +527,7 @@ describe("GradingWorkspacePage report publication", () => {
     expect(
       screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish Report" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeEnabled();
   });
 
   it("ignores an old student's late publication failure", async () => {
@@ -474,9 +539,10 @@ describe("GradingWorkspacePage report publication", () => {
     configureApis({ statuses: { ada: "complete", grace: "complete" }, publish });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Publish Report" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Report" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Publish this student's report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm publish this student's report" }));
     await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await screen.findByText("Status:");
 

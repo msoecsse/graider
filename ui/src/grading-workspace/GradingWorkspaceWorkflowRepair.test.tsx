@@ -148,7 +148,9 @@ describe("GradingWorkspacePage workflow repair", () => {
       })
     );
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Replace workflows & run for all students" })
+      within(dialog).getByRole("button", {
+        name: "Confirm replace workflows & run for all students"
+      })
     );
     await waitFor(() => expect(bulkRepair).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/1 succeeded · 1 failed/u)).toBeInTheDocument();
@@ -208,7 +210,7 @@ describe("GradingWorkspacePage workflow repair", () => {
     fireEvent.click(action);
     const dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByRole("checkbox"));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Replace workflow & run" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm replace workflow & run" }));
     expect(await within(dialog).findByRole("button", { name: "Confirming…" })).toBeDisabled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Confirming…" }));
     expect(repair).toHaveBeenCalledTimes(2);
@@ -236,7 +238,7 @@ describe("GradingWorkspacePage workflow repair", () => {
     fireEvent.click(action);
     const dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByRole("checkbox"));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Replace workflow & run" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm replace workflow & run" }));
     expect(
       await screen.findByText(
         /Workflow repair succeeded, but the grading run could not be started/u

@@ -6,12 +6,18 @@ import {
   groupDiagnostics
 } from "../assignment-detail/assignmentDetailReadiness";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
+import { formatReadableDateTime } from "../components/dateTime";
 import {
   createGradeStatusSummary,
   isNonTerminalGradeStatusRow,
   mergeGradeStatusRows,
   normalizeGradeStatus
 } from "./gradeStatusNormalization";
+import {
+  formatGradeStatusLabel,
+  getGradeStatusChipClassName,
+  getNotReadyReason
+} from "./gradeStatusLabels";
 import { getGradeStatusRunUrl } from "./gradeStatusRunUrl";
 import type {
   GradeStatusLoadResult,
@@ -79,61 +85,6 @@ const formatSeconds = (milliseconds: number): number => milliseconds / MILLISECO
 
 const getStudentLabel = (row: GradeStatusRepositoryRow): string =>
   row.studentId ?? "Unknown student";
-
-const formatGradeStatusRowLabel = (row: GradeStatusRepositoryRow): string => {
-  if (row.status === "queued") {
-    return "Queued";
-  }
-
-  if (row.status === "in_progress") {
-    return "In progress";
-  }
-
-  if (row.status === "completed") {
-    if (row.conclusion === "cancelled") {
-      return "Cancelled";
-    }
-
-    if (row.conclusion === "timed_out") {
-      return "Timed out";
-    }
-
-    return `Completed — ${row.conclusion ?? "unknown"}`;
-  }
-
-  if (row.status === "missing") {
-    return "Missing";
-  }
-
-  if (row.status === "token_required") {
-    return "Token required";
-  }
-
-  return row.status === "blocked" ? "Blocked" : "Unknown";
-};
-
-const getGradeStatusChipClassName = (row: GradeStatusRepositoryRow): string => {
-  if (row.status === "completed" && row.conclusion === "success")
-    return "status-chip status-chip--success";
-  if (row.status === "completed" && row.conclusion === "failure")
-    return "status-chip status-chip--error";
-  return row.needsAttention ? "status-chip status-chip--attention" : "status-chip";
-};
-
-const getNotReadyReason = (status: NormalizedGradeStatus): string => {
-  const parts = [
-    status.summary.queued + status.summary.inProgress > 0
-      ? `${status.summary.queued + status.summary.inProgress} runs still in progress.`
-      : null,
-    status.summary.missing > 0
-      ? `${status.summary.missing} repositories are missing completed grading runs.`
-      : null,
-    status.summary.unknown > 0 ? `${status.summary.unknown} repositories are unknown.` : null,
-    status.summary.blocked > 0 ? `${status.summary.blocked} repositories are blocked.` : null
-  ].filter((part): part is string => part !== null);
-
-  return parts.length === 0 ? "Status is not ready for report generation yet." : parts.join(" ");
-};
 
 const DetailItem = ({
   label,
@@ -275,7 +226,7 @@ const RepositoryRowsPanel = ({
               </span>
               <span role="cell">
                 <span className={getGradeStatusChipClassName(row)}>
-                  {formatGradeStatusRowLabel(row)}
+                  {formatGradeStatusLabel(row)}
                 </span>
               </span>
               <span role="cell">
@@ -290,10 +241,13 @@ const RepositoryRowsPanel = ({
                     Run {formatNullableValue(row.runId)}
                   </a>
                 )}
-                <span className="muted-inline"> Started {formatNullableValue(row.startedAt)}</span>
                 <span className="muted-inline">
                   {" "}
-                  Completed {formatNullableValue(row.completedAt)}
+                  Started {formatReadableDateTime(row.startedAt) ?? "Not configured"}
+                </span>
+                <span className="muted-inline">
+                  {" "}
+                  Completed {formatReadableDateTime(row.completedAt) ?? "Not configured"}
                 </span>
               </span>
             </div>
@@ -529,7 +483,10 @@ export const GradeStatusPage = ({
           Assignment file: {activeStatus?.assignment.file ?? selection.assignmentFile}
         </p>
         {activeStatus?.refreshedAt === null || activeStatus?.refreshedAt === undefined ? null : (
-          <p className="assignment-detail__path">Last refreshed: {activeStatus.refreshedAt}</p>
+          <p className="assignment-detail__path">
+            Last refreshed:{" "}
+            {formatReadableDateTime(activeStatus.refreshedAt) ?? activeStatus.refreshedAt}
+          </p>
         )}
         {isLoading ? <p className="loading-state">Loading grade status...</p> : null}
         {isRefreshing ? (

@@ -129,6 +129,26 @@ const removeCourseGrading = (cwd: string): void => {
   fs.writeFileSync(coursePath, original.replace("grading:\n  enabled: false\n", ""), "utf8");
 };
 
+const enableCourseGrading = (cwd: string): void => {
+  const coursePath = path.join(cwd, "course.yml");
+  const original = fs.readFileSync(coursePath, "utf8");
+
+  fs.writeFileSync(
+    coursePath,
+    original.replace(
+      "grading:\n  enabled: false\n",
+      "grading:\n  enabled: true\n  workflow: grade.yml\n  artifact: grading-results\n  result_file: results.json\n"
+    ),
+    "utf8"
+  );
+};
+
+const addExplicitDisabledAssignmentGrading = (cwd: string): void => {
+  const assignmentPath = path.join(cwd, ...ASSIGNMENT_PATH_SEGMENTS);
+
+  fs.appendFileSync(assignmentPath, "grading:\n  enabled: false\n  mode: no-grading\n", "utf8");
+};
+
 const getRow = (
   result: AssignmentGradeStatusResult,
   studentId: string
@@ -432,6 +452,47 @@ describe("graider assignment grade-status command", () => {
       workflow: null,
       workflowRef: null
     });
+    expectNoMutations(githubClient);
+  });
+
+  it("treats an explicit disabled assignment grading override as neutral", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    const githubClient = createStatusClient();
+    enableCourseGrading(cwd);
+    addExplicitDisabledAssignmentGrading(cwd);
+
+    const result = await runAssignmentGradeStatusCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: jsonOptions,
+      env: GRADE_STATUS_ENV,
+      githubClient
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.grading).toMatchObject({
+      enabled: false,
+      resolvedFrom: "assignment_override",
+      workflow: null,
+      workflowRef: null
+    });
+    expect(result.repositories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "not_configured",
+          reason: DiagnosticCode.GradingNotConfigured,
+          needsAttention: false
+        })
+      ])
+    );
+    expect(result.summary).toMatchObject({
+      blocked: 0,
+      needsAttention: 0,
+      missing: 0,
+      unknown: 0,
+      readyForReport: false
+    });
+    expect(githubClient.workflowRunReadRequests).toEqual([]);
     expectNoMutations(githubClient);
   });
 

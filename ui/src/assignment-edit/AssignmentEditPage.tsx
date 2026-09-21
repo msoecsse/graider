@@ -7,6 +7,7 @@ import type {
 } from "../../electron/ipc";
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
+import { Toast, useToast } from "../components/Toast";
 
 const toDateTimeLocal = (value: string): string => value.replace(/(?:Z|[+-]\d{2}:\d{2})$/u, "");
 const toIsoWithOffset = (value: string): string => {
@@ -33,6 +34,7 @@ export const AssignmentEditPage = ({
     readonly { readonly code: string; readonly sections: readonly string[] }[]
   >([]);
   const [message, setMessage] = useState<string | null>(null);
+  const { message: toastMessage, showToast } = useToast();
   const [preview, setPreview] = useState<AssignmentEditPreviewResult | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -559,10 +561,15 @@ export const AssignmentEditPage = ({
         isOpen={isConfirming && preview !== null}
         onCancel={() => setIsConfirming(false)}
         onConfirm={save}
+        onSuccess={(successMessage) => {
+          setIsConfirming(false);
+          showToast(successMessage);
+        }}
         preview={preview === null ? undefined : <pre>{preview.content}</pre>}
         summary={`${title.trim() || "This assignment"} will be updated.`}
         title="Save assignment changes?"
       />
+      <Toast message={toastMessage} />
     </main>
   );
 };

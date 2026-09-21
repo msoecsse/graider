@@ -7,6 +7,7 @@ import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
 import { prepareGradingWorkspace } from "./gradingWorkspaceService.js";
+import { getAssignmentGradingLifecycle } from "./assignmentGradingLifecycleService.js";
 import { loadGradingStudentSource } from "./gradingStudentSourceService.js";
 import {
   clearGradingStudentViewState,
@@ -65,6 +66,7 @@ import {
   isSaveGradingStudentViewStateRequest
 } from "./gradingStudentViewStateRequestValidation.js";
 import { isPrepareGradingWorkspaceRequest } from "./gradingWorkspaceRequestValidation.js";
+import { isAssignmentGradingLifecycleRequest } from "./assignmentGradingLifecycleRequestValidation.js";
 import {
   getLocalRepositoryLocatorPath,
   recordSuccessfulDownloadLocators
@@ -923,6 +925,19 @@ export const registerIpcHandlers = (): void => {
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug,
       userDataPath: app.getPath("userData")
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.getAssignmentGradingLifecycle, (_event, request: unknown) => {
+    if (
+      !isAssignmentGradingLifecycleRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error("A registered course folder is required for the grading lifecycle summary.");
+    return getAssignmentGradingLifecycle({
+      courseFolderId: request.courseFolderId,
+      courseFolderPath: request.courseFolderPath,
+      termCode: request.termCode,
+      assignmentSlug: request.assignmentSlug
     });
   });
   ipcMain.handle(IPC_CHANNELS.loadGradingStudentSource, (_event, request: unknown) => {

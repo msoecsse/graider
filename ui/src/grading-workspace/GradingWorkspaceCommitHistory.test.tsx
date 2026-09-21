@@ -179,6 +179,13 @@ const setApis = ({
   return { loadSource, loadSnapshot, loadEvidence, mutations };
 };
 
+const showAllStudents = async (): Promise<void> => {
+  const pill =
+    screen.queryByRole("button", { name: /^All\b/u }) ??
+    (await screen.findByRole("button", { name: /^All\b/u }));
+  fireEvent.click(pill);
+};
+
 describe("GradingWorkspacePage commit history", () => {
   it("loads canonical identity independently and renders trusted commits in supplied order", async () => {
     const pendingSource = deferred<ReturnType<typeof source>>();
@@ -216,6 +223,10 @@ describe("GradingWorkspacePage commit history", () => {
       "datetime",
       "2026-09-11T10:15:30-05:00"
     );
+    expect(items[0]!.querySelector("time")).toHaveTextContent(
+      /^[A-Za-z]{3} Sep 11, \d{1,2}:\d{2} [AP]M$/u
+    );
+    expect(items[0]).not.toHaveTextContent("2026-09-11T10:15:30-05:00");
   });
 
   it("clears A immediately and ignores stale A success and failure after selecting B", async () => {
@@ -226,7 +237,8 @@ describe("GradingWorkspacePage commit history", () => {
     );
     setApis({ loadHistory });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /grace · Section 002/u }));
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByText("Loading commit history for grace…")).toBeInTheDocument();
     await act(async () => grace.resolve(history("grace")));
     expect(await screen.findByText("Commit history for grace")).toBeInTheDocument();
@@ -255,6 +267,7 @@ describe("GradingWorkspacePage commit history", () => {
     setApis({ loadHistory });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     await screen.findByText("Commit history for ada");
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await screen.findByText("Commit history for grace");
     fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));

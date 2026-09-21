@@ -126,7 +126,12 @@ const configure = ({
   return { bulkPublish, loadSnapshot, saveViewState };
 };
 
-describe("GradingWorkspacePage bulk report publication", () => {
+const openPublishReview = async (): Promise<void> => {
+  fireEvent.click(await screen.findByRole("button", { name: /^Publish \d+ reports?$/u }));
+  await screen.findByRole("heading", { name: "Publish review" });
+};
+
+describe("GradingWorkspacePage publish review", () => {
   it("selects Complete students by default and excludes Published and unfinished students", async () => {
     const { bulkPublish } = configure({
       statuses: {
@@ -138,21 +143,37 @@ describe("GradingWorkspacePage bulk report publication", () => {
       }
     });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await openPublishReview();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Publish Completed Reports" }));
-    expect(screen.getByRole("checkbox", { name: "ada" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "grace" })).toBeChecked();
-    expect(screen.queryByRole("checkbox", { name: "linus" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", { name: "margaret" })).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog")).toHaveTextContent("2 completed reports");
+    expect(screen.getByRole("checkbox", { name: "Select ada to publish" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select grace to publish" })).toBeChecked();
+    expect(
+      screen.queryByRole("checkbox", { name: "Select linus to publish" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", { name: "Select margaret to publish" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("2 reports will be committed to 2 repositories.")).toBeInTheDocument();
+    expect(document.querySelector(".grading-publish-review__published-row")).toHaveTextContent(
+      "linus · Section 003 · Published"
+    );
+    expect(screen.getByText("2 students not graded yet.", { exact: false })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "grace" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(bulkPublish).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Publish review" })).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Publish Completed Reports" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "grace" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Reports" }));
+  it("publishes only the students left selected, leaving the rest untouched", async () => {
+    const { bulkPublish } = configure({
+      statuses: { ada: "complete", grace: "complete" }
+    });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await openPublishReview();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select grace to publish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish 1 report" }));
+
     await waitFor(() => expect(bulkPublish).toHaveBeenCalledTimes(1));
     expect(bulkPublish).toHaveBeenCalledWith({ ...REQUEST, studentIds: ["ada"] });
     expect(Object.keys(bulkPublish.mock.calls[0]?.[0] ?? {}).sort()).toEqual([
@@ -162,6 +183,57 @@ describe("GradingWorkspacePage bulk report publication", () => {
       "studentIds",
       "termCode"
     ]);
+  });
+
+  it("toggling a checkbox reads its checked value before updating selection, and does not crash", async () => {
+    configure({ statuses: { ada: "complete", grace: "complete" } });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await openPublishReview();
+
+    const graceCheckbox = screen.getByRole("checkbox", { name: "Select grace to publish" });
+    expect(graceCheckbox).toBeChecked();
+
+    fireEvent.click(graceCheckbox);
+    expect(graceCheckbox).not.toBeChecked();
+    expect(screen.getByText("1 report will be committed to 1 repository.")).toBeInTheDocument();
+
+    fireEvent.click(graceCheckbox);
+    expect(graceCheckbox).toBeChecked();
+    expect(screen.getByText("2 reports will be committed to 2 repositories.")).toBeInTheDocument();
+  });
+
+  it("stops dispatching further snapshot fetches once the review is cancelled", async () => {
+    const pending = deferred<ReturnType<typeof snapshot>>();
+    const loadSnapshot = vi.fn().mockReturnValue(pending.promise);
+    configure({
+      statuses: {
+        s1: "complete",
+        s2: "complete",
+        s3: "complete",
+        s4: "complete",
+        s5: "complete",
+        s6: "complete",
+        s7: "complete"
+      },
+      loadSnapshot
+    });
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await openPublishReview();
+
+    // The concurrency bound keeps some of the 7 ready students queued rather
+    // than dispatching all of them (plus the selected student's own snapshot
+    // load) at once.
+    await waitFor(() => expect(loadSnapshot.mock.calls.length).toBeGreaterThan(1));
+    const callsWhileOpen = loadSnapshot.mock.calls.length;
+    expect(callsWhileOpen).toBeLessThan(8);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await act(async () => {
+      pending.resolve(snapshot("s1", "complete"));
+    });
+
+    expect(loadSnapshot.mock.calls.length).toBe(callsWhileOpen);
   });
 
   it("flushes the current student's pending view state before one bulk call", async () => {
@@ -174,8 +246,8 @@ describe("GradingWorkspacePage bulk report publication", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Move ada" }));
-    fireEvent.click(screen.getByRole("button", { name: "Publish Completed Reports" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Reports" }));
+    await openPublishReview();
+    fireEvent.click(screen.getByRole("button", { name: "Publish 2 reports" }));
     await waitFor(() => expect(saveViewState).toHaveBeenCalledTimes(1));
     expect(bulkPublish).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Publishing 2 reports…" })).toBeDisabled();
@@ -189,7 +261,7 @@ describe("GradingWorkspacePage bulk report publication", () => {
     await waitFor(() => expect(bulkPublish).toHaveBeenCalledTimes(1));
   });
 
-  it("shows ordered per-student outcomes, continues failures, and refreshes statuses authoritatively", async () => {
+  it("shows per-student outcomes naming who failed and why, continues past failures, and refreshes statuses authoritatively", async () => {
     let bulkFinished = false;
     const bulkPublish = vi.fn().mockImplementation(async () => {
       bulkFinished = true;
@@ -230,31 +302,40 @@ describe("GradingWorkspacePage bulk report publication", () => {
       loadSnapshot
     });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await openPublishReview();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Publish Completed Reports" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Publish Reports" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish 3 reports" }));
 
-    expect(
-      await screen.findByText("0 published · 1 published with warnings · 2 failed")
-    ).toBeInTheDocument();
-    const results = screen.getByRole("status");
-    expect(results).toHaveTextContent("ada — Published with warnings");
-    expect(results).toHaveTextContent("grace — Failed: Graider cannot publish the report");
-    expect(results).toHaveTextContent("linus — Publication stale");
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Already published (1)" })).toBeInTheDocument()
+    );
+    const adaWarning = screen.getByText("The report was published without commit history.");
+    const adaRow = adaWarning.closest(".grading-publish-review__published-row");
+    expect(adaRow).toHaveTextContent("ada · Section 001 · Published");
+    expect(adaRow).toHaveTextContent("Published with warnings");
+
+    const graceRow = screen
+      .getByRole("checkbox", { name: "Select grace to publish" })
+      .closest("tr");
+    expect(graceRow).toHaveTextContent(
+      "Failed: Graider cannot publish the report because the GitHub token lacks repository Contents write permission."
+    );
+    const linusRow = screen
+      .getByRole("checkbox", { name: "Select linus to publish" })
+      .closest("tr");
+    expect(linusRow).toHaveTextContent("Publication stale");
+
     expect(loadSnapshot).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
     expect(loadSnapshot).toHaveBeenCalledWith({ ...REQUEST, studentId: "grace" });
     expect(loadSnapshot).toHaveBeenCalledWith({ ...REQUEST, studentId: "linus" });
-    expect(
-      screen.getByRole("button", { name: /ada · Section 001 · Published/u })
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Republish Report" })).toBeEnabled();
   });
 
-  it("disables bulk publication when no Complete students exist", async () => {
+  it("shows the empty state when there are no completed reports ready to publish", async () => {
     configure({ statuses: { ada: "published", grace: "in_progress" } });
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await openPublishReview();
 
-    expect(await screen.findByRole("button", { name: "Publish Completed Reports" })).toBeDisabled();
     expect(screen.getByText("No completed reports are ready to publish.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish 0 reports" })).toBeDisabled();
   });
 });

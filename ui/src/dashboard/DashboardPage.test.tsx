@@ -519,11 +519,13 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
       recordedTemplateRevision: null
     }),
     executeAssignmentTemplateSync: vi.fn(),
+    onAssignmentTemplateSyncProgress: vi.fn(() => () => undefined),
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createAssignmentApplyPreviewResult()),
     getAssignmentGradePreview: vi.fn().mockResolvedValue(createAssignmentGradePreviewResult()),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
     getFacultyReport: vi.fn().mockResolvedValue(createFacultyReportResult()),
     applyAssignment: vi.fn(),
+    onAssignmentApplyProgress: vi.fn(() => () => undefined),
     gradeAssignment: vi.fn().mockResolvedValue(createAssignmentGradeResult()),
     ...api
   };
@@ -566,14 +568,23 @@ describe("local faculty settings", () => {
   });
 });
 
-const getFirstPreviewApplyButton = (): HTMLElement => {
-  const button = screen.getAllByRole("button", { name: "Preview apply" })[0];
+const getApplyPrimaryButton = (): HTMLElement => {
+  const button = screen.getByRole("button", { name: /^Apply to \d+ students?$/u });
 
   if (button === undefined) {
-    throw new Error("Expected a Preview apply button.");
+    throw new Error("Expected an Apply to N students primary button.");
   }
 
   return button;
+};
+
+const openAssignmentOverflowMenu = async (): Promise<void> => {
+  fireEvent.click(await screen.findByRole("button", { name: "More assignment actions" }));
+};
+
+const clickAssignmentOverflowItem = async (label: string): Promise<void> => {
+  await openAssignmentOverflowMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(`^${label}`, "u") }));
 };
 
 const createDeferred = <T,>(): {
@@ -818,8 +829,26 @@ describe("DashboardPage", () => {
       await screen.findByRole("heading", { level: 2, name: "No courses added yet." })
     ).toBeInTheDocument();
     expect(screen.getByText("Open a Graider course folder to get started.")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Open course folder" })).toHaveLength(2);
+    expect(
+      screen.getByText("Once you add one, its courses and assignments will appear here.")
+    ).toBeInTheDocument();
+    // Only the empty state's action renders while there is nothing on screen yet; the
+    // toolbar's identical "Open course folder" button would otherwise duplicate it.
+    expect(screen.getAllByRole("button", { name: "Open course folder" })).toHaveLength(1);
     expect(refreshDashboard).not.toHaveBeenCalled();
+  });
+
+  it("shows the toolbar's Open course folder action once folders are registered", async () => {
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER])
+    });
+
+    render(<DashboardPage />);
+
+    expect(
+      await screen.findByRole("button", { name: `Refresh ${COURSE_FOLDER.path}` })
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Open course folder" })).toHaveLength(1);
   });
 
   it("renders accessible toolbar controls", async () => {
@@ -844,6 +873,8 @@ describe("DashboardPage", () => {
     expect(screen.getAllByText(COURSE_FOLDER.path).length).toBeGreaterThan(0);
     expect(screen.getAllByText(SECOND_COURSE_FOLDER.path).length).toBeGreaterThan(0);
     expect(screen.queryByRole("heading", { level: 2, name: "No courses added yet." })).toBeNull();
+    expect(screen.getAllByText(/Last opened [A-Za-z]{3} Jun 9,/u)).toHaveLength(2);
+    expect(screen.queryByText(/2026-06-09T19:30:00/u)).toBeNull();
   });
 
   it("auto-runs dashboard refresh for one cached folder on startup", async () => {
@@ -887,6 +918,41 @@ describe("DashboardPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "27s1-csc4641" })).toBeInTheDocument();
     expect(refreshDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the assignment table because it carries assignments the recent-assignments cards omit", async () => {
+    // dashboard-builder.ts filters and caps `recentAssignments` (active/completed/unknown
+    // status, top 5), while `assignments` (what the table renders) is the unfiltered,
+    // uncapped list. An "inactive" assignment like this one only ever reaches the table.
+    const archivedAssignment = {
+      slug: "archived-quiz",
+      title: "Archived Quiz",
+      status: "inactive",
+      assignmentFile: "terms/27s1/assignments/archived-quiz/assignment.yml",
+      needsAttention: false,
+      diagnostics: []
+    };
+    const cardWithArchivedAssignment = {
+      ...COURSE_TERM_CARD,
+      assignments: [...COURSE_TERM_CARD.recentAssignments, archivedAssignment]
+    };
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(
+          createCombinedDashboardResult([createDashboardResult({}, [cardWithArchivedAssignment])])
+        )
+    });
+    render(<DashboardPage />);
+
+    await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" });
+
+    expect(
+      screen.queryByRole("button", { name: "Open assignment detail for Archived Quiz" })
+    ).toBeNull();
+    expect(screen.getByRole("cell", { name: "Archived Quiz" })).toBeInTheDocument();
   });
 
   it("does not show the no-card state while startup refresh is still running", async () => {
@@ -1318,8 +1384,12 @@ describe("DashboardPage", () => {
     fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
     await screen.findByRole("button", { name: "Remove Section" });
     fireEvent.click(screen.getByRole("button", { name: "Remove Section" }));
-    fireEvent.click(screen.getByLabelText("I understand this removes the entire section."));
-    fireEvent.click(screen.getByRole("button", { name: "Remove section" }));
+    const removeSectionConfirm = screen.getByRole("button", { name: "Remove section" });
+    expect(removeSectionConfirm).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: /Type 001 to confirm/u }), {
+      target: { value: "001" }
+    });
+    fireEvent.click(removeSectionConfirm);
 
     await waitFor(() =>
       expect(removeSection).toHaveBeenCalledWith({
@@ -1407,8 +1477,12 @@ describe("DashboardPage", () => {
 
     expect(screen.getByRole("dialog", { name: "Remove roster" })).toBeInTheDocument();
     expect(removeRoster).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText("I understand this removes the entire roster."));
-    fireEvent.click(screen.getByRole("button", { name: "Remove roster" }));
+    const removeRosterConfirm = screen.getByRole("button", { name: "Remove roster" });
+    expect(removeRosterConfirm).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: /Type 001 to confirm/u }), {
+      target: { value: "001" }
+    });
+    fireEvent.click(removeRosterConfirm);
 
     await waitFor(() =>
       expect(removeRoster).toHaveBeenCalledWith({
@@ -2312,7 +2386,9 @@ describe("DashboardPage", () => {
       await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
     );
 
-    expect(await screen.findByRole("heading", { level: 2, name: "Summary" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
+    ).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Template" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Grading" })).toBeInTheDocument();
     expect(
@@ -2323,16 +2399,18 @@ describe("DashboardPage", () => {
     expect(within(gradeSummary).getByText("Completed — success")).toBeInTheDocument();
     expect(within(gradeSummary).queryByRole("columnheader", { name: "Workflow" })).toBeNull();
     expect(screen.getByText("100")).toBeInTheDocument();
-    expect(screen.getByText("2027-06-15T23:59:00+09:00")).toBeInTheDocument();
+    expect(screen.getByText(/Jun 1[45], 2027/u)).toBeInTheDocument();
+    expect(screen.queryByText("2027-06-15T23:59:00+09:00")).not.toBeInTheDocument();
     expect(screen.getAllByText("graider-sandbox/csc1120L2Template").length).toBeGreaterThan(0);
     expect(screen.getAllByText(".github/workflows/grade.yml").length).toBeGreaterThan(0);
-    expect(screen.getByText("workflow_dispatch status")).toBeInTheDocument();
+    expect(screen.getByText("Workflow dispatch status")).toBeInTheDocument();
     expect(screen.getAllByText("3").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
-    expect(getFirstPreviewApplyButton()).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Preview grading" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Generate report" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "View grading status" })).toBeEnabled();
+    expect(getApplyPrimaryButton()).toBeEnabled();
+    await openAssignmentOverflowMenu();
+    expect(screen.getByRole("menuitem", { name: /^Faculty report/u })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: /^View grading status/u })).toBeEnabled();
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(
       within(gradeSummary).getByRole("button", { name: "View full grade status" })
     ).toBeEnabled();
@@ -2360,7 +2438,7 @@ describe("DashboardPage", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
 
-    fireEvent.click(getFirstPreviewApplyButton());
+    fireEvent.click(getApplyPrimaryButton());
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Apply Preview" })
@@ -2381,7 +2459,17 @@ describe("DashboardPage", () => {
   });
 
   it("opens grade dispatch preview from assignment detail and returns to assignment detail", async () => {
-    const getAssignmentDetail = vi.fn().mockResolvedValue(createAssignmentDetailResult());
+    // The grade preview entry point is the header's primary "Continue grading"
+    // action once the assignment is applied — not_applied assignments show
+    // "Apply to N students" instead, so this scenario applies the assignment.
+    const getAssignmentDetail = vi
+      .fn()
+      .mockResolvedValue(
+        createAssignmentDetailResult(
+          {},
+          createAssignmentDetailJson({ applyState: { status: "applied" } })
+        )
+      );
     const getAssignmentGradePreview = vi
       .fn()
       .mockResolvedValue(createAssignmentGradePreviewResult());
@@ -2402,7 +2490,7 @@ describe("DashboardPage", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Preview grading" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue grading" }));
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Grade Dispatch Preview" })
@@ -2444,7 +2532,7 @@ describe("DashboardPage", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "View grading status" }));
+    await clickAssignmentOverflowItem("View grading status");
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Grade Status" })
@@ -2488,7 +2576,8 @@ describe("DashboardPage", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Generate report" }));
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
+    await clickAssignmentOverflowItem("Faculty report");
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Faculty Report" })
@@ -2529,11 +2618,11 @@ describe("DashboardPage", () => {
     );
     expect(await screen.findByText("100")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh detail" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
 
     expect(await screen.findByText("Loading assignment detail...")).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refreshing detail..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh assignment detail" })).toBeDisabled();
 
     resolveSecondRefresh(
       createAssignmentDetailResult(
@@ -2582,7 +2671,9 @@ describe("DashboardPage", () => {
       await screen.findByRole("button", { name: "Open assignment detail for Lab 02" })
     );
 
-    expect(await screen.findByText("No grading")).toBeInTheDocument();
+    // "No grading" appears twice by design: the status badge, and the
+    // Assignment facts card's Grading row, which reuses the same wording.
+    expect(await screen.findAllByText("No grading")).toHaveLength(2);
     expect(
       screen.getByRole("heading", { level: 2, name: "Grade status summary" })
     ).toBeInTheDocument();

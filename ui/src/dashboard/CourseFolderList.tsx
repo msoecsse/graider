@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import type { CourseFolderDashboardResult, CourseFolderRecord } from "../../electron/ipc";
+import { formatReadableDateTime } from "../components/dateTime";
 
 interface CourseFolderListProps {
   readonly courseFolders: readonly CourseFolderRecord[];
@@ -13,7 +14,7 @@ interface CourseFolderListProps {
   readonly removingId: string | null;
 }
 
-const formatTimestamp = (value: string): string => new Date(value).toLocaleString();
+const formatTimestamp = (value: string): string => formatReadableDateTime(value) ?? "Unknown time";
 
 const getCardCountLabel = (cardCount: unknown): string => {
   if (typeof cardCount !== "number") {

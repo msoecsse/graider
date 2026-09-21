@@ -12,6 +12,9 @@ await build({
     gradingWorkspaceBackend: fileURLToPath(
       new URL("../../src/grading/grading-workspace-context.ts", import.meta.url)
     ),
+    assignmentGradingLifecycleBackend: fileURLToPath(
+      new URL("../../src/grading/assignment-grading-lifecycle-context.ts", import.meta.url)
+    ),
     gradingStudentSourceBackend: fileURLToPath(
       new URL("../../src/grading/grading-student-source-context.ts", import.meta.url)
     ),

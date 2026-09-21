@@ -129,6 +129,7 @@ The renderer treats these repository statuses as terminal:
 completed
 missing
 blocked
+not_configured
 ```
 
 `cancelled` and `timed_out` are displayed as completed-run conclusions when the
@@ -148,6 +149,7 @@ Missing
 Unknown
 Token required
 Blocked
+Grading disabled
 ```
 
 The Assignment Detail compact summary uses the same labels, but displays fewer

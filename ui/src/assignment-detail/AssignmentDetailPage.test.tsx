@@ -6,6 +6,7 @@ import type {
   AssignmentDetailResult,
   AssignmentGradeStatusJsonResponse,
   AssignmentGradeStatusResult,
+  AssignmentGradingLifecycleResult,
   AssignmentRepositoryDownloadResult,
   GraiderUIApi
 } from "../../electron/ipc";
@@ -314,6 +315,19 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   return graiderUI as unknown as GraiderUIApi;
 };
 
+const createLifecycleResult = (
+  overrides: Partial<Extract<AssignmentGradingLifecycleResult, { status: "success" }>> = {}
+): AssignmentGradingLifecycleResult => ({
+  status: "success",
+  students: [],
+  totalStudentCount: 0,
+  gradingDoneCount: 0,
+  publishedCount: 0,
+  unknownStatusCount: 0,
+  pointsPossible: 0,
+  ...overrides
+});
+
 const mockClipboard = (writeText: ReturnType<typeof vi.fn>): void => {
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -388,6 +402,17 @@ const renderAssignmentDetailPage = (
     />
   );
 
+const openOverflowMenu = async (): Promise<void> => {
+  fireEvent.click(await screen.findByRole("button", { name: "More assignment actions" }));
+};
+
+const clickOverflowItem = async (label: string): Promise<void> => {
+  await openOverflowMenu();
+  // The menu item's accessible name is its label immediately followed by its
+  // caption (no separator), so match on the label as a prefix.
+  fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(`^${label}`, "u") }));
+};
+
 describe("AssignmentDetailPage", () => {
   it("offers a trusted single-repository update action for individual student rows", async () => {
     const prepareAssignmentTemplateSync = vi
@@ -414,7 +439,9 @@ describe("AssignmentDetailPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
     const dialog = await screen.findByRole("dialog", { name: "Update repository for s001" });
-    expect(within(dialog).getByText("s001")).toBeInTheDocument();
+    // Scoped to the preview's detail grid: "s001" also appears in the typed
+    // confirmation word prompt below the preview.
+    expect(within(dialog).getByText("s001", { selector: "dd span" })).toBeInTheDocument();
     expect(within(dialog).getByText("graider-sandbox/csc1120-lab02-ada")).toBeInTheDocument();
     expect(within(dialog).getByText("graider-sandbox/csc1120L2Template")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -454,7 +481,12 @@ describe("AssignmentDetailPage", () => {
         "I understand this will update this student repository or create a pull request."
       )
     );
-    fireEvent.click(within(dialog).getByRole("button", { name: "Update Repository" }));
+    const confirmButton = within(dialog).getByRole("button", { name: "Update Repository" });
+    expect(confirmButton).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Type s001 to confirm/u }), {
+      target: { value: "s001" }
+    });
+    fireEvent.click(confirmButton);
 
     await waitFor(() =>
       expect(executeAssignmentTemplateSync).toHaveBeenCalledWith({
@@ -518,6 +550,9 @@ describe("AssignmentDetailPage", () => {
         "I understand this will update this student repository or create a pull request."
       )
     );
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Type s001 to confirm/u }), {
+      target: { value: "s001" }
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Update Repository" }));
 
     await waitFor(() =>
@@ -546,7 +581,10 @@ describe("AssignmentDetailPage", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Update Student Repositories" })).not.toBeDisabled()
     );
-    expect(screen.queryByRole("status")).toBeNull();
+    // The in-flight OperationStatusBar is gone; the success toast that
+    // replaces it is a different role="status" element.
+    expect(screen.queryByText("Updating repository")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Student repositories updated.");
   });
 
   it("does not expose per-student updates for group repositories", async () => {
@@ -669,6 +707,9 @@ describe("AssignmentDetailPage", () => {
         "I understand this will update student repositories or create pull requests."
       )
     );
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Type Lab 02 to confirm/u }), {
+      target: { value: "Lab 02" }
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Update repositories" }));
 
     const confirming = within(dialog).getByRole("button", { name: "Confirming…" });
@@ -736,14 +777,17 @@ describe("AssignmentDetailPage", () => {
     });
 
     const results = await screen.findByLabelText("Template update results");
-    expect(screen.queryByRole("status")).toBeNull();
+    // The in-flight OperationStatusBar is gone; the success toast that
+    // replaces it is a different role="status" element.
+    expect(screen.queryByText("Updating student repositories")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Student repositories updated.");
     progressListener?.({
       current: 6,
       total: 6,
       studentId: "stale",
       repository: "graider-sandbox/stale"
     });
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("Updating student repositories")).toBeNull();
     expect(within(results).getByText("s001")).toBeInTheDocument();
     expect(within(results).getByText("Updated")).toBeInTheDocument();
     expect(within(results).getByText("Already current")).toBeInTheDocument();
@@ -782,14 +826,15 @@ describe("AssignmentDetailPage", () => {
     mockGraiderUI({ deleteAssignment });
     renderAssignmentDetailPage({ onDeleted });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Delete assignment" }));
+    await clickOverflowItem("Delete assignment");
     expect(deleteAssignment).not.toHaveBeenCalled();
-    const dialog = screen.getByRole("dialog", { name: "Delete assignment" });
+    const dialog = screen.getByRole("dialog", { name: "Delete assignment?" });
     expect(dialog).toBeInTheDocument();
-    fireEvent.click(
-      within(dialog).getByLabelText("I understand this deletes the local assignment configuration.")
-    );
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete assignment" }));
+    const confirmButton = within(dialog).getByRole("button", { name: "Delete assignment" });
+    expect(confirmButton).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Lab 02" } });
+    expect(confirmButton).toBeEnabled();
+    fireEvent.click(confirmButton);
 
     await waitFor(() =>
       expect(deleteAssignment).toHaveBeenCalledWith({
@@ -1227,6 +1272,43 @@ describe("AssignmentDetailPage", () => {
     expect(getTemplateWorkflow).not.toHaveBeenCalled();
   });
 
+  it("wires the lifecycle rows and grade status into the student table in the main column", async () => {
+    mockGraiderUI({
+      getAssignmentGradingLifecycle: vi.fn().mockResolvedValue(
+        createLifecycleResult({
+          students: [
+            {
+              studentId: "ada",
+              githubUsername: "adalovelace",
+              section: "001",
+              gradingStatus: "published",
+              score: 90
+            }
+          ],
+          totalStudentCount: 1,
+          gradingDoneCount: 1,
+          publishedCount: 1,
+          pointsPossible: 100
+        })
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const table = await screen.findByRole("heading", { level: 2, name: "Students" });
+    const section = table.closest("section") as HTMLElement;
+    fireEvent.click(within(section).getByRole("button", { name: "Done 1" }));
+    expect(within(section).getByText("ada")).toBeInTheDocument();
+    expect(within(section).getByText("90 / 100")).toBeInTheDocument();
+    expect(within(section).getByText("Published")).toBeInTheDocument();
+
+    const main = section.closest(".assignment-detail__main");
+    const sidebar = document.querySelector(".assignment-detail__sidebar");
+    expect(main).not.toBeNull();
+    expect(sidebar).not.toBeNull();
+    expect(main).not.toBe(sidebar);
+  });
+
   it("renders the existing assignment panels with the repository list outside Advanced details", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(
@@ -1261,16 +1343,18 @@ describe("AssignmentDetailPage", () => {
 
     expect(await screen.findByRole("heading", { level: 2, name: "Readiness" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Preview apply" })[0]).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Preview grading" })[0]).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "View grading status" })[0]).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Refresh detail" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Fix template repository" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh assignment detail" })).toBeEnabled();
+    await openOverflowMenu();
+    expect(screen.getByRole("menuitem", { name: /^Apply to new students/u })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^View grading status/u })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getAllByText("Needs attention").length).toBeGreaterThan(0);
     expect(screen.getByText("Template repository is missing.")).toBeInTheDocument();
     expect(
       screen.getByText("GitHub authentication needed for readiness checks.")
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Summary" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Assignment facts" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Template" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Grading" })).toBeInTheDocument();
     expect(
@@ -1283,7 +1367,114 @@ describe("AssignmentDetailPage", () => {
     expect(summaryHeading.closest("details")).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
     expect(screen.getByText("assignment_detail_template_repository_missing")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish student reports" })).toBeDisabled();
+    expect(screen.queryByRole("heading", { name: "Available actions" })).not.toBeInTheDocument();
+  });
+
+  it("moves the assignment file path, course folder, workflow path, slug, and LMS id into a collapsed Technical details disclosure", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+
+    renderAssignmentDetailPage();
+
+    await screen.findByRole("heading", { level: 2, name: "Assignment facts" });
+
+    const details = screen.getByText("Technical details").closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+
+    const insideDetails = within(details as HTMLDetailsElement);
+    expect(insideDetails.getByText("Assignment file path")).toBeInTheDocument();
+    expect(insideDetails.getByText(ASSIGNMENT_FILE)).toBeInTheDocument();
+    expect(insideDetails.getByText("Course folder path")).toBeInTheDocument();
+    expect(insideDetails.getByText(COURSE_FOLDER_PATH)).toBeInTheDocument();
+    expect(insideDetails.getByText("Workflow path")).toBeInTheDocument();
+    expect(insideDetails.getByText(".github/workflows/grade.yml")).toBeInTheDocument();
+    expect(insideDetails.getByText("Slug")).toBeInTheDocument();
+    expect(insideDetails.getByText("lab02")).toBeInTheDocument();
+    expect(insideDetails.getByText("LMS assignment ID")).toBeInTheDocument();
+    expect(insideDetails.getByText("lms-123")).toBeInTheDocument();
+
+    const factsSection = screen
+      .getByRole("heading", { level: 2, name: "Assignment facts" })
+      .closest("section");
+    expect(factsSection).not.toBeNull();
+    const insideFacts = within(factsSection as HTMLElement);
+    expect(insideFacts.queryByText("Slug")).toBeNull();
+    expect(insideFacts.queryByText("LMS assignment ID")).toBeNull();
+    expect(insideFacts.queryByText(ASSIGNMENT_FILE)).toBeNull();
+    expect(insideFacts.queryByText(COURSE_FOLDER_PATH)).toBeNull();
+  });
+
+  it("renders the assignment facts Template row as a link to the repository, not a raw path", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+
+    renderAssignmentDetailPage();
+
+    const factsSection = (
+      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
+    ).closest("section") as HTMLElement;
+    const templateLink = within(factsSection).getByRole("link", { name: "csc1120L2Template" });
+    expect(templateLink).toHaveAttribute(
+      "href",
+      "https://github.com/graider-sandbox/csc1120L2Template"
+    );
+    expect(within(factsSection).queryByText("graider-sandbox/csc1120L2Template")).toBeNull();
+  });
+
+  it("shows a plain placeholder, not a broken link, when no template repository is configured", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({
+            template: {
+              repository: null,
+              branch: null,
+              status: "missing",
+              repositoryStatus: "missing",
+              branchStatus: "not_checked"
+            }
+          })
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const factsSection = (
+      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
+    ).closest("section") as HTMLElement;
+    expect(within(factsSection).queryByRole("link")).toBeNull();
+    expect(within(factsSection).getByText("Not configured")).toBeInTheDocument();
+  });
+
+  it("shows the Grading fact in plain language, combining enabled state and mode", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({
+            grading: {
+              enabled: true,
+              mode: "preset",
+              workflow: ".github/workflows/grade.yml",
+              artifact: "grading-results",
+              resultFile: "grading-results.json",
+              workflowStatus: "available",
+              workflowDispatch: "available"
+            }
+          })
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const factsSection = (
+      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
+    ).closest("section") as HTMLElement;
+    expect(within(factsSection).getByText("Grading enabled (Preset)")).toBeInTheDocument();
   });
 
   it("renders neutral placeholders and missing grade-status data without crashing", async () => {
@@ -1322,7 +1513,9 @@ describe("AssignmentDetailPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Grade status data is not available yet.")).toBeInTheDocument();
     expect(screen.getByText("Roster counts could not be loaded.")).toBeInTheDocument();
-    expect(screen.getByText("No grading")).toBeInTheDocument();
+    // "No grading" now appears twice by design: the status badge, and the
+    // Assignment facts card's Grading row, which reuses the same wording.
+    expect(screen.getAllByText("No grading")).toHaveLength(2);
     expect(screen.getAllByText("Not configured").length).toBeGreaterThanOrEqual(4);
     expect(screen.getByRole("heading", { level: 2, name: "Diagnostics" })).toBeInTheDocument();
   });
@@ -1344,10 +1537,10 @@ describe("AssignmentDetailPage", () => {
     expect(within(summary).queryByText("github-only")).toBeNull();
     expect(within(summary).queryByRole("columnheader", { name: "Workflow" })).toBeNull();
     expect(screen.queryByText("2026-06-12T17:33:39Z")).toBeNull();
-    expect(within(summary).getAllByText(/Last completed .*Jun 12, 2026/u).length).toBeGreaterThan(
-      0
-    );
-    expect(within(summary).getByText(/Started .*Jun 12, 2026/u)).toBeInTheDocument();
+    expect(
+      within(summary).getAllByText(/Last completed .*[A-Za-z]{3} Jun 12,/u).length
+    ).toBeGreaterThan(0);
+    expect(within(summary).getByText(/Started .*[A-Za-z]{3} Jun 12,/u)).toBeInTheDocument();
     expect(within(summary).getByText("No run time available")).toBeInTheDocument();
     expect(within(summary).getByText("Completed — success")).toHaveClass("status-chip--success");
     expect(within(summary).getByText("Completed — failure")).toHaveClass("status-chip--error");
@@ -1362,6 +1555,86 @@ describe("AssignmentDetailPage", () => {
       "https://github.com/graider-sandbox/csc1120-lab02-ada"
     );
     expect(within(summary).getAllByText("No run link")).toHaveLength(3);
+  });
+
+  it("renders disabled grading status neutrally instead of as blocked", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({
+            grading: {
+              enabled: false,
+              mode: "no-grading",
+              workflow: null,
+              artifact: null,
+              resultFile: null,
+              workflowStatus: "not_required",
+              workflowDispatch: "not_required"
+            }
+          })
+        )
+      ),
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(
+        createAssignmentGradeStatusResult(
+          createAssignmentGradeStatusJson({
+            grading: {
+              enabled: false,
+              resolvedFrom: "assignment_override",
+              mode: "no-grading",
+              workflow: null,
+              artifact: null,
+              resultFile: null,
+              workflowRef: null
+            },
+            summary: {
+              totalRepositories: 1,
+              queued: 0,
+              inProgress: 0,
+              completed: 0,
+              successful: 0,
+              failed: 0,
+              cancelled: 0,
+              timedOut: 0,
+              missing: 0,
+              unknown: 0,
+              blocked: 0,
+              needsAttention: 0,
+              readyForReport: false
+            },
+            repositories: [
+              {
+                studentId: "s001",
+                githubUsername: "adalovelace",
+                section: "001",
+                repository: "graider-sandbox/csc1120-lab02-ada",
+                workflow: null,
+                ref: null,
+                runId: null,
+                runUrl: null,
+                status: "not_configured",
+                conclusion: "unknown",
+                startedAt: null,
+                completedAt: null,
+                selectionStrategy: "no_configured_workflow_run",
+                reason: "grading_not_configured",
+                needsAttention: false,
+                diagnostics: []
+              }
+            ]
+          })
+        )
+      )
+    });
+
+    renderAssignmentDetailPage();
+
+    const summary = await screen.findByLabelText("Grade status summary");
+    expect(within(summary).getByText("Grading disabled")).toBeInTheDocument();
+    expect(
+      within(summary).getByText("Grading is disabled for this assignment.")
+    ).toBeInTheDocument();
+    expect(within(summary).queryByText("Blocked")).toBeNull();
+    expect(within(summary).getByText("Grading disabled")).not.toHaveClass("status-chip--attention");
   });
 
   it("keeps an MSOE username distinct from its GitHub repository URL", async () => {
@@ -1531,15 +1804,15 @@ describe("AssignmentDetailPage", () => {
 
     renderAssignmentDetailPage();
 
-    await screen.findByRole("button", { name: "Copy assignment path" });
+    await screen.findByRole("button", { name: "Copy Assignment file path" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy assignment path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy Assignment file path" }));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(ASSIGNMENT_FILE);
     });
     expect(await screen.findByText("Copied")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy course folder path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy Course folder path" }));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(COURSE_FOLDER_PATH);
     });
@@ -1559,11 +1832,17 @@ describe("AssignmentDetailPage", () => {
     const onPreviewGrade = vi.fn();
 
     mockGraiderUI({
-      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+      getAssignmentDetail: vi
+        .fn()
+        .mockResolvedValue(
+          createAssignmentDetailResult(
+            createAssignmentDetailJson({ applyState: { status: "applied" } })
+          )
+        )
     });
     renderAssignmentDetailPage({ onPreviewGrade });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Preview grading" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue grading" }));
 
     expect(onPreviewGrade).toHaveBeenCalledTimes(1);
     expect(onPreviewGrade).toHaveBeenCalledWith(
@@ -1584,8 +1863,9 @@ describe("AssignmentDetailPage", () => {
       getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
     });
     renderAssignmentDetailPage({ onViewGradeStatus });
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "View grading status" }));
+    await clickOverflowItem("View grading status");
 
     expect(onViewGradeStatus).toHaveBeenCalledTimes(1);
     expect(onViewGradeStatus).toHaveBeenCalledWith(
@@ -1606,13 +1886,14 @@ describe("AssignmentDetailPage", () => {
       getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
     });
     renderAssignmentDetailPage({ onViewFacultyReport });
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    const reportButton = await screen.findByRole("button", { name: "Generate report" });
-    expect(reportButton).toBeEnabled();
+    await openOverflowMenu();
+    const reportItem = screen.getByRole("menuitem", { name: /^Faculty report/u });
+    expect(reportItem).toBeEnabled();
     expect(screen.getByText("Generate and view the faculty report.")).toBeInTheDocument();
-    expect(screen.queryByText("Coming in a future slice")).toBeNull();
 
-    fireEvent.click(reportButton);
+    fireEvent.click(reportItem);
 
     expect(onViewFacultyReport).toHaveBeenCalledWith(
       SELECTION,
@@ -1634,8 +1915,10 @@ describe("AssignmentDetailPage", () => {
     renderAssignmentDetailPage({
       selection: { ...SELECTION, courseFolderPath: "" }
     });
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    expect(await screen.findByRole("button", { name: "Generate report" })).toBeDisabled();
+    await openOverflowMenu();
+    expect(screen.getByRole("menuitem", { name: /^Faculty report/u })).toBeDisabled();
     expect(
       screen.getByText(
         "A course folder and assignment file are required to generate a faculty report."
@@ -1799,9 +2082,11 @@ describe("AssignmentDetailPage", () => {
 
     renderAssignmentDetailPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Copy assignment path" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Copy Assignment file path" }));
 
-    expect(await screen.findByText("Unable to copy.")).toBeInTheDocument();
+    // Technical details owns its own copy affordance (built in PR1) with its
+    // own feedback text, distinct from the page-level CopyButton's.
+    expect(await screen.findByText("Unable to copy")).toBeInTheDocument();
   });
 
   it("keeps prior detail visible and disables refresh while loading", async () => {
@@ -1820,11 +2105,12 @@ describe("AssignmentDetailPage", () => {
     renderAssignmentDetailPage();
 
     expect(await screen.findByText("100")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh detail" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
 
     expect(await screen.findByText("Loading assignment detail...")).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refreshing detail..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh assignment detail" })).toBeDisabled();
+    expect(screen.getByText("Refreshing…")).toBeInTheDocument();
 
     resolveRefresh(
       createAssignmentDetailResult(
@@ -1877,8 +2163,9 @@ describe("AssignmentDetailPage", () => {
       .mockResolvedValue(createRepositoryDownloadResult());
     mockGraiderUI({ selectRepositoryDownloadFolder, downloadAssignmentRepositories });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
 
     await waitFor(() => expect(downloadAssignmentRepositories).toHaveBeenCalledTimes(1));
     expect(selectRepositoryDownloadFolder).toHaveBeenCalledTimes(1);
@@ -1895,8 +2182,9 @@ describe("AssignmentDetailPage", () => {
     const downloadAssignmentRepositories = vi.fn();
     mockGraiderUI({ selectRepositoryDownloadFolder, downloadAssignmentRepositories });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
 
     await waitFor(() => expect(selectRepositoryDownloadFolder).toHaveBeenCalledTimes(1));
     expect(downloadAssignmentRepositories).not.toHaveBeenCalled();
@@ -1919,12 +2207,11 @@ describe("AssignmentDetailPage", () => {
       downloadAssignmentRepositories
     });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
 
-    expect(
-      await screen.findByRole("button", { name: "Downloading repositories..." })
-    ).toBeDisabled();
+    expect(await screen.findByText("Downloading student repositories")).toBeInTheDocument();
     resolveDownload(createRepositoryDownloadResult());
 
     const results = await screen.findByLabelText("Repository download results");
@@ -1963,8 +2250,9 @@ describe("AssignmentDetailPage", () => {
       downloadAssignmentRepositories: vi.fn().mockResolvedValue(groupResult)
     });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
 
     const results = await screen.findByLabelText("Repository download results");
     expect(within(results).getByText(/1 cloned, 0 failed of 1/u)).toBeInTheDocument();
@@ -2007,9 +2295,9 @@ describe("AssignmentDetailPage", () => {
       downloadAssignmentRepositories
     });
     renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
-    const button = await screen.findByRole("button", { name: "Download Student Repositories" });
-    fireEvent.click(button);
+    await clickOverflowItem("Download student repositories");
     const results = await screen.findByLabelText("Repository download results");
     expect(within(results).getByText("27s1-csc1120-lab02-alpha")).toBeInTheDocument();
     expect(within(results).getByText("27s1-csc1120-lab02-beta")).toBeInTheDocument();
@@ -2018,12 +2306,13 @@ describe("AssignmentDetailPage", () => {
       within(results).getByText(/One repository could not be downloaded/u)
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Download Student Repositories" }));
+    await clickOverflowItem("Download student repositories");
     expect(await screen.findByText("Unable to download student repositories.")).toHaveAttribute(
       "role",
       "alert"
     );
-    expect(screen.getByRole("button", { name: "Download Student Repositories" })).toBeEnabled();
+    await openOverflowMenu();
+    expect(screen.getByRole("menuitem", { name: /^Download student repositories/u })).toBeEnabled();
     expect(screen.queryByText("command failure")).toBeNull();
   });
 });

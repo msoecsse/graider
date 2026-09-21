@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type {
+  AssignmentGradingLifecycleResult,
   AssignmentTemplateSyncAvailability,
   AssignmentTemplateSyncExecutionResult,
   AssignmentTemplateSyncOutcome,
@@ -13,11 +14,28 @@ import type {
   TemplateWorkflowSavePreview,
   TemplateWorkflowSaveResult
 } from "../../electron/ipc";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
+import {
+  LifecycleStrip,
+  type LifecycleStep,
+  type LifecycleStepState
+} from "../components/LifecycleStrip";
 import { OperationStatusBar } from "../components/OperationStatusBar";
+import { OverflowMenu, type OverflowMenuGroup } from "../components/OverflowMenu";
+import { PageHeader } from "../components/PageHeader";
+import { TechnicalDetails, type TechnicalDetailsItem } from "../components/TechnicalDetails";
+import { Toast, useToast } from "../components/Toast";
+import { AssignmentDetailStudentTable } from "./AssignmentDetailStudentTable";
 import { copyTextToClipboard } from "./assignmentDetailClipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
+import { formatReadableDateTime } from "../components/dateTime";
 import { normalizeGradeStatus } from "../grade-status/gradeStatusNormalization";
+import {
+  formatGradeStatusLabel,
+  getGradeStatusChipClassName,
+  getGradeStatusSummaryText
+} from "../grade-status/gradeStatusLabels";
 import { getGradeStatusRunUrl } from "../grade-status/gradeStatusRunUrl";
 import type {
   GradeStatusLoadResult,
@@ -35,7 +53,6 @@ import {
   hasTokenRequiredReadiness
 } from "./assignmentDetailReadiness";
 import type {
-  AssignmentDetailAction,
   AssignmentDetailDiagnostic,
   AssignmentDetailLoadResult,
   AssignmentDetailPageProps,
@@ -43,32 +60,125 @@ import type {
   NormalizedAssignmentDetail
 } from "./assignmentDetailTypes";
 
-const ACTION_LABELS = {
-  validate: "Validate / Refresh detail",
-  apply: "Preview apply",
-  grade: "Grade submissions",
-  report: "Generate report",
-  publishStudentReports: "Publish student reports",
-  generateWorkflow: "Generate/update workflow"
-} as const;
-
-type ActionKey = keyof typeof ACTION_LABELS;
-
 interface StudentAccessPagesConfigSaveOutcome {
   readonly ok: boolean;
   readonly diagnostics: readonly string[];
 }
 
-const ACTION_ORDER: readonly ActionKey[] = [
-  "validate",
-  "apply",
-  "grade",
-  "report",
-  "publishStudentReports",
-  "generateWorkflow"
-];
-
 const COPY_FEEDBACK_TIMEOUT_MS = 2200;
+const REFRESH_MINUTE_MS = 60_000;
+const REFRESH_HOUR_MS = 60 * REFRESH_MINUTE_MS;
+const REFRESH_DAY_MS = 24 * REFRESH_HOUR_MS;
+
+const ADVANCED_DETAILS_ID = "assignment-advanced-details";
+
+const BLOCKER_FIX_LABELS: Readonly<Record<string, string>> = {
+  "github-token-required": "Fix GitHub authentication",
+  "template-repository": "Fix template repository",
+  "template-branch": "Fix template branch",
+  "grading-workflow": "Fix grading workflow",
+  "workflow-dispatch": "Fix workflow dispatch",
+  "roster-summary": "Fix roster data",
+  "partial-success": "Review readiness checks"
+};
+
+const formatRefreshedAgo = (refreshedAt: string | null): string => {
+  if (refreshedAt === null) return "Not yet refreshed";
+  const refreshedTime = new Date(refreshedAt).getTime();
+  if (Number.isNaN(refreshedTime)) return "Not yet refreshed";
+  const elapsedMs = Math.max(0, Date.now() - refreshedTime);
+  if (elapsedMs < REFRESH_MINUTE_MS) return "Updated just now";
+  if (elapsedMs < REFRESH_HOUR_MS) {
+    const minutes = Math.floor(elapsedMs / REFRESH_MINUTE_MS);
+    return `Updated ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  }
+  if (elapsedMs < REFRESH_DAY_MS) {
+    const hours = Math.floor(elapsedMs / REFRESH_HOUR_MS);
+    return `Updated ${hours} hour${hours === 1 ? "" : "s"} ago`;
+  }
+  const days = Math.floor(elapsedMs / REFRESH_DAY_MS);
+  return `Updated ${days} day${days === 1 ? "" : "s"} ago`;
+};
+
+// Reveals a section that already exists on the page (optionally inside the
+// Advanced details disclosure) instead of performing an action of its own —
+// these panels are out of scope to restructure this PR, so the overflow menu
+// points faculty at the existing control rather than duplicating it.
+const revealExistingSection = (headingId: string, detailsId?: string): void => {
+  if (detailsId !== undefined) {
+    const detailsElement = document.getElementById(detailsId);
+    if (detailsElement instanceof HTMLDetailsElement) detailsElement.open = true;
+  }
+  const heading = document.getElementById(headingId);
+  heading?.scrollIntoView?.({ block: "start" });
+  heading?.focus();
+};
+
+interface AssignmentLifecycleStripInput {
+  readonly activeStudentCount: number;
+  readonly isApplied: boolean;
+  readonly gradingDoneCount: number;
+  readonly publishedCount: number;
+  readonly unknownStatusCount: number;
+  readonly isBlocked: boolean;
+  readonly blockedDetail: string;
+}
+
+// Created is always complete once the page can render at all -- the
+// assignment already exists -- but there is no "assignment created" date
+// anywhere in the current data model, so its detail is intentionally left
+// blank rather than inventing one. See the PR report.
+const buildAssignmentLifecycleSteps = (
+  input: AssignmentLifecycleStripInput
+): readonly LifecycleStep[] => {
+  const total = input.activeStudentCount;
+  const gradingDone = input.isApplied && (total === 0 || input.gradingDoneCount >= total);
+  const publishedDone = gradingDone && (total === 0 || input.publishedCount >= total);
+
+  const appliedState: LifecycleStepState = input.isApplied ? "complete" : "current";
+  const gradingState: LifecycleStepState = !input.isApplied
+    ? "upcoming"
+    : gradingDone
+      ? "complete"
+      : "current";
+  const publishedState: LifecycleStepState = !gradingDone
+    ? "upcoming"
+    : publishedDone
+      ? "complete"
+      : "current";
+
+  const steps: readonly LifecycleStep[] = [
+    { id: "created", label: "Created", state: "complete" },
+    {
+      id: "applied",
+      label: "Applied",
+      detail: `${total} repositor${total === 1 ? "y" : "ies"}`,
+      state: appliedState
+    },
+    {
+      id: "grading",
+      label: "Grading",
+      detail:
+        input.unknownStatusCount > 0
+          ? `${input.gradingDoneCount} of ${total} done · ${input.unknownStatusCount} unknown`
+          : `${input.gradingDoneCount} of ${total} done`,
+      state: gradingState
+    },
+    {
+      id: "published",
+      label: "Published",
+      detail: `${input.publishedCount} of ${total} sent`,
+      state: publishedState
+    }
+  ];
+
+  // Blocked takes precedence over whichever step is otherwise "current" —
+  // the same precedence the primary action already applies.
+  if (!input.isBlocked) return steps;
+  return steps.map((step) =>
+    step.state === "current" ? { ...step, state: "blocked", detail: input.blockedDetail } : step
+  );
+};
 
 const derivePagesBaseUrl = (repository: string): string => {
   const [owner, name] = repository.trim().split("/");
@@ -96,13 +206,7 @@ const hasFacultyReportContext = ({
   courseFolderPath.trim().length > 0 &&
   assignmentFile.trim().length > 0;
 
-type CopyKey =
-  | "assignment-path"
-  | "course-folder-path"
-  | "template-repository"
-  | "workflow-path"
-  | "canvas-link"
-  | "publish-commands";
+type CopyKey = "template-repository" | "workflow-path" | "canvas-link" | "publish-commands";
 
 interface CopyState {
   readonly key: CopyKey;
@@ -330,7 +434,9 @@ const ReadinessPanel = ({
     >
       <div className="readiness-summary__header">
         <div>
-          <h2 id="assignment-readiness-title">Readiness</h2>
+          <h2 id="assignment-readiness-title" tabIndex={-1}>
+            Readiness
+          </h2>
           <p className="readiness-summary__status">{readiness.label}</p>
         </div>
         <span className="status-chip">{formatStatusLabel(detail.status)}</span>
@@ -351,62 +457,102 @@ const ReadinessPanel = ({
   );
 };
 
-const SummaryPanel = ({
-  detail,
-  courseFolderPath,
-  copyState,
-  onCopy
+const GRADING_MODE_LABELS: Readonly<Record<string, string>> = {
+  preset: "Preset",
+  "custom-workflow": "Custom workflow",
+  "contract-only": "Contract only"
+};
+
+// Reuses the exact "Grading enabled" / "No grading" phrasing already shown in
+// the status badges (see getStatusBadges) and extends it with the mode, so
+// the facts card reads as "is automated grading configured, and how" rather
+// than duplicating the grading_category gradebook-bucket concept.
+const getGradingFactValue = (grading: NormalizedAssignmentDetail["grading"]): string => {
+  if (!grading.enabled) {
+    return "No grading";
+  }
+
+  const modeLabel = grading.mode === null ? undefined : GRADING_MODE_LABELS[grading.mode];
+  return modeLabel === undefined ? "Grading enabled" : `Grading enabled (${modeLabel})`;
+};
+
+const AssignmentFactsPanel = ({
+  detail
 }: {
   readonly detail: NormalizedAssignmentDetail;
-  readonly courseFolderPath: string;
-  readonly copyState: CopyState | null;
-  readonly onCopy: (copyKey: CopyKey, value: string) => void;
 }): ReactElement => (
-  <section className="detail-panel" aria-labelledby="assignment-summary-title">
-    <h2 id="assignment-summary-title">Summary</h2>
+  <section className="detail-panel" aria-labelledby="assignment-facts-title">
+    <h2 id="assignment-facts-title">Assignment facts</h2>
     <dl className="detail-grid">
-      <DetailItem label="Title" value={detail.assignment.title} />
-      <DetailItem label="Slug" value={detail.assignment.slug} />
-      <DetailItem label="Type" value={detail.assignment.type} />
-      <DetailItem label="Status" value={detail.assignment.status} />
+      <DetailItem
+        label="Due"
+        value={formatReadableDateTime(detail.deadline.dueAt) ?? detail.deadline.dueAt}
+      />
       <DetailItem label="Points" value={detail.metadata.points} />
-      <DetailItem label="Due date" value={detail.deadline.dueAt} />
-      <DetailItem label="Late policy" value={detail.deadline.latePolicy} />
+      <DetailItem label="Type" value={detail.assignment.type} />
       <DetailItem label="Sections" value={detail.sections.join(", ") || null} />
+      <DetailItem label="Grading" value={getGradingFactValue(detail.grading)} />
+      <DetailItem label="Late policy" value={detail.deadline.latePolicy} />
+      <div className="detail-item">
+        <dt>Template</dt>
+        <dd>
+          {detail.template.repository === null ? (
+            <span>{formatNullableValue(detail.template.repository)}</span>
+          ) : (
+            <a
+              href={`https://github.com/${detail.template.repository}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {getRepositoryShortName(detail.template.repository)}
+            </a>
+          )}
+        </dd>
+      </div>
       <DetailItem label="Faculty owner" value={detail.metadata.facultyOwner} />
-      <DetailItem label="LMS assignment ID" value={detail.metadata.lmsAssignmentId} />
       <DetailItem label="Grading category" value={detail.metadata.gradingCategory} />
-      <DetailItem
-        label="Assignment file path"
-        value={detail.assignment.file}
-        valueClassName="copyable-value"
-        action={
-          <CopyButton
-            label="Copy assignment path"
-            value={detail.assignment.file}
-            copyKey="assignment-path"
-            copyState={copyState}
-            onCopy={onCopy}
-          />
-        }
-      />
-      <DetailItem
-        label="Course folder path"
-        value={courseFolderPath}
-        valueClassName="copyable-value"
-        action={
-          <CopyButton
-            label="Copy course folder path"
-            value={courseFolderPath}
-            copyKey="course-folder-path"
-            copyState={copyState}
-            onCopy={onCopy}
-          />
-        }
-      />
     </dl>
   </section>
 );
+
+// The five implementation identifiers section 5.3 puts behind Technical
+// details. Sourced from data the page already has -- assignment.file and
+// assignment.slug from the detail response, grading.workflow from the same
+// response's grading block, lmsAssignmentId from its metadata block, and
+// courseFolderPath from the page's own selection -- no new field or fetch.
+const buildTechnicalDetailsItems = (
+  detail: NormalizedAssignmentDetail,
+  courseFolderPath: string
+): readonly TechnicalDetailsItem[] => [
+  {
+    id: "assignment-file-path",
+    label: "Assignment file path",
+    value: formatNullableValue(detail.assignment.file),
+    copyable: detail.assignment.file !== null
+  },
+  {
+    id: "course-folder-path",
+    label: "Course folder path",
+    value: courseFolderPath,
+    copyable: true
+  },
+  {
+    id: "workflow-path",
+    label: "Workflow path",
+    value: formatNullableValue(detail.grading.workflow),
+    copyable: detail.grading.workflow !== null
+  },
+  {
+    id: "slug",
+    label: "Slug",
+    value: formatNullableValue(detail.assignment.slug)
+  },
+  {
+    id: "lms-assignment-id",
+    label: "LMS assignment ID",
+    value: formatNullableValue(detail.metadata.lmsAssignmentId)
+  }
+];
 
 const TemplatePanel = ({
   detail,
@@ -476,7 +622,7 @@ const GradingPanel = ({
         <DetailItem label="Artifact name" value={detail.grading.artifact} />
         <DetailItem label="Result file" value={detail.grading.resultFile} />
         <StatusItem label="Workflow status" value={detail.grading.workflowStatus} />
-        <StatusItem label="workflow_dispatch status" value={detail.grading.workflowDispatch} />
+        <StatusItem label="Workflow dispatch status" value={detail.grading.workflowDispatch} />
       </dl>
     )}
   </section>
@@ -514,7 +660,9 @@ const GradeWorkflowPanel = ({
     <section className="detail-panel grade-workflow-panel" aria-labelledby="grade-workflow-title">
       <div className="grade-workflow-panel__header">
         <div>
-          <h2 id="grade-workflow-title">Grade workflow</h2>
+          <h2 id="grade-workflow-title" tabIndex={-1}>
+            Grade workflow
+          </h2>
           <p className="detail-panel__note">
             Workflow changes are not saved in this version. Saving to the template repository will
             be added in a later slice.
@@ -676,7 +824,9 @@ const StudentRepositoryAccessPagePanel = ({
   };
   return (
     <section className="detail-panel" aria-labelledby="student-repository-access-page-title">
-      <h2 id="student-repository-access-page-title">Student repository access page</h2>
+      <h2 id="student-repository-access-page-title" tabIndex={-1}>
+        Student repository access page
+      </h2>
       <p className="detail-panel__note">
         Apply generates this HTML page in the configured Pages repository. Regenerate it here after
         roster or repository-link corrections. Course repository files remain the source for
@@ -1047,81 +1197,11 @@ const DiagnosticsPanel = ({
   </section>
 );
 
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "numeric",
-  minute: "2-digit"
-});
-
 const getGradeStatusStudentLabel = (row: GradeStatusRepositoryRow): string =>
   row.studentId ?? "Unknown student";
 
 const getRepositoryShortName = (repository: string | null): string =>
   repository?.split("/").at(-1) ?? "Not configured";
-
-const formatGradeStatusSummaryLabel = (row: GradeStatusRepositoryRow): string => {
-  if (row.status === "queued") {
-    return "Queued";
-  }
-
-  if (row.status === "in_progress") {
-    return "In progress";
-  }
-
-  if (row.status === "completed") {
-    if (row.conclusion === "success") {
-      return "Completed — success";
-    }
-
-    if (row.conclusion === "failure") {
-      return "Completed — failure";
-    }
-
-    if (row.conclusion === "cancelled") {
-      return "Cancelled";
-    }
-
-    if (row.conclusion === "timed_out") {
-      return "Timed out";
-    }
-
-    return "Completed — unknown";
-  }
-
-  if (row.status === "missing") {
-    return "Missing";
-  }
-
-  if (row.status === "token_required") {
-    return "Token required";
-  }
-
-  return row.status === "blocked" ? "Blocked" : "Unknown";
-};
-
-const getGradeStatusSummaryChipClassName = (row: GradeStatusRepositoryRow): string => {
-  if (row.status === "completed" && row.conclusion === "success") {
-    return "status-chip status-chip--success";
-  }
-
-  if (row.status === "completed" && row.conclusion === "failure") {
-    return "status-chip status-chip--error";
-  }
-
-  return row.needsAttention ? "status-chip status-chip--attention" : "status-chip";
-};
-
-const formatReadableDateTime = (timestamp: string | null): string | null => {
-  if (timestamp === null) {
-    return null;
-  }
-
-  const date = new Date(timestamp);
-
-  return Number.isNaN(date.getTime()) ? null : DATE_TIME_FORMATTER.format(date);
-};
 
 const formatGradeStatusLastUpdate = (row: GradeStatusRepositoryRow): string => {
   const completedAt = formatReadableDateTime(row.completedAt);
@@ -1137,31 +1217,6 @@ const formatGradeStatusLastUpdate = (row: GradeStatusRepositoryRow): string => {
   }
 
   return "No run time available";
-};
-
-const getGradeStatusSummaryText = (status: NormalizedGradeStatus): string => {
-  const activeRuns = status.summary.queued + status.summary.inProgress;
-  const parts = [
-    status.summary.needsAttention > 0
-      ? `${status.summary.needsAttention} grading runs need attention.`
-      : null,
-    activeRuns > 0 ? `${activeRuns} runs still in progress.` : null,
-    status.summary.missing > 0
-      ? `${status.summary.missing} repositories are missing completed grading runs.`
-      : null,
-    status.summary.unknown > 0 ? `${status.summary.unknown} repositories are unknown.` : null,
-    status.summary.blocked > 0 ? `${status.summary.blocked} repositories are blocked.` : null
-  ].filter((part): part is string => part !== null);
-
-  if (parts.length > 0) {
-    return parts.join(" ");
-  }
-
-  if (status.repositories.length === 0) {
-    return "No repository status rows were returned.";
-  }
-
-  return "No grading runs need attention.";
 };
 
 const GradeStatusSummaryPanel = ({
@@ -1247,8 +1302,8 @@ const GradeStatusSummaryPanel = ({
                     )}
                   </td>
                   <td>
-                    <span className={getGradeStatusSummaryChipClassName(row)}>
-                      {formatGradeStatusSummaryLabel(row)}
+                    <span className={getGradeStatusChipClassName(row)}>
+                      {formatGradeStatusLabel(row)}
                     </span>
                   </td>
                   <td>{formatGradeStatusLastUpdate(row)}</td>
@@ -1395,104 +1450,6 @@ const CollapsibleDiagnosticsPanel = ({
   </details>
 );
 
-const getActionDescription = (
-  action: AssignmentDetailAction,
-  actionKey: ActionKey,
-  canGenerateFacultyReport: boolean
-): string => {
-  if (actionKey === "validate") {
-    return action.available ? "Runs assignment detail again." : "Unavailable for this assignment";
-  }
-
-  if (!action.available) {
-    return action.reason ?? "Unavailable for this assignment";
-  }
-
-  if (actionKey === "apply") {
-    return "Preview what apply would do. No changes are made.";
-  }
-
-  if (actionKey === "grade") {
-    return "Preview grading workflow dispatches. No workflows are started.";
-  }
-
-  if (actionKey === "report") {
-    return canGenerateFacultyReport
-      ? "Generate and view the faculty report."
-      : "A course folder and assignment file are required to generate a faculty report.";
-  }
-
-  if (!action.implemented) {
-    return "This action is not available in this view.";
-  }
-
-  return "This action is not available in this view.";
-};
-
-const ActionsPanel = ({
-  detail,
-  isLoading,
-  onRefresh,
-  onPreviewApply,
-  onPreviewGrade,
-  onViewFacultyReport,
-  canGenerateFacultyReport
-}: {
-  readonly detail: NormalizedAssignmentDetail;
-  readonly isLoading: boolean;
-  readonly onRefresh: () => void;
-  readonly onPreviewApply: () => void;
-  readonly onPreviewGrade: () => void;
-  readonly onViewFacultyReport: () => void;
-  readonly canGenerateFacultyReport: boolean;
-}): ReactElement => (
-  <section className="detail-panel" aria-labelledby="assignment-actions-title">
-    <h2 id="assignment-actions-title">Available actions</h2>
-    <div className="assignment-actions">
-      {ACTION_ORDER.map((actionKey) => {
-        const action = detail.actions[actionKey];
-        const isValidate = actionKey === "validate";
-        const isApplyPreview = actionKey === "apply";
-        const isGradePreview = actionKey === "grade";
-        const isFacultyReport = actionKey === "report";
-
-        return (
-          <div className="assignment-action" key={actionKey}>
-            <button
-              className={
-                isValidate ? "secondary-action" : "secondary-action assignment-action__button"
-              }
-              type="button"
-              disabled={
-                (!isValidate && !isApplyPreview && !isGradePreview && !isFacultyReport) ||
-                isLoading ||
-                (isFacultyReport ? !canGenerateFacultyReport : !action.available)
-              }
-              onClick={
-                isValidate
-                  ? onRefresh
-                  : isApplyPreview
-                    ? onPreviewApply
-                    : isGradePreview
-                      ? onPreviewGrade
-                      : isFacultyReport
-                        ? onViewFacultyReport
-                        : undefined
-              }
-              aria-describedby={`assignment-action-${actionKey}-description`}
-            >
-              {ACTION_LABELS[actionKey]}
-            </button>
-            <p id={`assignment-action-${actionKey}-description`}>
-              {getActionDescription(action, actionKey, canGenerateFacultyReport)}
-            </p>
-          </div>
-        );
-      })}
-    </div>
-  </section>
-);
-
 export const AssignmentDetailPage = ({
   selection,
   initialLoadResult = null,
@@ -1511,6 +1468,8 @@ export const AssignmentDetailPage = ({
   const [gradeStatusLoadResult, setGradeStatusLoadResult] = useState<GradeStatusLoadResult | null>(
     null
   );
+  const [gradingLifecycleResult, setGradingLifecycleResult] =
+    useState<AssignmentGradingLifecycleResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloadingRepositories, setIsDownloadingRepositories] = useState(false);
   const [repositoryDownloadError, setRepositoryDownloadError] = useState<string | null>(null);
@@ -1542,7 +1501,6 @@ export const AssignmentDetailPage = ({
   const [isSavingGroupConfig, setIsSavingGroupConfig] = useState(false);
   const [groupConfigFeedback, setGroupConfigFeedback] = useState<string | null>(null);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [templateSyncAvailability, setTemplateSyncAvailability] =
@@ -1561,6 +1519,7 @@ export const AssignmentDetailPage = ({
   const templateSyncProgressActiveRef = useRef(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
+  const { message: toastMessage, showToast } = useToast();
 
   const detail = useMemo(
     () =>
@@ -1619,7 +1578,7 @@ export const AssignmentDetailPage = ({
   };
 
   const deleteLocalAssignment = async (): Promise<void> => {
-    if (!isDeleteConfirmed || window.graiderUI.deleteAssignment === undefined) return;
+    if (window.graiderUI.deleteAssignment === undefined) return;
     setIsDeleting(true);
     setDeleteError(null);
     try {
@@ -1694,6 +1653,30 @@ export const AssignmentDetailPage = ({
       }));
     } finally {
       setIsLoadingGradeStatus(false);
+    }
+  };
+
+  const loadGradingLifecycleSummary = async (): Promise<void> => {
+    const getGradingLifecycle = window.graiderUI.getAssignmentGradingLifecycle;
+    if (
+      getGradingLifecycle === undefined ||
+      selection.termSlug === null ||
+      selection.assignmentSlug === null
+    ) {
+      setGradingLifecycleResult(null);
+      return;
+    }
+    try {
+      setGradingLifecycleResult(
+        await getGradingLifecycle({
+          courseFolderId: selection.courseFolderId,
+          courseFolderPath: selection.courseFolderPath,
+          termCode: selection.termSlug,
+          assignmentSlug: selection.assignmentSlug
+        })
+      );
+    } catch {
+      setGradingLifecycleResult(null);
     }
   };
 
@@ -2005,6 +1988,11 @@ export const AssignmentDetailPage = ({
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   useEffect(() => {
+    setGradingLifecycleResult(null);
+    void loadGradingLifecycleSummary();
+  }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
+
+  useEffect(() => {
     let isCurrent = true;
     const prepareTemplateSync = window.graiderUI.prepareAssignmentTemplateSync;
     setTemplateSyncAvailability(null);
@@ -2121,112 +2109,246 @@ export const AssignmentDetailPage = ({
         : "Synchronizing template changes across student repositories..."
       : `Repository ${templateSyncProgress.current} of ${templateSyncProgress.total} · ${templateSyncProgress.studentId} · ${templateSyncProgress.repository}`;
 
-  return (
-    <main className="dashboard-shell" aria-labelledby="assignment-detail-title">
-      <header className="app-header">
-        <div className="app-header__inner">
-          <div>
-            <p className="app-header__eyebrow">Graider</p>
-            <h1 id="assignment-detail-title">{title}</h1>
-            <p className="assignment-detail__subtitle">{getCourseTermSubtitle(detail)}</p>
-          </div>
-          <div className="assignment-detail__header-actions">
-            <button className="secondary-action" type="button" onClick={onBack}>
-              Back to dashboard
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null}
-              onClick={onEditAssignment}
-            >
-              Edit assignment
-            </button>
-            <button
-              className="danger-action"
-              type="button"
-              disabled={detail === null || isDeleting}
-              onClick={() => {
-                setIsConfirmingDelete(true);
-                setIsDeleteConfirmed(false);
-                setDeleteError(null);
-              }}
-            >
-              Delete assignment
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null}
-              onClick={() => {
-                onPreviewApply(selection, detail, loadResult);
-              }}
-            >
-              Preview apply
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null}
-              onClick={() => {
+  // Primary action label depends on lifecycle state: blocked (a readiness item
+  // needs attention) takes precedence over apply state, which is otherwise
+  // either "not yet applied" (derive the student count and go to apply) or
+  // "applied" (go grade). The finer-grained applied/submissions/graded/
+  // published split from the design doc is intentionally not implemented here
+  // — see the PR report for why.
+  const readiness = detail === null ? null : deriveAssignmentReadiness(detail);
+  const isBlocked = readiness?.status === "needs_attention";
+  // A missing GitHub token is a lesser concern than the readiness checks it
+  // merely prevented from running (deriveAssignmentReadiness treats it the
+  // same way — see hasNonTokenAttention above) so the primary action features
+  // the first non-token blocker when one exists.
+  const blockerItem =
+    needsAttentionItems.find((item) => item.id !== "github-token-required") ??
+    needsAttentionItems[0];
+  const primaryHeaderAction =
+    detail === null
+      ? undefined
+      : isBlocked
+        ? {
+            label:
+              blockerItem === undefined
+                ? "Review readiness checks"
+                : (BLOCKER_FIX_LABELS[blockerItem.id] ?? "Review readiness checks"),
+            onClick: () => revealExistingSection("assignment-readiness-title")
+          }
+        : detail.applyState.status === "applied" || detail.applyState.status === "partially_applied"
+          ? {
+              label: "Continue grading",
+              onClick: () => {
                 onPreviewGrade(selection, detail, loadResult);
-              }}
-            >
-              Preview grading
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null || isDownloadingRepositories}
-              onClick={() => void downloadStudentRepositories()}
-            >
-              {isDownloadingRepositories
-                ? "Downloading repositories..."
-                : "Download Student Repositories"}
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={
-                detail === null ||
-                isPreparingTemplateSync ||
-                isExecutingTemplateSync ||
-                templateSyncAvailability?.available !== true ||
-                templateSyncAvailability.repositoryCount === 0
               }
-              onClick={() => {
-                setTemplateSyncError(null);
-                setTemplateSyncTarget(null);
-                setIsTemplateSyncModalOpen(true);
-              }}
-            >
-              {isExecutingTemplateSync
-                ? "Updating Student Repositories..."
-                : "Update Student Repositories"}
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={detail === null}
-              onClick={() => {
-                onViewGradeStatus(selection, detail, loadResult);
-              }}
-            >
-              View grading status
-            </button>
-            <button
-              className="primary-action"
-              type="button"
-              disabled={isLoading}
-              onClick={() => {
-                void loadDetail();
-              }}
-            >
-              {isLoading ? "Refreshing detail..." : "Refresh detail"}
-            </button>
-          </div>
-        </div>
-      </header>
+            }
+          : {
+              label: `Apply to ${detail.roster?.activeStudentCount ?? 0} student${
+                (detail.roster?.activeStudentCount ?? 0) === 1 ? "" : "s"
+              }`,
+              onClick: () => {
+                onPreviewApply(selection, detail, loadResult);
+              }
+            };
+
+  const assignmentLifecycleSteps: readonly LifecycleStep[] =
+    detail === null
+      ? []
+      : buildAssignmentLifecycleSteps({
+          activeStudentCount: detail.roster?.activeStudentCount ?? 0,
+          isApplied:
+            detail.applyState.status === "applied" ||
+            detail.applyState.status === "partially_applied",
+          gradingDoneCount:
+            gradingLifecycleResult?.status === "success"
+              ? gradingLifecycleResult.gradingDoneCount
+              : 0,
+          publishedCount:
+            gradingLifecycleResult?.status === "success"
+              ? gradingLifecycleResult.publishedCount
+              : 0,
+          unknownStatusCount:
+            gradingLifecycleResult?.status === "success"
+              ? gradingLifecycleResult.unknownStatusCount
+              : 0,
+          isBlocked,
+          blockedDetail:
+            blockerItem === undefined
+              ? "Review readiness checks"
+              : (BLOCKER_FIX_LABELS[blockerItem.id] ?? "Review readiness checks")
+        });
+
+  const overflowGroups: readonly OverflowMenuGroup[] =
+    detail === null
+      ? []
+      : [
+          {
+            id: "assignment",
+            heading: "Assignment",
+            items: [
+              {
+                id: "edit-assignment",
+                label: "Edit assignment",
+                caption: "Change assignment settings, points, and due date.",
+                onSelect: onEditAssignment
+              },
+              {
+                id: "group-settings",
+                label: "Group settings",
+                caption: "Switch between individual and shared group repositories.",
+                disabled: groupConfig === null,
+                onSelect: () => revealExistingSection("repository-mode-title", ADVANCED_DETAILS_ID)
+              },
+              {
+                id: "student-access-page",
+                label: "Student access page",
+                caption: "Generate the public page students use to find their repository.",
+                disabled: accessPage === null,
+                onSelect: () => revealExistingSection("student-repository-access-page-title")
+              }
+            ]
+          },
+          {
+            id: "repositories",
+            heading: "Repositories",
+            items: [
+              {
+                id: "apply-new-students",
+                label: "Apply to new students",
+                caption: "Create repositories for students not yet applied.",
+                onSelect: () => {
+                  onPreviewApply(selection, detail, loadResult);
+                }
+              },
+              {
+                id: "download-repositories",
+                label: "Download student repositories",
+                caption: "Clone all student repositories locally.",
+                disabled: isDownloadingRepositories,
+                onSelect: () => void downloadStudentRepositories()
+              }
+            ]
+          },
+          {
+            id: "grading-setup",
+            heading: "Grading setup",
+            items: [
+              {
+                id: "regenerate-workflow",
+                label: "Regenerate grading workflow",
+                caption: "View, edit, and push the grading workflow file.",
+                disabled: !detail.grading.enabled,
+                onSelect: () => revealExistingSection("grade-workflow-title", ADVANCED_DETAILS_ID)
+              },
+              {
+                id: "view-grading-status",
+                label: "View grading status",
+                caption: "See automated check status for every repository.",
+                onSelect: () => {
+                  onViewGradeStatus(selection, detail, loadResult);
+                }
+              }
+            ]
+          },
+          {
+            id: "reports",
+            heading: "Reports",
+            items: [
+              {
+                id: "faculty-report",
+                label: "Faculty report",
+                caption: canGenerateFacultyReport
+                  ? "Generate and view the faculty report."
+                  : "A course folder and assignment file are required to generate a faculty report.",
+                disabled: !canGenerateFacultyReport,
+                onSelect: () => {
+                  onViewFacultyReport(selection, detail, loadResult);
+                }
+              }
+            ]
+          },
+          {
+            id: "danger",
+            items: [
+              {
+                id: "delete-assignment",
+                label: "Delete assignment",
+                caption: "Remove the local assignment configuration only.",
+                destructive: true,
+                disabled: isDeleting,
+                onSelect: () => {
+                  setIsConfirmingDelete(true);
+                  setDeleteError(null);
+                }
+              }
+            ]
+          }
+        ];
+
+  return (
+    <main className="dashboard-shell" aria-label={title}>
+      <button className="secondary-action assignment-detail__back" type="button" onClick={onBack}>
+        Back to dashboard
+      </button>
+      <PageHeader
+        eyebrow="Graider"
+        title={title}
+        meta={getCourseTermSubtitle(detail)}
+        secondaryActions={
+          detail === null
+            ? []
+            : [
+                {
+                  label: isExecutingTemplateSync
+                    ? "Updating Student Repositories..."
+                    : "Update Student Repositories",
+                  disabled:
+                    isPreparingTemplateSync ||
+                    isExecutingTemplateSync ||
+                    templateSyncAvailability?.available !== true ||
+                    templateSyncAvailability.repositoryCount === 0,
+                  onClick: () => {
+                    setTemplateSyncError(null);
+                    setTemplateSyncTarget(null);
+                    setIsTemplateSyncModalOpen(true);
+                  }
+                }
+              ]
+        }
+        overflow={
+          <>
+            {primaryHeaderAction === undefined ? null : (
+              <button
+                className={isBlocked ? "primary-action primary-action--blocked" : "primary-action"}
+                type="button"
+                onClick={primaryHeaderAction.onClick}
+              >
+                {primaryHeaderAction.label}
+              </button>
+            )}
+            <span className="page-header__refresh">
+              <button
+                className="page-header__refresh-button"
+                type="button"
+                aria-label="Refresh assignment detail"
+                disabled={isLoading}
+                onClick={() => {
+                  void loadDetail();
+                }}
+              >
+                ↻
+              </button>
+              <span className="page-header__refresh-status">
+                {isLoading ? "Refreshing…" : formatRefreshedAgo(loadResult?.refreshedAt ?? null)}
+              </span>
+            </span>
+            {detail === null ? null : (
+              <OverflowMenu groups={overflowGroups} aria-label="More assignment actions" />
+            )}
+          </>
+        }
+      />
+      {detail === null ? null : <LifecycleStrip steps={assignmentLifecycleSteps} />}
       <ConfirmationWithPreviewModal
         isOpen={isTemplateSyncModalOpen}
         title={
@@ -2283,6 +2405,11 @@ export const AssignmentDetailPage = ({
             ? "I understand this will update student repositories or create pull requests."
             : "I understand this will update this student repository or create a pull request."
         }
+        confirmationWord={
+          templateSyncTarget?.selectedRepository === undefined
+            ? title
+            : templateSyncTarget.selectedRepository.studentId
+        }
         confirmDisabled={isExecutingTemplateSync}
         confirmLabel={
           templateSyncTarget?.selectedRepository === undefined
@@ -2291,6 +2418,10 @@ export const AssignmentDetailPage = ({
         }
         successMessage="Student repositories updated."
         onConfirm={executeTemplateSync}
+        onSuccess={(successMessage) => {
+          setIsTemplateSyncModalOpen(false);
+          showToast(successMessage);
+        }}
         onCancel={() => {
           if (!isExecutingTemplateSync) setIsTemplateSyncModalOpen(false);
         }}
@@ -2301,45 +2432,25 @@ export const AssignmentDetailPage = ({
           detail={templateSyncStatusDetail}
         />
       ) : null}
-      {!isConfirmingDelete ? null : (
-        <section className="detail-panel" role="dialog" aria-labelledby="delete-assignment-title">
-          <h2 id="delete-assignment-title">Delete assignment</h2>
+      {isDownloadingRepositories ? (
+        <OperationStatusBar label="Downloading student repositories" />
+      ) : null}
+      <ConfirmDialog
+        isOpen={isConfirmingDelete}
+        title="Delete assignment?"
+        summary={
           <p>
             This deletes only the local assignment configuration file. It does not delete GitHub
             repositories, student repositories, GitHub Classroom resources, or other remote
             resources.
           </p>
-          <label className="confirmation-check">
-            <input
-              type="checkbox"
-              checked={isDeleteConfirmed}
-              onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
-            />
-            I understand this deletes the local assignment configuration.
-          </label>
-          <div className="apply-confirmation-actions">
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={isDeleting}
-              onClick={() => {
-                setIsConfirmingDelete(false);
-                setIsDeleteConfirmed(false);
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              className="danger-action"
-              type="button"
-              disabled={!isDeleteConfirmed || isDeleting}
-              onClick={() => void deleteLocalAssignment()}
-            >
-              {isDeleting ? "Deleting assignment..." : "Delete assignment"}
-            </button>
-          </div>
-        </section>
-      )}
+        }
+        confirmationWord={title}
+        confirmLabel="Delete assignment"
+        isConfirming={isDeleting}
+        onConfirm={() => void deleteLocalAssignment()}
+        onCancel={() => setIsConfirmingDelete(false)}
+      />
       {deleteError === null ? null : (
         <p className="error-message" role="alert">
           {deleteError}
@@ -2425,162 +2536,158 @@ export const AssignmentDetailPage = ({
             </div>
 
             <div className="assignment-detail-grid">
-              <SummaryPanel
-                detail={detail}
-                courseFolderPath={selection.courseFolderPath}
-                copyState={copyState}
-                onCopy={handleCopy}
-              />
-              {accessPage === null ? null : (
-                <StudentRepositoryAccessPagePanel
-                  result={accessPage}
-                  isGenerating={isGeneratingAccessPage}
-                  isSelectingPagesFolder={isSelectingPagesFolder}
-                  copyFeedback={getCopyStateText(copyState, "canvas-link")}
-                  onGenerate={() => {
-                    void generateStudentRepositoryAccessPage();
-                  }}
-                  onSelectPagesFolder={() => selectStudentAccessPagesRepositoryFolder()}
-                  onSaveConfig={saveStudentAccessPagesConfig}
-                  isSavingConfig={isSavingAccessPagesConfig}
-                  configFeedback={accessPagesConfigFeedback}
-                  defaultRepository={
-                    (accessPage.githubOrganization ?? selection.courseSlug) === null
-                      ? ""
-                      : `${accessPage.githubOrganization ?? selection.courseSlug}/${accessPage.githubOrganization ?? selection.courseSlug}pages`
-                  }
-                  onCopy={(value) => {
-                    handleCopy("canvas-link", value);
-                  }}
+              <div className="assignment-detail__main">
+                <AssignmentDetailStudentTable
+                  lifecycleResult={gradingLifecycleResult}
+                  gradeStatus={gradeStatus}
                 />
-              )}
-              <RosterPanel detail={detail} />
-              <ActionsPanel
-                detail={detail}
-                isLoading={isLoading}
-                onRefresh={() => {
-                  void loadDetail();
-                }}
-                onPreviewApply={() => {
-                  onPreviewApply(selection, detail, loadResult);
-                }}
-                onPreviewGrade={() => {
-                  onPreviewGrade(selection, detail, loadResult);
-                }}
-                onViewFacultyReport={() => {
-                  onViewFacultyReport(selection, detail, loadResult);
-                }}
-                canGenerateFacultyReport={canGenerateFacultyReport}
-              />
-              <details className="detail-panel assignment-detail__advanced">
-                <summary>Advanced details</summary>
-                <p className="assignment-detail__path">Assignment file: {detail.assignment.file}</p>
-                <TemplatePanel detail={detail} copyState={copyState} onCopy={handleCopy} />
-                <GradingPanel detail={detail} copyState={copyState} onCopy={handleCopy} />
-                <GradeWorkflowPanel
-                  detail={detail}
-                  workflowResult={workflowResult}
-                  draft={workflowDraft}
-                  preview={workflowPreview}
-                  isLoading={isLoadingWorkflow}
-                  isPushing={isPushingWorkflow}
-                  onViewWorkflow={() => {
-                    void loadTemplateWorkflow();
-                  }}
-                  onDraftChange={(value) => {
-                    setWorkflowDraft(value);
-                    setWorkflowPreview(null);
-                    setWorkflowSaveResult(null);
-                  }}
-                  onPreview={() => {
-                    void previewWorkflowSave();
-                  }}
-                  onPush={() => {
-                    void pushWorkflow();
-                  }}
-                />
-                {workflowSaveResult?.status === "success" ? (
-                  <p role="status">
-                    Workflow pushed
-                    {workflowSaveResult.commitSha === null
-                      ? "."
-                      : `: ${workflowSaveResult.commitSha}`}
-                  </p>
-                ) : null}
-                <StudentReportsPanel detail={detail} />
-                {groupConfig === null ? null : (
-                  <section className="detail-panel" aria-labelledby="repository-mode-title">
-                    <h2 id="repository-mode-title">Repository mode</h2>
-                    <label>
-                      Repository mode
-                      <select
-                        value={groupMode}
-                        onChange={(event) =>
-                          setGroupMode(event.target.value as "individual" | "group")
-                        }
-                      >
-                        <option value="individual">Individual repositories</option>
-                        <option value="group">Group repositories</option>
-                      </select>
-                    </label>
-                    {groupMode === "group" ? (
-                      <>
-                        <p className="detail-panel__note">
-                          Apply creates one shared repository per group. Use Preview apply to verify
-                          group membership and repository targets before applying changes.
-                        </p>
-                        <label>
-                          Group membership CSV
-                          <textarea
-                            aria-label="Group membership CSV"
-                            value={groupsCsv}
-                            rows={8}
-                            onChange={(event) => setGroupsCsv(event.target.value)}
-                          />
-                        </label>
-                        <p className="detail-panel__note">
-                          {String(groupConfig.groupCount)} groups,{" "}
-                          {String(groupConfig.groupedStudentCount)}
-                          {" grouped students, "}
-                          {String(groupConfig.ungroupedActiveStudentCount)} ungrouped active
-                          students.
-                        </p>
-                      </>
-                    ) : groupConfig.groupsCsv.trim() !== "group_id,student_id" ? (
-                      <p className="detail-panel__note">
-                        Existing groups.csv is retained and ignored while Individual repositories is
-                        selected.
-                      </p>
-                    ) : null}
-                    <button
-                      className="primary-action"
-                      type="button"
-                      disabled={isSavingGroupConfig}
-                      onClick={() => void saveAssignmentGroupConfig()}
-                    >
-                      {isSavingGroupConfig ? "Saving repository mode..." : "Save repository mode"}
-                    </button>
-                    {groupConfigFeedback === null ? null : (
-                      <p role="status">{groupConfigFeedback}</p>
-                    )}
-                  </section>
-                )}
-                {accessPagePublishStatus === null ? null : (
-                  <StudentRepositoryAccessPagePublishPanel
-                    result={accessPagePublishStatus}
-                    copyFeedback={getCopyStateText(copyState, "publish-commands")}
-                    onPublish={() => {
-                      void publishStudentRepositoryAccessPage();
+                {accessPage === null ? null : (
+                  <StudentRepositoryAccessPagePanel
+                    result={accessPage}
+                    isGenerating={isGeneratingAccessPage}
+                    isSelectingPagesFolder={isSelectingPagesFolder}
+                    copyFeedback={getCopyStateText(copyState, "canvas-link")}
+                    onGenerate={() => {
+                      void generateStudentRepositoryAccessPage();
                     }}
-                    isPublishing={isPublishingAccessPage}
-                    publishResult={accessPagePublishResult}
+                    onSelectPagesFolder={() => selectStudentAccessPagesRepositoryFolder()}
+                    onSaveConfig={saveStudentAccessPagesConfig}
+                    isSavingConfig={isSavingAccessPagesConfig}
+                    configFeedback={accessPagesConfigFeedback}
+                    defaultRepository={
+                      (accessPage.githubOrganization ?? selection.courseSlug) === null
+                        ? ""
+                        : `${accessPage.githubOrganization ?? selection.courseSlug}/${accessPage.githubOrganization ?? selection.courseSlug}pages`
+                    }
                     onCopy={(value) => {
-                      handleCopy("publish-commands", value);
+                      handleCopy("canvas-link", value);
                     }}
                   />
                 )}
-                <DiagnosticsPanel diagnostics={detail.diagnostics} />
-              </details>
+                <details
+                  className="detail-panel assignment-detail__advanced"
+                  id={ADVANCED_DETAILS_ID}
+                >
+                  <summary>Advanced details</summary>
+                  <p className="assignment-detail__path">
+                    Assignment file: {detail.assignment.file}
+                  </p>
+                  <TemplatePanel detail={detail} copyState={copyState} onCopy={handleCopy} />
+                  <GradingPanel detail={detail} copyState={copyState} onCopy={handleCopy} />
+                  <GradeWorkflowPanel
+                    detail={detail}
+                    workflowResult={workflowResult}
+                    draft={workflowDraft}
+                    preview={workflowPreview}
+                    isLoading={isLoadingWorkflow}
+                    isPushing={isPushingWorkflow}
+                    onViewWorkflow={() => {
+                      void loadTemplateWorkflow();
+                    }}
+                    onDraftChange={(value) => {
+                      setWorkflowDraft(value);
+                      setWorkflowPreview(null);
+                      setWorkflowSaveResult(null);
+                    }}
+                    onPreview={() => {
+                      void previewWorkflowSave();
+                    }}
+                    onPush={() => {
+                      void pushWorkflow();
+                    }}
+                  />
+                  {workflowSaveResult?.status === "success" ? (
+                    <p role="status">
+                      Workflow pushed
+                      {workflowSaveResult.commitSha === null
+                        ? "."
+                        : `: ${workflowSaveResult.commitSha}`}
+                    </p>
+                  ) : null}
+                  <StudentReportsPanel detail={detail} />
+                  {groupConfig === null ? null : (
+                    <section className="detail-panel" aria-labelledby="repository-mode-title">
+                      <h2 id="repository-mode-title" tabIndex={-1}>
+                        Repository mode
+                      </h2>
+                      <label>
+                        Repository mode
+                        <select
+                          value={groupMode}
+                          onChange={(event) =>
+                            setGroupMode(event.target.value as "individual" | "group")
+                          }
+                        >
+                          <option value="individual">Individual repositories</option>
+                          <option value="group">Group repositories</option>
+                        </select>
+                      </label>
+                      {groupMode === "group" ? (
+                        <>
+                          <p className="detail-panel__note">
+                            Apply creates one shared repository per group. Use Preview apply to
+                            verify group membership and repository targets before applying changes.
+                          </p>
+                          <label>
+                            Group membership CSV
+                            <textarea
+                              aria-label="Group membership CSV"
+                              value={groupsCsv}
+                              rows={8}
+                              onChange={(event) => setGroupsCsv(event.target.value)}
+                            />
+                          </label>
+                          <p className="detail-panel__note">
+                            {String(groupConfig.groupCount)} groups,{" "}
+                            {String(groupConfig.groupedStudentCount)}
+                            {" grouped students, "}
+                            {String(groupConfig.ungroupedActiveStudentCount)} ungrouped active
+                            students.
+                          </p>
+                        </>
+                      ) : groupConfig.groupsCsv.trim() !== "group_id,student_id" ? (
+                        <p className="detail-panel__note">
+                          Existing groups.csv is retained and ignored while Individual repositories
+                          is selected.
+                        </p>
+                      ) : null}
+                      <button
+                        className="primary-action"
+                        type="button"
+                        disabled={isSavingGroupConfig}
+                        onClick={() => void saveAssignmentGroupConfig()}
+                      >
+                        {isSavingGroupConfig ? "Saving repository mode..." : "Save repository mode"}
+                      </button>
+                      {groupConfigFeedback === null ? null : (
+                        <p role="status">{groupConfigFeedback}</p>
+                      )}
+                    </section>
+                  )}
+                  {accessPagePublishStatus === null ? null : (
+                    <StudentRepositoryAccessPagePublishPanel
+                      result={accessPagePublishStatus}
+                      copyFeedback={getCopyStateText(copyState, "publish-commands")}
+                      onPublish={() => {
+                        void publishStudentRepositoryAccessPage();
+                      }}
+                      isPublishing={isPublishingAccessPage}
+                      publishResult={accessPagePublishResult}
+                      onCopy={(value) => {
+                        handleCopy("publish-commands", value);
+                      }}
+                    />
+                  )}
+                  <DiagnosticsPanel diagnostics={detail.diagnostics} />
+                </details>
+              </div>
+              <aside className="assignment-detail__sidebar">
+                <AssignmentFactsPanel detail={detail} />
+                <RosterPanel detail={detail} />
+                <TechnicalDetails
+                  items={buildTechnicalDetailsItems(detail, selection.courseFolderPath)}
+                />
+              </aside>
             </div>
             {templateSyncResult === null ? null : (
               <TemplateSyncResultsPanel result={templateSyncResult} />
@@ -2601,6 +2708,7 @@ export const AssignmentDetailPage = ({
           </>
         )}
       </section>
+      <Toast message={toastMessage} />
     </main>
   );
 };

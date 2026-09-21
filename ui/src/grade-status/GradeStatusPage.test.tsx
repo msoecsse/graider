@@ -209,6 +209,19 @@ describe("GradeStatusPage", () => {
     expect(graiderUI.gradeAssignment).not.toHaveBeenCalled();
   });
 
+  it("shows started and completed times in readable form, never the raw ISO timestamp", async () => {
+    mockGraiderUI({
+      getAssignmentGradeStatus: vi.fn().mockResolvedValue(createGradeStatusResult())
+    });
+
+    renderGradeStatusPage();
+
+    expect((await screen.findAllByText(/Started [A-Za-z]{3} Jun 10,/u)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Completed [A-Za-z]{3} Jun 10,/u)).toBeInTheDocument();
+    expect(screen.queryByText(/2026-06-10T12:00:00/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/2026-06-10T12:05:00/u)).not.toBeInTheDocument();
+  });
+
   it("opens faculty report from the latest loaded status", async () => {
     const onViewFacultyReport = vi.fn();
 
@@ -241,6 +254,42 @@ describe("GradeStatusPage", () => {
     renderGradeStatusPage();
 
     expect(await screen.findByText("Completed — failure")).toHaveClass("status-chip--error");
+  });
+
+  it("renders disabled grading neutrally without auto-refreshing or blocking rows", async () => {
+    const disabledRow = {
+      ...(createGradeStatusJson().repositories[0] as Record<string, unknown>),
+      workflow: null,
+      ref: null,
+      runId: null,
+      runUrl: null,
+      status: "not_configured",
+      reason: "grading_not_configured",
+      needsAttention: false
+    };
+    const getAssignmentGradeStatus = vi.fn().mockResolvedValue(
+      createGradeStatusResult(
+        createGradeStatusJson([disabledRow], {
+          grading: {
+            enabled: false,
+            resolvedFrom: "assignment_override",
+            mode: "no-grading",
+            workflow: null,
+            artifact: null,
+            resultFile: null,
+            workflowRef: null
+          }
+        })
+      )
+    );
+    mockGraiderUI({ getAssignmentGradeStatus });
+    renderGradeStatusPage();
+
+    expect(await screen.findByText("Grading disabled")).toBeInTheDocument();
+    expect(screen.getByText("Grading is disabled for this assignment.")).toBeInTheDocument();
+    expect(screen.queryByText("Blocked")).toBeNull();
+    expect(screen.getByText("Needs attention").nextElementSibling).toHaveTextContent("0");
+    expect(getAssignmentGradeStatus).toHaveBeenCalledTimes(1);
   });
 
   it("manual refresh runs full grade status and keeps prior rows visible while refreshing", async () => {

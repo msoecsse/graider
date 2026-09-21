@@ -8,6 +8,7 @@ import type {
 } from "../../electron/ipc";
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
+import { Toast, useToast } from "../components/Toast";
 
 interface RequiredFileDraft {
   readonly key: string;
@@ -88,6 +89,7 @@ export const AssignmentSetupPage = ({
   const [isConfirming, setIsConfirming] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const { message: toastMessage, showToast } = useToast();
 
   useEffect(() => {
     const loadTerms = window.graiderUI.loadAssignmentSetupTerms;
@@ -622,6 +624,10 @@ export const AssignmentSetupPage = ({
         isOpen={isConfirming && preview !== null}
         onCancel={() => setIsConfirming(false)}
         onConfirm={handleSave}
+        onSuccess={(successMessage) => {
+          setIsConfirming(false);
+          showToast(successMessage);
+        }}
         preview={
           preview === null ? undefined : (
             <>
@@ -634,6 +640,7 @@ export const AssignmentSetupPage = ({
         summary={`${assignmentTitle.trim() || "This assignment"} will be created for ${sectionIds.length} section${sectionIds.length === 1 ? "" : "s"}.`}
         title="Create assignment?"
       />
+      <Toast message={toastMessage} />
     </main>
   );
 };

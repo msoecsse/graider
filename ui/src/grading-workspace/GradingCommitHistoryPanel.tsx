@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import type { GradingStudentCommitHistoryResult } from "../../electron/ipc";
+import { formatReadableDateTime } from "../components/dateTime";
 
 type HistorySuccess = Extract<GradingStudentCommitHistoryResult, { readonly status: "success" }>;
 
@@ -47,7 +48,7 @@ export const commitHistoryResultToLoadState = (
 };
 
 const formatCommitTimestamp = (committedAt: string): string =>
-  new Date(committedAt).toLocaleString();
+  formatReadableDateTime(committedAt) ?? "Unknown time";
 
 export const GradingCommitHistoryContent = ({
   state

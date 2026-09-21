@@ -254,6 +254,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const showAllStudents = async (): Promise<void> => {
+  const pill =
+    screen.queryByRole("button", { name: /^All\b/u }) ??
+    (await screen.findByRole("button", { name: /^All\b/u }));
+  fireEvent.click(pill);
+};
+
 describe("GradingWorkspacePage source viewer", () => {
   it("loads the first selected student using only canonical Slice 15 identity fields", async () => {
     const loadGradingStudentSource = vi.fn().mockResolvedValue(source("ada"));
@@ -312,7 +319,8 @@ describe("GradingWorkspacePage source viewer", () => {
     setApis(vi.fn().mockResolvedValue(workspace()), loadGradingStudentSource);
 
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /grace · Section 002/u }));
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(loadGradingStudentSource).toHaveBeenCalledTimes(2));
 
     await act(async () => grace.resolve(source("grace")));
@@ -348,6 +356,7 @@ describe("GradingWorkspacePage source viewer", () => {
 
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     await waitFor(() => expect(loadView).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" }));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(loadView).toHaveBeenCalledWith({ ...REQUEST, studentId: "grace" }));
     await act(async () =>
@@ -434,6 +443,7 @@ describe("GradingWorkspacePage source viewer", () => {
     await screen.findByTestId("mock-monaco");
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
 
     expect(saveView).toHaveBeenCalledTimes(1);
@@ -478,6 +488,7 @@ describe("GradingWorkspacePage source viewer", () => {
     await screen.findByTestId("mock-monaco");
 
     fireEvent.click(screen.getByRole("button", { name: "Move ada latest" }));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("grace:");
     fireEvent.click(screen.getByRole("button", { name: "Move grace once" }));
@@ -565,6 +576,7 @@ describe("GradingWorkspacePage source viewer", () => {
     );
     expect(screen.getByRole("alert")).not.toHaveTextContent("private path and stack");
     vi.useRealTimers();
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("grace:");
   });
@@ -581,7 +593,8 @@ describe("GradingWorkspacePage source viewer", () => {
     expect(
       await screen.findByText(/Download this student's repository through Graider/u)
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("grace:class grace {}");
   });
 
@@ -761,7 +774,20 @@ describe("GradingWorkspacePage grading snapshot", () => {
     const refreshed = {
       ...snapshot("ada", "complete"),
       appliedComments: [{ id: "comment", text: "Snapshot comment", deduction: -5 }],
-      grade: { ...snapshot("ada").grade, totalScore: 95 }
+      grade: {
+        ...snapshot("ada").grade,
+        totalScore: 95,
+        categories: [
+          {
+            id: "quality",
+            name: "Code Quality",
+            pointsPossible: 100,
+            score: 95,
+            categorizedCommentAdjustmentTotal: -5,
+            manualAdjustmentTotal: 0
+          }
+        ]
+      }
     };
     const loadSnapshot = vi
       .fn()
@@ -786,7 +812,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Mark Complete" }));
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Mark ada grading complete?");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel marking complete" }));
     expect(markComplete).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Mark Complete" }));
@@ -805,7 +831,8 @@ describe("GradingWorkspacePage grading snapshot", () => {
       await screen.findByText("Complete", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
     expect(screen.getByText("Snapshot comment")).toBeInTheDocument();
-    expect(screen.getByText("95 / 100")).toBeInTheDocument();
+    expect(screen.getByText("95 / 100", { selector: ".grading-score-total" })).toBeInTheDocument();
+    await showAllStudents();
     expect(screen.getByRole("button", { name: /ada · Section 001/u })).toHaveTextContent(
       "Complete"
     );
@@ -943,6 +970,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
     await waitFor(() =>
       expect(markComplete).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" })
     );
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(
       await screen.findByText("Complete", { selector: ".grading-student-snapshot strong" })
@@ -955,7 +983,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
     expect(screen.queryByRole("button", { name: "Mark Complete" })).not.toBeInTheDocument();
   });
 
-  it("displays a missing-state projection as Not Started with full score and no rubric error", async () => {
+  it("displays a missing-state projection as Not Started with a manual score note", async () => {
     setApis(
       vi.fn().mockResolvedValue(workspace()),
       vi.fn().mockResolvedValue(source("ada")),
@@ -969,7 +997,8 @@ describe("GradingWorkspacePage grading snapshot", () => {
     expect(
       await screen.findByText("Not Started", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
-    expect(screen.getByText("100 / 100")).toBeInTheDocument();
+    expect(screen.getByText("No rubric — enter a score manually")).toBeInTheDocument();
+    expect(screen.queryByText("100 / 100")).not.toBeInTheDocument();
     expect(screen.getByText("No rubric categories are configured.")).toBeInTheDocument();
     expect(screen.getByText("No comments applied.")).toBeInTheDocument();
     expect(screen.getByText("No manual adjustments.")).toBeInTheDocument();
@@ -990,19 +1019,41 @@ describe("GradingWorkspacePage grading snapshot", () => {
       loadSnapshot,
       loadLibrary
     );
+    const category = (score: number): ReturnType<typeof snapshot>["grade"]["categories"] =>
+      [
+        {
+          id: "quality",
+          name: "Code Quality",
+          pointsPossible: 100,
+          score,
+          categorizedCommentAdjustmentTotal: 0,
+          manualAdjustmentTotal: 0
+        }
+      ] as unknown as ReturnType<typeof snapshot>["grade"]["categories"];
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /grace · Section 002/u }));
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
 
     await act(async () =>
-      grace.resolve({ ...snapshot("grace"), grade: { ...snapshot("grace").grade, totalScore: 82 } })
+      grace.resolve({
+        ...snapshot("grace"),
+        grade: { ...snapshot("grace").grade, totalScore: 82, categories: category(82) }
+      })
     );
-    expect(await screen.findByText("82 / 100")).toBeInTheDocument();
+    expect(
+      await screen.findByText("82 / 100", { selector: ".grading-score-total" })
+    ).toBeInTheDocument();
     await act(async () =>
-      ada.resolve({ ...snapshot("ada"), grade: { ...snapshot("ada").grade, totalScore: 41 } })
+      ada.resolve({
+        ...snapshot("ada"),
+        grade: { ...snapshot("ada").grade, totalScore: 41, categories: category(41) }
+      })
     );
-    expect(screen.getByText("82 / 100")).toBeInTheDocument();
-    expect(screen.queryByText("41 / 100")).not.toBeInTheDocument();
+    expect(screen.getByText("82 / 100", { selector: ".grading-score-total" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("41 / 100", { selector: ".grading-score-total" })
+    ).not.toBeInTheDocument();
     expect(loadLibrary).toHaveBeenCalledTimes(1);
   });
 
@@ -1075,7 +1126,8 @@ describe("GradingWorkspacePage grading snapshot", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
     expect(await screen.findByText(snapshotSubmissionChangedText)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(
       await screen.findByText("Complete", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
@@ -1158,7 +1210,7 @@ describe("GradingWorkspacePage comment library", () => {
     );
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
-    expect(await screen.findByText("100 / 100")).toBeInTheDocument();
+    expect(await screen.findByText("No rubric — enter a score manually")).toBeInTheDocument();
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("ada:");
     expect(
       screen.getByText("The shared comment library could not be loaded safely.")
@@ -1195,8 +1247,9 @@ describe("GradingWorkspacePage comment library", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Search comments" }), {
       target: { value: "feedback" }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText("100 / 100");
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await screen.findByText("No rubric — enter a score manually");
 
     Object.values(mutations).forEach((mutation) => expect(mutation).not.toHaveBeenCalled());
     expect(saveView).not.toHaveBeenCalled();
@@ -1321,7 +1374,8 @@ describe("GradingWorkspacePage comment application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select ada range" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
     expect(screen.getByText("Source target: src/Main.java: 2-5")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
     expect(screen.getByRole("button", { name: "Add Comment" })).toBeDisabled();
@@ -1357,7 +1411,9 @@ describe("GradingWorkspacePage comment application", () => {
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Use a clearer loop.");
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Loop clarity");
     expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(2);
-    expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("quality");
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue(
+      "quality"
+    );
     expect(screen.getByText("Source target: src/Main.java: 2-5")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
       target: { value: "Customized feedback" }
@@ -1437,13 +1493,13 @@ describe("GradingWorkspacePage comment application", () => {
     await screen.findByTestId("mock-monaco");
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
 
-    expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue("");
     expect(screen.getByRole("radio", { name: "General" })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
     await waitFor(() => expect(addComment).toHaveBeenCalledTimes(1));
     expect(addComment.mock.calls[0]?.[0].comment).not.toHaveProperty("rubricCategoryId");
     expect(addComment.mock.calls[0]?.[0].comment).not.toHaveProperty("sourceLocation");
-    expect(await screen.findByText("98 / 100")).toBeInTheDocument();
+    expect(await screen.findByText("No rubric — enter a score manually")).toBeInTheDocument();
     expect(screen.getByTestId("mock-annotations")).toHaveTextContent("[]");
   });
 
@@ -1471,7 +1527,7 @@ describe("GradingWorkspacePage comment application", () => {
     );
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
@@ -1496,12 +1552,12 @@ describe("GradingWorkspacePage comment application", () => {
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Apply Loop clarity" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Select ada invalid" }));
     expect(screen.getByRole("button", { name: "Apply comment" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
     expect(addComment).not.toHaveBeenCalled();
     expect(screen.queryByRole("form", { name: "Apply Loop clarity" })).not.toBeInTheDocument();
   });
@@ -1529,7 +1585,7 @@ describe("GradingWorkspacePage comment application", () => {
     await act(async () =>
       mutation.resolve({ status: "grading_state_error", studentId: "ada", code: "invalid" })
     );
-    expect(screen.getByText("100 / 100")).toBeInTheDocument();
+    expect(screen.getByText("No rubric — enter a score manually")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Grading state could not be updated safely"
     );
@@ -1652,6 +1708,7 @@ describe("GradingWorkspacePage comment application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Applying…" })).toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Move ada latest" }));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(
       await screen.findByText("Complete", { selector: ".grading-student-snapshot strong" })
@@ -1694,7 +1751,8 @@ describe("GradingWorkspacePage comment application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("different local submission");
     expect(screen.getByRole("button", { name: "Apply comment" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("grace:");
     expect(addComment).toHaveBeenCalledTimes(1);
   });
@@ -1731,6 +1789,7 @@ describe("GradingWorkspacePage comment application", () => {
       "Persisted source feedback"
     );
     expect(screen.getByTestId("mock-annotations")).not.toHaveTextContent("General only");
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
     expect(screen.getByTestId("mock-annotations")).toHaveTextContent("[]");
@@ -1801,7 +1860,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(4);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
     fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
@@ -1874,14 +1933,16 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Original feedback");
     expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(5);
-    expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("quality");
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue(
+      "quality"
+    );
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
       target: { value: "Revised feedback" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Deduction" }), {
       target: { value: "8" }
     });
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "correctness" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
@@ -2002,7 +2063,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     );
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
     });
     fireEvent.click(screen.getByRole("radio", { name: "General" }));
@@ -2061,10 +2122,10 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Original feedback");
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Adjustment: -5");
     expect(screen.getByRole("alertdialog")).toHaveTextContent("src/Main.java, line 1");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel deleting comment" }));
     expect(deleteComment).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Delete comment: Original feedback" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting comment" }));
 
     await waitFor(() => expect(deleteComment).toHaveBeenCalledTimes(1));
     expect(deleteComment).toHaveBeenCalledWith({
@@ -2115,8 +2176,11 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     expect(screen.getByText("95 / 100")).toBeInTheDocument();
     expect(screen.getByTestId("mock-annotations")).toHaveTextContent("Original feedback");
 
+    // The failed edit left the comment editor open with unsaved changes, so
+    // opening the delete confirmation must ask before discarding that draft.
     fireEvent.click(screen.getByRole("button", { name: "Delete comment: Original feedback" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard comment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting comment" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "selected grading record could not be found"
     );
@@ -2170,7 +2234,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Move ada once" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete comment: Original feedback" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting comment" }));
     await waitFor(() => expect(saveView).toHaveBeenCalledTimes(1));
     expect(deleteComment).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Move ada latest" }));
@@ -2226,6 +2290,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
     await waitFor(() => expect(editComment).toHaveBeenCalledTimes(1));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("grace:");
     await act(async () => edit.resolve({ status: "submission_changed", studentId: "ada" }));
@@ -2338,13 +2403,13 @@ describe("GradingWorkspacePage manual adjustments", () => {
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
     fireEvent.click(await screen.findByRole("button", { name: "Add adjustment" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
       target: { value: "quality" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
       target: { value: "1.5" }
     });
-    fireEvent.click(screen.getAllByRole("button", { name: "Add adjustment" })[1] as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Save new adjustment" }));
 
     await waitFor(() => expect(addAdjustment).toHaveBeenCalledTimes(1));
     expect(saveView.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER).toBeLessThan(
@@ -2402,10 +2467,12 @@ describe("GradingWorkspacePage manual adjustments", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit adjustment: quality" }));
-    expect(screen.getByRole("combobox", { name: "Rubric category" })).toHaveValue("quality");
+    expect(screen.getByRole("combobox", { name: "Adjustment rubric category" })).toHaveValue(
+      "quality"
+    );
     expect(screen.getByRole("spinbutton", { name: "Amount" })).toHaveValue(-2);
     expect(screen.getByRole("textbox", { name: "Note (optional)" })).toHaveValue("Late");
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
       target: { value: "correctness" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
@@ -2427,14 +2494,14 @@ describe("GradingWorkspacePage manual adjustments", () => {
     expect(
       screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Publish Report" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete adjustment: correctness" }));
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Correctness");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel deleting adjustment" }));
     expect(deleteAdjustment).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Delete adjustment: correctness" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting adjustment" }));
     await waitFor(() => expect(deleteAdjustment).toHaveBeenCalledTimes(1));
     expect(deleteAdjustment).toHaveBeenCalledWith({
       ...REQUEST,
@@ -2489,9 +2556,9 @@ describe("GradingWorkspacePage manual adjustments", () => {
     expect(await screen.findByText("Adjustment: -0.25")).toBeInTheDocument();
     expect(screen.getByTestId("mock-annotations")).toHaveTextContent("Keep this annotation");
     fireEvent.click(screen.getByRole("button", { name: "Add adjustment" }));
-    const save = screen.getAllByRole("button", { name: "Add adjustment" })[1] as HTMLElement;
+    const save = screen.getByRole("button", { name: "Save new adjustment" });
     expect(save).toBeDisabled();
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
       target: { value: "quality" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
@@ -2540,8 +2607,11 @@ describe("GradingWorkspacePage manual adjustments", () => {
     expect(screen.getByText("Late")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("could not be updated safely");
 
+    // The failed edit left the adjustment editor open with unsaved changes, so
+    // opening the delete confirmation must ask before discarding that draft.
     fireEvent.click(screen.getByRole("button", { name: "Delete adjustment: quality" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard adjustment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting adjustment" }));
     await waitFor(() => expect(deleteAdjustment).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Adjustment: -2")).toBeInTheDocument();
     expect(screen.getByText("98 / 100")).toBeInTheDocument();
@@ -2582,14 +2652,15 @@ describe("GradingWorkspacePage manual adjustments", () => {
     render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Add adjustment" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Rubric category" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
       target: { value: "quality" }
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
       target: { value: "1" }
     });
-    fireEvent.click(screen.getAllByRole("button", { name: "Add adjustment" })[1] as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Save new adjustment" }));
     await waitFor(() => expect(addAdjustment).toHaveBeenCalledTimes(1));
+    await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByText("80 / 100")).toBeInTheDocument();
     await act(async () =>
@@ -2605,6 +2676,168 @@ describe("GradingWorkspacePage manual adjustments", () => {
     );
     expect(screen.getByText("80 / 100")).toBeInTheDocument();
     expect(screen.queryByText("100 / 100")).not.toBeInTheDocument();
+  });
+});
+
+describe("GradingWorkspacePage grading progress and filters", () => {
+  it("derives header progress and filter pill counts from the same source as the student list", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(
+        workspace([
+          { studentId: "ada", section: "001", gradingStatus: "not_started" },
+          { studentId: "grace", section: "002", gradingStatus: "complete" },
+          { studentId: "henry", section: "003", gradingStatus: "published" },
+          { studentId: "ida", section: "004", gradingStatus: "in_progress" }
+        ])
+      ),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    expect(await screen.findByText("2 of 4 graded · 1 published")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "To grade 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Graded 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Published 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All 4" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ada · Section 001/u })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ida · Section 004/u })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /grace · Section 002/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /henry · Section 003/u })).not.toBeInTheDocument();
+  });
+
+  it("changes only which students are listed when a filter pill is selected", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(workspace()),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await screen.findByTestId("mock-monaco");
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Graded 1" }));
+    expect(screen.queryByRole("button", { name: /ada · Section 001/u })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /grace · Section 002/u })).toBeInTheDocument();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:");
+  });
+
+  it("has no students listed for a filter with a zero count and explains why", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(workspace()),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Published 0" }));
+    expect(screen.getByText("No reports have been published yet.")).toBeInTheDocument();
+  });
+
+  it("moves to the next ungraded student and wraps past the end of the roster", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(
+        workspace([
+          { studentId: "ada", section: "001", gradingStatus: "not_started" },
+          { studentId: "grace", section: "002", gradingStatus: "complete" },
+          { studentId: "henry", section: "003", gradingStatus: "complete" }
+        ])
+      ),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await screen.findByTestId("mock-monaco");
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:");
+
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Next ungraded" }));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
+  });
+
+  it("disables Next ungraded and explains why once every student is graded or published", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(
+        workspace([
+          { studentId: "ada", section: "001", gradingStatus: "complete" },
+          { studentId: "grace", section: "002", gradingStatus: "published" }
+        ])
+      ),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+
+    expect(await screen.findByRole("button", { name: "Next ungraded" })).toBeDisabled();
+    expect(screen.getByText("No other students need grading.")).toBeInTheDocument();
+  });
+
+  it("keeps Previous available as a plain step back regardless of grading status", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(workspace()),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await screen.findByTestId("mock-monaco");
+
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
+    expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
+  });
+
+  it("gives navigation secondary weight so it never competes with Mark Complete or the header publish action", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(workspace()),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await screen.findByTestId("mock-monaco");
+
+    expect(screen.getByRole("button", { name: "Previous" })).toHaveClass("secondary-action");
+    expect(screen.getByRole("button", { name: "Previous" })).not.toHaveClass("primary-action");
+    expect(screen.getByRole("button", { name: "Next ungraded" })).toHaveClass("secondary-action");
+    expect(screen.getByRole("button", { name: "Next ungraded" })).not.toHaveClass("primary-action");
+
+    const markComplete = screen.getByRole("button", { name: "Mark Complete" });
+    expect(markComplete).toHaveClass("primary-action");
+    expect(markComplete).not.toHaveClass("secondary-action");
+
+    const headerPublish = screen.getByRole("button", { name: /^Publish \d+ reports?$/u });
+    expect(headerPublish).toHaveClass("primary-action");
+    expect(headerPublish).not.toHaveClass("secondary-action");
+  });
+
+  it("keeps the student list and grading pane in agreement about status after a fresh snapshot load", async () => {
+    setApis(
+      vi.fn().mockResolvedValue(
+        workspace([
+          { studentId: "ada", section: "001", gradingStatus: "not_started" },
+          { studentId: "grace", section: "002", gradingStatus: "not_started" }
+        ])
+      ),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId))),
+      undefined,
+      undefined,
+      vi.fn(({ studentId }: { studentId: string }) =>
+        Promise.resolve(snapshot(studentId, studentId === "grace" ? "published" : "not_started"))
+      )
+    );
+    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    await screen.findByTestId("mock-monaco");
+
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    expect(
+      await screen.findByText("Published", { selector: ".grading-student-snapshot strong" })
+    ).toBeInTheDocument();
+    await showAllStudents();
+    expect(screen.getByRole("button", { name: /grace · Section 002/u })).toHaveTextContent(
+      "Published"
+    );
+    expect(screen.getByRole("button", { name: /grace · Section 002/u })).not.toHaveTextContent(
+      "Not Started"
+    );
   });
 });
 

@@ -25,7 +25,6 @@ export const renderJavaJunitCheckstyleWorkflow = ({
   push:
     paths-ignore:
       - .github/workflows/grade.yml
-  repository_dispatch:
   workflow_dispatch:
     inputs:
       submission_sha:

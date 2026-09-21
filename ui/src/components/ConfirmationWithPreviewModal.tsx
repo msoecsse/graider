@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { isTypedConfirmationSatisfied, TypedConfirmation } from "./TypedConfirmation";
 
 export interface ConfirmationWithPreviewModalProps {
   readonly isOpen: boolean;
@@ -7,11 +8,26 @@ export interface ConfirmationWithPreviewModalProps {
   readonly preview?: ReactNode;
   readonly supplementalContent?: ReactNode;
   readonly acknowledgementLabel?: string;
+  /**
+   * README section 2: required whenever the operation affects a roster or
+   * student repositories. The name of the thing being destroyed or
+   * changed, not a constant -- matches ConfirmDialog's confirmationWord.
+   */
+  readonly confirmationWord?: string;
   readonly confirmDisabled?: boolean;
   readonly confirmLabel: string;
   readonly successMessage?: string;
   readonly onConfirm: (acknowledged: boolean) => Promise<void> | void;
   readonly onCancel: () => void;
+  /**
+   * Called once, synchronously, after onConfirm resolves successfully, with
+   * the resolved successMessage. This component never renders a success
+   * message itself (README section 2.6) and cannot close itself -- only
+   * the caller owns `isOpen`. A caller's handler must set whatever state
+   * controls `isOpen` to false and raise the success surface (a toast; see
+   * ui/src/components/Toast.tsx) with the given message.
+   */
+  readonly onSuccess: (message: string) => void;
 }
 
 const getFocusableElements = (container: HTMLElement): HTMLElement[] =>
@@ -28,19 +44,27 @@ export const ConfirmationWithPreviewModal = ({
   preview,
   supplementalContent,
   acknowledgementLabel,
+  confirmationWord,
   confirmDisabled = false,
   confirmLabel,
   successMessage = "Changes saved.",
   onConfirm,
-  onCancel
+  onCancel,
+  onSuccess
 }: ConfirmationWithPreviewModalProps): ReactNode => {
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
+  const [typedConfirmation, setTypedConfirmation] = useState("");
   const [isConfirming, setIsConfirming] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
-    null
-  );
+  // "In flight" (isConfirming) and "already succeeded" (hasSucceeded) are
+  // deliberately separate. Nothing is in flight once onConfirm resolves, so
+  // cancelling is safe at that point; only re-confirming is not. Gating
+  // Cancel/Escape on isConfirming alone means they work again as soon as
+  // the promise settles, even if the caller's onSuccess handler does not
+  // close the modal -- the component must never be able to trap the user.
+  const [hasSucceeded, setHasSucceeded] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const titleId = useId();
   const summaryId = useId();
 
@@ -62,8 +86,10 @@ export const ConfirmationWithPreviewModal = ({
   useEffect(() => {
     if (!isOpen) {
       setAcknowledged(false);
+      setTypedConfirmation("");
       setIsConfirming(false);
-      setFeedback(null);
+      setHasSucceeded(false);
+      setErrorMessage(null);
     }
   }, [isOpen]);
 
@@ -71,24 +97,37 @@ export const ConfirmationWithPreviewModal = ({
     return null;
   }
 
+  const confirmationWordSatisfied =
+    confirmationWord === undefined ||
+    isTypedConfirmationSatisfied(confirmationWord, typedConfirmation);
+
   const handleConfirm = async (): Promise<void> => {
-    if (isConfirming || confirmDisabled || (acknowledgementLabel !== undefined && !acknowledged)) {
+    if (
+      isConfirming ||
+      hasSucceeded ||
+      confirmDisabled ||
+      (acknowledgementLabel !== undefined && !acknowledged) ||
+      !confirmationWordSatisfied
+    ) {
       return;
     }
 
     setIsConfirming(true);
-    setFeedback(null);
+    setErrorMessage(null);
 
     try {
       await onConfirm(acknowledged);
-      setFeedback({ type: "success", message: successMessage });
-    } catch (error) {
-      setFeedback({
-        type: "error",
-        message: error instanceof Error ? error.message : "Unable to save changes."
-      });
-    } finally {
+      // isConfirming clears -- nothing is in flight any more, so Cancel and
+      // Escape work again -- but hasSucceeded is set so Confirm stays
+      // disabled. This is what keeps the button from being clicked twice
+      // without also trapping the user if the caller's onSuccess handler
+      // does not close the modal.
       setIsConfirming(false);
+      setHasSucceeded(true);
+      onSuccess(successMessage);
+    } catch (error) {
+      setIsConfirming(false);
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save changes.");
     }
   };
 
@@ -166,12 +205,17 @@ export const ConfirmationWithPreviewModal = ({
             {acknowledgementLabel}
           </label>
         )}
-        {feedback === null ? null : (
-          <p
-            className={feedback.type === "error" ? "error-message" : "success-message"}
-            role={feedback.type === "error" ? "alert" : "status"}
-          >
-            {feedback.message}
+        {confirmationWord === undefined ? null : (
+          <TypedConfirmation
+            word={confirmationWord}
+            value={typedConfirmation}
+            onChange={setTypedConfirmation}
+            disabled={isConfirming}
+          />
+        )}
+        {errorMessage === null ? null : (
+          <p className="error-message" role="alert">
+            {errorMessage}
           </p>
         )}
         <div className="apply-confirmation-actions">
@@ -187,8 +231,10 @@ export const ConfirmationWithPreviewModal = ({
             className="primary-action"
             disabled={
               isConfirming ||
+              hasSucceeded ||
               confirmDisabled ||
-              (acknowledgementLabel !== undefined && !acknowledged)
+              (acknowledgementLabel !== undefined && !acknowledged) ||
+              !confirmationWordSatisfied
             }
             onClick={() => void handleConfirm()}
             type="button"
