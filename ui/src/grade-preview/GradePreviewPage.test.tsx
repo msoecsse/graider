@@ -530,16 +530,18 @@ describe("GradePreviewPage", () => {
     mockGraiderUI({ getAssignmentGradePreview });
     renderGradePreviewPage();
 
-    expect(await screen.findByText("manifest_entry_missing")).toBeInTheDocument();
+    // "manifest_entry_missing" isn't in formatReasonLabel's table, so it falls back to
+    // its deliberate readable form (underscores -> spaces) instead of the raw enum.
+    expect(await screen.findByText("manifest entry missing")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh grade preview" }));
 
     expect(await screen.findByText("Loading grade preview...")).toBeInTheDocument();
-    expect(screen.getByText("manifest_entry_missing")).toBeInTheDocument();
+    expect(screen.getByText("manifest entry missing")).toBeInTheDocument();
 
     resolveRefresh(createGradePreviewResult(secondPreview));
 
     await waitFor(() => {
-      expect(screen.queryByText("manifest_entry_missing")).toBeNull();
+      expect(screen.queryByText("manifest entry missing")).toBeNull();
     });
     expect(getAssignmentGradePreview).toHaveBeenCalledTimes(2);
   });
@@ -588,7 +590,11 @@ describe("GradePreviewPage", () => {
     });
     renderGradePreviewPage();
 
-    expect(await screen.findByText("Token required")).toBeInTheDocument();
+    // "Token required" now appears twice for this row: the status chip
+    // ("token_required" -> formatGradePreviewRepositoryStatus) and the reason
+    // cell ("token_required" -> formatReasonLabel both map to the same text).
+    // Before PR8-2 the reason cell showed the raw, unmapped enum instead.
+    expect(await screen.findAllByText("Token required")).toHaveLength(2);
     expect(
       screen.getByRole("heading", {
         level: 2,

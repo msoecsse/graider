@@ -46,12 +46,11 @@ import {
   collectNeedsAttentionItems,
   deriveAssignmentReadiness,
   formatNullableValue,
-  formatStatusLabel,
   getDiagnosticCategory,
   groupDiagnostics,
-  hasAttentionStatus,
   hasTokenRequiredReadiness
 } from "./assignmentDetailReadiness";
+import { formatStatusLabel, hasAttentionStatus } from "../components/statusLabels";
 import type {
   AssignmentDetailDiagnostic,
   AssignmentDetailLoadResult,
@@ -314,7 +313,7 @@ const getStatusBadges = (detail: NormalizedAssignmentDetail | null): readonly st
   }
 
   const badges = [
-    detail.assignment.status,
+    detail.assignment.status === null ? null : formatStatusLabel(detail.assignment.status),
     detail.grading.enabled ? "Grading enabled" : "No grading"
   ];
 
@@ -686,7 +685,7 @@ const GradeWorkflowPanel = ({
             <DetailItem label="Repository" value={workflowResult.repository} />
             <DetailItem label="Branch" value={workflowResult.branch} />
             <DetailItem label="Workflow path" value={workflowResult.path} />
-            <DetailItem label="Fetch status" value={workflowResult.status} />
+            <DetailItem label="Fetch status" value={formatStatusLabel(workflowResult.status)} />
           </dl>
           {workflowResult.diagnostics.map((item) => (
             <p className="error-message" role="alert" key={item.message}>
@@ -2472,7 +2471,8 @@ export const AssignmentDetailPage = ({
           <ul>
             {repositoryDownloadResult.targets.map((target) => (
               <li key={target.targetId}>
-                <strong>{target.repositoryName}</strong> — {target.status} — {target.localPath}
+                <strong>{target.repositoryName}</strong> — {formatStatusLabel(target.status)} —{" "}
+                {target.localPath}
                 {target.groupId === undefined ? null : ` (${target.groupId})`}
                 <span> {target.studentIds.join(", ")}</span>
                 {target.diagnostics.map((diagnostic) => (

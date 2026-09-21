@@ -3,11 +3,14 @@ import { copyTextToClipboard } from "../assignment-detail/assignmentDetailClipbo
 import { OperationStatusBar } from "../components/OperationStatusBar";
 import {
   formatNullableValue,
-  formatStatusLabel,
   getDiagnosticCategory,
-  groupDiagnostics,
-  hasAttentionStatus
+  groupDiagnostics
 } from "../assignment-detail/assignmentDetailReadiness";
+import {
+  formatReasonLabel,
+  formatStatusLabel,
+  hasAttentionStatus
+} from "../components/statusLabels";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
 import type { AssignmentApplyProgressEvent } from "../../electron/ipc";
 import { normalizeApplyResult } from "./applyResultNormalization";
@@ -426,7 +429,7 @@ const RepositoryRowsPanel = ({
               </span>
             </span>
             <span role="cell">
-              {formatNullableValue(row.reason)}
+              {formatReasonLabel(row.reason)}
               <RowDiagnostics diagnostics={row.diagnostics} />
             </span>
           </div>
@@ -574,7 +577,7 @@ const ApplyResultRowsPanel = ({
               </span>
             </span>
             <span role="cell">
-              {formatNullableValue(row.reason)}
+              {formatReasonLabel(row.reason)}
               <RowDiagnostics diagnostics={row.diagnostics} />
             </span>
           </div>

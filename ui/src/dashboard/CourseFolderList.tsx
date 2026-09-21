@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import type { CourseFolderDashboardResult, CourseFolderRecord } from "../../electron/ipc";
 import { formatReadableDateTime } from "../components/dateTime";
+import { formatStatusLabel } from "../components/statusLabels";
 
 interface CourseFolderListProps {
   readonly courseFolders: readonly CourseFolderRecord[];
@@ -64,7 +65,7 @@ const getResultMessage = (result: CourseFolderDashboardResult): string => {
   }
 
   if (result.dashboard !== null) {
-    return `Dashboard returned ${result.dashboard.status}.`;
+    return `Dashboard returned ${formatStatusLabel(result.dashboard.status)}.`;
   }
 
   return getErrorMessage(result);
@@ -108,7 +109,7 @@ export const CourseFolderList = ({
               )}
               {courseFolder.lastDashboardStatus === null ? null : (
                 <span className="folder-list__meta">
-                  Last dashboard status: {courseFolder.lastDashboardStatus}
+                  Last dashboard status: {formatStatusLabel(courseFolder.lastDashboardStatus)}
                 </span>
               )}
               {isRefreshing ? <span className="folder-list__status">Refreshing...</span> : null}

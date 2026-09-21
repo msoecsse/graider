@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import {
   formatNullableValue,
-  formatStatusLabel,
   getDiagnosticCategory,
   groupDiagnostics
 } from "../assignment-detail/assignmentDetailReadiness";
+import { formatStatusLabel } from "../components/statusLabels";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
 import { normalizeFacultyReport } from "./facultyReportNormalization";
 import type {
@@ -104,7 +104,7 @@ const ContextPanel = ({ report }: { readonly report: NormalizedFacultyReport }):
       <DetailItem label="Course" value={report.assignment.courseCode} />
       <DetailItem label="Term" value={report.assignment.termCode} />
       <DetailItem label="Assignment file" value={report.assignment.assignmentFile} />
-      <DetailItem label="Command status" value={report.status} />
+      <DetailItem label="Command status" value={formatStatusLabel(report.status)} />
       <DetailItem label="Exit code" value={report.exitCode} />
     </dl>
   </section>

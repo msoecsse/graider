@@ -426,8 +426,14 @@ describe("ApplyPreviewPage", () => {
     expect(screen.getAllByText("Would skip").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
-    expect(screen.getByText("student_repository_missing")).toBeInTheDocument();
-    expect(screen.getAllByText("assignment_archived").length).toBeGreaterThan(0);
+    // Reason column: "student_repository_missing" is a mapped entry in
+    // formatReasonLabel (matches the README section 2.3 example verbatim).
+    // "assignment_archived" has no entry, so it falls back to its readable
+    // form; the row's own diagnostic still shows the raw code in <code>,
+    // out of scope for this task (see the PR8-2 summary).
+    expect(screen.getByText("No repository yet")).toBeInTheDocument();
+    expect(screen.getAllByText("assignment archived").length).toBeGreaterThan(0);
+    expect(screen.getByText("assignment_archived")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Apply changes" })).toBeDisabled();
     expect(
       screen.getByText("Apply is disabled until the latest preview has no blockers.")

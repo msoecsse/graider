@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import {
   formatNullableValue,
-  formatStatusLabel,
   getDiagnosticCategory,
-  groupDiagnostics,
-  hasAttentionStatus
+  groupDiagnostics
 } from "../assignment-detail/assignmentDetailReadiness";
+import {
+  formatReasonLabel,
+  formatStatusLabel,
+  hasAttentionStatus
+} from "../components/statusLabels";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
 import { normalizeGradeDispatchResult } from "./gradeResultNormalization";
 import { normalizeGradePreview } from "./gradePreviewNormalization";
@@ -195,7 +198,7 @@ const ContextPanel = ({ preview }: { readonly preview: NormalizedGradePreview })
     <h2 id="grade-preview-context-title">Context</h2>
     <dl className="detail-grid">
       <DetailItem label="Assignment" value={preview.assignment.title ?? preview.assignment.slug} />
-      <DetailItem label="Assignment status" value={preview.assignment.status} />
+      <DetailItem label="Assignment status" value={formatStatusLabel(preview.assignment.status)} />
       <DetailItem label="Course" value={preview.course.title ?? preview.course.slug} />
       <DetailItem label="Term" value={preview.term.title ?? preview.term.slug} />
       <DetailItem label="Assignment file" value={preview.files.assignmentFile} />
@@ -352,7 +355,7 @@ const RepositoryRowsPanel = ({
               {row.ref === null ? null : <span className="muted-inline"> @ {row.ref}</span>}
             </span>
             <span role="cell">
-              {formatNullableValue(row.reason)}
+              {formatReasonLabel(row.reason)}
               <RowDiagnostics diagnostics={row.diagnostics} />
             </span>
           </div>
@@ -480,7 +483,7 @@ const DispatchResultRowsPanel = ({
               {row.ref === null ? null : <span className="muted-inline"> @ {row.ref}</span>}
             </span>
             <span role="cell">
-              {formatNullableValue(row.reason)}
+              {formatReasonLabel(row.reason)}
               <RowDiagnostics diagnostics={row.diagnostics} />
             </span>
           </div>

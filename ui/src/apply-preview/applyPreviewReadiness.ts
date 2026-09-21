@@ -1,7 +1,4 @@
-import {
-  formatStatusLabel,
-  hasAttentionStatus
-} from "../assignment-detail/assignmentDetailReadiness";
+import { formatStatusLabel, hasAttentionStatus } from "../components/statusLabels";
 import type {
   ApplyResultRepositoryStatus,
   ApplyPreviewReadinessSummary,
