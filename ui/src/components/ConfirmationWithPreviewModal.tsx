@@ -12,6 +12,15 @@ export interface ConfirmationWithPreviewModalProps {
   readonly successMessage?: string;
   readonly onConfirm: (acknowledged: boolean) => Promise<void> | void;
   readonly onCancel: () => void;
+  /**
+   * Called once, synchronously, after onConfirm resolves successfully, with
+   * the resolved successMessage. This component never renders a success
+   * message itself (README section 2.6) and cannot close itself -- only
+   * the caller owns `isOpen`. A caller's handler must set whatever state
+   * controls `isOpen` to false and raise the success surface (a toast; see
+   * ui/src/components/Toast.tsx) with the given message.
+   */
+  readonly onSuccess: (message: string) => void;
 }
 
 const getFocusableElements = (container: HTMLElement): HTMLElement[] =>
@@ -32,15 +41,14 @@ export const ConfirmationWithPreviewModal = ({
   confirmLabel,
   successMessage = "Changes saved.",
   onConfirm,
-  onCancel
+  onCancel,
+  onSuccess
 }: ConfirmationWithPreviewModalProps): ReactNode => {
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
-    null
-  );
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const titleId = useId();
   const summaryId = useId();
 
@@ -63,7 +71,7 @@ export const ConfirmationWithPreviewModal = ({
     if (!isOpen) {
       setAcknowledged(false);
       setIsConfirming(false);
-      setFeedback(null);
+      setErrorMessage(null);
     }
   }, [isOpen]);
 
@@ -77,17 +85,17 @@ export const ConfirmationWithPreviewModal = ({
     }
 
     setIsConfirming(true);
-    setFeedback(null);
+    setErrorMessage(null);
 
     try {
       await onConfirm(acknowledged);
-      setFeedback({ type: "success", message: successMessage });
+      // Leave isConfirming true: the button stays disabled for the gap
+      // between this resolving and the caller unmounting the modal.
+      // Resetting it here (or in a finally block) is what made a second
+      // click possible.
+      onSuccess(successMessage);
     } catch (error) {
-      setFeedback({
-        type: "error",
-        message: error instanceof Error ? error.message : "Unable to save changes."
-      });
-    } finally {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save changes.");
       setIsConfirming(false);
     }
   };
@@ -166,12 +174,9 @@ export const ConfirmationWithPreviewModal = ({
             {acknowledgementLabel}
           </label>
         )}
-        {feedback === null ? null : (
-          <p
-            className={feedback.type === "error" ? "error-message" : "success-message"}
-            role={feedback.type === "error" ? "alert" : "status"}
-          >
-            {feedback.message}
+        {errorMessage === null ? null : (
+          <p className="error-message" role="alert">
+            {errorMessage}
           </p>
         )}
         <div className="apply-confirmation-actions">

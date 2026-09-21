@@ -8,6 +8,7 @@ const renderModal = (
 ) => {
   const onCancel = vi.fn();
   const onConfirm = vi.fn().mockResolvedValue(undefined);
+  const onSuccess = vi.fn();
 
   render(
     <ConfirmationWithPreviewModal
@@ -18,11 +19,12 @@ const renderModal = (
       confirmLabel="Save changes"
       onCancel={onCancel}
       onConfirm={onConfirm}
+      onSuccess={onSuccess}
       {...overrides}
     />
   );
 
-  return { onCancel, onConfirm };
+  return { onCancel, onConfirm, onSuccess };
 };
 
 describe("ConfirmationWithPreviewModal", () => {
@@ -37,7 +39,7 @@ describe("ConfirmationWithPreviewModal", () => {
   });
 
   it("requires acknowledgement when configured and executes confirmation asynchronously", async () => {
-    const { onConfirm } = renderModal({
+    const { onConfirm, onSuccess } = renderModal({
       acknowledgementLabel: "I understand this replaces the existing roster."
     });
 
@@ -48,17 +50,53 @@ describe("ConfirmationWithPreviewModal", () => {
 
     await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
     expect(onConfirm).toHaveBeenCalledWith(true);
-    expect(await screen.findByRole("status")).toHaveTextContent("Changes saved.");
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("Changes saved."));
   });
 
-  it("keeps the dialog open and reports an async confirmation failure", async () => {
-    renderModal({ onConfirm: vi.fn().mockRejectedValue(new Error("Network unavailable")) });
+  // README section 2.6: a modal never displays a success message inside
+  // itself. This asserts the absence directly, since the component this
+  // test previously asserted the opposite of the fix -- the in-modal
+  // "Changes saved." message next to a still-enabled button was the bug.
+  it("never renders a success message inside the dialog, and calls onSuccess instead", async () => {
+    const { onSuccess } = renderModal({ successMessage: "Student repositories updated." });
 
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("Student repositories updated."));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("Student repositories updated.")).toBeNull();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("keeps the confirm button disabled after a successful confirm, so a second click cannot resubmit", async () => {
+    const { onConfirm, onSuccess } = renderModal();
+    const confirm = screen.getByRole("button", { name: "Save changes" });
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the dialog open and reports an async confirmation failure, with the button usable to retry", async () => {
+    const onConfirm = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Network unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const { onSuccess } = renderModal({ onConfirm });
+
+    const confirm = screen.getByRole("button", { name: "Save changes" });
+    fireEvent.click(confirm);
+
     expect(await screen.findByRole("alert")).toHaveTextContent("Network unavailable");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(confirm).not.toBeDisabled();
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("Changes saved."));
   });
 
   it("disables actions while confirmation is running", async () => {
@@ -69,14 +107,14 @@ describe("ConfirmationWithPreviewModal", () => {
           resolveConfirm = resolve;
         })
     );
-    renderModal({ onConfirm });
+    const { onSuccess } = renderModal({ onConfirm });
 
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByRole("button", { name: "Confirming…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     resolveConfirm();
-    expect(await screen.findByRole("status")).toHaveTextContent("Changes saved.");
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("Changes saved."));
   });
 
   it("cancels with Escape unless confirmation is executing", () => {

@@ -571,7 +571,10 @@ describe("AssignmentDetailPage", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Update Student Repositories" })).not.toBeDisabled()
     );
-    expect(screen.queryByRole("status")).toBeNull();
+    // The in-flight OperationStatusBar is gone; the success toast that
+    // replaces it is a different role="status" element.
+    expect(screen.queryByText("Updating repository")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Student repositories updated.");
   });
 
   it("does not expose per-student updates for group repositories", async () => {
@@ -761,14 +764,17 @@ describe("AssignmentDetailPage", () => {
     });
 
     const results = await screen.findByLabelText("Template update results");
-    expect(screen.queryByRole("status")).toBeNull();
+    // The in-flight OperationStatusBar is gone; the success toast that
+    // replaces it is a different role="status" element.
+    expect(screen.queryByText("Updating student repositories")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Student repositories updated.");
     progressListener?.({
       current: 6,
       total: 6,
       studentId: "stale",
       repository: "graider-sandbox/stale"
     });
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("Updating student repositories")).toBeNull();
     expect(within(results).getByText("s001")).toBeInTheDocument();
     expect(within(results).getByText("Updated")).toBeInTheDocument();
     expect(within(results).getByText("Already current")).toBeInTheDocument();

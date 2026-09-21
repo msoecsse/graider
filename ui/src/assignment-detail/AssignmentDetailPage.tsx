@@ -25,6 +25,7 @@ import { OperationStatusBar } from "../components/OperationStatusBar";
 import { OverflowMenu, type OverflowMenuGroup } from "../components/OverflowMenu";
 import { PageHeader } from "../components/PageHeader";
 import { TechnicalDetails, type TechnicalDetailsItem } from "../components/TechnicalDetails";
+import { Toast, useToast } from "../components/Toast";
 import { AssignmentDetailStudentTable } from "./AssignmentDetailStudentTable";
 import { copyTextToClipboard } from "./assignmentDetailClipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
@@ -1518,6 +1519,7 @@ export const AssignmentDetailPage = ({
   const templateSyncProgressActiveRef = useRef(false);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
+  const { message: toastMessage, showToast } = useToast();
 
   const detail = useMemo(
     () =>
@@ -2411,6 +2413,10 @@ export const AssignmentDetailPage = ({
         }
         successMessage="Student repositories updated."
         onConfirm={executeTemplateSync}
+        onSuccess={(successMessage) => {
+          setIsTemplateSyncModalOpen(false);
+          showToast(successMessage);
+        }}
         onCancel={() => {
           if (!isExecutingTemplateSync) setIsTemplateSyncModalOpen(false);
         }}
@@ -2697,6 +2703,7 @@ export const AssignmentDetailPage = ({
           </>
         )}
       </section>
+      <Toast message={toastMessage} />
     </main>
   );
 };

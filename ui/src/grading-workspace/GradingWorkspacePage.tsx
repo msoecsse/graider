@@ -28,6 +28,7 @@ import type {
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { FilterPills } from "../components/FilterPills";
 import { KbdHint } from "../components/KbdHint";
+import { Toast, useToast } from "../components/Toast";
 import {
   commitHistoryResultToLoadState,
   type CommitHistoryLoadState
@@ -578,6 +579,7 @@ export const GradingWorkspacePage = ({
   const [reportPublicationNotice, setReportPublicationNotice] = useState<ReportPublicationNotice>();
   const [discardDraftConfirmation, setDiscardDraftConfirmation] =
     useState<DiscardDraftConfirmation>();
+  const { message: toastMessage, showToast } = useToast();
   const [reportPreview, setReportPreview] = useState<ReportPreviewState>({ status: "idle" });
   const [publishReviewOpen, setPublishReviewOpen] = useState(false);
   const [publishReviewSelectedIds, setPublishReviewSelectedIds] = useState<readonly string[]>([]);
@@ -2763,7 +2765,12 @@ export const GradingWorkspacePage = ({
           </p>
         }
         confirmLabel={`Discard ${discardDraftConfirmation.kind}`}
+        successMessage={`Discarded the unsaved ${discardDraftConfirmation.kind}.`}
         onConfirm={() => confirmDiscardDraft()}
+        onSuccess={(successMessage) => {
+          setDiscardDraftConfirmation(undefined);
+          showToast(successMessage);
+        }}
         onCancel={cancelDiscardDraft}
       />
     );
@@ -2786,6 +2793,7 @@ export const GradingWorkspacePage = ({
         {footer}
         {cheatSheet}
         {discardDraftPrompt}
+        <Toast message={toastMessage} />
       </main>
     );
 
@@ -3049,6 +3057,13 @@ export const GradingWorkspacePage = ({
                     : "Confirm publish this student's report"
                 }
                 onConfirm={confirmPublishReport}
+                // confirmPublishReport never rejects and already closes this
+                // modal itself in a finally block, reporting every outcome
+                // -- success, warning, and error alike -- through
+                // reportPublicationNotice above, independent of this
+                // component's success/error contract. A generic toast here
+                // would be redundant on success and misleading on failure.
+                onSuccess={() => undefined}
                 onCancel={() => setReportPublicationConfirmation(undefined)}
               />
               {reportPreview.status === "success" &&
@@ -3560,6 +3575,12 @@ export const GradingWorkspacePage = ({
               acknowledgementLabel="I understand this replaces repository grading workflows."
               confirmLabel="Confirm replace workflows & run for all students"
               onConfirm={confirmBulkWorkflowRepair}
+              // confirmBulkWorkflowRepair closes this modal itself,
+              // immediately, before the repair even starts, and reports the
+              // outcome through bulkWorkflowRepairResult above. A generic
+              // toast here would arrive well after the fact and duplicate
+              // that reporting.
+              onSuccess={() => undefined}
               onCancel={() => setBulkWorkflowRepairConfirmation(false)}
             />
             <ConfirmationWithPreviewModal
@@ -3578,6 +3599,13 @@ export const GradingWorkspacePage = ({
               acknowledgementLabel="I understand this replaces the repository's grading workflow."
               confirmLabel="Confirm replace workflow & run"
               onConfirm={confirmWorkflowRepair}
+              // confirmWorkflowRepair never rejects and already closes this
+              // modal itself, reporting every outcome -- success and error
+              // alike -- through workflowRepairNotice above, independent of
+              // this component's success/error contract. A generic toast
+              // here would be redundant on success and misleading on
+              // failure.
+              onSuccess={() => undefined}
               onCancel={() => setWorkflowRepairConfirmation(undefined)}
             />
           </section>
@@ -3865,6 +3893,7 @@ export const GradingWorkspacePage = ({
       {footer}
       {cheatSheet}
       {discardDraftPrompt}
+      <Toast message={toastMessage} />
     </main>
   );
 };

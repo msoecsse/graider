@@ -303,6 +303,7 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel adjustment" })).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent("Discarded the unsaved comment.");
     assertNoDuplicateAccessibleNames();
   });
 

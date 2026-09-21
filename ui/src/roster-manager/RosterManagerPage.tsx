@@ -8,6 +8,7 @@ import type {
   RosterSaveRequest
 } from "../../electron/ipc";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
+import { Toast, useToast } from "../components/Toast";
 
 const HEADERS = [
   ["studentId", "student_id"],
@@ -69,6 +70,7 @@ export const RosterManagerPage = ({
   const [isExisting, setIsExisting] = useState(false);
   const [changeDescription, setChangeDescription] = useState<string | null>(null);
   const [preview, setPreview] = useState<RosterPreviewResult | null>(null);
+  const { message: toastMessage, showToast } = useToast();
   const [isConfirmingSave, setIsConfirmingSave] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isConfirmingRosterRemoval, setIsConfirmingRosterRemoval] = useState(false);
@@ -710,6 +712,10 @@ export const RosterManagerPage = ({
         isOpen={isConfirmingSave && preview !== null}
         onCancel={() => setIsConfirmingSave(false)}
         onConfirm={handleSave}
+        onSuccess={(successMessage) => {
+          setIsConfirmingSave(false);
+          showToast(successMessage);
+        }}
         preview={preview === null ? undefined : <pre>{preview.content}</pre>}
         summary={
           changeDescription ??
@@ -717,6 +723,7 @@ export const RosterManagerPage = ({
         }
         title="Save roster changes?"
       />
+      <Toast message={toastMessage} />
     </main>
   );
 };

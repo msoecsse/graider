@@ -63,6 +63,7 @@ describe("RosterManagerPage", () => {
     expect(screen.queryByRole("dialog", { name: "Save roster changes?" })).not.toBeInTheDocument();
     expect(screen.getByText("Saved terms/27s1/rosters/001.csv")).toBeInTheDocument();
     expect(onSaved).toHaveBeenCalledOnce();
+    expect(screen.getByText("Changes saved.")).toHaveAttribute("role", "status");
   });
 
   it("edits faculty assignments in the selected section before saving", async () => {
