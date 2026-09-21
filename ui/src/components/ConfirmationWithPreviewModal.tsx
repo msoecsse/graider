@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { isTypedConfirmationSatisfied, TypedConfirmation } from "./TypedConfirmation";
 
 export interface ConfirmationWithPreviewModalProps {
   readonly isOpen: boolean;
@@ -7,6 +8,12 @@ export interface ConfirmationWithPreviewModalProps {
   readonly preview?: ReactNode;
   readonly supplementalContent?: ReactNode;
   readonly acknowledgementLabel?: string;
+  /**
+   * README section 2: required whenever the operation affects a roster or
+   * student repositories. The name of the thing being destroyed or
+   * changed, not a constant -- matches ConfirmDialog's confirmationWord.
+   */
+  readonly confirmationWord?: string;
   readonly confirmDisabled?: boolean;
   readonly confirmLabel: string;
   readonly successMessage?: string;
@@ -37,6 +44,7 @@ export const ConfirmationWithPreviewModal = ({
   preview,
   supplementalContent,
   acknowledgementLabel,
+  confirmationWord,
   confirmDisabled = false,
   confirmLabel,
   successMessage = "Changes saved.",
@@ -47,6 +55,7 @@ export const ConfirmationWithPreviewModal = ({
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
+  const [typedConfirmation, setTypedConfirmation] = useState("");
   const [isConfirming, setIsConfirming] = useState(false);
   // "In flight" (isConfirming) and "already succeeded" (hasSucceeded) are
   // deliberately separate. Nothing is in flight once onConfirm resolves, so
@@ -77,6 +86,7 @@ export const ConfirmationWithPreviewModal = ({
   useEffect(() => {
     if (!isOpen) {
       setAcknowledged(false);
+      setTypedConfirmation("");
       setIsConfirming(false);
       setHasSucceeded(false);
       setErrorMessage(null);
@@ -87,12 +97,17 @@ export const ConfirmationWithPreviewModal = ({
     return null;
   }
 
+  const confirmationWordSatisfied =
+    confirmationWord === undefined ||
+    isTypedConfirmationSatisfied(confirmationWord, typedConfirmation);
+
   const handleConfirm = async (): Promise<void> => {
     if (
       isConfirming ||
       hasSucceeded ||
       confirmDisabled ||
-      (acknowledgementLabel !== undefined && !acknowledged)
+      (acknowledgementLabel !== undefined && !acknowledged) ||
+      !confirmationWordSatisfied
     ) {
       return;
     }
@@ -190,6 +205,14 @@ export const ConfirmationWithPreviewModal = ({
             {acknowledgementLabel}
           </label>
         )}
+        {confirmationWord === undefined ? null : (
+          <TypedConfirmation
+            word={confirmationWord}
+            value={typedConfirmation}
+            onChange={setTypedConfirmation}
+            disabled={isConfirming}
+          />
+        )}
         {errorMessage === null ? null : (
           <p className="error-message" role="alert">
             {errorMessage}
@@ -210,7 +233,8 @@ export const ConfirmationWithPreviewModal = ({
               isConfirming ||
               hasSucceeded ||
               confirmDisabled ||
-              (acknowledgementLabel !== undefined && !acknowledged)
+              (acknowledgementLabel !== undefined && !acknowledged) ||
+              !confirmationWordSatisfied
             }
             onClick={() => void handleConfirm()}
             type="button"

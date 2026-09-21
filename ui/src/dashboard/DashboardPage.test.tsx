@@ -1329,8 +1329,12 @@ describe("DashboardPage", () => {
     fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
     await screen.findByRole("button", { name: "Remove Section" });
     fireEvent.click(screen.getByRole("button", { name: "Remove Section" }));
-    fireEvent.click(screen.getByLabelText("I understand this removes the entire section."));
-    fireEvent.click(screen.getByRole("button", { name: "Remove section" }));
+    const removeSectionConfirm = screen.getByRole("button", { name: "Remove section" });
+    expect(removeSectionConfirm).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: /Type 001 to confirm/u }), {
+      target: { value: "001" }
+    });
+    fireEvent.click(removeSectionConfirm);
 
     await waitFor(() =>
       expect(removeSection).toHaveBeenCalledWith({
@@ -1418,8 +1422,12 @@ describe("DashboardPage", () => {
 
     expect(screen.getByRole("dialog", { name: "Remove roster" })).toBeInTheDocument();
     expect(removeRoster).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText("I understand this removes the entire roster."));
-    fireEvent.click(screen.getByRole("button", { name: "Remove roster" }));
+    const removeRosterConfirm = screen.getByRole("button", { name: "Remove roster" });
+    expect(removeRosterConfirm).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: /Type 001 to confirm/u }), {
+      target: { value: "001" }
+    });
+    fireEvent.click(removeRosterConfirm);
 
     await waitFor(() =>
       expect(removeRoster).toHaveBeenCalledWith({

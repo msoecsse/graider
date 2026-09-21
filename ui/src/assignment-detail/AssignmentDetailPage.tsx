@@ -2405,6 +2405,11 @@ export const AssignmentDetailPage = ({
             ? "I understand this will update student repositories or create pull requests."
             : "I understand this will update this student repository or create a pull request."
         }
+        confirmationWord={
+          templateSyncTarget?.selectedRepository === undefined
+            ? title
+            : templateSyncTarget.selectedRepository.studentId
+        }
         confirmDisabled={isExecutingTemplateSync}
         confirmLabel={
           templateSyncTarget?.selectedRepository === undefined

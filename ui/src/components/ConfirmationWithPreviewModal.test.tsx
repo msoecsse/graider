@@ -57,6 +57,51 @@ describe("ConfirmationWithPreviewModal", () => {
     await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("Changes saved."));
   });
 
+  it("requires the exact typed confirmation word before confirming", async () => {
+    const { onConfirm } = renderModal({ confirmationWord: "lab02" });
+    const confirm = screen.getByRole("button", { name: "Save changes" });
+    const input = screen.getByRole("textbox", { name: /Type lab02 to confirm/u });
+
+    expect(confirm).toBeDisabled();
+    fireEvent.change(input, { target: { value: "lab0" } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(input, { target: { value: "lab02x" } });
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: "lab02" } });
+    expect(confirm).not.toBeDisabled();
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
+  });
+
+  it("resets the typed confirmation word on close, so a reopened modal does not start pre-confirmed", () => {
+    const onCancel = vi.fn();
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+    const onSuccess = vi.fn();
+    const props = {
+      title: "Remove section",
+      summary: "This removes section 001.",
+      confirmLabel: "Remove section",
+      confirmationWord: "001",
+      onCancel,
+      onConfirm,
+      onSuccess
+    };
+    const { rerender } = render(<ConfirmationWithPreviewModal isOpen {...props} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: /Type 001 to confirm/u }), {
+      target: { value: "001" }
+    });
+    expect(screen.getByRole("button", { name: "Remove section" })).not.toBeDisabled();
+
+    rerender(<ConfirmationWithPreviewModal isOpen={false} {...props} />);
+    rerender(<ConfirmationWithPreviewModal isOpen {...props} />);
+
+    expect(screen.getByRole("textbox", { name: /Type 001 to confirm/u })).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Remove section" })).toBeDisabled();
+  });
+
   // README section 2.6: a modal never displays a success message inside
   // itself. This asserts the absence directly, since the component this
   // test previously asserted the opposite of the fix -- the in-modal

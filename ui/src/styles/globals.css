@@ -2996,17 +2996,22 @@ h1 {
   font-size: 0.85rem;
 }
 
-.confirm-dialog__confirmation {
+.typed-confirmation {
   display: grid;
   gap: 6px;
   margin: var(--space-3) 0;
   font-weight: 600;
 }
 
-.confirm-dialog__confirmation input {
+.typed-confirmation input {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 10px;
+}
+
+.typed-confirmation input:disabled {
+  background: var(--surface-sunken);
+  color: var(--text-disabled);
 }
 
 .unsaved-changes-bar {

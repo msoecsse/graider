@@ -439,7 +439,9 @@ describe("AssignmentDetailPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
     const dialog = await screen.findByRole("dialog", { name: "Update repository for s001" });
-    expect(within(dialog).getByText("s001")).toBeInTheDocument();
+    // Scoped to the preview's detail grid: "s001" also appears in the typed
+    // confirmation word prompt below the preview.
+    expect(within(dialog).getByText("s001", { selector: "dd span" })).toBeInTheDocument();
     expect(within(dialog).getByText("graider-sandbox/csc1120-lab02-ada")).toBeInTheDocument();
     expect(within(dialog).getByText("graider-sandbox/csc1120L2Template")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -479,7 +481,12 @@ describe("AssignmentDetailPage", () => {
         "I understand this will update this student repository or create a pull request."
       )
     );
-    fireEvent.click(within(dialog).getByRole("button", { name: "Update Repository" }));
+    const confirmButton = within(dialog).getByRole("button", { name: "Update Repository" });
+    expect(confirmButton).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Type s001 to confirm/u }), {
+      target: { value: "s001" }
+    });
+    fireEvent.click(confirmButton);
 
     await waitFor(() =>
       expect(executeAssignmentTemplateSync).toHaveBeenCalledWith({
@@ -543,6 +550,9 @@ describe("AssignmentDetailPage", () => {
         "I understand this will update this student repository or create a pull request."
       )
     );
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Type s001 to confirm/u }), {
+      target: { value: "s001" }
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Update Repository" }));
 
     await waitFor(() =>
@@ -697,6 +707,9 @@ describe("AssignmentDetailPage", () => {
         "I understand this will update student repositories or create pull requests."
       )
     );
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Type Lab 02 to confirm/u }), {
+      target: { value: "Lab 02" }
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Update repositories" }));
 
     const confirming = within(dialog).getByRole("button", { name: "Confirming…" });

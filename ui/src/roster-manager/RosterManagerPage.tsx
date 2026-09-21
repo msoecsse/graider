@@ -9,6 +9,7 @@ import type {
 } from "../../electron/ipc";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { Toast, useToast } from "../components/Toast";
+import { isTypedConfirmationSatisfied, TypedConfirmation } from "../components/TypedConfirmation";
 
 const HEADERS = [
   ["studentId", "student_id"],
@@ -74,10 +75,17 @@ export const RosterManagerPage = ({
   const [isConfirmingSave, setIsConfirmingSave] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isConfirmingRosterRemoval, setIsConfirmingRosterRemoval] = useState(false);
-  const [isRosterRemovalConfirmed, setIsRosterRemovalConfirmed] = useState(false);
+  // README section 2: removing a roster or section requires typing a
+  // confirmation word -- the section identifier, since a roster in this
+  // app is scoped to one section. Inline, not a modal: the surrounding
+  // panel is already an inline confirmation section, and the rule requires
+  // the word, not a dialog.
+  const [rosterRemovalWord, setRosterRemovalWord] = useState("");
+  const isRosterRemovalConfirmed = isTypedConfirmationSatisfied(sectionId, rosterRemovalWord);
   const [isRemovingRoster, setIsRemovingRoster] = useState(false);
   const [isConfirmingSectionRemoval, setIsConfirmingSectionRemoval] = useState(false);
-  const [isSectionRemovalConfirmed, setIsSectionRemovalConfirmed] = useState(false);
+  const [sectionRemovalWord, setSectionRemovalWord] = useState("");
+  const isSectionRemovalConfirmed = isTypedConfirmationSatisfied(sectionId, sectionRemovalWord);
   const [isRemovingSection, setIsRemovingSection] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -263,7 +271,7 @@ export const RosterManagerPage = ({
         setChangeDescription(null);
         clearPreview();
         setIsConfirmingRosterRemoval(false);
-        setIsRosterRemovalConfirmed(false);
+        setRosterRemovalWord("");
         setMessage(`Removed ${result.path}`);
         onSaved();
       } else {
@@ -304,7 +312,7 @@ export const RosterManagerPage = ({
         setChangeDescription(null);
         clearPreview();
         setIsConfirmingSectionRemoval(false);
-        setIsSectionRemovalConfirmed(false);
+        setSectionRemovalWord("");
         setMessage(`Removed section ${sectionId}`);
         onSaved();
       } else {
@@ -590,7 +598,7 @@ export const RosterManagerPage = ({
               disabled={!isExisting || isLoading || isRemovingRoster}
               onClick={() => {
                 setIsConfirmingRosterRemoval(true);
-                setIsRosterRemovalConfirmed(false);
+                setRosterRemovalWord("");
                 setMessage(null);
               }}
             >
@@ -602,7 +610,7 @@ export const RosterManagerPage = ({
               disabled={isLoading || isRemovingSection}
               onClick={() => {
                 setIsConfirmingSectionRemoval(true);
-                setIsSectionRemovalConfirmed(false);
+                setSectionRemovalWord("");
                 setMessage(null);
               }}
             >
@@ -617,14 +625,12 @@ export const RosterManagerPage = ({
               This deletes {targetPath} and removes its section from term.yml. It does not remove
               any student repositories.
             </p>
-            <label className="confirmation-check">
-              <input
-                type="checkbox"
-                checked={isRosterRemovalConfirmed}
-                onChange={(event) => setIsRosterRemovalConfirmed(event.target.checked)}
-              />
-              I understand this removes the entire roster.
-            </label>
+            <TypedConfirmation
+              word={sectionId}
+              value={rosterRemovalWord}
+              onChange={setRosterRemovalWord}
+              disabled={isRemovingRoster}
+            />
             <div className="apply-confirmation-actions">
               <button
                 className="secondary-action"
@@ -632,7 +638,7 @@ export const RosterManagerPage = ({
                 disabled={isRemovingRoster}
                 onClick={() => {
                   setIsConfirmingRosterRemoval(false);
-                  setIsRosterRemovalConfirmed(false);
+                  setRosterRemovalWord("");
                 }}
               >
                 Cancel
@@ -655,14 +661,12 @@ export const RosterManagerPage = ({
               This removes section {sectionId} from term.yml and deletes its roster CSV if present.
               It does not remove any student repositories.
             </p>
-            <label className="confirmation-check">
-              <input
-                type="checkbox"
-                checked={isSectionRemovalConfirmed}
-                onChange={(event) => setIsSectionRemovalConfirmed(event.target.checked)}
-              />
-              I understand this removes the entire section.
-            </label>
+            <TypedConfirmation
+              word={sectionId}
+              value={sectionRemovalWord}
+              onChange={setSectionRemovalWord}
+              disabled={isRemovingSection}
+            />
             <div className="apply-confirmation-actions">
               <button
                 className="secondary-action"
@@ -670,7 +674,7 @@ export const RosterManagerPage = ({
                 disabled={isRemovingSection}
                 onClick={() => {
                   setIsConfirmingSectionRemoval(false);
-                  setIsSectionRemovalConfirmed(false);
+                  setSectionRemovalWord("");
                 }}
               >
                 Cancel

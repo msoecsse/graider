@@ -7,6 +7,7 @@ import {
   type ReactElement,
   type ReactNode
 } from "react";
+import { isTypedConfirmationSatisfied, TypedConfirmation } from "./TypedConfirmation";
 
 export type DiffEntryType = "added" | "changed" | "removed" | "neutral";
 
@@ -76,7 +77,8 @@ export const ConfirmDialog = ({
   }
 
   const confirmationSatisfied =
-    confirmationWord === undefined || typedConfirmation === confirmationWord;
+    confirmationWord === undefined ||
+    isTypedConfirmationSatisfied(confirmationWord, typedConfirmation);
   const isConfirmDisabled = confirmDisabled || isConfirming || !confirmationSatisfied;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -150,16 +152,11 @@ export const ConfirmDialog = ({
           </ul>
         )}
         {confirmationWord === undefined ? null : (
-          <label className="confirm-dialog__confirmation">
-            Type <strong>{confirmationWord}</strong> to confirm
-            <input
-              onChange={(event) => {
-                setTypedConfirmation(event.currentTarget.value);
-              }}
-              type="text"
-              value={typedConfirmation}
-            />
-          </label>
+          <TypedConfirmation
+            word={confirmationWord}
+            value={typedConfirmation}
+            onChange={setTypedConfirmation}
+          />
         )}
         <div className="apply-confirmation-actions">
           <button

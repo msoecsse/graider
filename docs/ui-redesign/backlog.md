@@ -583,6 +583,33 @@ single value — the race disappears rather than needing to be tested.
 
 ---
 
+## 20. Remove course folder has no confirmation at all — **Worth fixing**
+
+`DashboardPage.tsx:399` (`handleRemoveCourseFolder`) calls
+`window.graiderUI.removeCourseFolder(id)` directly from a button click,
+with no confirmation step of any kind — not a typed word, not even a
+Cancel/Confirm prompt.
+
+PR7-2 gated the three actions the destructive-action rule (README section
+2) actually reaches: they affect a roster or student repositories. This one
+doesn't. `removeCourseFolder` resolves to `removeCourseFolderFromRegistry`
+(`main.ts:512`), which only unregisters the folder from Graider's own local
+registry (`courseRegistry.ts:349`) — it deletes nothing on disk and touches
+no student repository. The rule's typed-word requirement does not reach
+it, and PR7-2 deliberately left it ungated rather than inventing a
+requirement the rule doesn't impose.
+
+It is still an unconfirmed, destructive-*looking* action on a single
+click. Re-adding the folder is easy — nothing was actually destroyed — but
+a faculty member who clicks it by accident today gets no warning and no
+way back except knowing to re-add it.
+
+Fix: a lightweight confirmation — a plain Cancel/Confirm prompt is enough,
+no typed word required — so a misclick doesn't silently drop a course
+folder from the list.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -590,5 +617,5 @@ Nothing is blocking PR6b anymore — proceed to it directly.
 Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this
 sequence.
 
-Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, and 19 can wait until after
-the redesign.
+Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, and 20 can wait until
+after the redesign.
