@@ -8,6 +8,10 @@ const renderModal = (
 ) => {
   const onCancel = vi.fn();
   const onConfirm = vi.fn().mockResolvedValue(undefined);
+  // The default here never closes the modal (isOpen below is a static
+  // `true`, not driven by caller state) -- exactly the "caller resolves
+  // without closing" shape that PR7-1a fixes. Every test in this file that
+  // does not override onSuccess is implicitly exercising that scenario.
   const onSuccess = vi.fn();
 
   render(
@@ -80,6 +84,65 @@ describe("ConfirmationWithPreviewModal", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
+  // PR7-1a regression: bbd6bee left isConfirming true after success so the
+  // confirm button could not be clicked twice, but every exit (Cancel,
+  // Confirm, Escape) was gated on that same flag. A caller whose onConfirm
+  // resolves without closing the modal -- three real call sites do this,
+  // see GradingWorkspacePage.tsx -- left the user with no way out short of
+  // restarting the app. This must fail against bbd6bee.
+  it("leaves Cancel and Escape usable after a successful confirm that the caller does not close, without weakening the double-submit guard", async () => {
+    const { onCancel, onConfirm, onSuccess } = renderModal();
+    const confirm = screen.getByRole("button", { name: "Save changes" });
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+
+    // The double-submit fix is not weakened: Confirm stays disabled and a
+    // second click still does not call onConfirm again.
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+
+    // But the user is not trapped: Cancel and Escape both work, because
+    // nothing is "in flight" any more once onConfirm has resolved.
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(cancel).not.toBeDisabled();
+    fireEvent.click(cancel);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts in a clean, enabled state if the modal is reopened after a successful confirm", async () => {
+    const onCancel = vi.fn();
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+    const onSuccess = vi.fn();
+    const props = {
+      title: "Save roster changes",
+      summary: "12 student records will be updated.",
+      confirmLabel: "Save changes",
+      onCancel,
+      onConfirm,
+      onSuccess
+    };
+    const { rerender } = render(<ConfirmationWithPreviewModal isOpen {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    // The caller closes the modal, then reopens it for a fresh confirmation.
+    rerender(<ConfirmationWithPreviewModal isOpen={false} {...props} />);
+    rerender(<ConfirmationWithPreviewModal isOpen {...props} />);
+
+    expect(screen.getByRole("button", { name: "Save changes" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(2));
+  });
+
   it("keeps the dialog open and reports an async confirmation failure, with the button usable to retry", async () => {
     const onConfirm = vi
       .fn()
@@ -93,6 +156,7 @@ describe("ConfirmationWithPreviewModal", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Network unavailable");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(confirm).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toBeDisabled();
 
     fireEvent.click(confirm);
     await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(2));

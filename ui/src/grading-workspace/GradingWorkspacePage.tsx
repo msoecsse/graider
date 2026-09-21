@@ -873,8 +873,18 @@ export const GradingWorkspacePage = ({
       confirmation === undefined ||
       repair === undefined ||
       confirmation.studentId !== currentStudentIdRef.current
-    )
+    ) {
+      // Stale, or the repair API is unavailable. Both are unreachable in
+      // practice today -- this modal only opens once openWorkflowRepairConfirmation
+      // has already confirmed workflowRepair.status is "ready", which itself
+      // requires repair !== undefined, and window.graiderUI does not change
+      // mid-session -- but the guard stays as defence in depth. See
+      // confirmPublishReport's identical stale case above for why this
+      // closes without a notice: workflowRepairNotice is scoped to a
+      // student id the user may no longer be viewing.
+      setWorkflowRepairConfirmation(undefined);
       return;
+    }
     const generation = workflowRepairRequestGeneration.current + 1;
     workflowRepairRequestGeneration.current = generation;
     setWorkflowRepair({ status: "running", ...confirmation });
@@ -1993,10 +2003,24 @@ export const GradingWorkspacePage = ({
     if (
       reportPublicationConfirmation === undefined ||
       reportPublicationConfirmation.studentId !== currentStudentIdRef.current
-    )
+    ) {
+      // Stale: this confirmation was for a student the faculty member has
+      // since navigated away from. reportPublicationNotice only renders
+      // when it matches the currently viewed student, so a notice here
+      // would never be seen -- just close.
+      setReportPublicationConfirmation(undefined);
       return;
+    }
     const studentId = reportPublicationConfirmation.studentId;
-    if (gradingMutationStudents.current.has(studentId)) return;
+    if (gradingMutationStudents.current.has(studentId)) {
+      setReportPublicationNotice({
+        studentId,
+        tone: "warning",
+        message: "Another change to this student is still running. Try again in a moment."
+      });
+      setReportPublicationConfirmation(undefined);
+      return;
+    }
     if (gradingMutationBlockedStudents.current.has(studentId)) {
       setReportPublicationNotice({
         studentId,

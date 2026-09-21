@@ -48,6 +48,13 @@ export const ConfirmationWithPreviewModal = ({
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
+  // "In flight" (isConfirming) and "already succeeded" (hasSucceeded) are
+  // deliberately separate. Nothing is in flight once onConfirm resolves, so
+  // cancelling is safe at that point; only re-confirming is not. Gating
+  // Cancel/Escape on isConfirming alone means they work again as soon as
+  // the promise settles, even if the caller's onSuccess handler does not
+  // close the modal -- the component must never be able to trap the user.
+  const [hasSucceeded, setHasSucceeded] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const titleId = useId();
   const summaryId = useId();
@@ -71,6 +78,7 @@ export const ConfirmationWithPreviewModal = ({
     if (!isOpen) {
       setAcknowledged(false);
       setIsConfirming(false);
+      setHasSucceeded(false);
       setErrorMessage(null);
     }
   }, [isOpen]);
@@ -80,7 +88,12 @@ export const ConfirmationWithPreviewModal = ({
   }
 
   const handleConfirm = async (): Promise<void> => {
-    if (isConfirming || confirmDisabled || (acknowledgementLabel !== undefined && !acknowledged)) {
+    if (
+      isConfirming ||
+      hasSucceeded ||
+      confirmDisabled ||
+      (acknowledgementLabel !== undefined && !acknowledged)
+    ) {
       return;
     }
 
@@ -89,14 +102,17 @@ export const ConfirmationWithPreviewModal = ({
 
     try {
       await onConfirm(acknowledged);
-      // Leave isConfirming true: the button stays disabled for the gap
-      // between this resolving and the caller unmounting the modal.
-      // Resetting it here (or in a finally block) is what made a second
-      // click possible.
+      // isConfirming clears -- nothing is in flight any more, so Cancel and
+      // Escape work again -- but hasSucceeded is set so Confirm stays
+      // disabled. This is what keeps the button from being clicked twice
+      // without also trapping the user if the caller's onSuccess handler
+      // does not close the modal.
+      setIsConfirming(false);
+      setHasSucceeded(true);
       onSuccess(successMessage);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to save changes.");
       setIsConfirming(false);
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save changes.");
     }
   };
 
@@ -192,6 +208,7 @@ export const ConfirmationWithPreviewModal = ({
             className="primary-action"
             disabled={
               isConfirming ||
+              hasSucceeded ||
               confirmDisabled ||
               (acknowledgementLabel !== undefined && !acknowledged)
             }
