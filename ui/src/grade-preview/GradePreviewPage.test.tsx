@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AssignmentGradeJsonResponse,
@@ -290,7 +290,11 @@ describe("GradePreviewPage", () => {
     expect(screen.getByText("course_default")).toBeInTheDocument();
     expect(screen.getAllByText(".github/workflows/grade.yml").length).toBeGreaterThan(0);
     expect(screen.getByText("workflow_dispatch readiness")).toBeInTheDocument();
-    expect(screen.getByText("Repository dispatch preview")).toBeInTheDocument();
+    expect(screen.getByText("Repository dispatch plan")).toBeInTheDocument();
+    // Sentence tallied from the merged rows, not counter boxes (README section 5.4).
+    expect(
+      screen.getByText("1 repository will be dispatched, 1 skipped, 1 blocked.")
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Would dispatch").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Would skip").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
@@ -369,8 +373,11 @@ describe("GradePreviewPage", () => {
 
     resolveDispatch(createGradeResult());
 
+    // "Post-dispatch actions" only renders once a result exists -- the plan
+    // summary/table/diagnostics panels are unconditional (README section 5.4),
+    // so this is the marker that dispatch has completed, not a dedicated result panel.
     expect(
-      await screen.findByRole("heading", { level: 2, name: "Grade Dispatch Result Summary" })
+      await screen.findByRole("heading", { level: 2, name: "Post-dispatch actions" })
     ).toBeInTheDocument();
   });
 
@@ -392,13 +399,80 @@ describe("GradePreviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dispatch grading" }));
 
     expect(
-      await screen.findByText("Grade dispatch result — preview context remains visible below.")
+      await screen.findByText(
+        "Grading workflows have been dispatched. The plan below reflects what happened."
+      )
     ).toBeInTheDocument();
-    expect(screen.getByText("Workflow dispatched")).toBeInTheDocument();
+    // README section 5.4: the Status column updates in place -- there is no
+    // second, appended result table, so no row should still show its preview
+    // status ("Would dispatch") once its result is known.
+    expect(screen.getByText("1 repository was dispatched, 1 failed.")).toBeInTheDocument();
     expect(screen.getAllByText("Dispatched").length).toBeGreaterThan(0);
-    expect(screen.getByText("Failed / blocked")).toBeInTheDocument();
+    expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
     expect(screen.getByText("Workflow dispatch failed.")).toBeInTheDocument();
-    expect(screen.queryByText("Would dispatched")).toBeNull();
+    expect(screen.queryByText("Would dispatch")).toBeNull();
+  });
+
+  it("shows the diagnostics region only once there is something to say, and switches to the result's diagnostics", async () => {
+    mockGraiderUI({
+      getAssignmentGradePreview: vi
+        .fn()
+        .mockResolvedValue(createGradePreviewResult(createReadyGradePreviewJson())),
+      gradeAssignment: vi.fn().mockResolvedValue(
+        createGradeResult(
+          createGradeJson({
+            diagnostics: [
+              {
+                code: "manifest_written",
+                severity: "info",
+                message: "Manifest updated for this assignment."
+              }
+            ]
+          })
+        )
+      )
+    });
+    renderGradePreviewPage();
+
+    await screen.findByRole("button", { name: "Review grade dispatch" });
+    expect(screen.queryByRole("heading", { name: "Diagnostics / blockers" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review grade dispatch" }));
+    fireEvent.click(
+      screen.getByLabelText(
+        "I understand this will start grading workflows on student repositories"
+      )
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch grading" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Diagnostics / blockers" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Manifest updated for this assignment.")).toBeInTheDocument();
+  });
+
+  it("keeps the plan summary's counts in agreement with the rows the table renders", async () => {
+    mockGraiderUI({
+      getAssignmentGradePreview: vi
+        .fn()
+        .mockResolvedValue(createGradePreviewResult(createReadyGradePreviewJson())),
+      gradeAssignment: vi.fn().mockResolvedValue(createGradeResult())
+    });
+    renderGradePreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review grade dispatch" }));
+    fireEvent.click(
+      screen.getByLabelText(
+        "I understand this will start grading workflows on student repositories"
+      )
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dispatch grading" }));
+
+    const table = await screen.findByRole("table", { name: "Repository rows" });
+    const dataRowCount = within(table).getAllByRole("row").length - 1; // minus the header row
+
+    expect(dataRowCount).toBe(2);
+    expect(screen.getByText("1 repository was dispatched, 1 failed.")).toBeInTheDocument();
   });
 
   it("renders partial-success and failure diagnostics safely", async () => {
@@ -530,16 +604,18 @@ describe("GradePreviewPage", () => {
     mockGraiderUI({ getAssignmentGradePreview });
     renderGradePreviewPage();
 
-    expect(await screen.findByText("manifest_entry_missing")).toBeInTheDocument();
+    // "manifest_entry_missing" isn't in formatReasonLabel's table, so it falls back to
+    // its deliberate readable form (underscores -> spaces) instead of the raw enum.
+    expect(await screen.findByText("manifest entry missing")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh grade preview" }));
 
     expect(await screen.findByText("Loading grade preview...")).toBeInTheDocument();
-    expect(screen.getByText("manifest_entry_missing")).toBeInTheDocument();
+    expect(screen.getByText("manifest entry missing")).toBeInTheDocument();
 
     resolveRefresh(createGradePreviewResult(secondPreview));
 
     await waitFor(() => {
-      expect(screen.queryByText("manifest_entry_missing")).toBeNull();
+      expect(screen.queryByText("manifest entry missing")).toBeNull();
     });
     expect(getAssignmentGradePreview).toHaveBeenCalledTimes(2);
   });
@@ -588,7 +664,11 @@ describe("GradePreviewPage", () => {
     });
     renderGradePreviewPage();
 
-    expect(await screen.findByText("Token required")).toBeInTheDocument();
+    // "Token required" now appears twice for this row: the status chip
+    // ("token_required" -> formatGradePreviewRepositoryStatus) and the reason
+    // cell ("token_required" -> formatReasonLabel both map to the same text).
+    // Before PR8-2 the reason cell showed the raw, unmapped enum instead.
+    expect(await screen.findAllByText("Token required")).toHaveLength(2);
     expect(
       screen.getByRole("heading", {
         level: 2,

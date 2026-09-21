@@ -194,3 +194,50 @@ export interface NormalizedApplyResult {
   readonly groupTargets: readonly ApplyResultGroupTarget[];
   readonly rawSummary: Readonly<Record<string, unknown>>;
 }
+
+/**
+ * One merged individual-repository row: preview and (once apply has run)
+ * result, joined by student identity. README section 5.4 -- "one plan
+ * table," not a preview table and a separate result table. `resultStatus`
+ * is null until apply runs for this row; the presentation layer prefers it
+ * over `previewStatus` once it is set, which is what makes the table's
+ * Status column "update in place" instead of a second table appearing.
+ */
+export interface ApplyRowState {
+  readonly studentId: string | null;
+  readonly githubUsername: string | null;
+  readonly section: string | null;
+  readonly repository: string | null;
+  readonly previewStatus: ApplyPreviewRepositoryStatus;
+  readonly previewReason: string | null;
+  readonly resultStatus: ApplyResultRepositoryStatus | null;
+  readonly resultReason: string | null;
+  readonly diagnostics: readonly AssignmentDetailDiagnostic[];
+}
+
+/**
+ * One merged group-repository row, the group-mode equivalent of
+ * `ApplyRowState`. `previewStatus` is synthesized (see
+ * applyPreviewMerge.ts) since preview group targets carry no per-target
+ * status of their own -- group apply is all-or-nothing at preview time.
+ * `resultStatus` is the raw backend value (`created` / `updated` / `failed`
+ * / `blocked` / `pending`, from src/groups/group-target-executor.ts and
+ * src/cli/commands/apply.command.ts) since it is not the same enum as
+ * `ApplyResultRepositoryStatus`.
+ */
+export interface ApplyGroupRowState {
+  readonly groupId: string | null;
+  readonly repositoryName: string | null;
+  readonly sectionIds: readonly string[];
+  readonly studentIds: readonly string[];
+  readonly githubUsernames: readonly string[];
+  readonly plannedStudentPermission: string | null;
+  readonly facultyTeam: string | null;
+  readonly facultyTeamPermission: string | null;
+  readonly graderTeam: string | null;
+  readonly graderTeamPermission: string | null;
+  readonly previewStatus: ApplyPreviewRepositoryStatus;
+  readonly resultStatus: string | null;
+  readonly htmlUrl: string | null;
+  readonly diagnostics: readonly AssignmentDetailDiagnostic[];
+}

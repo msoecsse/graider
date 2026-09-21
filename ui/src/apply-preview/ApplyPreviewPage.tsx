@@ -3,11 +3,15 @@ import { copyTextToClipboard } from "../assignment-detail/assignmentDetailClipbo
 import { OperationStatusBar } from "../components/OperationStatusBar";
 import {
   formatNullableValue,
-  formatStatusLabel,
   getDiagnosticCategory,
-  groupDiagnostics,
-  hasAttentionStatus
+  groupDiagnostics
 } from "../assignment-detail/assignmentDetailReadiness";
+import {
+  formatReasonLabel,
+  formatStatusLabel,
+  hasAttentionStatus
+} from "../components/statusLabels";
+import { formatReadableDateTime } from "../components/dateTime";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
 import type { AssignmentApplyProgressEvent } from "../../electron/ipc";
 import { normalizeApplyResult } from "./applyResultNormalization";
@@ -15,16 +19,23 @@ import { normalizeApplyPreview } from "./applyPreviewNormalization";
 import {
   canApplyPreview,
   deriveApplyPreviewReadiness,
-  formatApplyPreviewRepositoryStatus,
-  formatApplyResultRepositoryStatus,
   getApplyBlockerReasons
 } from "./applyPreviewReadiness";
+import {
+  formatMergedGroupRowStatus,
+  formatMergedRowStatus,
+  getApplyPlanSummaryText,
+  mergedGroupRowNeedsAttention,
+  mergedRowNeedsAttention,
+  mergeApplyGroupRows,
+  mergeApplyRows
+} from "./applyPreviewMerge";
 import type {
   ApplyExecutionLoadResult,
+  ApplyGroupRowState,
   ApplyPreviewLoadResult,
   ApplyPreviewPageProps,
-  ApplyPreviewRepositoryRow,
-  ApplyResultRepositoryRow,
+  ApplyRowState,
   NormalizedApplyPreview,
   NormalizedApplyResult
 } from "./applyPreviewTypes";
@@ -137,8 +148,7 @@ const getCourseTermSubtitle = (preview: NormalizedApplyPreview | null): string =
   return course ?? term ?? "Course assignment";
 };
 
-const getStudentLabel = (row: ApplyPreviewRepositoryRow): string =>
-  row.studentId ?? "Unknown student";
+const getStudentLabel = (row: ApplyRowState): string => row.studentId ?? "Unknown student";
 
 const getApplyOperationDetail = (progress: AssignmentApplyProgressEvent | null): string =>
   progress === null
@@ -322,43 +332,61 @@ const GradingPanel = ({ preview }: { readonly preview: NormalizedApplyPreview })
         <DetailItem label="Artifact name" value={preview.grading.artifact} />
         <DetailItem label="Result file" value={preview.grading.resultFile} />
         <StatusItem label="Workflow status" value={preview.grading.workflowStatus} />
-        <StatusItem label="workflow_dispatch status" value={preview.grading.workflowDispatch} />
+        <StatusItem label="Workflow dispatch status" value={preview.grading.workflowDispatch} />
       </dl>
     )}
   </section>
 );
 
-const RepositorySummaryPanel = ({
-  preview
+const getAppliedAtLabel = (appliedAt: string | null): string | null =>
+  appliedAt === null ? null : formatReadableDateTime(appliedAt);
+
+/**
+ * README section 5.4: "one summary sentence, not ten counter boxes" (five
+ * preview, five result). The sentence is computed from the same merged rows
+ * the table below renders, so its counts agree with the rows shown by
+ * construction -- see applyPreviewMerge.ts.
+ */
+const PlanSummaryPanel = ({
+  preview,
+  result,
+  rows,
+  groupRows
 }: {
   readonly preview: NormalizedApplyPreview;
-}): ReactElement => (
-  <section className="detail-panel apply-preview-summary" aria-labelledby="repository-plan-title">
-    <h2 id="repository-plan-title">Repository plan summary</h2>
-    <dl className="apply-preview-counts">
-      <div>
-        <dt>Would create</dt>
-        <dd>{preview.plan.summary.wouldCreateRepositories}</dd>
-      </div>
-      <div>
-        <dt>Would update</dt>
-        <dd>{preview.plan.summary.wouldUpdateRepositories}</dd>
-      </div>
-      <div>
-        <dt>Would skip</dt>
-        <dd>{preview.plan.summary.wouldSkipRepositories}</dd>
-      </div>
-      <div>
-        <dt>Blocked</dt>
-        <dd>{preview.plan.summary.blockedRepositories}</dd>
-      </div>
-      <div>
-        <dt>Unknown</dt>
-        <dd>{preview.plan.summary.unknownRepositories}</dd>
-      </div>
-    </dl>
-  </section>
-);
+  readonly result: NormalizedApplyResult | null;
+  readonly rows: readonly ApplyRowState[];
+  readonly groupRows: readonly ApplyGroupRowState[];
+}): ReactElement => {
+  const appliedAtLabel = result === null ? null : getAppliedAtLabel(result.appliedAt);
+
+  return (
+    <section className="detail-panel apply-preview-summary" aria-labelledby="repository-plan-title">
+      <h2 id="repository-plan-title">Repository plan</h2>
+      <p>{getApplyPlanSummaryText(preview, result !== null, rows, groupRows)}</p>
+      {result === null ? null : (
+        <>
+          <div className="apply-result-meta">
+            <span className="status-chip">{formatStatusLabel(result.status)}</span>
+            <span>Exit code {result.exitCode}</span>
+            {appliedAtLabel === null ? null : <span>Applied {appliedAtLabel}</span>}
+          </div>
+          <dl className="detail-grid apply-result-files">
+            {result.repositoryMode !== "group" ? null : (
+              <>
+                <DetailItem label="Group repositories" value={result.targetCount} />
+                <DetailItem label="Student mappings" value={result.studentMappingCount} />
+              </>
+            )}
+            <DetailItem label="Assignment file" value={result.assignmentFile} />
+            <DetailItem label="Manifest file" value={result.manifestFile} />
+            <DetailItem label="Generated files" value={result.generatedFiles.join(", ") || null} />
+          </dl>
+        </>
+      )}
+    </section>
+  );
+};
 
 const RowDiagnostics = ({
   diagnostics
@@ -382,28 +410,35 @@ const RowDiagnostics = ({
   );
 };
 
+/**
+ * One row per student, its preview and (once apply has run) result status
+ * joined. README section 5.4: "one plan table... updates that table's
+ * Status column in place" -- there is no second table appended once apply
+ * runs; this same table's Status/Reason cells just start reading
+ * differently for rows the result covers.
+ */
 const RepositoryRowsPanel = ({
-  preview
+  rows
 }: {
-  readonly preview: NormalizedApplyPreview;
+  readonly rows: readonly ApplyRowState[];
 }): ReactElement => (
   <section
     className="detail-panel apply-preview-repositories"
     aria-labelledby="repository-rows-title"
   >
     <h2 id="repository-rows-title">Repository rows</h2>
-    {preview.plan.repositories.length === 0 ? (
-      <p className="detail-panel__note">No repository preview rows.</p>
+    {rows.length === 0 ? (
+      <p className="detail-panel__note">No repository rows.</p>
     ) : (
-      <div className="apply-preview-table" role="table" aria-label="Repository preview rows">
+      <div className="apply-preview-table" role="table" aria-label="Repository rows">
         <div className="apply-preview-table__header" role="row">
           <span role="columnheader">Student</span>
           <span role="columnheader">Section</span>
           <span role="columnheader">Repository</span>
-          <span role="columnheader">Preview status</span>
+          <span role="columnheader">Status</span>
           <span role="columnheader">Reason</span>
         </div>
-        {preview.plan.repositories.map((row) => (
+        {rows.map((row) => (
           <div
             className="apply-preview-table__row"
             role="row"
@@ -417,16 +452,16 @@ const RepositoryRowsPanel = ({
             <span role="cell">
               <span
                 className={
-                  row.status === "blocked" || row.status === "unknown"
+                  mergedRowNeedsAttention(row)
                     ? "status-chip status-chip--attention"
                     : "status-chip"
                 }
               >
-                {formatApplyPreviewRepositoryStatus(row.status)}
+                {formatMergedRowStatus(row)}
               </span>
             </span>
             <span role="cell">
-              {formatNullableValue(row.reason)}
+              {formatReasonLabel(row.resultStatus === null ? row.previewReason : row.resultReason)}
               <RowDiagnostics diagnostics={row.diagnostics} />
             </span>
           </div>
@@ -436,25 +471,29 @@ const RepositoryRowsPanel = ({
   </section>
 );
 
+/** Group-mode equivalent of `RepositoryRowsPanel`. */
 const GroupTargetsPanel = ({
-  preview
+  preview,
+  rows
 }: {
   readonly preview: NormalizedApplyPreview;
+  readonly rows: readonly ApplyGroupRowState[];
 }): ReactElement | null => {
   if (preview.repositoryMode !== "group") return null;
+
   return (
     <section
       className="detail-panel apply-preview-repositories"
       aria-labelledby="group-targets-title"
     >
-      <h2 id="group-targets-title">Group repository targets</h2>
+      <h2 id="group-targets-title">Group repositories</h2>
       <p className="detail-panel__note">
-        Review these targets before using Apply. Apply creates one repository per group.
+        Apply creates one repository per group and gives every group member admin access.
       </p>
-      {preview.plan.groupTargets.length === 0 ? (
-        <p className="detail-panel__note">No valid group repository targets were found.</p>
+      {rows.length === 0 ? (
+        <p className="detail-panel__note">No group repository targets were found.</p>
       ) : (
-        <div className="apply-preview-table" role="table" aria-label="Group repository targets">
+        <div className="apply-preview-table" role="table" aria-label="Group repositories">
           <div className="apply-preview-table__header" role="row">
             <span role="columnheader">Group</span>
             <span role="columnheader">Section</span>
@@ -462,172 +501,39 @@ const GroupTargetsPanel = ({
             <span role="columnheader">Students</span>
             <span role="columnheader">Permission</span>
             <span role="columnheader">Teams</span>
+            <span role="columnheader">Status</span>
           </div>
-          {preview.plan.groupTargets.map((target) => (
+          {rows.map((row) => (
             <div
               className="apply-preview-table__row"
               role="row"
-              key={target.targetId ?? target.repositoryName ?? "group"}
+              key={row.groupId ?? row.repositoryName ?? "group"}
             >
-              <span role="cell">{formatNullableValue(target.groupId)}</span>
-              <span role="cell">{target.sectionIds.join(", ") || "—"}</span>
+              <span role="cell">{formatNullableValue(row.groupId)}</span>
+              <span role="cell">{row.sectionIds.join(", ") || "—"}</span>
               <span role="cell" className="apply-preview-table__repository">
-                {formatNullableValue(target.repositoryName)}
-              </span>
-              <span role="cell">{target.studentIds.join(", ") || "—"}</span>
-              <span role="cell">{formatNullableValue(target.plannedStudentPermission)}</span>
-              <span role="cell">{`${target.facultyTeam ?? "—"} (${target.facultyTeamPermission ?? "—"}), ${target.graderTeam ?? "—"} (${target.graderTeamPermission ?? "—"})`}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-};
-
-const ApplyResultSummaryPanel = ({
-  result
-}: {
-  readonly result: NormalizedApplyResult;
-}): ReactElement => (
-  <section className="detail-panel apply-preview-summary" aria-labelledby="apply-result-title">
-    <h2 id="apply-result-title">Apply Result Summary</h2>
-    <div className="apply-result-meta">
-      <span className="status-chip">{formatStatusLabel(result.status)}</span>
-      <span>Exit code {result.exitCode}</span>
-      {result.appliedAt === null ? null : <span>Applied at {result.appliedAt}</span>}
-    </div>
-    <dl className="apply-preview-counts">
-      <div>
-        <dt>Created</dt>
-        <dd>{result.summary.createdRepositories}</dd>
-      </div>
-      <div>
-        <dt>Updated</dt>
-        <dd>{result.summary.updatedRepositories}</dd>
-      </div>
-      <div>
-        <dt>Skipped</dt>
-        <dd>{result.summary.skippedRepositories}</dd>
-      </div>
-      <div>
-        <dt>Failed</dt>
-        <dd>{result.summary.failedRepositories}</dd>
-      </div>
-      <div>
-        <dt>Blocked</dt>
-        <dd>{result.summary.blockedRepositories}</dd>
-      </div>
-    </dl>
-    <dl className="detail-grid apply-result-files">
-      {result.repositoryMode !== "group" ? null : (
-        <>
-          <DetailItem label="Group repositories" value={result.targetCount} />
-          <DetailItem label="Student mappings" value={result.studentMappingCount} />
-        </>
-      )}
-      <DetailItem label="Assignment file" value={result.assignmentFile} />
-      <DetailItem label="Manifest file" value={result.manifestFile} />
-      <DetailItem label="Generated files" value={result.generatedFiles.join(", ") || null} />
-    </dl>
-  </section>
-);
-
-const ApplyResultRowsPanel = ({
-  result
-}: {
-  readonly result: NormalizedApplyResult;
-}): ReactElement => (
-  <section className="detail-panel apply-preview-repositories" aria-labelledby="apply-result-rows">
-    <h2 id="apply-result-rows">Repository result rows</h2>
-    {result.rows.length === 0 ? (
-      <p className="detail-panel__note">No per-student apply result rows were returned.</p>
-    ) : (
-      <div className="apply-preview-table" role="table" aria-label="Repository apply result rows">
-        <div className="apply-preview-table__header" role="row">
-          <span role="columnheader">Student</span>
-          <span role="columnheader">Section</span>
-          <span role="columnheader">Repository</span>
-          <span role="columnheader">Result status</span>
-          <span role="columnheader">Reason</span>
-        </div>
-        {result.rows.map((row) => (
-          <div
-            className="apply-preview-table__row"
-            role="row"
-            key={`${row.studentId ?? row.githubUsername ?? row.repository ?? "row"}-${row.section ?? "section"}`}
-          >
-            <span role="cell">{getApplyResultStudentLabel(row)}</span>
-            <span role="cell">{formatNullableValue(row.section)}</span>
-            <span role="cell" className="apply-preview-table__repository">
-              {formatNullableValue(row.repository)}
-            </span>
-            <span role="cell">
-              <span
-                className={
-                  row.status === "failed" || row.status === "blocked"
-                    ? "status-chip status-chip--attention"
-                    : "status-chip"
-                }
-              >
-                {formatApplyResultRepositoryStatus(row.status)}
-              </span>
-            </span>
-            <span role="cell">
-              {formatNullableValue(row.reason)}
-              <RowDiagnostics diagnostics={row.diagnostics} />
-            </span>
-          </div>
-        ))}
-      </div>
-    )}
-  </section>
-);
-
-const GroupApplyResultTargetsPanel = ({
-  result
-}: {
-  readonly result: NormalizedApplyResult;
-}): ReactElement | null => {
-  if (result.repositoryMode !== "group") return null;
-
-  return (
-    <section
-      className="detail-panel apply-preview-repositories"
-      aria-labelledby="group-apply-results"
-    >
-      <h2 id="group-apply-results">Group repository results</h2>
-      {result.groupTargets.length === 0 ? (
-        <p className="detail-panel__note">No group repository result targets were returned.</p>
-      ) : (
-        <div className="apply-preview-table" role="table" aria-label="Group repository results">
-          <div className="apply-preview-table__header" role="row">
-            <span role="columnheader">Group</span>
-            <span role="columnheader">Repository</span>
-            <span role="columnheader">Students</span>
-            <span role="columnheader">Result status</span>
-            <span role="columnheader">Diagnostics</span>
-          </div>
-          {result.groupTargets.map((target) => (
-            <div
-              className="apply-preview-table__row"
-              role="row"
-              key={target.groupId ?? target.repositoryName ?? "group-result"}
-            >
-              <span role="cell">{formatNullableValue(target.groupId)}</span>
-              <span role="cell" className="apply-preview-table__repository">
-                {target.htmlUrl === null ? (
-                  formatNullableValue(target.repositoryName)
+                {row.htmlUrl === null ? (
+                  formatNullableValue(row.repositoryName)
                 ) : (
-                  <a href={target.htmlUrl} target="_blank" rel="noreferrer">
-                    {target.repositoryName ?? target.htmlUrl}
+                  <a href={row.htmlUrl} target="_blank" rel="noreferrer">
+                    {row.repositoryName ?? row.htmlUrl}
                   </a>
                 )}
               </span>
-              <span role="cell">{target.studentIds.join(", ") || "—"}</span>
-              <span role="cell">{formatNullableValue(target.status)}</span>
+              <span role="cell">{row.studentIds.join(", ") || "—"}</span>
+              <span role="cell">{formatNullableValue(row.plannedStudentPermission)}</span>
+              <span role="cell">{`${row.facultyTeam ?? "—"} (${row.facultyTeamPermission ?? "—"}), ${row.graderTeam ?? "—"} (${row.graderTeamPermission ?? "—"})`}</span>
               <span role="cell">
-                <RowDiagnostics diagnostics={target.diagnostics} />
+                <span
+                  className={
+                    mergedGroupRowNeedsAttention(row)
+                      ? "status-chip status-chip--attention"
+                      : "status-chip"
+                  }
+                >
+                  {formatMergedGroupRowStatus(row)}
+                </span>
+                <RowDiagnostics diagnostics={row.diagnostics} />
               </span>
             </div>
           ))}
@@ -660,6 +566,12 @@ const DiagnosticEntry = ({
   </li>
 );
 
+/**
+ * README section 5.4: "one diagnostics region, shown only when there is
+ * something to say" -- callers only render this when `diagnostics` is
+ * non-empty, so unlike its predecessor this component never needs its own
+ * empty state.
+ */
 const DiagnosticsPanel = ({
   diagnostics
 }: {
@@ -667,30 +579,23 @@ const DiagnosticsPanel = ({
 }): ReactElement => (
   <section className="detail-panel" aria-labelledby="apply-preview-diagnostics-title">
     <h2 id="apply-preview-diagnostics-title">Diagnostics / blockers</h2>
-    {diagnostics.length === 0 ? (
-      <p className="detail-panel__note">No blockers or warnings.</p>
-    ) : (
-      <div className="diagnostic-groups">
-        {groupDiagnostics(diagnostics).map((group) => (
-          <section className="diagnostic-group" aria-label={group.label} key={group.key}>
-            <h3>{group.key === "needs_attention" ? "Blockers" : group.label}</h3>
-            <ul className="assignment-detail-diagnostics">
-              {group.diagnostics.map((diagnostic, index) => (
-                <DiagnosticEntry
-                  diagnostic={diagnostic}
-                  key={`${diagnostic.code ?? "diagnostic"}-${index}`}
-                />
-              ))}
-            </ul>
-          </section>
-        ))}
-      </div>
-    )}
+    <div className="diagnostic-groups">
+      {groupDiagnostics(diagnostics).map((group) => (
+        <section className="diagnostic-group" aria-label={group.label} key={group.key}>
+          <h3>{group.key === "needs_attention" ? "Blockers" : group.label}</h3>
+          <ul className="assignment-detail-diagnostics">
+            {group.diagnostics.map((diagnostic, index) => (
+              <DiagnosticEntry
+                diagnostic={diagnostic}
+                key={`${diagnostic.code ?? "diagnostic"}-${index}`}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
   </section>
 );
-
-const getApplyResultStudentLabel = (row: ApplyResultRepositoryRow): string =>
-  row.studentId ?? "Unknown student";
 
 const ConfirmationPanel = ({
   preview,
@@ -808,44 +713,39 @@ const ConfirmationPanel = ({
   );
 };
 
-const ApplyResultPanel = ({
-  result,
+/**
+ * The one part of the old "two panel sets" design that genuinely was a
+ * single panel whose content changes: pre-apply this slot holds
+ * `ConfirmationPanel`, post-apply it holds this. Never both at once, so it
+ * was never part of the stacking defect README section 5.4 describes.
+ */
+const PostApplyActionsPanel = ({
   onBack,
   onRefreshAssignmentDetail,
   onBackToDashboard
 }: {
-  readonly result: NormalizedApplyResult;
   readonly onBack: () => void;
   readonly onRefreshAssignmentDetail?: () => void;
   readonly onBackToDashboard?: () => void;
 }): ReactElement => (
-  <>
-    <ApplyResultSummaryPanel result={result} />
-    {result.repositoryMode === "group" ? (
-      <GroupApplyResultTargetsPanel result={result} />
-    ) : (
-      <ApplyResultRowsPanel result={result} />
-    )}
-    <DiagnosticsPanel diagnostics={result.diagnostics} />
-    <section className="detail-panel apply-preview-final-action" aria-labelledby="post-apply-title">
-      <h2 id="post-apply-title">Post-apply actions</h2>
-      <div className="apply-confirmation-actions">
-        <button className="secondary-action" type="button" onClick={onBack}>
-          Back to assignment detail
+  <section className="detail-panel apply-preview-final-action" aria-labelledby="post-apply-title">
+    <h2 id="post-apply-title">Post-apply actions</h2>
+    <div className="apply-confirmation-actions">
+      <button className="secondary-action" type="button" onClick={onBack}>
+        Back to assignment detail
+      </button>
+      {onRefreshAssignmentDetail === undefined ? null : (
+        <button className="primary-action" type="button" onClick={onRefreshAssignmentDetail}>
+          Refresh assignment detail
         </button>
-        {onRefreshAssignmentDetail === undefined ? null : (
-          <button className="primary-action" type="button" onClick={onRefreshAssignmentDetail}>
-            Refresh assignment detail
-          </button>
-        )}
-        {onBackToDashboard === undefined ? null : (
-          <button className="secondary-action" type="button" onClick={onBackToDashboard}>
-            Back to dashboard
-          </button>
-        )}
-      </div>
-    </section>
-  </>
+      )}
+      {onBackToDashboard === undefined ? null : (
+        <button className="secondary-action" type="button" onClick={onBackToDashboard}>
+          Back to dashboard
+        </button>
+      )}
+    </div>
+  </section>
 );
 
 export const ApplyPreviewPage = ({
@@ -880,6 +780,16 @@ export const ApplyPreviewPage = ({
         ? null
         : normalizeApplyResult(applyResult.apply, applyResult.appliedAt),
     [applyResult]
+  );
+
+  const mergedRows = useMemo(
+    () => (preview === null ? [] : mergeApplyRows(preview, normalizedApplyResult)),
+    [preview, normalizedApplyResult]
+  );
+
+  const mergedGroupRows = useMemo(
+    () => (preview === null ? [] : mergeApplyGroupRows(preview, normalizedApplyResult)),
+    [preview, normalizedApplyResult]
   );
 
   const loadPreview = async (): Promise<void> => {
@@ -1015,9 +925,14 @@ export const ApplyPreviewPage = ({
   const showTokenGuidance =
     preview !== null &&
     (preview.diagnostics.some((diagnostic) => diagnostic.code === "github_token_required") ||
-      preview.plan.repositories.some(
-        (row) => row.status === "token_required" || row.reason === "token_required"
+      mergedRows.some(
+        (row) => row.previewStatus === "token_required" || row.previewReason === "token_required"
       ));
+  const activeDiagnostics =
+    normalizedApplyResult === null
+      ? (preview?.diagnostics ?? [])
+      : normalizedApplyResult.diagnostics;
+  const refreshedAtLabel = preview === null ? null : formatReadableDateTime(preview.refreshedAt);
 
   return (
     <main className="dashboard-shell" aria-labelledby="apply-preview-title">
@@ -1052,13 +967,13 @@ export const ApplyPreviewPage = ({
         <p className="preview-only-notice">
           {normalizedApplyResult === null
             ? "Preview only — no repositories or files will be changed."
-            : "Apply result — preview context remains visible below."}
+            : "Apply has finished. The plan below reflects what happened."}
         </p>
         <p className="assignment-detail__path">
           Assignment file: {preview?.files.assignmentFile ?? selection.assignmentFile}
         </p>
-        {preview?.refreshedAt === null || preview?.refreshedAt === undefined ? null : (
-          <p className="assignment-detail__path">Last refreshed: {preview.refreshedAt}</p>
+        {refreshedAtLabel === null ? null : (
+          <p className="assignment-detail__path">Last refreshed: {refreshedAtLabel}</p>
         )}
 
         {isLoading ? <p className="loading-state">Loading apply preview...</p> : null}
@@ -1103,10 +1018,20 @@ export const ApplyPreviewPage = ({
               <TargetPanel preview={preview} />
               <TemplatePanel preview={preview} copyState={copyState} onCopy={handleCopy} />
               <GradingPanel preview={preview} />
-              <RepositorySummaryPanel preview={preview} />
-              <RepositoryRowsPanel preview={preview} />
-              <GroupTargetsPanel preview={preview} />
-              <DiagnosticsPanel diagnostics={preview.diagnostics} />
+              <PlanSummaryPanel
+                preview={preview}
+                result={normalizedApplyResult}
+                rows={mergedRows}
+                groupRows={mergedGroupRows}
+              />
+              {preview.repositoryMode === "group" ? (
+                <GroupTargetsPanel preview={preview} rows={mergedGroupRows} />
+              ) : (
+                <RepositoryRowsPanel rows={mergedRows} />
+              )}
+              {activeDiagnostics.length === 0 ? null : (
+                <DiagnosticsPanel diagnostics={activeDiagnostics} />
+              )}
               {normalizedApplyResult === null ? (
                 <ConfirmationPanel
                   preview={preview}
@@ -1127,8 +1052,7 @@ export const ApplyPreviewPage = ({
                   }}
                 />
               ) : (
-                <ApplyResultPanel
-                  result={normalizedApplyResult}
+                <PostApplyActionsPanel
                   onBack={onBack}
                   {...(onRefreshAssignmentDetail === undefined
                     ? {}

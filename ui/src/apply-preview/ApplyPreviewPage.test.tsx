@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AssignmentApplyJsonResponse,
@@ -426,8 +426,14 @@ describe("ApplyPreviewPage", () => {
     expect(screen.getAllByText("Would skip").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
-    expect(screen.getByText("student_repository_missing")).toBeInTheDocument();
-    expect(screen.getAllByText("assignment_archived").length).toBeGreaterThan(0);
+    // Reason column: "student_repository_missing" is a mapped entry in
+    // formatReasonLabel (matches the README section 2.3 example verbatim).
+    // "assignment_archived" has no entry, so it falls back to its readable
+    // form; the row's own diagnostic still shows the raw code in <code>,
+    // out of scope for this task (see the PR8-2 summary).
+    expect(screen.getByText("No repository yet")).toBeInTheDocument();
+    expect(screen.getAllByText("assignment archived").length).toBeGreaterThan(0);
+    expect(screen.getByText("assignment_archived")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Apply changes" })).toBeDisabled();
     expect(
       screen.getByText("Apply is disabled until the latest preview has no blockers.")
@@ -496,9 +502,7 @@ describe("ApplyPreviewPage", () => {
     });
     renderApplyPreviewPage();
 
-    expect(
-      await screen.findByRole("table", { name: "Group repository targets" })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "Group repositories" })).toBeInTheDocument();
     expect(screen.getByText("27s2-csc1120-lab02-team-1")).toBeInTheDocument();
     expect(screen.getByText("alpha, beta")).toBeInTheDocument();
     expect(screen.queryByText(/alpha-gh/u)).toBeNull();
@@ -551,24 +555,28 @@ describe("ApplyPreviewPage", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
 
-    expect(
-      await screen.findByRole("heading", { name: "Group repository results" })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Group repositories" })).toBeInTheDocument();
     expect(applyAssignment).toHaveBeenCalledWith({
       courseFolderId: SELECTION.courseFolderId,
       courseFolderPath: SELECTION.courseFolderPath,
       assignmentFile: SELECTION.assignmentFile
     });
-    expect(screen.getByText("Group repositories")).toBeInTheDocument();
+    // "Group repositories" now names both the merged table's heading (checked
+    // above) and the result metadata's target-count label -- disambiguate.
+    expect(screen.getByText("Group repositories", { selector: "dt" })).toBeInTheDocument();
     expect(screen.getByText("Student mappings")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "27s2-csc1120-lab02-team-1" })).toHaveAttribute(
       "href",
       "https://github.com/csc1120/27s2-csc1120-lab02-team-1"
     );
-    expect(screen.getAllByText("alpha, beta")).toHaveLength(2);
+    // Was 2 (once in the preview group table, once in the appended result
+    // table) before the merge; the merged table renders each group once.
+    expect(screen.getAllByText("alpha, beta")).toHaveLength(1);
     expect(screen.queryByText(/alpha-gh/u)).toBeNull();
     expect(screen.getByText("grading_workflow_pending")).toBeInTheDocument();
-    expect(screen.queryByText("Repository result rows")).toBeNull();
+    // Only the merged group table renders in group mode -- the individual-row
+    // table's heading (which would render for individual mode) must not appear.
+    expect(screen.queryByRole("heading", { name: "Repository rows" })).toBeNull();
   });
 
   it("shows the durable-checkpoint warning after a failed group Apply", async () => {
@@ -657,7 +665,10 @@ describe("ApplyPreviewPage", () => {
 
     resolveApply(createApplyResult());
 
-    expect(await screen.findByText("Apply Result Summary")).toBeInTheDocument();
+    // "Post-apply actions" only renders once a result exists -- the plan
+    // summary/table/diagnostics panels are unconditional (README section 5.4),
+    // so this is the marker that apply has completed, not a dedicated result panel.
+    expect(await screen.findByText("Post-apply actions")).toBeInTheDocument();
     expect(screen.queryByRole("status")).toBeNull();
     expect(applyAssignment).toHaveBeenCalledTimes(1);
   });
@@ -729,7 +740,7 @@ describe("ApplyPreviewPage", () => {
 
     resolveApply(createApplyResult());
 
-    await screen.findByText("Apply Result Summary");
+    await screen.findByText("Post-apply actions");
     expect(screen.queryByRole("status")).toBeNull();
   });
 
@@ -760,11 +771,19 @@ describe("ApplyPreviewPage", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
 
-    expect(await screen.findByText("Apply Result Summary")).toBeInTheDocument();
+    // README section 5.4: the Status column updates in place -- there is no
+    // second, appended result table, so no row should still show its preview
+    // status ("Would create") once its result is known. Confirming "Would
+    // create" is gone is exactly what proves the merge, not a detail to drop.
+    expect(
+      await screen.findByText("1 repository was created, 1 updated, 1 skipped.")
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Created").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Updated").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Skipped").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Would create").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Would create")).toBeNull();
+    expect(screen.queryByText("Would update")).toBeNull();
+    expect(screen.queryByText("Would skip")).toBeNull();
     expect(screen.getAllByText("terms/27s1/manifests/lab02/manifest.yml").length).toBeGreaterThan(
       0
     );
@@ -775,6 +794,64 @@ describe("ApplyPreviewPage", () => {
     expect(onBackToDashboard).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Back to assignment detail" }));
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the diagnostics region only once there is something to say, and switches to the result's diagnostics", async () => {
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(
+        createApplyResult(
+          createApplyJson({
+            diagnostics: [
+              {
+                code: "manifest_written",
+                severity: "info",
+                message: "Manifest updated for this assignment."
+              }
+            ]
+          })
+        )
+      )
+    });
+    renderApplyPreviewPage();
+
+    await screen.findByRole("button", { name: "Review apply changes" });
+    expect(screen.queryByRole("heading", { name: "Diagnostics / blockers" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Diagnostics / blockers" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Manifest updated for this assignment.")).toBeInTheDocument();
+  });
+
+  it("keeps the plan summary's counts in agreement with the rows the table renders", async () => {
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(createApplyResult())
+    });
+    renderApplyPreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    const table = await screen.findByRole("table", { name: "Repository rows" });
+    const dataRowCount = within(table).getAllByRole("row").length - 1; // minus the header row
+
+    expect(dataRowCount).toBe(3);
+    expect(screen.getByText("1 repository was created, 1 updated, 1 skipped.")).toBeInTheDocument();
   });
 
   it("renders partial success and failure diagnostics safely", async () => {
@@ -815,7 +892,7 @@ describe("ApplyPreviewPage", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
 
-    expect(await screen.findByText("Apply Result Summary")).toBeInTheDocument();
+    expect(await screen.findByText("Post-apply actions")).toBeInTheDocument();
     expect(screen.getByText("Sensitive diagnostic details were redacted.")).toBeInTheDocument();
     expect(screen.getByText("[redacted]")).toBeInTheDocument();
     expect(screen.queryByText(/ghp_secret_token/u)).toBeNull();
@@ -867,7 +944,7 @@ describe("ApplyPreviewPage", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
 
-    expect(await screen.findByText("Apply Result Summary")).toBeInTheDocument();
+    expect(await screen.findByText("Post-apply actions")).toBeInTheDocument();
     expect(graiderUI.getAssignmentDetail).not.toHaveBeenCalled();
     expect(graiderUI.refreshDashboard).not.toHaveBeenCalled();
     expect(graiderUI.refreshCourseFolder).not.toHaveBeenCalled();
@@ -906,8 +983,10 @@ describe("ApplyPreviewPage", () => {
     renderApplyPreviewPage();
 
     expect(await screen.findByText("No grading workflow required.")).toBeInTheDocument();
-    expect(screen.getByText("No blockers or warnings.")).toBeInTheDocument();
-    expect(screen.getByText("No repository preview rows.")).toBeInTheDocument();
+    // README section 5.4: "one diagnostics region, shown only when there is
+    // something to say" -- with no diagnostics, the region doesn't render at all.
+    expect(screen.queryByRole("heading", { name: "Diagnostics / blockers" })).toBeNull();
+    expect(screen.getByText("No repository rows.")).toBeInTheDocument();
   });
 
   it("shows missing token guidance and redacts token-looking diagnostics", async () => {

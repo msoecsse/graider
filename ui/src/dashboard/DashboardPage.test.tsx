@@ -1353,6 +1353,47 @@ describe("DashboardPage", () => {
     await waitFor(() => expect(refreshCourseFolder).toHaveBeenCalledWith(COURSE_FOLDER.id));
   });
 
+  it("keeps the roster status select on its raw machine value, not a display label", async () => {
+    // README section 2.3 asks for status enums to display as plain language, but
+    // RosterManagerPage.tsx:535's status <select> is a form control, not display
+    // text -- PR8-2 deliberately left it alone (see its summary). This locks in
+    // that the option text and the submitted value both stay the raw roster
+    // status the backend expects ("active"/"dropped"/"hold"), not a mapped label.
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      loadRosterTerms: vi.fn().mockResolvedValue({
+        terms: [{ code: "27s1", sections: ["001"] }],
+        diagnostics: []
+      }),
+      getRosterForSection: vi.fn().mockResolvedValue({
+        status: "ready",
+        path: "terms/27s1/rosters/section-001.csv",
+        exists: false,
+        rows: [],
+        diagnostics: []
+      })
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: `Manage rosters in ${COURSE_FOLDER.path}` })
+    );
+    await screen.findByRole("heading", { level: 1, name: "Manage rosters" });
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
+    fireEvent.change(screen.getByLabelText("Section"), { target: { value: "001" } });
+    await screen.findByText("A new roster will be created.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Student" }));
+    const statusSelect = screen.getByLabelText("status row 1") as HTMLSelectElement;
+
+    expect(statusSelect.value).toBe("active");
+    expect(screen.getByRole("option", { name: "dropped" })).toBeInTheDocument();
+
+    fireEvent.change(statusSelect, { target: { value: "dropped" } });
+
+    expect(statusSelect.value).toBe("dropped");
+  });
+
   it("removes a selected section through the confirmed section action", async () => {
     const removeSection = vi.fn().mockResolvedValue({
       status: "success",

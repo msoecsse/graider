@@ -527,10 +527,29 @@ dialog — close and toast.
 
 ### 5.7 Dashboard
 
-Not yet mocked, but two defects should be fixed regardless:
+Not yet mocked, but defects should be fixed regardless:
 
-- Each course currently renders a card grid **and** a separate assignments
-  table, so the same assignments appear twice in two formats. Keep one.
+- **Corrected (PR8-2, `74e0fe3`) — the original framing below was wrong.**
+  The card grid's "Recent assignments" list and the assignments table below
+  it do not render the same data. `dashboard-builder.ts:1066` builds
+  `recentAssignments` (what the cards render) as
+  `assignments.filter(shouldIncludeAssignment).sort(...).slice(0, 5)` --
+  capped at five and filtered to `active`, `completed`, and `unknown`
+  statuses -- while `assignments` (what the table renders) is the full,
+  unfiltered, uncapped list. They overlap; they are not duplicates.
+  Deleting the table, as the original bullet below instructed, would have
+  hidden every assignment past the fifth, or with any other status, with no
+  route back to it. The real defect is that two views of the same
+  underlying data coexist on screen with no indication that one of them
+  (the cards) is a partial view of the other -- a faculty member has no way
+  to tell from the screen that "Recent assignments" is anything less than
+  the whole list. Fix, if ever: label the cards' list as partial (for
+  example "5 most recent of N"), or link it to the fuller table/view,
+  rather than presenting it as complete.
+- ~~Each course currently renders a card grid **and** a separate assignments
+  table, so the same assignments appear twice in two formats. Keep one.~~
+  Superseded by the correction above -- kept here so the history of what
+  was tried and why it didn't hold up isn't lost.
 - Columns that are always empty (Sections, Grading showing "-", Repositories
   showing "Repository status unavailable") must either carry data or be removed.
 

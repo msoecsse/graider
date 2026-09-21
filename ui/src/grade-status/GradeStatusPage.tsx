@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import {
   formatNullableValue,
-  formatStatusLabel,
   getDiagnosticCategory,
   groupDiagnostics
 } from "../assignment-detail/assignmentDetailReadiness";
+import { formatStatusLabel } from "../components/statusLabels";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
 import { formatReadableDateTime } from "../components/dateTime";
 import {
@@ -165,7 +165,7 @@ const ContextPanel = ({ status }: { readonly status: NormalizedGradeStatus }): R
     <h2 id="grade-status-context">Context</h2>
     <dl className="detail-grid">
       <DetailItem label="Assignment" value={status.assignment.title ?? status.assignment.slug} />
-      <DetailItem label="Assignment status" value={status.assignment.status} />
+      <DetailItem label="Assignment status" value={formatStatusLabel(status.assignment.status)} />
       <DetailItem label="Course" value={status.course.title ?? status.course.slug} />
       <DetailItem label="Term" value={status.term.title ?? status.term.slug} />
       <DetailItem label="Assignment file" value={status.assignment.file} />

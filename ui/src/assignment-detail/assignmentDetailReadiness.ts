@@ -1,3 +1,4 @@
+import { formatStatusLabel, hasAttentionStatus } from "../components/statusLabels";
 import type {
   AssignmentDetailDiagnostic,
   AssignmentDetailDiagnosticGroup,
@@ -7,13 +8,6 @@ import type {
 } from "./assignmentDetailTypes";
 
 const AVAILABLE_STATUSES = ["available", "success", "ready"] as const;
-const NON_ATTENTION_STATUSES = [
-  "available",
-  "not_required",
-  "not_checked",
-  "not_configured",
-  "disabled"
-] as const;
 const PARTIAL_STATUSES = ["token_required", "not_checked"] as const;
 const ERROR_SEVERITY = "error";
 const WARNING_SEVERITY = "warning";
@@ -21,33 +15,6 @@ const INFO_SEVERITY = "info";
 
 export const formatNullableValue = (value: string | number | null | undefined): string =>
   value === null || value === undefined || value === "" ? "Not configured" : String(value);
-
-export const formatStatusLabel = (status: string | null): string => {
-  if (status === null || status.trim().length === 0) {
-    return "Unavailable";
-  }
-
-  const labels: Readonly<Record<string, string>> = {
-    available: "Available",
-    branch_missing: "Branch missing",
-    disabled: "Disabled",
-    error: "Error",
-    inaccessible: "Inaccessible",
-    missing: "Missing",
-    not_checked: "Not checked",
-    not_configured: "Not configured",
-    not_required: "Not required",
-    partial_success: "Partially checked",
-    success: "Ready",
-    token_required: "Token required"
-  };
-
-  return labels[status] ?? status.replaceAll("_", " ");
-};
-
-export const hasAttentionStatus = (status: string | null): boolean =>
-  status !== null &&
-  !NON_ATTENTION_STATUSES.includes(status as (typeof NON_ATTENTION_STATUSES)[number]);
 
 const hasPartialStatus = (status: string | null): boolean =>
   status !== null && PARTIAL_STATUSES.includes(status as (typeof PARTIAL_STATUSES)[number]);
