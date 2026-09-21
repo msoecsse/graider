@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { HashRouter } from "react-router-dom";
 import { DashboardDataProvider } from "./dashboard/DashboardDataContext";
+import { RouteErrorBoundary } from "./dashboard/RouteErrorBoundary";
 import { AppRoutes } from "./AppRoutes";
 
 /**
@@ -20,7 +21,9 @@ import { AppRoutes } from "./AppRoutes";
 export const App = (): ReactElement => (
   <DashboardDataProvider>
     <HashRouter>
-      <AppRoutes />
+      <RouteErrorBoundary>
+        <AppRoutes />
+      </RouteErrorBoundary>
     </HashRouter>
   </DashboardDataProvider>
 );

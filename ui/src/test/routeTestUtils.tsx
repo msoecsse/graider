@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { render, type RenderResult } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { DashboardDataProvider } from "../dashboard/DashboardDataContext";
+import { RouteErrorBoundary } from "../dashboard/RouteErrorBoundary";
 import { AppRoutes } from "../AppRoutes";
 
 /**
@@ -16,7 +17,9 @@ export const renderAtRoute = (initialPath: string): RenderResult =>
   render(
     <MemoryRouter initialEntries={[initialPath]}>
       <DashboardDataProvider>
-        <AppRoutes />
+        <RouteErrorBoundary>
+          <AppRoutes />
+        </RouteErrorBoundary>
       </DashboardDataProvider>
     </MemoryRouter>
   );

@@ -723,6 +723,49 @@ document, not to build a page to fill it.
 
 ---
 
+## 29. Navigating to a just-created assignment can race its own cache refresh — **Should fix**
+
+`DashboardPage.tsx`'s `onOpenAssignment` handler (passed to
+`AssignmentSetupPage`, ~line 379) does:
+
+```ts
+setSelectedAssignmentSetupCourse(null);
+void handleRefreshCourseFolder(selection.courseFolderId);
+// ...then immediately navigate() to the new assignment's detail route
+```
+
+`handleRefreshCourseFolder` is fired and not awaited, but the `navigate()`
+call right after it runs regardless of whether the refresh has completed.
+`AssignmentDetailRoute` resolves the new assignment by looking it up in
+`aggregatedDashboard.cards` (`dashboardResolvers.ts`'s
+`resolveAssignmentSelection`) -- the same cache `handleRefreshCourseFolder`
+is in the middle of repopulating. If the IPC round trip to reload the
+course folder's dashboard JSON takes longer than the render that follows
+`navigate()` (a real possibility -- it shells out to the Graider CLI), the
+new assignment's slug will not yet be in the card's assignment list, and
+`AssignmentDetailRoute` will render `RouteNotFound` ("This assignment could
+not be found. It may have been deleted or renamed.") for an assignment that
+was, in fact, just created successfully.
+
+Confirmed as a real, reachable path by tracing the code (not by
+reproducing the timing in a test -- jsdom's mocked promises resolve fast
+enough that the race is very hard to force reliably); not fixed here per
+PR10-1a's explicit scope.
+
+This is a different failure mode from PR10-1a's crash: no white screen, no
+uncaught exception -- a plain, on-brand "not found" message the user will
+likely read as "did that not work?" and go looking for the assignment
+again from the dashboard, where it will in fact be present once the
+refresh completes.
+
+Fix: await `handleRefreshCourseFolder(selection.courseFolderId)` before
+calling `navigate(...)`, so the cache is guaranteed to contain the new
+assignment before `AssignmentDetailRoute` tries to resolve it. This makes
+the create-assignment flow's navigation slightly slower (one IPC round
+trip) rather than occasionally wrong.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -731,4 +774,4 @@ Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-26, 27, and 28 can wait until after the redesign.
+26, 27, 28, and 29 can wait until after the redesign.

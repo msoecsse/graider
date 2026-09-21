@@ -177,6 +177,15 @@ export const AssignmentSetupPage = ({
     setMessage(null);
     try {
       const nextPreview = await previewAssignmentSetup(request);
+      // Boundary check, not a silent guard: `files` is typed as required, but
+      // the main process has returned a differently-shaped result on at
+      // least one path before (PR10-1a). Surfacing a plain-language error
+      // here is the alternative to trusting an IPC response that could, in
+      // principle, violate its own declared shape again.
+      if (!Array.isArray(nextPreview.files)) {
+        setMessage("Assignment setup preview returned an unexpected response. Try again.");
+        return;
+      }
       setPreview(nextPreview);
       if (nextPreview.status === "ready") setIsConfirming(true);
       else setMessage(nextPreview.diagnostics.map((item) => item.message).join(" "));
