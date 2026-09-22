@@ -843,6 +843,97 @@ suppression in comment title/body/deduction/category fields.
 
 ---
 
+## 33. No column-header mapping for roster CSV import — **Should fix**
+
+Confirmed while assessing step 11 (`docs/ui-redesign/step-11-feasibility.md`):
+roster import matches CSV headers by exact string equality in three
+separate places — `src/roster/roster-loader.ts:90-95` against
+`src/roster/roster-validation.ts:20-23`'s literal column-name constants,
+`ui/electron/courseSetupService.ts:15-24`'s two hardcoded accepted header
+sets, and `ui/src/roster-manager/RosterManagerPage.tsx:178-182`'s
+"Uploaded roster must use the canonical four-column Graider header." There
+is no header-to-field mapping code anywhere — no detection, no UI, no
+normalization from an arbitrary source header (a raw LMS export, for
+example) to Graider's four canonical fields.
+
+Needed for §5.5's `CSV column "SIS User ID" → Student ID` requirement and
+its own "[Canvas-ready]" annotation, and independently useful for anyone
+importing a roster exported from a system other than Graider's own format.
+
+Fix: a pure mapping function (best-effort default by name similarity,
+user-editable) plus a small confirmation UI, validated through the existing
+per-row rules in `roster-validation.ts`. No backend GitHub work. Roughly
+one panel-plus-tests in size.
+
+---
+
+## 34. No draft or resumable-state storage exists anywhere in the app — **Worth fixing**
+
+Confirmed while assessing step 11: `ui/electron/localSettings.ts` (60
+lines, read in full) stores exactly `currentFacultyMsoeUsername` and
+`lastChooserDirectory`. No other draft-persistence mechanism exists in the
+main process, the course registry, or any renderer screen —
+`CourseSetupPage`, `AssignmentSetupPage`, and `RosterManagerPage` all hold
+form state in React state only, lost on window close.
+
+Needed for §5.5's "Save and finish later," and for any future multi-step
+flow that wants to survive an interruption.
+
+Fix: a new local JSON draft module, same shape as `localSettings.ts`
+(`userData`-scoped file, simple read/write helpers), keyed by course folder
+and flow/step identity. The storage mechanics are small; the draft shape
+itself is not trivial once it has to cover every field a five-step wizard
+would collect, including uploaded CSV content and column mappings.
+
+---
+
+## 35. Roster, section, and faculty mutations cannot be deferred past their own save — **Worth fixing**
+
+The flip side of item 31's fix, found while assessing step 11.
+`ui/electron/courseMutationPublicationService.ts`'s
+`publishSuccessfulCourseMutation` unconditionally pushes to GitHub
+immediately after any wrapped mutation succeeds, and wraps `saveRoster`,
+`removeRoster`, `removeSection`, `saveAssignmentSetup`, `saveAssignmentEdit`,
+`deleteAssignment`, and `saveAssignmentGroupConfig` (`ui/electron/main.ts`
+lines 672, 683, 755, 764, 772, 785, 880, 892, 904). Before item 31 this
+was the actual bug (changes stayed silently local); now the opposite
+problem exists — nothing that calls these paths can hold a change back from
+GitHub, even temporarily, even when the caller has a good reason to (a
+multi-step flow, a batch of related edits meant to land together).
+
+This blocks §5.5's wizard from being built as specified: its Roster and
+Faculty steps would need to call these same paths, and each would publish
+immediately rather than waiting for the wizard's Review step. See
+`docs/ui-redesign/step-11-feasibility.md` §3 for the full analysis.
+
+Fix: scoped, not a rearchitecture — new or parameterized IPC entry points
+for these mutations that skip the auto-publish wrapper, with the caller
+responsible for an explicit, single `publishCourseChanges` call when it's
+actually ready. `saveCourseSetup` already has no auto-publish and needs no
+change.
+
+---
+
+## 36. Roster CSV parsing is already implemented twice — **Worth fixing**
+
+Found while assessing step 11, independent of whether the wizard is ever
+built: `ui/electron/courseSetupService.ts`'s server-side roster validation
+(used during initial course setup) and
+`ui/src/roster-manager/RosterManagerPage.tsx`'s client-side
+`parseUploadedRoster` ("Replace from CSV") are two separate implementations
+of the same job — parsing an uploaded CSV against the canonical roster
+header and reporting problems. Same shape as item 22 and the
+three-date-formatters pattern this document already tracks.
+
+Fix: extract one shared module (parsing, column matching per item 33,
+validation) and have both call sites use it. Natural to do as part of step
+12's roster manager rebuild (§5.6), since that screen's target validation
+UI is already specified in detail; item 33's column-matching work and any
+future wizard roster step should build on the same module rather than add
+a third implementation.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -851,4 +942,4 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-26, 27, and 28 can wait until after the redesign.
+26, 27, 28, 33, 34, 35, and 36 can wait until after the redesign.
