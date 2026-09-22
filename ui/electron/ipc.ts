@@ -786,7 +786,11 @@ export interface EditGradingLibraryCommentRequest extends LoadGradingCommentLibr
 export interface DeleteGradingLibraryCommentRequest extends LoadGradingCommentLibraryRequest {
   readonly commentId: string;
 }
-export type { GradingCommentLibraryResult } from "./gradingCommentLibraryService.js";
+export type {
+  GradingCommentLibraryLoadResult,
+  GradingCommentLibraryMutationResult,
+  GradingCommentLibraryResult
+} from "./gradingCommentLibraryService.js";
 export type {
   AssignmentGradingLifecycleRequest,
   AssignmentGradingLifecycleResult
@@ -1173,16 +1177,16 @@ export interface GraiderUIApi {
   >;
   readonly loadGradingCommentLibrary?: (
     request: LoadGradingCommentLibraryRequest
-  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryLoadResult>;
   readonly createGradingLibraryComment?: (
     request: CreateGradingLibraryCommentRequest
-  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryMutationResult>;
   readonly editGradingLibraryComment?: (
     request: EditGradingLibraryCommentRequest
-  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryMutationResult>;
   readonly deleteGradingLibraryComment?: (
     request: DeleteGradingLibraryCommentRequest
-  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryMutationResult>;
   readonly prepareAssignmentTemplateSync: (
     request: import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncRequest
   ) => Promise<import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncAvailability>;

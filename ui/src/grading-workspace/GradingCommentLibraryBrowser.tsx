@@ -1,9 +1,9 @@
 import type { Dispatch, ReactElement, SetStateAction } from "react";
-import type { GradingCommentLibraryResult } from "../../electron/ipc";
+import type { GradingCommentLibraryLoadResult } from "../../electron/ipc";
 import { FormattedGradingComment } from "./FormattedGradingComment";
 
 type LoadedLibrary = Extract<
-  GradingCommentLibraryResult,
+  GradingCommentLibraryLoadResult,
   { readonly status: "success"; readonly comments: unknown }
 >;
 

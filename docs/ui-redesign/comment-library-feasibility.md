@@ -12,26 +12,24 @@ strict validation, stable IDs, Electron services and IPC, case-insensitive
 search, AND tag filtering, a grading-workspace browser, and applied-comment
 snapshot semantics. JSON remains the right storage format.
 
-The important gaps are at the user and publication boundaries:
+The important remaining gaps are at the user boundary:
 
 - the existing create/edit/delete APIs are not wired to faculty UI;
 - there is no course-level Comment Library screen;
 - free-form tags have no authoring control or autocomplete, and persisted tags
   are not deduplicated case-insensitively;
 - a one-shot grading comment cannot be promoted into the library;
-- library mutations are not automatically published because the canonical file
-  is outside the managed course-publish allowlist;
 
 COMMENT-1 resolved the formatting gap with a shared parser/model, React
 renderer, report renderer, scoped styling, editor helpers, and parity-focused
-tests. The remaining work is at the user and publication boundaries.
+tests. COMMENT-2 resolved the publication boundary. The remaining work is at
+the faculty-facing authoring and management boundaries.
 
-The recommended sequence is COMMENT-2 through COMMENT-5 in §12. It moves the
-publication contract ahead of faculty-facing mutation UI so Graider never
-ships a create/edit/delete workflow that appears shared but only writes one
-faculty member's checkout. This priority track starts after completed PR12-3.
-PR12-4 and PR12-5 remain planned, but are explicitly deferred until the comment
-track is complete.
+The remaining recommended sequence is COMMENT-3 through COMMENT-5 in §12.
+COMMENT-2 deliberately moved the publication contract ahead of faculty-facing
+mutation UI so Graider will not ship a create/edit/delete workflow that appears
+shared but only writes one faculty member's checkout. PR12-4 and PR12-5 remain
+planned, but are explicitly deferred until the comment track is complete.
 
 ## 2. Product decisions now locked
 
@@ -125,9 +123,10 @@ the required snapshot model.
 - **Not implemented:** a dedicated course-level management route and navigation
   entry.
 - **Not implemented:** one-shot comment promotion to the library.
-- **Implemented but not shared/published safely:** local JSON mutation is safe,
-  but library mutation handlers do not use course mutation publication and the
-  canonical file is not managed by the course publisher.
+- **Resolved in COMMENT-2:** successful create, edit, and delete operations use
+  the safe course publisher; the exact canonical file is managed; and typed
+  results distinguish full success from a durable local save whose publication
+  failed. Read-only loading remains publication-free.
 - **Resolved in COMMENT-1:** structured code formatting, rendered previews,
   and lightweight textarea formatting helpers. The parser retains optional
   fence-language metadata but COMMENT-1 does not display or highlight it.
@@ -136,12 +135,10 @@ the required snapshot model.
 
 The remaining product work is narrower than “build a comment library”:
 
-1. add the one canonical library path to safe course publication and return
-   explicit partial-success results;
-2. expose the existing mutation APIs through a shared reusable-comment editor,
+1. expose the existing mutation APIs through a shared reusable-comment editor,
    including normalized free-form tags and autocomplete;
-3. offer post-application one-shot promotion; and
-4. add a course-level management route that reuses the same components and
+2. offer post-application one-shot promotion; and
+3. add a course-level management route that reuses the same components and
    services.
 
 No database, generic filesystem API, new comment schema, or rich-text editor is
@@ -344,13 +341,14 @@ continues to escape comment text and retains its restrictive CSP.
 
 ## 10. Course publication and multi-faculty safety
 
-### 10.1 Current publication behavior
+### 10.1 Implemented publication behavior
 
-`.graider/grading/comments.json` is not in
-`coursePublishService.ts`'s managed path allowlist. Existing library mutations
-therefore remain local and cannot be included even by manual course publish.
+COMMENT-2 added exactly `.graider/grading/comments.json` to
+`coursePublishService.ts`'s managed path allowlist. Nearby `.graider` paths
+remain unrelated. Successful create, edit, and delete operations now publish
+through the shared course-mutation wrapper; loading remains read-only.
 
-The publisher otherwise has the right safety properties:
+The publisher retains its safety properties:
 
 - it stages explicit allowed paths, never `git add .`;
 - unrelated unstaged and untracked files remain untouched;
@@ -358,15 +356,14 @@ The publisher otherwise has the right safety properties:
 - an allowed deletion can be staged;
 - commit and push failures are reported; and
 - the mutation/publication wrapper preserves successful local changes when
-  publication fails.
-
-The future allowlist change must add exactly
-`.graider/grading/comments.json`, not `.graider/**`.
+  publication fails; and
+- no `.graider/**` wildcard or generic staging was introduced.
 
 ### 10.2 Required mutation result contract
 
-The existing library context results need the same publication envelope used
-by assignment and roster mutations:
+The Electron library service now separates read-only load results from mutation
+results and applies the same publication envelope used by assignment and roster
+mutations:
 
 1. **Local mutation failed:** return failure/not-found, no publication result,
    and do not invoke publication.
@@ -382,18 +379,18 @@ entry was lost merely because Git failed.
 ### 10.3 Divergence example
 
 If faculty A and B start from the same revision, A pushes comment X, and B then
-creates comment Y without first integrating A's commit, current publication
-will:
+creates comment Y without first integrating A's commit, publication will:
 
 1. save B's `comments.json` locally;
 2. stage and commit that allowed file; and
 3. fail the push as non-fast-forward.
 
-B's mutation survives in the working tree/local commit and no newer remote
-state is overwritten. Faculty should see “saved locally, publication failed,”
-then synchronize/reconcile the course repository and use manual **Publish
-Course Changes** as the retry path. A blind retry cannot resolve divergence by
-itself; UI copy should not imply otherwise.
+B's mutation survives in the local commit and no newer remote state is
+overwritten. Integration coverage now proves this two-clone non-fast-forward
+case. Faculty should see “saved locally, publication failed,” then
+synchronize/reconcile the course repository and use manual **Publish Course
+Changes** as the retry path. A blind retry cannot resolve divergence by itself;
+UI copy should not imply otherwise.
 
 The initial feature may stop safely here. A future semantic three-way merge can
 use stable comment IDs:
@@ -472,12 +469,13 @@ existing-surface integration, lightweight textarea wrap helpers/preview, and
 safety/parity-focused tests. It is independent of publication and gives every
 later library editor one preview implementation.
 
-### COMMENT-2 — Library mutation publication contract
+### COMMENT-2 — Library mutation publication contract — complete
 
-Add only `.graider/grading/comments.json` to managed course paths, adapt the
-existing create/edit/delete results to local-success/publication outcomes, and
-wrap those handlers with the existing safe publication service. Cover allowed
-path, unrelated work, staged-work, deletion, push failure, and divergence.
+Shipped the exact `.graider/grading/comments.json` managed path, distinct load
+and mutation results, and centralized create/edit/delete publication in the
+Electron library service. Tests cover exact-path rejection, create/edit/delete,
+unrelated work, staged-work, no upstream, local durability, push failure, and
+two-clone divergence.
 
 This intentionally moves the originally envisioned publication slice before
 faculty mutation UI. Backend work can land safely without exposing an
@@ -502,20 +500,20 @@ Add the course/term-context route and navigation, then compose the shared
 browser, editor, tag control, formatted preview, and publication feedback into
 the dedicated management surface.
 
-COMMENT-1 is complete. COMMENT-2 must precede COMMENT-3; COMMENT-3 supplies
-the reusable editor for COMMENT-4 and COMMENT-5. COMMENT-4 and COMMENT-5 could
-be developed in either order after COMMENT-3, but the grading-loop promotion
-workflow is recommended first because it serves the more frequent workflow.
+COMMENT-1 and COMMENT-2 are complete. COMMENT-3 supplies the reusable editor
+for COMMENT-4 and COMMENT-5. COMMENT-4 and COMMENT-5 could be developed in
+either order after COMMENT-3, but the grading-loop promotion workflow is
+recommended first because it serves the more frequent workflow.
 
 After COMMENT-5, resume PR12-4 (roster source/provenance) and PR12-5 (the roster
 manager visual rebuild that consumes PR12-3 counts and PR12-4 provenance).
 
 ## 13. Backlog and documentation corrections
 
-Backlog items 39, 40, 42, and 43 remain open for unwired mutation UI/management,
-publication exclusion, tag authoring/normalization, and one-shot promotion.
-Item 41 is resolved by COMMENT-1. They are problem statements, not a duplicate
-PR checklist.
+Backlog items 39, 42, and 43 remain open for unwired mutation UI/management,
+tag authoring/normalization, and one-shot promotion. Item 40 is resolved by
+COMMENT-2, and item 41 is resolved by COMMENT-1. They are problem statements,
+not a duplicate PR checklist.
 
 The grading specification now records the locked behavior. The UI-redesign
 roadmap preserves the Step 12 history while explicitly placing COMMENT-1
@@ -538,7 +536,8 @@ through COMMENT-5 between completed PR12-3 and deferred PR12-4/PR12-5.
 
 ## 15. Recommendation
 
-Proceed with COMMENT-2, the safe publication foundation. Keep the JSON library
-and existing CRUD/search/snapshot infrastructure. Follow with workspace
-CRUD/tags, one-shot promotion, and the dedicated management screen. Resume
-PR12-4 and PR12-5 only after this priority track is complete.
+Proceed with COMMENT-3: build the shared reusable-comment editor, normalized
+free-form tag authoring/autocomplete, grading-workspace create/edit/delete, and
+publication feedback on top of COMMENT-2's contract. Follow with one-shot
+promotion and the dedicated management screen. Resume PR12-4 and PR12-5 only
+after this priority track is complete.

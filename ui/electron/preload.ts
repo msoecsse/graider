@@ -42,7 +42,8 @@ import {
   type CreateGradingLibraryCommentRequest,
   type EditGradingLibraryCommentRequest,
   type DeleteGradingLibraryCommentRequest,
-  type GradingCommentLibraryResult,
+  type GradingCommentLibraryLoadResult,
+  type GradingCommentLibraryMutationResult,
   type AssignmentTemplateSyncAvailability,
   type AssignmentTemplateSyncExecuteRequest,
   type AssignmentTemplateSyncExecutionResult,
@@ -349,20 +350,29 @@ const graiderUI: GraiderUIApi = {
     ),
   loadGradingCommentLibrary: async (
     request: LoadGradingCommentLibraryRequest
-  ): Promise<GradingCommentLibraryResult> =>
-    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.loadGradingCommentLibrary, request),
+  ): Promise<GradingCommentLibraryLoadResult> =>
+    await invoke<GradingCommentLibraryLoadResult>(IPC_CHANNELS.loadGradingCommentLibrary, request),
   createGradingLibraryComment: async (
     request: CreateGradingLibraryCommentRequest
-  ): Promise<GradingCommentLibraryResult> =>
-    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.createGradingLibraryComment, request),
+  ): Promise<GradingCommentLibraryMutationResult> =>
+    await invoke<GradingCommentLibraryMutationResult>(
+      IPC_CHANNELS.createGradingLibraryComment,
+      request
+    ),
   editGradingLibraryComment: async (
     request: EditGradingLibraryCommentRequest
-  ): Promise<GradingCommentLibraryResult> =>
-    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.editGradingLibraryComment, request),
+  ): Promise<GradingCommentLibraryMutationResult> =>
+    await invoke<GradingCommentLibraryMutationResult>(
+      IPC_CHANNELS.editGradingLibraryComment,
+      request
+    ),
   deleteGradingLibraryComment: async (
     request: DeleteGradingLibraryCommentRequest
-  ): Promise<GradingCommentLibraryResult> =>
-    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.deleteGradingLibraryComment, request),
+  ): Promise<GradingCommentLibraryMutationResult> =>
+    await invoke<GradingCommentLibraryMutationResult>(
+      IPC_CHANNELS.deleteGradingLibraryComment,
+      request
+    ),
   prepareAssignmentTemplateSync: async (
     request: AssignmentTemplateSyncRequest
   ): Promise<AssignmentTemplateSyncAvailability> =>

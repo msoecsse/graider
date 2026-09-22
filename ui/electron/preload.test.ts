@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
+  CreateGradingLibraryCommentRequest,
+  DeleteGradingLibraryCommentRequest,
+  EditGradingLibraryCommentRequest,
   GraiderUIApi,
   GradingStudentWorkflowRepairRequest,
   PublishGradingStudentReportRequest,
@@ -159,6 +162,55 @@ describe("grading workflow repair preload bridge", () => {
     expect(electron.invoke).toHaveBeenCalledWith(
       "graider-ui:roster-manager:section-summaries",
       request
+    );
+  });
+
+  it("exposes narrow comment-library mutations with publication-aware results", async () => {
+    const api = electron.exposedApi;
+    if (
+      api?.createGradingLibraryComment === undefined ||
+      api.editGradingLibraryComment === undefined ||
+      api.deleteGradingLibraryComment === undefined
+    )
+      throw new Error("Expected comment-library mutation preload methods.");
+    const identity = { courseFolderId: "course", termCode: "27s1" };
+    const comment = {
+      title: "Title",
+      text: "Text",
+      defaultDeduction: -1,
+      tags: ["style"]
+    };
+    const createRequest: CreateGradingLibraryCommentRequest = { ...identity, comment };
+    const editRequest: EditGradingLibraryCommentRequest = {
+      ...identity,
+      commentId: "comment-id",
+      replacement: comment
+    };
+    const deleteRequest: DeleteGradingLibraryCommentRequest = {
+      ...identity,
+      commentId: "comment-id"
+    };
+    electron.invoke.mockResolvedValue({
+      status: "success",
+      diagnostics: [],
+      publication: { status: "success", diagnostics: [] }
+    });
+
+    await api.createGradingLibraryComment(createRequest);
+    await api.editGradingLibraryComment(editRequest);
+    await api.deleteGradingLibraryComment(deleteRequest);
+
+    expect(electron.invoke).toHaveBeenCalledWith(
+      "graider-ui:grading-comment-library:create",
+      createRequest
+    );
+    expect(electron.invoke).toHaveBeenCalledWith(
+      "graider-ui:grading-comment-library:edit",
+      editRequest
+    );
+    expect(electron.invoke).toHaveBeenCalledWith(
+      "graider-ui:grading-comment-library:delete",
+      deleteRequest
     );
   });
 });

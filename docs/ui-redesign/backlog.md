@@ -1046,7 +1046,7 @@ screen, not another storage model or parallel set of APIs. See
 
 ---
 
-## 40. The canonical comment library is excluded from safe course publication — **Should fix**
+## 40. The canonical comment library is excluded from safe course publication — **Resolved**
 
 The managed allowlist in `coursePublishService.ts` does not include
 `.graider/grading/comments.json`. Current local library mutations therefore
@@ -1058,6 +1058,17 @@ the existing local-mutation-then-publication service, and expose full success
 versus saved-locally/publication-failed results. Do not allow `.graider/**` and
 do not weaken protection for unrelated staged or local files. A non-fast-
 forward push may safely fail initially; the local mutation must remain durable.
+
+Resolved in COMMENT-2: the publisher now allowlists exactly
+`.graider/grading/comments.json`; neighboring `.graider` paths remain
+unmanaged. The authorized Electron library service centrally publishes every
+successful create, edit, and delete while leaving loads read-only. Mutation
+results preserve local success and the created/edited value where applicable,
+add a typed publication outcome, and append **Publish Course Changes** recovery
+guidance when publication fails. Tests protect exact-path classification,
+create/edit/delete publishing, unrelated-file and unrelated-staged-work safety,
+no-upstream durability, preload typing, and two-clone non-fast-forward behavior
+without force-push, pull, merge, reset, or rollback.
 
 ---
 
