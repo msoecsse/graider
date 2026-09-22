@@ -66,7 +66,8 @@ export const useResolvedAssignmentSelection = (): RouteResolution<
   Extract<AssignmentSelectionResolution, { status: "ready" }>["selection"]
 > => {
   const { courseSlug, termSlug, assignment } = useParams();
-  const { courseFolders, aggregatedDashboard, isLoadingFolders } = useDashboardData();
+  const { courseFolders, aggregatedDashboard, isLoadingFolders, isRefreshingAll, refreshingId } =
+    useDashboardData();
 
   if (courseSlug === undefined || termSlug === undefined || assignment === undefined) {
     return { status: "not_found", reason: "This assignment could not be found." };
@@ -84,7 +85,23 @@ export const useResolvedAssignmentSelection = (): RouteResolution<
     assignment
   );
 
-  return resolution.status === "ready"
-    ? { status: "ready", value: resolution.selection }
-    : { status: "not_found", reason: resolution.reason };
+  if (resolution.status === "ready") {
+    return { status: "ready", value: resolution.selection };
+  }
+
+  // The assignment's own card can exist while the assignment itself is
+  // missing from it for a genuinely temporary reason: it was just created,
+  // and the refresh that will add it to this card's assignment list is
+  // still in flight (DashboardPage's onOpenAssignment fires that refresh
+  // and navigates here without waiting for it). Reporting "not found"
+  // while that refresh is running would be wrong -- "not found" means "we
+  // looked and it isn't there," not "we haven't looked yet." Once the
+  // refresh for this specific folder (or a refresh-all) lands, this either
+  // resolves to "ready" or becomes a genuine "not_found".
+  const card = findCombinedCard(aggregatedDashboard.cards, courseSlug, termSlug);
+  if (isRefreshingAll || (card !== null && refreshingId === card.sourceFolderId)) {
+    return { status: "loading" };
+  }
+
+  return { status: "not_found", reason: resolution.reason };
 };

@@ -413,6 +413,34 @@ const clickOverflowItem = async (label: string): Promise<void> => {
 };
 
 describe("AssignmentDetailPage", () => {
+  it("does not show a repository-update failure banner or button for a template-less assignment", async () => {
+    // PR10-1c bug 2: a blank template repository is a valid configuration
+    // (PR10-1a/PR10-1b), and repository template-sync genuinely cannot work
+    // without one -- so this is a feature that does not apply here, not a
+    // misconfiguration to explain (README sections 2.1/2.5).
+    const prepareAssignmentTemplateSync = vi.fn().mockResolvedValue({
+      available: false,
+      repositoryCount: 0,
+      templateRepository: null,
+      recordedTemplateRevision: null,
+      blocker: {
+        code: "template_required",
+        message: "Configure an assignment template before updating repositories."
+      }
+    });
+    mockGraiderUI({ prepareAssignmentTemplateSync });
+    renderAssignmentDetailPage();
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
+
+    await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1));
+
+    expect(screen.queryByText("Student repository updates unavailable")).toBeNull();
+    expect(
+      screen.queryByText("Configure an assignment template before updating repositories.")
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /Update Student Repositories/u })).toBeNull();
+  });
+
   it("offers a trusted single-repository update action for individual student rows", async () => {
     const prepareAssignmentTemplateSync = vi
       .fn()

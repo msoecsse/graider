@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AssignmentDetailPage } from "./AssignmentDetailPage";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { buildAssignmentBreadcrumbs } from "../dashboard/breadcrumbHelpers";
+import { useDashboardData } from "../dashboard/DashboardDataContext";
 import { RouteLoading, RouteNotFound } from "../dashboard/RouteNotFound";
 import { useResolvedAssignmentSelection } from "../dashboard/useRouteResolution";
 import {
@@ -28,6 +29,7 @@ import {
 export const AssignmentDetailRoute = (): ReactElement => {
   const resolution = useResolvedAssignmentSelection();
   const navigate = useNavigate();
+  const { handleRefreshCourseFolder } = useDashboardData();
 
   if (resolution.status === "loading") return <RouteLoading />;
   if (resolution.status === "not_found") return <RouteNotFound reason={resolution.reason} />;
@@ -46,7 +48,16 @@ export const AssignmentDetailRoute = (): ReactElement => {
           navigate(getAssignmentEditPath(courseSlug, termSlug, assignmentSlug));
         }}
         onDeleted={() => {
-          navigate(DASHBOARD_PATH);
+          // Refresh before navigating, not after (the ordering bug 1 in
+          // PR10-1c warns about): the dashboard has no placeholder for "this
+          // row is being removed," so navigating first would show the
+          // just-deleted assignment still listed until the refresh lands --
+          // a stale-then-vanishing flash right after a destructive action
+          // the user just confirmed. Awaiting first means the dashboard is
+          // already correct the moment it renders.
+          void handleRefreshCourseFolder(selection.courseFolderId).then(() => {
+            navigate(DASHBOARD_PATH);
+          });
         }}
         onPreviewApply={() => {
           navigate(getApplyPreviewPath(courseSlug, termSlug, assignmentSlug));

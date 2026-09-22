@@ -2283,6 +2283,18 @@ export const AssignmentDetailPage = ({
           }
         ];
 
+  // A blank template repository is a valid assignment configuration (the
+  // same fact PR10-1a/PR10-1b established for assignment creation), but
+  // repository template-sync genuinely cannot work without one -- it syncs
+  // existing repositories toward the template's *latest commit*, which does
+  // not exist to sync toward when there is no template
+  // (assignment-template-sync-context.ts's `resolveCurrentTemplateCommitSha`
+  // requires a real template repository). So this is not a misconfiguration
+  // to explain; it is a feature that does not apply to this assignment, and
+  // README section 2.1/2.5 say that means hiding the action and its
+  // guidance, not showing a disabled button or a failure banner for it.
+  const templateSyncNotApplicable = templateSyncAvailability?.blocker?.code === "template_required";
+
   return (
     <main className="dashboard-shell" aria-label={title}>
       <PageHeader
@@ -2290,7 +2302,7 @@ export const AssignmentDetailPage = ({
         title={title}
         meta={getCourseTermSubtitle(detail)}
         secondaryActions={
-          detail === null
+          detail === null || templateSyncNotApplicable
             ? []
             : [
                 {
@@ -2498,7 +2510,7 @@ export const AssignmentDetailPage = ({
             {templateSyncError}
           </p>
         )}
-        {templateSyncAvailability?.blocker === undefined ? null : (
+        {templateSyncAvailability?.blocker === undefined || templateSyncNotApplicable ? null : (
           <section className="detail-guidance" aria-label="Template update guidance">
             <h2>Student repository updates unavailable</h2>
             <p>{templateSyncAvailability.blocker.message}</p>

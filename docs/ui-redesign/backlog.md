@@ -723,7 +723,7 @@ document, not to build a page to fill it.
 
 ---
 
-## 29. Navigating to a just-created assignment can race its own cache refresh — **Should fix**
+## 29. Navigating to a just-created assignment can race its own cache refresh — **Resolved**
 
 `DashboardPage.tsx`'s `onOpenAssignment` handler (passed to
 `AssignmentSetupPage`, ~line 379) does:
@@ -764,14 +764,31 @@ assignment before `AssignmentDetailRoute` tries to resolve it. This makes
 the create-assignment flow's navigation slightly slower (one IPC round
 trip) rather than occasionally wrong.
 
+**Confirmed visible in a running app, then fixed in PR10-1c** -- hand
+testing showed exactly this: "Page could not be found" flashed before the
+new assignment's detail screen replaced it. Fixed without an await and
+without a timeout: `useResolvedAssignmentSelection` (`useRouteResolution.ts`)
+now checks whether the assignment's own card's folder is currently being
+refreshed (`refreshingId === card.sourceFolderId`, or a refresh-all is in
+flight) before concluding "not found." A missing assignment in a folder
+that is mid-refresh now resolves to `loading` (rendering `RouteLoading`)
+instead of `not_found` (rendering `RouteNotFound`), so the screen goes
+straight from "loading" to the real assignment once the refresh lands, with
+no error flash in between. `useResolvedCourseFolder` (the roster route's
+resolver) was deliberately left unchanged: no current navigation path
+reaches it before its folder has already loaded, so there is no live case
+for it to fix. Regression test in `App.test.tsx` drives a controlled,
+manually-resolved refresh promise to observe the loading state directly;
+confirmed it fails (shows `RouteNotFound`) without the fix.
+
 ---
 
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this
+Items 1, 2, 3, 4, 6, 7, 9, and 29 are resolved and no longer part of this
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-26, 27, 28, and 29 can wait until after the redesign.
+26, 27, and 28 can wait until after the redesign.

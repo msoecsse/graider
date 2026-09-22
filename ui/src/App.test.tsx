@@ -789,6 +789,101 @@ describe("App routing — reached from the dashboard", () => {
     });
   });
 
+  it("shows a loading state, never RouteNotFound, while a just-created assignment's refresh is still in flight", async () => {
+    // Backlog item 29 / PR10-1c bug 1: DashboardPage.tsx's onOpenAssignment
+    // fires handleRefreshCourseFolder and navigates without awaiting it, so
+    // the destination route resolves against a cache that doesn't have the
+    // new assignment yet. This must show a loading state, not "not found."
+    const previewAssignmentSetup = vi.fn().mockResolvedValue({
+      status: "ready",
+      diagnostics: [],
+      hasConflicts: false,
+      files: [
+        {
+          path: "terms/27s1/assignments/lab03/assignment.yml",
+          content: "schema_version: 1\n",
+          exists: false
+        }
+      ]
+    });
+    const saveAssignmentSetup = vi.fn().mockResolvedValue({
+      status: "success",
+      writtenFiles: ["terms/27s1/assignments/lab03/assignment.yml"],
+      diagnostics: []
+    });
+    const cardWithLab03 = {
+      ...COURSE_TERM_CARD,
+      assignmentCount: 2,
+      recentAssignments: [
+        ...COURSE_TERM_CARD.recentAssignments,
+        {
+          slug: "lab03",
+          title: "Lab 03",
+          status: "active",
+          assignmentFile: "terms/27s1/assignments/lab03/assignment.yml",
+          needsAttention: false,
+          diagnostics: []
+        }
+      ]
+    };
+    let resolveRefresh: (value: CourseFolderDashboardResult) => void = () => undefined;
+    const refreshCourseFolder = vi.fn().mockImplementation(
+      async () =>
+        await new Promise<CourseFolderDashboardResult>((resolve) => {
+          resolveRefresh = resolve;
+        })
+    );
+    const getAssignmentDetail = vi.fn().mockResolvedValue(
+      createAssignmentDetailResult(
+        { assignmentFile: "terms/27s1/assignments/lab03/assignment.yml" },
+        createAssignmentDetailJson({
+          assignment: {
+            slug: "lab03",
+            title: "Lab 03",
+            type: "individual",
+            status: "active",
+            file: "terms/27s1/assignments/lab03/assignment.yml"
+          }
+        })
+      )
+    );
+
+    mockGraiderUI({
+      loadAssignmentSetupTerms: vi.fn().mockResolvedValue({
+        terms: [{ code: "27s1", sections: ["001", "002"] }],
+        diagnostics: []
+      }),
+      previewAssignmentSetup,
+      saveAssignmentSetup,
+      refreshCourseFolder,
+      getAssignmentDetail
+    });
+    renderAtRoute("/");
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: `Create a new assignment in ${COURSE_FOLDER.path}`
+      })
+    );
+    await screen.findByRole("heading", { level: 1, name: "Assignment Setup" });
+
+    fireEvent.change(screen.getByLabelText("Assignment title"), { target: { value: "Lab 03" } });
+    fireEvent.change(screen.getByLabelText("Assignment slug"), { target: { value: "lab03" } });
+    fireEvent.change(screen.getByLabelText("Term"), { target: { value: "27s1" } });
+    fireEvent.click(screen.getByLabelText("Section 002"));
+    fireEvent.click(screen.getByRole("button", { name: "Create assignment" }));
+
+    const confirmation = await screen.findByRole("dialog", { name: "Create assignment?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Create assignment" }));
+
+    expect(await screen.findByText("Loading course data...")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "This page could not be found." })).toBeNull();
+
+    resolveRefresh(createDashboardResult({}, [cardWithLab03]));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Lab 03" })).toBeInTheDocument();
+  });
+
   it("shows safe assignment detail command errors", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(
@@ -813,6 +908,42 @@ describe("App routing — reached from the dashboard", () => {
 
     expect((await screen.findAllByText(/Graider CLI not found/u)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/secret-token-value/u)).toBeNull();
+  });
+
+  it("refreshes the dashboard cache after deleting an assignment, so it disappears without a manual refresh", async () => {
+    // PR10-1c bug 3: AssignmentDetailRoute's onDeleted only navigated to the
+    // dashboard; nothing refreshed the folder's cache, so the deleted
+    // assignment stayed listed until a manual refresh. Refreshing before
+    // navigating (not after) avoids a stale-then-vanishing flash, since the
+    // dashboard has no placeholder for "this row is being removed."
+    const deleteAssignment = vi.fn().mockResolvedValue({
+      status: "success",
+      path: ASSIGNMENT_FILE,
+      diagnostics: []
+    });
+    const cardWithoutLab02 = {
+      ...COURSE_TERM_CARD,
+      assignmentCount: 0,
+      recentAssignments: []
+    };
+    const refreshCourseFolder = vi
+      .fn()
+      .mockResolvedValue(createDashboardResult({}, [cardWithoutLab02]));
+    mockGraiderUI({ deleteAssignment, refreshCourseFolder });
+    renderAtRoute("/");
+
+    await openAssignmentDetail();
+    await clickAssignmentOverflowItem("Delete assignment");
+
+    const dialog = await screen.findByRole("dialog", { name: "Delete assignment?" });
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Lab 02" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete assignment" }));
+
+    await waitFor(() => expect(refreshCourseFolder).toHaveBeenCalledWith(COURSE_FOLDER.id));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "27s1-csc1120" })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open assignment detail for Lab 02" })).toBeNull();
   });
 });
 
