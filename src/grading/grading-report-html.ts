@@ -1,4 +1,5 @@
 import type { GradingEvidenceOutcome, JunitFailure } from "./grading-evidence-parser.js";
+import { parseCommentContent, type CommentInlineNode } from "../shared/comment-content.js";
 import type {
   GradingReportComment,
   GradingReportModel,
@@ -25,6 +26,10 @@ thead th { background: #f1f5f9; }
 .feedback-list, .finding-list, .commit-list { padding-left: 1.4rem; }
 .feedback { border-left: 4px solid #64748b; padding: .55rem .75rem; margin: .65rem 0; background: #f8fafc; }
 .preserve-text, .failure-details { white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-content__paragraph { margin: .35rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-content__inline-code { border-radius: 3px; background: #e2e8f0; padding: 0 .22em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.comment-content__code-block { max-width: 100%; overflow-x: auto; margin: .65rem 0 0; border: 1px solid #cbd5e1; border-radius: 4px; background: #f1f5f9; padding: .65rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em; line-height: 1.5; white-space: pre; }
+.comment-content__code-block code { font-family: inherit; }
 .source-file { break-inside: avoid; }
 .source-scroll { max-width: 100%; overflow-x: auto; border: 1px solid #cbd5e1; }
 .source-code { margin: 0; border: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .875rem; }
@@ -43,7 +48,7 @@ thead th { background: #f1f5f9; }
 .commit-list li { margin-bottom: .65rem; }
 .commit-message { overflow-wrap: anywhere; }
 code.sha { font-size: .85em; }
-@media print { main { width: 100%; padding: 0; } a { color: inherit; } .source-scroll { overflow: visible; } .feedback, tr { break-inside: avoid; } }
+@media print { main { width: 100%; padding: 0; } a { color: inherit; } .source-scroll { overflow: visible; } .feedback, tr, .comment-content__code-block { break-inside: avoid; } .comment-content__code-block { overflow: visible; white-space: pre-wrap; } }
 `;
 
 const COMMIT_SHA_DISPLAY_LENGTH = 8;
@@ -91,8 +96,26 @@ const commentLabel = (comment: GradingReportComment): string =>
     ? `Feedback ${formatNumber(comment.reportIndex)}`
     : escapeHtml(comment.title);
 
+const renderCommentInlineContent = (nodes: readonly CommentInlineNode[]): string =>
+  nodes
+    .map((node) =>
+      node.kind === "inline_code"
+        ? `<code class="comment-content__inline-code">${escapeHtml(node.text)}</code>`
+        : escapeHtml(node.text)
+    )
+    .join("");
+
+const renderFormattedCommentContent = (text: string): string =>
+  parseCommentContent(text)
+    .map((block) =>
+      block.kind === "code_block"
+        ? `<pre class="comment-content__code-block"><code>${escapeHtml(block.text)}</code></pre>`
+        : `<p class="comment-content__paragraph">${renderCommentInlineContent(block.children)}</p>`
+    )
+    .join("\n");
+
 const renderCommentBody = (comment: GradingReportComment): string => `
-<p class="preserve-text">${escapeHtml(comment.text)}</p>
+${renderFormattedCommentContent(comment.text)}
 <p class="secondary">${commentCategory(comment)} · Score adjustment: ${formatSignedNumber(comment.deduction)}</p>`;
 
 const sourceLocationText = (comment: GradingReportComment): string => {

@@ -48,6 +48,27 @@ describe("GradingAppliedCommentsPanel", () => {
     expect(onRequestDelete).toHaveBeenCalledWith(comment);
   });
 
+  it("renders formatted applied-comment bodies but keeps the delete summary plain", () => {
+    const { container } = render(
+      <GradingAppliedCommentsPanel
+        {...baseProps}
+        appliedComments={[{ ...comment, text: "Use `scanner.nextLine()`\n```\n  value();\n```" }]}
+        deleteConfirmation={{
+          studentId: "ada",
+          commentId: "c1",
+          text: "Use `scanner.nextLine()`",
+          deduction: -2
+        }}
+      />
+    );
+
+    expect(screen.getByText("scanner.nextLine()").tagName).toBe("CODE");
+    expect(
+      container.querySelector(".formatted-grading-comment__code-block code")?.textContent
+    ).toBe("  value();");
+    expect(screen.getByText("“Use `scanner.nextLine()`” · Adjustment: -2")).toBeInTheDocument();
+  });
+
   it("shows the delete confirmation for the matching student and confirms on click", () => {
     const onConfirmDelete = vi.fn();
     render(

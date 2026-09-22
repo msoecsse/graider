@@ -1061,7 +1061,7 @@ forward push may safely fail initially; the local mutation must remain durable.
 
 ---
 
-## 41. Comment text has no shared safe code-formatting semantics — **Should fix**
+## 41. Comment text has no shared safe code-formatting semantics — **Resolved**
 
 Reusable and applied comments render as plain React text, while the generated
 student report escapes the entire string into a whitespace-preserving
@@ -1072,6 +1072,17 @@ Fix with a deliberately small parser over the existing string: inline
 backticks plus triple-backtick fenced blocks with optional language metadata.
 Feed a React renderer and an explicitly escaped report renderer from the same
 typed model. Do not enable general Markdown, raw HTML, or rich-text storage.
+
+Resolved in COMMENT-1: `src/shared/comment-content.ts` is the one neutral
+parser/model used by both the React `FormattedGradingComment` component and the
+student HTML report renderer. It recognizes only paired inline backticks and
+valid triple-backtick blocks, retains optional language metadata without
+rendering/highlighting it, and fails closed for unmatched backticks and
+unclosed/invalid fences. Scoped UI and standalone-report CSS make inline and
+block code distinct without affecting other code surfaces. Parser, React,
+report, editor, and keyboard-focus tests cover malformed input, escaped hostile
+HTML, whitespace, reusable/applied bodies, and report use for general and
+source-anchored feedback.
 
 ---
 
@@ -1115,7 +1126,8 @@ Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
 26, 27, 28, 33, 34, 35, 36, and 37 can wait until after the redesign. Item 38
 is resolved.
 
-Priority update after PR12-3: address items 39-43 through the COMMENT-1 to
-COMMENT-5 sequence in `comment-library-feasibility.md`, then resume PR12-4
+Priority update after PR12-3: COMMENT-1 resolved item 41. Address items 39, 40,
+42, and 43 through COMMENT-2 to COMMENT-5 in
+`comment-library-feasibility.md`, then resume PR12-4
 (item 37) and PR12-5. The remaining Step 12 work is deferred by an explicit
 priority decision, not blocked or abandoned.

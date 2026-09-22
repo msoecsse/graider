@@ -21,10 +21,12 @@ The important gaps are at the user and publication boundaries:
 - a one-shot grading comment cannot be promoted into the library;
 - library mutations are not automatically published because the canonical file
   is outside the managed course-publish allowlist;
-- all comment surfaces render plain text, with no shared inline-code or fenced
-  code-block interpretation.
 
-The recommended sequence is COMMENT-1 through COMMENT-5 in §12. It moves the
+COMMENT-1 resolved the formatting gap with a shared parser/model, React
+renderer, report renderer, scoped styling, editor helpers, and parity-focused
+tests. The remaining work is at the user and publication boundaries.
+
+The recommended sequence is COMMENT-2 through COMMENT-5 in §12. It moves the
 publication contract ahead of faculty-facing mutation UI so Graider never
 ships a create/edit/delete workflow that appears shared but only writes one
 faculty member's checkout. This priority track starts after completed PR12-3.
@@ -126,21 +128,20 @@ the required snapshot model.
 - **Implemented but not shared/published safely:** local JSON mutation is safe,
   but library mutation handlers do not use course mutation publication and the
   canonical file is not managed by the course publisher.
-- **Not implemented:** structured code formatting, rendered previews, and
-  textarea formatting helpers.
+- **Resolved in COMMENT-1:** structured code formatting, rendered previews,
+  and lightweight textarea formatting helpers. The parser retains optional
+  fence-language metadata but COMMENT-1 does not display or highlight it.
 
 ## 4. What is missing
 
 The remaining product work is narrower than “build a comment library”:
 
-1. define one tiny, safe comment-format grammar and share its parsed semantics
-   between React and report HTML;
-2. add the one canonical library path to safe course publication and return
+1. add the one canonical library path to safe course publication and return
    explicit partial-success results;
-3. expose the existing mutation APIs through a shared reusable-comment editor,
+2. expose the existing mutation APIs through a shared reusable-comment editor,
    including normalized free-form tags and autocomplete;
-4. offer post-application one-shot promotion; and
-5. add a course-level management route that reuses the same components and
+3. offer post-application one-shot promotion; and
+4. add a course-level management route that reuses the same components and
    services.
 
 No database, generic filesystem API, new comment schema, or rich-text editor is
@@ -267,11 +268,11 @@ content renderer, and Electron APIs as the grading workspace. A parallel
 management model would recreate the drift this feasibility pass is intended to
 avoid.
 
-## 9. Comment code formatting
+## 9. Comment code formatting — completed in COMMENT-1
 
 ### 9.1 Recommended representation
 
-Use one dependency-free parser over the canonical string and a small typed
+COMMENT-1 uses one dependency-free parser over the canonical string and a small typed
 model, conceptually:
 
 ```text
@@ -279,7 +280,7 @@ Comment block = Paragraph(inline children) | CodeBlock(language?, text)
 Inline child  = Text(text) | InlineCode(text)
 ```
 
-One parser should feed two renderers:
+One parser feeds two renderers:
 
 - a React renderer using text children, `<code>`, and `<pre><code>`; and
 - the published-report renderer using the same nodes and explicit HTML escaping
@@ -289,9 +290,8 @@ This is cleaner than sharing rendered HTML: React keeps its normal escaping,
 the report keeps its existing `escapeHtml` guarantee, and neither renderer can
 accidentally enable raw HTML. Because the browser needs to parse unsaved
 textarea content synchronously, this should be a neutral shared source module,
-not an Electron CJS service. COMMENT-1 must make the smallest deliberate
-TypeScript/Vite boundary adjustment needed for that neutral module; it should
-not import repository backend services into renderer code.
+not an Electron CJS service. The neutral module is `src/shared/comment-content.ts`;
+the UI imports only that dependency-free source, not repository backend services.
 
 ### 9.2 Grammar and edge behavior
 
@@ -304,7 +304,7 @@ Only recognize:
 Everything else is prose. In particular, headings, emphasis, links, images,
 tables, embedded content, and raw HTML are not syntax.
 
-Recommended fail-closed behavior:
+Implemented fail-closed behavior:
 
 - unmatched single backticks remain literal text;
 - an unclosed fence remains literal text rather than consuming the rest of the
@@ -318,19 +318,19 @@ Recommended fail-closed behavior:
   highlighting; and
 - HTML-looking content in prose or code is always escaped text.
 
-The textarea remains the editor. **Inline code** and **Code block** helpers may
-wrap the current selection. If a selected multiline fragment already contains
-a line that would close a triple-backtick fence, the initial helper should
-decline or warn rather than create ambiguous markup. A lightweight rendered
-preview belongs in reusable create/edit and is useful in grading comment
-editing; no WYSIWYG editor is warranted.
+The textarea remains the editor. COMMENT-1 adds **Inline code** and **Code
+block** helpers. Inline code wraps the selection or inserts an empty pair with
+the caret inside. Code block wraps the selection without adding a language; it
+declines with a warning when the selection contains a closing triple-backtick
+fence. The existing grading-comment editor now has a compact shared-renderer
+preview. No WYSIWYG editor was added.
 
 ### 9.3 Surfaces to update
 
 - reusable-comment browser/list previews;
 - applied comments in the grading workspace;
 - reusable create/edit preview;
-- grading comment preview if included in COMMENT-1;
+- grading comment preview;
 - published student report HTML.
 
 Monaco currently carries comment text as annotation data rather than rendering
@@ -339,9 +339,8 @@ should remain short plain-text summaries. Long block lines need horizontal
 scrolling; blocks need monospace type, a distinct background and inset, and
 print-friendly report styling.
 
-`<script>alert(1)</script>` must render literally on every surface. The current
-report already escapes comment text and sets a restrictive CSP; COMMENT-1 must
-preserve both guarantees.
+`<script>alert(1)</script>` renders literally on every surface. The report
+continues to escape comment text and retains its restrictive CSP.
 
 ## 10. Course publication and multi-faculty safety
 
@@ -466,12 +465,12 @@ cannot drift.
 
 ## 12. Recommended implementation sequence
 
-### COMMENT-1 — Comment formatting foundation
+### COMMENT-1 — Comment formatting foundation — complete
 
-Add the shared parser/model, React and report renderers, semantic styling,
-existing-surface integration, lightweight textarea wrap helpers/preview where
-appropriate, and safety/parity tests. This slice is independent of publication
-and gives every later library editor a single preview implementation.
+Shipped the shared parser/model, React and report renderers, semantic styling,
+existing-surface integration, lightweight textarea wrap helpers/preview, and
+safety/parity-focused tests. It is independent of publication and gives every
+later library editor one preview implementation.
 
 ### COMMENT-2 — Library mutation publication contract
 
@@ -503,7 +502,7 @@ Add the course/term-context route and navigation, then compose the shared
 browser, editor, tag control, formatted preview, and publication feedback into
 the dedicated management surface.
 
-COMMENT-1 is independent; COMMENT-2 must precede COMMENT-3; COMMENT-3 supplies
+COMMENT-1 is complete. COMMENT-2 must precede COMMENT-3; COMMENT-3 supplies
 the reusable editor for COMMENT-4 and COMMENT-5. COMMENT-4 and COMMENT-5 could
 be developed in either order after COMMENT-3, but the grading-loop promotion
 workflow is recommended first because it serves the more frequent workflow.
@@ -513,10 +512,10 @@ manager visual rebuild that consumes PR12-3 counts and PR12-4 provenance).
 
 ## 13. Backlog and documentation corrections
 
-Backlog items 39-43 record the genuine gaps identified here: unwired mutation
-UI/management, publication exclusion, missing structured formatting, missing
-tag authoring/normalization, and missing one-shot promotion. They are problem
-statements, not a duplicate PR checklist.
+Backlog items 39, 40, 42, and 43 remain open for unwired mutation UI/management,
+publication exclusion, tag authoring/normalization, and one-shot promotion.
+Item 41 is resolved by COMMENT-1. They are problem statements, not a duplicate
+PR checklist.
 
 The grading specification now records the locked behavior. The UI-redesign
 roadmap preserves the Step 12 history while explicitly placing COMMENT-1
@@ -539,8 +538,7 @@ through COMMENT-5 between completed PR12-3 and deferred PR12-4/PR12-5.
 
 ## 15. Recommendation
 
-Proceed with COMMENT-1, the small formatting foundation. Keep the JSON library
-and existing CRUD/search/snapshot infrastructure. Follow with publication
-safety before exposing mutation UI, then add workspace CRUD/tags, one-shot
-promotion, and the dedicated management screen. Resume PR12-4 and PR12-5 only
-after this priority track is complete.
+Proceed with COMMENT-2, the safe publication foundation. Keep the JSON library
+and existing CRUD/search/snapshot infrastructure. Follow with workspace
+CRUD/tags, one-shot promotion, and the dedicated management screen. Resume
+PR12-4 and PR12-5 only after this priority track is complete.

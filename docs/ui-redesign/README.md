@@ -692,7 +692,8 @@ track before the remaining Step 12 work:
 
 ```text
 PR12-3 (complete)
-  -> COMMENT-1 through COMMENT-5
+  -> COMMENT-1 (complete)
+  -> COMMENT-2 through COMMENT-5
   -> PR12-4 roster source/provenance
   -> PR12-5 roster-manager visual rebuild
 ```

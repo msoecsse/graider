@@ -477,6 +477,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     fireEvent.change(deduction, { target: { value: "1" } });
     fireEvent.keyDown(deduction, { key: "p" });
     fireEvent.keyDown(category, { key: "1" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Inline code" }), { key: "p" });
 
     expect(title).toHaveValue("j");
     expect(comment).toHaveValue("Needs a clearer justification");

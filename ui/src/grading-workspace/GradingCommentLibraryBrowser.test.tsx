@@ -34,6 +34,22 @@ describe("GradingCommentLibraryBrowser", () => {
     expect(onApply).toHaveBeenCalledWith(comment);
   });
 
+  it("renders formatted reusable-comment previews", () => {
+    const { container } = render(
+      <GradingCommentLibraryBrowser
+        {...baseProps}
+        matchingComments={[
+          { ...comment, text: "Use `scanner.nextLine()`\n```java\n  value();\n```" }
+        ]}
+      />
+    );
+
+    expect(screen.getByText("scanner.nextLine()").tagName).toBe("CODE");
+    expect(
+      container.querySelector(".formatted-grading-comment__code-block code")?.textContent
+    ).toBe("  value();");
+  });
+
   it("disables Apply when no student is selected", () => {
     render(<GradingCommentLibraryBrowser {...baseProps} studentId={undefined} />);
 

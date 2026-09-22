@@ -446,6 +446,7 @@ const sourceTargetLabel = (location: CanonicalSourceRange): string =>
 const isGradingShortcutSuppressedTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof Element)) return false;
   if (target.closest(".grading-source-editor") !== null) return false;
+  if (target.closest(".grading-comment-formatting-controls") !== null) return true;
   const tag = target.tagName;
   return (
     tag === "INPUT" ||

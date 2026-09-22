@@ -1,5 +1,6 @@
 import type { Dispatch, ReactElement, SetStateAction } from "react";
 import type { GradingCommentLibraryResult } from "../../electron/ipc";
+import { FormattedGradingComment } from "./FormattedGradingComment";
 
 type LoadedLibrary = Extract<
   GradingCommentLibraryResult,
@@ -85,7 +86,7 @@ export const GradingCommentLibraryBrowser = ({
           {matchingComments.map((comment) => (
             <li key={comment.id}>
               <strong>{comment.title}</strong>
-              <p>{comment.text}</p>
+              <FormattedGradingComment text={comment.text} />
               <p>Default adjustment: {comment.defaultDeduction}</p>
               {comment.defaultRubricCategoryId === undefined ? null : (
                 <p>Default category: {comment.defaultRubricCategoryId}</p>
