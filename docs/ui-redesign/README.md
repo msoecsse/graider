@@ -538,6 +538,51 @@ Make it one page whose state changes:
 
 ### 5.5 Term setup wizard
 
+**Corrected 2026-09 — not being built as five new screens.** A feasibility
+pass (`docs/ui-redesign/step-11-feasibility.md`) found this section
+describes a screen the codebase cannot support as written, and that most of
+what it asks for already exists elsewhere. The spec below is kept for the
+record, not as a build target. What's actually happening:
+
+- **Three capabilities this section depends on do not exist**, and are
+  tracked as their own backlog items rather than as wizard prerequisites:
+  no CSV column-header mapping (item 33), no draft or resumable-state
+  storage anywhere in the app (item 34), and no way to defer a
+  roster/section/faculty mutation past its own save (item 35).
+  `CourseSetupPage.tsx` also already performs most of steps 1 (Course), 2
+  (Term), and 4 (Faculty) — and part of 3 (an optional initial roster CSV)
+  — in one screen, one local-only save. A five-step wizard built next to it
+  would mostly duplicate it.
+- **Chosen direction: redesign `CourseSetupPage.tsx`, not build a parallel
+  wizard.** Bring that screen up to §2's rules (action hierarchy, plain
+  language, hiding implementation detail), and ship items 33-35 as
+  independently shippable improvements to it. None of the three blocks the
+  others, and none requires the wizard shell to exist first.
+- **The constraint that actually killed the literal spec, stated plainly so
+  it is not mistaken for a bug report later:** this section promised
+  "Nothing is created on GitHub until the last step." Today,
+  `courseMutationPublicationService.ts` auto-publishes to GitHub
+  immediately after every mutation it wraps, including `saveRoster`,
+  `removeRoster`, and `removeSection`. That auto-publish is correct
+  behaviour for every caller that exists today, and was a deliberate fix
+  (backlog item 31) for a real problem — changes silently staying local
+  until someone remembered to click Publish. **This is a collision between
+  two correct decisions, not a defect in either one.** Do not "fix" the
+  auto-publish to unblock a wizard; if a wizard is ever built, it needs its
+  own deferred-publish path (item 35), and the existing callers keep
+  auto-publishing exactly as they do now.
+- **If a wizard shell is ever wanted anyway**, build the backend deferral
+  (item 35) and the shared roster CSV module (item 36, shared with §5.6)
+  first. Do not start with the wizard UI — every step under it depends on
+  something that doesn't exist yet.
+- **Timing: not urgent.** No new rosters are being created until next term.
+
+See §6 for where this leaves the PR sequence.
+
+---
+
+**Original spec, superseded by the correction above.**
+
 Five steps: Course → Term → Roster → Faculty → Review. Left rail 300px, numbered
 steps with a caption under each; completed steps get a filled check. "Save and
 finish later" in the header, since term setup gets interrupted.
@@ -622,22 +667,25 @@ Not yet mocked, but defects should be fixed regardless:
 Work on `ui-redesign` with one PR per step. Each PR keeps `npm test`,
 `npm run lint`, `npm run typecheck`, and `npm run format:check` green.
 
-| #   | Scope                                                                                              | Why this order                                                |
-| --- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| 1   | Design tokens in `globals.css` + shared components (§4.3)                                          | Everything else depends on them                               |
-| 2   | Grading workspace styling only — apply the design system, no behaviour change                      | Biggest felt improvement, lowest risk, independent of routing |
-| 3   | Grading workspace behaviour: progress header, filters, next-ungraded, score/status consistency fix | The weekly hot path                                           |
-| 4   | Keyboard shortcuts + cheat sheet                                                                   | Builds on 3                                                   |
-| 5   | Publish review screen                                                                              | Removes publishing from the sidebar                           |
-| 6   | Assignment detail: lifecycle strip, overflow menu, remove "Available actions", Technical details   | Worst novice confusion                                        |
-| 7   | Roster save-modal bug + destructive action gating                                                  | Data-loss risk at 20 users; can be pulled earlier if needed   |
-| 8   | Status-code and date humanisation module (§2.3)                                                    | Touches several screens                                       |
-| 9   | Apply/grade preview merge                                                                          | Depends on 8                                                  |
-| 10  | Router + breadcrumbs, split large components                                                       | Larger refactor, safest once screens are settled              |
-| 11  | Term setup wizard                                                                                  | Ship before the next term begins                              |
-| 12  | Roster manager rebuild + source field                                                              | Completes term-start work                                     |
+| #   | Scope                                                                                              | Why this order                                                                                     |
+| --- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 1   | Design tokens in `globals.css` + shared components (§4.3)                                          | Everything else depends on them                                                                    |
+| 2   | Grading workspace styling only — apply the design system, no behaviour change                      | Biggest felt improvement, lowest risk, independent of routing                                      |
+| 3   | Grading workspace behaviour: progress header, filters, next-ungraded, score/status consistency fix | The weekly hot path                                                                                |
+| 4   | Keyboard shortcuts + cheat sheet                                                                   | Builds on 3                                                                                        |
+| 5   | Publish review screen                                                                              | Removes publishing from the sidebar                                                                |
+| 6   | Assignment detail: lifecycle strip, overflow menu, remove "Available actions", Technical details   | Worst novice confusion                                                                             |
+| 7   | Roster save-modal bug + destructive action gating                                                  | Data-loss risk at 20 users; can be pulled earlier if needed                                        |
+| 8   | Status-code and date humanisation module (§2.3)                                                    | Touches several screens                                                                            |
+| 9   | Apply/grade preview merge                                                                          | Depends on 8                                                                                       |
+| 10  | Router + breadcrumbs, split large components                                                       | Larger refactor, safest once screens are settled                                                   |
+| 11  | `CourseSetupPage.tsx` redesign against §2, plus items 33-35 as independent improvements            | Replaces the term setup wizard — see §5.5's correction; not urgent, no new rosters until next term |
+| 12  | Roster manager rebuild + source field                                                              | Completes term-start work; give it a feasibility pass first, per item 27                           |
 
 PR 7 can jump the queue; it is a real bug.
+
+The term setup wizard shell (five steps, left rail, resumability) is
+**deferred indefinitely, not scheduled** — see §5.5.
 
 ---
 

@@ -710,6 +710,17 @@ is current just because the rule it's illustrating still holds.
 
 Fix: no code fix. A habit for whoever reads this document next.
 
+**Applied for the first time, 2026-09.** Step 11's feasibility pass
+(`docs/ui-redesign/step-11-feasibility.md`) is this item's own advice put
+into practice before implementation, rather than corrected after the fact
+like the four cases above: check the document's description of what the
+code supports against the code itself before building against it. It
+found three missing foundations (items 33-35) and substantial overlap with
+`CourseSetupPage.tsx`, and section 5.5 was corrected as a result instead of
+a five-screen wizard being built on top of them. Step 12 (§5.6, the roster
+manager rebuild) is next — give it the same pass before implementation,
+not after.
+
 ---
 
 ## 28. What is a course page for? — **Optional**
@@ -856,14 +867,19 @@ is no header-to-field mapping code anywhere — no detection, no UI, no
 normalization from an arbitrary source header (a raw LMS export, for
 example) to Graider's four canonical fields.
 
-Needed for §5.5's `CSV column "SIS User ID" → Student ID` requirement and
-its own "[Canvas-ready]" annotation, and independently useful for anyone
-importing a roster exported from a system other than Graider's own format.
+**Standalone work, not a wizard prerequisite.** CSV import today depends on
+the file already having Graider's exact column names; anyone importing a
+roster exported from a system other than Graider's own format — Canvas or
+otherwise — hits the same hard rejection regardless of whether §5.5's
+wizard is ever built. §5.5 names this as the foundation for future Canvas
+field mapping, but the gap and its fix stand on their own.
 
 Fix: a pure mapping function (best-effort default by name similarity,
 user-editable) plus a small confirmation UI, validated through the existing
 per-row rules in `roster-validation.ts`. No backend GitHub work. Roughly
 one panel-plus-tests in size.
+
+**Not urgent.** No new rosters are being created until next term.
 
 ---
 
@@ -876,13 +892,16 @@ main process, the course registry, or any renderer screen —
 `CourseSetupPage`, `AssignmentSetupPage`, and `RosterManagerPage` all hold
 form state in React state only, lost on window close.
 
-Needed for §5.5's "Save and finish later," and for any future multi-step
-flow that wants to survive an interruption.
+**No current caller.** §5.5's "Save and finish later" was the motivating
+case, but the term setup wizard is deferred indefinitely (see §5.5's
+correction), so nothing in the app needs this today. Recorded here for
+whichever future multi-step flow needs to survive an interruption first —
+optional until one does, not a prerequisite for anything currently planned.
 
 Fix: a new local JSON draft module, same shape as `localSettings.ts`
 (`userData`-scoped file, simple read/write helpers), keyed by course folder
 and flow/step identity. The storage mechanics are small; the draft shape
-itself is not trivial once it has to cover every field a five-step wizard
+itself is not trivial once it has to cover every field a multi-step flow
 would collect, including uploaded CSV content and column mappings.
 
 ---
@@ -901,16 +920,28 @@ problem exists — nothing that calls these paths can hold a change back from
 GitHub, even temporarily, even when the caller has a good reason to (a
 multi-step flow, a batch of related edits meant to land together).
 
-This blocks §5.5's wizard from being built as specified: its Roster and
-Faculty steps would need to call these same paths, and each would publish
-immediately rather than waiting for the wizard's Review step. See
-`docs/ui-redesign/step-11-feasibility.md` §3 for the full analysis.
+**A real constraint on any future deferred operation, wizard or not — not
+specific to §5.5.** It surfaced while assessing the term setup wizard
+(`docs/ui-redesign/step-11-feasibility.md` §3 has the full analysis of that
+case), but the underlying fact is general: nothing that calls
+`saveRoster`, `removeRoster`, `removeSection`, or the wrapped assignment
+mutations can currently hold a change back from GitHub, even briefly, even
+when the caller has a good reason to — a multi-step flow, a batch of
+related edits meant to land together, a future undo window, anything. Any
+feature that wants that will hit this, not just a wizard.
+
+**This is not a defect.** The auto-publish is correct behaviour for every
+caller today and was a deliberate fix (item 31) for changes silently
+staying local. Do not remove or weaken it to unblock some future caller —
+add a separate, opt-in deferred path instead.
 
 Fix: scoped, not a rearchitecture — new or parameterized IPC entry points
 for these mutations that skip the auto-publish wrapper, with the caller
 responsible for an explicit, single `publishCourseChanges` call when it's
 actually ready. `saveCourseSetup` already has no auto-publish and needs no
-change.
+change. No current caller needs this yet — the term setup wizard that
+motivated it is deferred indefinitely — so this is background knowledge to
+have on hand, not queued work.
 
 ---
 
