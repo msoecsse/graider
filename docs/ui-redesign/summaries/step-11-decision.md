@@ -83,7 +83,18 @@ None outstanding.
 §5.5 no longer reads as a build target for a literal five-step wizard; the
 correction is visible in place, the original spec is preserved as a
 record, and §6's sequence, plus backlog items 27/33/34/35, agree with it.
-Pushed to `ui-redesign`; CI confirmed green on the resulting commit.
+Pushed to `ui-redesign` as `427994e`.
+
+**CI is not green, but not because of this change.** `main.ts` (committed
+in `408a002`, "Updated ui-redesign docs," before this task) imports
+`./nativeDirectoryChooser.js`, but `ui/electron/nativeDirectoryChooser.ts`
+was never committed to any branch (`git log --all` for that path is
+empty) — it exists only as an untracked file on this local checkout, from
+unrelated concurrent work. Every commit on `ui-redesign` since `408a002`
+has failed CI at the UI typecheck step for this reason, including this
+one; this task's own changes are documentation-only and untested by CI at
+all. Not fixed here — outside this task's scope and not mine to commit
+without knowing whether that file is finished. Reported directly instead.
 
 ## Deferred
 
