@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraiderUIApi } from "../../electron/ipc";
+import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
 import { AssignmentSetupPage } from "./AssignmentSetupPage";
 
 const courseFolder = {
@@ -199,5 +200,153 @@ describe("AssignmentSetupPage preview response handling", () => {
         assignmentSlug: "lab04"
       })
     );
+  });
+});
+
+const READY_PREVIEW = {
+  status: "ready",
+  files: [
+    {
+      path: "terms/27s1/assignments/lab04/assignment.yml",
+      content: "schema_version: 1\n",
+      exists: false
+    }
+  ],
+  diagnostics: [],
+  hasConflicts: false
+};
+
+const renderToConfirmDialog = async (
+  api: Partial<GraiderUIApi>,
+  onOpenAssignment: (selection: AssignmentDetailSelection) => void = vi.fn()
+): Promise<{ readonly dialog: HTMLElement }> => {
+  Object.defineProperty(window, "graiderUI", {
+    configurable: true,
+    value: {
+      loadAssignmentSetupTerms: vi.fn().mockResolvedValue({
+        terms: [{ code: "27s1", sections: ["001"] }],
+        diagnostics: []
+      }),
+      previewAssignmentSetup: vi.fn().mockResolvedValue(READY_PREVIEW),
+      ...api
+    } satisfies Partial<GraiderUIApi>
+  });
+  render(
+    <AssignmentSetupPage
+      courseFolder={courseFolder}
+      onBack={vi.fn()}
+      onOpenAssignment={onOpenAssignment}
+    />
+  );
+
+  fireEvent.change(await screen.findByLabelText("Term"), { target: { value: "27s1" } });
+  fireEvent.click(screen.getByLabelText("Section 001"));
+  fireEvent.change(screen.getByLabelText("Assignment title"), { target: { value: "Lab 04" } });
+  fireEvent.change(screen.getByLabelText("Assignment slug"), { target: { value: "lab04" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create assignment" }));
+
+  const dialog = await screen.findByRole("dialog", { name: "Create assignment?" });
+  return { dialog };
+};
+
+const confirmAndExpectAlert = async (
+  dialog: HTMLElement,
+  expectedMessage: string
+): Promise<void> => {
+  fireEvent.click(within(dialog).getByRole("button", { name: "Create assignment" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(expectedMessage);
+};
+
+describe("AssignmentSetupPage save error handling", () => {
+  it("surfaces the backend's diagnostic when the save fails, not a generic sentence", async () => {
+    const { dialog } = await renderToConfirmDialog({
+      saveAssignmentSetup: vi.fn().mockResolvedValue({
+        status: "failure",
+        writtenFiles: [],
+        diagnostics: [
+          { message: "Existing assignment.yml must be explicitly replaced before saving." }
+        ]
+      })
+    });
+
+    await confirmAndExpectAlert(
+      dialog,
+      "Existing assignment.yml must be explicitly replaced before saving."
+    );
+    expect(screen.queryByText("Unable to save assignment.yml.")).toBeNull();
+  });
+
+  it.each([
+    "Generated path is outside the selected course folder.",
+    "Unable to write assignment.yml."
+  ])("reaches the user distinguishably for the backend reason %s", async (message) => {
+    const { dialog } = await renderToConfirmDialog({
+      saveAssignmentSetup: vi.fn().mockResolvedValue({
+        status: "failure",
+        writtenFiles: [],
+        diagnostics: [{ message }]
+      })
+    });
+
+    await confirmAndExpectAlert(dialog, message);
+  });
+
+  it("says a reason was not given when the backend reports failure with no diagnostics", async () => {
+    const { dialog } = await renderToConfirmDialog({
+      saveAssignmentSetup: vi.fn().mockResolvedValue({
+        status: "failure",
+        writtenFiles: [],
+        diagnostics: []
+      })
+    });
+
+    await confirmAndExpectAlert(dialog, "Assignment setup failed, and no reason was reported.");
+  });
+
+  it("does not report a successful save's navigation failure as a save failure", async () => {
+    const onOpenAssignment = vi.fn(() => {
+      throw new Error("route resolution failed");
+    });
+    const saveAssignmentSetup = vi.fn().mockResolvedValue({
+      status: "success",
+      writtenFiles: ["terms/27s1/assignments/lab04/assignment.yml"],
+      diagnostics: []
+    });
+    const { dialog } = await renderToConfirmDialog({ saveAssignmentSetup }, onOpenAssignment);
+
+    await confirmAndExpectAlert(
+      dialog,
+      "The assignment was saved, but opening it failed: route resolution failed"
+    );
+    expect(saveAssignmentSetup).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Unable to save assignment.yml.")).toBeNull();
+  });
+
+  it("preserves a genuine error's own message when the preview call itself rejects", async () => {
+    Object.defineProperty(window, "graiderUI", {
+      configurable: true,
+      value: {
+        loadAssignmentSetupTerms: vi.fn().mockResolvedValue({ terms: [], diagnostics: [] }),
+        previewAssignmentSetup: vi
+          .fn()
+          .mockRejectedValue(
+            new Error("A registered course folder is required for assignment setup.")
+          ),
+        saveAssignmentSetup: vi.fn()
+      } satisfies Partial<GraiderUIApi>
+    });
+    render(
+      <AssignmentSetupPage
+        courseFolder={courseFolder}
+        onBack={vi.fn()}
+        onOpenAssignment={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create assignment" }));
+
+    expect(
+      await screen.findByText("A registered course folder is required for assignment setup.")
+    ).toBeInTheDocument();
   });
 });

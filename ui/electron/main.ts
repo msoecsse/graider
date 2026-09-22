@@ -656,6 +656,14 @@ export const registerIpcHandlers = (): void => {
         writtenFiles: [],
         diagnostics: localPreview.diagnostics
       };
+    // Mirrors the previewAssignmentSetup handler above (PR10-1a): a blank
+    // template repository is a valid "no template" choice, not a value to
+    // validate against GitHub. Without this, normalizeTemplateRepository("")
+    // returns null and validateTemplateRepository reports "Template
+    // repository value must be in owner/repo form..." for every save of an
+    // assignment with no template -- a real, misleading save failure for the
+    // single most common case (PR10-1b).
+    if (request.templateRepository.trim() === "") return saveAssignmentSetup(request);
     const validation = await validateTemplateRepository(
       request.templateRepository,
       request.templateBranch,
