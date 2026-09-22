@@ -945,23 +945,73 @@ have on hand, not queued work.
 
 ---
 
-## 36. Roster CSV parsing is already implemented twice — **Worth fixing**
+## 36. Roster CSV parsing is implemented four times, not two — **Worth fixing**
 
-Found while assessing step 11, independent of whether the wizard is ever
-built: `ui/electron/courseSetupService.ts`'s server-side roster validation
-(used during initial course setup) and
+**Corrected while assessing step 12
+(`docs/ui-redesign/step-12-feasibility.md`) — this item undercounted.**
+Found while assessing step 11, independent of whether any wizard is ever
+built: roster CSV parsing exists as four separate implementations, not
+two. `src/roster/roster-loader.ts` + `src/io/csv.ts` (the CLI/grading
+path, the most complete and validated of the four),
+`ui/electron/courseSetupService.ts` (initial roster upload during course
+creation), **`ui/electron/rosterManagerService.ts`'s own `parseCsvLine`/
+`parseRows` (lines 39-82)** — missed in the original count, a third,
+independent parser with weaker validation than `roster-loader.ts`'s — and
 `ui/src/roster-manager/RosterManagerPage.tsx`'s client-side
-`parseUploadedRoster` ("Replace from CSV") are two separate implementations
-of the same job — parsing an uploaded CSV against the canonical roster
-header and reporting problems. Same shape as item 22 and the
-three-date-formatters pattern this document already tracks.
+`parseUploadedRoster` ("Replace from CSV", lines 38-52). Same shape as
+item 22 and the three-date-formatters pattern this document already
+tracks, now with twice as many instances as first recorded.
 
 Fix: extract one shared module (parsing, column matching per item 33,
-validation) and have both call sites use it. Natural to do as part of step
-12's roster manager rebuild (§5.6), since that screen's target validation
-UI is already specified in detail; item 33's column-matching work and any
-future wizard roster step should build on the same module rather than add
-a third implementation.
+validation, and the row-level diffing item 2 of the step-12 assessment
+needs) and converge all four call sites on it over time. Build it as part
+of step 12's roster manager rebuild (§5.6), since that screen needs it
+fresh; step 11's `CourseSetupPage.tsx` redesign and the CLI path can adopt
+it afterward rather than each growing its own version further.
+
+---
+
+## 37. Roster carries no provenance — **Worth fixing**
+
+Found while assessing step 12. `RosterRow` (`ui/electron/ipc.ts:522-527`)
+is `{studentId, githubUsername, section, status}`; `RosterLoadResult` and
+`RosterSaveResult` (same file, 534-565) carry no timestamp, author, or
+origin either. `ui/electron/rosterManagerService.ts` never reads file
+mtime or git metadata as a proxy. There is no way today to answer "where
+did this roster come from, and when was it last touched?"
+
+Needed for §5.6's source bar (`Source: CSV upload`, `Last updated Jun 2 by
+jones`) and its own note to "build the source as a first-class field
+now" ahead of eventual Canvas sync.
+
+Fix: small. Add an optional `source` field (`kind: "csv_upload" |
+"manual_edit"`, `updatedAt`, `updatedBy`) to `RosterLoadResult`/
+`RosterSaveRequest`, written by `saveRoster` and read by
+`getRosterForSection`. `updatedBy` can reuse the existing
+`currentFacultyMsoeUsername` local setting. No rearchitecture — one field
+threaded through three existing functions.
+
+---
+
+## 38. No per-section roster count aggregation in the Electron IPC layer — **Worth fixing**
+
+Found while assessing step 12. `AssignmentSetupTerm`
+(`ui/electron/ipc.ts:229-232`) is `{code, sections: string[]}` — section
+IDs only, no counts. The backend already computes exactly the shape
+wanted — `RosterSummary` in `src/roster/roster-models.ts`
+(`studentCount`, `activeStudentCount`, `droppedStudentCount`,
+`holdStudentCount`), produced by `src/roster/roster-loader.ts` — but it is
+wired into the CLI/grading path only, never exposed to the Electron IPC
+layer `RosterManagerPage.tsx` and `ui/electron/rosterManagerService.ts`
+use.
+
+Needed for §5.6's section tabs with counts and its small stats card.
+
+Fix: small. A bulk IPC read that loads every section's roster for a term
+once and returns per-section counts, reusing whichever shared parser item
+36 converges on rather than adding a fifth implementation. The stats card
+itself needs nothing new once a section is loaded — it's a client-side
+aggregate over data already in hand.
 
 ---
 
@@ -973,4 +1023,4 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-26, 27, 28, 33, 34, 35, and 36 can wait until after the redesign.
+26, 27, 28, 33, 34, 35, 36, 37, and 38 can wait until after the redesign.
