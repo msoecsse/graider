@@ -176,7 +176,6 @@ const renderAssignmentDetailPage = (
   render(
     <AssignmentDetailPage
       selection={SELECTION}
-      onBack={vi.fn()}
       onPreviewApply={vi.fn()}
       onPreviewGrade={vi.fn()}
       onViewFacultyReport={vi.fn()}

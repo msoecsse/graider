@@ -134,7 +134,7 @@ describe("GradingWorkspacePage workflow repair", () => {
     });
     setApis(repair);
     Object.assign(window.graiderUI, { repairGradingAssignmentWorkflows: bulkRepair });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(
       await screen.findByRole("button", { name: "Replace workflows & run for all students" })
     );
@@ -162,7 +162,7 @@ describe("GradingWorkspacePage workflow repair", () => {
       Promise.resolve({ status: "grading_not_eligible" as const, studentId })
     );
     setApis(repair);
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(
       await screen.findByText(/unavailable for this assignment's grading configuration/u)
@@ -179,7 +179,7 @@ describe("GradingWorkspacePage workflow repair", () => {
       )
     );
     setApis(repair);
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     const action = await screen.findByRole("button", { name: "Replace workflow & run" });
     await waitFor(() => expect(action).toBeEnabled());
@@ -203,7 +203,7 @@ describe("GradingWorkspacePage workflow repair", () => {
           })
     );
     setApis(repair);
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     const action = await screen.findByRole("button", { name: "Replace workflow & run" });
     await waitFor(() => expect(action).toBeEnabled());
@@ -231,7 +231,7 @@ describe("GradingWorkspacePage workflow repair", () => {
       )
     );
     setApis(repair);
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     const action = await screen.findByRole("button", { name: "Replace workflow & run" });
     await waitFor(() => expect(action).toBeEnabled());
@@ -258,7 +258,7 @@ describe("GradingWorkspacePage workflow repair", () => {
           })
     );
     setApis(repair);
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(repair).toHaveBeenCalledTimes(2));

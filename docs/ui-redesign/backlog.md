@@ -230,8 +230,13 @@ exact example in README section 2.3's own table.
 Found but left unfixed, reported instead (outside these two files, or
 disproportionate to this refactor):
 
-- `ui/src/apply-preview/ApplyPreviewPage.tsx:325` has the identical raw
-  `"workflow_dispatch status"` label — a different file.
+- `ui/src/apply-preview/ApplyPreviewPage.tsx:325` had the identical raw
+  `"workflow_dispatch status"` label — a different file. **Half-closed as of
+  PR10-1: this instance is gone (fixed in an intervening PR), but its
+  sibling in `ui/src/grade-preview/GradePreviewPage.tsx:253`
+  (`label="workflow_dispatch readiness"`) is still raw.** PR10-1's own
+  instructions named this line explicitly as out of scope for that PR (a
+  router change, not a label fix), so it remains open.
 - `GradeStatusPage.tsx` shows a workflow file path and an assignment file
   path directly in the table/page with no "Technical details" disclosure
   on this page to hide them behind (section 2.4); adding one is a bigger
@@ -655,12 +660,135 @@ been through the redesign. Deciding where it should live is a §2.4 question.
 
 ---
 
+## 26. Routed URLs are not shareable outside this window — **Accepted limitation**
+
+PR10-1 added a real router (`HashRouter`, README section 4.1), so every
+routed screen now has a URL. That URL only means something inside the
+Electron window that produced it — pasting `#/course/csc1120/27s1/lab02` to
+a colleague, or into a new tab, does nothing, because there is no
+`file://`-served web server backing it and no other window watching for it.
+
+A genuinely shareable link needs a registered custom protocol (e.g.
+`graider://`) and an `open-url` handler in `ui/electron/main.ts` that turns
+an incoming link into a navigation inside a running (or newly launched)
+window. That is Electron main-process and packaging work, not router work,
+and PR10-1 did not add it.
+
+Fix, if this is ever wanted: register the protocol, handle `open-url` (macOS)
+and the second-instance argv (Windows/Linux) in `main.ts`, and translate the
+incoming URL into the `HashRouter`'s path.
+
+---
+
+## 27. This document's section 4 diverged from the code it described, again — **Worth fixing (process, not code)**
+
+PR10-1 found section 4.1's six-route table describing a router that did not
+match what existed: three of its six routes named a screen with no
+component (course page, term setup wizard) or that wasn't a screen at all
+(publish review is workspace state), while five already-built screens had
+no route at all. Section 4.1 has been corrected to match what shipped.
+
+This is the fourth time a section of this document has been found to
+describe something other than the code: section 5.3's facts card (item
+9-adjacent work), section 5.7's "duplicate" tables, section 5.4's count
+mismatch, and now section 4.1's route table. Individually each was a small
+correction. As a pattern, it says something about this document worth
+stating plainly for whoever picks up steps 11 and 12 (the term setup
+wizard, and the component split in section 4.2): **this document's
+descriptions of _symptoms_ — a bug, a missing behavior, a rule to follow —
+have held up. Its descriptions of _code inventories_ — what exists, what a
+screen contains, how many of something there are — have not, four times
+running.** Before implementing against a table, list, or count in this
+document, check it against the code first; do not assume the description
+is current just because the rule it's illustrating still holds.
+
+Fix: no code fix. A habit for whoever reads this document next.
+
+---
+
+## 28. What is a course page for? — **Optional**
+
+README section 4.1's original six-route table included
+`/course/:courseSlug/:termSlug` — a course-level page, distinct from the
+dashboard and from assignment detail. PR10-1 did not build it: no section
+of this document says what it would show that the dashboard's per-course
+card doesn't already show, and no component for it exists anywhere in
+`ui/src`.
+
+Before anyone builds this route, the open question is not "how" but
+"why": what does a faculty member do on a course page that they cannot
+already do from the dashboard card for that course-term? If the honest
+answer is "nothing new," the fix is to remove the route from the
+document, not to build a page to fill it.
+
+---
+
+## 29. Navigating to a just-created assignment can race its own cache refresh — **Resolved**
+
+`DashboardPage.tsx`'s `onOpenAssignment` handler (passed to
+`AssignmentSetupPage`, ~line 379) does:
+
+```ts
+setSelectedAssignmentSetupCourse(null);
+void handleRefreshCourseFolder(selection.courseFolderId);
+// ...then immediately navigate() to the new assignment's detail route
+```
+
+`handleRefreshCourseFolder` is fired and not awaited, but the `navigate()`
+call right after it runs regardless of whether the refresh has completed.
+`AssignmentDetailRoute` resolves the new assignment by looking it up in
+`aggregatedDashboard.cards` (`dashboardResolvers.ts`'s
+`resolveAssignmentSelection`) -- the same cache `handleRefreshCourseFolder`
+is in the middle of repopulating. If the IPC round trip to reload the
+course folder's dashboard JSON takes longer than the render that follows
+`navigate()` (a real possibility -- it shells out to the Graider CLI), the
+new assignment's slug will not yet be in the card's assignment list, and
+`AssignmentDetailRoute` will render `RouteNotFound` ("This assignment could
+not be found. It may have been deleted or renamed.") for an assignment that
+was, in fact, just created successfully.
+
+Confirmed as a real, reachable path by tracing the code (not by
+reproducing the timing in a test -- jsdom's mocked promises resolve fast
+enough that the race is very hard to force reliably); not fixed here per
+PR10-1a's explicit scope.
+
+This is a different failure mode from PR10-1a's crash: no white screen, no
+uncaught exception -- a plain, on-brand "not found" message the user will
+likely read as "did that not work?" and go looking for the assignment
+again from the dashboard, where it will in fact be present once the
+refresh completes.
+
+Fix: await `handleRefreshCourseFolder(selection.courseFolderId)` before
+calling `navigate(...)`, so the cache is guaranteed to contain the new
+assignment before `AssignmentDetailRoute` tries to resolve it. This makes
+the create-assignment flow's navigation slightly slower (one IPC round
+trip) rather than occasionally wrong.
+
+**Confirmed visible in a running app, then fixed in PR10-1c** -- hand
+testing showed exactly this: "Page could not be found" flashed before the
+new assignment's detail screen replaced it. Fixed without an await and
+without a timeout: `useResolvedAssignmentSelection` (`useRouteResolution.ts`)
+now checks whether the assignment's own card's folder is currently being
+refreshed (`refreshingId === card.sourceFolderId`, or a refresh-all is in
+flight) before concluding "not found." A missing assignment in a folder
+that is mid-refresh now resolves to `loading` (rendering `RouteLoading`)
+instead of `not_found` (rendering `RouteNotFound`), so the screen goes
+straight from "loading" to the real assignment once the refresh lands, with
+no error flash in between. `useResolvedCourseFolder` (the roster route's
+resolver) was deliberately left unchanged: no current navigation path
+reaches it before its folder has already loaded, so there is no live case
+for it to fix. Regression test in `App.test.tsx` drives a controlled,
+manually-resolved refresh promise to observe the loading state directly;
+confirmed it fails (shows `RouteNotFound`) without the fix.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 2, 3, 4, 6, 7, and 9 are resolved and no longer part of this
+Items 1, 2, 3, 4, 6, 7, 9, and 29 are resolved and no longer part of this
 sequence.
 
-Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, and 25
-can wait until after the redesign.
+Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+26, 27, and 28 can wait until after the redesign.

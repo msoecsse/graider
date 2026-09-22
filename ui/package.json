@@ -25,6 +25,7 @@
     "monaco-editor": "^0.52.2",
     "react": "latest",
     "react-dom": "latest",
+    "react-router-dom": "^6.30.6",
     "yaml": "^2.9.0"
   },
   "devDependencies": {

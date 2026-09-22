@@ -720,28 +720,16 @@ const ConfirmationPanel = ({
  * was never part of the stacking defect README section 5.4 describes.
  */
 const PostApplyActionsPanel = ({
-  onBack,
-  onRefreshAssignmentDetail,
-  onBackToDashboard
+  onRefreshAssignmentDetail
 }: {
-  readonly onBack: () => void;
   readonly onRefreshAssignmentDetail?: () => void;
-  readonly onBackToDashboard?: () => void;
 }): ReactElement => (
   <section className="detail-panel apply-preview-final-action" aria-labelledby="post-apply-title">
     <h2 id="post-apply-title">Post-apply actions</h2>
     <div className="apply-confirmation-actions">
-      <button className="secondary-action" type="button" onClick={onBack}>
-        Back to assignment detail
-      </button>
       {onRefreshAssignmentDetail === undefined ? null : (
         <button className="primary-action" type="button" onClick={onRefreshAssignmentDetail}>
           Refresh assignment detail
-        </button>
-      )}
-      {onBackToDashboard === undefined ? null : (
-        <button className="secondary-action" type="button" onClick={onBackToDashboard}>
-          Back to dashboard
         </button>
       )}
     </div>
@@ -751,9 +739,7 @@ const PostApplyActionsPanel = ({
 export const ApplyPreviewPage = ({
   selection,
   assignmentDetail,
-  onBack,
-  onRefreshAssignmentDetail,
-  onBackToDashboard
+  onRefreshAssignmentDetail
 }: ApplyPreviewPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<ApplyPreviewLoadResult | null>(null);
   const [applyResult, setApplyResult] = useState<ApplyExecutionLoadResult | null>(null);
@@ -945,9 +931,6 @@ export const ApplyPreviewPage = ({
             <p className="assignment-detail__subtitle">{getCourseTermSubtitle(preview)}</p>
           </div>
           <div className="assignment-detail__header-actions">
-            <button className="secondary-action" type="button" onClick={onBack}>
-              Back to assignment
-            </button>
             <button
               className="primary-action"
               type="button"
@@ -1053,11 +1036,9 @@ export const ApplyPreviewPage = ({
                 />
               ) : (
                 <PostApplyActionsPanel
-                  onBack={onBack}
                   {...(onRefreshAssignmentDetail === undefined
                     ? {}
                     : { onRefreshAssignmentDetail })}
-                  {...(onBackToDashboard === undefined ? {} : { onBackToDashboard })}
                 />
               )}
             </div>

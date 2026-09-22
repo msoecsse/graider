@@ -177,11 +177,29 @@ export const AssignmentSetupPage = ({
     setMessage(null);
     try {
       const nextPreview = await previewAssignmentSetup(request);
+      // Boundary check, not a silent guard: `files` is typed as required, but
+      // the main process has returned a differently-shaped result on at
+      // least one path before (PR10-1a). Surfacing a plain-language error
+      // here is the alternative to trusting an IPC response that could, in
+      // principle, violate its own declared shape again.
+      if (!Array.isArray(nextPreview.files)) {
+        setMessage("Assignment setup preview returned an unexpected response. Try again.");
+        return;
+      }
       setPreview(nextPreview);
       if (nextPreview.status === "ready") setIsConfirming(true);
       else setMessage(nextPreview.diagnostics.map((item) => item.message).join(" "));
-    } catch {
-      setMessage("Unable to prepare the assignment setup preview.");
+    } catch (error) {
+      // Unlike handleSave, nothing inside this try intentionally throws a
+      // diagnostic-carrying error to discard -- the diagnostics path above
+      // uses setMessage directly. This catch only ever sees a genuine,
+      // unexpected failure to reach the main process, so it still preserves
+      // that error's own message when one exists (PR10-1b).
+      setMessage(
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Unable to prepare the assignment setup preview."
+      );
     } finally {
       setIsLoading(false);
     }
@@ -197,32 +215,51 @@ export const AssignmentSetupPage = ({
     }
     setIsLoading(true);
     setMessage(null);
+
+    // Narrowed to the IPC call alone (PR10-1b): no catch here, so a genuine
+    // failure to even reach the main process propagates with its own real
+    // message instead of being replaced by a generic one below.
+    let result: Awaited<ReturnType<typeof saveAssignmentSetup>>;
     try {
-      const result = await saveAssignmentSetup({ ...request, confirmed: true, replaceExisting });
-      if (result.status === "success") {
-        const assignmentFile = result.writtenFiles[0];
-        if (assignmentFile === undefined) {
-          throw new Error("Assignment configuration was saved without a file path.");
-        }
-        onOpenAssignment({
-          courseFolderId: courseFolder.id,
-          courseFolderPath: courseFolder.path,
-          assignmentFile,
-          assignmentTitle: assignmentTitle.trim() || null,
-          assignmentSlug: assignmentSlug.trim() || null,
-          assignmentStatus: "active",
-          courseTitle: null,
-          courseSlug: null,
-          termTitle: null,
-          termSlug: termCode.trim() || null
-        });
-      } else {
-        throw new Error(result.diagnostics.map((item) => item.message).join(" "));
-      }
-    } catch {
-      throw new Error("Unable to save assignment.yml.");
+      result = await saveAssignmentSetup({ ...request, confirmed: true, replaceExisting });
     } finally {
       setIsLoading(false);
+    }
+
+    if (result.status !== "success") {
+      const reason = result.diagnostics.map((item) => item.message).join(" ");
+      throw new Error(
+        reason.length > 0 ? reason : "Assignment setup failed, and no reason was reported."
+      );
+    }
+
+    const assignmentFile = result.writtenFiles[0];
+    if (assignmentFile === undefined) {
+      throw new Error("Assignment configuration was saved without a file path.");
+    }
+
+    // The save already succeeded at this point -- a failure here is a
+    // navigation problem, not a save problem, and must not be reported as
+    // one (README section 2.5; PR10-1b).
+    try {
+      onOpenAssignment({
+        courseFolderId: courseFolder.id,
+        courseFolderPath: courseFolder.path,
+        assignmentFile,
+        assignmentTitle: assignmentTitle.trim() || null,
+        assignmentSlug: assignmentSlug.trim() || null,
+        assignmentStatus: "active",
+        courseTitle: null,
+        courseSlug: null,
+        termTitle: null,
+        termSlug: termCode.trim() || null
+      });
+    } catch (error) {
+      throw new Error(
+        `The assignment was saved, but opening it failed: ${
+          error instanceof Error ? error.message : "an unknown error occurred"
+        }`
+      );
     }
   };
 

@@ -537,11 +537,9 @@ const sourceTargetLabel = (location: CanonicalSourceRange): string =>
     : `${location.file}: ${location.startLine}-${location.endLine}`;
 
 export const GradingWorkspacePage = ({
-  request,
-  onBack
+  request
 }: {
   request: GradingWorkspacePrepareRequest;
-  onBack: () => void;
 }): ReactElement => {
   const [result, setResult] = useState<PreparationResult | null>(null);
   const [selected, setSelected] = useState(0);
@@ -2580,9 +2578,6 @@ export const GradingWorkspacePage = ({
     };
     return (
       <main className="dashboard-shell">
-        <button className="secondary-action" type="button" onClick={onBack}>
-          Back
-        </button>
         <p>{message[result.status] ?? "Grading workspace could not be prepared."}</p>
       </main>
     );
@@ -2623,9 +2618,6 @@ export const GradingWorkspacePage = ({
       : ((gradedOrPublishedCount - publishedCount) / allStudentsCount) * 100;
   const header = (
     <header className="grading-workspace__header">
-      <button className="secondary-action" type="button" onClick={onBack}>
-        Back
-      </button>
       <div className="grading-workspace__header-titles">
         <h1>{result.assignment.title}</h1>
         <p>

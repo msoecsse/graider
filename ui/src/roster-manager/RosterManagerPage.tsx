@@ -53,11 +53,9 @@ const parseUploadedRoster = (content: string, sectionId: string): RosterRow[] | 
 
 export const RosterManagerPage = ({
   courseFolder,
-  onBack,
   onSaved
 }: {
   readonly courseFolder: CourseFolderRecord;
-  readonly onBack: () => void;
   readonly onSaved: () => void;
 }): ReactElement => {
   const [terms, setTerms] = useState<readonly AssignmentSetupTerm[]>([]);
@@ -339,9 +337,6 @@ export const RosterManagerPage = ({
             <h1 id="roster-manager-title">Manage rosters</h1>
             <p className="assignment-detail__subtitle">{courseFolder.path}</p>
           </div>
-          <button className="secondary-action" type="button" onClick={onBack}>
-            Back to dashboard
-          </button>
         </div>
       </header>
       <section className="dashboard-content roster-manager" aria-label="Roster manager">

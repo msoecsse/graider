@@ -397,8 +397,8 @@ const mockClipboard = (writeText: ReturnType<typeof vi.fn>): void => {
   });
 };
 
-const renderApplyPreviewPage = (onBack = vi.fn()) =>
-  render(<ApplyPreviewPage selection={SELECTION} assignmentDetail={null} onBack={onBack} />);
+const renderApplyPreviewPage = () =>
+  render(<ApplyPreviewPage selection={SELECTION} assignmentDetail={null} />);
 
 describe("ApplyPreviewPage", () => {
   it("auto-loads and renders preview context, panels, rows, diagnostics, and disabled apply for blockers", async () => {
@@ -745,9 +745,7 @@ describe("ApplyPreviewPage", () => {
   });
 
   it("renders success result summary, completed rows, and post-apply actions", async () => {
-    const onBack = vi.fn();
     const onRefreshAssignmentDetail = vi.fn();
-    const onBackToDashboard = vi.fn();
 
     mockGraiderUI({
       getAssignmentApplyPreview: vi
@@ -759,9 +757,7 @@ describe("ApplyPreviewPage", () => {
       <ApplyPreviewPage
         selection={SELECTION}
         assignmentDetail={null}
-        onBack={onBack}
         onRefreshAssignmentDetail={onRefreshAssignmentDetail}
-        onBackToDashboard={onBackToDashboard}
       />
     );
 
@@ -790,10 +786,6 @@ describe("ApplyPreviewPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
     expect(onRefreshAssignmentDetail).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Back to dashboard" }));
-    expect(onBackToDashboard).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Back to assignment detail" }));
-    expect(onBack).toHaveBeenCalledTimes(1);
   });
 
   it("shows the diagnostics region only once there is something to say, and switches to the result's diagnostics", async () => {
@@ -1130,18 +1122,5 @@ describe("ApplyPreviewPage", () => {
       expect(writeText).toHaveBeenCalledWith("graider-sandbox/csc1120L2Template");
     });
     expect(await screen.findByText("Copied")).toBeInTheDocument();
-  });
-
-  it("Back to assignment calls the provided navigation callback", async () => {
-    const onBack = vi.fn();
-
-    mockGraiderUI({
-      getAssignmentApplyPreview: vi.fn().mockResolvedValue(createApplyPreviewResult())
-    });
-    renderApplyPreviewPage(onBack);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Back to assignment" }));
-
-    expect(onBack).toHaveBeenCalledTimes(1);
   });
 });

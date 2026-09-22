@@ -266,7 +266,7 @@ describe("GradingWorkspacePage source viewer", () => {
     const loadGradingStudentSource = vi.fn().mockResolvedValue(source("ada"));
     setApis(vi.fn().mockResolvedValue(workspace()), loadGradingStudentSource);
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("ada:class ada {}");
     expect(loadGradingStudentSource).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
@@ -297,7 +297,7 @@ describe("GradingWorkspacePage source viewer", () => {
       loadGradingStudentViewState
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent(JSON.stringify(persisted));
     expect(loadGradingStudentViewState).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
@@ -318,7 +318,7 @@ describe("GradingWorkspacePage source viewer", () => {
     );
     setApis(vi.fn().mockResolvedValue(workspace()), loadGradingStudentSource);
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(loadGradingStudentSource).toHaveBeenCalledTimes(2));
@@ -354,7 +354,7 @@ describe("GradingWorkspacePage source viewer", () => {
       loadView
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await waitFor(() => expect(loadView).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" }));
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
@@ -402,7 +402,7 @@ describe("GradingWorkspacePage source viewer", () => {
       undefined,
       saveView
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     vi.useFakeTimers();
 
@@ -439,7 +439,7 @@ describe("GradingWorkspacePage source viewer", () => {
       undefined,
       saveView
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
@@ -484,7 +484,7 @@ describe("GradingWorkspacePage source viewer", () => {
       loadView,
       saveView
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.click(screen.getByRole("button", { name: "Move ada latest" }));
@@ -508,7 +508,7 @@ describe("GradingWorkspacePage source viewer", () => {
       undefined,
       saveView
     );
-    const rendered = render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    const rendered = render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
@@ -526,7 +526,7 @@ describe("GradingWorkspacePage source viewer", () => {
       vi.fn().mockResolvedValue({ status: "submission_changed", studentId: "ada" }),
       saveView
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The local submission changed after grading state was created"
@@ -545,7 +545,7 @@ describe("GradingWorkspacePage source viewer", () => {
       undefined,
       saveView
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
@@ -565,7 +565,7 @@ describe("GradingWorkspacePage source viewer", () => {
       undefined,
       saveView
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
@@ -588,7 +588,7 @@ describe("GradingWorkspacePage source viewer", () => {
       .mockResolvedValueOnce(source("grace"));
     setApis(vi.fn().mockResolvedValue(workspace()), loadGradingStudentSource);
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(
       await screen.findByText(/Download this student's repository through Graider/u)
@@ -605,7 +605,7 @@ describe("GradingWorkspacePage source viewer", () => {
       loadGradingStudentSource
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(
       await screen.findByText("Configure your local faculty MSOE username before grading.")
@@ -626,7 +626,7 @@ describe("GradingWorkspacePage source viewer", () => {
       })
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     expect(await screen.findByText("No required files are configured.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -646,7 +646,7 @@ describe("GradingWorkspacePage source viewer", () => {
       })
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent(
       "src/First.java-missing,src/Second.java-missing"
     );
@@ -689,7 +689,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       loadSnapshot
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByText("73.25 / 100")).toBeInTheDocument();
     expect(loadSnapshot).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
@@ -718,7 +718,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       vi.fn().mockResolvedValue(snapshot("ada", gradingStatus))
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(
       await screen.findByText(expected, { selector: ".grading-student-snapshot strong" })
@@ -736,7 +736,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
         vi.fn().mockResolvedValue(snapshot("ada", gradingStatus))
       );
 
-      render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+      render(<GradingWorkspacePage request={REQUEST} />);
 
       expect(await screen.findByRole("button", { name: "Mark Complete" })).toBeEnabled();
     }
@@ -754,7 +754,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       vi.fn().mockResolvedValue(snapshot("ada", gradingStatus))
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     await screen.findByText(label, {
       selector: ".grading-student-snapshot strong"
@@ -809,7 +809,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       markComplete
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Mark Complete" }));
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Mark ada grading complete?");
     fireEvent.click(screen.getByRole("button", { name: "Cancel marking complete" }));
@@ -880,7 +880,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       undefined,
       markComplete
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
     fireEvent.click(screen.getByRole("button", { name: "Mark Complete" }));
@@ -928,7 +928,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       undefined,
       markComplete
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Mark Complete" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm Mark Complete" }));
 
@@ -964,7 +964,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       undefined,
       markComplete
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Mark Complete" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm Mark Complete" }));
     await waitFor(() =>
@@ -992,7 +992,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       vi.fn().mockResolvedValue(snapshot("ada"))
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(
       await screen.findByText("Not Started", { selector: ".grading-student-snapshot strong" })
@@ -1030,7 +1030,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
           manualAdjustmentTotal: 0
         }
       ] as unknown as ReturnType<typeof snapshot>["grade"]["categories"];
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(loadSnapshot).toHaveBeenCalledTimes(2));
@@ -1101,7 +1101,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       vi.fn().mockResolvedValue(loaded)
     );
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByText("General feedback")).toBeInTheDocument();
     expect(screen.getByText("Source: src/Main.java, line 7")).toBeInTheDocument();
@@ -1123,7 +1123,7 @@ describe("GradingWorkspacePage grading snapshot", () => {
       undefined,
       loadSnapshot
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByText(snapshotSubmissionChangedText)).toBeInTheDocument();
     await showAllStudents();
@@ -1168,7 +1168,7 @@ describe("GradingWorkspacePage comment library", () => {
       undefined,
       vi.fn().mockResolvedValue({ status: "success", comments })
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     const library = await screen.findByRole("list", { name: "Reusable comments" });
     expect(
       within(library)
@@ -1208,7 +1208,7 @@ describe("GradingWorkspacePage comment library", () => {
       vi.fn().mockResolvedValue(snapshot("ada")),
       loadLibrary
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByText("No rubric — enter a score manually")).toBeInTheDocument();
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("ada:");
@@ -1242,7 +1242,7 @@ describe("GradingWorkspacePage comment library", () => {
         ]
       })
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByText("One");
     fireEvent.change(screen.getByRole("searchbox", { name: "Search comments" }), {
       target: { value: "feedback" }
@@ -1327,7 +1327,7 @@ describe("GradingWorkspacePage comment application", () => {
       undefined,
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     expect(screen.getByRole("button", { name: "Add Comment" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
@@ -1369,7 +1369,7 @@ describe("GradingWorkspacePage comment application", () => {
       undefined,
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Select ada range" }));
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
@@ -1402,7 +1402,7 @@ describe("GradingWorkspacePage comment application", () => {
       vi.fn().mockResolvedValue({ status: "success", comments: [reusableComment] }),
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByText("Loop clarity");
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Select ada range" }));
@@ -1489,7 +1489,7 @@ describe("GradingWorkspacePage comment application", () => {
       vi.fn().mockResolvedValue({ status: "success", comments: [invalidDefault] }),
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
 
@@ -1525,7 +1525,7 @@ describe("GradingWorkspacePage comment application", () => {
       vi.fn().mockResolvedValue({ status: "success", comments: [reusableComment] }),
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
@@ -1547,7 +1547,7 @@ describe("GradingWorkspacePage comment application", () => {
       vi.fn().mockResolvedValue({ status: "success", comments: [reusableComment] }),
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByText("Loop clarity");
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
@@ -1574,7 +1574,7 @@ describe("GradingWorkspacePage comment application", () => {
       vi.fn().mockResolvedValue({ status: "success", comments: [reusableComment] }),
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
@@ -1627,7 +1627,7 @@ describe("GradingWorkspacePage comment application", () => {
       vi.fn().mockResolvedValue({ status: "success", comments: [reusableComment] }),
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByText("Loop clarity");
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
@@ -1702,7 +1702,7 @@ describe("GradingWorkspacePage comment application", () => {
       vi.fn().mockResolvedValue({ status: "success", comments: [reusableComment] }),
       vi.fn(() => add.promise)
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
@@ -1746,7 +1746,7 @@ describe("GradingWorkspacePage comment application", () => {
       vi.fn().mockResolvedValue({ status: "success", comments: [reusableComment] }),
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("different local submission");
@@ -1783,7 +1783,7 @@ describe("GradingWorkspacePage comment application", () => {
       undefined,
       loadSnapshot
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByTestId("mock-annotations")).toHaveTextContent(
       "Persisted source feedback"
@@ -1857,7 +1857,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       undefined,
       addComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(4);
     fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
@@ -1926,7 +1926,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       undefined,
       editComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
@@ -2007,7 +2007,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       undefined,
       editComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     expect(screen.getByText("Source target: src/Main.java: 7")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Use current selection" })).toBeDisabled();
@@ -2061,7 +2061,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       undefined,
       editComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
@@ -2114,7 +2114,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       undefined,
       deleteComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Delete comment: Original feedback" })
@@ -2162,7 +2162,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       editComment,
       deleteComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
       target: { value: "Local fake" }
@@ -2231,7 +2231,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       undefined,
       deleteComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Move ada once" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete comment: Original feedback" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm deleting comment" }));
@@ -2286,7 +2286,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       undefined,
       editComment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
     await waitFor(() => expect(editComment).toHaveBeenCalledTimes(1));
@@ -2398,7 +2398,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
       undefined,
       addAdjustment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
@@ -2464,7 +2464,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
       editAdjustment,
       deleteAdjustment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit adjustment: quality" }));
     expect(screen.getByRole("combobox", { name: "Adjustment rubric category" })).toHaveValue(
@@ -2522,7 +2522,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
       undefined,
       vi.fn().mockResolvedValue(snapshot("ada"))
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByRole("button", { name: "Add adjustment" })).toBeDisabled();
     expect(screen.getByText("Manual adjustments require a rubric category.")).toBeInTheDocument();
@@ -2551,7 +2551,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
         ]
       })
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByText("Adjustment: -0.25")).toBeInTheDocument();
     expect(screen.getByTestId("mock-annotations")).toHaveTextContent("Keep this annotation");
@@ -2594,7 +2594,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
       editAdjustment,
       deleteAdjustment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit adjustment: quality" }));
     fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
@@ -2649,7 +2649,7 @@ describe("GradingWorkspacePage manual adjustments", () => {
       undefined,
       addAdjustment
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Add adjustment" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Adjustment rubric category" }), {
@@ -2692,7 +2692,7 @@ describe("GradingWorkspacePage grading progress and filters", () => {
       ),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByText("2 of 4 graded · 1 published")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "To grade 2" })).toBeInTheDocument();
@@ -2710,7 +2710,7 @@ describe("GradingWorkspacePage grading progress and filters", () => {
       vi.fn().mockResolvedValue(workspace()),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:");
 
@@ -2725,7 +2725,7 @@ describe("GradingWorkspacePage grading progress and filters", () => {
       vi.fn().mockResolvedValue(workspace()),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Published 0" }));
     expect(screen.getByText("No reports have been published yet.")).toBeInTheDocument();
@@ -2742,7 +2742,7 @@ describe("GradingWorkspacePage grading progress and filters", () => {
       ),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:");
 
@@ -2764,7 +2764,7 @@ describe("GradingWorkspacePage grading progress and filters", () => {
       ),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByRole("button", { name: "Next ungraded" })).toBeDisabled();
     expect(screen.getByText("No other students need grading.")).toBeInTheDocument();
@@ -2775,7 +2775,7 @@ describe("GradingWorkspacePage grading progress and filters", () => {
       vi.fn().mockResolvedValue(workspace()),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
@@ -2792,7 +2792,7 @@ describe("GradingWorkspacePage grading progress and filters", () => {
       vi.fn().mockResolvedValue(workspace()),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     expect(screen.getByRole("button", { name: "Previous" })).toHaveClass("secondary-action");
@@ -2824,7 +2824,7 @@ describe("GradingWorkspacePage grading progress and filters", () => {
         Promise.resolve(snapshot(studentId, studentId === "grace" ? "published" : "not_started"))
       )
     );
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));

@@ -154,7 +154,6 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
 const renderFacultyReportPage = (
   callbacks: {
     readonly onBackToGradeStatus?: () => void;
-    readonly onBackToAssignmentDetail?: () => void;
   } = {}
 ) =>
   render(
@@ -163,7 +162,6 @@ const renderFacultyReportPage = (
       assignmentDetail={null}
       gradeStatus={null}
       onBackToGradeStatus={callbacks.onBackToGradeStatus ?? vi.fn()}
-      onBackToAssignmentDetail={callbacks.onBackToAssignmentDetail ?? vi.fn()}
     />
   );
 
@@ -316,17 +314,14 @@ describe("FacultyReportPage", () => {
     expect(screen.queryByText("ghp_secret_token")).not.toBeInTheDocument();
   });
 
-  it("navigates back to grade status and assignment detail", async () => {
+  it("navigates back to grade status", async () => {
     const onBackToGradeStatus = vi.fn();
-    const onBackToAssignmentDetail = vi.fn();
 
     mockGraiderUI({});
-    renderFacultyReportPage({ onBackToGradeStatus, onBackToAssignmentDetail });
+    renderFacultyReportPage({ onBackToGradeStatus });
 
     fireEvent.click(await screen.findByRole("button", { name: "Back to grading status" }));
-    fireEvent.click(screen.getByRole("button", { name: "Back to assignment detail" }));
 
     expect(onBackToGradeStatus).toHaveBeenCalledTimes(1);
-    expect(onBackToAssignmentDetail).toHaveBeenCalledTimes(1);
   });
 });

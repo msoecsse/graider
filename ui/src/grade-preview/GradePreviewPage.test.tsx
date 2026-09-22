@@ -262,8 +262,8 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   return graiderUI as unknown as GraiderUIApi;
 };
 
-const renderGradePreviewPage = (onBack = vi.fn()) =>
-  render(<GradePreviewPage selection={SELECTION} assignmentDetail={null} onBack={onBack} />);
+const renderGradePreviewPage = () =>
+  render(<GradePreviewPage selection={SELECTION} assignmentDetail={null} />);
 
 describe("GradePreviewPage", () => {
   it("auto-loads grade preview and renders target, grading, workflow, summary, and rows", async () => {
@@ -703,16 +703,5 @@ describe("GradePreviewPage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/secret-token-value/u)).toBeNull();
     expect(screen.queryByText(/Authorization/u)).toBeNull();
-  });
-
-  it("returns to assignment detail", async () => {
-    const onBack = vi.fn();
-
-    mockGraiderUI({});
-    renderGradePreviewPage(onBack);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Back to assignment detail" }));
-
-    expect(onBack).toHaveBeenCalledTimes(1);
   });
 });

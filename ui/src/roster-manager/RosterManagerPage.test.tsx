@@ -43,7 +43,6 @@ describe("RosterManagerPage", () => {
           lastRefreshedAt: null,
           lastDashboardStatus: null
         }}
-        onBack={vi.fn()}
         onSaved={onSaved}
       />
     );
@@ -105,7 +104,6 @@ describe("RosterManagerPage", () => {
           lastRefreshedAt: null,
           lastDashboardStatus: null
         }}
-        onBack={vi.fn()}
         onSaved={vi.fn()}
       />
     );

@@ -13,7 +13,6 @@ export interface FacultyReportPageProps {
   readonly assignmentDetail: NormalizedAssignmentDetail | null;
   readonly gradeStatus: NormalizedGradeStatus | null;
   readonly onBackToGradeStatus: () => void;
-  readonly onBackToAssignmentDetail: () => void;
 }
 
 export interface FacultyReportAssignment {

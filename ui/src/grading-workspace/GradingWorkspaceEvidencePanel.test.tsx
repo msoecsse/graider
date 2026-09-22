@@ -206,7 +206,7 @@ describe("GradingWorkspacePage automated checks", () => {
       loadSnapshot: vi.fn().mockReturnValue(pendingSnapshot.promise)
     });
 
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     const panel = await screen.findByRole("region", { name: "Automated Checks" });
     expect(loadEvidence).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
@@ -241,7 +241,7 @@ describe("GradingWorkspacePage automated checks", () => {
       studentId === "ada" ? ada.promise : grace.promise
     );
     setApis({ loadEvidence });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(loadEvidence).toHaveBeenCalledTimes(2));
@@ -270,7 +270,7 @@ describe("GradingWorkspacePage automated checks", () => {
       .mockResolvedValueOnce(evidence("grace"))
       .mockReturnValueOnce(reloadedAda.promise);
     setApis({ loadEvidence });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByText("Automated checks for ada");
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
@@ -292,7 +292,7 @@ describe("GradingWorkspacePage automated checks", () => {
       .mockReturnValueOnce(staleReload.promise)
       .mockResolvedValueOnce(evidence("grace"));
     const { loadSource, loadSnapshot, mutations } = setApis({ loadEvidence });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Reload automated checks" }));
     expect(screen.getByRole("button", { name: "Reload automated checks" })).toBeDisabled();
     expect(loadEvidence).toHaveBeenCalledTimes(2);
@@ -310,7 +310,7 @@ describe("GradingWorkspacePage automated checks", () => {
 
   it("keeps evidence failures independent from ordinary source and grading", async () => {
     setApis({ loadEvidence: vi.fn().mockRejectedValue(new Error("raw private failure")) });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("Source for ada");
     expect(
@@ -329,7 +329,7 @@ describe("GradingWorkspacePage automated checks", () => {
       emptySuccessfulEvidence: true
     });
     setApis({ loadEvidence: vi.fn().mockResolvedValue(successful) });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     const panel = await screen.findByRole("region", { name: "Automated Checks" });
     expect(panel).toHaveTextContent("All reported tests passed.");
     expect(panel).toHaveTextContent("No Checkstyle violations reported.");
@@ -365,7 +365,7 @@ describe("GradingWorkspacePage automated checks", () => {
     setApis({
       loadEvidence: vi.fn().mockResolvedValue({ status: "evidence_error", studentId: "ada", code })
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     expect(
       await screen.findByText(new RegExp(message.replaceAll(".", "\\."), "u"))
     ).toBeInTheDocument();
@@ -381,7 +381,7 @@ describe("GradingWorkspacePage automated checks", () => {
     setApis({
       loadEvidence: vi.fn().mockResolvedValue({ status, studentId: "ada" })
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     expect(await screen.findByText(new RegExp(message, "u"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mark Complete" })).toBeEnabled();
   });
@@ -390,7 +390,7 @@ describe("GradingWorkspacePage automated checks", () => {
     setApis({
       loadEvidence: vi.fn().mockResolvedValue({ status: "not_applicable", studentId: "ada" })
     });
-    render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+    render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Automated Checks" })).not.toBeInTheDocument()
@@ -405,7 +405,7 @@ describe("GradingWorkspacePage automated checks", () => {
         loadEvidence: vi.fn().mockResolvedValue(evidence("ada")),
         loadSnapshot
       });
-      render(<GradingWorkspacePage request={REQUEST} onBack={vi.fn()} />);
+      render(<GradingWorkspacePage request={REQUEST} />);
       await screen.findByText("Automated checks for ada");
       expect(
         screen.getByText(
