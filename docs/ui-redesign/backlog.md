@@ -825,11 +825,29 @@ semantics, and the roster access-page partial-success path.
 
 ---
 
+## 32. Read-only source-editor focus disabled grading shortcuts — **Resolved**
+
+The workspace shortcut guard correctly suppresses real faculty typing controls,
+but it identified Monaco solely by its internal textarea target. Since the
+source viewer is read-only, that made the central evidence-review workflow
+keyboard-dead whenever source code had focus: faculty could not create a
+source-anchored comment or inspect checks, history, or another student without
+moving focus away first.
+
+Resolved: the central shortcut policy now recognizes descendants of Graider's
+read-only `.grading-source-editor` before applying the editable-control guard,
+and listens in capture phase so Monaco cannot hide the event. Workspace tests
+model Monaco's focused textarea and cover source-comment targeting, checks,
+history, navigation, reusable comments, modifier keys, and continued
+suppression in comment title/body/deduction/category fields.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 2, 3, 4, 6, 7, 9, 29, 30, and 31 are resolved and no longer part of this
+Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of this
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,

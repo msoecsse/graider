@@ -15,7 +15,8 @@ vi.mock("./MonacoSourceViewer", () => ({
       target: { file: string; startLine: number; endLine: number } | undefined
     ) => void;
   }) => (
-    <div>
+    <div className="grading-source-editor">
+      <textarea aria-label="Mock Monaco keyboard target" readOnly />
       <div data-testid="mock-monaco">Source for {studentId}</div>
       <button
         onClick={() =>
@@ -387,6 +388,118 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
     fireEvent.keyDown(window, { key: "c" });
     expect(await screen.findByRole("form", { name: "Add comment" })).toBeInTheDocument();
+  });
+
+  it("keeps shortcuts active in the read-only source editor", async () => {
+    const loadCommentLibrary = vi.fn().mockResolvedValue({
+      status: "success",
+      comments: [
+        { id: "one", title: "First comment", text: "Feedback one", defaultDeduction: -1, tags: [] }
+      ]
+    });
+    setApis({
+      loadCommentLibrary,
+      loadEvidence: vi.fn().mockResolvedValue(evidenceWithFailures("ada"))
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    const sourceKeyboardTarget = screen.getByRole("textbox", {
+      name: "Mock Monaco keyboard target"
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
+    sourceKeyboardTarget.focus();
+    fireEvent.keyDown(sourceKeyboardTarget, { key: "c" });
+    expect(await screen.findByRole("form", { name: "Add comment" })).toHaveTextContent(
+      "Source target: src/Main.java: 1"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
+    sourceKeyboardTarget.focus();
+    fireEvent.keyDown(sourceKeyboardTarget, { key: "a" });
+    expect(await screen.findByText("Automated Checks")).toBeInTheDocument();
+
+    sourceKeyboardTarget.focus();
+    fireEvent.keyDown(sourceKeyboardTarget, { key: "h" });
+    expect(await screen.findByText("Commit History")).toHaveFocus();
+
+    sourceKeyboardTarget.focus();
+    fireEvent.keyDown(sourceKeyboardTarget, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace"));
+
+    const nextSourceKeyboardTarget = screen.getByRole("textbox", {
+      name: "Mock Monaco keyboard target"
+    });
+    nextSourceKeyboardTarget.focus();
+    fireEvent.keyDown(nextSourceKeyboardTarget, { key: "k" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada"));
+  });
+
+  it("allows reusable-comment shortcuts from the read-only source editor", async () => {
+    const loadCommentLibrary = vi.fn().mockResolvedValue({
+      status: "success",
+      comments: [
+        { id: "one", title: "First comment", text: "Feedback one", defaultDeduction: -1, tags: [] }
+      ]
+    });
+    setApis({ loadCommentLibrary });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByText("First comment");
+    await screen.findByTestId("mock-monaco");
+    const sourceKeyboardTarget = screen.getByRole("textbox", {
+      name: "Mock Monaco keyboard target"
+    });
+
+    sourceKeyboardTarget.focus();
+    fireEvent.keyDown(sourceKeyboardTarget, { key: "1" });
+
+    expect(await screen.findByRole("form", { name: "Apply First comment" })).toBeInTheDocument();
+  });
+
+  it("suppresses shortcuts in comment editing controls", async () => {
+    const loadEvidence = vi.fn().mockResolvedValue(evidenceWithFailures("ada"));
+    setApis({ loadEvidence, rubric: [{ id: "quality", name: "Code Quality", points: 100 }] });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
+    fireEvent.keyDown(window, { key: "c" });
+    await screen.findByRole("form", { name: "Add comment" });
+    await waitFor(() => expect(loadEvidence).toHaveBeenCalledTimes(1));
+
+    const title = screen.getByRole("textbox", { name: "Title" });
+    const comment = screen.getByRole("textbox", { name: "Comment" });
+    const deduction = screen.getByRole("spinbutton", { name: "Deduction" });
+    const category = screen.getByRole("combobox", { name: "Comment rubric category" });
+    fireEvent.change(title, { target: { value: "j" } });
+    fireEvent.keyDown(title, { key: "j" });
+    fireEvent.change(comment, { target: { value: "Needs a clearer justification" } });
+    fireEvent.keyDown(comment, { key: "a" });
+    fireEvent.change(deduction, { target: { value: "1" } });
+    fireEvent.keyDown(deduction, { key: "p" });
+    fireEvent.keyDown(category, { key: "1" });
+
+    expect(title).toHaveValue("j");
+    expect(comment).toHaveValue("Needs a clearer justification");
+    expect(deduction).toHaveValue(1);
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada");
+    expect(loadEvidence).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("heading", { name: "Publish review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Apply First comment" })).not.toBeInTheDocument();
+  });
+
+  it("does not consume modifier shortcuts from the source editor", async () => {
+    setApis({});
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
+    const sourceKeyboardTarget = screen.getByRole("textbox", {
+      name: "Mock Monaco keyboard target"
+    });
+
+    const event = fireEvent.keyDown(sourceKeyboardTarget, { key: "c", ctrlKey: true });
+
+    expect(event).toBe(true);
+    expect(screen.queryByRole("form", { name: "Add comment" })).not.toBeInTheDocument();
   });
 
   it("M opens the add-adjustment editor when a rubric is configured", async () => {

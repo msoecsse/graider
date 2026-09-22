@@ -385,8 +385,11 @@ is keyboard-only.
 
 Show `⌘` on macOS and `Ctrl` on Windows; detect, do not hardcode.
 
-Shortcuts must be disabled while focus is in a text input, and the cheat sheet
-is a modal listing them grouped as Move / Read / Grade / Finish.
+Shortcuts must be disabled while faculty are typing in genuine editable controls
+(comments, adjustments, searches, and other form data). They remain active in
+the read-only source editor, even though Monaco uses an internal textarea for
+keyboard focus. The cheat sheet is a modal listing them grouped as Move / Read /
+Grade / Finish.
 
 ### 5.2 Publish review
 

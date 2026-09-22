@@ -443,6 +443,18 @@ const sourceTargetLabel = (location: CanonicalSourceRange): string =>
     ? `${location.file}: ${location.startLine}`
     : `${location.file}: ${location.startLine}-${location.endLine}`;
 
+const isGradingShortcutSuppressedTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof Element)) return false;
+  if (target.closest(".grading-source-editor") !== null) return false;
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+};
+
 export const GradingWorkspacePage = ({
   request
 }: {
@@ -2399,14 +2411,9 @@ export const GradingWorkspacePage = ({
   };
 
   useEffect(() => {
-    const isTypingElement = (target: EventTarget | null): boolean => {
-      if (!(target instanceof HTMLElement)) return false;
-      const tag = target.tagName;
-      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
-    };
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
-      if (isTypingElement(event.target)) return;
+      if (isGradingShortcutSuppressedTarget(event.target)) return;
       const key = event.key;
       if (publishReviewOpen) {
         if (key === "Escape") {
@@ -2481,8 +2488,8 @@ export const GradingWorkspacePage = ({
     };
     // Re-registered every render (cheap: one listener, infrequent event) so the
     // handler always closes over the latest state instead of a stale render's.
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   });
 
   if (result === null)
