@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   CombinedDashboardResult,
@@ -178,12 +178,19 @@ describe("AssignmentDetailRoute", () => {
     mockGraiderUI({ getAssignmentDetail });
     renderAtRoute(`/course/csc1120/27s1/lab02`);
 
+    // The heading renders from the route-resolved selection alone
+    // (selection.assignmentTitle), available before getAssignmentDetail's
+    // own effect has necessarily run -- so its arrival is not proof the
+    // call has already happened; wait for the call itself, not just the
+    // heading, to avoid a race under full-suite contention.
     await screen.findByRole("heading", { level: 1, name: "Lab 02" });
-    expect(getAssignmentDetail).toHaveBeenCalledWith({
-      courseFolderId: COURSE_FOLDER.id,
-      courseFolderPath: COURSE_FOLDER.path,
-      assignmentFile: ASSIGNMENT_FILE
-    });
+    await waitFor(() =>
+      expect(getAssignmentDetail).toHaveBeenCalledWith({
+        courseFolderId: COURSE_FOLDER.id,
+        courseFolderPath: COURSE_FOLDER.path,
+        assignmentFile: ASSIGNMENT_FILE
+      })
+    );
   });
 
   it("navigates to assignment edit and back", async () => {
