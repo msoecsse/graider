@@ -806,11 +806,30 @@ keyboard, list-pane, and control tests cover the regression.
 
 ---
 
+## 31. Assignment and roster mutations stayed local until manually published — **Resolved**
+
+Graider had a safe course publishing service, but assignment create, edit,
+delete, group settings, and roster/section mutations only wrote to the local
+course repository. The rendered dashboard could therefore report pending
+managed changes until a faculty member noticed and used Publish Course Changes.
+The allowlist also omitted an assignment's `groups.csv`, so group configuration
+could not be included even by the existing publication path.
+
+Resolved: successful local assignment and roster/section mutations now run the
+existing safe publisher after their local and Student Repository access-page
+work completes. Publication failures preserve the durable local change and
+return an explicit saved-locally warning; manual Publish Course Changes remains
+the retry path. The allowed managed paths now include assignment `groups.csv`,
+and regression tests cover groups files, tracked deletions, safe failure
+semantics, and the roster access-page partial-success path.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 2, 3, 4, 6, 7, 9, 29, and 30 are resolved and no longer part of this
+Items 1, 2, 3, 4, 6, 7, 9, 29, 30, and 31 are resolved and no longer part of this
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,

@@ -219,7 +219,11 @@ export const RosterManagerPage = ({
     try {
       const result = await saveRoster({ ...request, confirmed: true });
       if (result.status === "success") {
-        setMessage(`Saved ${result.path}`);
+        setMessage(
+          result.publication?.status === "failure"
+            ? result.diagnostics.map((item) => item.message).join(" ")
+            : `Saved ${result.path}`
+        );
         setIsExisting(true);
         if (isCreatingSection) {
           setTerms((current) =>
@@ -270,7 +274,11 @@ export const RosterManagerPage = ({
         clearPreview();
         setIsConfirmingRosterRemoval(false);
         setRosterRemovalWord("");
-        setMessage(`Removed ${result.path}`);
+        setMessage(
+          result.publication?.status === "failure"
+            ? result.diagnostics.map((item) => item.message).join(" ")
+            : `Removed ${result.path}`
+        );
         onSaved();
       } else {
         setMessage(result.diagnostics.map((item) => item.message).join(" "));
@@ -311,7 +319,11 @@ export const RosterManagerPage = ({
         clearPreview();
         setIsConfirmingSectionRemoval(false);
         setSectionRemovalWord("");
-        setMessage(`Removed section ${sectionId}`);
+        setMessage(
+          result.publication?.status === "failure"
+            ? result.diagnostics.map((item) => item.message).join(" ")
+            : `Removed section ${sectionId}`
+        );
         onSaved();
       } else {
         setMessage(result.diagnostics.map((item) => item.message).join(" "));

@@ -62,6 +62,7 @@ export const AssignmentEditPage = ({
   const [requiredFiles, setRequiredFiles] = useState<readonly RequiredFileDraft[]>([]);
   const [rubric, setRubric] = useState<readonly RubricDraft[]>([]);
   const draftKeyCounter = useRef(0);
+  const publicationWarningRef = useRef<string | null>(null);
   useEffect(() => {
     const load = window.graiderUI.getAssignmentForEdit;
     if (load === undefined) {
@@ -173,10 +174,19 @@ export const AssignmentEditPage = ({
       throw new Error("Assignment editing is unavailable in this app build.");
     }
     setLoading(true);
+    publicationWarningRef.current = null;
     try {
       const result = await window.graiderUI.saveAssignmentEdit({ ...request, confirmed: true });
-      if (result.status === "success") onSaved();
-      else throw new Error(result.diagnostics.map((item) => item.message).join(" "));
+      if (result.status !== "success") {
+        throw new Error(result.diagnostics.map((item) => item.message).join(" "));
+      }
+      if (result.publication?.status === "failure") {
+        const warning = result.diagnostics.map((item) => item.message).join(" ");
+        publicationWarningRef.current = warning;
+        setMessage(warning);
+      } else {
+        onSaved();
+      }
     } finally {
       setLoading(false);
     }
@@ -602,7 +612,7 @@ export const AssignmentEditPage = ({
         onConfirm={save}
         onSuccess={(successMessage) => {
           setIsConfirming(false);
-          showToast(successMessage);
+          showToast(publicationWarningRef.current ?? successMessage);
         }}
         preview={preview === null ? undefined : <pre>{preview.content}</pre>}
         summary={`${title.trim() || "This assignment"} will be updated.`}

@@ -82,6 +82,11 @@ Data refreshes automatically on navigation. Manual refresh is an icon button
 paired with a quiet "Updated 2 minutes ago" timestamp. It is never a prominent
 labelled button, and never appears more than once per screen.
 
+Graider-managed assignment and roster changes publish automatically after they
+are saved locally. Publishing stages only Graider-managed course files; it does
+not include unrelated local work. If publication fails, the local mutation
+remains saved and the UI explains that **Publish Course Changes** can retry it.
+
 ### 2.3 Plain language
 
 Faculty are the users; the file format is an implementation detail.

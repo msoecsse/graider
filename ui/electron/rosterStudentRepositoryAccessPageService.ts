@@ -120,7 +120,7 @@ const withStudentRepositoryPageRefresh = async <T extends RosterMutationResult>(
     ? result
     : {
         ...result,
-        status: "failure",
+        status: "success",
         diagnostics: [
           ...result.diagnostics,
           diagnostic(

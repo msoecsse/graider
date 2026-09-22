@@ -75,6 +75,7 @@ import { registerAssignmentTemplateSyncIpc } from "./assignmentTemplateSyncIpc.j
 import { assignmentTemplateSyncService } from "./assignmentTemplateSyncService.js";
 import { saveStudentAccessPagesConfig } from "./studentAccessPagesConfigService.js";
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService.js";
+import { publishSuccessfulCourseMutation } from "./courseMutationPublicationService.js";
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import { getFacultyReport } from "./facultyReportRunner.js";
 import { previewCourseSetup, saveCourseSetup } from "./courseSetupService.js";
@@ -667,7 +668,11 @@ export const registerIpcHandlers = (): void => {
     // repository value must be in owner/repo form..." for every save of an
     // assignment with no template -- a real, misleading save failure for the
     // single most common case (PR10-1b).
-    if (request.templateRepository.trim() === "") return saveAssignmentSetup(request);
+    if (request.templateRepository.trim() === "")
+      return await publishSuccessfulCourseMutation(
+        request.courseFolderPath,
+        saveAssignmentSetup(request)
+      );
     const validation = await validateTemplateRepository(
       request.templateRepository,
       request.templateBranch,
@@ -675,11 +680,14 @@ export const registerIpcHandlers = (): void => {
     );
     if (!validation.valid)
       return { status: "failure" as const, writtenFiles: [], diagnostics: validation.diagnostics };
-    return saveAssignmentSetup({
-      ...request,
-      templateRepository: validation.repository ?? request.templateRepository,
-      templateBranch: validation.branch ?? request.templateBranch
-    });
+    return await publishSuccessfulCourseMutation(
+      request.courseFolderPath,
+      saveAssignmentSetup({
+        ...request,
+        templateRepository: validation.repository ?? request.templateRepository,
+        templateBranch: validation.branch ?? request.templateBranch
+      })
+    );
   });
   ipcMain.handle(IPC_CHANNELS.getAssignmentForEdit, (_event, request: unknown) => {
     if (
@@ -744,28 +752,40 @@ export const registerIpcHandlers = (): void => {
           path: request.assignmentFile,
           diagnostics: validation.diagnostics
         };
-      return saveAssignmentEdit({
-        ...request,
-        templateRepository: validation.repository ?? request.templateRepository,
-        templateBranch: validation.branch ?? request.templateBranch
-      });
+      return await publishSuccessfulCourseMutation(
+        request.courseFolderPath,
+        saveAssignmentEdit({
+          ...request,
+          templateRepository: validation.repository ?? request.templateRepository,
+          templateBranch: validation.branch ?? request.templateBranch
+        })
+      );
     }
-    return saveAssignmentEdit(request);
+    return await publishSuccessfulCourseMutation(
+      request.courseFolderPath,
+      saveAssignmentEdit(request)
+    );
   });
-  ipcMain.handle(IPC_CHANNELS.deleteAssignment, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.deleteAssignment, async (_event, request: unknown) => {
     if (!isAssignmentDeleteRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment delete request.");
-    return deleteAssignment(request);
+    return await publishSuccessfulCourseMutation(
+      request.courseFolderPath,
+      deleteAssignment(request)
+    );
   });
   ipcMain.handle(IPC_CHANNELS.getAssignmentGroupConfig, (_event, request: unknown) => {
     if (!isAssignmentGroupConfigRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment group settings request.");
     return getAssignmentGroupConfig(request);
   });
-  ipcMain.handle(IPC_CHANNELS.saveAssignmentGroupConfig, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.saveAssignmentGroupConfig, async (_event, request: unknown) => {
     if (!isAssignmentGroupConfigSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment group settings request.");
-    return saveAssignmentGroupConfig(request);
+    return await publishSuccessfulCourseMutation(
+      request.courseFolderPath,
+      saveAssignmentGroupConfig(request)
+    );
   });
   ipcMain.handle(
     IPC_CHANNELS.getStudentRepositoryAccessPageStatus,
@@ -857,28 +877,37 @@ export const registerIpcHandlers = (): void => {
     if (!isRosterSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
-    return await saveRosterWithStudentRepositoryAccessPageRefresh(request, {
-      runner: processRunner,
-      pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
-    });
+    return await publishSuccessfulCourseMutation(
+      request.courseFolderPath,
+      await saveRosterWithStudentRepositoryAccessPageRefresh(request, {
+        runner: processRunner,
+        pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+      })
+    );
   });
   ipcMain.handle(IPC_CHANNELS.removeRoster, async (_event, request: unknown) => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
-    return await removeRosterWithStudentRepositoryAccessPageRefresh(request, {
-      runner: processRunner,
-      pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
-    });
+    return await publishSuccessfulCourseMutation(
+      request.courseFolderPath,
+      await removeRosterWithStudentRepositoryAccessPageRefresh(request, {
+        runner: processRunner,
+        pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+      })
+    );
   });
   ipcMain.handle(IPC_CHANNELS.removeSection, async (_event, request: unknown) => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
-    return await removeSectionWithStudentRepositoryAccessPageRefresh(request, {
-      runner: processRunner,
-      pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
-    });
+    return await publishSuccessfulCourseMutation(
+      request.courseFolderPath,
+      await removeSectionWithStudentRepositoryAccessPageRefresh(request, {
+        runner: processRunner,
+        pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+      })
+    );
   });
 
   ipcMain.handle(IPC_CHANNELS.getTemplateWorkflow, async (_event, request: unknown) => {

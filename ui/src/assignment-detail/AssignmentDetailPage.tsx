@@ -517,7 +517,11 @@ export const AssignmentDetailPage = ({
         confirmed: true
       });
       if (result.status === "success") {
-        onDeleted();
+        if (result.publication?.status === "failure") {
+          setDeleteError(result.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
+        } else {
+          onDeleted();
+        }
       } else {
         setDeleteError(result.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
       }

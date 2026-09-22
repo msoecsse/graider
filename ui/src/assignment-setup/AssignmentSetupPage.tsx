@@ -90,6 +90,7 @@ export const AssignmentSetupPage = ({
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const { message: toastMessage, showToast } = useToast();
+  const publicationWarningRef = useRef<string | null>(null);
 
   useEffect(() => {
     const loadTerms = window.graiderUI.loadAssignmentSetupTerms;
@@ -215,6 +216,7 @@ export const AssignmentSetupPage = ({
     }
     setIsLoading(true);
     setMessage(null);
+    publicationWarningRef.current = null;
 
     // Narrowed to the IPC call alone (PR10-1b): no catch here, so a genuine
     // failure to even reach the main process propagates with its own real
@@ -233,33 +235,40 @@ export const AssignmentSetupPage = ({
       );
     }
 
-    const assignmentFile = result.writtenFiles[0];
-    if (assignmentFile === undefined) {
-      throw new Error("Assignment configuration was saved without a file path.");
-    }
+    const publicationFailed = result.publication?.status === "failure";
+    if (publicationFailed) {
+      const warning = result.diagnostics.map((item) => item.message).join(" ");
+      publicationWarningRef.current = warning;
+      setMessage(warning);
+    } else {
+      const assignmentFile = result.writtenFiles[0];
+      if (assignmentFile === undefined) {
+        throw new Error("Assignment configuration was saved without a file path.");
+      }
 
-    // The save already succeeded at this point -- a failure here is a
-    // navigation problem, not a save problem, and must not be reported as
-    // one (README section 2.5; PR10-1b).
-    try {
-      onOpenAssignment({
-        courseFolderId: courseFolder.id,
-        courseFolderPath: courseFolder.path,
-        assignmentFile,
-        assignmentTitle: assignmentTitle.trim() || null,
-        assignmentSlug: assignmentSlug.trim() || null,
-        assignmentStatus: "active",
-        courseTitle: null,
-        courseSlug: null,
-        termTitle: null,
-        termSlug: termCode.trim() || null
-      });
-    } catch (error) {
-      throw new Error(
-        `The assignment was saved, but opening it failed: ${
-          error instanceof Error ? error.message : "an unknown error occurred"
-        }`
-      );
+      // The save already succeeded at this point -- a failure here is a
+      // navigation problem, not a save problem, and must not be reported as
+      // one (README section 2.5; PR10-1b).
+      try {
+        onOpenAssignment({
+          courseFolderId: courseFolder.id,
+          courseFolderPath: courseFolder.path,
+          assignmentFile,
+          assignmentTitle: assignmentTitle.trim() || null,
+          assignmentSlug: assignmentSlug.trim() || null,
+          assignmentStatus: "active",
+          courseTitle: null,
+          courseSlug: null,
+          termTitle: null,
+          termSlug: termCode.trim() || null
+        });
+      } catch (error) {
+        throw new Error(
+          `The assignment was saved, but opening it failed: ${
+            error instanceof Error ? error.message : "an unknown error occurred"
+          }`
+        );
+      }
     }
   };
 
@@ -663,7 +672,7 @@ export const AssignmentSetupPage = ({
         onConfirm={handleSave}
         onSuccess={(successMessage) => {
           setIsConfirming(false);
-          showToast(successMessage);
+          showToast(publicationWarningRef.current ?? successMessage);
         }}
         preview={
           preview === null ? undefined : (
