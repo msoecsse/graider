@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type {
   AssignmentEditModel,
   AssignmentEditPreviewResult,
@@ -8,6 +8,15 @@ import type {
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { Toast, useToast } from "../components/Toast";
+
+interface RequiredFileDraft {
+  readonly key: string;
+  readonly value: string;
+}
+
+interface RubricDraft extends AssignmentRubricCategory {
+  readonly key: string;
+}
 
 const toDateTimeLocal = (value: string): string => value.replace(/(?:Z|[+-]\d{2}:\d{2})$/u, "");
 const toIsoWithOffset = (value: string): string => {
@@ -50,8 +59,9 @@ export const AssignmentEditPage = ({
   const [facultyOwner, setFacultyOwner] = useState("");
   const [lmsAssignmentId, setLmsAssignmentId] = useState("");
   const [gradingCategory, setGradingCategory] = useState("");
-  const [requiredFiles, setRequiredFiles] = useState<readonly string[]>([]);
-  const [rubric, setRubric] = useState<readonly AssignmentRubricCategory[]>([]);
+  const [requiredFiles, setRequiredFiles] = useState<readonly RequiredFileDraft[]>([]);
+  const [rubric, setRubric] = useState<readonly RubricDraft[]>([]);
+  const draftKeyCounter = useRef(0);
   useEffect(() => {
     const load = window.graiderUI.getAssignmentForEdit;
     if (load === undefined) {
@@ -82,8 +92,18 @@ export const AssignmentEditPage = ({
           setFacultyOwner(value.facultyOwner);
           setLmsAssignmentId(value.lmsAssignmentId ?? "");
           setGradingCategory(value.gradingCategory);
-          setRequiredFiles(value.requiredFiles);
-          setRubric(value.rubric);
+          setRequiredFiles(
+            value.requiredFiles.map((file) => {
+              draftKeyCounter.current += 1;
+              return { key: `required-file-${String(draftKeyCounter.current)}`, value: file };
+            })
+          );
+          setRubric(
+            value.rubric.map((category) => {
+              draftKeyCounter.current += 1;
+              return { key: `rubric-${String(draftKeyCounter.current)}`, ...category };
+            })
+          );
         }
       })
       .catch(() => setMessage("Unable to load assignment.yml for editing."))
@@ -111,8 +131,12 @@ export const AssignmentEditPage = ({
             gradingCategory,
             gradingMode: model.gradingMode,
             gradingPreset: model.gradingPreset,
-            requiredFiles,
-            rubric,
+            requiredFiles: requiredFiles.map((file) => file.value),
+            rubric: rubric.map(({ id, name, points: categoryPoints }) => ({
+              id,
+              name,
+              points: categoryPoints
+            })),
             originalContent: model.originalContent,
             confirmed: false
           },
@@ -353,14 +377,14 @@ export const AssignmentEditPage = ({
               <h2>Required files</h2>
               <p className="muted-copy">Files are shown to faculty in this order.</p>
               {requiredFiles.map((file, index) => (
-                <div className="inline-form-row" key={`${index}-${file}`}>
+                <div className="inline-form-row" key={file.key}>
                   <input
                     aria-label={`Required file ${String(index + 1)}`}
-                    value={file}
+                    value={file.value}
                     onChange={(event) => {
                       setRequiredFiles((current) =>
-                        current.map((value, currentIndex) =>
-                          currentIndex === index ? event.target.value : value
+                        current.map((value) =>
+                          value.key === file.key ? { ...value, value: event.target.value } : value
                         )
                       );
                       clear();
@@ -421,7 +445,11 @@ export const AssignmentEditPage = ({
               <button
                 className="secondary-action"
                 onClick={() => {
-                  setRequiredFiles((current) => [...current, ""]);
+                  draftKeyCounter.current += 1;
+                  setRequiredFiles((current) => [
+                    ...current,
+                    { key: `required-file-${String(draftKeyCounter.current)}`, value: "" }
+                  ]);
                   clear();
                 }}
                 type="button"
@@ -433,15 +461,15 @@ export const AssignmentEditPage = ({
               <h2>Rubric</h2>
               <p className="muted-copy">Categories are flat and shown in this order.</p>
               {rubric.map((category, index) => (
-                <div className="inline-form-row" key={`${index}-${category.id}`}>
+                <div className="inline-form-row" key={category.key}>
                   <input
                     aria-label={`Rubric ID ${String(index + 1)}`}
                     placeholder="ID"
                     value={category.id}
                     onChange={(event) => {
                       setRubric((current) =>
-                        current.map((value, item) =>
-                          item === index ? { ...value, id: event.target.value } : value
+                        current.map((value) =>
+                          value.key === category.key ? { ...value, id: event.target.value } : value
                         )
                       );
                       clear();
@@ -453,8 +481,10 @@ export const AssignmentEditPage = ({
                     value={category.name}
                     onChange={(event) => {
                       setRubric((current) =>
-                        current.map((value, item) =>
-                          item === index ? { ...value, name: event.target.value } : value
+                        current.map((value) =>
+                          value.key === category.key
+                            ? { ...value, name: event.target.value }
+                            : value
                         )
                       );
                       clear();
@@ -466,8 +496,8 @@ export const AssignmentEditPage = ({
                     value={Number.isFinite(category.points) ? String(category.points) : ""}
                     onChange={(event) => {
                       setRubric((current) =>
-                        current.map((value, item) =>
-                          item === index
+                        current.map((value) =>
+                          value.key === category.key
                             ? {
                                 ...value,
                                 points:
@@ -534,7 +564,16 @@ export const AssignmentEditPage = ({
               <button
                 className="secondary-action"
                 onClick={() => {
-                  setRubric((current) => [...current, { id: "", name: "", points: Number.NaN }]);
+                  draftKeyCounter.current += 1;
+                  setRubric((current) => [
+                    ...current,
+                    {
+                      key: `rubric-${String(draftKeyCounter.current)}`,
+                      id: "",
+                      name: "",
+                      points: Number.NaN
+                    }
+                  ]);
                   clear();
                 }}
                 type="button"

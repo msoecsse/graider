@@ -504,7 +504,7 @@ has stayed undone through eight of them.
 
 ---
 
-## 17. `AssignmentEditPage.tsx` has no test file — **Should fix**
+## 17. `AssignmentEditPage.tsx` has no test file — **Resolved**
 
 There is no `AssignmentEditPage.test.tsx`. PR7-1 changed production code in
 this file — added the required `onSuccess` prop and wired the toast — with
@@ -521,6 +521,12 @@ suite that at least renders the page and exercises some of its flows.
 Fix: a new `AssignmentEditPage.test.tsx` covering, at minimum, the preview
 and confirm flow through to a successful save, so the modal wiring in this
 file has the same floor of coverage as its siblings.
+
+Resolved: `AssignmentEditPage.test.tsx` now covers loaded required-file and
+rubric rows, stable-key focus regression behavior, add/reorder/remove, request
+projection, and the preview/confirm/save flow. The tests exposed that editable
+React keys remounted rows as faculty typed; Assignment Edit now uses stable
+UI-only draft identities, which are projected out before IPC requests.
 
 ---
 
