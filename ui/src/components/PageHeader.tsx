@@ -11,6 +11,7 @@ export interface PageHeaderAction {
 export interface PageHeaderProps {
   readonly eyebrow?: string;
   readonly title: string;
+  readonly titleId?: string;
   readonly meta?: ReactNode;
   readonly primaryAction?: PageHeaderAction;
   readonly secondaryActions?: readonly PageHeaderAction[];
@@ -22,6 +23,7 @@ const MAX_SECONDARY_ACTIONS = 2;
 export const PageHeader = ({
   eyebrow,
   title,
+  titleId,
   meta,
   primaryAction,
   secondaryActions = [],
@@ -30,7 +32,9 @@ export const PageHeader = ({
   <header className="page-header">
     <div className="page-header__titles">
       {eyebrow === undefined ? null : <p className="page-header__eyebrow">{eyebrow}</p>}
-      <h1 className="page-header__title">{title}</h1>
+      <h1 className="page-header__title" id={titleId}>
+        {title}
+      </h1>
       {meta === undefined ? null : <p className="page-header__meta">{meta}</p>}
     </div>
     <div className="page-header__actions">

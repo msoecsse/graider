@@ -51,4 +51,23 @@ describe("PageHeader", () => {
 
     expect(screen.getByRole("button", { name: "⋯" })).toBeInTheDocument();
   });
+
+  it("sets the heading id from titleId so an external landmark can resolve it", () => {
+    render(
+      <main aria-labelledby="page-title">
+        <PageHeader title="Lab 02" titleId="page-title" />
+      </main>
+    );
+
+    const main = screen.getByRole("main", { name: "Lab 02" });
+    const heading = screen.getByRole("heading", { name: "Lab 02" });
+    expect(heading).toHaveAttribute("id", "page-title");
+    expect(main).toHaveAttribute("aria-labelledby", "page-title");
+  });
+
+  it("omits the heading id when titleId is not supplied", () => {
+    render(<PageHeader title="Lab 02" />);
+
+    expect(screen.getByRole("heading", { name: "Lab 02" })).not.toHaveAttribute("id");
+  });
 });
