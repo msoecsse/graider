@@ -22,9 +22,9 @@ const baseProps = {
   statusLabel: (status: string) => status,
   onSelectStudent: vi.fn(),
   onPrevious: vi.fn(),
-  onNextUngraded: vi.fn(),
+  onNext: vi.fn(),
   hasPrevious: false,
-  hasNextUngraded: true
+  hasNext: true
 };
 
 describe("GradingStudentListPane", () => {
@@ -43,13 +43,33 @@ describe("GradingStudentListPane", () => {
         {...baseProps}
         filteredStudents={[]}
         hasPrevious={false}
-        hasNextUngraded={false}
+        hasNext={false}
       />
     );
 
     expect(screen.getByText("No assigned students.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Next ungraded" })).toBeDisabled();
-    expect(screen.getByText("No other students need grading.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    expect(screen.getByText("No other visible students.")).toBeInTheDocument();
+  });
+
+  it("uses the active filter to label next navigation", () => {
+    render(<GradingStudentListPane {...baseProps} studentFilter="graded" />);
+
+    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+  });
+
+  it("disables navigation for a one-student filter to avoid reloading the same student", () => {
+    render(
+      <GradingStudentListPane
+        {...baseProps}
+        filteredStudents={[entries[0] as GradingStudentListEntry]}
+        hasPrevious={false}
+        hasNext={false}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
   });
 });

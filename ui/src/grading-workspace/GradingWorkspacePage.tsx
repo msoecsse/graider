@@ -41,7 +41,11 @@ import { GradingFooterHintBar } from "./GradingFooterHintBar";
 import { GradingKeyboardCheatSheetModal } from "./GradingKeyboardCheatSheetModal";
 import { GradingProgressHeader } from "./GradingProgressHeader";
 import { GradingScorePanel } from "./GradingScorePanel";
-import { GradingStudentListPane, type StudentFilterId } from "./GradingStudentListPane";
+import {
+  GradingStudentListPane,
+  type GradingStudentListEntry,
+  type StudentFilterId
+} from "./GradingStudentListPane";
 import { GradingSubmissionViewerPane, type SourceLoadState } from "./GradingSubmissionViewerPane";
 import {
   GradingAppliedCommentsPanel,
@@ -916,7 +920,7 @@ export const GradingWorkspacePage = ({
       }),
     [studentsWithStatus, studentFilter]
   );
-  const nextUngradedStudentIndex = useMemo(() => {
+  const nextStudentNeedingGradingIndex = useMemo(() => {
     const total = studentsWithStatus.length;
     if (total === 0) return undefined;
     const searchOrder = Array.from(
@@ -2270,20 +2274,36 @@ export const GradingWorkspacePage = ({
           snapshot.snapshot.gradingStatus
         )
       : undefined;
-  const goToPreviousStudent = (): void => {
-    if (selected <= 0) return;
-    requestStudentSwitch(() => {
-      void flushPendingViewState(currentStudentId);
-      setSelected((value) => value - 1);
-    });
+  const getStudentNavigationTarget = (
+    entries: readonly GradingStudentListEntry[],
+    direction: "next" | "previous"
+  ): number | undefined => {
+    if (entries.length === 0) return undefined;
+    const currentPosition = entries.findIndex((entry) => entry.index === selected);
+    if (currentPosition < 0)
+      return direction === "next" ? entries[0]?.index : entries.at(-1)?.index;
+    if (entries.length === 1) return undefined;
+    const targetPosition =
+      direction === "next"
+        ? (currentPosition + 1) % entries.length
+        : (currentPosition - 1 + entries.length) % entries.length;
+    return entries[targetPosition]?.index;
   };
-  const goToNextUngradedStudent = (): void => {
-    if (nextUngradedStudentIndex === undefined) return;
-    const targetIndex = nextUngradedStudentIndex;
+  const switchToStudent = (targetIndex: number | undefined): void => {
+    if (targetIndex === undefined || targetIndex === selected) return;
     requestStudentSwitch(() => {
       void flushPendingViewState(currentStudentId);
       setSelected(targetIndex);
     });
+  };
+  const goToFilteredStudent = (direction: "next" | "previous"): void => {
+    switchToStudent(getStudentNavigationTarget(filteredStudents, direction));
+  };
+  const goToNextRosterStudent = (): void => {
+    switchToStudent(getStudentNavigationTarget(studentsWithStatus, "next"));
+  };
+  const goToNextStudentNeedingGrading = (): void => {
+    switchToStudent(nextStudentNeedingGradingIndex);
   };
   const focusStudentFilter = (): void => {
     const container = filterPillsContainerRef.current;
@@ -2314,7 +2334,7 @@ export const GradingWorkspacePage = ({
       markCompleteConfirmation.studentId === currentStudentId
     ) {
       void confirmMarkComplete().then((succeeded) => {
-        if (succeeded) goToNextUngradedStudent();
+        if (succeeded) goToNextStudentNeedingGrading();
       });
       return;
     }
@@ -2401,12 +2421,13 @@ export const GradingWorkspacePage = ({
       }
       if (key === "j" || key === "J") {
         event.preventDefault();
-        goToNextUngradedStudent();
+        if (event.shiftKey) goToNextRosterStudent();
+        else goToFilteredStudent("next");
         return;
       }
       if (key === "k" || key === "K") {
         event.preventDefault();
-        goToPreviousStudent();
+        goToFilteredStudent("previous");
         return;
       }
       if (key === "/") {
@@ -2613,10 +2634,10 @@ export const GradingWorkspacePage = ({
               setSelected(index);
             });
           }}
-          onPrevious={goToPreviousStudent}
-          onNextUngraded={goToNextUngradedStudent}
-          hasPrevious={selected > 0}
-          hasNextUngraded={nextUngradedStudentIndex !== undefined}
+          onPrevious={() => goToFilteredStudent("previous")}
+          onNext={() => goToFilteredStudent("next")}
+          hasPrevious={getStudentNavigationTarget(filteredStudents, "previous") !== undefined}
+          hasNext={getStudentNavigationTarget(filteredStudents, "next") !== undefined}
         />
         <GradingSubmissionViewerPane
           hasSelectedStudent={student !== undefined}

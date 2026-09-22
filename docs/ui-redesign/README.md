@@ -339,7 +339,8 @@ label, and points chip — clicking applies it and updates the score), and
 link. Pinned bottom: primary `Mark complete and go to next` with a `⏎` badge,
 and a quiet `Skip for now`.
 
-**Footer (40px).** Persistent hint bar: `J` next student, `K` previous,
+**Footer (40px).** Persistent hint bar: `J` next student in the active filter,
+`K` previous student in the active filter,
 `C` comment, `1–9` library, `⏎` complete, `?` all shortcuts. On the right,
 `Saved automatically`.
 
@@ -349,33 +350,33 @@ and a quiet `Skip for now`.
   "No rubric — enter a score manually" instead of `100 / 100`.
 - Student list status and the right-panel grading status must derive from the
   same source. They currently disagree.
-- Navigation is **Next ungraded**, not Next. Shift-J moves to the next student
-  including graded ones.
+- Navigation follows the active student filter, with wraparound. Shift-J moves
+  to the next student in the full roster regardless of the filter.
 - Publishing moves out of the left sidebar to the header and its own review
   screen.
 
 **Keyboard shortcuts.** Every shortcut must also have a visible control. Nothing
 is keyboard-only.
 
-| Keys            | Action                            |
-| --------------- | --------------------------------- |
-| `J` / `K`       | Next ungraded / previous student  |
-| `⇧J`            | Next student including graded     |
-| `G G`           | Jump to first ungraded            |
-| `/`             | Focus the active filter pill      |
-| `⇥` / `⇧⇥`      | Next / previous file              |
-| `H`             | Commit history                    |
-| `A`             | Automated checks                  |
-| `C`             | Comment on selected lines         |
-| `1`–`9`         | Apply library comment by position |
-| `⌘K` / `Ctrl K` | Search comment library            |
-| `M`             | Manual adjustment                 |
-| `⌫`             | Remove last applied comment       |
-| `⏎`             | Mark complete and go to next      |
-| `S`             | Skip                              |
-| `P`             | Open publish review               |
-| `⎋`             | Close panel or dialog             |
-| `?`             | Shortcut cheat sheet              |
+| Keys            | Action                                               |
+| --------------- | ---------------------------------------------------- |
+| `J` / `K`       | Next / previous student in the active filter (wraps) |
+| `⇧J`            | Next student in the full roster (wraps)              |
+| `G G`           | Jump to first ungraded                               |
+| `/`             | Focus the active filter pill                         |
+| `⇥` / `⇧⇥`      | Next / previous file                                 |
+| `H`             | Commit history                                       |
+| `A`             | Automated checks                                     |
+| `C`             | Comment on selected lines                            |
+| `1`–`9`         | Apply library comment by position                    |
+| `⌘K` / `Ctrl K` | Search comment library                               |
+| `M`             | Manual adjustment                                    |
+| `⌫`             | Remove last applied comment                          |
+| `⏎`             | Mark complete and go to next                         |
+| `S`             | Skip                                                 |
+| `P`             | Open publish review                                  |
+| `⎋`             | Close panel or dialog                                |
+| `?`             | Shortcut cheat sheet                                 |
 
 Show `⌘` on macOS and `Ctrl` on Windows; detect, do not hardcode.
 

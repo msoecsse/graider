@@ -22,10 +22,13 @@ export const GradingKeyboardCheatSheetModal = ({
           <div className="grading-shortcut-group">
             <h3>Move</h3>
             <div>
-              <KbdHint label="J" /> <span>Next ungraded student</span>
+              <KbdHint label="J" /> <span>Next student in the active filter</span>
             </div>
             <div>
-              <KbdHint label="K" /> <span>Previous student</span>
+              <KbdHint label="K" /> <span>Previous student in the active filter</span>
+            </div>
+            <div>
+              <KbdHint label="⇧J" /> <span>Next student in the full roster</span>
             </div>
             <div>
               <KbdHint label="/" /> <span>Focus the student filter</span>

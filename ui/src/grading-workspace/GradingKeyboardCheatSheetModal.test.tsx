@@ -8,7 +8,8 @@ describe("GradingKeyboardCheatSheetModal", () => {
     render(<GradingKeyboardCheatSheetModal open onClose={onClose} />);
 
     expect(screen.getByRole("heading", { name: "Keyboard shortcuts" })).toBeInTheDocument();
-    expect(screen.getByText("Next ungraded student")).toBeInTheDocument();
+    expect(screen.getByText("Next student in the active filter")).toBeInTheDocument();
+    expect(screen.getByText("Next student in the full roster")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Close keyboard shortcuts" }));
     expect(onClose).toHaveBeenCalledTimes(1);

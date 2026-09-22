@@ -24,9 +24,9 @@ export const GradingStudentListPane = ({
   statusLabel,
   onSelectStudent,
   onPrevious,
-  onNextUngraded,
+  onNext,
   hasPrevious,
-  hasNextUngraded
+  hasNext
 }: {
   readonly totalStudentsCount: number;
   readonly filteredStudents: readonly GradingStudentListEntry[];
@@ -42,9 +42,9 @@ export const GradingStudentListPane = ({
   readonly statusLabel: (status: string) => string;
   readonly onSelectStudent: (index: number) => void;
   readonly onPrevious: () => void;
-  readonly onNextUngraded: () => void;
+  readonly onNext: () => void;
   readonly hasPrevious: boolean;
-  readonly hasNextUngraded: boolean;
+  readonly hasNext: boolean;
 }): ReactElement => (
   <aside>
     <h2>Students</h2>
@@ -91,17 +91,12 @@ export const GradingStudentListPane = ({
       >
         Previous
       </button>
-      <button
-        className="secondary-action"
-        type="button"
-        disabled={!hasNextUngraded}
-        onClick={onNextUngraded}
-      >
-        Next ungraded
+      <button className="secondary-action" type="button" disabled={!hasNext} onClick={onNext}>
+        {studentFilter === "to_grade" ? "Next ungraded" : "Next"}
       </button>
     </div>
-    {hasNextUngraded ? null : (
-      <p className="grading-workspace__pagination-note">No other students need grading.</p>
+    {hasNext ? null : (
+      <p className="grading-workspace__pagination-note">No other visible students.</p>
     )}
   </aside>
 );

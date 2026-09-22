@@ -7,7 +7,7 @@ describe("GradingFooterHintBar", () => {
     render(<GradingFooterHintBar />);
 
     expect(screen.getByRole("list", { name: "Keyboard shortcut hints" })).toBeInTheDocument();
-    expect(screen.getByText("Next student")).toBeInTheDocument();
+    expect(screen.getByText("Next in filter")).toBeInTheDocument();
     expect(screen.getByText("Saved automatically")).toBeInTheDocument();
   });
 });

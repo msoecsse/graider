@@ -37,9 +37,24 @@ const REQUEST: GradingWorkspacePrepareRequest = {
   assignmentSlug: "lab1"
 };
 
-const students = [
+interface WorkspaceStudent {
+  readonly studentId: string;
+  readonly section: string;
+  readonly gradingStatus: "not_started" | "in_progress" | "complete" | "published";
+}
+
+const students: readonly WorkspaceStudent[] = [
   { studentId: "ada", section: "001", gradingStatus: "not_started" },
   { studentId: "grace", section: "002", gradingStatus: "in_progress" }
+];
+
+const mixedStudents: readonly WorkspaceStudent[] = [
+  { studentId: "ada", section: "001", gradingStatus: "not_started" },
+  { studentId: "bea", section: "001", gradingStatus: "complete" },
+  { studentId: "cy", section: "002", gradingStatus: "complete" },
+  { studentId: "dan", section: "002", gradingStatus: "published" },
+  { studentId: "eve", section: "003", gradingStatus: "published" },
+  { studentId: "frank", section: "003", gradingStatus: "in_progress" }
 ];
 
 const source = (studentId: string) => ({
@@ -109,8 +124,15 @@ const evidenceWithFailures = (
 });
 
 const setApis = ({
+  workspaceStudents = students,
   loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
-    Promise.resolve(snapshot(studentId))
+    Promise.resolve(
+      snapshot(
+        studentId,
+        workspaceStudents.find((student) => student.studentId === studentId)?.gradingStatus ??
+          "not_started"
+      )
+    )
   ),
   loadEvidence = vi.fn().mockResolvedValue({ status: "not_applicable", studentId: "ada" }),
   loadCommitHistory = vi.fn().mockResolvedValue({
@@ -149,6 +171,7 @@ const setApis = ({
   readonly addComment?: ReturnType<typeof vi.fn>;
   readonly markComplete?: ReturnType<typeof vi.fn>;
   readonly publishReport?: ReturnType<typeof vi.fn>;
+  readonly workspaceStudents?: readonly WorkspaceStudent[];
 } = {}) => {
   Object.assign(window.graiderUI, {
     prepareGradingWorkspace: vi.fn().mockResolvedValue({
@@ -156,7 +179,7 @@ const setApis = ({
       assignment: { title: "Lab 1", termCode: "27s1", slug: "lab1" },
       requiredFiles: ["src/Main.java"],
       rubric,
-      students
+      students: workspaceStudents
     }),
     loadGradingStudentSource: vi.fn(({ studentId }: { studentId: string }) =>
       Promise.resolve(source(studentId))
@@ -190,6 +213,103 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace"));
 
     fireEvent.keyDown(window, { key: "k" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada"));
+  });
+
+  it("keeps J and K in the To grade filter and wraps at both ends", async () => {
+    setApis({ workspaceStudents: mixedStudents });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("frank"));
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada"));
+    fireEvent.keyDown(window, { key: "k" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("frank"));
+  });
+
+  it("keeps J and K in the Graded filter and wraps at both ends", async () => {
+    setApis({ workspaceStudents: mixedStudents });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Graded 2" }));
+
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("bea"));
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("cy"));
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("bea"));
+    fireEvent.keyDown(window, { key: "k" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("cy"));
+  });
+
+  it("keeps J and K in Published and All filters", async () => {
+    setApis({ workspaceStudents: mixedStudents });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Published 2" }));
+
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("dan"));
+    fireEvent.keyDown(window, { key: "k" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("eve"));
+
+    fireEvent.click(screen.getByRole("button", { name: "All 6" }));
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("frank"));
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada"));
+    fireEvent.keyDown(window, { key: "k" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("frank"));
+  });
+
+  it("selects the filter edge when the current student is not visible", async () => {
+    setApis({ workspaceStudents: mixedStudents });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Graded 2" }));
+
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("bea"));
+
+    fireEvent.click(screen.getByRole("button", { name: "To grade 2" }));
+    fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/ }));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada"));
+    fireEvent.click(screen.getByRole("button", { name: "Graded 2" }));
+    fireEvent.keyDown(window, { key: "k" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("cy"));
+  });
+
+  it("does nothing when the active filter is empty", async () => {
+    setApis({});
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Published 0" }));
+
+    fireEvent.keyDown(window, { key: "j" });
+    fireEvent.keyDown(window, { key: "k" });
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada");
+  });
+
+  it("uses Shift+J to navigate the full roster regardless of the active filter", async () => {
+    setApis({ workspaceStudents: mixedStudents });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Graded 2" }));
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("bea"));
+    fireEvent.keyDown(window, { key: "J", shiftKey: true });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("cy"));
+    fireEvent.keyDown(window, { key: "J", shiftKey: true });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("dan"));
+
+    fireEvent.click(screen.getByRole("button", { name: "All 6" }));
+    fireEvent.click(screen.getByRole("button", { name: /frank · Section 003/ }));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("frank"));
+    fireEvent.click(screen.getByRole("button", { name: "Graded 2" }));
+    fireEvent.keyDown(window, { key: "J", shiftKey: true });
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada"));
   });
 
@@ -412,7 +532,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     await screen.findByTestId("mock-monaco");
 
     const hints = screen.getByRole("list", { name: "Keyboard shortcut hints" });
-    expect(hints).toHaveTextContent("J Next student");
+    expect(hints).toHaveTextContent("J Next in filter");
     expect(hints).toHaveTextContent("K Previous");
     expect(hints).toHaveTextContent("C Comment");
     expect(hints).toHaveTextContent("A Checks");

@@ -789,11 +789,28 @@ confirmed it fails (shows `RouteNotFound`) without the fix.
 
 ---
 
+## 30. Grading navigation ignored the active student filter — **Resolved**
+
+The student list already rendered filter-aware entries, but J searched the
+full roster for the next ungraded student and K decremented the global roster
+index. Under Graded or Published, either shortcut could select a student that
+was not visible. Shift+J was documented as full-roster navigation but was not
+implemented distinctly from J.
+
+Resolved: J and K now navigate the same filtered entries rendered by the list,
+using their original roster indexes and wrapping at both ends. If the selected
+student is outside the filter, J selects the first visible row and K the last.
+Shift+J now wraps through the complete roster regardless of the filter. The
+visible Previous/Next controls share the filter-relative behavior, and focused
+keyboard, list-pane, and control tests cover the regression.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 2, 3, 4, 6, 7, 9, and 29 are resolved and no longer part of this
+Items 1, 2, 3, 4, 6, 7, 9, 29, and 30 are resolved and no longer part of this
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,

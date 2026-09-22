@@ -5,7 +5,7 @@ export const GradingFooterHintBar = (): ReactElement => (
   <footer className="grading-workspace__footer">
     <ul className="grading-workspace__footer-hints" aria-label="Keyboard shortcut hints">
       <li className="grading-workspace__footer-hint">
-        <KbdHint label="J" /> Next student
+        <KbdHint label="J" /> Next in filter
       </li>
       <li className="grading-workspace__footer-hint">
         <KbdHint label="K" /> Previous
