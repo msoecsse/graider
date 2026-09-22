@@ -487,6 +487,16 @@ Common
 
 The default rubric category is optional.
 
+The canonical library is the versioned JSON file
+`.graider/grading/comments.json` in the main course repository. It remains a
+course-level collection even when assignment- or faculty-oriented tags provide
+filtered views. No database is required.
+
+A reusable default rubric category is only a convenience. When applying the
+comment, Graider preselects it only if that category ID exists in the current
+assignment. Otherwise the category starts unset, and faculty may always
+override it before applying.
+
 ### 12.1 Comment Library CRUD
 
 Faculty must be able to:
@@ -508,6 +518,14 @@ Editing may change:
 Deleting or editing a reusable library comment must **never alter already-applied comments** in student grading records.
 
 Applied comments are snapshots.
+
+Delete means delete the reusable entry only. It does not delete or mutate any
+comment already applied to a student.
+
+The library also has a dedicated course-level management screen outside the
+grading workspace. The grading workspace and management screen reuse the same
+library model, editor, and CRUD operations rather than maintaining parallel
+collections.
 
 ### 12.2 Search and Filtering
 
@@ -532,7 +550,33 @@ Common
 
 Search and tag filters work together.
 
+Search is case-insensitive and matches title OR comment text OR tag text.
+Multiple selected tag filters use AND semantics.
+
+Tags are free-form. Tag entry suggests existing course-library tags while still
+allowing a new value. Whitespace-only and case-only duplicates are normalized
+without unnecessarily discarding established display casing.
+
 There are no physically separate course/assignment/faculty comment libraries. Tags provide those views.
+
+### 12.3 Course Publication
+
+Creating, editing, or deleting a reusable comment automatically publishes the
+canonical library through Graider's safe course-publication mechanism. The
+managed allowlist includes exactly `.graider/grading/comments.json`, not a
+broad `.graider/**` pattern, and unrelated local or staged work retains the
+publisher's existing protections.
+
+A successful local mutation remains durable if commit or push fails. The UI
+must distinguish:
+
+- local mutation failed;
+- local mutation and publication both succeeded; and
+- local mutation succeeded but publication failed.
+
+In the third case, **Publish Course Changes** is the retry/recovery path. A
+newer divergent remote library must never be overwritten blindly. Safe failure
+on divergence is acceptable initially; automatic semantic merging is deferred.
 
 ---
 
@@ -570,6 +614,19 @@ When faculty invokes Add Comment:
 The applied instance stores its own values.
 
 Later editing of the reusable library entry must not change previously applied student comments.
+
+### 13.4 One-Shot Comments and Library Promotion
+
+Faculty may write and apply a one-shot comment without creating a reusable
+entry. After that student comment is successfully saved, Graider offers **Save
+to course library**. The reusable-comment editor is prefilled, and faculty may
+adjust title, text, default deduction, default category, and tags before
+saving.
+
+This is a separate, opt-in mutation. Canceling or failing the library save does
+not alter the student's already-applied comment, and successful promotion does
+not retroactively turn that applied snapshot into a live reference to the new
+entry.
 
 ---
 
@@ -848,6 +905,26 @@ At minimum:
 8. recent commit history.
 
 Exact visual styling can be addressed later.
+
+### 23.1 Safe Comment Code Formatting
+
+Canonical comment text remains a string. Graider interprets only this small
+Markdown-like subset in both the React grading UI and generated student HTML:
+
+- paired single backticks for inline code; and
+- triple-backtick fenced code blocks, optionally followed by a language
+  identifier.
+
+The language identifier is metadata only at first; syntax highlighting is not
+required. Inline code uses a monospace treatment. Code blocks preserve
+whitespace and use a distinct background, inset/padding, and horizontal
+scrolling for long lines.
+
+The shared parser/format model must give the React and report renderers
+identical semantics. Raw HTML is never interpreted, and all existing report
+escaping and content-security guarantees remain in force. General Markdown,
+including headings, arbitrary links, images, tables, raw HTML, and embedded
+content, is unsupported. Bold and italic may be considered later.
 
 ---
 

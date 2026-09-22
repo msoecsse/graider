@@ -1030,6 +1030,80 @@ paths have not yet been migrated.
 
 ---
 
+## 39. Comment-library mutations exist but have no faculty UI — **Should fix**
+
+The course-level JSON model, context operations, Electron service, validated
+IPC handlers, and preload APIs already support reusable-comment create, edit,
+and delete. The renderer currently calls only the load operation. The grading
+workspace can browse and apply reusable comments, but cannot manage them, and
+there is no dedicated course-level Comment Library route.
+
+This leaves substantial implemented infrastructure inaccessible and forces any
+library maintenance outside Graider. The fix is shared create/edit/delete UI
+used by both the grading workspace and a dedicated course-level management
+screen, not another storage model or parallel set of APIs. See
+`comment-library-feasibility.md`.
+
+---
+
+## 40. The canonical comment library is excluded from safe course publication — **Should fix**
+
+The managed allowlist in `coursePublishService.ts` does not include
+`.graider/grading/comments.json`. Current local library mutations therefore
+cannot automatically publish and cannot be picked up by manual **Publish
+Course Changes**. This contradicts the library's course-shared purpose.
+
+Fix narrowly: allow exactly the canonical file, wrap create/edit/delete with
+the existing local-mutation-then-publication service, and expose full success
+versus saved-locally/publication-failed results. Do not allow `.graider/**` and
+do not weaken protection for unrelated staged or local files. A non-fast-
+forward push may safely fail initially; the local mutation must remain durable.
+
+---
+
+## 41. Comment text has no shared safe code-formatting semantics — **Should fix**
+
+Reusable and applied comments render as plain React text, while the generated
+student report escapes the entire string into a whitespace-preserving
+paragraph. Faculty cannot visually distinguish example code from prose, and
+there is no shared interpretation layer keeping UI and report output aligned.
+
+Fix with a deliberately small parser over the existing string: inline
+backticks plus triple-backtick fenced blocks with optional language metadata.
+Feed a React renderer and an explicitly escaped report renderer from the same
+typed model. Do not enable general Markdown, raw HTML, or rich-text storage.
+
+---
+
+## 42. Free-form tag authoring lacks autocomplete and canonical duplicate normalization — **Should fix**
+
+The schema already accepts tags, search/filtering is case-insensitive, and the
+workspace derives a case-insensitively deduplicated list for filters. There is
+no tag authoring control, however, and backend normalization trims/removes
+blanks but still permits case-only duplicates such as `Java` and `java` in the
+same reusable entry.
+
+Fix with an accessible free-form tag/token input that suggests existing course
+tags and accepts new values. Normalize whitespace and deduplicate
+case-insensitively at the backend boundary while preserving established display
+casing.
+
+---
+
+## 43. One-shot comments cannot be promoted to the course library — **Should fix**
+
+Faculty can apply an ad hoc student comment or apply a reusable snapshot, but
+there is no bridge between those workflows. Useful one-shot feedback must be
+manually recreated outside the current grading flow to become reusable.
+
+After the student comment is successfully applied, offer **Save to course
+library** with a prefilled reusable-comment editor. The library save remains a
+separate opt-in mutation; cancellation or failure leaves the student comment
+unchanged, and successful promotion does not retroactively couple the applied
+snapshot to the new library entry.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -1038,4 +1112,10 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-26, 27, 28, 33, 34, 35, 36, 37, and 38 can wait until after the redesign.
+26, 27, 28, 33, 34, 35, 36, and 37 can wait until after the redesign. Item 38
+is resolved.
+
+Priority update after PR12-3: address items 39-43 through the COMMENT-1 to
+COMMENT-5 sequence in `comment-library-feasibility.md`, then resume PR12-4
+(item 37) and PR12-5. The remaining Step 12 work is deferred by an explicit
+priority decision, not blocked or abandoned.

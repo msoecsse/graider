@@ -684,6 +684,25 @@ Work on `ui-redesign` with one PR per step. Each PR keeps `npm test`,
 
 PR 7 can jump the queue; it is a real bug.
 
+### Priority update after PR12-3
+
+PR12-3 (bulk roster section summaries) is complete. An explicit product
+priority decision inserts the shared comment-library and comment-formatting
+track before the remaining Step 12 work:
+
+```text
+PR12-3 (complete)
+  -> COMMENT-1 through COMMENT-5
+  -> PR12-4 roster source/provenance
+  -> PR12-5 roster-manager visual rebuild
+```
+
+PR12-4 and PR12-5 are deferred by priority, not blocked or abandoned. The
+original Step 12 sequence remains part of the project history. See
+`comment-library-feasibility.md` and
+`summaries/comment-library-priority-decision.md` for the verified existing
+infrastructure, gaps, and recommended comment-track slices.
+
 The term setup wizard shell (five steps, left rail, resumability) is
 **deferred indefinitely, not scheduled** — see §5.5.
 
