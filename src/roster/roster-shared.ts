@@ -11,6 +11,7 @@ import {
   STATUS_COLUMN,
   STUDENT_ID_COLUMN,
   createMissingRequiredValueDiagnostic,
+  isRosterStatus,
   validateGithubUsername,
   validateRequiredColumns,
   validateRosterSection,
@@ -151,7 +152,7 @@ export const parseAndValidateRosterCsv = (request: RosterCsvParseRequest): Roste
       warnings.push(...rowWarnings);
       errors.push(...rowErrors);
 
-      if (rowErrors.length === EMPTY_COUNT) {
+      if (rowErrors.length === EMPTY_COUNT && isRosterStatus(normalizedStatus.value)) {
         records.push({
           studentId: normalizedStudentId.value,
           githubUsername: normalizedGithubUsername.value,

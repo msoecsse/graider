@@ -88,6 +88,8 @@ import {
   type RosterSaveRequest,
   type RosterSaveResult,
   type RosterSectionRequest,
+  type RosterSectionSummariesRequest,
+  type RosterSectionSummariesResult,
   type TemplateWorkflowRequest,
   type TemplateWorkflowResult,
   type TemplateWorkflowSavePreview,
@@ -209,6 +211,10 @@ const graiderUI: GraiderUIApi = {
     request: AssignmentSetupTermsRequest
   ): Promise<AssignmentSetupTermsResult> =>
     await invoke<AssignmentSetupTermsResult>(IPC_CHANNELS.loadRosterTerms, request),
+  getRosterSectionSummaries: async (
+    request: RosterSectionSummariesRequest
+  ): Promise<RosterSectionSummariesResult> =>
+    await invoke<RosterSectionSummariesResult>(IPC_CHANNELS.getRosterSectionSummaries, request),
   getRosterForSection: async (request: RosterSectionRequest): Promise<RosterLoadResult> =>
     await invoke<RosterLoadResult>(IPC_CHANNELS.getRosterForSection, request),
   previewRosterSave: async (request: RosterSaveRequest): Promise<RosterPreviewResult> =>

@@ -46,6 +46,7 @@ export const IPC_CHANNELS = {
   getCoursePublishStatus: "graider-ui:course-publish:status",
   publishCourseChanges: "graider-ui:course-publish:publish",
   loadRosterTerms: "graider-ui:roster-manager:terms",
+  getRosterSectionSummaries: "graider-ui:roster-manager:section-summaries",
   getRosterForSection: "graider-ui:roster-manager:get",
   previewRosterSave: "graider-ui:roster-manager:preview",
   saveRoster: "graider-ui:roster-manager:save",
@@ -530,6 +531,51 @@ export interface RosterSectionRequest extends AssignmentSetupTermsRequest {
   readonly termCode: string;
   readonly sectionId: string;
 }
+
+export interface RosterSectionSummariesRequest extends AssignmentSetupTermsRequest {
+  readonly termCode: string;
+}
+
+export interface RosterSectionSummaryDiagnostic {
+  readonly code: string;
+  readonly message: string;
+}
+
+export type RosterSectionSummary =
+  | {
+      readonly sectionId: string;
+      readonly status: "ready";
+      readonly exists: true;
+      readonly studentCount: number;
+      readonly activeStudentCount: number;
+      readonly droppedStudentCount: number;
+      readonly holdStudentCount: number;
+      readonly diagnostics: readonly RosterSectionSummaryDiagnostic[];
+    }
+  | {
+      readonly sectionId: string;
+      readonly status: "missing";
+      readonly exists: false;
+      readonly diagnostics: readonly RosterSectionSummaryDiagnostic[];
+    }
+  | {
+      readonly sectionId: string;
+      readonly status: "invalid";
+      readonly exists: true;
+      readonly diagnostics: readonly RosterSectionSummaryDiagnostic[];
+    };
+
+export type RosterSectionSummariesResult =
+  | {
+      readonly status: "ready";
+      readonly summaries: readonly RosterSectionSummary[];
+      readonly diagnostics: readonly [];
+    }
+  | {
+      readonly status: "term_config_error";
+      readonly summaries: readonly [];
+      readonly diagnostics: readonly RosterSectionSummaryDiagnostic[];
+    };
 
 export interface RosterLoadResult {
   readonly status: "ready" | "migration_required" | "invalid";
@@ -1033,6 +1079,9 @@ export interface GraiderUIApi {
   readonly loadRosterTerms?: (
     request: AssignmentSetupTermsRequest
   ) => Promise<AssignmentSetupTermsResult>;
+  readonly getRosterSectionSummaries?: (
+    request: RosterSectionSummariesRequest
+  ) => Promise<RosterSectionSummariesResult>;
   readonly getRosterForSection?: (request: RosterSectionRequest) => Promise<RosterLoadResult>;
   readonly previewRosterSave?: (request: RosterSaveRequest) => Promise<RosterPreviewResult>;
   readonly saveRoster?: (request: RosterSaveRequest) => Promise<RosterSaveResult>;

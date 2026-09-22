@@ -47,6 +47,9 @@ await build({
     ),
     gradingCommentLibraryBackend: fileURLToPath(
       new URL("../../src/grading/grading-comment-library-context.ts", import.meta.url)
+    ),
+    rosterSectionSummaryBackend: fileURLToPath(
+      new URL("../../src/roster/roster-section-summary-context.ts", import.meta.url)
     )
   },
   outDir: fileURLToPath(new URL("../dist-electron", import.meta.url)),

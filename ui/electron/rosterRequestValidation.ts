@@ -1,4 +1,9 @@
-import type { RosterRemoveRequest, RosterSaveRequest, RosterSectionRequest } from "./ipc.js";
+import type {
+  RosterRemoveRequest,
+  RosterSaveRequest,
+  RosterSectionRequest,
+  RosterSectionSummariesRequest
+} from "./ipc.js";
 
 const isRosterSectionRequest = (value: unknown): value is RosterSectionRequest => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -36,5 +41,17 @@ export const isRosterSaveRequest = (value: unknown): value is RosterSaveRequest 
 export const isRosterRemoveRequest = (value: unknown): value is RosterRemoveRequest =>
   isRosterSectionRequest(value) &&
   typeof (value as unknown as Record<string, unknown>).confirmed === "boolean";
+
+export const isRosterSectionSummariesRequest = (
+  value: unknown
+): value is RosterSectionSummariesRequest => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const request = value as Record<string, unknown>;
+  return (
+    typeof request.courseFolderId === "string" &&
+    typeof request.courseFolderPath === "string" &&
+    typeof request.termCode === "string"
+  );
+};
 
 export { isRosterSectionRequest };

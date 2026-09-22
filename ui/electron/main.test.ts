@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRosterSaveRequest } from "./rosterRequestValidation.js";
+import { isRosterSaveRequest, isRosterSectionSummariesRequest } from "./rosterRequestValidation.js";
 
 describe("isRosterSaveRequest", () => {
   it("accepts a manual student using the canonical roster row shape", () => {
@@ -20,5 +20,20 @@ describe("isRosterSaveRequest", () => {
         confirmed: false
       })
     ).toBe(true);
+  });
+});
+
+describe("isRosterSectionSummariesRequest", () => {
+  it("requires a narrow course and term identity", () => {
+    expect(
+      isRosterSectionSummariesRequest({
+        courseFolderId: "course-folder-test",
+        courseFolderPath: "/tmp/course",
+        termCode: "27s1"
+      })
+    ).toBe(true);
+    expect(isRosterSectionSummariesRequest({ courseFolderId: "course", termCode: "27s1" })).toBe(
+      false
+    );
   });
 });

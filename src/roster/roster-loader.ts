@@ -10,9 +10,7 @@ import {
   normalizeStudentId
 } from "./roster-normalization.js";
 import {
-  ROSTER_STATUS_ACTIVE,
-  ROSTER_STATUS_DROPPED,
-  ROSTER_STATUS_HOLD,
+  createRosterSummary,
   type RosterLoadResult,
   type RosterSectionSource,
   type RosterStudent,
@@ -50,18 +48,6 @@ const createEmptySummary = (rosterFiles: string[]): RosterSummary => ({
   activeStudentCount: EMPTY_COUNT,
   droppedStudentCount: EMPTY_COUNT,
   holdStudentCount: EMPTY_COUNT
-});
-
-const createSummary = (
-  rosterFiles: string[],
-  students: readonly RosterStudent[]
-): RosterSummary => ({
-  rosterFiles,
-  studentCount: students.length,
-  activeStudentCount: students.filter((student) => student.status === ROSTER_STATUS_ACTIVE).length,
-  droppedStudentCount: students.filter((student) => student.status === ROSTER_STATUS_DROPPED)
-    .length,
-  holdStudentCount: students.filter((student) => student.status === ROSTER_STATUS_HOLD).length
 });
 
 const getTermDirectory = (termConfigPath: string): string =>
@@ -225,7 +211,7 @@ export const loadTermRosters = (request: TermRosterLoadRequest): RosterLoadResul
     summary:
       errors.length > EMPTY_COUNT
         ? createEmptySummary(rosterFiles)
-        : createSummary(rosterFiles, students)
+        : createRosterSummary(rosterFiles, students)
   };
 };
 

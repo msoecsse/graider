@@ -993,7 +993,7 @@ threaded through three existing functions.
 
 ---
 
-## 38. No per-section roster count aggregation in the Electron IPC layer — **Worth fixing**
+## 38. No per-section roster count aggregation in the Electron IPC layer — **Resolved**
 
 Found while assessing step 12. `AssignmentSetupTerm`
 (`ui/electron/ipc.ts:229-232`) is `{code, sections: string[]}` — section
@@ -1012,6 +1012,21 @@ once and returns per-section counts, reusing whichever shared parser item
 36 converges on rather than adding a fifth implementation. The stats card
 itself needs nothing new once a section is loaded — it's a client-side
 aggregate over data already in hand.
+
+Resolved in PR12-3: `getRosterSectionSummaries` is a bulk Electron IPC read
+that returns every configured section for one registered course + term. A
+successful section exposes `studentCount`, `activeStudentCount`,
+`droppedStudentCount`, and `holdStudentCount`; missing and invalid rosters
+remain explicit per-section states with faculty-safe diagnostics, so one bad
+CSV cannot hide usable neighboring counts. Its new
+`roster-section-summary-context.ts` backend is bundled to
+`ui/dist-electron/rosterSectionSummaryBackend.cjs` by the established
+context/CJS bridge and uses PR12-2's `parseAndValidateRosterCsv` plus the
+canonical shared summary helper. Focused context, service, request-validation,
+and preload tests protect the integration, including reordered canonical CSV
+columns, normalization warnings, empty valid rosters, missing rosters, and
+invalid rosters. Item 36 remains open: the older roster-manager read/save
+paths have not yet been migrated.
 
 ---
 

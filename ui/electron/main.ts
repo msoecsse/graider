@@ -107,6 +107,7 @@ import {
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService.js";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService.js";
 import { getRosterForSection, loadRosterTerms, previewRosterSave } from "./rosterManagerService.js";
+import { getRosterSectionSummaries } from "./rosterSectionSummaryService.js";
 import {
   removeRosterWithStudentRepositoryAccessPageRefresh,
   removeSectionWithStudentRepositoryAccessPageRefresh,
@@ -115,7 +116,8 @@ import {
 import {
   isRosterRemoveRequest,
   isRosterSaveRequest,
-  isRosterSectionRequest
+  isRosterSectionRequest,
+  isRosterSectionSummariesRequest
 } from "./rosterRequestValidation.js";
 import { checkGitHubAuth } from "./githubAuthChecker.js";
 import { validateTemplateRepository } from "./templateRepositoryValidationService.js";
@@ -864,6 +866,13 @@ export const registerIpcHandlers = (): void => {
       throw new Error("A registered course folder is required for roster management.");
     }
     return getRosterForSection(request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getRosterSectionSummaries, (_event, request: unknown) => {
+    if (!isRosterSectionSummariesRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
+      throw new Error("A registered course folder is required for roster management.");
+    }
+    return getRosterSectionSummaries(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.previewRosterSave, (_event, request: unknown) => {
