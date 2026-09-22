@@ -1433,76 +1433,10 @@ describe("AssignmentDetailPage", () => {
     expect(insideFacts.queryByText(COURSE_FOLDER_PATH)).toBeNull();
   });
 
-  it("renders the assignment facts Template row as a link to the repository, not a raw path", async () => {
-    mockGraiderUI({
-      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
-    });
-
-    renderAssignmentDetailPage();
-
-    const factsSection = (
-      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
-    ).closest("section") as HTMLElement;
-    const templateLink = within(factsSection).getByRole("link", { name: "csc1120L2Template" });
-    expect(templateLink).toHaveAttribute(
-      "href",
-      "https://github.com/graider-sandbox/csc1120L2Template"
-    );
-    expect(within(factsSection).queryByText("graider-sandbox/csc1120L2Template")).toBeNull();
-  });
-
-  it("shows a plain placeholder, not a broken link, when no template repository is configured", async () => {
-    mockGraiderUI({
-      getAssignmentDetail: vi.fn().mockResolvedValue(
-        createAssignmentDetailResult(
-          createAssignmentDetailJson({
-            template: {
-              repository: null,
-              branch: null,
-              status: "missing",
-              repositoryStatus: "missing",
-              branchStatus: "not_checked"
-            }
-          })
-        )
-      )
-    });
-
-    renderAssignmentDetailPage();
-
-    const factsSection = (
-      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
-    ).closest("section") as HTMLElement;
-    expect(within(factsSection).queryByRole("link")).toBeNull();
-    expect(within(factsSection).getByText("Not configured")).toBeInTheDocument();
-  });
-
-  it("shows the Grading fact in plain language, combining enabled state and mode", async () => {
-    mockGraiderUI({
-      getAssignmentDetail: vi.fn().mockResolvedValue(
-        createAssignmentDetailResult(
-          createAssignmentDetailJson({
-            grading: {
-              enabled: true,
-              mode: "preset",
-              workflow: ".github/workflows/grade.yml",
-              artifact: "grading-results",
-              resultFile: "grading-results.json",
-              workflowStatus: "available",
-              workflowDispatch: "available"
-            }
-          })
-        )
-      )
-    });
-
-    renderAssignmentDetailPage();
-
-    const factsSection = (
-      await screen.findByRole("heading", { level: 2, name: "Assignment facts" })
-    ).closest("section") as HTMLElement;
-    expect(within(factsSection).getByText("Grading enabled (Preset)")).toBeInTheDocument();
-  });
+  // The Template-row-as-link, no-template-placeholder, and Grading-fact
+  // tests that used to live here moved to AssignmentFactsPanel.test.tsx
+  // (PR10-2) -- same assertions, rendering the panel directly instead of
+  // the full page.
 
   it("renders neutral placeholders and missing grade-status data without crashing", async () => {
     mockGraiderUI({

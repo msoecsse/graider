@@ -49,6 +49,39 @@ describe("coursePublishService", () => {
     expect(git(root, ["status", "--porcelain"])).toContain("notes.txt");
   });
 
+  it("publishes assignment groups without staging unrelated files", async () => {
+    const root = fixture();
+    const groups = path.join(root, "terms", "27s1", "assignments", "lab01", "groups.csv");
+    fs.mkdirSync(path.dirname(groups), { recursive: true });
+    fs.writeFileSync(groups, "group_id,student_id\nteam-1,ada\n", "utf8");
+    fs.writeFileSync(path.join(root, "notes.txt"), "unrelated\n", "utf8");
+
+    const result = await publishCourseChanges(root);
+
+    expect(result.status).toBe("success");
+    expect(git(root, ["show", "--format=", "--name-only", "HEAD"])).toBe(
+      "terms/27s1/assignments/lab01/groups.csv"
+    );
+    expect(git(root, ["status", "--porcelain"])).toContain("notes.txt");
+  });
+
+  it("commits an allowed tracked file deletion", async () => {
+    const root = fixture();
+    const roster = path.join(root, "terms", "27s1", "rosters", "section-001.csv");
+    fs.writeFileSync(roster, "student_id\nada\n", "utf8");
+    git(root, ["add", "terms/27s1/rosters/section-001.csv"]);
+    git(root, ["commit", "-m", "Add roster"]);
+    git(root, ["push"]);
+    fs.rmSync(roster);
+
+    const result = await publishCourseChanges(root);
+
+    expect(result.status).toBe("success");
+    expect(git(root, ["show", "--format=", "--name-status", "HEAD"])).toBe(
+      "D\tterms/27s1/rosters/section-001.csv"
+    );
+  });
+
   it("reports unrelated-only changes without committing them", async () => {
     const root = fixture();
     fs.writeFileSync(path.join(root, "notes.txt"), "unrelated\n", "utf8");

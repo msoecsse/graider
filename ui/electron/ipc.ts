@@ -145,6 +145,11 @@ export interface CoursePublishActionResult {
   readonly commitMessage: string | null;
 }
 
+export interface CourseMutationPublicationResult {
+  readonly status: "success" | "failure";
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
 export type GitHubAuthStatus = "connected" | "not_connected";
 
 export interface GitHubAuthResult {
@@ -272,6 +277,7 @@ export interface AssignmentSetupSaveResult {
   readonly status: "success" | "failure";
   readonly writtenFiles: readonly string[];
   readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly publication?: CourseMutationPublicationResult;
 }
 
 export interface AssignmentEditRequest extends AssignmentSetupTermsRequest {
@@ -347,6 +353,7 @@ export interface AssignmentEditSaveResult {
   readonly status: "success" | "failure" | "conflict";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly publication?: CourseMutationPublicationResult;
 }
 
 export interface AssignmentDeleteRequest extends AssignmentSetupTermsRequest {
@@ -358,6 +365,7 @@ export interface AssignmentDeleteResult {
   readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly publication?: CourseMutationPublicationResult;
 }
 
 export interface AssignmentGroupConfigRequest extends AssignmentSetupTermsRequest {
@@ -378,6 +386,7 @@ export interface AssignmentGroupConfigResult {
   readonly groupedStudentCount: number;
   readonly ungroupedActiveStudentCount: number;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly publication?: CourseMutationPublicationResult;
 }
 
 export interface StudentRepositoryAccessPageRequest extends AssignmentSetupTermsRequest {
@@ -552,6 +561,7 @@ export interface RosterSaveResult {
   readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly publication?: CourseMutationPublicationResult;
 }
 
 export interface RosterRemoveRequest extends RosterSectionRequest {
@@ -562,6 +572,7 @@ export interface RosterRemoveResult {
   readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly publication?: CourseMutationPublicationResult;
 }
 
 export interface TemplateWorkflowRequest {

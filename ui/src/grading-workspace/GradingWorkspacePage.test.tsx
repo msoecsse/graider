@@ -2731,7 +2731,7 @@ describe("GradingWorkspacePage grading progress and filters", () => {
     expect(screen.getByText("No reports have been published yet.")).toBeInTheDocument();
   });
 
-  it("moves to the next ungraded student and wraps past the end of the roster", async () => {
+  it("moves to the next visible student and wraps in the active filter", async () => {
     setApis(
       vi.fn().mockResolvedValue(
         workspace([
@@ -2750,11 +2750,13 @@ describe("GradingWorkspacePage grading progress and filters", () => {
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Next ungraded" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("henry:"));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
   });
 
-  it("disables Next ungraded and explains why once every student is graded or published", async () => {
+  it("disables filter-relative navigation when the active filter is empty", async () => {
     setApis(
       vi.fn().mockResolvedValue(
         workspace([
@@ -2767,24 +2769,25 @@ describe("GradingWorkspacePage grading progress and filters", () => {
     render(<GradingWorkspacePage request={REQUEST} />);
 
     expect(await screen.findByRole("button", { name: "Next ungraded" })).toBeDisabled();
-    expect(screen.getByText("No other students need grading.")).toBeInTheDocument();
+    expect(screen.getByText("No other visible students.")).toBeInTheDocument();
   });
 
-  it("keeps Previous available as a plain step back regardless of grading status", async () => {
+  it("wraps Previous within the active filter", async () => {
     setApis(
-      vi.fn().mockResolvedValue(workspace()),
+      vi.fn().mockResolvedValue(
+        workspace([
+          { studentId: "ada", section: "001", gradingStatus: "not_started" },
+          { studentId: "grace", section: "002", gradingStatus: "in_progress" }
+        ])
+      ),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId)))
     );
     render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
 
-    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
-    await showAllStudents();
-    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
-    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
     expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Previous" }));
-    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
   });
 
   it("gives navigation secondary weight so it never competes with Mark Complete or the header publish action", async () => {

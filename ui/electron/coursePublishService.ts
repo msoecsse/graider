@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
 const COMMIT_MESSAGE = "Publish Graider course changes";
 const ALLOWED_PATH =
-  /^(?:course\.yml|terms\/[^/]+\/term\.yml|terms\/[^/]+\/rosters\/[^/]+\.csv|terms\/[^/]+\/assignments\/[^/]+\/assignment\.yml|terms\/[^/]+\/assignments\/[^/]+\/\.github\/workflows\/grade\.yml)$/u;
+  /^(?:course\.yml|terms\/[^/]+\/term\.yml|terms\/[^/]+\/rosters\/[^/]+\.csv|terms\/[^/]+\/assignments\/[^/]+\/(?:assignment\.yml|groups\.csv|\.github\/workflows\/grade\.yml))$/u;
 
 const runGit = async (
   courseFolderPath: string,

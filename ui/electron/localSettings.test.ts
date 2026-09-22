@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   getLocalSettingsPath,
   loadLocalSettings,
-  saveCurrentFacultyMsoeUsername
+  saveCurrentFacultyMsoeUsername,
+  saveLastChooserDirectory
 } from "./localSettings";
 
 describe("local settings", () => {
@@ -32,5 +33,22 @@ describe("local settings", () => {
     saveCurrentFacultyMsoeUsername(settingsPath, "   ");
     expect(loadLocalSettings(settingsPath)).toEqual({ currentFacultyMsoeUsername: null });
     expect(fs.readFileSync(settingsPath, "utf8")).not.toContain("currentFacultyMsoeUsername");
+  });
+
+  it("saves the last chooser directory without changing unrelated settings", () => {
+    const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), "graider-local-settings-"));
+    const settingsPath = getLocalSettingsPath(userDataPath);
+    fs.writeFileSync(
+      settingsPath,
+      '{"unrelatedSetting":"keep","currentFacultyMsoeUsername":"smith"}\n'
+    );
+
+    saveLastChooserDirectory(settingsPath, "/tmp/course-folder");
+
+    expect(loadLocalSettings(settingsPath)).toEqual({
+      currentFacultyMsoeUsername: "smith",
+      lastChooserDirectory: "/tmp/course-folder"
+    });
+    expect(fs.readFileSync(settingsPath, "utf8")).toContain('"unrelatedSetting": "keep"');
   });
 });

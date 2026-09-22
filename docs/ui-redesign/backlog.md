@@ -504,7 +504,7 @@ has stayed undone through eight of them.
 
 ---
 
-## 17. `AssignmentEditPage.tsx` has no test file — **Should fix**
+## 17. `AssignmentEditPage.tsx` has no test file — **Resolved**
 
 There is no `AssignmentEditPage.test.tsx`. PR7-1 changed production code in
 this file — added the required `onSuccess` prop and wired the toast — with
@@ -521,6 +521,12 @@ suite that at least renders the page and exercises some of its flows.
 Fix: a new `AssignmentEditPage.test.tsx` covering, at minimum, the preview
 and confirm flow through to a successful save, so the modal wiring in this
 file has the same floor of coverage as its siblings.
+
+Resolved: `AssignmentEditPage.test.tsx` now covers loaded required-file and
+rubric rows, stable-key focus regression behavior, add/reorder/remove, request
+projection, and the preview/confirm/save flow. The tests exposed that editable
+React keys remounted rows as faculty typed; Assignment Edit now uses stable
+UI-only draft identities, which are projected out before IPC requests.
 
 ---
 
@@ -704,6 +710,17 @@ is current just because the rule it's illustrating still holds.
 
 Fix: no code fix. A habit for whoever reads this document next.
 
+**Applied for the first time, 2026-09.** Step 11's feasibility pass
+(`docs/ui-redesign/step-11-feasibility.md`) is this item's own advice put
+into practice before implementation, rather than corrected after the fact
+like the four cases above: check the document's description of what the
+code supports against the code itself before building against it. It
+found three missing foundations (items 33-35) and substantial overlap with
+`CourseSetupPage.tsx`, and section 5.5 was corrected as a result instead of
+a five-screen wizard being built on top of them. Step 12 (§5.6, the roster
+manager rebuild) is next — give it the same pass before implementation,
+not after.
+
 ---
 
 ## 28. What is a course page for? — **Optional**
@@ -783,12 +800,227 @@ confirmed it fails (shows `RouteNotFound`) without the fix.
 
 ---
 
+## 30. Grading navigation ignored the active student filter — **Resolved**
+
+The student list already rendered filter-aware entries, but J searched the
+full roster for the next ungraded student and K decremented the global roster
+index. Under Graded or Published, either shortcut could select a student that
+was not visible. Shift+J was documented as full-roster navigation but was not
+implemented distinctly from J.
+
+Resolved: J and K now navigate the same filtered entries rendered by the list,
+using their original roster indexes and wrapping at both ends. If the selected
+student is outside the filter, J selects the first visible row and K the last.
+Shift+J now wraps through the complete roster regardless of the filter. The
+visible Previous/Next controls share the filter-relative behavior, and focused
+keyboard, list-pane, and control tests cover the regression.
+
+---
+
+## 31. Assignment and roster mutations stayed local until manually published — **Resolved**
+
+Graider had a safe course publishing service, but assignment create, edit,
+delete, group settings, and roster/section mutations only wrote to the local
+course repository. The rendered dashboard could therefore report pending
+managed changes until a faculty member noticed and used Publish Course Changes.
+The allowlist also omitted an assignment's `groups.csv`, so group configuration
+could not be included even by the existing publication path.
+
+Resolved: successful local assignment and roster/section mutations now run the
+existing safe publisher after their local and Student Repository access-page
+work completes. Publication failures preserve the durable local change and
+return an explicit saved-locally warning; manual Publish Course Changes remains
+the retry path. The allowed managed paths now include assignment `groups.csv`,
+and regression tests cover groups files, tracked deletions, safe failure
+semantics, and the roster access-page partial-success path.
+
+---
+
+## 32. Read-only source-editor focus disabled grading shortcuts — **Resolved**
+
+The workspace shortcut guard correctly suppresses real faculty typing controls,
+but it identified Monaco solely by its internal textarea target. Since the
+source viewer is read-only, that made the central evidence-review workflow
+keyboard-dead whenever source code had focus: faculty could not create a
+source-anchored comment or inspect checks, history, or another student without
+moving focus away first.
+
+Resolved: the central shortcut policy now recognizes descendants of Graider's
+read-only `.grading-source-editor` before applying the editable-control guard,
+and listens in capture phase so Monaco cannot hide the event. Workspace tests
+model Monaco's focused textarea and cover source-comment targeting, checks,
+history, navigation, reusable comments, modifier keys, and continued
+suppression in comment title/body/deduction/category fields.
+
+---
+
+## 33. No column-header mapping for roster CSV import — **Should fix**
+
+Confirmed while assessing step 11 (`docs/ui-redesign/step-11-feasibility.md`):
+roster import matches CSV headers by exact string equality in three
+separate places — `src/roster/roster-loader.ts:90-95` against
+`src/roster/roster-validation.ts:20-23`'s literal column-name constants,
+`ui/electron/courseSetupService.ts:15-24`'s two hardcoded accepted header
+sets, and `ui/src/roster-manager/RosterManagerPage.tsx:178-182`'s
+"Uploaded roster must use the canonical four-column Graider header." There
+is no header-to-field mapping code anywhere — no detection, no UI, no
+normalization from an arbitrary source header (a raw LMS export, for
+example) to Graider's four canonical fields.
+
+**Standalone work, not a wizard prerequisite.** CSV import today depends on
+the file already having Graider's exact column names; anyone importing a
+roster exported from a system other than Graider's own format — Canvas or
+otherwise — hits the same hard rejection regardless of whether §5.5's
+wizard is ever built. §5.5 names this as the foundation for future Canvas
+field mapping, but the gap and its fix stand on their own.
+
+Fix: a pure mapping function (best-effort default by name similarity,
+user-editable) plus a small confirmation UI, validated through the existing
+per-row rules in `roster-validation.ts`. No backend GitHub work. Roughly
+one panel-plus-tests in size.
+
+**Not urgent.** No new rosters are being created until next term.
+
+---
+
+## 34. No draft or resumable-state storage exists anywhere in the app — **Worth fixing**
+
+Confirmed while assessing step 11: `ui/electron/localSettings.ts` (60
+lines, read in full) stores exactly `currentFacultyMsoeUsername` and
+`lastChooserDirectory`. No other draft-persistence mechanism exists in the
+main process, the course registry, or any renderer screen —
+`CourseSetupPage`, `AssignmentSetupPage`, and `RosterManagerPage` all hold
+form state in React state only, lost on window close.
+
+**No current caller.** §5.5's "Save and finish later" was the motivating
+case, but the term setup wizard is deferred indefinitely (see §5.5's
+correction), so nothing in the app needs this today. Recorded here for
+whichever future multi-step flow needs to survive an interruption first —
+optional until one does, not a prerequisite for anything currently planned.
+
+Fix: a new local JSON draft module, same shape as `localSettings.ts`
+(`userData`-scoped file, simple read/write helpers), keyed by course folder
+and flow/step identity. The storage mechanics are small; the draft shape
+itself is not trivial once it has to cover every field a multi-step flow
+would collect, including uploaded CSV content and column mappings.
+
+---
+
+## 35. Roster, section, and faculty mutations cannot be deferred past their own save — **Worth fixing**
+
+The flip side of item 31's fix, found while assessing step 11.
+`ui/electron/courseMutationPublicationService.ts`'s
+`publishSuccessfulCourseMutation` unconditionally pushes to GitHub
+immediately after any wrapped mutation succeeds, and wraps `saveRoster`,
+`removeRoster`, `removeSection`, `saveAssignmentSetup`, `saveAssignmentEdit`,
+`deleteAssignment`, and `saveAssignmentGroupConfig` (`ui/electron/main.ts`
+lines 672, 683, 755, 764, 772, 785, 880, 892, 904). Before item 31 this
+was the actual bug (changes stayed silently local); now the opposite
+problem exists — nothing that calls these paths can hold a change back from
+GitHub, even temporarily, even when the caller has a good reason to (a
+multi-step flow, a batch of related edits meant to land together).
+
+**A real constraint on any future deferred operation, wizard or not — not
+specific to §5.5.** It surfaced while assessing the term setup wizard
+(`docs/ui-redesign/step-11-feasibility.md` §3 has the full analysis of that
+case), but the underlying fact is general: nothing that calls
+`saveRoster`, `removeRoster`, `removeSection`, or the wrapped assignment
+mutations can currently hold a change back from GitHub, even briefly, even
+when the caller has a good reason to — a multi-step flow, a batch of
+related edits meant to land together, a future undo window, anything. Any
+feature that wants that will hit this, not just a wizard.
+
+**This is not a defect.** The auto-publish is correct behaviour for every
+caller today and was a deliberate fix (item 31) for changes silently
+staying local. Do not remove or weaken it to unblock some future caller —
+add a separate, opt-in deferred path instead.
+
+Fix: scoped, not a rearchitecture — new or parameterized IPC entry points
+for these mutations that skip the auto-publish wrapper, with the caller
+responsible for an explicit, single `publishCourseChanges` call when it's
+actually ready. `saveCourseSetup` already has no auto-publish and needs no
+change. No current caller needs this yet — the term setup wizard that
+motivated it is deferred indefinitely — so this is background knowledge to
+have on hand, not queued work.
+
+---
+
+## 36. Roster CSV parsing is implemented four times, not two — **Worth fixing**
+
+**Corrected while assessing step 12
+(`docs/ui-redesign/step-12-feasibility.md`) — this item undercounted.**
+Found while assessing step 11, independent of whether any wizard is ever
+built: roster CSV parsing exists as four separate implementations, not
+two. `src/roster/roster-loader.ts` + `src/io/csv.ts` (the CLI/grading
+path, the most complete and validated of the four),
+`ui/electron/courseSetupService.ts` (initial roster upload during course
+creation), **`ui/electron/rosterManagerService.ts`'s own `parseCsvLine`/
+`parseRows` (lines 39-82)** — missed in the original count, a third,
+independent parser with weaker validation than `roster-loader.ts`'s — and
+`ui/src/roster-manager/RosterManagerPage.tsx`'s client-side
+`parseUploadedRoster` ("Replace from CSV", lines 38-52). Same shape as
+item 22 and the three-date-formatters pattern this document already
+tracks, now with twice as many instances as first recorded.
+
+Fix: extract one shared module (parsing, column matching per item 33,
+validation, and the row-level diffing item 2 of the step-12 assessment
+needs) and converge all four call sites on it over time. Build it as part
+of step 12's roster manager rebuild (§5.6), since that screen needs it
+fresh; step 11's `CourseSetupPage.tsx` redesign and the CLI path can adopt
+it afterward rather than each growing its own version further.
+
+---
+
+## 37. Roster carries no provenance — **Worth fixing**
+
+Found while assessing step 12. `RosterRow` (`ui/electron/ipc.ts:522-527`)
+is `{studentId, githubUsername, section, status}`; `RosterLoadResult` and
+`RosterSaveResult` (same file, 534-565) carry no timestamp, author, or
+origin either. `ui/electron/rosterManagerService.ts` never reads file
+mtime or git metadata as a proxy. There is no way today to answer "where
+did this roster come from, and when was it last touched?"
+
+Needed for §5.6's source bar (`Source: CSV upload`, `Last updated Jun 2 by
+jones`) and its own note to "build the source as a first-class field
+now" ahead of eventual Canvas sync.
+
+Fix: small. Add an optional `source` field (`kind: "csv_upload" |
+"manual_edit"`, `updatedAt`, `updatedBy`) to `RosterLoadResult`/
+`RosterSaveRequest`, written by `saveRoster` and read by
+`getRosterForSection`. `updatedBy` can reuse the existing
+`currentFacultyMsoeUsername` local setting. No rearchitecture — one field
+threaded through three existing functions.
+
+---
+
+## 38. No per-section roster count aggregation in the Electron IPC layer — **Worth fixing**
+
+Found while assessing step 12. `AssignmentSetupTerm`
+(`ui/electron/ipc.ts:229-232`) is `{code, sections: string[]}` — section
+IDs only, no counts. The backend already computes exactly the shape
+wanted — `RosterSummary` in `src/roster/roster-models.ts`
+(`studentCount`, `activeStudentCount`, `droppedStudentCount`,
+`holdStudentCount`), produced by `src/roster/roster-loader.ts` — but it is
+wired into the CLI/grading path only, never exposed to the Electron IPC
+layer `RosterManagerPage.tsx` and `ui/electron/rosterManagerService.ts`
+use.
+
+Needed for §5.6's section tabs with counts and its small stats card.
+
+Fix: small. A bulk IPC read that loads every section's roster for a term
+once and returns per-section counts, reusing whichever shared parser item
+36 converges on rather than adding a fifth implementation. The stats card
+itself needs nothing new once a section is loaded — it's a client-side
+aggregate over data already in hand.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 2, 3, 4, 6, 7, 9, and 29 are resolved and no longer part of this
+Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of this
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-26, 27, and 28 can wait until after the redesign.
+26, 27, 28, 33, 34, 35, 36, 37, and 38 can wait until after the redesign.

@@ -228,7 +228,7 @@ describe("roster student repository access page lifecycle", () => {
       options(root)
     );
 
-    expect(result.status).toBe("failure");
+    expect(result.status).toBe("success");
     expect(result.diagnostics.map((item) => item.message).join(" ")).toMatch(/publish.*push/u);
   });
 
