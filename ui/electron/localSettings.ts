@@ -5,6 +5,7 @@ export const LOCAL_SETTINGS_FILE_NAME = "local-settings.json";
 
 export interface LocalSettings {
   readonly currentFacultyMsoeUsername: string | null;
+  readonly lastChooserDirectory?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -23,11 +24,20 @@ export const getLocalSettingsPath = (userDataPath: string): string =>
   path.join(userDataPath, LOCAL_SETTINGS_FILE_NAME);
 
 export const loadLocalSettings = (settingsPath: string): LocalSettings => {
-  const value = readSettings(settingsPath).currentFacultyMsoeUsername;
+  const settings = readSettings(settingsPath);
+  const username = settings.currentFacultyMsoeUsername;
+  const lastChooserDirectory = settings.lastChooserDirectory;
   return {
-    currentFacultyMsoeUsername: typeof value === "string" && value.trim() !== "" ? value : null
+    currentFacultyMsoeUsername:
+      typeof username === "string" && username.trim() !== "" ? username : null,
+    ...(typeof lastChooserDirectory === "string" && lastChooserDirectory.trim() !== ""
+      ? { lastChooserDirectory }
+      : {})
   };
 };
+
+export const loadLastChooserDirectory = (settingsPath: string): string | null =>
+  loadLocalSettings(settingsPath).lastChooserDirectory ?? null;
 
 export const saveCurrentFacultyMsoeUsername = (
   settingsPath: string,
@@ -40,4 +50,11 @@ export const saveCurrentFacultyMsoeUsername = (
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   fs.writeFileSync(settingsPath, `${JSON.stringify(settings, undefined, 2)}\n`, "utf8");
   return loadLocalSettings(settingsPath);
+};
+
+export const saveLastChooserDirectory = (settingsPath: string, directory: string): void => {
+  const settings = readSettings(settingsPath);
+  settings.lastChooserDirectory = directory;
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, `${JSON.stringify(settings, undefined, 2)}\n`, "utf8");
 };

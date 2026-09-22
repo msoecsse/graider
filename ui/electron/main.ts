@@ -83,6 +83,7 @@ import {
   loadLocalSettings,
   saveCurrentFacultyMsoeUsername
 } from "./localSettings.js";
+import { selectNativeDirectory } from "./nativeDirectoryChooser.js";
 import {
   loadAssignmentSetupTerms,
   previewAssignmentSetup,
@@ -125,7 +126,6 @@ import {
 import {
   addValidatedCourseFolderToRegistry,
   getCourseRegistryPath,
-  getSelectedFolderPath,
   listCourseFolders,
   removeCourseFolderFromRegistry,
   setStudentAccessPagesRepositoryFolder
@@ -513,11 +513,11 @@ export const registerIpcHandlers = (): void => {
   });
 
   ipcMain.handle(IPC_CHANNELS.selectCourseFolder, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openDirectory"]
+    const selectedFolder = await selectNativeDirectory({
+      properties: ["openDirectory"],
+      settingsPath: getLocalSettingsPath(app.getPath("userData")),
+      showOpenDialog: (options) => dialog.showOpenDialog(options)
     });
-
-    const selectedFolder = result.canceled ? null : getSelectedFolderPath(result.filePaths);
 
     if (selectedFolder === null) {
       return {
@@ -544,9 +544,11 @@ export const registerIpcHandlers = (): void => {
     IPC_CHANNELS.selectStudentAccessPagesRepositoryFolder,
     async (_event, courseFolderId: unknown) => {
       if (typeof courseFolderId !== "string") throw new Error("Course folder id is required.");
-      const selected = await dialog.showOpenDialog({ properties: ["openDirectory"] });
-      if (selected.canceled) return { canceled: true, folderPath: null };
-      const folderPath = getSelectedFolderPath(selected.filePaths);
+      const folderPath = await selectNativeDirectory({
+        properties: ["openDirectory"],
+        settingsPath: getLocalSettingsPath(app.getPath("userData")),
+        showOpenDialog: (options) => dialog.showOpenDialog(options)
+      });
       if (folderPath === null) return { canceled: true, folderPath: null };
       const registered = setStudentAccessPagesRepositoryFolder(
         getCourseRegistryPath(app.getPath("userData")),
@@ -567,18 +569,20 @@ export const registerIpcHandlers = (): void => {
     }
   );
   ipcMain.handle(IPC_CHANNELS.selectRepositoryDownloadFolder, async () => {
-    const selected = await dialog.showOpenDialog({
-      properties: ["openDirectory", "createDirectory"]
+    const folderPath = await selectNativeDirectory({
+      properties: ["openDirectory", "createDirectory"],
+      settingsPath: getLocalSettingsPath(app.getPath("userData")),
+      showOpenDialog: (options) => dialog.showOpenDialog(options)
     });
-    const folderPath = selected.canceled ? null : getSelectedFolderPath(selected.filePaths);
     return { canceled: folderPath === null, folderPath };
   });
 
   ipcMain.handle(IPC_CHANNELS.selectCourseSetupFolder, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openDirectory", "createDirectory"]
+    const selectedFolder = await selectNativeDirectory({
+      properties: ["openDirectory", "createDirectory"],
+      settingsPath: getLocalSettingsPath(app.getPath("userData")),
+      showOpenDialog: (options) => dialog.showOpenDialog(options)
     });
-    const selectedFolder = result.canceled ? null : getSelectedFolderPath(result.filePaths);
     if (selectedFolder !== null) approvedCourseSetupRoots.add(selectedFolder);
     return { canceled: selectedFolder === null, courseFolderPath: selectedFolder };
   });
