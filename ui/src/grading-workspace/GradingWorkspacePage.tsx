@@ -13,8 +13,10 @@ import type {
   GradingWorkspacePrepareRequest,
   BulkPublishGradingStudentReportsResult,
   PublishGradingStudentReportResult,
-  PreviewGradingStudentReportResult
+  PreviewGradingStudentReportResult,
+  GradingCommentLibraryMutationResult
 } from "../../electron/ipc";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { Toast, useToast } from "../components/Toast";
 import {
@@ -69,6 +71,11 @@ import {
   type CommentLibraryLoadState,
   type ReusableComment
 } from "./GradingCommentLibraryBrowser";
+import {
+  emptyReusableCommentEditorValue,
+  ReusableCommentEditor,
+  type ReusableCommentEditorValue
+} from "./ReusableCommentEditor";
 
 type Student = { studentId: string; section: string; gradingStatus: string };
 type Ready = {
@@ -154,6 +161,14 @@ interface PendingViewStateSave {
   readonly studentId: string;
   readonly viewState: GradingEditorViewState;
 }
+
+type LibraryEditorState =
+  | { readonly operation: "create"; readonly value: ReusableCommentEditorValue }
+  | {
+      readonly operation: "edit";
+      readonly commentId: string;
+      readonly value: ReusableCommentEditorValue;
+    };
 
 const workflowRepairUnavailableMessage = (status: string): string => {
   const messages: Readonly<Record<string, string>> = {
@@ -482,6 +497,10 @@ export const GradingWorkspacePage = ({
   });
   const [commentSearch, setCommentSearch] = useState("");
   const [selectedCommentTags, setSelectedCommentTags] = useState<readonly string[]>([]);
+  const [libraryEditor, setLibraryEditor] = useState<LibraryEditorState>();
+  const [libraryDeleteConfirmation, setLibraryDeleteConfirmation] = useState<ReusableComment>();
+  const [libraryMutationPending, setLibraryMutationPending] = useState(false);
+  const [libraryMutationMessage, setLibraryMutationMessage] = useState<string>();
   const [canonicalSourceTarget, setCanonicalSourceTarget] = useState<CanonicalSourceRange>();
   const [commentEditor, setCommentEditor] = useState<CommentEditorState>();
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteCommentConfirmation>();
@@ -1236,6 +1255,111 @@ export const GradingWorkspacePage = ({
         : [],
     [commentLibrary, commentSearch, selectedCommentTags]
   );
+  const updateLibraryComments = (
+    update: (comments: readonly ReusableComment[]) => readonly ReusableComment[]
+  ): void => {
+    setCommentLibrary((current) =>
+      current.status === "success"
+        ? { status: "success", comments: update(current.comments) }
+        : current
+    );
+  };
+  const libraryMutationFailureMessage = (result: GradingCommentLibraryMutationResult): string => {
+    if (result.status === "not_found") return "That reusable comment no longer exists.";
+    if (result.status === "failure") return "The reusable comment could not be saved safely.";
+    return "The shared comment library is unavailable for this faculty account.";
+  };
+  const publicationWarning = (
+    result: Extract<GradingCommentLibraryMutationResult, { readonly status: "success" }>
+  ): string | undefined =>
+    result.publication.status === "failure"
+      ? "Comment saved locally, but the shared course repository could not be published. Use Publish Course Changes to retry after resolving the repository issue."
+      : undefined;
+  const saveLibraryEditor = async (value: ReusableCommentEditorValue): Promise<void> => {
+    const editor = libraryEditor;
+    if (editor === undefined || libraryMutationPending) return;
+    if (
+      editor.operation === "create" &&
+      window.graiderUI.createGradingLibraryComment === undefined
+    ) {
+      setLibraryMutationMessage("The shared comment library is unavailable.");
+      return;
+    }
+    if (editor.operation === "edit" && window.graiderUI.editGradingLibraryComment === undefined) {
+      setLibraryMutationMessage("The shared comment library is unavailable.");
+      return;
+    }
+    setLibraryMutationPending(true);
+    setLibraryMutationMessage(undefined);
+    try {
+      const result =
+        editor.operation === "create"
+          ? await window.graiderUI.createGradingLibraryComment!({
+              courseFolderId: request.courseFolderId,
+              termCode: request.termCode,
+              comment: value
+            })
+          : await window.graiderUI.editGradingLibraryComment!({
+              courseFolderId: request.courseFolderId,
+              termCode: request.termCode,
+              commentId: editor.commentId,
+              replacement: value
+            });
+      if (result.status !== "success" || !("comment" in result)) {
+        setLibraryMutationMessage(libraryMutationFailureMessage(result));
+      } else {
+        updateLibraryComments((comments) =>
+          editor.operation === "create"
+            ? [...comments, result.comment]
+            : comments.map((comment) =>
+                comment.id === result.comment.id ? result.comment : comment
+              )
+        );
+        setLibraryEditor(undefined);
+        const warning = publicationWarning(result);
+        if (warning === undefined)
+          showToast(
+            editor.operation === "create"
+              ? "Reusable comment created."
+              : "Reusable comment updated."
+          );
+        else setLibraryMutationMessage(warning);
+      }
+    } catch {
+      setLibraryMutationMessage("The reusable comment could not be saved safely.");
+    } finally {
+      if (mounted.current) setLibraryMutationPending(false);
+    }
+  };
+  const deleteLibraryComment = async (): Promise<void> => {
+    const comment = libraryDeleteConfirmation;
+    const remove = window.graiderUI.deleteGradingLibraryComment;
+    if (comment === undefined || remove === undefined || libraryMutationPending) return;
+    setLibraryMutationPending(true);
+    setLibraryMutationMessage(undefined);
+    try {
+      const result = await remove({
+        courseFolderId: request.courseFolderId,
+        termCode: request.termCode,
+        commentId: comment.id
+      });
+      if (result.status !== "success")
+        setLibraryMutationMessage(libraryMutationFailureMessage(result));
+      else {
+        updateLibraryComments((comments) =>
+          comments.filter((candidate) => candidate.id !== comment.id)
+        );
+        setLibraryDeleteConfirmation(undefined);
+        const warning = publicationWarning(result);
+        if (warning === undefined) showToast("Reusable comment deleted.");
+        else setLibraryMutationMessage(warning);
+      }
+    } catch {
+      setLibraryMutationMessage("The reusable comment could not be deleted safely.");
+    } finally {
+      if (mounted.current) setLibraryMutationPending(false);
+    }
+  };
   const sourceAnnotations = useMemo<readonly GradingSourceAnnotation[]>(() => {
     if (snapshot.status !== "success") return [];
     return snapshot.snapshot.appliedComments.flatMap((comment) => {
@@ -2954,6 +3078,11 @@ export const GradingWorkspacePage = ({
           />
           <section className="grading-comment-library" aria-labelledby="comment-library-heading">
             <h3 id="comment-library-heading">Comment library</h3>
+            {libraryMutationMessage === undefined ? null : (
+              <div className="grading-panel-message" role="status">
+                {libraryMutationMessage}
+              </div>
+            )}
             {gradingMutationError === undefined ? null : (
               <div className="grading-panel-message" role="alert">
                 {gradingMutationError}
@@ -2991,13 +3120,66 @@ export const GradingWorkspacePage = ({
                 gradingMutationBlockedStudents.current.has(studentId)
               }
               onApply={openApplyEditor}
+              libraryMutationPending={libraryMutationPending}
+              onNew={() => {
+                setLibraryMutationMessage(undefined);
+                setLibraryEditor({ operation: "create", value: emptyReusableCommentEditorValue() });
+              }}
+              onEdit={(comment) => {
+                setLibraryMutationMessage(undefined);
+                setLibraryEditor({
+                  operation: "edit",
+                  commentId: comment.id,
+                  value: {
+                    title: comment.title,
+                    text: comment.text,
+                    defaultDeduction: comment.defaultDeduction,
+                    defaultRubricCategoryId: comment.defaultRubricCategoryId,
+                    tags: comment.tags
+                  }
+                });
+              }}
+              onDelete={(comment) => {
+                setLibraryMutationMessage(undefined);
+                setLibraryDeleteConfirmation(comment);
+              }}
             />
+            {libraryEditor === undefined ? null : (
+              <ReusableCommentEditor
+                categories={result.rubric}
+                initialValue={libraryEditor.value}
+                onCancel={() => setLibraryEditor(undefined)}
+                onSave={(value) => void saveLibraryEditor(value)}
+                pending={libraryMutationPending}
+                tagSuggestions={availableCommentTags}
+              />
+            )}
           </section>
         </aside>
       </div>
       {footer}
       {cheatSheet}
       {discardDraftPrompt}
+      <ConfirmDialog
+        confirmLabel="Delete reusable comment"
+        diff={
+          libraryDeleteConfirmation === undefined
+            ? []
+            : [
+                {
+                  id: libraryDeleteConfirmation.id,
+                  type: "removed",
+                  label: libraryDeleteConfirmation.title
+                }
+              ]
+        }
+        isConfirming={libraryMutationPending}
+        isOpen={libraryDeleteConfirmation !== undefined}
+        onCancel={() => setLibraryDeleteConfirmation(undefined)}
+        onConfirm={() => void deleteLibraryComment()}
+        summary="This deletes the reusable course-library entry. Comments already applied to students are unchanged."
+        title="Delete reusable comment?"
+      />
       <Toast message={toastMessage} />
     </main>
   );

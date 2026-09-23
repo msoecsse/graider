@@ -25,7 +25,11 @@ export const GradingCommentLibraryBrowser = ({
   studentId,
   gradingMutationStudentId,
   isStudentMutationBlocked,
-  onApply
+  onApply,
+  libraryMutationPending = false,
+  onNew = () => undefined,
+  onEdit = () => undefined,
+  onDelete = () => undefined
 }: {
   readonly commentLibrary: CommentLibraryLoadState;
   readonly commentSearch: string;
@@ -38,6 +42,10 @@ export const GradingCommentLibraryBrowser = ({
   readonly gradingMutationStudentId: string | undefined;
   readonly isStudentMutationBlocked: (studentId: string) => boolean;
   readonly onApply: (comment: ReusableComment) => void;
+  readonly libraryMutationPending?: boolean;
+  readonly onNew?: () => void;
+  readonly onEdit?: (comment: ReusableComment) => void;
+  readonly onDelete?: (comment: ReusableComment) => void;
 }): ReactElement => {
   if (commentLibrary.status === "loading")
     return <p aria-live="polite">Loading shared comments…</p>;
@@ -49,6 +57,16 @@ export const GradingCommentLibraryBrowser = ({
     );
   return (
     <>
+      <div className="grading-comment-library__actions">
+        <button
+          className="secondary-action"
+          disabled={libraryMutationPending}
+          onClick={onNew}
+          type="button"
+        >
+          New comment
+        </button>
+      </div>
       <label>
         Search comments
         <input
@@ -104,6 +122,24 @@ export const GradingCommentLibraryBrowser = ({
               >
                 Apply {comment.title}
               </button>
+              <span className="grading-comment-library__entry-actions">
+                <button
+                  className="secondary-action"
+                  disabled={libraryMutationPending}
+                  onClick={() => onEdit(comment)}
+                  type="button"
+                >
+                  Edit
+                </button>
+                <button
+                  className="secondary-action"
+                  disabled={libraryMutationPending}
+                  onClick={() => onDelete(comment)}
+                  type="button"
+                >
+                  Delete
+                </button>
+              </span>
             </li>
           ))}
         </ul>

@@ -56,6 +56,26 @@ describe("GradingCommentLibraryBrowser", () => {
     expect(screen.getByRole("button", { name: "Apply Off-by-one" })).toBeDisabled();
   });
 
+  it("exposes compact library management actions", () => {
+    const onNew = vi.fn();
+    const onEdit = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <GradingCommentLibraryBrowser
+        {...baseProps}
+        onDelete={onDelete}
+        onEdit={onEdit}
+        onNew={onNew}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New comment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onNew).toHaveBeenCalledOnce();
+    expect(onEdit).toHaveBeenCalledWith(comment);
+    expect(onDelete).toHaveBeenCalledWith(comment);
+  });
+
   it("shows the loading and failure states instead of the browser", () => {
     const { rerender } = render(
       <GradingCommentLibraryBrowser {...baseProps} commentLibrary={{ status: "loading" }} />

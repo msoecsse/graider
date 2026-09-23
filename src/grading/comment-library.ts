@@ -7,8 +7,16 @@ export const COMMENT_LIBRARY_SCHEMA_VERSION = 1;
 const MAX_REUSABLE_COMMENT_ID_GENERATION_ATTEMPTS = 10;
 
 const tagsSchema = z.array(z.string()).transform((tags) => {
-  const normalized = tags.map((tag) => tag.trim()).filter((tag) => tag !== "");
-  return [...new Set(normalized)];
+  const seen = new Set<string>();
+  return tags.reduce<string[]>((normalized, tag) => {
+    const displayValue = tag.trim();
+    const key = displayValue.toLocaleLowerCase();
+    if (displayValue !== "" && !seen.has(key)) {
+      seen.add(key);
+      normalized.push(displayValue);
+    }
+    return normalized;
+  }, []);
 });
 
 export const reusableCommentSchema = z

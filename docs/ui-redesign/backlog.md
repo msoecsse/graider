@@ -1030,7 +1030,7 @@ paths have not yet been migrated.
 
 ---
 
-## 39. Comment-library mutations exist but have no faculty UI — **Should fix**
+## 39. Comment-library mutations exist but have no faculty UI — **Partially resolved**
 
 The course-level JSON model, context operations, Electron service, validated
 IPC handlers, and preload APIs already support reusable-comment create, edit,
@@ -1043,6 +1043,10 @@ library maintenance outside Graider. The fix is shared create/edit/delete UI
 used by both the grading workspace and a dedicated course-level management
 screen, not another storage model or parallel set of APIs. See
 `comment-library-feasibility.md`.
+
+COMMENT-3 resolves the grading-workspace portion: faculty can create, edit,
+and explicitly delete reusable entries through the existing publication-aware
+APIs. COMMENT-5 remains for the dedicated course-level management route.
 
 ---
 
@@ -1097,7 +1101,7 @@ source-anchored feedback.
 
 ---
 
-## 42. Free-form tag authoring lacks autocomplete and canonical duplicate normalization — **Should fix**
+## 42. Free-form tag authoring lacks autocomplete and canonical duplicate normalization — **Resolved**
 
 The schema already accepts tags, search/filtering is case-insensitive, and the
 workspace derives a case-insensitively deduplicated list for filters. There is
@@ -1109,6 +1113,11 @@ Fix with an accessible free-form tag/token input that suggests existing course
 tags and accepts new values. Normalize whitespace and deduplicate
 case-insensitively at the backend boundary while preserving established display
 casing.
+
+Resolved in COMMENT-3: the shared editor supplies accessible removable tag
+tokens, native keyboard/pointer suggestions from existing course tags, and
+free-form entry. Canonical storage now trims, removes blanks, and deduplicates
+case-insensitively while retaining the first accepted display spelling/order.
 
 ---
 

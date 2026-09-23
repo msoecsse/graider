@@ -481,12 +481,17 @@ This intentionally moves the originally envisioned publication slice before
 faculty mutation UI. Backend work can land safely without exposing an
 intermediate UI that implies sharing while saving locally only.
 
-### COMMENT-3 — Shared library editor and grading-workspace CRUD
+### COMMENT-3 — Shared library editor and grading-workspace CRUD — complete
 
 Build the reusable create/edit form, delete confirmation, free-form tag entry,
 autocomplete, backend tag normalization, and rendered preview. Wire the
 existing workspace browser to create/edit/delete and display partial-publication
 warnings. Preserve the existing apply/search/filter/snapshot behavior.
+
+Shipped as a reusable renderer component with a compact workspace integration.
+The backend now preserves first-seen tag casing while removing case-only
+duplicates. COMMENT-4 and COMMENT-5 reuse this editor rather than duplicating
+authoring state.
 
 ### COMMENT-4 — One-shot “Save to course library”
 
@@ -536,8 +541,5 @@ through COMMENT-5 between completed PR12-3 and deferred PR12-4/PR12-5.
 
 ## 15. Recommendation
 
-Proceed with COMMENT-3: build the shared reusable-comment editor, normalized
-free-form tag authoring/autocomplete, grading-workspace create/edit/delete, and
-publication feedback on top of COMMENT-2's contract. Follow with one-shot
-promotion and the dedicated management screen. Resume PR12-4 and PR12-5 only
-after this priority track is complete.
+Proceed with COMMENT-4: add one-shot promotion by opening the shared editor
+with an applied comment's values only after its student mutation succeeds.
