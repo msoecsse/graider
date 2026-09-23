@@ -196,8 +196,14 @@ export const AssignmentSetupPage = ({
       } else {
         throw new Error(result.diagnostics.map((item) => item.message).join(" "));
       }
-    } catch {
-      throw new Error("Unable to save assignment.yml.");
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.trim() : "";
+      throw new Error(
+        reason === ""
+          ? "Unable to save assignment.yml."
+          : `Unable to save assignment.yml: ${reason}`,
+        { cause: error }
+      );
     } finally {
       setIsLoading(false);
     }

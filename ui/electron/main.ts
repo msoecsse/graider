@@ -512,7 +512,7 @@ export const registerIpcHandlers = (): void => {
     }
     const preview = previewAssignmentSetup(request);
     if (preview.status !== "ready") return preview;
-    if (request.templateRepository.trim() === "") return saveAssignmentSetup(request);
+    if (request.templateRepository.trim() === "") return preview;
     const validation = await validateTemplateRepository(
       request.templateRepository,
       request.templateBranch,
@@ -549,6 +549,7 @@ export const registerIpcHandlers = (): void => {
         writtenFiles: [],
         diagnostics: localPreview.diagnostics
       };
+    if (request.templateRepository.trim() === "") return saveAssignmentSetup(request);
     const validation = await validateTemplateRepository(
       request.templateRepository,
       request.templateBranch,

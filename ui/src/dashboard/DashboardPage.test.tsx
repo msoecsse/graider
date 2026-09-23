@@ -1216,6 +1216,52 @@ describe("DashboardPage", () => {
     expect(screen.queryByRole("dialog", { name: "Create assignment?" })).toBeNull();
   });
 
+  it("shows the save failure reason in the Assignment Setup confirmation", async () => {
+    const previewAssignmentSetup = vi.fn().mockResolvedValue({
+      status: "ready",
+      diagnostics: [],
+      hasConflicts: false,
+      files: [
+        {
+          path: "terms/27s1/assignments/lab03/assignment.yml",
+          content: "schema_version: 1\n",
+          exists: false
+        }
+      ]
+    });
+    const saveAssignmentSetup = vi.fn().mockResolvedValue({
+      status: "failure",
+      writtenFiles: [],
+      diagnostics: [{ message: "GitHub authentication is required." }]
+    });
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      loadAssignmentSetupTerms: vi.fn().mockResolvedValue({
+        terms: [{ code: "27s1", sections: ["001"] }],
+        diagnostics: []
+      }),
+      previewAssignmentSetup,
+      saveAssignmentSetup
+    });
+    render(<DashboardPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: `Create a new assignment in ${COURSE_FOLDER.path}`
+      })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Create assignment" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Create assignment?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Create assignment" }));
+
+    expect(
+      await within(confirmation).findByText(
+        "Unable to save assignment.yml: GitHub authentication is required."
+      )
+    ).toHaveClass("error-message");
+  });
+
   it("manages a roster through the typed preload APIs", async () => {
     const loadRosterTerms = vi.fn().mockResolvedValue({
       terms: [{ code: "27s1", sections: ["001"] }],
