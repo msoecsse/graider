@@ -695,7 +695,8 @@ PR12-3 (complete)
   -> COMMENT-1 (complete)
   -> COMMENT-2 (complete)
   -> COMMENT-3 (complete)
-  -> COMMENT-4 through COMMENT-5
+  -> COMMENT-4 (complete)
+  -> COMMENT-5
   -> PR12-4 roster source/provenance
   -> PR12-5 roster-manager visual rebuild
 ```

@@ -18,7 +18,7 @@ The important remaining gaps are at the user boundary:
 - there is no course-level Comment Library screen;
 - free-form tags have no authoring control or autocomplete, and persisted tags
   are not deduplicated case-insensitively;
-- a one-shot grading comment cannot be promoted into the library;
+- one-shot promotion had not yet been wired into the grading workspace;
 
 COMMENT-1 resolved the formatting gap with a shared parser/model, React
 renderer, report renderer, scoped styling, editor helpers, and parity-focused
@@ -122,7 +122,10 @@ the required snapshot model.
   and `java` in one stored entry.
 - **Not implemented:** a dedicated course-level management route and navigation
   entry.
-- **Not implemented:** one-shot comment promotion to the library.
+- **Resolved in COMMENT-4:** a successfully persisted one-shot comment receives
+  a student-scoped, opt-in **Save to course library** offer. It reuses the
+  shared editor and publication-aware create flow without rewriting the applied
+  snapshot.
 - **Resolved in COMMENT-2:** successful create, edit, and delete operations use
   the safe course publisher; the exact canonical file is managed; and typed
   results distinguish full success from a durable local save whose publication
@@ -493,11 +496,15 @@ The backend now preserves first-seen tag casing while removing case-only
 duplicates. COMMENT-4 and COMMENT-5 reuse this editor rather than duplicating
 authoring state.
 
-### COMMENT-4 — One-shot “Save to course library”
+### COMMENT-4 — One-shot “Save to course library” — complete
 
-After a one-shot student comment is successfully applied, offer the separate
-prefilled library flow. Reuse COMMENT-3's editor and COMMENT-2's publication
-contract. Keep the applied snapshot independent.
+After a one-shot student comment is persisted, the workspace captures its
+submitted snapshot values and offers a compact student-scoped action. The
+shared COMMENT-3 editor opens only on faculty request; its create result shares
+the normal COMMENT-3 local-library update and COMMENT-2 publication feedback.
+The offer remains valid when the follow-up grading-snapshot refresh fails, but
+is cleared on student switch, cancellation/dismissal, or successful library
+creation. The applied snapshot is never given a retroactive source ID.
 
 ### COMMENT-5 — Course-level Comment Library screen
 
@@ -505,20 +512,18 @@ Add the course/term-context route and navigation, then compose the shared
 browser, editor, tag control, formatted preview, and publication feedback into
 the dedicated management surface.
 
-COMMENT-1 and COMMENT-2 are complete. COMMENT-3 supplies the reusable editor
-for COMMENT-4 and COMMENT-5. COMMENT-4 and COMMENT-5 could be developed in
-either order after COMMENT-3, but the grading-loop promotion workflow is
-recommended first because it serves the more frequent workflow.
+COMMENT-1 through COMMENT-4 are complete. COMMENT-3 supplies the reusable
+editor and COMMENT-2 supplies the publication-aware mutation contract reused
+by COMMENT-4 and COMMENT-5.
 
 After COMMENT-5, resume PR12-4 (roster source/provenance) and PR12-5 (the roster
 manager visual rebuild that consumes PR12-3 counts and PR12-4 provenance).
 
 ## 13. Backlog and documentation corrections
 
-Backlog items 39, 42, and 43 remain open for unwired mutation UI/management,
-tag authoring/normalization, and one-shot promotion. Item 40 is resolved by
-COMMENT-2, and item 41 is resolved by COMMENT-1. They are problem statements,
-not a duplicate PR checklist.
+Backlog item 39 remains open for the dedicated management screen. Items 40,
+41, 42, and 43 are resolved by COMMENT-2 through COMMENT-4. They are problem
+statements, not a duplicate PR checklist.
 
 The grading specification now records the locked behavior. The UI-redesign
 roadmap preserves the Step 12 history while explicitly placing COMMENT-1
@@ -541,5 +546,6 @@ through COMMENT-5 between completed PR12-3 and deferred PR12-4/PR12-5.
 
 ## 15. Recommendation
 
-Proceed with COMMENT-4: add one-shot promotion by opening the shared editor
-with an applied comment's values only after its student mutation succeeds.
+Proceed with COMMENT-5: add the dedicated course-level Comment Library screen
+by reusing the shared browser/editor/tag controls and publication-aware CRUD
+flow already used in the workspace.

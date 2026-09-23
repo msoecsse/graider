@@ -1121,7 +1121,7 @@ case-insensitively while retaining the first accepted display spelling/order.
 
 ---
 
-## 43. One-shot comments cannot be promoted to the course library — **Should fix**
+## 43. One-shot comments cannot be promoted to the course library — **Resolved**
 
 Faculty can apply an ad hoc student comment or apply a reusable snapshot, but
 there is no bridge between those workflows. Useful one-shot feedback must be
@@ -1132,6 +1132,14 @@ library** with a prefilled reusable-comment editor. The library save remains a
 separate opt-in mutation; cancellation or failure leaves the student comment
 unchanged, and successful promotion does not retroactively couple the applied
 snapshot to the new library entry.
+
+Resolved in COMMENT-4: after a one-shot add is persisted, the grading workspace
+offers a compact, student-scoped **Save to course library** action. It opens the
+shared editor with the submitted title/text, a negative reusable default for
+the nonnegative applied deduction magnitude, any configured rubric category,
+and no inferred tags. The separate create mutation updates the in-memory
+library even if publication fails, preserves the recovery warning, and never
+rewrites the applied snapshot or adds `sourceCommentId`.
 
 ---
 

@@ -163,12 +163,22 @@ interface PendingViewStateSave {
 }
 
 type LibraryEditorState =
-  | { readonly operation: "create"; readonly value: ReusableCommentEditorValue }
+  | {
+      readonly operation: "create";
+      readonly value: ReusableCommentEditorValue;
+      readonly promotion?: PromotionOffer;
+    }
   | {
       readonly operation: "edit";
       readonly commentId: string;
       readonly value: ReusableCommentEditorValue;
     };
+
+interface PromotionOffer {
+  readonly studentId: string;
+  readonly appliedCommentId: string;
+  readonly value: ReusableCommentEditorValue;
+}
 
 const workflowRepairUnavailableMessage = (status: string): string => {
   const messages: Readonly<Record<string, string>> = {
@@ -498,6 +508,7 @@ export const GradingWorkspacePage = ({
   const [commentSearch, setCommentSearch] = useState("");
   const [selectedCommentTags, setSelectedCommentTags] = useState<readonly string[]>([]);
   const [libraryEditor, setLibraryEditor] = useState<LibraryEditorState>();
+  const [promotionOffer, setPromotionOffer] = useState<PromotionOffer>();
   const [libraryDeleteConfirmation, setLibraryDeleteConfirmation] = useState<ReusableComment>();
   const [libraryMutationPending, setLibraryMutationPending] = useState(false);
   const [libraryMutationMessage, setLibraryMutationMessage] = useState<string>();
@@ -561,6 +572,12 @@ export const GradingWorkspacePage = ({
   const autosaveBlockedStudents = useRef(new Set<string>());
   const mounted = useRef(true);
   currentStudentIdRef.current = currentStudentId;
+
+  useEffect(() => {
+    setPromotionOffer((current) =>
+      current === undefined || current.studentId === currentStudentId ? current : undefined
+    );
+  }, [currentStudentId]);
 
   const setStudentWarning = useCallback((studentId: string, message?: string): void => {
     if (!mounted.current) return;
@@ -1278,6 +1295,7 @@ export const GradingWorkspacePage = ({
   const saveLibraryEditor = async (value: ReusableCommentEditorValue): Promise<void> => {
     const editor = libraryEditor;
     if (editor === undefined || libraryMutationPending) return;
+    const promotion = editor.operation === "create" ? editor.promotion : undefined;
     if (
       editor.operation === "create" &&
       window.graiderUI.createGradingLibraryComment === undefined
@@ -1316,12 +1334,22 @@ export const GradingWorkspacePage = ({
               )
         );
         setLibraryEditor(undefined);
+        if (promotion !== undefined)
+          setPromotionOffer((current) =>
+            current !== undefined &&
+            current.studentId === promotion.studentId &&
+            current.appliedCommentId === promotion.appliedCommentId
+              ? undefined
+              : current
+          );
         const warning = publicationWarning(result);
         if (warning === undefined)
           showToast(
-            editor.operation === "create"
-              ? "Reusable comment created."
-              : "Reusable comment updated."
+            promotion === undefined
+              ? editor.operation === "create"
+                ? "Reusable comment created."
+                : "Reusable comment updated."
+              : "Comment saved to course library."
           );
         else setLibraryMutationMessage(warning);
       }
@@ -1635,7 +1663,8 @@ export const GradingWorkspacePage = ({
     closeMutationEditor: () => void = () => {
       setCommentEditor(undefined);
       setDeleteConfirmation(undefined);
-    }
+    },
+    onMutationPersisted?: () => void
   ): Promise<boolean> => {
     if (studentId !== currentStudentIdRef.current || gradingMutationStudents.current.has(studentId))
       return false;
@@ -1671,6 +1700,7 @@ export const GradingWorkspacePage = ({
         return false;
       }
       commentWasSaved = true;
+      onMutationPersisted?.();
       if (currentStudentIdRef.current === studentId) {
         closeMutationEditor();
       }
@@ -1766,23 +1796,48 @@ export const GradingWorkspacePage = ({
         return;
       }
       const editor = commentEditor;
-      await runGradingMutation(studentId, () =>
-        addComment({
-          ...identity,
-          comment: {
-            id: globalThis.crypto.randomUUID(),
-            ...(editor.reusableCommentId === undefined
-              ? {}
-              : { sourceCommentId: editor.reusableCommentId }),
-            title,
-            text: editor.text,
-            deduction,
-            ...(editor.rubricCategoryId === ""
-              ? {}
-              : { rubricCategoryId: editor.rubricCategoryId }),
-            ...(sourceLocation === undefined ? {} : { sourceLocation })
-          }
-        })
+      const appliedCommentId = globalThis.crypto.randomUUID();
+      const appliedComment = {
+        id: appliedCommentId,
+        ...(editor.reusableCommentId === undefined
+          ? {}
+          : { sourceCommentId: editor.reusableCommentId }),
+        title,
+        text: editor.text,
+        deduction,
+        ...(editor.rubricCategoryId === "" ? {} : { rubricCategoryId: editor.rubricCategoryId }),
+        ...(sourceLocation === undefined ? {} : { sourceLocation })
+      };
+      const promotion: PromotionOffer | undefined =
+        editor.reusableCommentId === undefined
+          ? {
+              studentId,
+              appliedCommentId,
+              value: {
+                title,
+                text: editor.text,
+                // Applied comments submit a nonnegative deduction magnitude;
+                // reusable defaults store the equivalent score adjustment.
+                defaultDeduction: -deduction,
+                ...(editor.rubricCategoryId === ""
+                  ? {}
+                  : { defaultRubricCategoryId: editor.rubricCategoryId }),
+                tags: []
+              }
+            }
+          : undefined;
+      await runGradingMutation(
+        studentId,
+        () =>
+          addComment({
+            ...identity,
+            comment: appliedComment
+          }),
+        undefined,
+        () => {
+          if (promotion !== undefined && currentStudentIdRef.current === studentId)
+            setPromotionOffer(promotion);
+        }
       );
       return;
     }
@@ -3088,6 +3143,32 @@ export const GradingWorkspacePage = ({
                 {gradingMutationError}
               </div>
             )}
+            {promotionOffer === undefined ||
+            promotionOffer.studentId !== student?.studentId ? null : (
+              <div className="grading-comment-promotion" role="status">
+                <span>Comment applied.</span>
+                <button
+                  className="secondary-action"
+                  onClick={() =>
+                    setLibraryEditor({
+                      operation: "create",
+                      value: promotionOffer.value,
+                      promotion: promotionOffer
+                    })
+                  }
+                  type="button"
+                >
+                  Save to course library
+                </button>
+                <button
+                  className="secondary-action"
+                  onClick={() => setPromotionOffer(undefined)}
+                  type="button"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
             {commentEditor !== undefined && commentEditor.studentId === student?.studentId ? (
               <GradingCommentEditorForm
                 editor={commentEditor}
@@ -3148,7 +3229,19 @@ export const GradingWorkspacePage = ({
               <ReusableCommentEditor
                 categories={result.rubric}
                 initialValue={libraryEditor.value}
-                onCancel={() => setLibraryEditor(undefined)}
+                onCancel={() => {
+                  const promotion =
+                    libraryEditor.operation === "create" ? libraryEditor.promotion : undefined;
+                  if (promotion !== undefined)
+                    setPromotionOffer((current) =>
+                      current !== undefined &&
+                      current.studentId === promotion.studentId &&
+                      current.appliedCommentId === promotion.appliedCommentId
+                        ? undefined
+                        : current
+                    );
+                  setLibraryEditor(undefined);
+                }}
                 onSave={(value) => void saveLibraryEditor(value)}
                 pending={libraryMutationPending}
                 tagSuggestions={availableCommentTags}

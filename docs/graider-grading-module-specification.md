@@ -628,6 +628,13 @@ not alter the student's already-applied comment, and successful promotion does
 not retroactively turn that applied snapshot into a live reference to the new
 entry.
 
+The offer is scoped to the student and applied-comment ID and is cleared when
+the selected student changes. It becomes available after the student mutation
+persists, even if the subsequent workspace snapshot reload fails; that reload
+failure is still reported separately. Applied-comment deductions are entered as
+nonnegative magnitudes, while the reusable default stores the corresponding
+negative score adjustment so a later library application has the same effect.
+
 ---
 
 ## 14. Editing and Deleting Applied Comments
