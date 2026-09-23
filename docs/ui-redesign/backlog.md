@@ -1184,6 +1184,18 @@ section. A follow-up should either give `removeRoster` true roster-only
 semantics or remove/rename the duplicate product action. That decision is a
 backend/product contract change and was not folded into the visual rebuild.
 
+**Decision, 2026-09-23 — implement true roster-only removal.** The ITEM-44
+feasibility pass verified that a section without `roster` is valid in the raw
+and loaded term model, is useful for faculty/assignment targeting, and is
+already rendered as **No roster** by the summary/UI path. Empty/header-only and
+absent rosters are distinct operational states. The next implementation slice
+will make `removeRoster` retain the section and faculty, remove only its
+`roster` reference, delete associated contained roster files and the provenance
+sidecar, refresh affected Student Repository Access Pages, and publish through
+the existing safe path. `removeSection` remains the stronger operation. See
+`item-44-remove-roster-feasibility.md` and `summaries/item-44-decision.md`.
+This item remains open until that behavior and its tests land.
+
 ---
 
 ## Suggested order
