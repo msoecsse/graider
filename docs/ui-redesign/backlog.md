@@ -637,7 +637,7 @@ The same one-job-three-implementations pattern PR8-1 fixed for dates.
 
 ---
 
-## 23. Raw enum text in status `<option>` labels — **Should fix**
+## 23. Raw enum text in status `<option>` labels — **Resolved**
 
 `RosterManagerPage.tsx:538–539` renders `<option value="active">active</option>`
 — the machine value is correct and also used verbatim as the visible label, so
@@ -645,6 +645,14 @@ faculty read lowercase enum words in a dropdown. `AssignmentEditPage.tsx:219`'s
 select has the same shape. A §2.3 violation that PR8-2's instructions excluded
 by treating the whole control as off-limits; the bound value must stay
 machine-readable, the option text should not.
+
+Resolved in PR12-5 for the roster manager. The raw status `<select>` was
+removed: each row now renders a humanized `StatusChip` (`Active`, `On hold`,
+`Dropped`) and changes the canonical `active`/`hold`/`dropped` value through an
+accessible row `OverflowMenu`. Dropped uses the error treatment, and tests
+protect both the faculty-facing labels and the unchanged machine value sent to
+the backend. `AssignmentEditPage.tsx` remains separate adjacent status-label
+debt; this item tracked the roster-manager violation rebuilt by §5.6.
 
 ---
 
@@ -969,6 +977,15 @@ of step 12's roster manager rebuild (§5.6), since that screen needs it
 fresh; step 11's `CourseSetupPage.tsx` redesign and the CLI path can adopt
 it afterward rather than each growing its own version further.
 
+PR12-5 converged the renderer's `RosterManagerPage` upload parser and row diff
+onto PR12-2's `parseAndValidateRosterCsv` and `diffRosterRows`. The old naive
+comma-splitting renderer parser was deleted. Three parsing paths remain, so the
+item stays open: `src/roster/roster-loader.ts` + `src/io/csv.ts`,
+`ui/electron/courseSetupService.ts`, and
+`ui/electron/rosterManagerService.ts`. The renderer imports the dependency-free
+shared module directly; Vite development access is allowlisted only for the
+shared roster module and its `io`/`diagnostics` dependencies.
+
 ---
 
 ## 37. Roster carries no provenance — **Resolved**
@@ -1152,6 +1169,23 @@ rewrites the applied snapshot or adds `sourceCommentId`.
 
 ---
 
+## 44. `removeRoster` also removes the configured section — **Should fix**
+
+Confirmed while rebuilding the roster manager in PR12-5. Despite its name,
+`ui/electron/rosterManagerService.ts` routes both `removeRoster` and
+`removeSection` through `removeSectionAndRoster`. Both rewrite `term.yml` to
+remove the selected section and delete its roster/source files; the only
+meaningful difference is that `removeRoster` requires an existing roster or
+roster reference.
+
+PR12-5 preserves that established backend behavior and uses accurate typed-
+confirmation copy rather than promising that **Remove roster** keeps the
+section. A follow-up should either give `removeRoster` true roster-only
+semantics or remove/rename the duplicate product action. That decision is a
+backend/product contract change and was not folded into the visual rebuild.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -1159,12 +1193,12 @@ Nothing is blocking PR6b anymore — proceed to it directly.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of this
 sequence.
 
-Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-26, 27, 28, 33, 34, 35, 36, and 37 can wait until after the redesign. Item 38
-is resolved.
+Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
+26, 27, 28, 33, 34, 35, 36, and 44 remain open. Items 23, 37, and 38 are
+resolved.
 
-Priority update after PR12-3: COMMENT-1 resolved item 41. Address items 39, 40,
-42, and 43 through COMMENT-2 to COMMENT-5 in
-`comment-library-feasibility.md`, then resume PR12-4
-(item 37) and PR12-5. The remaining Step 12 work is deferred by an explicit
-priority decision, not blocked or abandoned.
+Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
+COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
+(item 37) and PR12-5. PR12-5 now completes the planned Step 12 roster-manager
+rebuild. Item 36 remains adjacent parser-convergence debt rather than a blocker
+to that visual slice.

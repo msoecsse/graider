@@ -680,7 +680,7 @@ Work on `ui-redesign` with one PR per step. Each PR keeps `npm test`,
 | 9   | Apply/grade preview merge                                                                          | Depends on 8                                                                                       |
 | 10  | Router + breadcrumbs, split large components                                                       | Larger refactor, safest once screens are settled                                                   |
 | 11  | `CourseSetupPage.tsx` redesign against §2, plus items 33-35 as independent improvements            | Replaces the term setup wizard — see §5.5's correction; not urgent, no new rosters until next term |
-| 12  | Roster manager rebuild + source field                                                              | Completes term-start work; give it a feasibility pass first, per item 27                           |
+| 12  | Roster manager rebuild + source field — **complete**                                               | PR12-1 through PR12-5, with the documented COMMENT-1 through COMMENT-5 priority detour             |
 
 PR 7 can jump the queue; it is a real bug.
 
@@ -698,13 +698,15 @@ PR12-3 (complete)
   -> COMMENT-4 (complete)
   -> COMMENT-5 (complete)
   -> PR12-4 roster source/provenance (complete)
-  -> PR12-5 roster-manager visual rebuild
+  -> PR12-5 roster-manager visual rebuild (complete)
 ```
 
-PR12-4 is complete. PR12-5 is next and can consume both PR12-3's bulk section
-summaries and PR12-4's first-class roster source metadata without another
-backend slice. The original Step 12 sequence remains part of the project history. See
-`comment-library-feasibility.md` and
+PR12-5 is complete. The roster manager now consumes PR12-3's bulk section
+summaries and PR12-4's first-class roster source metadata in the rebuilt §5.6
+workspace. This completes the planned Step 12 roster-manager rebuild. The
+original Step 12 sequence and COMMENT-1 through COMMENT-5 priority detour remain
+part of the project history. See `summaries/pr12-5.md`,
+`comment-library-feasibility.md`, and
 `summaries/comment-library-priority-decision.md` for the verified existing
 infrastructure, gaps, and recommended comment-track slices.
 

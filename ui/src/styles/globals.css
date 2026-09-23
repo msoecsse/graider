@@ -1093,49 +1093,385 @@ h1 {
 
 .roster-manager {
   display: grid;
-  gap: 16px;
+  gap: var(--space-3);
+  min-width: 0;
 }
 
-.roster-manager__selection {
-  display: grid;
-  grid-template-columns: minmax(180px, 280px) minmax(180px, 280px);
-  gap: 14px;
-  align-items: end;
-}
-
-.roster-manager__selection label {
-  display: grid;
-  gap: 6px;
-}
-
-.roster-manager__table-header {
+.roster-section-navigation {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.roster-manager__table-wrap {
-  overflow-x: auto;
+.roster-section-tabs {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
-.roster-manager table {
+.roster-source-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--info-soft);
+  padding: var(--space-3);
+}
+
+.roster-source-bar__source,
+.roster-source-bar__meta,
+.roster-source-bar__pending {
+  margin: 0;
+}
+
+.roster-source-bar__details {
+  display: grid;
+  gap: 4px;
+}
+
+.roster-source-bar__meta {
+  color: var(--text-muted);
+  font-size: var(--font-size-body-sm);
+}
+
+.roster-source-bar__pending {
+  color: var(--warn-text);
+  font-size: var(--font-size-body-sm);
+  font-weight: 700;
+}
+
+.roster-source-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.roster-new-section,
+.roster-attention-state,
+.roster-manager__empty-notice,
+.roster-manager__publication-warning {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: var(--space-3);
+}
+
+.roster-new-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.roster-new-section h2,
+.roster-new-section p,
+.roster-attention-state h2,
+.roster-attention-state p,
+.roster-manager__empty-notice,
+.roster-manager__publication-warning {
+  margin-bottom: 0;
+}
+
+.roster-new-section label,
+.roster-faculty-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.roster-attention-state,
+.roster-manager__publication-warning {
+  border-color: var(--warn);
+  background: var(--warn-surface);
+  color: var(--warn-text);
+}
+
+.roster-manager__empty-notice {
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+}
+
+.roster-manager__message {
+  margin: 0;
+}
+
+.roster-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: var(--space-3);
+  align-items: start;
+  min-width: 0;
+}
+
+.roster-students-panel,
+.roster-sidebar-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: var(--space-3);
+}
+
+.roster-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.roster-panel-heading h2,
+.roster-panel-heading p,
+.roster-sidebar-card h2,
+.roster-sidebar-card p {
+  margin-bottom: 0;
+}
+
+.roster-panel-heading p,
+.roster-sidebar-card > p,
+.roster-stats + p {
+  color: var(--text-muted);
+  font-size: var(--font-size-body-sm);
+}
+
+.roster-student-table {
+  min-width: 640px;
+}
+
+.roster-student-table input {
   width: 100%;
-  border-collapse: collapse;
-  min-width: 980px;
+  min-width: 130px;
 }
 
-.roster-manager th,
-.roster-manager td {
-  border-bottom: 1px solid #d8dee4;
-  padding: 8px;
-  text-align: left;
-  vertical-align: top;
+.roster-student-table__row--added {
+  background: var(--accent-tint);
 }
 
-.roster-manager td input,
-.roster-manager td select {
-  min-width: 120px;
+.roster-student-table__row--changed {
+  background: var(--warn-surface);
+}
+
+.roster-student-table__input--attention {
+  border-color: var(--warn);
+  background: var(--warn-surface);
+}
+
+.roster-row-change {
+  display: inline-block;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.roster-row-change--added {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.roster-row-change--changed {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+.roster-row-change--dropped {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.roster-empty-state {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-sunken);
+  padding: var(--space-4);
+}
+
+.roster-empty-state p,
+.roster-empty-state h2 {
+  margin: 0;
+}
+
+.roster-empty-state--page {
+  justify-items: center;
+  text-align: center;
+}
+
+.roster-removed-rows {
+  margin-top: var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-card);
+  background: var(--danger-soft);
+  padding: var(--space-2);
+}
+
+.roster-removed-rows h3 {
+  margin: 0 0 var(--space-1);
+  color: var(--danger);
+  font-size: var(--font-size-section);
+}
+
+.roster-removed-rows ul {
+  display: grid;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.roster-removed-rows li,
+.roster-removed-rows li > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+
+.roster-sidebar {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.roster-faculty-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: var(--space-2) 0;
+  padding: 0;
+}
+
+.roster-faculty-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  padding: 4px 5px 4px 10px;
+}
+
+.roster-faculty-list button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--danger);
+}
+
+.roster-sidebar-card__empty {
+  margin-top: var(--space-2);
+}
+
+.roster-faculty-form {
+  display: grid;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+
+.roster-faculty-form > div {
+  display: flex;
+  gap: 6px;
+}
+
+.roster-faculty-form input {
+  min-width: 0;
+  width: 100%;
+}
+
+.roster-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
+}
+
+.roster-stats > div {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-sunken);
+  padding: var(--space-1);
+}
+
+.roster-stats dt {
+  color: var(--text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.roster-stats dd {
+  margin: 2px 0 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.roster-review-summary p,
+.roster-review-safety-note,
+.roster-review-faculty p {
+  margin-bottom: 6px;
+}
+
+.roster-review-diff ul {
+  display: grid;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.roster-review-diff__row {
+  border-left: 3px solid var(--border);
+  padding: var(--space-1);
+}
+
+.roster-review-diff__row--added {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.roster-review-diff__row--changed {
+  border-color: var(--warn);
+  background: var(--warn-surface);
+}
+
+.roster-review-diff__row--dropped {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.roster-review-diff__row > span {
+  margin-right: var(--space-1);
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.roster-review-diff__row p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.roster-review-faculty {
+  margin-top: var(--space-2);
+}
+
+.roster-review-safety-note {
+  border-radius: var(--radius-control);
+  background: var(--info-soft);
+  padding: var(--space-2);
 }
 
 .grade-workflow-panel__header {
@@ -2700,6 +3036,14 @@ h1 {
 }
 
 @media (max-width: 1000px) {
+  .roster-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .roster-sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .grading-workspace {
     height: auto;
     overflow: visible;
@@ -3244,6 +3588,33 @@ h1 {
 @media (max-width: 780px) {
   .page-header {
     flex-direction: column;
+  }
+
+  .roster-section-navigation,
+  .roster-source-bar,
+  .roster-new-section {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .roster-section-navigation,
+  .roster-source-bar {
+    flex-direction: column;
+  }
+
+  .roster-section-tabs {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .roster-source-bar__actions {
+    justify-content: flex-start;
+  }
+
+  .roster-sidebar {
+    grid-template-columns: 1fr;
   }
 
   .lifecycle-strip {

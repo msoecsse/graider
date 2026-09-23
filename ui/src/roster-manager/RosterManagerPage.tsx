@@ -1,34 +1,46 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type ReactElement } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactElement
+} from "react";
 import type {
-  AssignmentSetupTerm,
   CourseFolderRecord,
+  RosterLoadResult,
   RosterPreviewResult,
   RosterRemoveRequest,
   RosterRow,
   RosterSaveRequest,
+  RosterSectionSummary,
   RosterSource,
   RosterSourceKind
 } from "../../electron/ipc";
-import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
+import {
+  diffRosterRows,
+  parseAndValidateRosterCsv,
+  type RosterRowDiff
+} from "../../../src/roster/roster-shared";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { OverflowMenu, type OverflowMenuGroup } from "../components/OverflowMenu";
+import { PageHeader } from "../components/PageHeader";
+import { TechnicalDetails } from "../components/TechnicalDetails";
 import { Toast, useToast } from "../components/Toast";
-import { isTypedConfirmationSatisfied, TypedConfirmation } from "../components/TypedConfirmation";
+import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
+import { RosterSaveReview } from "./RosterSaveReview";
+import { RosterSectionTabs } from "./RosterSectionTabs";
+import { RosterFacultyPanel, RosterStatsCard } from "./RosterSidebar";
+import { RosterSourceBar } from "./RosterSourceBar";
+import { RosterStudentTable } from "./RosterStudentTable";
+import { diffFaculty, getUnsavedMessage, type RosterDraftRow } from "./rosterManagerModel";
 
-const HEADERS = [
-  ["studentId", "student_id"],
-  ["githubUsername", "github_username"],
-  ["section", "section"],
-  ["status", "status"]
-] as const;
-const MVP_ROSTER_HEADERS = ["student_id", "github_username", "section", "status"] as const;
-const LEGACY_ROSTER_HEADERS = [
-  "student_id",
-  "github_username",
-  "email",
-  "first_name",
-  "last_name",
-  "section",
-  "status"
-] as const;
+type LoadState = "idle" | "loading" | "ready" | "invalid";
+type DestructiveAction = "clear" | "remove_roster" | "remove_section";
+type PendingNavigation =
+  | { readonly type: "section"; readonly sectionId: string }
+  | { readonly type: "new_section" };
 
 const emptyRow = (section: string): RosterRow => ({
   studentId: "",
@@ -37,75 +49,399 @@ const emptyRow = (section: string): RosterRow => ({
   status: "active"
 });
 
-const parseUploadedRoster = (content: string, sectionId: string): RosterRow[] | null => {
-  const lines = content.split(/\r?\n/u).filter((line) => line.length > 0);
-  const isLegacyHeader = lines[0] === LEGACY_ROSTER_HEADERS.join(",");
-  if (lines[0] !== MVP_ROSTER_HEADERS.join(",") && !isLegacyHeader) return null;
-  const headers = isLegacyHeader ? LEGACY_ROSTER_HEADERS : MVP_ROSTER_HEADERS;
-  return lines.slice(1).map((line) => {
-    const values = line.split(",");
+const getDiagnosticsMessage = (
+  diagnostics: readonly { readonly message: string }[]
+): string | null => diagnostics.map((item) => item.message).join(" ") || null;
+
+const getDestructiveDialogCopy = (
+  action: DestructiveAction,
+  sectionId: string
+): { readonly title: string; readonly summary: string; readonly confirmLabel: string } => {
+  if (action === "clear") {
     return {
-      studentId: values[headers.indexOf("student_id")] ?? "",
-      githubUsername: values[headers.indexOf("github_username")] ?? "",
-      section: values[headers.indexOf("section")] ?? sectionId,
-      status: values[headers.indexOf("status")] ?? "active"
+      title: "Clear roster rows",
+      summary: `This stages an empty roster for section ${sectionId}. Nothing is saved until you review and save. Student repositories and published reports are not deleted.`,
+      confirmLabel: "Clear roster rows"
     };
-  });
+  }
+  if (action === "remove_roster") {
+    return {
+      title: "Remove roster",
+      summary: `This removes section ${sectionId} from the term configuration and deletes its roster files. Student repositories and published reports are not deleted.`,
+      confirmLabel: "Remove roster"
+    };
+  }
+  return {
+    title: "Remove section",
+    summary: `This removes section ${sectionId} from the term configuration and deletes its roster files if present. Student repositories and published reports are not deleted.`,
+    confirmLabel: "Remove section"
+  };
 };
+
+export interface RosterManagerPageProps {
+  readonly courseFolder: CourseFolderRecord;
+  readonly termCode: string;
+  readonly courseTitle: string;
+  readonly termTitle: string;
+  readonly onSaved: () => void;
+}
 
 export const RosterManagerPage = ({
   courseFolder,
+  termCode,
+  courseTitle,
+  termTitle,
   onSaved
-}: {
-  readonly courseFolder: CourseFolderRecord;
-  readonly onSaved: () => void;
-}): ReactElement => {
-  const [terms, setTerms] = useState<readonly AssignmentSetupTerm[]>([]);
-  const [termCode, setTermCode] = useState("");
+}: RosterManagerPageProps): ReactElement => {
+  const [sections, setSections] = useState<readonly string[]>([]);
+  const [summaries, setSummaries] = useState<ReadonlyMap<string, RosterSectionSummary>>(new Map());
   const [sectionId, setSectionId] = useState("");
   const [isCreatingSection, setIsCreatingSection] = useState(false);
-  const [rows, setRows] = useState<readonly RosterRow[]>([]);
-  const [faculty, setFaculty] = useState<readonly string[]>([]);
-  const [facultyInput, setFacultyInput] = useState("");
-  const [loadMessage, setLoadMessage] = useState<string | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("idle");
   const [isExisting, setIsExisting] = useState(false);
-  const [, setLoadedSource] = useState<RosterSource>();
+  const [draftRows, setDraftRows] = useState<readonly RosterDraftRow[]>([]);
+  const [baselineRows, setBaselineRows] = useState<readonly RosterRow[]>([]);
+  const [faculty, setFaculty] = useState<readonly string[]>([]);
+  const [baselineFaculty, setBaselineFaculty] = useState<readonly string[]>([]);
+  const [loadedSource, setLoadedSource] = useState<RosterSource>();
   const [pendingSourceKind, setPendingSourceKind] = useState<RosterSourceKind>();
-  const [changeDescription, setChangeDescription] = useState<string | null>(null);
+  const [rosterPath, setRosterPath] = useState<string | null>(null);
+  const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null);
+  const [publicationWarning, setPublicationWarning] = useState<string | null>(null);
   const [preview, setPreview] = useState<RosterPreviewResult | null>(null);
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
+  const [destructiveAction, setDestructiveAction] = useState<DestructiveAction | null>(null);
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
+  const [isDiscardDialogOpen, setIsDiscardDialogOpen] = useState(false);
   const { message: toastMessage, showToast } = useToast();
-  const [isConfirmingSave, setIsConfirmingSave] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isConfirmingRosterRemoval, setIsConfirmingRosterRemoval] = useState(false);
-  // README section 2: removing a roster or section requires typing a
-  // confirmation word -- the section identifier, since a roster in this
-  // app is scoped to one section. Inline, not a modal: the surrounding
-  // panel is already an inline confirmation section, and the rule requires
-  // the word, not a dialog.
-  const [rosterRemovalWord, setRosterRemovalWord] = useState("");
-  const isRosterRemovalConfirmed = isTypedConfirmationSatisfied(sectionId, rosterRemovalWord);
-  const [isRemovingRoster, setIsRemovingRoster] = useState(false);
-  const [isConfirmingSectionRemoval, setIsConfirmingSectionRemoval] = useState(false);
-  const [sectionRemovalWord, setSectionRemovalWord] = useState("");
-  const isSectionRemovalConfirmed = isTypedConfirmationSatisfied(sectionId, sectionRemovalWord);
-  const [isRemovingSection, setIsRemovingSection] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const rowKeySequence = useRef(0);
+  const loadGeneration = useRef(0);
+  const summaryGeneration = useRef(0);
+  const termsGeneration = useRef(0);
+  const sectionBeforeNew = useRef<string | null>(null);
+
+  const createDraftRows = useCallback(
+    (loadedRows: readonly RosterRow[]): readonly RosterDraftRow[] =>
+      loadedRows.map((row) => {
+        rowKeySequence.current += 1;
+        return { key: `roster-row-${String(rowKeySequence.current)}`, row: { ...row } };
+      }),
+    []
+  );
+
+  const rows = useMemo(() => draftRows.map((draftRow) => draftRow.row), [draftRows]);
+  const rosterDiff = useMemo(() => diffRosterRows(baselineRows, rows), [baselineRows, rows]);
+  const facultyDiff = useMemo(
+    () => diffFaculty(baselineFaculty, faculty),
+    [baselineFaculty, faculty]
+  );
+  const effectivePendingSourceKind =
+    isCreatingSection || rosterDiff.totalChangeCount > 0 ? pendingSourceKind : undefined;
+  const newSectionDirty =
+    isCreatingSection && (sectionId.trim().length > 0 || rows.length > 0 || faculty.length > 0);
+  const isDirty =
+    loadState !== "invalid" &&
+    (newSectionDirty || rosterDiff.totalChangeCount > 0 || facultyDiff.changed);
+  const removedDiffs = rosterDiff.rows.filter((row) => row.changeType === "dropped");
+
+  const clearReview = (): void => {
+    setPreview(null);
+    setIsReviewOpen(false);
+  };
+
+  const refreshSummaries = useCallback(async (): Promise<void> => {
+    const getRosterSectionSummaries = window.graiderUI.getRosterSectionSummaries;
+    const generation = summaryGeneration.current + 1;
+    summaryGeneration.current = generation;
+    if (getRosterSectionSummaries === undefined) {
+      setDiagnosticMessage("Roster section summaries are unavailable in this app build.");
+    } else {
+      try {
+        const result = await getRosterSectionSummaries({
+          courseFolderId: courseFolder.id,
+          courseFolderPath: courseFolder.path,
+          termCode
+        });
+        if (summaryGeneration.current === generation) {
+          setSummaries(
+            new Map(result.summaries.map((summary) => [summary.sectionId, summary] as const))
+          );
+          if (result.status === "term_config_error") {
+            setDiagnosticMessage(getDiagnosticsMessage(result.diagnostics));
+          }
+        }
+      } catch {
+        if (summaryGeneration.current === generation) {
+          setDiagnosticMessage("Unable to load roster section summaries.");
+        }
+      }
+    }
+  }, [courseFolder.id, courseFolder.path, termCode]);
+
+  const applyLoadedSection = useCallback(
+    (result: RosterLoadResult): void => {
+      const loadedRows = result.rows.map((row) => ({ ...row }));
+      const loadedFaculty = [...(result.faculty ?? [])];
+      setBaselineRows(loadedRows);
+      setDraftRows(createDraftRows(loadedRows));
+      setBaselineFaculty(loadedFaculty);
+      setFaculty(loadedFaculty);
+      setIsExisting(result.exists);
+      setLoadedSource(result.source);
+      setPendingSourceKind(undefined);
+      setRosterPath(result.path);
+      setLoadState(result.status === "ready" ? "ready" : "invalid");
+      setDiagnosticMessage(getDiagnosticsMessage(result.diagnostics));
+      setPublicationWarning(null);
+      clearReview();
+    },
+    [createDraftRows]
+  );
+
+  const loadSection = useCallback(
+    async (nextSectionId: string): Promise<void> => {
+      const generation = loadGeneration.current + 1;
+      loadGeneration.current = generation;
+      setSectionId(nextSectionId);
+      setIsCreatingSection(false);
+      setLoadState("loading");
+      setDiagnosticMessage(null);
+      setPublicationWarning(null);
+      setBaselineRows([]);
+      setDraftRows([]);
+      setBaselineFaculty([]);
+      setFaculty([]);
+      setLoadedSource(undefined);
+      setPendingSourceKind(undefined);
+      setRosterPath(null);
+      clearReview();
+
+      const getRosterForSection = window.graiderUI.getRosterForSection;
+      if (getRosterForSection === undefined) {
+        setLoadState("invalid");
+        setDiagnosticMessage("Roster management is unavailable in this app build.");
+      } else {
+        try {
+          const result = await getRosterForSection({
+            courseFolderId: courseFolder.id,
+            courseFolderPath: courseFolder.path,
+            termCode,
+            sectionId: nextSectionId
+          });
+          if (loadGeneration.current === generation) applyLoadedSection(result);
+        } catch {
+          if (loadGeneration.current === generation) {
+            setLoadState("invalid");
+            setDiagnosticMessage("Unable to load this roster.");
+          }
+        }
+      }
+    },
+    [applyLoadedSection, courseFolder.id, courseFolder.path, termCode]
+  );
 
   useEffect(() => {
+    const generation = termsGeneration.current + 1;
+    termsGeneration.current = generation;
+    loadGeneration.current += 1;
+    setSections([]);
+    setSectionId("");
+    setIsCreatingSection(false);
+    setLoadState("idle");
+    setBaselineRows([]);
+    setDraftRows([]);
+    setBaselineFaculty([]);
+    setFaculty([]);
+    setLoadedSource(undefined);
+    setPendingSourceKind(undefined);
+    setRosterPath(null);
+    setDiagnosticMessage(null);
+    clearReview();
+
     const loadRosterTerms = window.graiderUI.loadRosterTerms;
     if (loadRosterTerms === undefined) {
-      setLoadMessage("Roster management is unavailable in this app build.");
-      return;
-    }
-    void loadRosterTerms({ courseFolderId: courseFolder.id, courseFolderPath: courseFolder.path })
-      .then((result) => {
-        setTerms(result.terms);
-        setLoadMessage(result.diagnostics.map((item) => item.message).join(" ") || null);
+      setDiagnosticMessage("Roster management is unavailable in this app build.");
+    } else {
+      void loadRosterTerms({
+        courseFolderId: courseFolder.id,
+        courseFolderPath: courseFolder.path
       })
-      .catch(() => setLoadMessage("Unable to load terms for this course."));
-  }, [courseFolder.id, courseFolder.path]);
+        .then((result) => {
+          if (termsGeneration.current !== generation) return;
+          const routedTerm = result.terms.find((term) => term.code === termCode);
+          if (routedTerm === undefined) {
+            setDiagnosticMessage(`The routed term ${termCode} is not configured for this course.`);
+            return;
+          }
+          setSections(routedTerm.sections);
+          const termsMessage = getDiagnosticsMessage(result.diagnostics);
+          if (termsMessage !== null) setDiagnosticMessage(termsMessage);
+          const firstSection = routedTerm.sections[0];
+          if (firstSection !== undefined) void loadSection(firstSection);
+        })
+        .catch(() => {
+          if (termsGeneration.current === generation) {
+            setDiagnosticMessage("Unable to load terms for this course.");
+          }
+        });
+    }
+    void refreshSummaries();
+  }, [courseFolder.id, courseFolder.path, loadSection, refreshSummaries, termCode]);
 
-  const selectedTerm = terms.find((term) => term.code === termCode) ?? null;
+  const startNewSection = (): void => {
+    loadGeneration.current += 1;
+    sectionBeforeNew.current = sectionId.length === 0 ? null : sectionId;
+    setSectionId("");
+    setIsCreatingSection(true);
+    setLoadState("ready");
+    setIsExisting(false);
+    setBaselineRows([]);
+    setDraftRows([]);
+    setBaselineFaculty([]);
+    setFaculty([]);
+    setLoadedSource(undefined);
+    setPendingSourceKind("manual_edit");
+    setRosterPath(null);
+    setDiagnosticMessage(null);
+    setPublicationWarning(null);
+    clearReview();
+  };
+
+  const performNavigation = (navigation: PendingNavigation): void => {
+    if (navigation.type === "new_section") startNewSection();
+    else void loadSection(navigation.sectionId);
+  };
+
+  const requestNavigation = (navigation: PendingNavigation): void => {
+    if (isDirty) {
+      setPendingNavigation(navigation);
+      setIsDiscardDialogOpen(true);
+    } else {
+      performNavigation(navigation);
+    }
+  };
+
+  const discardDraft = (): void => {
+    clearReview();
+    setDiagnosticMessage(null);
+    setPublicationWarning(null);
+    if (isCreatingSection) {
+      const previousSection = sectionBeforeNew.current;
+      setIsCreatingSection(false);
+      setSectionId("");
+      setBaselineRows([]);
+      setDraftRows([]);
+      setBaselineFaculty([]);
+      setFaculty([]);
+      setPendingSourceKind(undefined);
+      setLoadedSource(undefined);
+      setRosterPath(null);
+      setLoadState("idle");
+      if (previousSection !== null) void loadSection(previousSection);
+    } else {
+      setDraftRows(createDraftRows(baselineRows));
+      setFaculty([...baselineFaculty]);
+      setPendingSourceKind(undefined);
+    }
+  };
+
+  const markStudentEdit = (): void => {
+    setPendingSourceKind("manual_edit");
+    clearReview();
+  };
+
+  const updateRow = (key: string, field: "studentId" | "githubUsername", value: string): void => {
+    setDraftRows((current) =>
+      current.map((draftRow) =>
+        draftRow.key === key ? { ...draftRow, row: { ...draftRow.row, [field]: value } } : draftRow
+      )
+    );
+    markStudentEdit();
+  };
+
+  const setRowStatus = (key: string, status: "active" | "hold" | "dropped"): void => {
+    setDraftRows((current) =>
+      current.map((draftRow) =>
+        draftRow.key === key ? { ...draftRow, row: { ...draftRow.row, status } } : draftRow
+      )
+    );
+    markStudentEdit();
+  };
+
+  const addStudent = (): void => {
+    rowKeySequence.current += 1;
+    setDraftRows((current) => [
+      ...current,
+      { key: `roster-row-${String(rowKeySequence.current)}`, row: emptyRow(sectionId) }
+    ]);
+    markStudentEdit();
+  };
+
+  const removeStudent = (key: string): void => {
+    setDraftRows((current) => current.filter((draftRow) => draftRow.key !== key));
+    markStudentEdit();
+  };
+
+  const undoRemove = (diff: RosterRowDiff): void => {
+    const baseline = diff.baseline;
+    if (baseline !== null) {
+      rowKeySequence.current += 1;
+      setDraftRows((current) => [
+        ...current,
+        {
+          key: `roster-row-${String(rowKeySequence.current)}`,
+          row: { ...baseline }
+        }
+      ]);
+      markStudentEdit();
+    }
+  };
+
+  const addFaculty = (username: string): void => {
+    setFaculty((current) =>
+      current.some((value) => value.toLowerCase() === username.toLowerCase())
+        ? current
+        : [...current, username]
+    );
+    if (!isExisting && loadedSource === undefined) setPendingSourceKind("manual_edit");
+    clearReview();
+  };
+
+  const removeFaculty = (username: string): void => {
+    setFaculty((current) => current.filter((value) => value !== username));
+    if (!isExisting && loadedSource === undefined) setPendingSourceKind("manual_edit");
+    clearReview();
+  };
+
+  const replaceFromCsv = (event: ChangeEvent<HTMLInputElement>): void => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (file !== undefined) {
+      void file
+        .text()
+        .then((content) => {
+          const result = parseAndValidateRosterCsv({
+            content,
+            rosterPath: "uploaded roster",
+            expectedSection: sectionId
+          });
+          if (result.errors.length > 0) {
+            setDiagnosticMessage(getDiagnosticsMessage(result.errors));
+          } else {
+            setDraftRows(createDraftRows(result.records));
+            setPendingSourceKind("csv_upload");
+            setDiagnosticMessage(getDiagnosticsMessage(result.warnings));
+            clearReview();
+          }
+        })
+        .catch(() => setDiagnosticMessage("Unable to read the selected CSV file."))
+        .finally(() => {
+          input.value = "";
+        });
+    }
+  };
+
   const request = useMemo<RosterSaveRequest>(
     () => ({
       courseFolderId: courseFolder.id,
@@ -115,7 +451,9 @@ export const RosterManagerPage = ({
       rows,
       faculty,
       createSection: isCreatingSection,
-      ...(pendingSourceKind === undefined ? {} : { sourceKind: pendingSourceKind }),
+      ...(effectivePendingSourceKind === undefined
+        ? {}
+        : { sourceKind: effectivePendingSourceKind }),
       confirmed: false
     }),
     [
@@ -123,111 +461,30 @@ export const RosterManagerPage = ({
       courseFolder.path,
       faculty,
       isCreatingSection,
-      pendingSourceKind,
+      effectivePendingSourceKind,
       rows,
       sectionId,
       termCode
     ]
   );
 
-  const clearPreview = (): void => {
-    setPreview(null);
-    setIsConfirmingSave(false);
-  };
-
-  const handleTermChange = (value: string): void => {
-    setTermCode(value);
-    setSectionId("");
-    setRows([]);
-    setFaculty([]);
-    setFacultyInput("");
-    setIsCreatingSection(false);
-    setIsExisting(false);
-    setLoadedSource(undefined);
-    setPendingSourceKind(undefined);
-    setChangeDescription(null);
-    setLoadMessage(null);
-    clearPreview();
-  };
-
-  const loadSection = async (value: string): Promise<void> => {
-    setSectionId(value);
-    setIsCreatingSection(false);
-    setRows([]);
-    setFaculty([]);
-    setFacultyInput("");
-    setIsExisting(false);
-    setLoadedSource(undefined);
-    setPendingSourceKind(undefined);
-    setChangeDescription(null);
-    clearPreview();
-    if (value.length === 0 || termCode.length === 0) return;
-    const getRosterForSection = window.graiderUI.getRosterForSection;
-    if (getRosterForSection === undefined) {
-      setLoadMessage("Roster management is unavailable in this app build.");
-      return;
-    }
-    setIsLoading(true);
-    try {
-      const result = await getRosterForSection({ ...request, sectionId: value });
-      setRows(result.rows);
-      setFaculty(result.faculty ?? []);
-      setIsExisting(result.exists);
-      setLoadedSource(result.source);
-      setPendingSourceKind(result.exists ? undefined : "manual_edit");
-      setLoadMessage(result.diagnostics.map((item) => item.message).join(" ") || null);
-    } catch {
-      setLoadMessage("Unable to load roster CSV.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const updateRow = (index: number, field: keyof RosterRow, value: string): void => {
-    setRows((current) =>
-      current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row))
-    );
-    setChangeDescription(null);
-    setPendingSourceKind("manual_edit");
-    clearPreview();
-  };
-
-  const replaceFromCsv = (event: ChangeEvent<HTMLInputElement>): void => {
-    const file = event.target.files?.[0];
-    if (file === undefined) return;
-    void file.text().then((content) => {
-      const uploadedRows = parseUploadedRoster(content, sectionId);
-      if (uploadedRows === null) {
-        setLoadMessage("Uploaded roster must use the canonical four-column Graider header.");
-        return;
-      }
-      setRows(uploadedRows);
-      setPendingSourceKind("csv_upload");
-      setChangeDescription(
-        "This preview replaces the current roster content with the uploaded CSV."
-      );
-      setLoadMessage(null);
-      clearPreview();
-    });
-  };
-
   const handlePreview = async (): Promise<void> => {
     const previewRosterSave = window.graiderUI.previewRosterSave;
-    if (previewRosterSave === undefined) return;
-    setIsLoading(true);
-    setLoadMessage(null);
-    try {
-      const nextPreview = await previewRosterSave(request);
-      setPreview(nextPreview);
-      if (nextPreview.status === "ready") {
-        setIsConfirmingSave(true);
-      } else {
-        setLoadMessage(nextPreview.diagnostics.map((item) => item.message).join(" "));
+    if (previewRosterSave === undefined) {
+      setDiagnosticMessage("Roster save preview is unavailable in this app build.");
+    } else {
+      setIsBusy(true);
+      setDiagnosticMessage(null);
+      try {
+        const nextPreview = await previewRosterSave(request);
+        setPreview(nextPreview);
+        if (nextPreview.status === "ready") setIsReviewOpen(true);
+        else setDiagnosticMessage(getDiagnosticsMessage(nextPreview.diagnostics));
+      } catch {
+        setDiagnosticMessage("Unable to prepare roster preview.");
+      } finally {
+        setIsBusy(false);
       }
-    } catch {
-      setLoadMessage("Unable to prepare roster preview.");
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -237,535 +494,346 @@ export const RosterManagerPage = ({
       throw new Error("Roster management is unavailable in this app build.");
     if (preview?.status !== "ready")
       throw new Error("Prepare a valid roster preview before saving.");
-    setIsLoading(true);
+    setIsBusy(true);
     try {
       const result = await saveRoster({ ...request, confirmed: true });
+      if (result.status !== "success") {
+        throw new Error(getDiagnosticsMessage(result.diagnostics) ?? "Unable to save roster.");
+      }
+
+      const savedRows = rows.map((row) => ({ ...row }));
+      const savedFaculty = [...faculty];
+      setBaselineRows(savedRows);
+      setBaselineFaculty(savedFaculty);
+      setLoadedSource(result.source);
+      setPendingSourceKind(undefined);
+      setIsExisting(true);
+      setLoadState("ready");
+      setRosterPath(result.path);
+      setDiagnosticMessage(null);
+      setPublicationWarning(
+        result.publication?.status === "failure"
+          ? (getDiagnosticsMessage(result.diagnostics) ??
+              "Roster saved locally, but publication failed. Use Publish Course Changes to retry.")
+          : null
+      );
+      if (isCreatingSection) {
+        setSections((current) => (current.includes(sectionId) ? current : [...current, sectionId]));
+        setIsCreatingSection(false);
+      }
+      clearReview();
+      await refreshSummaries();
+      onSaved();
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const finishRemoval = async (action: "remove_roster" | "remove_section"): Promise<void> => {
+    const remove =
+      action === "remove_roster" ? window.graiderUI.removeRoster : window.graiderUI.removeSection;
+    if (remove === undefined) return;
+    const removeRequest: RosterRemoveRequest = {
+      courseFolderId: courseFolder.id,
+      courseFolderPath: courseFolder.path,
+      termCode,
+      sectionId,
+      confirmed: true
+    };
+    setIsBusy(true);
+    setDiagnosticMessage(null);
+    try {
+      const result = await remove(removeRequest);
       if (result.status === "success") {
-        setLoadedSource(result.source);
+        setSections((current) => current.filter((section) => section !== sectionId));
+        setSectionId("");
+        setLoadState("idle");
+        setIsExisting(false);
+        setBaselineRows([]);
+        setDraftRows([]);
+        setBaselineFaculty([]);
+        setFaculty([]);
+        setLoadedSource(undefined);
         setPendingSourceKind(undefined);
-        setMessage(
+        setRosterPath(null);
+        setDestructiveAction(null);
+        setPublicationWarning(
           result.publication?.status === "failure"
-            ? result.diagnostics.map((item) => item.message).join(" ")
-            : `Saved ${result.path}`
+            ? (getDiagnosticsMessage(result.diagnostics) ??
+                "The local removal succeeded, but publication failed. Use Publish Course Changes to retry.")
+            : null
         );
-        setIsExisting(true);
-        if (isCreatingSection) {
-          setTerms((current) =>
-            current.map((term) =>
-              term.code === termCode ? { ...term, sections: [...term.sections, sectionId] } : term
-            )
-          );
-          setIsCreatingSection(false);
+        showToast(action === "remove_roster" ? "Roster and section removed." : "Section removed.");
+        await refreshSummaries();
+        onSaved();
+      } else {
+        setDiagnosticMessage(getDiagnosticsMessage(result.diagnostics));
+      }
+    } catch {
+      setDiagnosticMessage(
+        action === "remove_roster"
+          ? "Unable to remove the roster."
+          : "Unable to remove the section."
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleDestructiveConfirm = (): void => {
+    if (destructiveAction === "clear") {
+      setDraftRows([]);
+      setPendingSourceKind("manual_edit");
+      setDestructiveAction(null);
+      clearReview();
+    } else if (destructiveAction !== null) {
+      void finishRemoval(destructiveAction);
+    }
+  };
+
+  const hasSectionContext = sectionId.length > 0;
+  const overflowGroups: readonly OverflowMenuGroup[] = [
+    {
+      id: "roster-actions",
+      heading: "Roster",
+      items: [
+        {
+          id: "clear-roster",
+          label: "Clear roster rows",
+          caption: "Stage an empty roster for review",
+          destructive: true,
+          disabled: !hasSectionContext || rows.length === 0 || loadState !== "ready",
+          onSelect: () => setDestructiveAction("clear")
+        },
+        {
+          id: "remove-roster",
+          label: "Remove roster",
+          caption: "Removes the configured section and roster files",
+          destructive: true,
+          disabled: !hasSectionContext || !isExisting || isCreatingSection,
+          onSelect: () => setDestructiveAction("remove_roster")
+        },
+        {
+          id: "remove-section",
+          label: "Remove section",
+          caption: "Removes the section and any roster files",
+          destructive: true,
+          disabled: !hasSectionContext || isCreatingSection,
+          onSelect: () => setDestructiveAction("remove_section")
         }
-        clearPreview();
-        onSaved();
-      } else {
-        throw new Error(result.diagnostics.map((item) => item.message).join(" "));
-      }
-    } catch (error) {
-      throw error instanceof Error ? error : new Error("Unable to save roster CSV.");
-    } finally {
-      setIsLoading(false);
+      ]
     }
-  };
+  ];
 
-  const handleRemoveRoster = async (): Promise<void> => {
-    const removeRoster = window.graiderUI.removeRoster;
-    if (removeRoster === undefined || !isRosterRemovalConfirmed) return;
-    setIsRemovingRoster(true);
-    setMessage(null);
-    const removeRequest: RosterRemoveRequest = {
-      courseFolderId: courseFolder.id,
-      courseFolderPath: courseFolder.path,
-      termCode,
-      sectionId,
-      confirmed: true
-    };
-    try {
-      const result = await removeRoster(removeRequest);
-      if (result.status === "success") {
-        setTerms((current) =>
-          current.map((term) =>
-            term.code === termCode
-              ? { ...term, sections: term.sections.filter((section) => section !== sectionId) }
-              : term
-          )
-        );
-        setSectionId("");
-        setRows([]);
-        setIsExisting(false);
-        setLoadedSource(undefined);
-        setPendingSourceKind(undefined);
-        setChangeDescription(null);
-        clearPreview();
-        setIsConfirmingRosterRemoval(false);
-        setRosterRemovalWord("");
-        setMessage(
-          result.publication?.status === "failure"
-            ? result.diagnostics.map((item) => item.message).join(" ")
-            : `Removed ${result.path}`
-        );
-        onSaved();
-      } else {
-        setMessage(result.diagnostics.map((item) => item.message).join(" "));
-      }
-    } catch {
-      setMessage("Unable to remove roster CSV.");
-    } finally {
-      setIsRemovingRoster(false);
-    }
-  };
+  const currentRosterPath =
+    rosterPath ?? (hasSectionContext ? `terms/${termCode}/rosters/section-${sectionId}.csv` : null);
+  const technicalItems =
+    currentRosterPath === null
+      ? [
+          {
+            id: "course-folder",
+            label: "Course folder path",
+            value: courseFolder.path,
+            copyable: true
+          }
+        ]
+      : [
+          { id: "roster-path", label: "Roster path", value: currentRosterPath, copyable: true },
+          {
+            id: "source-path",
+            label: "Source metadata path",
+            value: `terms/${termCode}/rosters/section-${sectionId}.source.json`,
+            copyable: true
+          },
+          {
+            id: "course-folder",
+            label: "Course folder path",
+            value: courseFolder.path,
+            copyable: true
+          }
+        ];
 
-  const handleRemoveSection = async (): Promise<void> => {
-    const removeSection = window.graiderUI.removeSection;
-    if (removeSection === undefined || !isSectionRemovalConfirmed) return;
-    setIsRemovingSection(true);
-    setMessage(null);
-    const removeRequest: RosterRemoveRequest = {
-      courseFolderId: courseFolder.id,
-      courseFolderPath: courseFolder.path,
-      termCode,
-      sectionId,
-      confirmed: true
-    };
-    try {
-      const result = await removeSection(removeRequest);
-      if (result.status === "success") {
-        setTerms((current) =>
-          current.map((term) =>
-            term.code === termCode
-              ? { ...term, sections: term.sections.filter((section) => section !== sectionId) }
-              : term
-          )
-        );
-        setSectionId("");
-        setRows([]);
-        setIsExisting(false);
-        setLoadedSource(undefined);
-        setPendingSourceKind(undefined);
-        setChangeDescription(null);
-        clearPreview();
-        setIsConfirmingSectionRemoval(false);
-        setSectionRemovalWord("");
-        setMessage(
-          result.publication?.status === "failure"
-            ? result.diagnostics.map((item) => item.message).join(" ")
-            : `Removed section ${sectionId}`
-        );
-        onSaved();
-      } else {
-        setMessage(result.diagnostics.map((item) => item.message).join(" "));
-      }
-    } catch {
-      setMessage("Unable to remove section.");
-    } finally {
-      setIsRemovingSection(false);
-    }
-  };
-
-  const targetPath =
-    termCode.length > 0 && sectionId.length > 0
-      ? `terms/${termCode}/rosters/section-${sectionId}.csv`
-      : null;
+  const destructiveCopy =
+    destructiveAction === null ? null : getDestructiveDialogCopy(destructiveAction, sectionId);
 
   return (
-    <main className="dashboard-shell" aria-labelledby="roster-manager-title">
-      <header className="app-header">
-        <div className="app-header__inner">
-          <div>
-            <p className="app-header__eyebrow">Graider</p>
-            <h1 id="roster-manager-title">Manage rosters</h1>
-            <p className="assignment-detail__subtitle">{courseFolder.path}</p>
-          </div>
-        </div>
-      </header>
-      <section className="dashboard-content roster-manager" aria-label="Roster manager">
-        <section className="detail-panel roster-manager__selection">
-          <label>
-            Term
-            <select value={termCode} onChange={(event) => handleTermChange(event.target.value)}>
-              <option value="">Select a term</option>
-              {terms.map((term) => (
-                <option key={term.code} value={term.code}>
-                  {term.code}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="secondary-action"
-            type="button"
-            disabled={selectedTerm === null}
-            onClick={() => {
-              setSectionId("");
-              setRows([]);
-              setFaculty([]);
-              setFacultyInput("");
-              setIsExisting(false);
-              setLoadedSource(undefined);
-              setPendingSourceKind("manual_edit");
-              setIsCreatingSection(true);
-              clearPreview();
-            }}
-          >
-            Add Section
-          </button>
-          {isCreatingSection ? (
-            <>
-              <label>
-                New section ID
-                <input
-                  value={sectionId}
-                  placeholder="111"
-                  onChange={(event) => {
-                    setSectionId(event.target.value);
-                    setRows((current) =>
-                      current.map((row) => ({ ...row, section: event.target.value }))
-                    );
-                    clearPreview();
-                  }}
-                />
-              </label>
-              <label>
-                Roster CSV (optional)
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    replaceFromCsv(event);
-                  }}
-                />
-              </label>
-            </>
-          ) : null}
-          <label>
-            Section
-            <select
-              value={sectionId}
-              disabled={selectedTerm === null}
-              onChange={(event) => {
-                void loadSection(event.target.value);
-              }}
-            >
-              <option value="">Select a section</option>
-              {selectedTerm?.sections.map((section) => (
-                <option key={section} value={section}>
-                  {section}
-                </option>
-              ))}
-            </select>
-          </label>
-          {targetPath === null ? null : <p className="assignment-detail__path">{targetPath}</p>}
-          {loadMessage === null ? null : (
-            <p className="error-message" role="alert">
-              {loadMessage}
-            </p>
-          )}
-          {targetPath === null ? null : (
-            <p className="detail-panel__note">
-              {isExisting ? "Updating existing roster." : "A new roster will be created."}
-            </p>
-          )}
-        </section>
-        {sectionId.length === 0 ? null : (
-          <section className="detail-panel">
-            <div className="roster-manager__table-header">
-              <h2>Section faculty</h2>
+    <main className="dashboard-shell roster-manager-page" aria-labelledby="roster-manager-title">
+      <section className="dashboard-content roster-manager">
+        <PageHeader
+          eyebrow="Graider"
+          meta={`${courseTitle} · ${termTitle}`}
+          overflow={<OverflowMenu aria-label="More roster actions" groups={overflowGroups} />}
+          title="Manage rosters"
+          titleId="roster-manager-title"
+        />
+
+        <RosterSectionTabs
+          onAddSection={() => requestNavigation({ type: "new_section" })}
+          onSelect={(nextSectionId) =>
+            requestNavigation({ type: "section", sectionId: nextSectionId })
+          }
+          sections={sections}
+          selectedSectionId={isCreatingSection ? "" : sectionId}
+          summaries={summaries}
+        />
+
+        {sections.length === 0 && !isCreatingSection ? (
+          <section className="roster-empty-state roster-empty-state--page">
+            <h2>No sections configured for this term.</h2>
+            <button className="secondary-action" onClick={startNewSection} type="button">
+              Add section
+            </button>
+          </section>
+        ) : null}
+
+        {!isCreatingSection ? null : (
+          <section className="roster-new-section" aria-labelledby="new-section-title">
+            <div>
+              <h2 id="new-section-title">New section</h2>
+              <p>Define the section, then add students manually or replace from CSV.</p>
             </div>
-            <p className="detail-panel__note">MSOE usernames assigned to this section.</p>
             <label>
-              Faculty username
+              Section ID
               <input
-                value={facultyInput}
-                placeholder="jones"
-                onChange={(event) => setFacultyInput(event.target.value)}
+                autoFocus
+                onChange={(event) => {
+                  const nextSectionId = event.target.value;
+                  setSectionId(nextSectionId);
+                  setDraftRows((current) =>
+                    current.map((draftRow) => ({
+                      ...draftRow,
+                      row: { ...draftRow.row, section: nextSectionId }
+                    }))
+                  );
+                  setPendingSourceKind("manual_edit");
+                  clearReview();
+                }}
+                placeholder="001"
+                value={sectionId}
               />
             </label>
-            <button
-              className="secondary-action"
-              type="button"
-              onClick={() => {
-                const username = facultyInput.trim();
-                if (username.length === 0) {
-                  setLoadMessage("Faculty username is required.");
-                  return;
-                }
-                setFaculty((current) =>
-                  current.includes(username) ? current : [...current, username]
-                );
-                setFacultyInput("");
-                setLoadMessage(null);
-                setChangeDescription("This preview updates the faculty assigned to this section.");
-                clearPreview();
-              }}
-            >
-              Add faculty
-            </button>
-            {faculty.length === 0 ? (
-              <p className="detail-panel__note">No faculty assigned.</p>
-            ) : (
-              <ul>
-                {faculty.map((username) => (
-                  <li key={username}>
-                    {username}{" "}
-                    <button
-                      className="danger-action"
-                      type="button"
-                      onClick={() => {
-                        setFaculty((current) => current.filter((value) => value !== username));
-                        setChangeDescription(
-                          "This preview updates the faculty assigned to this section."
-                        );
-                        clearPreview();
-                      }}
-                    >
-                      Remove {username}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
           </section>
         )}
-        {sectionId.length === 0 ? null : (
-          <section className="detail-panel">
-            <div className="roster-manager__table-header">
-              <h2>Students</h2>
-              <button
-                className="secondary-action"
-                type="button"
-                onClick={() => {
-                  setRows((current) => [...current, emptyRow(sectionId)]);
-                  setPendingSourceKind("manual_edit");
-                  setChangeDescription("This change adds a student row to the roster.");
-                  clearPreview();
-                }}
-              >
-                Add Student
-              </button>
-            </div>
-            <div className="roster-manager__table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    {HEADERS.map(([, label]) => (
-                      <th key={label}>{label}</th>
-                    ))}
-                    <th>
-                      <span className="sr-only">Remove</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, index) => (
-                    <tr key={index}>
-                      {HEADERS.map(([field, label]) => (
-                        <td key={label}>
-                          {field === "section" ? (
-                            <input
-                              aria-label={`${label} row ${String(index + 1)}`}
-                              value={row.section}
-                              readOnly
-                            />
-                          ) : field === "status" ? (
-                            <select
-                              aria-label={`${label} row ${String(index + 1)}`}
-                              value={row.status}
-                              onChange={(event) => updateRow(index, field, event.target.value)}
-                            >
-                              <option value="active">active</option>
-                              <option value="dropped">dropped</option>
-                              <option value="hold">hold</option>
-                            </select>
-                          ) : (
-                            <input
-                              aria-label={`${label} row ${String(index + 1)}`}
-                              value={row[field]}
-                              onChange={(event) => updateRow(index, field, event.target.value)}
-                            />
-                          )}
-                        </td>
-                      ))}
-                      <td>
-                        <button
-                          className="danger-action"
-                          type="button"
-                          aria-label={`Remove Student ${String(index + 1)}`}
-                          onClick={() => {
-                            setRows((current) =>
-                              current.filter((_, rowIndex) => rowIndex !== index)
-                            );
-                            setPendingSourceKind("manual_edit");
-                            setChangeDescription("This preview removes the selected student row.");
-                            clearPreview();
-                          }}
-                        >
-                          Remove Student
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+
+        {diagnosticMessage === null ? null : (
+          <p className="error-message roster-manager__message" role="alert">
+            {diagnosticMessage}
+          </p>
         )}
-        {sectionId.length === 0 || isCreatingSection ? null : (
-          <section className="detail-panel">
-            <h2>Roster CSV actions</h2>
-            <label>
-              Replace from CSV
-              <input type="file" accept=".csv,text/csv" onChange={replaceFromCsv} />
-            </label>
-            <button
-              className="danger-action"
-              type="button"
-              disabled={rows.length === 0}
-              onClick={() => {
-                setRows([]);
-                setPendingSourceKind("manual_edit");
-                setChangeDescription(
-                  "This preview clears all roster rows and keeps the section's header-only CSV."
-                );
-                clearPreview();
-              }}
-            >
-              Clear Roster Rows
-            </button>
-            <button
-              className="danger-action"
-              type="button"
-              disabled={!isExisting || isLoading || isRemovingRoster}
-              onClick={() => {
-                setIsConfirmingRosterRemoval(true);
-                setRosterRemovalWord("");
-                setMessage(null);
-              }}
-            >
-              Remove Roster
-            </button>
-            <button
-              className="danger-action"
-              type="button"
-              disabled={isLoading || isRemovingSection}
-              onClick={() => {
-                setIsConfirmingSectionRemoval(true);
-                setSectionRemovalWord("");
-                setMessage(null);
-              }}
-            >
-              Remove Section
-            </button>
-          </section>
+        {publicationWarning === null ? null : (
+          <p className="roster-manager__publication-warning" role="alert">
+            <strong>Saved locally.</strong> {publicationWarning}
+          </p>
         )}
-        {!isConfirmingRosterRemoval ? null : (
-          <section className="detail-panel" role="dialog" aria-labelledby="remove-roster-title">
-            <h2 id="remove-roster-title">Remove roster</h2>
+
+        {!hasSectionContext ? null : (
+          <RosterSourceBar
+            disabled={loadState === "loading" || sectionId.trim().length === 0}
+            emptySourceExplanation={
+              isCreatingSection || !isExisting
+                ? "The first roster-data save will establish a source."
+                : "This roster predates source tracking. The next roster-data save will establish a source."
+            }
+            onReplace={replaceFromCsv}
+            pendingSourceKind={isDirty ? effectivePendingSourceKind : undefined}
+            source={loadedSource}
+          />
+        )}
+
+        {loadState === "loading" ? <p role="status">Loading section…</p> : null}
+        {loadState === "invalid" && hasSectionContext ? (
+          <section className="roster-attention-state">
+            <h2>Roster needs attention</h2>
             <p>
-              This deletes {targetPath} and removes its section from term.yml. It does not remove
-              any student repositories.
+              The roster could not be loaded safely. Review the diagnostic above or replace it from
+              CSV.
             </p>
-            <TypedConfirmation
-              word={sectionId}
-              value={rosterRemovalWord}
-              onChange={setRosterRemovalWord}
-              disabled={isRemovingRoster}
-            />
-            <div className="apply-confirmation-actions">
-              <button
-                className="secondary-action"
-                type="button"
-                disabled={isRemovingRoster}
-                onClick={() => {
-                  setIsConfirmingRosterRemoval(false);
-                  setRosterRemovalWord("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="danger-action"
-                type="button"
-                disabled={!isRosterRemovalConfirmed || isRemovingRoster}
-                onClick={() => void handleRemoveRoster()}
-              >
-                {isRemovingRoster ? "Removing roster..." : "Remove roster"}
-              </button>
-            </div>
           </section>
-        )}
-        {!isConfirmingSectionRemoval ? null : (
-          <section className="detail-panel" role="dialog" aria-labelledby="remove-section-title">
-            <h2 id="remove-section-title">Remove section</h2>
-            <p>
-              This removes section {sectionId} from term.yml and deletes its roster CSV if present.
-              It does not remove any student repositories.
-            </p>
-            <TypedConfirmation
-              word={sectionId}
-              value={sectionRemovalWord}
-              onChange={setSectionRemovalWord}
-              disabled={isRemovingSection}
-            />
-            <div className="apply-confirmation-actions">
-              <button
-                className="secondary-action"
-                type="button"
-                disabled={isRemovingSection}
-                onClick={() => {
-                  setIsConfirmingSectionRemoval(false);
-                  setSectionRemovalWord("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="danger-action"
-                type="button"
-                disabled={!isSectionRemovalConfirmed || isRemovingSection}
-                onClick={() => void handleRemoveSection()}
-              >
-                {isRemovingSection ? "Removing section..." : "Remove section"}
-              </button>
-            </div>
-          </section>
-        )}
-        {sectionId.length === 0 ? null : (
-          <section className="detail-panel">
-            <h2>Save roster</h2>
-            <button
-              className="primary-action"
-              type="button"
-              disabled={isLoading}
-              onClick={() => {
-                void handlePreview();
-              }}
-            >
-              {isLoading ? "Preparing preview..." : "Save roster"}
-            </button>
-            {message === null ? null : (
-              <p className="success-message" role="status">
-                {message}
+        ) : null}
+
+        {loadState === "ready" && hasSectionContext ? (
+          <>
+            {!isExisting && !isCreatingSection ? (
+              <p className="roster-manager__empty-notice">
+                No roster has been created for this section yet. Add students manually or replace
+                from CSV.
               </p>
-            )}
-          </section>
+            ) : null}
+            {isExisting && rows.length === 0 && rosterDiff.totalChangeCount === 0 ? (
+              <p className="roster-manager__empty-notice">This is a valid empty roster.</p>
+            ) : null}
+            <div className="roster-workspace">
+              <RosterStudentTable
+                draftRows={draftRows}
+                emptyMessage={
+                  isExisting
+                    ? "This valid roster currently has no student rows."
+                    : "No roster rows yet. Add a student or replace from CSV."
+                }
+                onAdd={addStudent}
+                onRemove={removeStudent}
+                onSetStatus={setRowStatus}
+                onUndoRemove={undoRemove}
+                onUpdate={updateRow}
+                removedDiffs={removedDiffs}
+                rowDiffs={rosterDiff.rows}
+              />
+              <aside className="roster-sidebar" aria-label="Section details">
+                <RosterFacultyPanel faculty={faculty} onAdd={addFaculty} onRemove={removeFaculty} />
+                <RosterStatsCard rows={rows} />
+              </aside>
+            </div>
+          </>
+        ) : null}
+
+        <TechnicalDetails items={technicalItems} />
+
+        {!isDirty ? null : (
+          <UnsavedChangesBar
+            message={getUnsavedMessage(rosterDiff, facultyDiff.changed, isCreatingSection)}
+            onDiscard={discardDraft}
+            onSave={() => void handlePreview()}
+            saving={isBusy}
+          />
         )}
       </section>
-      <ConfirmationWithPreviewModal
-        confirmLabel="Save roster"
-        isOpen={isConfirmingSave && preview !== null}
-        onCancel={() => setIsConfirmingSave(false)}
+
+      <RosterSaveReview
+        diff={rosterDiff}
+        facultyDiff={facultyDiff}
+        isCreatingSection={isCreatingSection}
+        isOpen={isReviewOpen && preview?.status === "ready"}
+        onCancel={() => setIsReviewOpen(false)}
         onConfirm={handleSave}
-        onSuccess={(successMessage) => {
-          setIsConfirmingSave(false);
-          showToast(successMessage);
+        onSuccess={showToast}
+      />
+
+      <ConfirmDialog
+        confirmationWord={sectionId}
+        confirmLabel={destructiveCopy?.confirmLabel ?? "Confirm"}
+        isConfirming={isBusy}
+        isOpen={destructiveCopy !== null}
+        onCancel={() => setDestructiveAction(null)}
+        onConfirm={handleDestructiveConfirm}
+        summary={destructiveCopy?.summary ?? ""}
+        title={destructiveCopy?.title ?? "Confirm action"}
+      />
+
+      <ConfirmDialog
+        confirmLabel="Discard and continue"
+        isOpen={isDiscardDialogOpen}
+        onCancel={() => {
+          setIsDiscardDialogOpen(false);
+          setPendingNavigation(null);
         }}
-        preview={preview === null ? undefined : <pre>{preview.content}</pre>}
-        summary={
-          changeDescription ??
-          `${preview?.exists === true || isExisting ? "Update" : "Create"} roster with ${rows.length} student record${rows.length === 1 ? "" : "s"}.`
-        }
-        title="Save roster changes?"
+        onConfirm={() => {
+          const navigation = pendingNavigation;
+          setIsDiscardDialogOpen(false);
+          setPendingNavigation(null);
+          if (navigation !== null) performNavigation(navigation);
+        }}
+        summary="Your unsaved roster and faculty changes will be discarded."
+        title="Discard unsaved changes?"
       />
       <Toast message={toastMessage} />
     </main>
