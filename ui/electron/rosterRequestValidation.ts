@@ -20,6 +20,9 @@ export const isRosterSaveRequest = (value: unknown): value is RosterSaveRequest 
   if (!isRosterSectionRequest(value)) return false;
   const request = value as unknown as Record<string, unknown>;
   return (
+    request.source === undefined &&
+    request.updatedAt === undefined &&
+    request.updatedBy === undefined &&
     Array.isArray(request.rows) &&
     request.rows.every(
       (row) =>
@@ -34,6 +37,9 @@ export const isRosterSaveRequest = (value: unknown): value is RosterSaveRequest 
       (Array.isArray(request.faculty) &&
         request.faculty.every((username) => typeof username === "string"))) &&
     (typeof request.createSection === "boolean" || request.createSection === undefined) &&
+    (request.sourceKind === undefined ||
+      request.sourceKind === "csv_upload" ||
+      request.sourceKind === "manual_edit") &&
     typeof request.confirmed === "boolean"
   );
 };

@@ -16,6 +16,7 @@ import type {
   RosterRow,
   RosterSaveRequest,
   RosterSaveResult,
+  RosterSource,
   RosterSectionRequest
 } from "./ipc.js";
 
@@ -31,10 +32,54 @@ const LEGACY_ROSTER_HEADERS = [
 ] as const;
 const VALID_STATUSES = ["active", "dropped", "hold"] as const;
 const SECTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
+const ROSTER_SOURCE_SCHEMA_VERSION = 1;
+
+export interface RosterSaveDependencies {
+  readonly updatedBy: string | null;
+  readonly now?: () => Date;
+}
 
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
 const getRosterPath = (termCode: string, sectionId: string): string =>
   `terms/${termCode}/rosters/section-${sectionId}.csv`;
+const getRosterSourcePath = (termCode: string, sectionId: string): string =>
+  `terms/${termCode}/rosters/section-${sectionId}.source.json`;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const parseRosterSource = (content: string): RosterSource | null => {
+  try {
+    const envelope = JSON.parse(content) as unknown;
+    if (!isRecord(envelope) || envelope.schemaVersion !== ROSTER_SOURCE_SCHEMA_VERSION) return null;
+    if (Object.keys(envelope).some((key) => key !== "schemaVersion" && key !== "source"))
+      return null;
+    const source = envelope.source;
+    if (!isRecord(source)) return null;
+    if (Object.keys(source).some((key) => !["kind", "updatedAt", "updatedBy"].includes(key)))
+      return null;
+    if (source.kind !== "csv_upload" && source.kind !== "manual_edit") return null;
+    if (
+      typeof source.updatedAt !== "string" ||
+      source.updatedAt.trim() === "" ||
+      Number.isNaN(Date.parse(source.updatedAt)) ||
+      new Date(source.updatedAt).toISOString() !== source.updatedAt
+    )
+      return null;
+    if (typeof source.updatedBy !== "string" && source.updatedBy !== null) return null;
+    if (typeof source.updatedBy === "string" && source.updatedBy.trim() === "") return null;
+    return {
+      kind: source.kind,
+      updatedAt: source.updatedAt,
+      updatedBy: source.updatedBy
+    };
+  } catch {
+    return null;
+  }
+};
+
+const createRosterSourceContent = (source: RosterSource): string =>
+  `${JSON.stringify({ schemaVersion: ROSTER_SOURCE_SCHEMA_VERSION, source }, undefined, 2)}\n`;
 
 const parseCsvLine = (line: string): string[] => {
   const values: string[] = [];
@@ -275,6 +320,26 @@ const getAssociatedRosterPaths = (request: RosterSectionRequest): string[] => {
 export const loadRosterTerms = (courseFolderPath: string): AssignmentSetupTermsResult =>
   loadAssignmentSetupTerms(courseFolderPath);
 
+const loadRosterSource = (
+  request: RosterSectionRequest
+): { readonly source?: RosterSource; readonly diagnostics: readonly CourseSetupDiagnostic[] } => {
+  const root = path.resolve(request.courseFolderPath);
+  const sourcePath = path.resolve(root, getRosterSourcePath(request.termCode, request.sectionId));
+  if (!isContainedPath(root, sourcePath))
+    return {
+      diagnostics: [diagnostic("Roster source path is outside the selected course folder.")]
+    };
+  if (!fs.existsSync(sourcePath)) return { diagnostics: [] };
+  try {
+    const source = parseRosterSource(fs.readFileSync(sourcePath, "utf8"));
+    return source === null
+      ? { diagnostics: [diagnostic("Roster source metadata is invalid or unsupported.")] }
+      : { source, diagnostics: [] };
+  } catch {
+    return { diagnostics: [diagnostic("Unable to read roster source metadata.")] };
+  }
+};
+
 export const getRosterForSection = (request: RosterSectionRequest): RosterLoadResult => {
   const rosterPath = getRosterPath(request.termCode, request.sectionId);
   if (!hasTermSection(request)) {
@@ -288,7 +353,19 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
     };
   }
 
-  const absolutePath = path.join(request.courseFolderPath, rosterPath);
+  const root = path.resolve(request.courseFolderPath);
+  const absolutePath = path.resolve(root, rosterPath);
+  if (!isContainedPath(root, absolutePath)) {
+    return {
+      status: "invalid",
+      path: rosterPath,
+      exists: false,
+      rows: [],
+      faculty: [],
+      diagnostics: [diagnostic("Generated path is outside the selected course folder.")]
+    };
+  }
+  const sourceResult = loadRosterSource(request);
   if (!fs.existsSync(absolutePath)) {
     return {
       status: "ready",
@@ -296,7 +373,7 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
       exists: false,
       rows: [],
       faculty: getSectionFaculty(request),
-      diagnostics: []
+      diagnostics: sourceResult.diagnostics
     };
   }
 
@@ -312,7 +389,8 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
         exists: true,
         rows: parseRows(content, header),
         faculty: getSectionFaculty(request),
-        diagnostics: []
+        ...(sourceResult.source === undefined ? {} : { source: sourceResult.source }),
+        diagnostics: sourceResult.diagnostics
       };
     }
     return {
@@ -393,6 +471,7 @@ const createCsv = (rows: readonly RosterRow[]): string => {
 
 export const previewRosterSave = (request: RosterSaveRequest): RosterPreviewResult => {
   const pathValue = getRosterPath(request.termCode, request.sectionId);
+  const rosterExists = fs.existsSync(path.join(request.courseFolderPath, pathValue));
   const isValidSelection = request.createSection ? true : hasTermSection(request);
   const creationDiagnostics = getSectionCreationDiagnostics(request);
   const facultyResult = normalizeFaculty(request.faculty);
@@ -402,13 +481,16 @@ export const previewRosterSave = (request: RosterSaveRequest): RosterPreviewResu
       : [diagnostic("Select an existing term and section before saving a roster.")]),
     ...creationDiagnostics,
     ...facultyResult.diagnostics,
+    ...(!rosterExists && request.sourceKind === undefined
+      ? [diagnostic("A source kind is required when creating a roster.")]
+      : []),
     ...validateRows(request)
   ];
   return {
     status: diagnostics.length === 0 ? "ready" : "invalid",
     path: pathValue,
     content: createCsv(request.rows),
-    exists: fs.existsSync(path.join(request.courseFolderPath, pathValue)),
+    exists: rosterExists,
     termPath:
       request.createSection || !hasRosterReference(request) || facultyResult.faculty !== undefined
         ? getTermPath(request.termCode)
@@ -431,7 +513,10 @@ const isContainedPath = (root: string, filePath: string): boolean => {
   );
 };
 
-export const saveRoster = (request: RosterSaveRequest): RosterSaveResult => {
+export const saveRoster = (
+  request: RosterSaveRequest,
+  dependencies: RosterSaveDependencies = { updatedBy: null }
+): RosterSaveResult => {
   const preview = previewRosterSave(request);
   if (!request.confirmed) {
     return {
@@ -445,14 +530,30 @@ export const saveRoster = (request: RosterSaveRequest): RosterSaveResult => {
 
   const root = path.resolve(request.courseFolderPath);
   const absolutePath = path.resolve(root, preview.path);
-  if (!isContainedPath(root, absolutePath)) {
+  const sourcePath = path.resolve(root, getRosterSourcePath(request.termCode, request.sectionId));
+  if (!isContainedPath(root, absolutePath) || !isContainedPath(root, sourcePath)) {
     return {
       status: "failure",
       path: preview.path,
       diagnostics: [diagnostic("Generated path is outside the selected course folder.")]
     };
   }
+  const existingSource = loadRosterSource(request).source;
+  let source = existingSource;
+  let originalRosterContent: string | null = null;
+  const rosterTempPath = `${absolutePath}.graider-tmp`;
+  const sourceTempPath = `${sourcePath}.graider-tmp`;
+  let termPath: string | null = null;
+  let originalTermContent: string | null = null;
   try {
+    if (fs.existsSync(absolutePath)) originalRosterContent = fs.readFileSync(absolutePath, "utf8");
+    if (request.sourceKind !== undefined) {
+      source = {
+        kind: request.sourceKind,
+        updatedAt: (dependencies.now ?? (() => new Date()))().toISOString(),
+        updatedBy: dependencies.updatedBy
+      };
+    }
     if (preview.termContent !== null && preview.termPath !== null) {
       if (preview.termPath === undefined || preview.termContent === undefined)
         return {
@@ -460,23 +561,55 @@ export const saveRoster = (request: RosterSaveRequest): RosterSaveResult => {
           path: preview.path,
           diagnostics: [diagnostic("Unable to update term.yml for the new section.")]
         };
-      const termPath = path.resolve(root, preview.termPath);
+      termPath = path.resolve(root, preview.termPath);
       if (!isContainedPath(root, termPath))
         return {
           status: "failure",
           path: preview.path,
           diagnostics: [diagnostic("Generated term path is outside the selected course folder.")]
         };
-      fs.writeFileSync(termPath, preview.termContent, "utf8");
+      originalTermContent = fs.readFileSync(termPath, "utf8");
     }
     fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-    fs.writeFileSync(absolutePath, preview.content, "utf8");
-    return { status: "success", path: preview.path, diagnostics: [] };
+    fs.writeFileSync(rosterTempPath, preview.content, "utf8");
+    if (request.sourceKind !== undefined && source !== undefined)
+      fs.writeFileSync(sourceTempPath, createRosterSourceContent(source), "utf8");
+    if (termPath !== null && typeof preview.termContent === "string")
+      fs.writeFileSync(termPath, preview.termContent, "utf8");
+    fs.renameSync(rosterTempPath, absolutePath);
+    try {
+      if (request.sourceKind !== undefined) fs.renameSync(sourceTempPath, sourcePath);
+    } catch {
+      if (originalRosterContent === null) fs.unlinkSync(absolutePath);
+      else fs.writeFileSync(absolutePath, originalRosterContent, "utf8");
+      if (termPath !== null && originalTermContent !== null)
+        fs.writeFileSync(termPath, originalTermContent, "utf8");
+      throw new Error("Unable to save roster source metadata.");
+    }
+    return {
+      status: "success",
+      path: preview.path,
+      diagnostics: [],
+      ...(source === undefined ? {} : { source })
+    };
   } catch {
+    try {
+      if (termPath !== null && originalTermContent !== null)
+        fs.writeFileSync(termPath, originalTermContent, "utf8");
+    } catch {
+      // Preserve the original failure diagnostic when rollback itself is unavailable.
+    }
+    for (const temporaryPath of [rosterTempPath, sourceTempPath]) {
+      try {
+        if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+      } catch {
+        // Best-effort cleanup; the canonical roster/source pair was already preserved.
+      }
+    }
     return {
       status: "failure",
       path: preview.path,
-      diagnostics: [diagnostic("Unable to save roster CSV.")]
+      diagnostics: [diagnostic("Unable to save roster CSV and source metadata.")]
     };
   }
 };
@@ -505,8 +638,13 @@ const removeSectionAndRoster = (
   const absoluteRosterPaths = getAssociatedRosterPaths(request).map((rosterFilePath) =>
     path.resolve(root, rosterFilePath)
   );
+  const absoluteSourcePath = path.resolve(
+    root,
+    getRosterSourcePath(request.termCode, request.sectionId)
+  );
   if (
     !absoluteRosterPaths.every((rosterFilePath) => isContainedPath(root, rosterFilePath)) ||
+    !isContainedPath(root, absoluteSourcePath) ||
     !isContainedPath(root, termPath)
   )
     return {
@@ -534,14 +672,20 @@ const removeSectionAndRoster = (
 
   try {
     const originalTermContent = fs.readFileSync(termPath, "utf8");
+    const filesToDelete = [...absoluteRosterPaths, absoluteSourcePath];
+    const originalFiles = filesToDelete.flatMap((filePath) =>
+      fs.existsSync(filePath) ? [{ filePath, content: fs.readFileSync(filePath) }] : []
+    );
     fs.writeFileSync(termPath, termContent, "utf8");
     try {
-      for (const rosterFilePath of absoluteRosterPaths) {
-        if (fs.existsSync(rosterFilePath)) fs.unlinkSync(rosterFilePath);
+      for (const filePath of filesToDelete) {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       }
     } catch {
       fs.writeFileSync(termPath, originalTermContent, "utf8");
-      throw new Error("Unable to delete roster CSV.");
+      for (const originalFile of originalFiles)
+        fs.writeFileSync(originalFile.filePath, originalFile.content);
+      throw new Error("Unable to delete roster CSV and source metadata.");
     }
     return { status: "success", path: rosterPath, diagnostics: [] };
   } catch {

@@ -21,6 +21,29 @@ describe("isRosterSaveRequest", () => {
       })
     ).toBe(true);
   });
+
+  it("accepts only narrow source-kind intent and rejects forged provenance", () => {
+    const base = {
+      courseFolderId: "course-folder-test",
+      courseFolderPath: "/tmp/course",
+      termCode: "27s1",
+      sectionId: "001",
+      rows: [],
+      confirmed: false
+    };
+    expect(isRosterSaveRequest({ ...base, sourceKind: "csv_upload" })).toBe(true);
+    expect(isRosterSaveRequest({ ...base, sourceKind: "manual_edit" })).toBe(true);
+    expect(isRosterSaveRequest(base)).toBe(true);
+    expect(isRosterSaveRequest({ ...base, sourceKind: "canvas" })).toBe(false);
+    expect(
+      isRosterSaveRequest({
+        ...base,
+        source: { kind: "csv_upload", updatedAt: "2026-09-22T22:00:00.000Z", updatedBy: "x" }
+      })
+    ).toBe(false);
+    expect(isRosterSaveRequest({ ...base, updatedAt: "2026-09-22T22:00:00.000Z" })).toBe(false);
+    expect(isRosterSaveRequest({ ...base, updatedBy: "attacker" })).toBe(false);
+  });
 });
 
 describe("isRosterSectionSummariesRequest", () => {

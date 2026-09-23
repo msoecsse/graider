@@ -3,7 +3,7 @@
 Investigation only, per item 27's practice, applied before implementation.
 No implementation code below. All citations are to code read directly.
 
-## 1. Source as a first-class field — genuine gap, small
+## 1. Source as a first-class field — shipped in PR12-4
 
 Confirmed: no roster carries provenance today. `RosterRow`
 (`ui/electron/ipc.ts:522-527`) is `{studentId, githubUsername, section,
@@ -24,6 +24,13 @@ existing functions, comparable in size to backlog item 34's storage
 module. Store it in the roster CSV's sidecar or as a comment/companion
 field; either is fine, not investigated further since it's an
 implementation detail once the field itself is agreed on.
+
+PR12-4 closed this gap with a versioned companion file at
+`terms/<term>/rosters/section-<section>.source.json`. The renderer supplies only
+`sourceKind`; trusted main-process dependencies supply author and save-time.
+Load/save results expose the canonical stored source, legacy missing metadata
+stays absent, and malformed metadata fails soft. See `summaries/pr12-4.md` for
+the shipped contract and behavior.
 
 ## 2. The unsaved-changes model — the shared component needs nothing; the diffing is new, and client-side-only
 

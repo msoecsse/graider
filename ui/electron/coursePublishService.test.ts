@@ -76,6 +76,40 @@ describe("coursePublishService", () => {
     expect(git(root, ["status", "--porcelain"])).toContain("notes.txt");
   });
 
+  it("allowlists only exact roster source sidecars and publishes their deletion", async () => {
+    const root = fixture();
+    const sidecar = path.join(root, "terms", "27s1", "rosters", "section-001.source.json");
+    fs.writeFileSync(sidecar, '{"schemaVersion":1}\n', "utf8");
+    for (const relativePath of [
+      "terms/27s1/rosters/notes.json",
+      "terms/27s1/rosters/other.source.json",
+      "terms/27s1/rosters/nested/section-001.source.json",
+      "terms/27s1/section-001.source.json"
+    ]) {
+      const candidate = path.join(root, relativePath);
+      fs.mkdirSync(path.dirname(candidate), { recursive: true });
+      fs.writeFileSync(candidate, "{}\n", "utf8");
+    }
+
+    const status = await getCoursePublishStatus(root);
+    expect(status.allowedChangedFiles).toEqual(["terms/27s1/rosters/section-001.source.json"]);
+    expect(status.unrelatedChangedFiles).toEqual(
+      expect.arrayContaining([
+        "terms/27s1/rosters/notes.json",
+        "terms/27s1/rosters/other.source.json",
+        "terms/27s1/rosters/nested/section-001.source.json",
+        "terms/27s1/section-001.source.json"
+      ])
+    );
+    expect((await publishCourseChanges(root)).status).toBe("success");
+
+    fs.rmSync(sidecar);
+    expect((await publishCourseChanges(root)).status).toBe("success");
+    expect(git(root, ["show", "--format=", "--name-status", "HEAD"])).toBe(
+      "D\tterms/27s1/rosters/section-001.source.json"
+    );
+  });
+
   it("publishes assignment groups without staging unrelated files", async () => {
     const root = fixture();
     const groups = path.join(root, "terms", "27s1", "assignments", "lab01", "groups.csv");

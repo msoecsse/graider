@@ -108,6 +108,7 @@ import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepository
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService.js";
 import { getRosterForSection, loadRosterTerms, previewRosterSave } from "./rosterManagerService.js";
 import { getRosterSectionSummaries } from "./rosterSectionSummaryService.js";
+import { createRosterSaveDependencies } from "./rosterProvenanceService.js";
 import {
   removeRosterWithStudentRepositoryAccessPageRefresh,
   removeSectionWithStudentRepositoryAccessPageRefresh,
@@ -890,7 +891,10 @@ export const registerIpcHandlers = (): void => {
       request.courseFolderPath,
       await saveRosterWithStudentRepositoryAccessPageRefresh(request, {
         runner: processRunner,
-        pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+        pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId),
+        saveDependencies: createRosterSaveDependencies(
+          getLocalSettingsPath(app.getPath("userData"))
+        )
       })
     );
   });

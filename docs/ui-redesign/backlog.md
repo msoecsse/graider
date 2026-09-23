@@ -971,7 +971,7 @@ it afterward rather than each growing its own version further.
 
 ---
 
-## 37. Roster carries no provenance — **Worth fixing**
+## 37. Roster carries no provenance — **Resolved**
 
 Found while assessing step 12. `RosterRow` (`ui/electron/ipc.ts:522-527`)
 is `{studentId, githubUsername, section, status}`; `RosterLoadResult` and
@@ -990,6 +990,14 @@ Fix: small. Add an optional `source` field (`kind: "csv_upload" |
 `getRosterForSection`. `updatedBy` can reuse the existing
 `currentFacultyMsoeUsername` local setting. No rearchitecture — one field
 threaded through three existing functions.
+
+Resolved in PR12-4. `RosterSource` is returned by roster load/save and persists
+in `terms/<term>/rosters/section-<section>.source.json`. The renderer supplies
+only `sourceKind`; the main process supplies the current faculty identity and a
+save-time clock. Missing companions preserve legacy compatibility, malformed
+companions fail soft, faculty-only saves preserve the prior source, and
+roster/section removal deletes the companion. The course-publication allowlist
+includes only the canonical companion pattern. Item 36 remains open.
 
 ---
 

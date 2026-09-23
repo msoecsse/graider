@@ -527,6 +527,14 @@ export interface RosterRow {
   readonly status: string;
 }
 
+export type RosterSourceKind = "csv_upload" | "manual_edit";
+
+export interface RosterSource {
+  readonly kind: RosterSourceKind;
+  readonly updatedAt: string;
+  readonly updatedBy: string | null;
+}
+
 export interface RosterSectionRequest extends AssignmentSetupTermsRequest {
   readonly termCode: string;
   readonly sectionId: string;
@@ -583,6 +591,7 @@ export interface RosterLoadResult {
   readonly exists: boolean;
   readonly rows: readonly RosterRow[];
   readonly faculty: readonly string[];
+  readonly source?: RosterSource;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
@@ -590,6 +599,7 @@ export interface RosterSaveRequest extends RosterSectionRequest {
   readonly rows: readonly RosterRow[];
   readonly faculty?: readonly string[];
   readonly createSection?: boolean;
+  readonly sourceKind?: RosterSourceKind;
   readonly confirmed: boolean;
 }
 
@@ -607,6 +617,7 @@ export interface RosterSaveResult {
   readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly source?: RosterSource;
   readonly publication?: CourseMutationPublicationResult;
 }
 

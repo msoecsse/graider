@@ -697,12 +697,13 @@ PR12-3 (complete)
   -> COMMENT-3 (complete)
   -> COMMENT-4 (complete)
   -> COMMENT-5 (complete)
-  -> PR12-4 roster source/provenance
+  -> PR12-4 roster source/provenance (complete)
   -> PR12-5 roster-manager visual rebuild
 ```
 
-PR12-4 and PR12-5 are deferred by priority, not blocked or abandoned. The
-original Step 12 sequence remains part of the project history. See
+PR12-4 is complete. PR12-5 is next and can consume both PR12-3's bulk section
+summaries and PR12-4's first-class roster source metadata without another
+backend slice. The original Step 12 sequence remains part of the project history. See
 `comment-library-feasibility.md` and
 `summaries/comment-library-priority-decision.md` for the verified existing
 infrastructure, gaps, and recommended comment-track slices.

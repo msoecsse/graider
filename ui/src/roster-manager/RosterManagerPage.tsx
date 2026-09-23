@@ -5,7 +5,9 @@ import type {
   RosterPreviewResult,
   RosterRemoveRequest,
   RosterRow,
-  RosterSaveRequest
+  RosterSaveRequest,
+  RosterSource,
+  RosterSourceKind
 } from "../../electron/ipc";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { Toast, useToast } from "../components/Toast";
@@ -67,6 +69,8 @@ export const RosterManagerPage = ({
   const [facultyInput, setFacultyInput] = useState("");
   const [loadMessage, setLoadMessage] = useState<string | null>(null);
   const [isExisting, setIsExisting] = useState(false);
+  const [, setLoadedSource] = useState<RosterSource>();
+  const [pendingSourceKind, setPendingSourceKind] = useState<RosterSourceKind>();
   const [changeDescription, setChangeDescription] = useState<string | null>(null);
   const [preview, setPreview] = useState<RosterPreviewResult | null>(null);
   const { message: toastMessage, showToast } = useToast();
@@ -111,9 +115,19 @@ export const RosterManagerPage = ({
       rows,
       faculty,
       createSection: isCreatingSection,
+      ...(pendingSourceKind === undefined ? {} : { sourceKind: pendingSourceKind }),
       confirmed: false
     }),
-    [courseFolder.id, courseFolder.path, faculty, isCreatingSection, rows, sectionId, termCode]
+    [
+      courseFolder.id,
+      courseFolder.path,
+      faculty,
+      isCreatingSection,
+      pendingSourceKind,
+      rows,
+      sectionId,
+      termCode
+    ]
   );
 
   const clearPreview = (): void => {
@@ -129,6 +143,8 @@ export const RosterManagerPage = ({
     setFacultyInput("");
     setIsCreatingSection(false);
     setIsExisting(false);
+    setLoadedSource(undefined);
+    setPendingSourceKind(undefined);
     setChangeDescription(null);
     setLoadMessage(null);
     clearPreview();
@@ -141,6 +157,8 @@ export const RosterManagerPage = ({
     setFaculty([]);
     setFacultyInput("");
     setIsExisting(false);
+    setLoadedSource(undefined);
+    setPendingSourceKind(undefined);
     setChangeDescription(null);
     clearPreview();
     if (value.length === 0 || termCode.length === 0) return;
@@ -155,6 +173,8 @@ export const RosterManagerPage = ({
       setRows(result.rows);
       setFaculty(result.faculty ?? []);
       setIsExisting(result.exists);
+      setLoadedSource(result.source);
+      setPendingSourceKind(result.exists ? undefined : "manual_edit");
       setLoadMessage(result.diagnostics.map((item) => item.message).join(" ") || null);
     } catch {
       setLoadMessage("Unable to load roster CSV.");
@@ -168,6 +188,7 @@ export const RosterManagerPage = ({
       current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row))
     );
     setChangeDescription(null);
+    setPendingSourceKind("manual_edit");
     clearPreview();
   };
 
@@ -181,6 +202,7 @@ export const RosterManagerPage = ({
         return;
       }
       setRows(uploadedRows);
+      setPendingSourceKind("csv_upload");
       setChangeDescription(
         "This preview replaces the current roster content with the uploaded CSV."
       );
@@ -219,6 +241,8 @@ export const RosterManagerPage = ({
     try {
       const result = await saveRoster({ ...request, confirmed: true });
       if (result.status === "success") {
+        setLoadedSource(result.source);
+        setPendingSourceKind(undefined);
         setMessage(
           result.publication?.status === "failure"
             ? result.diagnostics.map((item) => item.message).join(" ")
@@ -270,6 +294,8 @@ export const RosterManagerPage = ({
         setSectionId("");
         setRows([]);
         setIsExisting(false);
+        setLoadedSource(undefined);
+        setPendingSourceKind(undefined);
         setChangeDescription(null);
         clearPreview();
         setIsConfirmingRosterRemoval(false);
@@ -315,6 +341,8 @@ export const RosterManagerPage = ({
         setSectionId("");
         setRows([]);
         setIsExisting(false);
+        setLoadedSource(undefined);
+        setPendingSourceKind(undefined);
         setChangeDescription(null);
         clearPreview();
         setIsConfirmingSectionRemoval(false);
@@ -374,6 +402,8 @@ export const RosterManagerPage = ({
               setFaculty([]);
               setFacultyInput("");
               setIsExisting(false);
+              setLoadedSource(undefined);
+              setPendingSourceKind("manual_edit");
               setIsCreatingSection(true);
               clearPreview();
             }}
@@ -506,6 +536,7 @@ export const RosterManagerPage = ({
                 type="button"
                 onClick={() => {
                   setRows((current) => [...current, emptyRow(sectionId)]);
+                  setPendingSourceKind("manual_edit");
                   setChangeDescription("This change adds a student row to the roster.");
                   clearPreview();
                 }}
@@ -564,6 +595,7 @@ export const RosterManagerPage = ({
                             setRows((current) =>
                               current.filter((_, rowIndex) => rowIndex !== index)
                             );
+                            setPendingSourceKind("manual_edit");
                             setChangeDescription("This preview removes the selected student row.");
                             clearPreview();
                           }}
@@ -591,6 +623,7 @@ export const RosterManagerPage = ({
               disabled={rows.length === 0}
               onClick={() => {
                 setRows([]);
+                setPendingSourceKind("manual_edit");
                 setChangeDescription(
                   "This preview clears all roster rows and keeps the section's header-only CSV."
                 );

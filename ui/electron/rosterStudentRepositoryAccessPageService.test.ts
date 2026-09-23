@@ -126,7 +126,11 @@ const runner = (): ProcessRunner =>
 
 const options = (root: string) => ({
   runner: runner(),
-  pagesRepositoryFolderPath: pagesRoot(root)
+  pagesRepositoryFolderPath: pagesRoot(root),
+  saveDependencies: {
+    updatedBy: "jones",
+    now: () => new Date("2026-09-22T22:00:00.000Z")
+  }
 });
 
 describe("roster student repository access page lifecycle", () => {
@@ -136,14 +140,22 @@ describe("roster student repository access page lifecycle", () => {
     initializePagesRepository(root);
 
     const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
-      saveRequest(root, [
-        { studentId: "a001", githubUsername: "ada", section: "001", status: "active" },
-        { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
-      ]),
+      {
+        ...saveRequest(root, [
+          { studentId: "a001", githubUsername: "ada", section: "001", status: "active" },
+          { studentId: "a002", githubUsername: "newstudent", section: "001", status: "active" }
+        ]),
+        sourceKind: "csv_upload"
+      },
       options(root)
     );
 
     expect(result.status).toBe("success");
+    expect(result.source).toEqual({
+      kind: "csv_upload",
+      updatedAt: "2026-09-22T22:00:00.000Z",
+      updatedBy: "jones"
+    });
     expect(fs.readFileSync(path.join(pagesRoot(root), pagePath("lab02")), "utf8")).toContain(
       "a002"
     );

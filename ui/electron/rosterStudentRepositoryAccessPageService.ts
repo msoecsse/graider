@@ -15,13 +15,19 @@ import type {
   RosterSectionRequest,
   StudentRepositoryAccessPageRequest
 } from "./ipc.js";
-import { removeRoster, removeSection, saveRoster } from "./rosterManagerService.js";
+import {
+  removeRoster,
+  removeSection,
+  saveRoster,
+  type RosterSaveDependencies
+} from "./rosterManagerService.js";
 import { generateStudentRepositoryAccessPage } from "./studentRepositoryAccessPageService.js";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService.js";
 
 interface RosterAccessPageOptions {
   readonly runner: ProcessRunner;
   readonly pagesRepositoryFolderPath: string | null;
+  readonly saveDependencies?: RosterSaveDependencies;
 }
 
 type RosterMutationResult = RosterSaveResult | RosterRemoveResult;
@@ -134,7 +140,7 @@ export const saveRosterWithStudentRepositoryAccessPageRefresh = async (
   request: RosterSaveRequest,
   options: RosterAccessPageOptions
 ): Promise<RosterSaveResult> =>
-  withStudentRepositoryPageRefresh(request, saveRoster(request), options);
+  withStudentRepositoryPageRefresh(request, saveRoster(request, options.saveDependencies), options);
 
 export const removeRosterWithStudentRepositoryAccessPageRefresh = async (
   request: RosterRemoveRequest,
