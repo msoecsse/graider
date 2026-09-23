@@ -9,6 +9,10 @@ export const DASHBOARD_PATH = "/";
 export const getRosterPath = (courseSlug: string, termSlug: string): string =>
   `/course/${courseSlug}/${termSlug}/roster`;
 
+/** The course-owned library is reached through a term access context. */
+export const getCommentLibraryPath = (courseSlug: string, termSlug: string): string =>
+  `/course/${courseSlug}/${termSlug}/comment-library`;
+
 export const getAssignmentDetailPath = (
   courseSlug: string,
   termSlug: string,

@@ -14,7 +14,12 @@ export type CommentLibraryLoadState =
 
 export type ReusableComment = LoadedLibrary["comments"][number];
 
-export const GradingCommentLibraryBrowser = ({
+interface ApplyAction {
+  readonly isDisabled: (comment: ReusableComment) => boolean;
+  readonly onApply: (comment: ReusableComment) => void;
+}
+
+export const ReusableCommentLibraryBrowser = ({
   commentLibrary,
   commentSearch,
   onSearchChange,
@@ -22,11 +27,9 @@ export const GradingCommentLibraryBrowser = ({
   selectedCommentTags,
   onTagsChange,
   matchingComments,
-  studentId,
-  gradingMutationStudentId,
-  isStudentMutationBlocked,
-  onApply,
+  applyAction,
   libraryMutationPending = false,
+  showNewAction = true,
   onNew = () => undefined,
   onEdit = () => undefined,
   onDelete = () => undefined
@@ -38,11 +41,9 @@ export const GradingCommentLibraryBrowser = ({
   readonly selectedCommentTags: readonly string[];
   readonly onTagsChange: Dispatch<SetStateAction<readonly string[]>>;
   readonly matchingComments: readonly ReusableComment[];
-  readonly studentId: string | undefined;
-  readonly gradingMutationStudentId: string | undefined;
-  readonly isStudentMutationBlocked: (studentId: string) => boolean;
-  readonly onApply: (comment: ReusableComment) => void;
+  readonly applyAction?: ApplyAction;
   readonly libraryMutationPending?: boolean;
+  readonly showNewAction?: boolean;
   readonly onNew?: () => void;
   readonly onEdit?: (comment: ReusableComment) => void;
   readonly onDelete?: (comment: ReusableComment) => void;
@@ -57,16 +58,18 @@ export const GradingCommentLibraryBrowser = ({
     );
   return (
     <>
-      <div className="grading-comment-library__actions">
-        <button
-          className="secondary-action"
-          disabled={libraryMutationPending}
-          onClick={onNew}
-          type="button"
-        >
-          New comment
-        </button>
-      </div>
+      {!showNewAction ? null : (
+        <div className="grading-comment-library__actions">
+          <button
+            className="secondary-action"
+            disabled={libraryMutationPending}
+            onClick={onNew}
+            type="button"
+          >
+            New comment
+          </button>
+        </div>
+      )}
       <label>
         Search comments
         <input
@@ -97,7 +100,9 @@ export const GradingCommentLibraryBrowser = ({
           ))}
         </fieldset>
       )}
-      {matchingComments.length === 0 ? (
+      {commentLibrary.comments.length === 0 ? (
+        <p>No reusable comments yet.</p>
+      ) : matchingComments.length === 0 ? (
         <p>No matching reusable comments.</p>
       ) : (
         <ul className="grading-comment-list" aria-label="Reusable comments">
@@ -110,18 +115,16 @@ export const GradingCommentLibraryBrowser = ({
                 <p>Default category: {comment.defaultRubricCategoryId}</p>
               )}
               {comment.tags.length === 0 ? null : <p>Tags: {comment.tags.join(", ")}</p>}
-              <button
-                className="secondary-action"
-                type="button"
-                disabled={
-                  studentId === undefined ||
-                  gradingMutationStudentId !== undefined ||
-                  isStudentMutationBlocked(studentId)
-                }
-                onClick={() => onApply(comment)}
-              >
-                Apply {comment.title}
-              </button>
+              {applyAction === undefined ? null : (
+                <button
+                  className="secondary-action"
+                  type="button"
+                  disabled={applyAction.isDisabled(comment)}
+                  onClick={() => applyAction.onApply(comment)}
+                >
+                  Apply {comment.title}
+                </button>
+              )}
               <span className="grading-comment-library__entry-actions">
                 <button
                   className="secondary-action"
@@ -147,3 +150,6 @@ export const GradingCommentLibraryBrowser = ({
     </>
   );
 };
+
+/** @deprecated Prefer ReusableCommentLibraryBrowser outside the workspace. */
+export const GradingCommentLibraryBrowser = ReusableCommentLibraryBrowser;

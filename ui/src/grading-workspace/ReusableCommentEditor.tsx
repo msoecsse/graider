@@ -92,7 +92,13 @@ export const ReusableCommentEditor = ({
                 event.currentTarget.value === "" ? undefined : event.currentTarget.value
             }))
           }
-          value={availableCategory ? (value.defaultRubricCategoryId ?? "") : "unavailable"}
+          value={
+            value.defaultRubricCategoryId === undefined
+              ? ""
+              : availableCategory
+                ? value.defaultRubricCategoryId
+                : "unavailable"
+          }
         >
           <option value="">None</option>
           {!availableCategory && value.defaultRubricCategoryId !== undefined ? (

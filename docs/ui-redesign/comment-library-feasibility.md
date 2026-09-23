@@ -508,9 +508,13 @@ creation. The applied snapshot is never given a retroactive source ID.
 
 ### COMMENT-5 — Course-level Comment Library screen
 
-Add the course/term-context route and navigation, then compose the shared
-browser, editor, tag control, formatted preview, and publication feedback into
-the dedicated management surface.
+Complete: `/course/:courseSlug/:termSlug/comment-library` resolves the
+registered course folder and canonical card term before calling the existing
+narrow IPC APIs. Dashboard course-term cards and assignment-detail grading
+setup both link to it. The dedicated screen reuses the shared browser, editor,
+tag control, formatted preview, CRUD feedback, and explicit delete
+confirmation; it never shows student Apply behavior. Course-level edits start
+with no rubric category and preserve unavailable stored IDs.
 
 COMMENT-1 through COMMENT-4 are complete. COMMENT-3 supplies the reusable
 editor and COMMENT-2 supplies the publication-aware mutation contract reused
@@ -521,9 +525,8 @@ manager visual rebuild that consumes PR12-3 counts and PR12-4 provenance).
 
 ## 13. Backlog and documentation corrections
 
-Backlog item 39 remains open for the dedicated management screen. Items 40,
-41, 42, and 43 are resolved by COMMENT-2 through COMMENT-4. They are problem
-statements, not a duplicate PR checklist.
+Backlog items 39 through 43 are resolved by COMMENT-1 through COMMENT-5. They
+are problem statements, not a duplicate PR checklist.
 
 The grading specification now records the locked behavior. The UI-redesign
 roadmap preserves the Step 12 history while explicitly placing COMMENT-1
@@ -546,6 +549,5 @@ through COMMENT-5 between completed PR12-3 and deferred PR12-4/PR12-5.
 
 ## 15. Recommendation
 
-Proceed with COMMENT-5: add the dedicated course-level Comment Library screen
-by reusing the shared browser/editor/tag controls and publication-aware CRUD
-flow already used in the workspace.
+COMMENT-1 through COMMENT-5 are complete. Resume PR12-4: roster
+source/provenance, followed by PR12-5: roster-manager visual rebuild.

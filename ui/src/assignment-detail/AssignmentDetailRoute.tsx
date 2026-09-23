@@ -10,6 +10,7 @@ import {
   DASHBOARD_PATH,
   getApplyPreviewPath,
   getAssignmentEditPath,
+  getCommentLibraryPath,
   getFacultyReportPath,
   getGradePreviewPath,
   getGradeStatusPath,
@@ -46,6 +47,9 @@ export const AssignmentDetailRoute = (): ReactElement => {
         selection={selection}
         onEditAssignment={() => {
           navigate(getAssignmentEditPath(courseSlug, termSlug, assignmentSlug));
+        }}
+        onManageCommentLibrary={() => {
+          navigate(getCommentLibraryPath(courseSlug, termSlug));
         }}
         onDeleted={() => {
           // Refresh before navigating, not after (the ordering bug 1 in

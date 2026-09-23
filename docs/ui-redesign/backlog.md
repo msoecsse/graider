@@ -1030,7 +1030,7 @@ paths have not yet been migrated.
 
 ---
 
-## 39. Comment-library mutations exist but have no faculty UI — **Partially resolved**
+## 39. Comment-library mutations exist but have no faculty UI — **Resolved**
 
 The course-level JSON model, context operations, Electron service, validated
 IPC handlers, and preload APIs already support reusable-comment create, edit,
@@ -1044,9 +1044,10 @@ used by both the grading workspace and a dedicated course-level management
 screen, not another storage model or parallel set of APIs. See
 `comment-library-feasibility.md`.
 
-COMMENT-3 resolves the grading-workspace portion: faculty can create, edit,
-and explicitly delete reusable entries through the existing publication-aware
-APIs. COMMENT-5 remains for the dedicated course-level management route.
+COMMENT-3 resolved the grading-workspace portion. COMMENT-5 adds the dedicated
+course-level route, dashboard course-term and assignment-detail navigation,
+search/tag filtering, shared editor/formatting, publication-aware CRUD, and
+an explicit deletion confirmation that preserves applied student snapshots.
 
 ---
 

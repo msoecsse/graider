@@ -775,6 +775,10 @@ h1 {
   margin-bottom: 10px;
 }
 
+.course-card__actions {
+  margin-bottom: var(--space-2);
+}
+
 .course-card__source {
   font-family: var(--font-mono);
   font-size: 0.8rem;
@@ -3210,6 +3214,31 @@ h1 {
 .unsaved-changes-bar__actions {
   display: flex;
   gap: var(--space-1);
+}
+
+.comment-library-page .dashboard-content {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.comment-library-page__editor {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+  padding: var(--space-3);
+}
+
+.comment-library-page__editor h2,
+.comment-library-page__category-note {
+  margin-top: 0;
+}
+
+.comment-library-page__category-note {
+  color: var(--text-muted);
+}
+
+.comment-library-page .grading-comment-list li {
+  padding: var(--space-3);
 }
 
 @media (max-width: 780px) {

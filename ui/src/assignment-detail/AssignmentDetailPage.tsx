@@ -388,6 +388,7 @@ export const AssignmentDetailPage = ({
   onViewGradeStatus,
   onDetailLoaded,
   onEditAssignment = () => undefined,
+  onManageCommentLibrary = () => undefined,
   onDeleted = () => undefined
 }: AssignmentDetailPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(
@@ -1171,6 +1172,12 @@ export const AssignmentDetailPage = ({
                 caption: "View, edit, and push the grading workflow file.",
                 disabled: !detail.grading.enabled,
                 onSelect: () => revealExistingSection("grade-workflow-title", ADVANCED_DETAILS_ID)
+              },
+              {
+                id: "manage-comment-library",
+                label: "Manage Comment Library",
+                caption: "Create and maintain reusable comments shared across this course.",
+                onSelect: onManageCommentLibrary
               },
               {
                 id: "view-grading-status",

@@ -18,16 +18,18 @@ const baseProps = {
   selectedCommentTags: [],
   onTagsChange: vi.fn(),
   matchingComments: [comment],
-  studentId: "ada",
-  gradingMutationStudentId: undefined,
-  isStudentMutationBlocked: () => false,
-  onApply: vi.fn()
+  applyAction: { isDisabled: () => false, onApply: vi.fn() }
 };
 
 describe("GradingCommentLibraryBrowser", () => {
   it("renders matching comments and applies one on click", () => {
     const onApply = vi.fn();
-    render(<GradingCommentLibraryBrowser {...baseProps} onApply={onApply} />);
+    render(
+      <GradingCommentLibraryBrowser
+        {...baseProps}
+        applyAction={{ isDisabled: () => false, onApply }}
+      />
+    );
 
     expect(screen.getByText("Check your loop bounds.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Apply Off-by-one" }));
@@ -51,7 +53,12 @@ describe("GradingCommentLibraryBrowser", () => {
   });
 
   it("disables Apply when no student is selected", () => {
-    render(<GradingCommentLibraryBrowser {...baseProps} studentId={undefined} />);
+    render(
+      <GradingCommentLibraryBrowser
+        {...baseProps}
+        applyAction={{ isDisabled: () => true, onApply: vi.fn() }}
+      />
+    );
 
     expect(screen.getByRole("button", { name: "Apply Off-by-one" })).toBeDisabled();
   });

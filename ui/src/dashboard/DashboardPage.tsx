@@ -22,7 +22,12 @@ import {
 } from "./dashboardFilters";
 import { findAnyCardForFolder } from "./dashboardResolvers";
 import type { CombinedDashboardCard, RecentAssignmentSummary } from "./dashboardTypes";
-import { getAssignmentDetailPath, getRosterPath, toRouteSlug } from "./routePaths";
+import {
+  getAssignmentDetailPath,
+  getCommentLibraryPath,
+  getRosterPath,
+  toRouteSlug
+} from "./routePaths";
 
 type GitHubAuthViewState =
   | {
@@ -338,6 +343,15 @@ export const DashboardPage = (): ReactElement => {
     navigate(getRosterPath(toRouteSlug(card.card.courseSlug), toRouteSlug(card.card.termSlug)));
   };
 
+  const handleManageCommentLibrary = (combinedCard: CombinedDashboardCard): void => {
+    navigate(
+      getCommentLibraryPath(
+        toRouteSlug(combinedCard.card.courseSlug),
+        toRouteSlug(combinedCard.card.termSlug)
+      )
+    );
+  };
+
   const hasCourseFolders = courseFolders.length > 0;
   const visibleCards = filterAndSortDashboardCards(
     aggregatedDashboard.cards,
@@ -597,6 +611,7 @@ export const DashboardPage = (): ReactElement => {
               courseFolders={courseFolders}
               refreshingId={refreshingId}
               onOpenAssignment={handleOpenAssignmentDetail}
+              onManageCommentLibrary={handleManageCommentLibrary}
               onSetupAssignment={handleOpenAssignmentSetup}
               onManageRosters={handleOpenRosterManager}
               onRefresh={(id) => {

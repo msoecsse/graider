@@ -10,6 +10,7 @@ import { GradeStatusRoute } from "./grade-status/GradeStatusRoute";
 import { FacultyReportRoute } from "./faculty-report/FacultyReportRoute";
 import { GradingWorkspaceRoute } from "./grading-workspace/GradingWorkspaceRoute";
 import { RosterManagerRoute } from "./roster-manager/RosterManagerRoute";
+import { CommentLibraryRoute } from "./comment-library/CommentLibraryRoute";
 
 /**
  * The route table itself (README section 4.1), split out from `App.tsx` so
@@ -20,6 +21,7 @@ export const AppRoutes = (): ReactElement => (
   <Routes>
     <Route path="/" element={<DashboardPage />} />
     <Route path="/course/:courseSlug/:termSlug/roster" element={<RosterManagerRoute />} />
+    <Route path="/course/:courseSlug/:termSlug/comment-library" element={<CommentLibraryRoute />} />
     <Route path="/course/:courseSlug/:termSlug/:assignment" element={<AssignmentDetailRoute />} />
     <Route path="/course/:courseSlug/:termSlug/:assignment/apply" element={<ApplyPreviewRoute />} />
     <Route

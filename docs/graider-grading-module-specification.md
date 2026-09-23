@@ -527,6 +527,13 @@ grading workspace. The grading workspace and management screen reuse the same
 library model, editor, and CRUD operations rather than maintaining parallel
 collections.
 
+The management route is `/course/:courseSlug/:termSlug/comment-library`. The
+library remains course-owned; the term is the faculty authorization and
+navigation context. The renderer sends the resolved registered course ID and
+canonical term only, and the main process resolves the trusted course folder.
+Because the management screen has no assignment rubric, new comments start
+with no default category while stored unavailable category IDs remain preserved.
+
 ### 12.2 Search and Filtering
 
 Search matches:

@@ -148,6 +148,7 @@ export interface AssignmentDetailPageProps {
   readonly selection: AssignmentDetailSelection;
   readonly initialLoadResult?: AssignmentDetailLoadResult | null;
   readonly onEditAssignment?: () => void;
+  readonly onManageCommentLibrary?: () => void;
   readonly onDeleted?: () => void;
   readonly onPreviewApply: (
     selection: AssignmentDetailSelection,

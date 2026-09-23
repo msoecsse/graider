@@ -11,6 +11,20 @@ const value = {
 };
 
 describe("ReusableCommentEditor", () => {
+  it("selects None when a new comment has no category in an empty category list", () => {
+    render(
+      <ReusableCommentEditor
+        categories={[]}
+        initialValue={{ title: "New", text: "Text", defaultDeduction: 0, tags: [] }}
+        onCancel={vi.fn()}
+        onSave={vi.fn()}
+        tagSuggestions={[]}
+      />
+    );
+
+    expect(screen.getByRole("combobox", { name: "Default rubric category" })).toHaveValue("");
+  });
+
   it("shows unavailable categories, a formatted preview, and submits edited values", () => {
     const onSave = vi.fn();
     render(

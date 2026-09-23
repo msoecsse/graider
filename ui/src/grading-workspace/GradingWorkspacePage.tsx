@@ -13,8 +13,7 @@ import type {
   GradingWorkspacePrepareRequest,
   BulkPublishGradingStudentReportsResult,
   PublishGradingStudentReportResult,
-  PreviewGradingStudentReportResult,
-  GradingCommentLibraryMutationResult
+  PreviewGradingStudentReportResult
 } from "../../electron/ipc";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
@@ -38,6 +37,12 @@ import {
 } from "./GradingPublishReviewPanel";
 import type { GradingSourceAnnotation } from "./MonacoSourceViewer";
 import { filterReusableComments, listReusableCommentTags } from "./commentLibrarySearch";
+import {
+  commentLibraryLoadFailureMessage,
+  commentLibraryMutationFailureMessage,
+  commentLibraryPublicationWarning,
+  updateReusableCommentList
+} from "./commentLibraryFeedback";
 import { isGradingStudentSourceDto, type CanonicalSourceRange } from "./submissionSourceView";
 import { GradingFooterHintBar } from "./GradingFooterHintBar";
 import { GradingKeyboardCheatSheetModal } from "./GradingKeyboardCheatSheetModal";
@@ -739,10 +744,7 @@ export const GradingWorkspacePage = ({
           setCommentLibrary({ status: "success", comments: value.comments });
           return;
         }
-        setCommentLibrary({
-          status: "failure",
-          message: "The shared comment library could not be loaded safely."
-        });
+        setCommentLibrary({ status: "failure", message: commentLibraryLoadFailureMessage(value) });
       })
       .catch(() => {
         if (active)
@@ -1281,17 +1283,6 @@ export const GradingWorkspacePage = ({
         : current
     );
   };
-  const libraryMutationFailureMessage = (result: GradingCommentLibraryMutationResult): string => {
-    if (result.status === "not_found") return "That reusable comment no longer exists.";
-    if (result.status === "failure") return "The reusable comment could not be saved safely.";
-    return "The shared comment library is unavailable for this faculty account.";
-  };
-  const publicationWarning = (
-    result: Extract<GradingCommentLibraryMutationResult, { readonly status: "success" }>
-  ): string | undefined =>
-    result.publication.status === "failure"
-      ? "Comment saved locally, but the shared course repository could not be published. Use Publish Course Changes to retry after resolving the repository issue."
-      : undefined;
   const saveLibraryEditor = async (value: ReusableCommentEditorValue): Promise<void> => {
     const editor = libraryEditor;
     if (editor === undefined || libraryMutationPending) return;
@@ -1324,14 +1315,10 @@ export const GradingWorkspacePage = ({
               replacement: value
             });
       if (result.status !== "success" || !("comment" in result)) {
-        setLibraryMutationMessage(libraryMutationFailureMessage(result));
+        setLibraryMutationMessage(commentLibraryMutationFailureMessage(result));
       } else {
         updateLibraryComments((comments) =>
-          editor.operation === "create"
-            ? [...comments, result.comment]
-            : comments.map((comment) =>
-                comment.id === result.comment.id ? result.comment : comment
-              )
+          updateReusableCommentList(comments, editor.operation, result.comment)
         );
         setLibraryEditor(undefined);
         if (promotion !== undefined)
@@ -1342,7 +1329,7 @@ export const GradingWorkspacePage = ({
               ? undefined
               : current
           );
-        const warning = publicationWarning(result);
+        const warning = commentLibraryPublicationWarning(result);
         if (warning === undefined)
           showToast(
             promotion === undefined
@@ -1372,13 +1359,11 @@ export const GradingWorkspacePage = ({
         commentId: comment.id
       });
       if (result.status !== "success")
-        setLibraryMutationMessage(libraryMutationFailureMessage(result));
+        setLibraryMutationMessage(commentLibraryMutationFailureMessage(result));
       else {
-        updateLibraryComments((comments) =>
-          comments.filter((candidate) => candidate.id !== comment.id)
-        );
+        updateLibraryComments((comments) => updateReusableCommentList(comments, "delete", comment));
         setLibraryDeleteConfirmation(undefined);
-        const warning = publicationWarning(result);
+        const warning = commentLibraryPublicationWarning(result);
         if (warning === undefined) showToast("Reusable comment deleted.");
         else setLibraryMutationMessage(warning);
       }
@@ -3195,12 +3180,13 @@ export const GradingWorkspacePage = ({
               selectedCommentTags={selectedCommentTags}
               onTagsChange={setSelectedCommentTags}
               matchingComments={matchingComments}
-              studentId={student?.studentId}
-              gradingMutationStudentId={gradingMutationStudentId}
-              isStudentMutationBlocked={(studentId) =>
-                gradingMutationBlockedStudents.current.has(studentId)
-              }
-              onApply={openApplyEditor}
+              applyAction={{
+                isDisabled: () =>
+                  student === undefined ||
+                  gradingMutationStudentId !== undefined ||
+                  gradingMutationBlockedStudents.current.has(student.studentId),
+                onApply: openApplyEditor
+              }}
               libraryMutationPending={libraryMutationPending}
               onNew={() => {
                 setLibraryMutationMessage(undefined);

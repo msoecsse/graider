@@ -28,6 +28,13 @@ export const buildRosterBreadcrumbs = (card: DashboardCard): readonly Breadcrumb
   { label: "Roster" }
 ];
 
+/** Breadcrumbs for the course-owned comment library's term access route. */
+export const buildCommentLibraryBreadcrumbs = (card: DashboardCard): readonly BreadcrumbItem[] => [
+  buildDashboardCrumb(),
+  buildCourseTermCrumb(card.courseTitle, card.courseSlug, card.termTitle, card.termSlug),
+  { label: "Comment Library" }
+];
+
 /**
  * Breadcrumbs for assignment-scoped routes: Dashboard > Course · Term >
  * Assignment title > (optional trailing label for the sub-screen).
