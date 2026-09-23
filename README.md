@@ -2,6 +2,12 @@
 
 Graider is a CLI-first TypeScript/Node tool for managing GitHub-based course assignments from a course-admin repository.
 
+TODO items
+* Determine how checkout script should be run
+* Shell scripts should indicate the assignment, course, term as well
+* rewrite the commands to be executed with Python
+* Use " for names - more robust for windows?
+
 The MVP focuses on deterministic, auditable assignment administration:
 
 - validate course, term, assignment, roster, and GitHub readiness inputs
