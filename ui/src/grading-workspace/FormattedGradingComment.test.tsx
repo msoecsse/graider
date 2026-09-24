@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { FormattedGradingComment } from "./FormattedGradingComment";
 
 describe("FormattedGradingComment", () => {
+  it("renders one ordinary character as a paragraph", () => {
+    const { container } = render(<FormattedGradingComment text="a" />);
+
+    expect(container.querySelector(".formatted-grading-comment__paragraph")).toHaveTextContent("a");
+  });
+
   it("renders prose, inline code, and fenced code semantically", () => {
     const { container } = render(
       <FormattedGradingComment

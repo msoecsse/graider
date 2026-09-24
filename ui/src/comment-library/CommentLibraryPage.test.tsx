@@ -63,6 +63,30 @@ describe("CommentLibraryPage", () => {
     expect(screen.getByRole("combobox", { name: "Default rubric category" })).toHaveValue("");
   });
 
+  it("previews the first character without persisting the comment", async () => {
+    const createGradingLibraryComment = vi.fn();
+    const editGradingLibraryComment = vi.fn();
+    const deleteGradingLibraryComment = vi.fn();
+    mockGraiderUI({
+      loadGradingCommentLibrary: vi.fn().mockResolvedValue({ status: "success", comments: [] }),
+      createGradingLibraryComment,
+      editGradingLibraryComment,
+      deleteGradingLibraryComment
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "New Comment" }));
+    const commentText = screen.getByRole("textbox", { name: "Comment text" });
+    fireEvent.change(commentText, { target: { value: "a" } });
+
+    expect(screen.getByRole("heading", { name: "New Comment" })).toBeInTheDocument();
+    expect(commentText).toHaveValue("a");
+    expect(screen.getByLabelText("Comment preview")).toHaveTextContent("a");
+    expect(createGradingLibraryComment).not.toHaveBeenCalled();
+    expect(editGradingLibraryComment).not.toHaveBeenCalled();
+    expect(deleteGradingLibraryComment).not.toHaveBeenCalled();
+  });
+
   it("keeps a local create when publication fails and reports recovery guidance", async () => {
     const created = { ...comment, id: "comment-2", title: "Whitespace" };
     const createGradingLibraryComment = vi.fn().mockResolvedValue({

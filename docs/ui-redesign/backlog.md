@@ -1213,6 +1213,23 @@ contract or schema change was required. See
 
 ---
 
+## 45. Reusable comment editor crashes on the first typed character — **Resolved**
+
+Discovered during manual testing after COMMENT-5. The shared reusable-comment
+editor read `event.currentTarget.value` inside functional React state updaters.
+When React evaluated the updater after event dispatch, `currentTarget` was
+`null`, so the first transition from empty comment text to the formatted live
+preview crashed the routed Comment Library screen before Save.
+
+Resolved in COMMENT-BUG-1 by capturing Title, Comment text, Default adjustment,
+and Default rubric category values before their functional updates. StrictMode
+shared-editor coverage reproduces and protects the blank-to-first-character
+transition; dedicated-page coverage proves typing does not invoke create, edit,
+or delete persistence. The shared parser and formatter were not at fault and
+remain unchanged. See `summaries/comment-bug-1.md`.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -1221,11 +1238,11 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
-26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, and 44 are
+26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, and 45 are
 resolved.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
 (item 37) and PR12-5. PR12-5 now completes the planned Step 12 roster-manager
-rebuild. Item 36 remains adjacent parser-convergence debt rather than a blocker
-to that visual slice.
+rebuild. COMMENT-BUG-1 then resolved item 45. Item 36 remains adjacent
+parser-convergence debt rather than a blocker to that visual slice.

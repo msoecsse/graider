@@ -48,9 +48,10 @@ export const ReusableCommentEditor = ({
         Title
         <input
           disabled={pending}
-          onChange={(event) =>
-            setValue((current) => ({ ...current, title: event.currentTarget.value }))
-          }
+          onChange={(event) => {
+            const title = event.currentTarget.value;
+            setValue((current) => ({ ...current, title }));
+          }}
           required
           value={value.title}
         />
@@ -59,9 +60,10 @@ export const ReusableCommentEditor = ({
         Comment text
         <textarea
           disabled={pending}
-          onChange={(event) =>
-            setValue((current) => ({ ...current, text: event.currentTarget.value }))
-          }
+          onChange={(event) => {
+            const text = event.currentTarget.value;
+            setValue((current) => ({ ...current, text }));
+          }}
           required
           value={value.text}
         />
@@ -70,12 +72,10 @@ export const ReusableCommentEditor = ({
         Default adjustment
         <input
           disabled={pending}
-          onChange={(event) =>
-            setValue((current) => ({
-              ...current,
-              defaultDeduction: Number(event.currentTarget.value)
-            }))
-          }
+          onChange={(event) => {
+            const defaultDeduction = Number(event.currentTarget.value);
+            setValue((current) => ({ ...current, defaultDeduction }));
+          }}
           step="any"
           type="number"
           value={value.defaultDeduction}
@@ -85,13 +85,13 @@ export const ReusableCommentEditor = ({
         Default rubric category
         <select
           disabled={pending}
-          onChange={(event) =>
+          onChange={(event) => {
+            const selectedCategoryId = event.currentTarget.value;
             setValue((current) => ({
               ...current,
-              defaultRubricCategoryId:
-                event.currentTarget.value === "" ? undefined : event.currentTarget.value
-            }))
-          }
+              defaultRubricCategoryId: selectedCategoryId === "" ? undefined : selectedCategoryId
+            }));
+          }}
           value={
             value.defaultRubricCategoryId === undefined
               ? ""
