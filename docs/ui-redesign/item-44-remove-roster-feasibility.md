@@ -276,3 +276,16 @@ This decision does not implement item 36 parser convergence, Canvas sync or
 import redesign, a term schema redesign, repository-access revocation, student
 repository deletion, assignment behavior changes, a publication redesign, or a
 new removal API.
+
+## Implementation outcome
+
+Implemented on `ui-redesign` on 2026-09-23. `removeRoster` now deletes only the
+matching YAML mapping's `roster` property with a parsed-document node mutation,
+retains the section/faculty, deletes contained associated roster files and the
+canonical source sidecar with rollback, refreshes affected Student Repository
+Access Pages, and reaches the existing safe course publisher. The renderer keeps
+the selected section in the no-roster state and uses action-specific success
+handling. `removeSection` remains the stronger section deletion, and Clear
+roster rows remains a saved header-only roster. Focused service, renderer,
+access-page, summary, rollback, and publication integration tests protect the
+final contract. No schema or IPC change was needed.

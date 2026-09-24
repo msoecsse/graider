@@ -106,4 +106,21 @@ describe("roster section summary context", () => {
       summaries: []
     });
   });
+
+  it("reports a retained section with no roster reference as missing", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    fs.writeFileSync(
+      termPath,
+      fs
+        .readFileSync(termPath, "utf8")
+        .replace("    roster: rosters/section-001.csv\n", "    faculty:\n      - jones\n"),
+      "utf8"
+    );
+
+    expect(
+      resolveRosterSectionSummariesContext({ courseFolderPath: root, termCode: "27s1" }).summaries
+    ).toContainEqual({ sectionId: "001", status: "missing", exists: false, diagnostics: [] });
+  });
 });

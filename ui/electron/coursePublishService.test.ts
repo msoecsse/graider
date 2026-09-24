@@ -4,7 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { publishSuccessfulCourseMutation } from "./courseMutationPublicationService";
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService";
+import { removeRoster } from "./rosterManagerService";
 
 const git = (root: string, arguments_: readonly string[]): string =>
   execFileSync("git", arguments_, { cwd: root, encoding: "utf8" }).trim();
@@ -194,6 +196,44 @@ describe("coursePublishService", () => {
     expect(git(root, ["show", "--format=", "--name-status", "HEAD"])).toBe(
       "D\tterms/27s1/rosters/section-001.csv"
     );
+  });
+
+  it("publishes the complete managed file set produced by roster-only removal", async () => {
+    const root = fixture();
+    const termPath = path.join(root, "terms", "27s1", "term.yml");
+    const rosterPath = path.join(root, "terms", "27s1", "rosters", "section-001.csv");
+    const sourcePath = path.join(root, "terms", "27s1", "rosters", "section-001.source.json");
+    fs.writeFileSync(
+      termPath,
+      'term:\n  code: "27s1"\nsections:\n  - id: "001"\n    roster: rosters/section-001.csv\n    faculty:\n      - jones\n',
+      "utf8"
+    );
+    fs.writeFileSync(rosterPath, "student_id,github_username,section,status\n", "utf8");
+    fs.writeFileSync(sourcePath, '{"schemaVersion":1}\n', "utf8");
+    git(root, [
+      "add",
+      "terms/27s1/term.yml",
+      "terms/27s1/rosters/section-001.csv",
+      "terms/27s1/rosters/section-001.source.json"
+    ]);
+    git(root, ["commit", "-m", "Add roster"]);
+    git(root, ["push"]);
+
+    const localResult = removeRoster({
+      courseFolderId: "course",
+      courseFolderPath: root,
+      termCode: "27s1",
+      sectionId: "001",
+      confirmed: true
+    });
+    const result = await publishSuccessfulCourseMutation(root, localResult, publishCourseChanges);
+    const publishedFiles = git(root, ["show", "--format=", "--name-status", "HEAD"]);
+
+    expect(result).toMatchObject({ status: "success", publication: { status: "success" } });
+    expect(publishedFiles).toContain("M\tterms/27s1/term.yml");
+    expect(publishedFiles).toContain("D\tterms/27s1/rosters/section-001.csv");
+    expect(publishedFiles).toContain("D\tterms/27s1/rosters/section-001.source.json");
+    expect(fs.readFileSync(termPath, "utf8")).toContain("faculty:\n      - jones");
   });
 
   it("reports unrelated-only changes without committing them", async () => {

@@ -569,20 +569,68 @@ describe("RosterManagerPage", () => {
       screen.getByText("2 student changes — 0 added, 2 removed, 0 changed")
     ).toBeInTheDocument();
     expect(api.saveRoster).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Review and save" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review and save" }));
+    const review = await screen.findByRole("dialog", { name: "Review roster changes" });
+    fireEvent.click(within(review).getByRole("button", { name: "Save roster" }));
+    await waitFor(() =>
+      expect(api.saveRoster).toHaveBeenCalledWith(
+        expect.objectContaining({ rows: [], sourceKind: "manual_edit", confirmed: true })
+      )
+    );
+    expect(screen.getByText("This is a valid empty roster.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "More roster actions" }));
+    expect(screen.getByRole("menuitem", { name: /Remove roster/u })).not.toBeDisabled();
   });
 
-  it("removes through overflow actions with typed confirmation and refreshes summaries", async () => {
-    const api = setupApi();
+  it("removes only the roster, keeps the selected section and faculty, and refreshes summaries", async () => {
+    const getRosterSectionSummaries = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "ready",
+        summaries: [
+          readySummary("001", 2),
+          { sectionId: "002", status: "missing", exists: false, diagnostics: [] },
+          {
+            sectionId: "003",
+            status: "invalid",
+            exists: true,
+            diagnostics: [{ code: "bad_roster", message: "Roster needs repair." }]
+          }
+        ],
+        diagnostics: []
+      })
+      .mockResolvedValue({
+        status: "ready",
+        summaries: [
+          { sectionId: "001", status: "missing", exists: false, diagnostics: [] },
+          { sectionId: "002", status: "missing", exists: false, diagnostics: [] },
+          {
+            sectionId: "003",
+            status: "invalid",
+            exists: true,
+            diagnostics: [{ code: "bad_roster", message: "Roster needs repair." }]
+          }
+        ],
+        diagnostics: []
+      });
+    const api = setupApi({ getRosterSectionSummaries });
     renderPage();
     await waitForInitialRoster();
 
     fireEvent.click(screen.getByRole("button", { name: "More roster actions" }));
-    expect(screen.getByRole("menuitem", { name: /Remove roster/u })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Remove roster/u })).toHaveTextContent(
+      "Removes the roster and keeps the section"
+    );
     expect(screen.getByRole("menuitem", { name: /Remove section/u })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: /Remove roster/u }));
     const dialog = screen.getByRole("dialog", { name: "Remove roster" });
-    expect(dialog).toHaveTextContent("removes section 001 from the term configuration");
+    expect(dialog).toHaveTextContent("removes the roster and student list for section 001");
+    expect(dialog).toHaveTextContent("section and its faculty remain configured");
+    expect(dialog).toHaveTextContent("Student repositories and published reports are not deleted");
     expect(dialog).not.toHaveTextContent("terms/27s1");
+    expect(within(dialog).getByRole("button", { name: "Remove roster" })).toBeDisabled();
     fireEvent.change(within(dialog).getByRole("textbox", { name: /Type 001 to confirm/u }), {
       target: { value: "001" }
     });
@@ -590,9 +638,65 @@ describe("RosterManagerPage", () => {
 
     await waitFor(() => expect(api.removeRoster).toHaveBeenCalledOnce());
     expect(api.getRosterSectionSummaries).toHaveBeenCalledTimes(2);
-    expect(await screen.findByText("Roster and section removed.")).toHaveAttribute(
-      "role",
-      "status"
+    expect(await screen.findByText("Roster removed.")).toHaveAttribute("role", "status");
+    expect(screen.getByRole("tab", { name: "Section 001, No roster" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    expect(screen.getByText("jones")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("ada")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/No roster has been created for this section yet/u)
+    ).toBeInTheDocument();
+    expect(screen.getByText("Source:").parentElement).toHaveTextContent("Not recorded");
+    expect(screen.queryByRole("button", { name: "Review and save" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Add student" })).not.toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Replace from CSV" })).toBeEnabled();
+    expect(screen.getByLabelText("Roster CSV file")).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "More roster actions" }));
+    expect(screen.getByRole("menuitem", { name: /Remove roster/u })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: /Remove section/u })).toBeEnabled();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Add student" })[0]!);
+    expect(screen.getByLabelText("Student ID for row 1")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Faculty username"), { target: { value: "smith" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add faculty" }));
+    expect(screen.getByText("smith")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review and save" })).toBeInTheDocument();
+  });
+
+  it("adopts local roster-only state when publication fails", async () => {
+    const api = setupApi({
+      removeRoster: vi.fn().mockResolvedValue({
+        status: "success",
+        path: "terms/27s1/rosters/section-001.csv",
+        diagnostics: [{ message: "Push failed. Use Publish Course Changes to retry." }],
+        publication: { status: "failure", diagnostics: [{ message: "Push failed." }] }
+      })
+    });
+    renderPage();
+    await waitForInitialRoster();
+    fireEvent.click(screen.getByRole("button", { name: "More roster actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Remove roster/u }));
+    const dialog = screen.getByRole("dialog", { name: "Remove roster" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Type 001 to confirm/u }), {
+      target: { value: "001" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove roster" }));
+
+    await waitFor(() => expect(api.removeRoster).toHaveBeenCalledOnce());
+    expect(screen.getByRole("tab", { name: /Section 001/u })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    expect(screen.getByText("jones")).toBeInTheDocument();
+    expect(
+      screen.getByText(/No roster has been created for this section yet/u)
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review and save" })).not.toBeInTheDocument();
+    expect((await screen.findByText(/Saved locally/u)).parentElement).toHaveTextContent(
+      "Publish Course Changes"
     );
   });
 
@@ -650,7 +754,7 @@ describe("RosterManagerPage", () => {
     expect(api.saveRoster).not.toHaveBeenCalled();
   });
 
-  it("requires typed confirmation before removing a section", async () => {
+  it("requires typed confirmation before removing a section and clears the section context", async () => {
     const api = setupApi();
     renderPage();
     await waitForInitialRoster();
@@ -659,12 +763,18 @@ describe("RosterManagerPage", () => {
     const dialog = screen.getByRole("dialog", { name: "Remove section" });
     const confirm = within(dialog).getByRole("button", { name: "Remove section" });
     expect(confirm).toBeDisabled();
+    expect(dialog).toHaveTextContent("removes section 001 from the term configuration");
+    expect(dialog).toHaveTextContent("Student repositories and published reports are not deleted");
+    expect(dialog).not.toHaveTextContent("terms/27s1");
     fireEvent.change(within(dialog).getByRole("textbox", { name: /Type 001 to confirm/u }), {
       target: { value: "001" }
     });
     fireEvent.click(confirm);
     await waitFor(() => expect(api.removeSection).toHaveBeenCalledOnce());
     expect(api.getRosterSectionSummaries).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("tab", { name: /Section 001/u })).not.toBeInTheDocument();
+    expect(screen.queryByText("jones")).not.toBeInTheDocument();
+    expect(await screen.findByText("Section removed.")).toHaveAttribute("role", "status");
   });
 
   it("keeps filesystem paths only inside Technical details", async () => {

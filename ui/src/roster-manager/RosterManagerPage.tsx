@@ -67,7 +67,7 @@ const getDestructiveDialogCopy = (
   if (action === "remove_roster") {
     return {
       title: "Remove roster",
-      summary: `This removes section ${sectionId} from the term configuration and deletes its roster files. Student repositories and published reports are not deleted.`,
+      summary: `This removes the roster and student list for section ${sectionId}. The section and its faculty remain configured. Student repositories and published reports are not deleted.`,
       confirmLabel: "Remove roster"
     };
   }
@@ -545,17 +545,30 @@ export const RosterManagerPage = ({
     try {
       const result = await remove(removeRequest);
       if (result.status === "success") {
-        setSections((current) => current.filter((section) => section !== sectionId));
-        setSectionId("");
-        setLoadState("idle");
-        setIsExisting(false);
-        setBaselineRows([]);
-        setDraftRows([]);
-        setBaselineFaculty([]);
-        setFaculty([]);
-        setLoadedSource(undefined);
-        setPendingSourceKind(undefined);
-        setRosterPath(null);
+        if (action === "remove_roster") {
+          setLoadState("ready");
+          setIsExisting(false);
+          setBaselineRows([]);
+          setDraftRows([]);
+          setLoadedSource(undefined);
+          setPendingSourceKind(undefined);
+          setRosterPath(null);
+          showToast("Roster removed.");
+        } else {
+          setSections((current) => current.filter((section) => section !== sectionId));
+          setSectionId("");
+          setLoadState("idle");
+          setIsExisting(false);
+          setBaselineRows([]);
+          setDraftRows([]);
+          setBaselineFaculty([]);
+          setFaculty([]);
+          setLoadedSource(undefined);
+          setPendingSourceKind(undefined);
+          setRosterPath(null);
+          showToast("Section removed.");
+        }
+        clearReview();
         setDestructiveAction(null);
         setPublicationWarning(
           result.publication?.status === "failure"
@@ -563,7 +576,6 @@ export const RosterManagerPage = ({
                 "The local removal succeeded, but publication failed. Use Publish Course Changes to retry.")
             : null
         );
-        showToast(action === "remove_roster" ? "Roster and section removed." : "Section removed.");
         await refreshSummaries();
         onSaved();
       } else {
@@ -608,7 +620,7 @@ export const RosterManagerPage = ({
         {
           id: "remove-roster",
           label: "Remove roster",
-          caption: "Removes the configured section and roster files",
+          caption: "Removes the roster and keeps the section",
           destructive: true,
           disabled: !hasSectionContext || !isExisting || isCreatingSection,
           onSelect: () => setDestructiveAction("remove_roster")

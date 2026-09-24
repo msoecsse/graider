@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { parseDocument } from "yaml";
+import { isMap, isSeq, parseDocument } from "yaml";
 
 import { normalizeFacultyUsernames } from "./sectionFaculty.js";
 
@@ -286,6 +286,23 @@ const createTermContentWithoutSection = (request: RosterSectionRequest): string 
           (section as Record<string, unknown>).id !== request.sectionId
       )
     );
+    return document.toString();
+  } catch {
+    return null;
+  }
+};
+
+const createTermContentWithoutRosterReference = (request: RosterSectionRequest): string | null => {
+  const termPath = path.join(request.courseFolderPath, getTermPath(request.termCode));
+  try {
+    const document = parseDocument(fs.readFileSync(termPath, "utf8"));
+    const sections = document.get("sections", true);
+    if (!isSeq(sections)) return null;
+    const section = sections.items.find(
+      (candidate) => isMap(candidate) && candidate.get("id") === request.sectionId
+    );
+    if (!isMap(section)) return null;
+    section.delete("roster");
     return document.toString();
   } catch {
     return null;
@@ -614,11 +631,77 @@ export const saveRoster = (
   }
 };
 
-const removeSectionAndRoster = (
-  request: RosterRemoveRequest,
-  confirmationMessage: string,
-  requireRoster: boolean
+interface RosterRemovalPaths {
+  readonly rosterPath: string;
+  readonly termPath: string;
+  readonly rosterPaths: readonly string[];
+  readonly sourcePath: string;
+}
+
+const resolveRosterRemovalPaths = (request: RosterRemoveRequest): RosterRemovalPaths | null => {
+  const rosterPath = getRosterPath(request.termCode, request.sectionId);
+  const root = path.resolve(request.courseFolderPath);
+  const termPath = path.resolve(root, getTermPath(request.termCode));
+  const rosterPaths = [
+    ...new Set(
+      getAssociatedRosterPaths(request).map((rosterFilePath) => path.resolve(root, rosterFilePath))
+    )
+  ];
+  const sourcePath = path.resolve(root, getRosterSourcePath(request.termCode, request.sectionId));
+  if (
+    !rosterPaths.every((rosterFilePath) => isContainedPath(root, rosterFilePath)) ||
+    !isContainedPath(root, sourcePath) ||
+    !isContainedPath(root, termPath)
+  )
+    return null;
+  return { rosterPath, termPath, rosterPaths, sourcePath };
+};
+
+const removeRosterArtifacts = (
+  paths: RosterRemovalPaths,
+  termContent: string
 ): RosterRemoveResult => {
+  const filesToDelete = [...paths.rosterPaths, paths.sourcePath];
+
+  try {
+    const originalTermContent = fs.readFileSync(paths.termPath, "utf8");
+    const originalFiles = filesToDelete.flatMap((filePath) =>
+      fs.existsSync(filePath) ? [{ filePath, content: fs.readFileSync(filePath) }] : []
+    );
+    try {
+      fs.writeFileSync(paths.termPath, termContent, "utf8");
+      for (const filePath of filesToDelete) {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
+    } catch {
+      try {
+        fs.writeFileSync(paths.termPath, originalTermContent, "utf8");
+      } catch {
+        // Preserve the removal failure while continuing to restore file snapshots.
+      }
+      for (const originalFile of originalFiles) {
+        try {
+          fs.writeFileSync(originalFile.filePath, originalFile.content);
+        } catch {
+          // Preserve the removal failure while attempting every snapshot restoration.
+        }
+      }
+      throw new Error("Unable to delete roster CSV and source metadata.");
+    }
+    return { status: "success", path: paths.rosterPath, diagnostics: [] };
+  } catch {
+    return {
+      status: "failure",
+      path: paths.rosterPath,
+      diagnostics: [diagnostic("Unable to remove roster CSV and update term.yml.")]
+    };
+  }
+};
+
+const getRemovalFailure = (
+  request: RosterRemoveRequest,
+  confirmationMessage: string
+): RosterRemoveResult | null => {
   const rosterPath = getRosterPath(request.termCode, request.sectionId);
   if (!request.confirmed)
     return {
@@ -632,77 +715,60 @@ const removeSectionAndRoster = (
       path: rosterPath,
       diagnostics: [diagnostic("Select an existing term and section before removing a roster.")]
     };
+  return null;
+};
 
-  const root = path.resolve(request.courseFolderPath);
-  const termPath = path.resolve(root, getTermPath(request.termCode));
-  const absoluteRosterPaths = getAssociatedRosterPaths(request).map((rosterFilePath) =>
-    path.resolve(root, rosterFilePath)
+export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult => {
+  const failure = getRemovalFailure(
+    request,
+    "Roster removal must be confirmed before deleting files."
   );
-  const absoluteSourcePath = path.resolve(
-    root,
-    getRosterSourcePath(request.termCode, request.sectionId)
-  );
+  if (failure !== null) return failure;
+  const paths = resolveRosterRemovalPaths(request);
+  if (paths === null)
+    return {
+      status: "failure",
+      path: getRosterPath(request.termCode, request.sectionId),
+      diagnostics: [diagnostic("Roster removal path is outside the selected course folder.")]
+    };
   if (
-    !absoluteRosterPaths.every((rosterFilePath) => isContainedPath(root, rosterFilePath)) ||
-    !isContainedPath(root, absoluteSourcePath) ||
-    !isContainedPath(root, termPath)
+    !paths.rosterPaths.some((rosterFilePath) => fs.existsSync(rosterFilePath)) &&
+    !hasRosterReference(request)
   )
     return {
       status: "failure",
-      path: rosterPath,
+      path: paths.rosterPath,
+      diagnostics: [diagnostic("No configured roster exists for this section.")]
+    };
+  const termContent = createTermContentWithoutRosterReference(request);
+  if (termContent === null)
+    return {
+      status: "failure",
+      path: paths.rosterPath,
+      diagnostics: [diagnostic("Unable to update term.yml while removing the roster.")]
+    };
+  return removeRosterArtifacts(paths, termContent);
+};
+
+export const removeSection = (request: RosterRemoveRequest): RosterRemoveResult => {
+  const failure = getRemovalFailure(
+    request,
+    "Section removal must be confirmed before deleting files."
+  );
+  if (failure !== null) return failure;
+  const paths = resolveRosterRemovalPaths(request);
+  if (paths === null)
+    return {
+      status: "failure",
+      path: getRosterPath(request.termCode, request.sectionId),
       diagnostics: [diagnostic("Roster removal path is outside the selected course folder.")]
     };
   const termContent = createTermContentWithoutSection(request);
   if (termContent === null)
     return {
       status: "failure",
-      path: rosterPath,
+      path: paths.rosterPath,
       diagnostics: [diagnostic("Unable to update term.yml while removing the roster.")]
     };
-  if (
-    requireRoster &&
-    !absoluteRosterPaths.some((rosterFilePath) => fs.existsSync(rosterFilePath)) &&
-    !hasRosterReference(request)
-  )
-    return {
-      status: "failure",
-      path: rosterPath,
-      diagnostics: [diagnostic("No configured roster exists for this section.")]
-    };
-
-  try {
-    const originalTermContent = fs.readFileSync(termPath, "utf8");
-    const filesToDelete = [...absoluteRosterPaths, absoluteSourcePath];
-    const originalFiles = filesToDelete.flatMap((filePath) =>
-      fs.existsSync(filePath) ? [{ filePath, content: fs.readFileSync(filePath) }] : []
-    );
-    fs.writeFileSync(termPath, termContent, "utf8");
-    try {
-      for (const filePath of filesToDelete) {
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      }
-    } catch {
-      fs.writeFileSync(termPath, originalTermContent, "utf8");
-      for (const originalFile of originalFiles)
-        fs.writeFileSync(originalFile.filePath, originalFile.content);
-      throw new Error("Unable to delete roster CSV and source metadata.");
-    }
-    return { status: "success", path: rosterPath, diagnostics: [] };
-  } catch {
-    return {
-      status: "failure",
-      path: rosterPath,
-      diagnostics: [diagnostic("Unable to remove roster CSV and update term.yml.")]
-    };
-  }
+  return removeRosterArtifacts(paths, termContent);
 };
-
-export const removeRoster = (request: RosterRemoveRequest): RosterRemoveResult =>
-  removeSectionAndRoster(request, "Roster removal must be confirmed before deleting files.", true);
-
-export const removeSection = (request: RosterRemoveRequest): RosterRemoveResult =>
-  removeSectionAndRoster(
-    request,
-    "Section removal must be confirmed before deleting files.",
-    false
-  );

@@ -244,10 +244,18 @@ describe("roster student repository access page lifecycle", () => {
     expect(result.diagnostics.map((item) => item.message).join(" ")).toMatch(/publish.*push/u);
   });
 
-  it("regenerates affected pages when a roster section is removed", async () => {
+  it("regenerates only affected pages after roster-only removal without deleting repositories", async () => {
     const root = createRoot();
     writeFixture(root);
     initializePagesRepository(root);
+    const studentRepositoryMarker = path.join(root, "student-repositories", "ada", "keep.txt");
+    fs.mkdirSync(path.dirname(studentRepositoryMarker), { recursive: true });
+    fs.writeFileSync(studentRepositoryMarker, "keep\n", "utf8");
+    fs.writeFileSync(
+      path.join(root, "terms/27s1/rosters/section-001.source.json"),
+      '{"schemaVersion":1}\n',
+      "utf8"
+    );
     const request: RosterRemoveRequest = {
       courseFolderId: "course",
       courseFolderPath: root,
@@ -259,7 +267,42 @@ describe("roster student repository access page lifecycle", () => {
     const result = await removeRosterWithStudentRepositoryAccessPageRefresh(request, options(root));
 
     expect(result.status).toBe("success");
-    expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab02")))).toBe(true);
+    const affectedPage = path.join(pagesRoot(root), pagePath("lab02"));
+    expect(fs.existsSync(affectedPage)).toBe(true);
+    expect(fs.readFileSync(affectedPage, "utf8")).not.toContain("a001");
     expect(fs.existsSync(path.join(pagesRoot(root), pagePath("lab03")))).toBe(false);
+    expect(fs.readFileSync(path.join(root, assignmentFile("lab02")), "utf8")).toContain('- "001"');
+    expect(fs.readFileSync(path.join(root, "terms/27s1/term.yml"), "utf8")).toContain('id: "001"');
+    expect(fs.existsSync(path.join(root, "terms/27s1/rosters/section-001.csv"))).toBe(false);
+    expect(fs.existsSync(path.join(root, "terms/27s1/rosters/section-001.source.json"))).toBe(
+      false
+    );
+    expect(fs.readFileSync(studentRepositoryMarker, "utf8")).toBe("keep\n");
+  });
+
+  it("keeps roster-only local success when access-page publication fails", async () => {
+    const root = createRoot();
+    writeFixture(root);
+    initializePagesRepository(root);
+    git(pagesRoot(root), [
+      "remote",
+      "set-url",
+      "origin",
+      path.join(root, "missing", "csc1120", "csc1120pages")
+    ]);
+    const request: RosterRemoveRequest = {
+      courseFolderId: "course",
+      courseFolderPath: root,
+      termCode: "27s1",
+      sectionId: "001",
+      confirmed: true
+    };
+
+    const result = await removeRosterWithStudentRepositoryAccessPageRefresh(request, options(root));
+
+    expect(result.status).toBe("success");
+    expect(result.diagnostics.map((item) => item.message).join(" ")).toMatch(/publish.*push/u);
+    expect(fs.readFileSync(path.join(root, "terms/27s1/term.yml"), "utf8")).toContain('id: "001"');
+    expect(fs.existsSync(path.join(root, "terms/27s1/rosters/section-001.csv"))).toBe(false);
   });
 });

@@ -1169,7 +1169,7 @@ rewrites the applied snapshot or adds `sourceCommentId`.
 
 ---
 
-## 44. `removeRoster` also removes the configured section — **Should fix**
+## 44. `removeRoster` also removes the configured section — **Resolved**
 
 Confirmed while rebuilding the roster manager in PR12-5. Despite its name,
 `ui/electron/rosterManagerService.ts` routes both `removeRoster` and
@@ -1194,7 +1194,22 @@ will make `removeRoster` retain the section and faculty, remove only its
 sidecar, refresh affected Student Repository Access Pages, and publish through
 the existing safe path. `removeSection` remains the stronger operation. See
 `item-44-remove-roster-feasibility.md` and `summaries/item-44-decision.md`.
-This item remains open until that behavior and its tests land.
+At the decision commit, this item remained open pending that behavior and its
+tests.
+
+**Resolved, 2026-09-23.** `removeRoster` now mutates the parsed YAML document by
+deleting only the matching section mapping's `roster` property. The section,
+faculty, other section fields, and surrounding YAML structure remain; contained
+canonical/configured roster files and the canonical source sidecar are deleted
+with snapshot rollback. The retained section loads as no roster and its PR12-3
+summary becomes **No roster**. The renderer keeps the selected tab and faculty,
+clears roster/source state, refreshes summaries and affected Student Repository
+Access Pages, and publishes the managed `term.yml` modification plus roster and
+source deletions through the existing safe path. `removeSection` remains the
+stronger section-plus-roster/source operation. **Clear roster rows** remains a
+staged save of a valid header-only roster, distinct from both removals. No IPC
+contract or schema change was required. See
+`summaries/item-44-implementation.md`.
 
 ---
 
@@ -1206,7 +1221,7 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
-26, 27, 28, 33, 34, 35, 36, and 44 remain open. Items 23, 37, and 38 are
+26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, and 44 are
 resolved.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through

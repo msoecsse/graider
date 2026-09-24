@@ -113,13 +113,14 @@ save the canonical four-column CSV. Use **Add Student** to add an individual
 student; the selected section is filled in and the status defaults to `active`.
 Use **Remove Student** to remove a row, **Replace from CSV** to replace the
 selected roster with an uploaded canonical CSV, or **Clear Roster Rows** to
-save a header-only roster while keeping the section. **Remove Roster** instead
-deletes the roster CSV and removes its section from the term configuration after
-confirmation. To add it again later, choose **Add Section** and save/import its
-roster. Review the preview before using **Save Roster**. Keep `student_id` and
-`github_username` accurate. Use `active` for students who should receive
-repositories; use `dropped` or `hold` to exclude them from repository
-access-page generation.
+save a header-only roster while keeping the section and an explicitly configured
+zero-student roster. **Remove Roster** deletes the roster files, reference, and
+source history while keeping the section and its faculty. **Remove Section**
+removes the section configuration and any associated roster files. All three
+actions require confirmation, and none deletes student repositories. Review the
+preview before using **Save Roster**. Keep `student_id` and `github_username`
+accurate. Use `active` for students who should receive repositories; use
+`dropped` or `hold` to exclude them from repository access-page generation.
 
 To add a section after course setup, select the term and choose **Add Section**.
 Enter a safe, unique section ID, optionally upload a canonical roster CSV (or
