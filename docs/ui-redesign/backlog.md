@@ -1230,6 +1230,29 @@ remain unchanged. See `summaries/comment-bug-1.md`.
 
 ---
 
+## 46. Managed Java grading workflow always downloads JavaFX and does not stage FXML resources — **Resolved**
+
+The single `java-junit-checkstyle` preset now detects JavaFX need from the exact
+checked-out submission at runtime. FXML under `src/`, JavaFX/TestFX imports,
+JavaFX module requirements, and fully qualified JavaFX package references
+activate the JavaFX path. Ordinary Java submissions skip JavaFX downloads,
+Xvfb, and GTK/audio setup and compile/test without JavaFX arguments.
+
+JavaFX submissions retain Java 25 and JavaFX 25, install the Linux GUI runtime,
+compile and test with the conditional module path, and run JUnit under Xvfb.
+FXML is copied unchanged from `src/<relative-path>` to
+`$BUILD_DIR/<relative-path>`, including nested directories. TestFX remains
+repository-provided through recursive `lib/*.jar` discovery; Graider does not
+download or select it. Checkstyle remains 14.1.0 with the current MSOE config.
+
+The initial-repository/Classroom-bot suppression and workflow-file push-ignore
+remain intact. The managed marker stays at ownership version 1, so older
+canonical v1 workflows classify as `managed_outdated` and remain safely
+replaceable through existing Apply and workflow-repair paths. See
+`summaries/workflow-fx-1.md`.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -1238,11 +1261,12 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
-26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, and 45 are
-resolved.
+26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, and 46
+are resolved.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
 (item 37) and PR12-5. PR12-5 now completes the planned Step 12 roster-manager
 rebuild. COMMENT-BUG-1 then resolved item 45. Item 36 remains adjacent
-parser-convergence debt rather than a blocker to that visual slice.
+parser-convergence debt rather than a blocker to that visual slice. WORKFLOW-FX-1
+then resolved item 46 without adding another preset or faculty configuration.
