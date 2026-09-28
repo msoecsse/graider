@@ -1300,6 +1300,24 @@ the global panel. See `summaries/apply-result-bug-1.md`.
 
 ---
 
+## 49. Dashboard still requires `grade.yml` in the template for Graider-managed grading presets — **Resolved**
+
+Dashboard readiness treated every enabled grading workflow as faculty-owned
+and read the configured path from the template branch. Newly explicit managed
+presets therefore received `dashboard_grading_workflow_missing` even though
+Apply correctly deploys Graider's canonical workflow to student repositories.
+
+Resolved in DASHBOARD-WORKFLOW-BUG-1. Dashboard now retains effective grading
+internally and reuses the canonical managed-workflow eligibility predicate.
+Template repository and branch checks still run, but eligible managed presets
+do not read or validate a template workflow and report `gradingWorkflow` and
+`workflowDispatch` as `not_required`. Custom workflows, including custom
+ownership at `.github/workflows/grade.yml`, retain all existing file and
+`workflow_dispatch` validation. Course-inherited and assignment-level managed
+configuration are covered. See `summaries/dashboard-workflow-bug-1.md`.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -1309,7 +1327,7 @@ sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
 26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, 46, 47,
-and 48 are resolved.
+48, and 49 are resolved.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
@@ -1320,3 +1338,4 @@ then resolved item 46 without adding another preset or faculty configuration.
 ASSIGNMENT-CREATE-BUG-1 resolved item 47 without beginning ITEM-36.
 APPLY-RESULT-BUG-1 then resolved item 48; its live GitHub Apply acceptance
 retest remains ahead of the two WORKFLOW-FX-1 live smoke runs and ITEM-36.
+DASHBOARD-WORKFLOW-BUG-1 then resolved item 49 without beginning ITEM-36.
