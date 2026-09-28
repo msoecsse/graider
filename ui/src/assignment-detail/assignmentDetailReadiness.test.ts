@@ -166,6 +166,46 @@ describe("assignment detail readiness helpers", () => {
     );
   });
 
+  it("does not synthesize a roster blocker for a total assignment configuration failure", () => {
+    const detail = normalize({
+      status: "failure",
+      roster: null,
+      diagnostics: [
+        {
+          code: "invalid_config",
+          severity: "error",
+          message: "Assignment configuration contains unsupported root keys."
+        }
+      ]
+    });
+
+    expect(collectNeedsAttentionItems(detail).map((item) => item.id)).not.toContain(
+      "roster-summary"
+    );
+    expect(detail.diagnostics.map((diagnostic) => diagnostic.message)).toContain(
+      "Assignment configuration contains unsupported root keys."
+    );
+  });
+
+  it("keeps roster attention for a partial-success detail with unavailable roster data", () => {
+    const detail = normalize({ status: "partial_success", roster: null });
+
+    expect(collectNeedsAttentionItems(detail)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "roster-summary",
+          title: "Roster counts could not be loaded."
+        })
+      ])
+    );
+  });
+
+  it("does not add roster attention when real roster counts are available", () => {
+    expect(collectNeedsAttentionItems(normalize()).map((item) => item.id)).not.toContain(
+      "roster-summary"
+    );
+  });
+
   it("groups diagnostics by severity and redacts sensitive values", () => {
     const detail = normalize({
       diagnostics: [

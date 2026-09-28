@@ -1253,6 +1253,32 @@ replaceable through existing Apply and workflow-repair paths. See
 
 ---
 
+## 47. New grading-enabled assignments are not marked as managed-preset assignments, and Assignment Detail shows pre-Apply/stale readiness blockers — **Resolved**
+
+Assignment Setup and Course Setup emitted enabled grading with the canonical
+workflow/artifact paths but omitted `mode: preset` and
+`preset: java-junit-checkstyle`. The strict ownership predicate therefore
+correctly treated the new configuration as legacy/custom, requiring a workflow
+copy in the template and preventing managed deployment eligibility.
+
+Resolved in ASSIGNMENT-CREATE-BUG-1. Both setup serializers now emit the
+explicit managed preset beneath `grading`, and omit empty optional grading
+collections instead of serializing YAML nulls. Assignment Edit preserves an
+explicit preset, keeps legacy/custom blocks legacy/custom, and retains existing
+no-grading behavior. Real config-loader tests prove both assignment-level and
+course-inherited output is schema-valid and managed-workflow eligible.
+
+Assignment Detail now prepares template sync only for `applied` and
+`partially_applied` assignments. `not_applied` is a neutral lifecycle state
+with no update action or manifest warning. Refresh clears and recomputes the
+state, and request-generation guards reject stale detail/preparation responses.
+The backend manifest requirement remains unchanged. Total detail/config
+failures no longer synthesize a misleading roster-summary blocker, while
+partial-success roster failures still do. See
+`summaries/assignment-create-bug-1.md`.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -1261,8 +1287,8 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
-26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, and 46
-are resolved.
+26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, 46, and
+47 are resolved.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
@@ -1270,3 +1296,4 @@ COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
 rebuild. COMMENT-BUG-1 then resolved item 45. Item 36 remains adjacent
 parser-convergence debt rather than a blocker to that visual slice. WORKFLOW-FX-1
 then resolved item 46 without adding another preset or faculty configuration.
+ASSIGNMENT-CREATE-BUG-1 resolved item 47 without beginning ITEM-36.

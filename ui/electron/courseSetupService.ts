@@ -10,6 +10,13 @@ import type {
   CourseSetupSection
 } from "./ipc.js";
 import { normalizeFacultyUsernames } from "./sectionFaculty.js";
+import {
+  DEFAULT_GRADING_ARTIFACT,
+  DEFAULT_GRADING_RESULT_FILE,
+  DEFAULT_GRADING_WORKFLOW,
+  MANAGED_GRADING_MODE,
+  MANAGED_GRADING_PRESET
+} from "./gradingDefaults.js";
 
 const TERM_CODE_PATTERN = /^\d{2}s[123]$/;
 const ROSTER_HEADERS = ["student_id", "github_username", "section", "status"] as const;
@@ -183,9 +190,11 @@ ${
     ? ""
     : `grading:
   enabled: true
-  workflow: .github/workflows/grade.yml
-  artifact: grading-results
-  result_file: grading-results.json
+  mode: ${MANAGED_GRADING_MODE}
+  preset: ${MANAGED_GRADING_PRESET}
+  workflow: ${DEFAULT_GRADING_WORKFLOW}
+  artifact: ${DEFAULT_GRADING_ARTIFACT}
+  result_file: ${DEFAULT_GRADING_RESULT_FILE}
 `
 }
 reports:

@@ -8,6 +8,7 @@ import type {
   AssignmentGradeStatusResult,
   AssignmentGradingLifecycleResult,
   AssignmentRepositoryDownloadResult,
+  AssignmentTemplateSyncAvailability,
   GraiderUIApi
 } from "../../electron/ipc";
 import { AssignmentDetailPage } from "./AssignmentDetailPage";
@@ -315,6 +316,18 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
   return graiderUI as unknown as GraiderUIApi;
 };
 
+const mockAppliedGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi =>
+  mockGraiderUI({
+    getAssignmentDetail: vi
+      .fn()
+      .mockResolvedValue(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({ applyState: { status: "applied" } })
+        )
+      ),
+    ...api
+  });
+
 const createLifecycleResult = (
   overrides: Partial<Extract<AssignmentGradingLifecycleResult, { status: "success" }>> = {}
 ): AssignmentGradingLifecycleResult => ({
@@ -413,6 +426,27 @@ const clickOverflowItem = async (label: string): Promise<void> => {
 };
 
 describe("AssignmentDetailPage", () => {
+  it("treats not-applied template sync as a normal lifecycle state", async () => {
+    const prepareAssignmentTemplateSync = vi.fn().mockResolvedValue({
+      available: false,
+      repositoryCount: 0,
+      templateRepository: "graider-sandbox/csc1120L2Template",
+      recordedTemplateRevision: null,
+      blocker: {
+        code: "manifest_required",
+        message: "Assignment manifest is missing or unreadable. Apply the assignment first."
+      }
+    });
+    mockGraiderUI({ prepareAssignmentTemplateSync });
+    renderAssignmentDetailPage();
+
+    expect(await screen.findByRole("button", { name: "Apply to 3 students" })).toBeInTheDocument();
+    expect(prepareAssignmentTemplateSync).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Update Student Repositories/u })).toBeNull();
+    expect(screen.queryByText("Student repository updates unavailable")).toBeNull();
+    expect(screen.queryByText(/Assignment manifest is missing or unreadable/u)).toBeNull();
+  });
+
   it("does not show a repository-update failure banner or button for a template-less assignment", async () => {
     // PR10-1c bug 2: a blank template repository is a valid configuration
     // (PR10-1a/PR10-1b), and repository template-sync genuinely cannot work
@@ -428,7 +462,7 @@ describe("AssignmentDetailPage", () => {
         message: "Configure an assignment template before updating repositories."
       }
     });
-    mockGraiderUI({ prepareAssignmentTemplateSync });
+    mockAppliedGraiderUI({ prepareAssignmentTemplateSync });
     renderAssignmentDetailPage();
     await screen.findByRole("heading", { level: 1, name: "Lab 02" });
 
@@ -461,9 +495,10 @@ describe("AssignmentDetailPage", () => {
         }
       });
     const executeAssignmentTemplateSync = vi.fn();
-    mockGraiderUI({ prepareAssignmentTemplateSync, executeAssignmentTemplateSync });
+    mockAppliedGraiderUI({ prepareAssignmentTemplateSync, executeAssignmentTemplateSync });
     renderAssignmentDetailPage();
 
+    await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1));
     fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
     const dialog = await screen.findByRole("dialog", { name: "Update repository for s001" });
     // Scoped to the preview's detail grid: "s001" also appears in the typed
@@ -498,9 +533,10 @@ describe("AssignmentDetailPage", () => {
       status: "success",
       outcomes: [{ studentId: "s001", status: "updated" }]
     });
-    mockGraiderUI({ prepareAssignmentTemplateSync, executeAssignmentTemplateSync });
+    mockAppliedGraiderUI({ prepareAssignmentTemplateSync, executeAssignmentTemplateSync });
     renderAssignmentDetailPage();
 
+    await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1));
     fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
     const dialog = await screen.findByRole("dialog", { name: "Update repository for s001" });
     fireEvent.click(
@@ -555,7 +591,7 @@ describe("AssignmentDetailPage", () => {
           repository: "graider-sandbox/csc1120-lab02-ada"
         }
       });
-    mockGraiderUI({
+    mockAppliedGraiderUI({
       prepareAssignmentTemplateSync,
       executeAssignmentTemplateSync: vi.fn(
         async () =>
@@ -570,6 +606,7 @@ describe("AssignmentDetailPage", () => {
     });
     renderAssignmentDetailPage();
 
+    await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1));
     fireEvent.click(await screen.findByRole("button", { name: "Update repository for s001" }));
     const dialog = await screen.findByRole("dialog", { name: "Update repository for s001" });
     fireEvent.click(
@@ -644,7 +681,7 @@ describe("AssignmentDetailPage", () => {
         message: "Apply this assignment before updating student repositories."
       }
     });
-    mockGraiderUI({ prepareAssignmentTemplateSync });
+    mockAppliedGraiderUI({ prepareAssignmentTemplateSync });
     renderAssignmentDetailPage();
 
     const action = await screen.findByRole("button", {
@@ -658,13 +695,152 @@ describe("AssignmentDetailPage", () => {
       assignmentFile: SELECTION.assignmentFile
     });
     expect(
-      screen.getByText("Apply this assignment before updating student repositories.")
+      await screen.findByText("Apply this assignment before updating student repositories.")
     ).toBeInTheDocument();
+  });
+
+  it("treats partially applied assignments as eligible for template-sync preparation", async () => {
+    const prepareAssignmentTemplateSync = vi.fn().mockResolvedValue({
+      available: true,
+      repositoryCount: 3,
+      templateRepository: "graider-sandbox/csc1120L2Template",
+      recordedTemplateRevision: "0123456789abcdef"
+    });
+    mockGraiderUI({
+      getAssignmentDetail: vi
+        .fn()
+        .mockResolvedValue(
+          createAssignmentDetailResult(
+            createAssignmentDetailJson({ applyState: { status: "partially_applied" } })
+          )
+        ),
+      prepareAssignmentTemplateSync
+    });
+    renderAssignmentDetailPage();
+
+    const action = await screen.findByRole("button", { name: "Update Student Repositories" });
+    await waitFor(() => expect(action).toBeEnabled());
+    expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes from not applied to applied and then prepares current template-sync state", async () => {
+    const getAssignmentDetail = vi
+      .fn()
+      .mockResolvedValueOnce(createAssignmentDetailResult())
+      .mockResolvedValueOnce(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({ applyState: { status: "applied" } }),
+          { refreshedAt: "2026-06-10T14:00:00.000Z" }
+        )
+      );
+    const prepareAssignmentTemplateSync = vi.fn().mockResolvedValue({
+      available: true,
+      repositoryCount: 3,
+      templateRepository: "graider-sandbox/csc1120L2Template",
+      recordedTemplateRevision: "new-revision"
+    });
+    mockGraiderUI({ getAssignmentDetail, prepareAssignmentTemplateSync });
+    renderAssignmentDetailPage();
+
+    await screen.findByRole("button", { name: "Apply to 3 students" });
+    expect(prepareAssignmentTemplateSync).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
+
+    await waitFor(() => expect(getAssignmentDetail).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByRole("button", { name: "Update Student Repositories" })
+    ).toBeEnabled();
+  });
+
+  it("refreshes from applied to not applied and clears stale template-sync guidance", async () => {
+    const getAssignmentDetail = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({ applyState: { status: "applied" } })
+        )
+      )
+      .mockResolvedValueOnce(createAssignmentDetailResult());
+    const prepareAssignmentTemplateSync = vi.fn().mockResolvedValue({
+      available: false,
+      repositoryCount: 0,
+      templateRepository: "graider-sandbox/csc1120L2Template",
+      recordedTemplateRevision: null,
+      blocker: {
+        code: "manifest_required",
+        message: "Assignment manifest is missing or unreadable."
+      }
+    });
+    mockGraiderUI({ getAssignmentDetail, prepareAssignmentTemplateSync });
+    renderAssignmentDetailPage();
+
+    expect(await screen.findByText("Assignment manifest is missing or unreadable.")).toBeVisible();
+    expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
+
+    await screen.findByRole("button", { name: "Apply to 3 students" });
+    await waitFor(() => {
+      expect(screen.queryByText("Student repository updates unavailable")).toBeNull();
+      expect(screen.queryByText("Assignment manifest is missing or unreadable.")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Update Student Repositories/u })).toBeNull();
+    });
+    expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores an older template-sync preparation response after refresh", async () => {
+    const resolvers: Array<(value: AssignmentTemplateSyncAvailability) => void> = [];
+    const prepareAssignmentTemplateSync = vi.fn(
+      async () =>
+        await new Promise<AssignmentTemplateSyncAvailability>((resolve) => {
+          resolvers.push(resolve);
+        })
+    );
+    const getAssignmentDetail = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({ applyState: { status: "applied" } })
+        )
+      )
+      .mockResolvedValueOnce(
+        createAssignmentDetailResult(
+          createAssignmentDetailJson({ applyState: { status: "applied" } }),
+          { refreshedAt: "2026-06-10T14:00:00.000Z" }
+        )
+      );
+    mockGraiderUI({ getAssignmentDetail, prepareAssignmentTemplateSync });
+    renderAssignmentDetailPage();
+
+    await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
+    await waitFor(() => expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(2));
+
+    resolvers[1]?.({
+      available: true,
+      repositoryCount: 3,
+      templateRepository: "graider-sandbox/csc1120L2Template",
+      recordedTemplateRevision: "current-revision"
+    });
+    const action = await screen.findByRole("button", { name: "Update Student Repositories" });
+    await waitFor(() => expect(action).toBeEnabled());
+
+    resolvers[0]?.({
+      available: false,
+      repositoryCount: 0,
+      templateRepository: "graider-sandbox/csc1120L2Template",
+      recordedTemplateRevision: null,
+      blocker: { code: "manifest_required", message: "Stale manifest warning." }
+    });
+    await waitFor(() => {
+      expect(action).toBeEnabled();
+      expect(screen.queryByText("Stale manifest warning.")).toBeNull();
+    });
   });
 
   it("opens template-sync confirmation with preview details and cancel never executes", async () => {
     const executeAssignmentTemplateSync = vi.fn();
-    mockGraiderUI({
+    mockAppliedGraiderUI({
       prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
         available: true,
         repositoryCount: 3,
@@ -675,7 +851,9 @@ describe("AssignmentDetailPage", () => {
     });
     renderAssignmentDetailPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Update Student Repositories" }));
+    const action = await screen.findByRole("button", { name: "Update Student Repositories" });
+    await waitFor(() => expect(action).toBeEnabled());
+    fireEvent.click(action);
 
     const dialog = screen.getByRole("dialog", { name: "Update Student Repositories" });
     expect(within(dialog).getByText(/3 student repositories/u)).toBeInTheDocument();
@@ -712,7 +890,7 @@ describe("AssignmentDetailPage", () => {
           repository: string;
         }) => void)
       | undefined;
-    mockGraiderUI({
+    mockAppliedGraiderUI({
       prepareAssignmentTemplateSync: vi.fn().mockResolvedValue({
         available: true,
         repositoryCount: 6,
@@ -727,7 +905,9 @@ describe("AssignmentDetailPage", () => {
     });
     renderAssignmentDetailPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Update Student Repositories" }));
+    const action = await screen.findByRole("button", { name: "Update Student Repositories" });
+    await waitFor(() => expect(action).toBeEnabled());
+    fireEvent.click(action);
     const dialog = screen.getByRole("dialog", { name: "Update Student Repositories" });
     fireEvent.click(
       within(dialog).getByLabelText(

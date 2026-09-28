@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parseDocument } from "yaml";
 import { describe, expect, it } from "vitest";
 import type { AssignmentSetupRequest } from "./ipc";
 import {
@@ -80,15 +81,44 @@ describe("assignment setup service", () => {
   it("generates assignment YAML with faculty input and grading defaults", () => {
     const root = createRoot();
     createTerm(root);
-    const preview = previewAssignmentSetup(createRequest(root));
+    const preview = previewAssignmentSetup(
+      createRequest(root, {
+        requiredFiles: ["src/Main.java"],
+        rubric: [{ id: "correctness", name: "Correctness", points: 40 }]
+      })
+    );
+    const parsed = parseDocument(preview.files[0]?.content ?? "").toJS() as Record<string, unknown>;
 
     expect(preview.status).toBe("ready");
     expect(preview.files[0]?.path).toBe("terms/27s1/assignments/lab02/assignment.yml");
     expect(preview.files[0]?.content).toContain('title: "Lab 02"');
     expect(preview.files[0]?.content).toContain("type: individual");
     expect(preview.files[0]?.content).toContain("status: active");
-    expect(preview.files[0]?.content).toContain("workflow: .github/workflows/grade.yml");
     expect(preview.files[0]?.content).toContain("points: 100");
+    expect(parsed).not.toHaveProperty("mode");
+    expect(parsed).not.toHaveProperty("preset");
+    expect(parsed.grading).toEqual({
+      enabled: true,
+      mode: "preset",
+      preset: "java-junit-checkstyle",
+      workflow: ".github/workflows/grade.yml",
+      artifact: "grading-results",
+      result_file: "grading-results.json",
+      required_files: ["src/Main.java"],
+      rubric: [{ id: "correctness", name: "Correctness", points: 40 }]
+    });
+  });
+
+  it("omits empty optional grading collections instead of emitting YAML nulls", () => {
+    const root = createRoot();
+    createTerm(root);
+    const preview = previewAssignmentSetup(createRequest(root));
+    const parsed = parseDocument(preview.files[0]?.content ?? "").toJS() as {
+      grading: Record<string, unknown>;
+    };
+
+    expect(parsed.grading).not.toHaveProperty("required_files");
+    expect(parsed.grading).not.toHaveProperty("rubric");
   });
 
   it("writes an explicit disabled grading block when grading is unchecked", () => {

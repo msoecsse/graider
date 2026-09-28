@@ -446,6 +446,8 @@ export const AssignmentDetailPage = ({
   const [templateSyncError, setTemplateSyncError] = useState<string | null>(null);
   const templateSyncExecutionRef = useRef(false);
   const templateSyncProgressActiveRef = useRef(false);
+  const detailLoadGenerationRef = useRef(0);
+  const templateSyncPreparationGenerationRef = useRef(0);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
   const { message: toastMessage, showToast } = useToast();
@@ -471,6 +473,15 @@ export const AssignmentDetailPage = ({
   );
 
   const loadDetail = async (): Promise<void> => {
+    const generation = detailLoadGenerationRef.current + 1;
+    detailLoadGenerationRef.current = generation;
+    templateSyncPreparationGenerationRef.current += 1;
+    setTemplateSyncAvailability(null);
+    setTemplateSyncResult(null);
+    setTemplateSyncError(null);
+    setIsTemplateSyncModalOpen(false);
+    setTemplateSyncTarget(null);
+    setIsPreparingTemplateSync(false);
     setIsLoading(true);
 
     try {
@@ -480,8 +491,10 @@ export const AssignmentDetailPage = ({
         assignmentFile: selection.assignmentFile
       });
 
-      setLoadResult(nextResult);
-      onDetailLoaded?.(nextResult);
+      if (detailLoadGenerationRef.current === generation) {
+        setLoadResult(nextResult);
+        onDetailLoaded?.(nextResult);
+      }
     } catch {
       const failureResult = {
         courseFolderId: selection.courseFolderId,
@@ -499,10 +512,12 @@ export const AssignmentDetailPage = ({
         refreshedAt: null
       };
 
-      setLoadResult(failureResult);
-      onDetailLoaded?.(failureResult);
+      if (detailLoadGenerationRef.current === generation) {
+        setLoadResult(failureResult);
+        onDetailLoaded?.(failureResult);
+      }
     } finally {
-      setIsLoading(false);
+      if (detailLoadGenerationRef.current === generation) setIsLoading(false);
     }
   };
 
@@ -648,7 +663,13 @@ export const AssignmentDetailPage = ({
 
   const prepareSingleRepositoryTemplateSync = async (studentId: string): Promise<void> => {
     const prepareTemplateSync = window.graiderUI.prepareAssignmentTemplateSync;
-    if (prepareTemplateSync === undefined || templateSyncExecutionRef.current) return;
+    if (
+      prepareTemplateSync === undefined ||
+      templateSyncExecutionRef.current ||
+      (detail?.applyState.status !== "applied" && detail?.applyState.status !== "partially_applied")
+    )
+      return;
+    const generation = templateSyncPreparationGenerationRef.current;
     setIsPreparingTemplateSync(true);
     setTemplateSyncError(null);
     setTemplateSyncResult(null);
@@ -659,6 +680,7 @@ export const AssignmentDetailPage = ({
         assignmentFile: selection.assignmentFile,
         studentId
       });
+      if (templateSyncPreparationGenerationRef.current !== generation) return;
       if (!availability.available || availability.selectedRepository === undefined) {
         setTemplateSyncError(
           availability.blocker?.message ?? "This student repository cannot be updated safely."
@@ -668,9 +690,13 @@ export const AssignmentDetailPage = ({
       setTemplateSyncTarget(availability);
       setIsTemplateSyncModalOpen(true);
     } catch {
-      setTemplateSyncError("Unable to prepare this student repository update.");
+      if (templateSyncPreparationGenerationRef.current === generation) {
+        setTemplateSyncError("Unable to prepare this student repository update.");
+      }
     } finally {
-      setIsPreparingTemplateSync(false);
+      if (templateSyncPreparationGenerationRef.current === generation) {
+        setIsPreparingTemplateSync(false);
+      }
     }
   };
 
@@ -908,9 +934,13 @@ export const AssignmentDetailPage = ({
 
   useEffect(() => {
     if (hasInitialResultForSelection) {
+      detailLoadGenerationRef.current += 1;
+      templateSyncPreparationGenerationRef.current += 1;
+      setIsLoading(false);
       setLoadResult(initialLoadResult);
       onDetailLoaded?.(initialLoadResult);
     } else {
+      setLoadResult(null);
       void loadDetail();
     }
   }, [selection.assignmentFile, selection.courseFolderId]);
@@ -926,13 +956,31 @@ export const AssignmentDetailPage = ({
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   useEffect(() => {
-    let isCurrent = true;
+    const generation = templateSyncPreparationGenerationRef.current + 1;
+    templateSyncPreparationGenerationRef.current = generation;
     const prepareTemplateSync = window.graiderUI.prepareAssignmentTemplateSync;
     setTemplateSyncAvailability(null);
     setTemplateSyncResult(null);
     setTemplateSyncError(null);
     setIsTemplateSyncModalOpen(false);
     setTemplateSyncTarget(null);
+
+    const detailMatchesSelection =
+      loadResult?.courseFolderId === selection.courseFolderId &&
+      loadResult.assignmentFile === selection.assignmentFile;
+    const isApplied =
+      detailMatchesSelection &&
+      (detail?.applyState.status === "applied" ||
+        detail?.applyState.status === "partially_applied");
+    if (!isApplied) {
+      setIsPreparingTemplateSync(false);
+      return () => {
+        if (templateSyncPreparationGenerationRef.current === generation) {
+          templateSyncPreparationGenerationRef.current += 1;
+        }
+      };
+    }
+
     setIsPreparingTemplateSync(true);
 
     if (prepareTemplateSync === undefined) {
@@ -944,7 +992,9 @@ export const AssignmentDetailPage = ({
       });
       setIsPreparingTemplateSync(false);
       return () => {
-        isCurrent = false;
+        if (templateSyncPreparationGenerationRef.current === generation) {
+          templateSyncPreparationGenerationRef.current += 1;
+        }
       };
     }
 
@@ -954,10 +1004,12 @@ export const AssignmentDetailPage = ({
       assignmentFile: selection.assignmentFile
     })
       .then((availability) => {
-        if (isCurrent) setTemplateSyncAvailability(availability);
+        if (templateSyncPreparationGenerationRef.current === generation) {
+          setTemplateSyncAvailability(availability);
+        }
       })
       .catch(() => {
-        if (isCurrent) {
+        if (templateSyncPreparationGenerationRef.current === generation) {
           setTemplateSyncAvailability({
             available: false,
             repositoryCount: 0,
@@ -971,13 +1023,17 @@ export const AssignmentDetailPage = ({
         }
       })
       .finally(() => {
-        if (isCurrent) setIsPreparingTemplateSync(false);
+        if (templateSyncPreparationGenerationRef.current === generation) {
+          setIsPreparingTemplateSync(false);
+        }
       });
 
     return () => {
-      isCurrent = false;
+      if (templateSyncPreparationGenerationRef.current === generation) {
+        templateSyncPreparationGenerationRef.current += 1;
+      }
     };
-  }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
+  }, [loadResult, selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   useEffect(() => {
     setGroupConfig(null);
@@ -1235,6 +1291,10 @@ export const AssignmentDetailPage = ({
   // README section 2.1/2.5 say that means hiding the action and its
   // guidance, not showing a disabled button or a failure banner for it.
   const templateSyncNotApplicable = templateSyncAvailability?.blocker?.code === "template_required";
+  const templateSyncLifecycleEligible =
+    loadResult?.courseFolderId === selection.courseFolderId &&
+    loadResult.assignmentFile === selection.assignmentFile &&
+    (detail?.applyState.status === "applied" || detail?.applyState.status === "partially_applied");
 
   return (
     <main className="dashboard-shell" aria-label={title}>
@@ -1243,7 +1303,7 @@ export const AssignmentDetailPage = ({
         title={title}
         meta={getCourseTermSubtitle(detail)}
         secondaryActions={
-          detail === null || templateSyncNotApplicable
+          detail === null || !templateSyncLifecycleEligible || templateSyncNotApplicable
             ? []
             : [
                 {
@@ -1426,7 +1486,9 @@ export const AssignmentDetailPage = ({
             {templateSyncError}
           </p>
         )}
-        {templateSyncAvailability?.blocker === undefined || templateSyncNotApplicable ? null : (
+        {!templateSyncLifecycleEligible ||
+        templateSyncAvailability?.blocker === undefined ||
+        templateSyncNotApplicable ? null : (
           <section className="detail-guidance" aria-label="Template update guidance">
             <h2>Student repository updates unavailable</h2>
             <p>{templateSyncAvailability.blocker.message}</p>
@@ -1576,7 +1638,9 @@ export const AssignmentDetailPage = ({
               onViewFullGradeStatus={() => {
                 onViewGradeStatus(selection, detail, loadResult);
               }}
-              canUpdateRepositories={groupConfig?.repositoryMode === "individual"}
+              canUpdateRepositories={
+                templateSyncLifecycleEligible && groupConfig?.repositoryMode === "individual"
+              }
               isTemplateSyncPending={isPreparingTemplateSync || isExecutingTemplateSync}
               onUpdateRepository={(studentId) => {
                 void prepareSingleRepositoryTemplateSync(studentId);

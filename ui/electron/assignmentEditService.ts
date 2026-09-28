@@ -2,6 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
 import { loadAssignmentSetupTerms, normalizeTemplateRepository } from "./assignmentSetupService.js";
+import {
+  DEFAULT_GRADING_ARTIFACT,
+  DEFAULT_GRADING_RESULT_FILE,
+  DEFAULT_GRADING_WORKFLOW
+} from "./gradingDefaults.js";
 import type {
   AssignmentEditLoadResult,
   AssignmentEditModel,
@@ -17,9 +22,6 @@ const ASSIGNMENT_PATH_PATTERN =
 const ISO_DATE_TIME_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/;
 const VALID_STATUSES = new Set(["draft", "active", "closed", "archived"]);
-const DEFAULT_WORKFLOW = ".github/workflows/grade.yml";
-const DEFAULT_ARTIFACT = "grading-results";
-const DEFAULT_RESULT_FILE = "grading-results.json";
 
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
 const quoteYaml = (value: string): string => JSON.stringify(value);
@@ -65,12 +67,20 @@ const renderGradingConfiguration = (request: AssignmentEditRequest): string => {
     name: category.name.trim(),
     points: category.points
   }));
-  return `  required_files:\n${requiredFiles.map((file) => `    - ${quoteYaml(file)}`).join("\n")}\n  rubric:\n${rubric
-    .map(
-      (category) =>
-        `    - id: ${quoteYaml(category.id)}\n      name: ${quoteYaml(category.name)}\n      points: ${String(category.points)}`
-    )
-    .join("\n")}\n`;
+  const requiredFilesBlock =
+    requiredFiles.length === 0
+      ? ""
+      : `  required_files:\n${requiredFiles.map((file) => `    - ${quoteYaml(file)}`).join("\n")}\n`;
+  const rubricBlock =
+    rubric.length === 0
+      ? ""
+      : `  rubric:\n${rubric
+          .map(
+            (category) =>
+              `    - id: ${quoteYaml(category.id)}\n      name: ${quoteYaml(category.name)}\n      points: ${String(category.points)}`
+          )
+          .join("\n")}\n`;
+  return `${requiredFilesBlock}${rubricBlock}`;
 };
 
 const createYaml = (
@@ -206,11 +216,11 @@ export const getAssignmentForEdit = (
         facultyOwner,
         lmsAssignmentId:
           typeof metadata?.lms_assignment_id === "string" ? metadata.lms_assignment_id : null,
-        workflow: asString(grading?.workflow) ?? DEFAULT_WORKFLOW,
+        workflow: asString(grading?.workflow) ?? DEFAULT_GRADING_WORKFLOW,
         gradingMode: asString(grading?.mode),
         gradingPreset: asString(grading?.preset),
-        artifact: asString(grading?.artifact) ?? DEFAULT_ARTIFACT,
-        resultFile: asString(grading?.result_file) ?? DEFAULT_RESULT_FILE,
+        artifact: asString(grading?.artifact) ?? DEFAULT_GRADING_ARTIFACT,
+        resultFile: asString(grading?.result_file) ?? DEFAULT_GRADING_RESULT_FILE,
         requiredFiles,
         rubric,
         gradingConfigurationPresent: grading !== null,
