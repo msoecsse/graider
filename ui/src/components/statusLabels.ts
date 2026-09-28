@@ -110,7 +110,14 @@ const REASON_LABELS: Readonly<Record<string, string>> = {
   archived: "Archived",
   student_status_active: "Student active",
   student_status_dropped: "Student dropped",
-  student_status_hold: "Student on hold"
+  student_status_hold: "Student on hold",
+  repository_created: "Repository created",
+  repository_created_with_issues: "Repository created; follow-up issues need attention",
+  repository_updated: "Repository updated",
+  repository_updated_with_issues: "Repository updated; follow-up issues need attention",
+  repository_apply_failed: "Repository update failed",
+  repository_apply_skipped: "No repository changes were needed",
+  repository_apply_blocked: "Repository apply was blocked"
 };
 
 export const formatReasonLabel = (reason: string | null): string => {
@@ -120,3 +127,18 @@ export const formatReasonLabel = (reason: string | null): string => {
 
   return REASON_LABELS[reason] ?? reason.replaceAll("_", " ");
 };
+
+const APPLY_OPERATION_LABELS: Readonly<Record<string, string>> = {
+  create_repository: "Create repository",
+  create_repository_from_template: "Create repository from template",
+  add_student_collaborator: "Add student collaborator",
+  add_faculty_team_permission: "Add faculty team permission",
+  add_grader_team_permission: "Add grader team permission",
+  enable_actions: "Enable Actions",
+  ensure_managed_grading_workflow: "Install managed grading workflow",
+  verify_grading_workflow: "Verify grading workflow",
+  verify_workflow_dispatch: "Verify workflow dispatch"
+};
+
+export const formatApplyOperationLabel = (operationType: string): string =>
+  APPLY_OPERATION_LABELS[operationType] ?? operationType.replaceAll("_", " ");

@@ -46,6 +46,7 @@ const GRADER_PERMISSION: Exclude<GitHubPermission, "none"> = "maintain";
 const CREATE_REPOSITORY_PLAN_TYPE = "create_repository";
 const CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE = "create_repository_from_template";
 const FIRST_REPOSITORY_POSITION = 1;
+export const FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS = 4;
 
 const isRepositoryCreationOperation = (operation: PlanOperation): boolean =>
   operation.type === CREATE_REPOSITORY_PLAN_TYPE ||
@@ -95,7 +96,7 @@ export interface ApplySummary {
   errors: number;
 }
 
-export type ApplyRepositoryOutcomeStatus = "created" | "updated" | "skipped" | "failed";
+export type ApplyRepositoryOutcomeStatus = "created" | "updated" | "skipped" | "failed" | "blocked";
 
 export interface ApplyRepositoryOutcome {
   studentId: string;
@@ -103,6 +104,8 @@ export interface ApplyRepositoryOutcome {
   section: string;
   repository: string;
   status: ApplyRepositoryOutcomeStatus;
+  reason: string;
+  diagnostics: readonly Diagnostic[];
 }
 
 export interface ApplyExecutionResult {
@@ -120,6 +123,38 @@ interface ApplyState {
   errors: Diagnostic[];
 }
 
+interface ApplyRepositoryOutcomeState {
+  readonly created: boolean;
+  readonly updated: boolean;
+  readonly diagnostics: readonly Diagnostic[];
+  readonly planReason?: string;
+}
+
+const hasErrorDiagnostic = (diagnostics: readonly Diagnostic[]): boolean =>
+  diagnostics.some((diagnostic) => diagnostic.severity === "error");
+
+const getRepositoryOutcomeReason = (
+  status: ApplyRepositoryOutcomeStatus,
+  diagnostics: readonly Diagnostic[],
+  planReason: string | undefined
+): string => {
+  if (status === "created") {
+    return hasErrorDiagnostic(diagnostics)
+      ? "repository_created_with_issues"
+      : "repository_created";
+  }
+  if (status === "updated") {
+    return hasErrorDiagnostic(diagnostics)
+      ? "repository_updated_with_issues"
+      : "repository_updated";
+  }
+  if (status === "failed") return "repository_apply_failed";
+
+  return (
+    planReason ?? (status === "blocked" ? "repository_apply_blocked" : "repository_apply_skipped")
+  );
+};
+
 const createEmptySummary = (): ApplySummary => ({
   created: EMPTY_COUNT,
   existing: EMPTY_COUNT,
@@ -132,74 +167,110 @@ const createEmptySummary = (): ApplySummary => ({
   errors: EMPTY_COUNT
 });
 
-const normalizeGitHubError = (error: unknown): Diagnostic =>
-  error instanceof GitHubClientError
-    ? createGitHubDiagnostic(error)
-    : createConfigDiagnostic(
-        DiagnosticCode.GithubApiError,
-        "Unexpected GitHub client failure during apply."
-      );
+const createOperationContext = (
+  operation: PlanOperation,
+  extraContext: Readonly<Record<string, unknown>> = {}
+): Record<string, unknown> => ({
+  operationType: operation.type,
+  ...(operation.repository_name === undefined ? {} : { repositoryName: operation.repository_name }),
+  ...(operation.student_id === undefined ? {} : { student_id: operation.student_id }),
+  ...(operation.github_username === undefined
+    ? {}
+    : { github_username: operation.github_username }),
+  ...(operation.section === undefined ? {} : { section: operation.section }),
+  ...extraContext
+});
+
+const attachOperationContext = (
+  diagnostic: Diagnostic,
+  operation: PlanOperation,
+  extraContext: Readonly<Record<string, unknown>> = {}
+): Diagnostic => ({
+  ...diagnostic,
+  context: {
+    ...diagnostic.context,
+    ...createOperationContext(operation, extraContext)
+  }
+});
+
+const normalizeGitHubError = (
+  error: unknown,
+  operation: PlanOperation,
+  extraContext: Readonly<Record<string, unknown>> = {}
+): Diagnostic =>
+  attachOperationContext(
+    error instanceof GitHubClientError
+      ? createGitHubDiagnostic(error)
+      : createConfigDiagnostic(
+          DiagnosticCode.GithubApiError,
+          "Unexpected GitHub client failure during apply."
+        ),
+    operation,
+    extraContext
+  );
 
 const runGitHubOperation = async <T>(
   input: ApplyExecutionInput,
   operation: () => Promise<T>
 ): Promise<T> => withGitHubRetry(operation, input.retryOptions);
 
+const runFreshRepositoryActionsRead = async <T>(
+  input: ApplyExecutionInput,
+  operation: PlanOperation,
+  read: () => Promise<T>
+): Promise<T> =>
+  withGitHubRetry(read, {
+    ...input.retryOptions,
+    ...(wasRepositoryCreatedInPlan(input, operation)
+      ? { maxAttempts: FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS }
+      : {})
+  });
+
 const createWorkflowMissingDiagnostic = (operation: PlanOperation): Diagnostic =>
-  createConfigDiagnostic(
-    DiagnosticCode.GradingWorkflowMissing,
-    `Grading workflow was not found for ${operation.repository_name ?? "repository"}.`,
-    {
-      repositoryName: operation.repository_name,
-      student_id: operation.student_id,
-      github_username: operation.github_username,
-      section: operation.section
-    }
+  attachOperationContext(
+    createConfigDiagnostic(
+      DiagnosticCode.GradingWorkflowMissing,
+      `Grading workflow was not found for ${operation.repository_name ?? "repository"}.`
+    ),
+    operation,
+    { workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH }
   );
 
 const createWorkflowDispatchDiagnostic = (operation: PlanOperation): Diagnostic =>
-  createConfigDiagnostic(
-    DiagnosticCode.WorkflowDispatchUnsupported,
-    `Workflow dispatch is not supported for ${operation.repository_name ?? "repository"}.`,
-    {
-      repositoryName: operation.repository_name,
-      student_id: operation.student_id,
-      github_username: operation.github_username,
-      section: operation.section
-    }
+  attachOperationContext(
+    createConfigDiagnostic(
+      DiagnosticCode.WorkflowDispatchUnsupported,
+      `Workflow dispatch is not supported for ${operation.repository_name ?? "repository"}.`
+    ),
+    operation,
+    { workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH }
   );
 
 const createWorkflowDeploymentConflictDiagnostic = (
   operation: PlanOperation,
   unsupportedVersion: boolean
 ): Diagnostic =>
-  createConfigDiagnostic(
-    unsupportedVersion
-      ? DiagnosticCode.WorkflowDeploymentVersionUnsupported
-      : DiagnosticCode.WorkflowDeploymentConflict,
-    unsupportedVersion
-      ? `Repository ${operation.repository_name ?? "repository"} contains a Graider workflow with an unsupported ownership version; it was preserved.`
-      : `Repository ${operation.repository_name ?? "repository"} contains an existing ${GRAIDER_MANAGED_WORKFLOW_PATH} that is not managed by Graider; it was preserved.`,
-    {
-      repositoryName: operation.repository_name,
-      workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
-      student_id: operation.student_id,
-      github_username: operation.github_username,
-      section: operation.section
-    }
+  attachOperationContext(
+    createConfigDiagnostic(
+      unsupportedVersion
+        ? DiagnosticCode.WorkflowDeploymentVersionUnsupported
+        : DiagnosticCode.WorkflowDeploymentConflict,
+      unsupportedVersion
+        ? `Repository ${operation.repository_name ?? "repository"} contains a Graider workflow with an unsupported ownership version; it was preserved.`
+        : `Repository ${operation.repository_name ?? "repository"} contains an existing ${GRAIDER_MANAGED_WORKFLOW_PATH} that is not managed by Graider; it was preserved.`
+    ),
+    operation,
+    { workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH }
   );
 
 const createWorkflowDeploymentForbiddenDiagnostic = (operation: PlanOperation): Diagnostic =>
-  createConfigDiagnostic(
-    DiagnosticCode.WorkflowDeploymentForbidden,
-    `Graider could not create or update ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${operation.repository_name ?? "the student repository"}. Check the token's workflow-file write permission.`,
-    {
-      repositoryName: operation.repository_name,
-      workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
-      student_id: operation.student_id,
-      github_username: operation.github_username,
-      section: operation.section
-    }
+  attachOperationContext(
+    createConfigDiagnostic(
+      DiagnosticCode.WorkflowDeploymentForbidden,
+      `Graider could not create or update ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${operation.repository_name ?? "the student repository"}. Check the token's workflow-file write permission.`
+    ),
+    operation,
+    { workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH }
   );
 
 const operationTargetKey = (operation: PlanOperation): string =>
@@ -229,17 +300,13 @@ const createPermissionWarning = (
   currentPermission: GitHubPermission,
   expectedPermission: Exclude<GitHubPermission, "none">
 ): Diagnostic =>
-  createWarningDiagnostic(
-    DiagnosticCode.PermissionNotDowngraded,
-    `Existing permission ${currentPermission} is higher than requested ${expectedPermission}; leaving it unchanged.`,
-    {
-      repositoryName: operation.repository_name,
-      student_id: operation.student_id,
-      github_username: operation.github_username,
-      section: operation.section,
-      currentPermission,
-      expectedPermission
-    }
+  attachOperationContext(
+    createWarningDiagnostic(
+      DiagnosticCode.PermissionNotDowngraded,
+      `Existing permission ${currentPermission} is higher than requested ${expectedPermission}; leaving it unchanged.`,
+      { currentPermission, expectedPermission }
+    ),
+    operation
   );
 
 const findTarget = (
@@ -548,7 +615,7 @@ const executeCreateRepository = async (
       );
     }
   } catch (error: unknown) {
-    return recordError(nextState, normalizeGitHubError(error));
+    return recordError(nextState, normalizeGitHubError(error, operation));
   }
 };
 
@@ -622,7 +689,7 @@ const executeStudentCollaborator = async (
       input.manifestPath
     );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error));
+    return recordError(state, normalizeGitHubError(error, operation));
   }
 };
 
@@ -709,7 +776,7 @@ const executeTeamPermission = async (
       input.manifestPath
     );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error));
+    return recordError(state, normalizeGitHubError(error, operation, { teamSlug }));
   }
 };
 
@@ -730,7 +797,7 @@ const executeEnableActions = async (
   }
 
   try {
-    const actionsState = await runGitHubOperation(input, () =>
+    const actionsState = await runFreshRepositoryActionsRead(input, operation, () =>
       input.githubClient.getActionsState(input.config.course.github.organization, repositoryName)
     );
     let nextState = state;
@@ -758,7 +825,7 @@ const executeEnableActions = async (
       input.manifestPath
     );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error));
+    return recordError(state, normalizeGitHubError(error, operation));
   }
 };
 
@@ -846,7 +913,7 @@ const executeVerifyWorkflow = async (
       input.manifestPath
     );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error));
+    return recordError(state, normalizeGitHubError(error, operation, { workflowPath }));
   }
 };
 
@@ -932,7 +999,7 @@ const executeVerifyDispatch = async (
       input.manifestPath
     );
   } catch (error: unknown) {
-    return recordError(state, normalizeGitHubError(error));
+    return recordError(state, normalizeGitHubError(error, operation, { workflowPath }));
   }
 };
 
@@ -958,16 +1025,14 @@ const executeEnsureManagedWorkflow = async (
       blockedWorkflowTargets.add(operationTargetKey(operation));
       return recordError(
         state,
-        createConfigDiagnostic(
-          DiagnosticCode.StudentRepositoryMissing,
-          `Student repository ${owner}/${repositoryName} was not found while deploying the grading workflow.`,
-          {
-            owner,
-            repositoryName,
-            student_id: operation.student_id,
-            github_username: operation.github_username,
-            section: operation.section
-          }
+        attachOperationContext(
+          createConfigDiagnostic(
+            DiagnosticCode.StudentRepositoryMissing,
+            `Student repository ${owner}/${repositoryName} was not found while deploying the grading workflow.`,
+            { owner }
+          ),
+          operation,
+          { workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH }
         )
       );
     }
@@ -998,7 +1063,9 @@ const executeEnsureManagedWorkflow = async (
       state,
       error instanceof WorkflowDeploymentPermissionError
         ? createWorkflowDeploymentForbiddenDiagnostic(operation)
-        : normalizeGitHubError(error)
+        : normalizeGitHubError(error, operation, {
+            workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH
+          })
     );
   }
 };
@@ -1089,10 +1156,7 @@ export const executeApplyPlan = async (
   const observedAt = input.clock.now().toISOString();
   const blockedWorkflowTargets = new Set<string>();
   const durabilityBlockedTargets = new Set<string>();
-  const repositoryOutcomes = new Map<
-    string,
-    { created: boolean; updated: boolean; failed: boolean }
-  >();
+  const repositoryOutcomes = new Map<string, ApplyRepositoryOutcomeState>();
   const repositoryTargets = input.plan.operations.reduce<ApplyRepositoryTarget[]>(
     (targets, operation) => {
       const target = operation.target_id === undefined ? undefined : findTarget(input, operation);
@@ -1119,7 +1183,9 @@ export const executeApplyPlan = async (
           githubUsername: target.githubUsernames[0] ?? "",
           section: target.sectionIds[0] ?? "",
           repository: target.repositoryName,
-          status: "failed" as const
+          status: "failed" as const,
+          reason: "repository_apply_failed",
+          diagnostics: target.diagnostics
         }))
     };
   }
@@ -1143,6 +1209,7 @@ export const executeApplyPlan = async (
       });
     }
     const errorsBefore = state.errors.length;
+    const warningsBefore = state.warnings.length;
     const createdBefore = state.summary.created;
     const verifiedBefore = state.summary.verified;
     state = await executeOperation(
@@ -1153,6 +1220,29 @@ export const executeApplyPlan = async (
       blockedWorkflowTargets,
       durabilityBlockedTargets
     );
+    state = {
+      ...state,
+      warnings: [
+        ...state.warnings.slice(0, warningsBefore),
+        ...state.warnings
+          .slice(warningsBefore)
+          .map((diagnostic) =>
+            diagnostic.context?.operationType === undefined
+              ? attachOperationContext(diagnostic, operation)
+              : diagnostic
+          )
+      ],
+      errors: [
+        ...state.errors.slice(0, errorsBefore),
+        ...state.errors
+          .slice(errorsBefore)
+          .map((diagnostic) =>
+            diagnostic.context?.operationType === undefined
+              ? attachOperationContext(diagnostic, operation)
+              : diagnostic
+          )
+      ]
+    };
 
     if (
       operation.target_id !== undefined &&
@@ -1170,8 +1260,12 @@ export const executeApplyPlan = async (
     const current = repositoryOutcomes.get(operation.target_id) ?? {
       created: false,
       updated: false,
-      failed: false
+      diagnostics: []
     };
+    const operationDiagnostics = [
+      ...state.warnings.slice(warningsBefore),
+      ...state.errors.slice(errorsBefore)
+    ];
     repositoryOutcomes.set(operation.target_id, {
       created:
         current.created ||
@@ -1179,7 +1273,12 @@ export const executeApplyPlan = async (
       updated:
         current.updated ||
         (isRepositoryUpdateOperation(operation) && state.summary.verified > verifiedBefore),
-      failed: current.failed || state.errors.length > errorsBefore
+      diagnostics: [...current.diagnostics, ...operationDiagnostics],
+      ...(current.planReason === undefined && operation.reason !== undefined
+        ? { planReason: operation.reason }
+        : current.planReason === undefined
+          ? {}
+          : { planReason: current.planReason })
     });
   }
 
@@ -1189,13 +1288,14 @@ export const executeApplyPlan = async (
       .filter((target) => target.mode === "individual")
       .map((target) => {
         const outcome = repositoryOutcomes.get(target.targetId);
+        const diagnostics = [...target.diagnostics, ...(outcome?.diagnostics ?? [])];
         const status: ApplyRepositoryOutcomeStatus =
-          outcome?.failed === true
-            ? "failed"
-            : outcome?.created === true
-              ? "created"
-              : outcome?.updated === true
-                ? "updated"
+          outcome?.created === true
+            ? "created"
+            : outcome?.updated === true
+              ? "updated"
+              : hasErrorDiagnostic(diagnostics)
+                ? "failed"
                 : "skipped";
 
         return {
@@ -1203,7 +1303,9 @@ export const executeApplyPlan = async (
           githubUsername: target.githubUsernames[0] ?? "",
           section: target.sectionIds[0] ?? "",
           repository: target.repositoryName,
-          status
+          status,
+          reason: getRepositoryOutcomeReason(status, diagnostics, outcome?.planReason),
+          diagnostics
         };
       })
   };

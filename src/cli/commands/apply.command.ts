@@ -452,13 +452,30 @@ export const runApplyCommand = async ({
         blockedOperationCount: plan.summary.blocked_operations,
         repositories: plan.targets
           .filter((target) => target.mode === "individual")
-          .map((target) => ({
-            studentId: target.primaryStudentId ?? target.targetId,
-            githubUsername: target.githubUsernames[0] ?? "",
-            section: target.sectionIds[0] ?? "",
-            repository: target.repositoryName,
-            status: "blocked"
-          }))
+          .map((target) => {
+            const targetOperations = plan.operations.filter(
+              (operation) => operation.target_id === target.targetId
+            );
+            const diagnostics = [
+              ...target.diagnostics,
+              ...targetOperations.flatMap((operation) => [
+                ...operation.warnings,
+                ...operation.errors
+              ])
+            ];
+
+            return {
+              studentId: target.primaryStudentId ?? target.targetId,
+              githubUsername: target.githubUsernames[0] ?? "",
+              section: target.sectionIds[0] ?? "",
+              repository: target.repositoryName,
+              status: "blocked",
+              reason:
+                targetOperations.find((operation) => operation.reason !== undefined)?.reason ??
+                "repository_apply_blocked",
+              diagnostics
+            };
+          })
       }
     });
   }

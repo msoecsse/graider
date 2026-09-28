@@ -7,6 +7,7 @@ import {
 import { shouldRetryGitHubError } from "../../../src/github/github-retry.js";
 
 const RETRY_AFTER_SECONDS = 30;
+const RATE_LIMIT_STATUS = 429;
 
 describe("GitHub errors", () => {
   it("maps auth missing errors to diagnostics", () => {
@@ -26,14 +27,20 @@ describe("GitHub errors", () => {
 
   it("marks transient GitHub errors as retryable", () => {
     const rateLimitError = new GitHubClientError("rate_limited", "Rate limited.", {
-      retryAfterSeconds: RETRY_AFTER_SECONDS
+      retryAfterSeconds: RETRY_AFTER_SECONDS,
+      statusCode: RATE_LIMIT_STATUS
     });
     const networkError = new GitHubClientError("network_error", "Network error.");
 
     expect(rateLimitError).toMatchObject({
       diagnosticCode: "github_rate_limited",
       retryAfterSeconds: RETRY_AFTER_SECONDS,
+      statusCode: RATE_LIMIT_STATUS,
       retryable: true
+    });
+    expect(createGitHubDiagnostic(rateLimitError).context).toMatchObject({
+      statusCode: RATE_LIMIT_STATUS,
+      retryAfterSeconds: RETRY_AFTER_SECONDS
     });
     expect(isRetryableGitHubError(rateLimitError)).toBe(true);
     expect(shouldRetryGitHubError(networkError)).toBe(true);

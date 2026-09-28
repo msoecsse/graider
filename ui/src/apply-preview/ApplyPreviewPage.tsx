@@ -7,6 +7,7 @@ import {
   groupDiagnostics
 } from "../assignment-detail/assignmentDetailReadiness";
 import {
+  formatApplyOperationLabel,
   formatReasonLabel,
   formatStatusLabel,
   hasAttentionStatus
@@ -403,6 +404,9 @@ const RowDiagnostics = ({
         <li key={`${diagnostic.code ?? "diagnostic"}-${index}`}>
           <strong>{formatStatusLabel(diagnostic.severity)}</strong>
           <span>{diagnostic.message}</span>
+          {diagnostic.context.operationType === undefined ? null : (
+            <span>Operation: {formatApplyOperationLabel(diagnostic.context.operationType)}</span>
+          )}
           {diagnostic.code === null ? null : <code>{diagnostic.code}</code>}
         </li>
       ))}
@@ -596,6 +600,12 @@ const DiagnosticsPanel = ({
     </div>
   </section>
 );
+
+const isRepositoryScopedDiagnostic = (diagnostic: AssignmentDetailDiagnostic): boolean =>
+  diagnostic.context.repositoryName !== undefined ||
+  diagnostic.context.student_id !== undefined ||
+  diagnostic.context.github_username !== undefined ||
+  diagnostic.context.groupId !== undefined;
 
 const ConfirmationPanel = ({
   preview,
@@ -918,6 +928,16 @@ export const ApplyPreviewPage = ({
     normalizedApplyResult === null
       ? (preview?.diagnostics ?? [])
       : normalizedApplyResult.diagnostics;
+  const globalDiagnostics =
+    normalizedApplyResult === null
+      ? activeDiagnostics
+      : activeDiagnostics.filter((diagnostic) => !isRepositoryScopedDiagnostic(diagnostic));
+  const repositoryIssueCount =
+    normalizedApplyResult === null
+      ? 0
+      : preview?.repositoryMode === "group"
+        ? mergedGroupRows.filter((row) => row.diagnostics.length > 0).length
+        : mergedRows.filter((row) => row.diagnostics.length > 0).length;
   const refreshedAtLabel = preview === null ? null : formatReadableDateTime(preview.refreshedAt);
 
   return (
@@ -1012,8 +1032,15 @@ export const ApplyPreviewPage = ({
               ) : (
                 <RepositoryRowsPanel rows={mergedRows} />
               )}
-              {activeDiagnostics.length === 0 ? null : (
-                <DiagnosticsPanel diagnostics={activeDiagnostics} />
+              {repositoryIssueCount === 0 ? null : (
+                <p className="detail-panel__note" role="status">
+                  {repositoryIssueCount === 1
+                    ? "1 repository has repository-specific issues shown in the repository table."
+                    : `${String(repositoryIssueCount)} repositories have repository-specific issues shown in the repository table.`}
+                </p>
+              )}
+              {globalDiagnostics.length === 0 ? null : (
+                <DiagnosticsPanel diagnostics={globalDiagnostics} />
               )}
               {normalizedApplyResult === null ? (
                 <ConfirmationPanel

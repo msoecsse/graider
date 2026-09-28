@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runApplyCommand } from "../../src/cli/commands/apply.command.js";
+import { FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS } from "../../src/execution/apply-executor.js";
 import { formatCommandResultAsJson } from "../../src/cli/output.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { ExitCode } from "../../src/core/exit-codes.js";
@@ -50,6 +51,37 @@ const jsonYesOptions = normalizeCommonCommandOptions({ json: true, yes: true });
 const fixedClock = {
   now: () => new Date(APPLY_TIMESTAMP)
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const getRepositoryOutcomes = (result: {
+  readonly summary: Readonly<Record<string, unknown>>;
+}): readonly Record<string, unknown>[] => {
+  const repositories = result.summary.repositories;
+  return Array.isArray(repositories) ? repositories.filter(isRecord) : [];
+};
+
+const getOutcomeDiagnostics = (
+  outcome: Readonly<Record<string, unknown>> | undefined
+): readonly Record<string, unknown>[] => {
+  const diagnostics = outcome?.diagnostics;
+  return Array.isArray(diagnostics) ? diagnostics.filter(isRecord) : [];
+};
+
+const hasOutcomeDiagnostic = (
+  outcome: Readonly<Record<string, unknown>> | undefined,
+  code: string,
+  expectedContext: Readonly<Record<string, unknown>>
+): boolean =>
+  getOutcomeDiagnostics(outcome).some((diagnostic) => {
+    const context = diagnostic.context;
+    return (
+      diagnostic.code === code &&
+      isRecord(context) &&
+      Object.entries(expectedContext).every(([key, value]) => context[key] === value)
+    );
+  });
 
 const templateRepository: GitHubTemplateRepository = {
   owner: ORGANIZATION,
@@ -238,6 +270,18 @@ class EventuallyMaterializedTemplateGitHubClient extends FakeGitHubClient {
       if (this.materializationReads < 3) return Promise.resolve(undefined);
     }
     return super.getDefaultBranchCommitSha(owner, repo);
+  }
+}
+
+class ActionsPropagationGitHubClient extends FakeGitHubClient {
+  actionsStateReads = 0;
+
+  override getActionsState(
+    owner: string,
+    repo: string
+  ): ReturnType<FakeGitHubClient["getActionsState"]> {
+    this.actionsStateReads += 1;
+    return super.getActionsState(owner, repo);
   }
 }
 
@@ -499,9 +543,22 @@ describe("graider apply command", () => {
       expect.arrayContaining([expect.objectContaining({ code: "workflow_deployment_forbidden" })])
     );
     expect(forbiddenResult.status).toBe("partial_success");
-    expect(forbiddenResult.summary.repositories).toEqual(
+    const forbiddenOutcomes = getRepositoryOutcomes(forbiddenResult);
+    const jonesOutcome = forbiddenOutcomes.find(
+      (outcome) => outcome.repository === JONES_REPOSITORY
+    );
+    expect(jonesOutcome).toMatchObject({
+      status: "created",
+      reason: "repository_created_with_issues"
+    });
+    expect(
+      hasOutcomeDiagnostic(jonesOutcome, "workflow_deployment_forbidden", {
+        operationType: "ensure_managed_grading_workflow",
+        repositoryName: JONES_REPOSITORY
+      })
+    ).toBe(true);
+    expect(forbiddenOutcomes).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ repository: JONES_REPOSITORY, status: "failed" }),
         expect.objectContaining({ repository: PATEL_REPOSITORY, status: "created" })
       ])
     );
@@ -914,7 +971,11 @@ describe("graider apply command", () => {
       expect.arrayContaining([expect.objectContaining({ code: "manifest_write_failed" })])
     );
     expect(result.summary.repositories).toEqual([
-      expect.objectContaining({ repository: JONES_REPOSITORY, status: "failed" })
+      expect.objectContaining({
+        repository: JONES_REPOSITORY,
+        status: "created",
+        reason: "repository_created_with_issues"
+      })
     ]);
     expect(githubClient.mutations.createdRepositories).toHaveLength(1);
     expect(githubClient.mutations.addedCollaborators).toEqual([]);
@@ -980,6 +1041,207 @@ describe("graider apply command", () => {
     }
   );
 
+  it("keeps Created and attaches collaborator context when post-create access setup fails", async () => {
+    const githubClient = createReadyClient();
+    githubClient.failTimes("addCollaborator", "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS, {
+      statusCode: 500
+    });
+
+    const { cwd, result } = await runApply("grading-disabled", githubClient);
+    const manifest = loadWrittenManifest(cwd);
+
+    expect(result.status).toBe("partial_success");
+    const collaboratorOutcome = getRepositoryOutcomes(result)[0];
+    expect(collaboratorOutcome).toMatchObject({
+      repository: JONES_REPOSITORY,
+      status: "created",
+      reason: "repository_created_with_issues"
+    });
+    expect(
+      hasOutcomeDiagnostic(collaboratorOutcome, "github_api_error", {
+        operationType: "add_student_collaborator",
+        repositoryName: JONES_REPOSITORY,
+        student_id: "jones",
+        github_username: "seanjones",
+        section: "001",
+        statusCode: 500
+      })
+    ).toBe(true);
+    expect(manifest.status).toBe("loaded");
+    expect(manifest.manifest?.repositories[0]?.repository.name).toBe(JONES_REPOSITORY);
+
+    const createdCount = githubClient.mutations.createdRepositories.length;
+    githubClient.clearFailures();
+    const rerun = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+
+    expect(rerun.status).toBe("success");
+    expect(githubClient.mutations.createdRepositories).toHaveLength(createdCount);
+  });
+
+  it("retries fresh-repository Actions readiness within a bounded propagation window", async () => {
+    const githubClient = new ActionsPropagationGitHubClient({
+      templateRepositories: [templateRepository],
+      users: ["seanjones"].map((username) => ({ username })),
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ]
+    });
+    githubClient.failTimes("getActionsState", "api_error", 3, { statusCode: 404 });
+
+    const { result } = await runApply("grading-disabled", githubClient);
+
+    expect(result.status).toBe("success");
+    expect(githubClient.actionsStateReads).toBe(FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS);
+    expect(githubClient.mutations.createdRepositories).toHaveLength(1);
+    expect(result.summary.retryCount).toBe(3);
+    expect(result.summary.repositories).toEqual([
+      expect.objectContaining({
+        status: "created",
+        reason: "repository_created",
+        diagnostics: []
+      })
+    ]);
+  });
+
+  it("retains Created with an Actions 404 issue after propagation retries exhaust", async () => {
+    const githubClient = new ActionsPropagationGitHubClient({
+      templateRepositories: [templateRepository],
+      users: ["seanjones"].map((username) => ({ username })),
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ]
+    });
+    githubClient.failTimes("getActionsState", "api_error", FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS, {
+      statusCode: 404
+    });
+
+    const { cwd, result } = await runApply("grading-disabled", githubClient);
+
+    expect(result.status).toBe("partial_success");
+    expect(githubClient.actionsStateReads).toBe(FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS);
+    const actionsOutcome = getRepositoryOutcomes(result)[0];
+    expect(actionsOutcome).toMatchObject({
+      status: "created",
+      reason: "repository_created_with_issues"
+    });
+    expect(
+      hasOutcomeDiagnostic(actionsOutcome, "github_api_error", {
+        operationType: "enable_actions",
+        repositoryName: JONES_REPOSITORY,
+        statusCode: 404
+      })
+    ).toBe(true);
+    expect(loadWrittenManifest(cwd).manifest?.repositories[0]?.repository.name).toBe(
+      JONES_REPOSITORY
+    );
+
+    const createdCount = githubClient.mutations.createdRepositories.length;
+    githubClient.clearFailures();
+    const rerun = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+
+    expect(rerun.status).toBe("success");
+    expect(githubClient.mutations.createdRepositories).toHaveLength(createdCount);
+  });
+
+  it("reports Updated with issues when an existing repository changes before a later failure", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    writeTrackedManifest(cwd, JONES_REPOSITORY);
+    const githubClient = createReadyClient([createRepository(JONES_REPOSITORY)]);
+    githubClient.failTimes("getActionsState", "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS, {
+      statusCode: 404
+    });
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+
+    expect(result.status).toBe("partial_success");
+    const updateOutcome = getRepositoryOutcomes(result)[0];
+    expect(updateOutcome).toMatchObject({
+      status: "updated",
+      reason: "repository_updated_with_issues"
+    });
+    expect(
+      hasOutcomeDiagnostic(updateOutcome, "github_api_error", {
+        operationType: "enable_actions",
+        statusCode: 404
+      })
+    ).toBe(true);
+  });
+
+  it("keeps Failed when an existing repository has no successful update before failure", async () => {
+    const cwd = copyFixtureToTemp("grading-disabled");
+    writeTrackedManifest(cwd, JONES_REPOSITORY);
+    const githubClient = new FakeGitHubClient({
+      templateRepositories: [templateRepository],
+      repositories: [createRepository(JONES_REPOSITORY)],
+      users: [{ username: "seanjones" }],
+      teams: [
+        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
+        { org: ORGANIZATION, slug: "graders", name: "Graders" }
+      ],
+      collaboratorPermissions: [
+        {
+          owner: ORGANIZATION,
+          repo: JONES_REPOSITORY,
+          username: "seanjones",
+          permission: "admin"
+        }
+      ],
+      teamPermissions: [
+        {
+          owner: ORGANIZATION,
+          repo: JONES_REPOSITORY,
+          teamSlug: "faculty",
+          permission: "admin"
+        },
+        {
+          owner: ORGANIZATION,
+          repo: JONES_REPOSITORY,
+          teamSlug: "graders",
+          permission: "maintain"
+        }
+      ]
+    });
+    githubClient.failTimes("getActionsState", "api_error", DEFAULT_GITHUB_RETRY_ATTEMPTS, {
+      statusCode: 404
+    });
+
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+
+    expect(result.summary.repositories).toEqual([
+      expect.objectContaining({ status: "failed", reason: "repository_apply_failed" })
+    ]);
+  });
+
   it("keeps the created repository manifest-tracked after workflow verification fails", async () => {
     const cwd = copyFixtureToTemp("active-assignment");
     const githubClient = new StudentWorkflowFailureGitHubClient({
@@ -1006,6 +1268,19 @@ describe("graider apply command", () => {
     expect(result.errors).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
     );
+    const workflowOutcome = getRepositoryOutcomes(result).find(
+      (outcome) => outcome.repository === JONES_REPOSITORY
+    );
+    expect(workflowOutcome).toMatchObject({
+      status: "created",
+      reason: "repository_created_with_issues"
+    });
+    expect(
+      hasOutcomeDiagnostic(workflowOutcome, "github_api_error", {
+        operationType: "verify_grading_workflow",
+        repositoryName: JONES_REPOSITORY
+      })
+    ).toBe(true);
     expect(manifest.status).toBe("loaded");
     if (manifest.status === "loaded") {
       expect(manifest.manifest.repositories.map((record) => record.repository.name)).toEqual([
@@ -1079,12 +1354,24 @@ describe("graider apply command", () => {
       DEFAULT_GITHUB_RETRY_ATTEMPTS
     );
 
-    const { result } = await runApply("grading-disabled", githubClient);
+    const { cwd, result } = await runApply("grading-disabled", githubClient);
 
     expect(result.exitCode).toBe(ExitCode.GitHubOrNetworkFailure);
     expect(result.errors).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: "github_api_error" })])
     );
+    const creationOutcome = getRepositoryOutcomes(result)[0];
+    expect(creationOutcome).toMatchObject({
+      status: "failed",
+      reason: "repository_apply_failed"
+    });
+    expect(
+      hasOutcomeDiagnostic(creationOutcome, "github_api_error", {
+        operationType: "create_repository_from_template",
+        repositoryName: JONES_REPOSITORY
+      })
+    ).toBe(true);
+    expect(loadWrittenManifest(cwd).manifest?.repositories).toEqual([]);
   });
 
   it("uses the repository returned by template creation without rediscovery", async () => {

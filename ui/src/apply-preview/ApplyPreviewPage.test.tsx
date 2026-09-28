@@ -783,6 +783,13 @@ describe("ApplyPreviewPage", () => {
     expect(screen.getAllByText("terms/27s1/manifests/lab02/manifest.yml").length).toBeGreaterThan(
       0
     );
+    const repositoryTable = screen.getByRole("table", { name: "Repository rows" });
+    const adaRow = within(repositoryTable)
+      .getAllByRole("row")
+      .find((row) => row.textContent?.includes("ada"));
+    expect(adaRow).toBeDefined();
+    expect(within(adaRow!).getByText("Repository created")).toBeInTheDocument();
+    expect(within(adaRow!).queryByText("Unavailable")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh assignment detail" }));
     expect(onRefreshAssignmentDetail).toHaveBeenCalledTimes(1);
@@ -844,6 +851,129 @@ describe("ApplyPreviewPage", () => {
 
     expect(dataRowCount).toBe(3);
     expect(screen.getByText("1 repository was created, 1 updated, 1 skipped.")).toBeInTheDocument();
+  });
+
+  it("shows durable success with row issues and keeps repository diagnostics out of the global panel", async () => {
+    const createdIssue = {
+      code: "github_api_error",
+      severity: "error",
+      message: "GitHub API request failed (HTTP 404: Not Found).",
+      context: {
+        operationType: "enable_actions",
+        repositoryName: "graider-sandbox/csc1120-lab02-ada",
+        student_id: "s001",
+        statusCode: 404
+      }
+    };
+    const updatedIssue = {
+      code: "github_permission_denied",
+      severity: "error",
+      message: "GitHub permission was denied (HTTP 403: Forbidden).",
+      context: {
+        operationType: "add_student_collaborator",
+        repositoryName: "graider-sandbox/csc1120-lab02-grace",
+        student_id: "s002",
+        statusCode: 403
+      }
+    };
+    const failedIssue = {
+      code: "github_api_error",
+      severity: "error",
+      message: "Repository creation failed (HTTP 422: Validation Failed).",
+      context: {
+        operationType: "create_repository_from_template",
+        repositoryName: "graider-sandbox/csc1120-lab02-katherine",
+        student_id: "s003",
+        statusCode: 422
+      }
+    };
+    const globalDiagnostic = {
+      code: "github_auth_failed",
+      severity: "error",
+      message: "GitHub authentication requires attention.",
+      context: { statusCode: 401 }
+    };
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(
+        createApplyResult(
+          createApplyJson({
+            status: "partial_success",
+            exitCode: 4,
+            diagnostics: [createdIssue, updatedIssue, failedIssue, globalDiagnostic],
+            errors: [createdIssue, updatedIssue, failedIssue, globalDiagnostic],
+            summary: {
+              repositories: [
+                {
+                  studentId: "s001",
+                  githubUsername: "ada",
+                  section: "001",
+                  repository: "graider-sandbox/csc1120-lab02-ada",
+                  status: "created",
+                  reason: "repository_created_with_issues",
+                  diagnostics: [createdIssue]
+                },
+                {
+                  studentId: "s002",
+                  githubUsername: "grace",
+                  section: "001",
+                  repository: "graider-sandbox/csc1120-lab02-grace",
+                  status: "updated",
+                  reason: "repository_updated_with_issues",
+                  diagnostics: [updatedIssue]
+                },
+                {
+                  studentId: "s003",
+                  githubUsername: "katherine",
+                  section: "001",
+                  repository: "graider-sandbox/csc1120-lab02-katherine",
+                  status: "failed",
+                  reason: "repository_apply_failed",
+                  diagnostics: [failedIssue]
+                }
+              ]
+            }
+          })
+        )
+      )
+    });
+    renderApplyPreviewPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    const table = await screen.findByRole("table", { name: "Repository rows" });
+    const rows = within(table).getAllByRole("row");
+    const adaRow = rows.find((row) => row.textContent?.includes("ada"));
+    const graceRow = rows.find((row) => row.textContent?.includes("grace"));
+    const katherineRow = rows.find((row) => row.textContent?.includes("katherine"));
+    expect(within(adaRow!).getByText("Created with issues")).toBeInTheDocument();
+    expect(within(adaRow!).queryByText("Failed")).toBeNull();
+    expect(within(adaRow!).getByText("Operation: Enable Actions")).toBeInTheDocument();
+    expect(within(graceRow!).getByText("Updated with issues")).toBeInTheDocument();
+    expect(within(katherineRow!).getByText("Failed")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "3 repositories have repository-specific issues shown in the repository table."
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("1 repository was created, 1 updated, 1 failed; 2 have follow-up issues.")
+    ).toBeInTheDocument();
+
+    const globalPanel = screen.getByRole("heading", {
+      name: "Diagnostics / blockers"
+    }).parentElement;
+    expect(globalPanel).not.toBeNull();
+    expect(within(globalPanel!).getByText(globalDiagnostic.message)).toBeInTheDocument();
+    expect(within(globalPanel!).queryByText(createdIssue.message)).toBeNull();
+    expect(within(globalPanel!).queryByText(updatedIssue.message)).toBeNull();
+    expect(within(globalPanel!).queryByText(failedIssue.message)).toBeNull();
   });
 
   it("renders partial success and failure diagnostics safely", async () => {

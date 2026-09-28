@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatReasonLabel, formatStatusLabel, hasAttentionStatus } from "./statusLabels";
+import {
+  formatApplyOperationLabel,
+  formatReasonLabel,
+  formatStatusLabel,
+  hasAttentionStatus
+} from "./statusLabels";
 
 describe("formatStatusLabel", () => {
   it("returns 'Unavailable' for null", () => {
@@ -88,7 +93,12 @@ describe("formatReasonLabel", () => {
     ["archived", "Archived"],
     ["student_status_active", "Student active"],
     ["student_status_dropped", "Student dropped"],
-    ["student_status_hold", "Student on hold"]
+    ["student_status_hold", "Student on hold"],
+    ["repository_created", "Repository created"],
+    ["repository_created_with_issues", "Repository created; follow-up issues need attention"],
+    ["repository_updated", "Repository updated"],
+    ["repository_updated_with_issues", "Repository updated; follow-up issues need attention"],
+    ["repository_apply_failed", "Repository update failed"]
   ])("maps %s to %s", (reason, label) => {
     expect(formatReasonLabel(reason)).toBe(label);
   });
@@ -99,5 +109,12 @@ describe("formatReasonLabel", () => {
 
   it("never returns the raw value unchanged when it contains an underscore", () => {
     expect(formatReasonLabel("some_new_reason")).not.toContain("_");
+  });
+});
+
+describe("formatApplyOperationLabel", () => {
+  it("formats known and future Apply operations", () => {
+    expect(formatApplyOperationLabel("enable_actions")).toBe("Enable Actions");
+    expect(formatApplyOperationLabel("future_operation")).toBe("future operation");
   });
 });

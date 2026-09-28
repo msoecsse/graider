@@ -13,6 +13,13 @@ CLI JSON output exposes diagnostics in `warnings`, `errors`, and the combined
 `diagnostics` array. UI integrations should branch on diagnostic `code`; message
 wording is safe for display but may evolve.
 
+GitHub diagnostics retain safe `kind`, `retryable`, and (when supplied by
+Octokit) `statusCode` context. Apply adds `operationType`, `repositoryName`,
+`student_id`, `github_username`, and `section` for target operations, plus
+`teamSlug` or `workflowPath` where applicable. Short GitHub response messages
+may appear in display text after redaction; headers, raw bodies, credentials,
+request payloads, and signed URLs are not copied into diagnostics.
+
 Exit-code precedence is centralized. Warnings alone exit `0`.
 
 | Exit code | Meaning                                             |

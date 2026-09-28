@@ -151,6 +151,14 @@ Failed
 Blocked
 ```
 
+Individual rows also carry a stable machine `reason` and target-scoped
+`diagnostics`. A durable `created` or `updated` status is not replaced by
+`failed` when a later target operation fails. The UI derives **Created with
+issues** or **Updated with issues** when those successful outcomes have error
+diagnostics, and renders the operation diagnostic beside the row. Older result
+payloads without the optional fields remain parseable and receive a safe
+status-derived reason.
+
 Do not mix preview wording with result wording.
 
 ## Result States
@@ -167,6 +175,12 @@ diagnostics. Individual results show per-student rows. Group results show one
 target per repository, its members, repository URL, and group/student-mapping
 counts. Failed group Apply results identify the failing operation and make clear
 that every observed repository identity was checkpointed for a safe retry.
+
+The individual summary counts repository outcomes from the displayed rows,
+not operation failure counters. Follow-up issue rows are reported separately.
+Repository/student-scoped diagnostics remain in raw command JSON but are
+shown primarily beside their row; only diagnostics without target identity
+remain in the global panel, with a compact count pointing to row issues.
 
 Safe command errors render bounded user-facing messages:
 

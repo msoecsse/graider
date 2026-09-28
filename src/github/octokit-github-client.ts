@@ -88,6 +88,7 @@ const PARSE_SUCCESS_RESPONSE_BODY_DISABLED = false;
 const LOCATION_HEADER = "location";
 const LOCATION_HEADER_ALTERNATE = "Location";
 const GET_METHOD = "GET";
+const MAX_SAFE_API_MESSAGE_LENGTH = 120;
 
 type OctokitParameters = Record<string, unknown>;
 
@@ -787,32 +788,79 @@ function normalizeOctokitError(error: unknown): GitHubClientError {
 
   const status = getErrorStatus(error);
   const retryAfterSeconds = getRetryAfterSeconds(error);
+  const apiMessage = getSafeApiMessage(error);
+  const statusOptions = status === undefined ? {} : { statusCode: status };
 
   if (status === HTTP_STATUS_UNAUTHORIZED) {
-    return new GitHubClientError("auth_failed", "GitHub authentication failed.");
+    return new GitHubClientError(
+      "auth_failed",
+      formatHttpErrorMessage("GitHub authentication failed", status, apiMessage),
+      statusOptions
+    );
   }
 
   if (
     status === HTTP_STATUS_TOO_MANY_REQUESTS ||
     (status === HTTP_STATUS_FORBIDDEN && isRateLimitError(error))
   ) {
-    const options = retryAfterSeconds === undefined ? {} : { retryAfterSeconds };
-    return new GitHubClientError("rate_limited", "GitHub rate limit was reached.", options);
+    const options = {
+      ...statusOptions,
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds })
+    };
+    return new GitHubClientError(
+      "rate_limited",
+      formatHttpErrorMessage("GitHub rate limit was reached", status, apiMessage),
+      options
+    );
   }
 
   if (status === HTTP_STATUS_FORBIDDEN) {
-    return new GitHubClientError("permission_denied", "GitHub permission was denied.");
+    return new GitHubClientError(
+      "permission_denied",
+      formatHttpErrorMessage("GitHub permission was denied", status, apiMessage),
+      statusOptions
+    );
   }
 
   if (status !== undefined && status >= HTTP_STATUS_SERVER_ERROR_MIN) {
-    return new GitHubClientError("api_error", "GitHub API request failed.");
+    return new GitHubClientError(
+      "api_error",
+      formatHttpErrorMessage("GitHub API request failed", status, apiMessage),
+      statusOptions
+    );
   }
 
   if (status !== undefined) {
-    return new GitHubClientError("api_error", "GitHub API request failed.");
+    return new GitHubClientError(
+      "api_error",
+      formatHttpErrorMessage("GitHub API request failed", status, apiMessage),
+      statusOptions
+    );
   }
 
   return new GitHubClientError("network_error", "GitHub network request failed.");
+}
+
+function formatHttpErrorMessage(
+  prefix: string,
+  status: number,
+  apiMessage: string | undefined
+): string {
+  return apiMessage === undefined
+    ? `${prefix} (HTTP ${String(status)}).`
+    : `${prefix} (HTTP ${String(status)}: ${apiMessage}).`;
+}
+
+function getSafeApiMessage(error: unknown): string | undefined {
+  const record = asRecord(error);
+  const responseMessage = asString(asRecord(asRecord(record.response).data).message);
+  const normalized = responseMessage?.replace(/[\r\n]+/gu, " ").trim();
+
+  return normalized === undefined ||
+    normalized.length === EMPTY_LENGTH ||
+    normalized.length > MAX_SAFE_API_MESSAGE_LENGTH
+    ? undefined
+    : normalized;
 }
 
 function createArtifactDecodeError(): GitHubClientError {

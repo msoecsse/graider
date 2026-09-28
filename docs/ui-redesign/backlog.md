@@ -1279,6 +1279,27 @@ partial-success roster failures still do. See
 
 ---
 
+## 48. Individual Apply conflates post-creation errors with repository creation failure and drops per-target GitHub diagnostics — **Resolved**
+
+Individual Apply previously gave any target error precedence over successful
+repository creation or update, so a durable repository could appear as
+`Failed`. Its row contract also omitted `reason` and `diagnostics`, while the
+Octokit adapter discarded safe HTTP status/message context. The renderer then
+showed `Unavailable` and repeated every target error in the global diagnostics
+panel.
+
+Resolved in APPLY-RESULT-BUG-1. Individual result rows now keep durable
+`created`/`updated` outcomes separate from error state, carry stable reasons
+and target diagnostics, and add Apply operation/target context. Safe GitHub
+HTTP status and short response messages survive normalization. Freshly created
+repositories receive a bounded four-attempt Actions-readiness window using the
+existing 250/500/1000 ms backoff. The UI derives **Created with issues** or
+**Updated with issues**, counts durable repository outcomes from rows, shows
+target diagnostics beside the row, and keeps only non-target diagnostics in
+the global panel. See `summaries/apply-result-bug-1.md`.
+
+---
+
 ## Suggested order
 
 Nothing is blocking PR6b anymore — proceed to it directly.
@@ -1287,8 +1308,8 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of
 sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
-26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, 46, and
-47 are resolved.
+26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, 46, 47,
+and 48 are resolved.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
@@ -1297,3 +1318,5 @@ rebuild. COMMENT-BUG-1 then resolved item 45. Item 36 remains adjacent
 parser-convergence debt rather than a blocker to that visual slice. WORKFLOW-FX-1
 then resolved item 46 without adding another preset or faculty configuration.
 ASSIGNMENT-CREATE-BUG-1 resolved item 47 without beginning ITEM-36.
+APPLY-RESULT-BUG-1 then resolved item 48; its live GitHub Apply acceptance
+retest remains ahead of the two WORKFLOW-FX-1 live smoke runs and ITEM-36.

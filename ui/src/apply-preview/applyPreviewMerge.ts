@@ -186,6 +186,9 @@ const agnosticVerb = (phrase: string): CountPhrase["verbPhrase"] => verb(phrase,
 
 const SINGULAR_COUNT = 1;
 
+const rowHasErrorDiagnostic = (row: ApplyRowState): boolean =>
+  row.diagnostics.some((diagnostic) => diagnostic.severity === "error");
+
 /**
  * README section 2.3's own example: "2 repositories will be created, 1
  * skipped" -- the subject noun and verb appear once, on the first non-zero
@@ -264,7 +267,7 @@ const getResultRowSummary = (rows: readonly ApplyRowState[]): string => {
     counts[status] += 1;
   }
 
-  return buildSummarySentence(REPOSITORY_NOUN, [
+  const outcomeSentence = buildSummarySentence(REPOSITORY_NOUN, [
     {
       count: counts.created,
       verbPhrase: verb("was created", "were created"),
@@ -287,6 +290,15 @@ const getResultRowSummary = (rows: readonly ApplyRowState[]): string => {
       shortLabel: "blocked"
     }
   ]);
+  const issueCount = rows.filter(
+    (row) =>
+      (row.resultStatus === "created" || row.resultStatus === "updated") &&
+      rowHasErrorDiagnostic(row)
+  ).length;
+
+  return issueCount === 0
+    ? outcomeSentence
+    : `${outcomeSentence.slice(0, -1)}; ${String(issueCount)} ${issueCount === SINGULAR_COUNT ? "has" : "have"} follow-up issues.`;
 };
 
 const getGroupPreviewSummary = (rows: readonly ApplyGroupRowState[]): string => {
@@ -378,13 +390,16 @@ export const getApplyPlanSummaryText = (
 export const formatMergedRowStatus = (row: ApplyRowState): string =>
   row.resultStatus === null
     ? formatApplyPreviewRepositoryStatus(row.previewStatus)
-    : formatApplyResultRepositoryStatus(row.resultStatus);
+    : (row.resultStatus === "created" || row.resultStatus === "updated") &&
+        rowHasErrorDiagnostic(row)
+      ? `${formatApplyResultRepositoryStatus(row.resultStatus)} with issues`
+      : formatApplyResultRepositoryStatus(row.resultStatus);
 
 /** Whether a merged individual row's status chip should read as needing attention. */
 export const mergedRowNeedsAttention = (row: ApplyRowState): boolean =>
   row.resultStatus === null
     ? row.previewStatus === "blocked" || row.previewStatus === "unknown"
-    : row.resultStatus === "failed" || row.resultStatus === "blocked";
+    : row.resultStatus === "failed" || row.resultStatus === "blocked" || rowHasErrorDiagnostic(row);
 
 /** Status column text for one merged group row: result once it exists, else preview. */
 export const formatMergedGroupRowStatus = (row: ApplyGroupRowState): string => {

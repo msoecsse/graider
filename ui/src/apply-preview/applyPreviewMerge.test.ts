@@ -43,6 +43,13 @@ const resultRow = (
   ...overrides
 });
 
+const issueDiagnostic = {
+  code: "github_api_error",
+  severity: "error",
+  message: "GitHub API request failed (HTTP 404: Not Found).",
+  context: { operationType: "enable_actions", statusCode: "404" }
+} as const;
+
 const previewGroupTarget = (
   overrides: Partial<ApplyPreviewGroupTarget> = {}
 ): ApplyPreviewGroupTarget => ({
@@ -200,6 +207,32 @@ describe("mergeApplyRows", () => {
     expect(merged[0]?.studentId).toBe("s999");
     expect(merged[0]?.resultStatus).toBe("created");
   });
+
+  it.each([
+    ["created", "Created with issues"],
+    ["updated", "Updated with issues"]
+  ] as const)("derives %s with issues from row diagnostics", (status, label) => {
+    const merged = mergeApplyRows(
+      preview({
+        plan: { summary: emptyPlanSummary(), repositories: [previewRow()], groupTargets: [] }
+      }),
+      result({ rows: [resultRow({ status, diagnostics: [issueDiagnostic] })] })
+    );
+
+    expect(formatMergedRowStatus(merged[0]!)).toBe(label);
+    expect(mergedRowNeedsAttention(merged[0]!)).toBe(true);
+  });
+
+  it("keeps an actual failed result labeled Failed", () => {
+    const merged = mergeApplyRows(
+      preview({
+        plan: { summary: emptyPlanSummary(), repositories: [previewRow()], groupTargets: [] }
+      }),
+      result({ rows: [resultRow({ status: "failed", diagnostics: [issueDiagnostic] })] })
+    );
+
+    expect(formatMergedRowStatus(merged[0]!)).toBe("Failed");
+  });
 });
 
 describe("mergeApplyGroupRows", () => {
@@ -348,6 +381,27 @@ describe("getApplyPlanSummaryText", () => {
 
     expect(getApplyPlanSummaryText(preview(), true, rows, [])).toBe(
       "1 repository was created, 1 blocked."
+    );
+  });
+
+  it("counts durable outcomes and reports follow-up issue rows separately", () => {
+    const resultRows = [
+      resultRow({ studentId: "s001", diagnostics: [issueDiagnostic] }),
+      resultRow({ studentId: "s002", diagnostics: [] })
+    ];
+    const rows = mergeApplyRows(
+      preview({
+        plan: {
+          summary: emptyPlanSummary(),
+          repositories: [previewRow({ studentId: "s001" }), previewRow({ studentId: "s002" })],
+          groupTargets: []
+        }
+      }),
+      result({ rows: resultRows })
+    );
+
+    expect(getApplyPlanSummaryText(preview(), true, rows, [])).toBe(
+      "2 repositories were created; 1 has follow-up issues."
     );
   });
 

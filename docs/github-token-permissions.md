@@ -120,12 +120,12 @@ GRAIDER_RUN_LIVE_DESTRUCTIVE_TESTS=true
 
 ## Common Failures
 
-| Diagnostic code                 | Meaning                                   | Likely fix                                                                    |
-| ------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------- |
-| `github_auth_missing`           | No token was available.                   | Set `GRAIDER_GITHUB_TOKEN` or `GITHUB_TOKEN`.                                 |
-| `github_auth_failed`            | GitHub rejected the token.                | Check token value, expiration, and organization approval.                     |
-| `github_permission_denied`      | Token lacks permission for the operation. | Add the required organization/repository permission or use an approved token. |
-| `github_rate_limited`           | GitHub rate limit prevented completion.   | Wait for reset or reduce concurrent/manual activity against the token.        |
-| `github_api_error`              | GitHub returned an API/server error.      | Retry later; inspect GitHub status if persistent.                             |
-| `github_network_error`          | Network access to GitHub failed.          | Check network, proxy, DNS, and CI egress policy.                              |
-| `workflow_deployment_forbidden` | Token cannot write the managed workflow.  | Grant Contents and workflow-file write authority for the target repository.   |
+| Diagnostic code                 | Meaning                                                                                                                | Likely fix                                                                                            |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `github_auth_missing`           | No token was available.                                                                                                | Set `GRAIDER_GITHUB_TOKEN` or `GITHUB_TOKEN`.                                                         |
+| `github_auth_failed`            | GitHub rejected the token.                                                                                             | Check token value, expiration, and organization approval.                                             |
+| `github_permission_denied`      | Token lacks permission for the operation.                                                                              | Add the required organization/repository permission or use an approved token.                         |
+| `github_rate_limited`           | GitHub rate limit prevented completion.                                                                                | Wait for reset or reduce concurrent/manual activity against the token.                                |
+| `github_api_error`              | GitHub returned an API/server error; safe HTTP status/message and Apply operation context are included when available. | Review the affected repository row and operation; retry later or inspect GitHub status if persistent. |
+| `github_network_error`          | Network access to GitHub failed.                                                                                       | Check network, proxy, DNS, and CI egress policy.                                                      |
+| `workflow_deployment_forbidden` | Token cannot write the managed workflow.                                                                               | Grant Contents and workflow-file write authority for the target repository.                           |
