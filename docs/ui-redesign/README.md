@@ -338,15 +338,16 @@ author, a points chip, a line reference, and the comment text.
 **Right pane (380px).** Fixed top block: student identity, grading status, the
 score as a large accent number over `/ 100`, and one bar per rubric category
 with `earned / max`. Scrolling middle: **Applied comments** (points chip, text,
-location), **Comment library** (each entry a button with a number-key badge,
-label, and points chip — clicking applies it and updates the score), and
+location), compact `Add comment` and `Browse comment library` actions, and
 **Automated checks** collapsed to a pass line plus any warning line with a View
-link. Pinned bottom: primary `Mark complete and go to next` with a `⏎` badge,
-and a quiet `Skip for now`.
+link. Authoring and reusable-library browse/edit work replace the grid with a
+student-scoped Comments workspace; they are not embedded in the sidebar.
+Pinned bottom: primary `Mark complete and go to next` with a `⏎` badge, and a
+quiet `Skip for now`.
 
 **Footer (40px).** Persistent hint bar: `J` next student in the active filter,
 `K` previous student in the active filter,
-`C` comment, `1–9` library, `⏎` complete, `?` all shortcuts. On the right,
+`C` comment, `⌘/Ctrl K` library, `1–9` library, `⏎` complete, `?` all shortcuts. On the right,
 `Saved automatically`.
 
 **Required behaviour changes**

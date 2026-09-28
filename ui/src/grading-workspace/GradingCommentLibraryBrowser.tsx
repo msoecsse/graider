@@ -27,6 +27,7 @@ export const ReusableCommentLibraryBrowser = ({
   selectedCommentTags,
   onTagsChange,
   matchingComments,
+  autoFocusSearch = false,
   applyAction,
   libraryMutationPending = false,
   showNewAction = true,
@@ -41,6 +42,7 @@ export const ReusableCommentLibraryBrowser = ({
   readonly selectedCommentTags: readonly string[];
   readonly onTagsChange: Dispatch<SetStateAction<readonly string[]>>;
   readonly matchingComments: readonly ReusableComment[];
+  readonly autoFocusSearch?: boolean;
   readonly applyAction?: ApplyAction;
   readonly libraryMutationPending?: boolean;
   readonly showNewAction?: boolean;
@@ -73,6 +75,7 @@ export const ReusableCommentLibraryBrowser = ({
       <label>
         Search comments
         <input
+          autoFocus={autoFocusSearch}
           type="search"
           value={commentSearch}
           onChange={(event) => onSearchChange(event.currentTarget.value)}

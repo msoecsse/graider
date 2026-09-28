@@ -2493,6 +2493,53 @@ h1 {
   gap: var(--space-2);
 }
 
+.grading-comment-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-3);
+  overflow-y: auto;
+}
+
+.grading-comment-workspace__header {
+  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.grading-comment-workspace__header h2,
+.grading-comment-workspace__header p {
+  margin: 0;
+}
+
+.grading-comment-workspace__header p {
+  color: var(--text-muted);
+  margin-top: var(--space-1);
+}
+
+.grading-comment-workspace__modes,
+.grading-comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.grading-comment-workspace__content {
+  width: min(58rem, 100%);
+}
+
+.grading-comment-workspace .grading-apply-comment,
+.grading-comment-workspace .reusable-comment-editor {
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 0.5rem;
+  margin-top: 0;
+  padding: var(--space-3);
+}
+
 .grading-score-total {
   font-size: 1.35rem;
   font-weight: 800;
