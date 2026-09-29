@@ -73,6 +73,7 @@ describe("UI security boundary", () => {
       "graider-ui:template-workflow:get",
       "graider-ui:template-workflow:preview-save",
       "graider-ui:template-workflow:save",
+      "graider-ui:template-workflow:replace-managed",
       "graider-ui:course-registry:remove",
       "graider-ui:dashboard:refresh-course-folder",
       "graider-ui:dashboard:refresh-all",

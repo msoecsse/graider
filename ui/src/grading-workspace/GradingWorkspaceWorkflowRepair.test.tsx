@@ -167,7 +167,7 @@ describe("GradingWorkspacePage workflow repair", () => {
     expect(
       await screen.findByText(/unavailable for this assignment's grading configuration/u)
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Replace workflow & run" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Replace Graider workflow…" })).toBeDisabled();
   });
 
   it("requires confirmation and cancel performs no confirmed request", async () => {
@@ -181,14 +181,19 @@ describe("GradingWorkspacePage workflow repair", () => {
     setApis(repair);
     render(<GradingWorkspacePage request={REQUEST} />);
 
-    const action = await screen.findByRole("button", { name: "Replace workflow & run" });
+    const action = await screen.findByRole("button", { name: "Replace Graider workflow…" });
     await waitFor(() => expect(action).toBeEnabled());
     fireEvent.click(action);
-    const dialog = screen.getByRole("dialog", { name: "Replace workflow and start grading run?" });
+    const dialog = screen.getByRole("dialog", { name: "Replace Graider workflow?" });
     expect(dialog).toHaveTextContent("Replace .github/workflows/grade.yml in trusted-org/lab1-ada");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(repair).toHaveBeenCalledTimes(1);
-    expect(repair).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada", confirmed: false });
+    expect(repair).toHaveBeenCalledWith({
+      ...REQUEST,
+      studentId: "ada",
+      confirmed: false,
+      runAfterReplacement: false
+    });
   });
 
   it("confirms exactly once, disables duplicate submission, and reports dispatch success", async () => {
@@ -205,16 +210,25 @@ describe("GradingWorkspacePage workflow repair", () => {
     setApis(repair);
     render(<GradingWorkspacePage request={REQUEST} />);
 
-    const action = await screen.findByRole("button", { name: "Replace workflow & run" });
+    const action = await screen.findByRole("button", { name: "Replace Graider workflow…" });
     await waitFor(() => expect(action).toBeEnabled());
     fireEvent.click(action);
     const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "I understand this replaces the repository's grading workflow."
+      })
+    );
     fireEvent.click(within(dialog).getByRole("button", { name: "Confirm replace workflow & run" }));
     expect(await within(dialog).findByRole("button", { name: "Confirming…" })).toBeDisabled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Confirming…" }));
     expect(repair).toHaveBeenCalledTimes(2);
-    expect(repair).toHaveBeenLastCalledWith({ ...REQUEST, studentId: "ada", confirmed: true });
+    expect(repair).toHaveBeenLastCalledWith({
+      ...REQUEST,
+      studentId: "ada",
+      confirmed: true,
+      runAfterReplacement: true
+    });
 
     await act(async () => pending.resolve(operationResult("ada")));
     expect(await screen.findByText(/Grading run dispatched successfully/u)).toHaveTextContent(
@@ -233,11 +247,15 @@ describe("GradingWorkspacePage workflow repair", () => {
     setApis(repair);
     render(<GradingWorkspacePage request={REQUEST} />);
 
-    const action = await screen.findByRole("button", { name: "Replace workflow & run" });
+    const action = await screen.findByRole("button", { name: "Replace Graider workflow…" });
     await waitFor(() => expect(action).toBeEnabled());
     fireEvent.click(action);
     const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("checkbox"));
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "I understand this replaces the repository's grading workflow."
+      })
+    );
     fireEvent.click(within(dialog).getByRole("button", { name: "Confirm replace workflow & run" }));
     expect(
       await screen.findByText(
@@ -262,7 +280,7 @@ describe("GradingWorkspacePage workflow repair", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(repair).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole("button", { name: "Replace workflow & run" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Replace Graider workflow…" })).toBeEnabled();
     await act(async () =>
       ada.resolve({
         status: "ready",
@@ -270,7 +288,7 @@ describe("GradingWorkspacePage workflow repair", () => {
         repositoryFullName: "trusted-org/lab1-ada"
       })
     );
-    fireEvent.click(screen.getByRole("button", { name: "Replace workflow & run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace Graider workflow…" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("trusted-org/lab1-grace");
   });
 });

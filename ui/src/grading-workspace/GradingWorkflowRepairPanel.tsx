@@ -36,7 +36,9 @@ export const GradingWorkflowRepairPanel = ({
   onConfirmBulkWorkflowRepair,
   workflowRepairConfirmation,
   onCancelWorkflowRepairConfirmation,
-  onConfirmWorkflowRepair
+  onConfirmWorkflowRepair,
+  runAfterReplacement = true,
+  onRunAfterReplacementChange = () => undefined
 }: {
   readonly workflowRepair: WorkflowRepairState;
   readonly onOpenWorkflowRepairConfirmation: () => void;
@@ -52,6 +54,8 @@ export const GradingWorkflowRepairPanel = ({
   readonly workflowRepairConfirmation: WorkflowRepairConfirmation | undefined;
   readonly onCancelWorkflowRepairConfirmation: () => void;
   readonly onConfirmWorkflowRepair: () => void;
+  readonly runAfterReplacement?: boolean;
+  readonly onRunAfterReplacementChange?: (value: boolean) => void;
 }): ReactElement => (
   <section className="grading-workflow-repair" aria-labelledby="workflow-repair-heading">
     <h3 id="workflow-repair-heading">Workflow</h3>
@@ -61,7 +65,7 @@ export const GradingWorkflowRepairPanel = ({
       disabled={workflowRepair.status !== "ready"}
       onClick={onOpenWorkflowRepairConfirmation}
     >
-      {workflowRepair.status === "running" ? "Replacing workflow…" : "Replace workflow & run"}
+      {workflowRepair.status === "running" ? "Replacing workflow…" : "Replace Graider workflow…"}
     </button>
     {workflowRepair.status === "loading" ? (
       <p aria-live="polite">Checking workflow repair availability…</p>
@@ -129,15 +133,28 @@ export const GradingWorkflowRepairPanel = ({
         workflowRepairConfirmation !== undefined &&
         workflowRepairConfirmation.studentId === studentId
       }
-      title="Replace workflow and start grading run?"
+      title="Replace Graider workflow?"
       summary={
         <p>
           Replace .github/workflows/grade.yml in {workflowRepairConfirmation?.repositoryFullName}{" "}
-          with the Graider-managed workflow and start a grading run?
+          with the current Graider-managed workflow. Existing unmanaged or unsupported workflows
+          will be replaced.
         </p>
       }
+      supplementalContent={
+        <label className="confirmation-check">
+          <input
+            checked={runAfterReplacement}
+            onChange={(event) => onRunAfterReplacementChange(event.currentTarget.checked)}
+            type="checkbox"
+          />
+          Run grading after replacement
+        </label>
+      }
       acknowledgementLabel="I understand this replaces the repository's grading workflow."
-      confirmLabel="Confirm replace workflow & run"
+      confirmLabel={
+        runAfterReplacement ? "Confirm replace workflow & run" : "Confirm replace workflow"
+      }
       onConfirm={onConfirmWorkflowRepair}
       // confirmWorkflowRepair never rejects and already closes this modal
       // itself, reporting every outcome -- success and error alike -- through

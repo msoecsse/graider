@@ -212,6 +212,7 @@ const workflowRepairResultNotice = (
       "Unsupported managed workflow replaced with the current Graider workflow.",
     already_current: "Graider workflow was already current.",
     write_failed: "Workflow write failed. No grading run was started.",
+    stale: "The workflow changed after preview. Reload before replacing it.",
     read_failed: "The existing workflow could not be read. No grading run was started.",
     not_attempted: "Workflow repair was not attempted."
   };
@@ -500,6 +501,7 @@ export const GradingWorkspacePage = ({
   const [workflowRepair, setWorkflowRepair] = useState<WorkflowRepairState>({ status: "idle" });
   const [workflowRepairConfirmation, setWorkflowRepairConfirmation] =
     useState<WorkflowRepairConfirmation>();
+  const [workflowRepairRunAfterReplacement, setWorkflowRepairRunAfterReplacement] = useState(true);
   const [workflowRepairNotice, setWorkflowRepairNotice] = useState<WorkflowRepairNotice>();
   const [bulkWorkflowRepairState, setBulkWorkflowRepairState] =
     useState<BulkWorkflowRepairState>("idle");
@@ -788,7 +790,10 @@ export const GradingWorkspacePage = ({
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug,
       studentId,
-      confirmed: false
+      confirmed: false,
+      // Availability is installation-only, so a missing grading-state SHA
+      // must not hide the intentional replacement escape hatch.
+      runAfterReplacement: false
     })
       .then((value) => {
         if (
@@ -855,7 +860,8 @@ export const GradingWorkspacePage = ({
         termCode: request.termCode,
         assignmentSlug: request.assignmentSlug,
         studentId: confirmation.studentId,
-        confirmed: true
+        confirmed: true,
+        runAfterReplacement: workflowRepairRunAfterReplacement
       });
     } catch {
       if (
@@ -1683,7 +1689,10 @@ export const GradingWorkspacePage = ({
       studentId: workflowRepair.studentId,
       repositoryFullName: workflowRepair.repositoryFullName
     };
-    requestPanelOpen(() => setWorkflowRepairConfirmation(confirmation));
+    requestPanelOpen(() => {
+      setWorkflowRepairRunAfterReplacement(true);
+      setWorkflowRepairConfirmation(confirmation);
+    });
   };
 
   const openBulkWorkflowRepairConfirmation = (): void => {
@@ -3338,6 +3347,8 @@ export const GradingWorkspacePage = ({
             workflowRepairConfirmation={workflowRepairConfirmation}
             onCancelWorkflowRepairConfirmation={() => setWorkflowRepairConfirmation(undefined)}
             onConfirmWorkflowRepair={confirmWorkflowRepair}
+            runAfterReplacement={workflowRepairRunAfterReplacement}
+            onRunAfterReplacementChange={setWorkflowRepairRunAfterReplacement}
           />
         </aside>
       </div>

@@ -30,6 +30,9 @@ await build({
     gradingStudentWorkflowRepairBackend: fileURLToPath(
       new URL("../../src/grading/grading-student-workflow-repair-context.ts", import.meta.url)
     ),
+    templateManagedWorkflowReplacementBackend: fileURLToPath(
+      new URL("../../src/grading/template-managed-workflow-replacement-context.ts", import.meta.url)
+    ),
     gradingStudentCommitHistoryBackend: fileURLToPath(
       new URL("../../src/grading/grading-submission-context.ts", import.meta.url)
     ),

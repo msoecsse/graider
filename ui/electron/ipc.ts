@@ -55,6 +55,7 @@ export const IPC_CHANNELS = {
   getTemplateWorkflow: "graider-ui:template-workflow:get",
   previewTemplateWorkflowSave: "graider-ui:template-workflow:preview-save",
   saveTemplateWorkflow: "graider-ui:template-workflow:save",
+  replaceTemplateManagedWorkflow: "graider-ui:template-workflow:replace-managed",
   removeCourseFolder: "graider-ui:course-registry:remove",
   refreshCourseFolder: "graider-ui:dashboard:refresh-course-folder",
   refreshDashboard: "graider-ui:dashboard:refresh-all",
@@ -678,6 +679,17 @@ export interface TemplateWorkflowSaveResult extends Omit<TemplateWorkflowSavePre
   readonly commitUrl: string | null;
 }
 
+export interface TemplateManagedWorkflowReplacementRequest {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly termCode: string;
+  readonly assignmentSlug: string;
+  readonly confirmed: boolean;
+  readonly previewFingerprint?: string;
+}
+export type TemplateManagedWorkflowReplacementResult =
+  import("./templateManagedWorkflowReplacementService.js").TemplateManagedWorkflowReplacementResult;
+
 export interface CourseFolderSelectionError {
   readonly code: string;
   readonly message: string;
@@ -735,6 +747,7 @@ export type GradingStudentEvidenceRequest = GradingStudentSourceRequest;
 export type { GradingStudentEvidenceResult } from "./gradingStudentEvidenceService.js";
 export interface GradingStudentWorkflowRepairRequest extends GradingStudentSourceRequest {
   readonly confirmed: boolean;
+  readonly runAfterReplacement?: boolean;
 }
 
 export interface GradingBulkWorkflowRepairRequest extends Omit<
@@ -1111,6 +1124,9 @@ export interface GraiderUIApi {
   readonly saveTemplateWorkflow?: (
     request: TemplateWorkflowSaveRequest
   ) => Promise<TemplateWorkflowSaveResult>;
+  readonly replaceTemplateManagedWorkflow?: (
+    request: TemplateManagedWorkflowReplacementRequest
+  ) => Promise<TemplateManagedWorkflowReplacementResult>;
   readonly listCourseFolders: () => Promise<CourseFolderRecord[]>;
   readonly removeCourseFolder: (id: string) => Promise<void>;
   readonly refreshCourseFolder: (id: string) => Promise<CourseFolderDashboardResult>;

@@ -1333,17 +1333,36 @@ workspace behavior. The next planned sequence is ITEM-51, then ITEM-36.
 
 ---
 
+## 51. Explicitly install/replace the canonical Graider grading workflow in a template or student repository — **Resolved**
+
+Apply remains conservative: it will not overwrite unmanaged or unsupported
+workflow content. ITEM-51 adds the deliberate, confirmed escape hatch for the
+sole Graider-owned path, `.github/workflows/grade.yml`. The shared installer
+uses the existing eligibility rule, canonical renderer, and ownership
+classifier; it creates missing content, leaves current content alone, and
+replaces outdated, unmanaged, or unsupported managed content only after
+confirmation. It never dispatches on its own.
+
+Assignment Detail previews the trusted configured template repository and
+branch, then confirms installation without running grading. The student dialog
+defaults to running grading after replacement, but faculty may uncheck it; a
+submission SHA is required only when dispatch is requested. Repository targets
+come from trusted assignment/manifest configuration, not renderer-provided
+owner, branch, path, or YAML. See
+`summaries/item-51-managed-workflow-replacement.md`.
+
+---
+
 ## Suggested order
 
-Nothing is blocking PR6b anymore — proceed to it directly.
+The next planned slice is ITEM-36.
 
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
 26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, 46, 47,
-48, and 49 are resolved. ITEM-51 is the next planned slice, followed by
-ITEM-36.
+48, 49, and 51 are resolved. ITEM-36 is the next planned slice.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4

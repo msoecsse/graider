@@ -249,13 +249,11 @@ describe.skip("GradingWorkspacePage sibling panel invariant (pre-ITEM-50 embedde
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
     expect(screen.getByRole("button", { name: "Cancel comment" })).toBeInTheDocument();
 
-    const repairButton = await screen.findByRole("button", { name: "Replace workflow & run" });
+    const repairButton = await screen.findByRole("button", { name: "Replace Graider workflow…" });
     await waitFor(() => expect(repairButton).toBeEnabled());
     fireEvent.click(repairButton);
     expect(screen.queryByRole("button", { name: "Cancel comment" })).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("dialog", { name: "Replace workflow and start grading run?" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Replace Graider workflow?" })).toBeInTheDocument();
     assertNoDuplicateAccessibleNames();
   });
 
@@ -542,6 +540,6 @@ describe("GradingWorkspacePage sibling panels after comment takeover", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
     expect(await screen.findByRole("heading", { name: "Manual adjustments" })).toBeInTheDocument();
     expect(screen.getByText("Original feedback")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Replace workflow & run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Replace Graider workflow…" })).toBeInTheDocument();
   });
 });

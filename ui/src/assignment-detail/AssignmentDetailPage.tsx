@@ -11,7 +11,8 @@ import type {
   StudentRepositoryAccessPageResult,
   TemplateWorkflowResult,
   TemplateWorkflowSavePreview,
-  TemplateWorkflowSaveResult
+  TemplateWorkflowSaveResult,
+  TemplateManagedWorkflowReplacementResult
 } from "../../electron/ipc";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
@@ -414,6 +415,9 @@ export const AssignmentDetailPage = ({
     null
   );
   const [isPushingWorkflow, setIsPushingWorkflow] = useState(false);
+  const [managedWorkflowReplacement, setManagedWorkflowReplacement] =
+    useState<Extract<TemplateManagedWorkflowReplacementResult, { readonly status: "ready" }>>();
+  const [isReplacingManagedWorkflow, setIsReplacingManagedWorkflow] = useState(false);
   const [accessPage, setAccessPage] = useState<StudentRepositoryAccessPageResult | null>(null);
   const [isSelectingPagesFolder, setIsSelectingPagesFolder] = useState(false);
   const [accessPagePublishStatus, setAccessPagePublishStatus] =
@@ -770,6 +774,71 @@ export const AssignmentDetailPage = ({
       }
     } finally {
       setIsPushingWorkflow(false);
+    }
+  };
+
+  const previewManagedWorkflowReplacement = async (): Promise<void> => {
+    if (
+      detail === null ||
+      detail.term.slug === null ||
+      detail.assignment.slug === null ||
+      window.graiderUI.replaceTemplateManagedWorkflow === undefined
+    )
+      return;
+    setIsReplacingManagedWorkflow(true);
+    try {
+      const result = await window.graiderUI.replaceTemplateManagedWorkflow({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        termCode: detail.term.slug,
+        assignmentSlug: detail.assignment.slug,
+        confirmed: false
+      });
+      if (result.status === "ready" && "preview" in result) setManagedWorkflowReplacement(result);
+      else showToast("Graider workflow replacement is unavailable for this assignment.");
+    } finally {
+      setIsReplacingManagedWorkflow(false);
+    }
+  };
+
+  const confirmManagedWorkflowReplacement = async (): Promise<void> => {
+    if (
+      detail === null ||
+      detail.term.slug === null ||
+      detail.assignment.slug === null ||
+      window.graiderUI.replaceTemplateManagedWorkflow === undefined
+    )
+      return;
+    setIsReplacingManagedWorkflow(true);
+    try {
+      const result = await window.graiderUI.replaceTemplateManagedWorkflow({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        termCode: detail.term.slug,
+        assignmentSlug: detail.assignment.slug,
+        confirmed: true,
+        ...(managedWorkflowReplacement === undefined
+          ? {}
+          : { previewFingerprint: managedWorkflowReplacement.preview.contentFingerprint })
+      });
+      if (result.status === "success" && "result" in result) {
+        setManagedWorkflowReplacement(undefined);
+        showToast(
+          result.result.workflow.status === "already_current"
+            ? "Graider workflow is already current."
+            : "Graider workflow installed in the template repository."
+        );
+        await loadTemplateWorkflow();
+      } else
+        showToast(
+          result.status === "success" &&
+            "result" in result &&
+            result.result.workflow.status === "stale"
+            ? "The template workflow changed after preview. Review it again before replacing it."
+            : "Unable to replace the template workflow safely."
+        );
+    } finally {
+      setIsReplacingManagedWorkflow(false);
     }
   };
 
@@ -1567,8 +1636,12 @@ export const AssignmentDetailPage = ({
                     preview={workflowPreview}
                     isLoading={isLoadingWorkflow}
                     isPushing={isPushingWorkflow}
+                    isReplacingManagedWorkflow={isReplacingManagedWorkflow}
                     onViewWorkflow={() => {
                       void loadTemplateWorkflow();
+                    }}
+                    onReplaceManagedWorkflow={() => {
+                      void previewManagedWorkflowReplacement();
                     }}
                     onDraftChange={(value) => {
                       setWorkflowDraft(value);
@@ -1581,6 +1654,32 @@ export const AssignmentDetailPage = ({
                     onPush={() => {
                       void pushWorkflow();
                     }}
+                  />
+                  <ConfirmationWithPreviewModal
+                    isOpen={managedWorkflowReplacement !== undefined}
+                    title="Replace template workflow with Graider's workflow?"
+                    summary={
+                      <p>
+                        Replace .github/workflows/grade.yml in{" "}
+                        {managedWorkflowReplacement?.preview.repository.fullName} on{" "}
+                        {managedWorkflowReplacement?.preview.repository.defaultBranch} with
+                        Graider's current generated workflow?
+                      </p>
+                    }
+                    preview={
+                      <p>
+                        Current classification: {managedWorkflowReplacement?.preview.classification}
+                        . Resulting action: {managedWorkflowReplacement?.preview.action}.
+                        {managedWorkflowReplacement?.preview.action === "replace"
+                          ? " The existing workflow will be replaced."
+                          : ""}
+                      </p>
+                    }
+                    acknowledgementLabel="I understand this can replace the template's existing workflow."
+                    confirmLabel="Confirm replace with Graider workflow"
+                    onConfirm={confirmManagedWorkflowReplacement}
+                    onSuccess={() => undefined}
+                    onCancel={() => setManagedWorkflowReplacement(undefined)}
                   />
                   {workflowSaveResult?.status === "success" ? (
                     <p role="status">

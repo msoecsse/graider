@@ -12,6 +12,7 @@ export interface GradingStudentWorkflowRepairRequest extends FacultyScopeService
   readonly assignmentSlug: string;
   readonly studentId: string;
   readonly confirmed: boolean;
+  readonly runAfterReplacement?: boolean;
 }
 
 export interface GradingStudentWorkflowRepairOperationDto {
@@ -30,6 +31,7 @@ export interface GradingStudentWorkflowRepairOperationDto {
       | "already_current"
       | "read_failed"
       | "write_failed"
+      | "stale"
       | "not_attempted";
     readonly commitSha?: string;
   };
@@ -66,7 +68,7 @@ interface PreparedContext {
   readonly studentId: string;
   readonly repository: { readonly owner: string; readonly name: string };
   readonly grading: unknown;
-  readonly submissionCommitSha: string;
+  readonly submissionCommitSha?: string;
 }
 
 type PrepareResult =
@@ -79,11 +81,14 @@ interface WorkflowRepairBackend {
     readonly termCode: string;
     readonly assignmentSlug: string;
     readonly studentId: string;
+    readonly runAfterReplacement?: boolean;
   }): PrepareResult;
   executePreparedGradingStudentWorkflowRepair(
     prepared: PreparedContext,
     token: string,
-    confirmed: boolean
+    confirmed: boolean,
+    overrides?: unknown,
+    runAfterReplacement?: boolean
   ): Promise<
     Extract<
       GradingStudentWorkflowRepairResult,
@@ -129,18 +134,29 @@ export const createGradingStudentWorkflowRepairService = (
       courseFolderPath: request.courseFolderPath,
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug,
-      studentId: request.studentId
+      studentId: request.studentId,
+      ...(request.runAfterReplacement === undefined
+        ? {}
+        : { runAfterReplacement: request.runAfterReplacement })
     });
     if (prepared.status !== "success") return prepared;
 
     const token = await resolveToken();
     if (token.status === "failure")
       return { status: "github_auth_unavailable", studentId: request.studentId };
-    return await backend.executePreparedGradingStudentWorkflowRepair(
-      prepared.value,
-      token.token,
-      request.confirmed
-    );
+    return request.runAfterReplacement === false
+      ? await backend.executePreparedGradingStudentWorkflowRepair(
+          prepared.value,
+          token.token,
+          request.confirmed,
+          {},
+          false
+        )
+      : await backend.executePreparedGradingStudentWorkflowRepair(
+          prepared.value,
+          token.token,
+          request.confirmed
+        );
   };
 };
 

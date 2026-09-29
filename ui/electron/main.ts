@@ -127,6 +127,7 @@ import {
   previewTemplateWorkflowSave,
   saveTemplateWorkflow
 } from "./templateWorkflowService.js";
+import { replaceTemplateManagedWorkflow } from "./templateManagedWorkflowReplacementService.js";
 import {
   addValidatedCourseFolderToRegistry,
   getCourseRegistryPath,
@@ -156,6 +157,7 @@ import {
   type StudentRepositoryAccessPageRequest,
   type TemplateWorkflowRequest,
   type TemplateWorkflowSaveRequest,
+  type TemplateManagedWorkflowReplacementRequest,
   type StudentAccessPagesConfigRequest,
   type AssignmentRepositoryDownloadRequest
 } from "./ipc.js";
@@ -434,6 +436,22 @@ const isTemplateWorkflowSaveRequest = (value: unknown): value is TemplateWorkflo
     typeof request.content === "string" &&
     (typeof request.loadedSha === "string" || request.loadedSha === null) &&
     typeof request.confirmed === "boolean"
+  );
+};
+
+const isTemplateManagedWorkflowReplacementRequest = (
+  value: unknown
+): value is TemplateManagedWorkflowReplacementRequest => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const request = value as Record<string, unknown>;
+  return (
+    (Object.keys(request).length === 5 || Object.keys(request).length === 6) &&
+    typeof request.courseFolderId === "string" &&
+    typeof request.courseFolderPath === "string" &&
+    typeof request.termCode === "string" &&
+    typeof request.assignmentSlug === "string" &&
+    typeof request.confirmed === "boolean" &&
+    (request.previewFingerprint === undefined || typeof request.previewFingerprint === "string")
   );
 };
 
@@ -939,6 +957,16 @@ export const registerIpcHandlers = (): void => {
     if (!isTemplateWorkflowSaveRequest(request))
       throw new Error("Template workflow save request is required.");
     return await saveTemplateWorkflow(request, { env: process.env, runner: processRunner });
+  });
+  ipcMain.handle(IPC_CHANNELS.replaceTemplateManagedWorkflow, async (_event, request: unknown) => {
+    if (
+      !isTemplateManagedWorkflowReplacementRequest(request) ||
+      !isRegisteredAssignmentSetupCourse(request)
+    )
+      throw new Error(
+        "A registered course folder is required for managed template workflow replacement."
+      );
+    return await replaceTemplateManagedWorkflow(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.refreshCourseFolder, async (_event, id: unknown) => {

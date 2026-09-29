@@ -96,6 +96,8 @@ import {
   type TemplateWorkflowSavePreview,
   type TemplateWorkflowSaveRequest,
   type TemplateWorkflowSaveResult,
+  type TemplateManagedWorkflowReplacementRequest,
+  type TemplateManagedWorkflowReplacementResult,
   type FacultyReportRequest,
   type FacultyReportResult,
   type GraiderUIApi,
@@ -236,6 +238,13 @@ const graiderUI: GraiderUIApi = {
     request: TemplateWorkflowSaveRequest
   ): Promise<TemplateWorkflowSaveResult> =>
     await invoke<TemplateWorkflowSaveResult>(IPC_CHANNELS.saveTemplateWorkflow, request),
+  replaceTemplateManagedWorkflow: async (
+    request: TemplateManagedWorkflowReplacementRequest
+  ): Promise<TemplateManagedWorkflowReplacementResult> =>
+    await invoke<TemplateManagedWorkflowReplacementResult>(
+      IPC_CHANNELS.replaceTemplateManagedWorkflow,
+      request
+    ),
   listCourseFolders: async (): Promise<CourseFolderRecord[]> =>
     await invoke<CourseFolderRecord[]>(IPC_CHANNELS.listCourseFolders),
   removeCourseFolder: async (id: string): Promise<void> => {
