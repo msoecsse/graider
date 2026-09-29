@@ -183,10 +183,10 @@ jobs:
               return 1
             fi
           }
-          for javafx_module in base graphics controls fxml; do
+          for javafx_module in base graphics controls fxml swing; do
             download "https://repo.maven.apache.org/maven2/org/openjfx/javafx-__GRAIDER_DOLLAR__javafx_module/__GRAIDER_DOLLAR__{JAVAFX_VERSION}/javafx-__GRAIDER_DOLLAR__javafx_module-__GRAIDER_DOLLAR__{JAVAFX_VERSION}-linux.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-__GRAIDER_DOLLAR__javafx_module.jar"
           done
-          JARS=("__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-base.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-graphics.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-controls.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-fxml.jar")
+          JARS=("__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-base.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-graphics.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-controls.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-fxml.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-swing.jar")
           for jar_file in "__GRAIDER_DOLLAR__{JARS[@]}"; do
             if ! jar tf "__GRAIDER_DOLLAR__jar_file" >/dev/null; then echo "::error::Downloaded JAR is invalid: __GRAIDER_DOLLAR__jar_file"; exit 1; fi
           done
@@ -229,7 +229,7 @@ jobs:
           mkdir -p "__GRAIDER_DOLLAR__BUILD_DIR"
           JAVAFX_COMPILE_ARGS=()
           if [[ "__GRAIDER_DOLLAR__GRAIDER_JAVAFX_REQUIRED" == true ]]; then
-            JAVAFX_COMPILE_ARGS=(--module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml)
+            JAVAFX_COMPILE_ARGS=(--module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)
           fi
           javac "__GRAIDER_DOLLAR__{JAVAFX_COMPILE_ARGS[@]}" -cp "__GRAIDER_DOLLAR__CLASSPATH" -d "__GRAIDER_DOLLAR__BUILD_DIR" "__GRAIDER_DOLLAR__{JAVA_FILES[@]}"
 
@@ -278,7 +278,7 @@ jobs:
           JAVAFX_RUNTIME_ARGS=()
           if [[ "__GRAIDER_DOLLAR__GRAIDER_JAVAFX_REQUIRED" == true ]]; then
             JUNIT_COMMAND=(xvfb-run -a -s "-screen 0 1280x1024x24" java)
-            JAVAFX_RUNTIME_ARGS=(-Dprism.order=sw --module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml)
+            JAVAFX_RUNTIME_ARGS=(-Dprism.order=sw --module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)
           fi
           "__GRAIDER_DOLLAR__{JUNIT_COMMAND[@]}" "__GRAIDER_DOLLAR__{JAVAFX_RUNTIME_ARGS[@]}" -jar "__GRAIDER_DOLLAR__TOOLS_DIR/junit-platform-console-standalone.jar" execute "__GRAIDER_DOLLAR__{TAG_ARGS[@]}" --scan-class-path --class-path "__GRAIDER_DOLLAR__TEST_CLASSPATH" --reports-dir "__GRAIDER_DOLLAR__EVIDENCE_DIR/junit" --fail-if-no-tests
 

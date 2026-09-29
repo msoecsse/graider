@@ -37,7 +37,7 @@ download JavaFX JARs.
 
 The JavaFX path conditionally installs `xvfb`, `libgtk-3-0t64`, and
 `libasound2t64`, then downloads and validates Linux JavaFX 25.0.2 base,
-graphics, controls, and FXML JARs. Shared compile and JUnit scripts populate
+graphics, controls, FXML, and Swing JARs. Shared compile and JUnit scripts populate
 JavaFX argument arrays only on this path. JUnit uses the same tag selection,
 class-path scan, reports directory, and failure behavior, with its command
 launched under Xvfb and `-Dprism.order=sw`.

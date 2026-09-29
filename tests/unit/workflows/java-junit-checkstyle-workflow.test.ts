@@ -164,7 +164,8 @@ describe("java-junit-checkstyle workflow", () => {
     expect(dependencyInstall.run).toContain("xvfb libgtk-3-0t64 libasound2t64");
     expect(javafxDownload.if).toBe("env.GRAIDER_JAVAFX_REQUIRED == 'true'");
     expect(javafxDownload.run).toContain("org/openjfx/javafx-");
-    expect(javafxDownload.run).toContain("base graphics controls fxml");
+    expect(javafxDownload.run).toContain("base graphics controls fxml swing");
+    expect(javafxDownload.run).toContain('"$JAVAFX_LIB/javafx-swing.jar"');
     expect(fxmlStaging.if).toBe(
       "steps.compile.outcome == 'success' && env.GRAIDER_JAVAFX_REQUIRED == 'true'"
     );
@@ -174,7 +175,7 @@ describe("java-junit-checkstyle workflow", () => {
     expect(compileScript).toContain("JAVAFX_COMPILE_ARGS=()");
     expect(compileScript).toContain('if [[ "$GRAIDER_JAVAFX_REQUIRED" == true ]]');
     expect(compileScript).toContain(
-      'JAVAFX_COMPILE_ARGS=(--module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml)'
+      'JAVAFX_COMPILE_ARGS=(--module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)'
     );
     expect(compileScript).toContain('javac "${JAVAFX_COMPILE_ARGS[@]}" -cp "$CLASSPATH"');
     expect(unitTestScript).toContain("JUNIT_COMMAND=(java)");
@@ -182,6 +183,9 @@ describe("java-junit-checkstyle workflow", () => {
       'JUNIT_COMMAND=(xvfb-run -a -s "-screen 0 1280x1024x24" java)'
     );
     expect(unitTestScript).toContain("JAVAFX_RUNTIME_ARGS=()");
+    expect(unitTestScript).toContain(
+      'JAVAFX_RUNTIME_ARGS=(-Dprism.order=sw --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)'
+    );
     expect(unitTestScript).toContain('"${JUNIT_COMMAND[@]}" "${JAVAFX_RUNTIME_ARGS[@]}" -jar');
   });
 
@@ -226,6 +230,14 @@ describe("java-junit-checkstyle workflow", () => {
     {
       name: "qualified JavaFX reference under test",
       files: { "test/AppTest.java": "class AppTest { javafx.scene.Node node; }\n" },
+      required: true,
+      reason: "Reason: JavaFX package references found"
+    },
+    {
+      name: "SwingFXUtils reference under test",
+      files: {
+        "test/ImageTest.java": "class ImageTest { javafx.embed.swing.SwingFXUtils utils; }\n"
+      },
       required: true,
       reason: "Reason: JavaFX package references found"
     },

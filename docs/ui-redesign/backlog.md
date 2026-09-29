@@ -1355,6 +1355,16 @@ owner, branch, path, or YAML. See
 
 ## Suggested order
 
+## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
+
+The canonical JavaFX path now downloads and validates `javafx-swing.jar` in
+addition to the base, graphics, controls, and FXML modules. Compile and JUnit
+runtime arguments include `javafx.swing`, fixing the demonstrated
+`SwingFXUtils` runtime failure without changing JavaFX detection, managed
+workflow ownership/version behavior, or adding unrelated modules such as
+`javafx.web` or `javafx.media`. The live known-good student submission still
+requires a real repository retest after workflow replacement.
+
 The next planned slice is ITEM-36.
 
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
@@ -1362,7 +1372,7 @@ of this sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
 26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, 46, 47,
-48, 49, and 51 are resolved. ITEM-36 is the next planned slice.
+48, 49, 51, and WORKFLOW-FX-2 are resolved. ITEM-36 is the next planned slice.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
@@ -1374,3 +1384,5 @@ ASSIGNMENT-CREATE-BUG-1 resolved item 47 without beginning ITEM-36.
 APPLY-RESULT-BUG-1 then resolved item 48; its live GitHub Apply acceptance
 retest remains ahead of the two WORKFLOW-FX-1 live smoke runs and ITEM-36.
 DASHBOARD-WORKFLOW-BUG-1 then resolved item 49 without beginning ITEM-36.
+WORKFLOW-FX-2 then resolved the demonstrated missing `javafx.swing` dependency
+without beginning ITEM-36.
