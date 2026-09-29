@@ -89,6 +89,17 @@ const LOCATION_HEADER = "location";
 const LOCATION_HEADER_ALTERNATE = "Location";
 const GET_METHOD = "GET";
 const MAX_SAFE_API_MESSAGE_LENGTH = 120;
+const GITHUB_REST_API_VERSION = "2026-03-10";
+
+const fetchWithGitHubApiVersion = (
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1]
+): ReturnType<typeof fetch> => {
+  const headers = new Headers(init?.headers);
+  headers.set("X-GitHub-Api-Version", GITHUB_REST_API_VERSION);
+
+  return fetch(input, { ...init, headers });
+};
 
 type OctokitParameters = Record<string, unknown>;
 
@@ -176,7 +187,13 @@ export class OctokitGitHubClient implements GitHubClient {
   constructor(options: OctokitGitHubClientOptions = {}) {
     this.token = normalizeToken(options.token);
     this.octokit =
-      options.octokit ?? (new Octokit({ auth: this.token }) as unknown as OctokitRestClientLike);
+      options.octokit ??
+      (new Octokit({
+        auth: this.token,
+        request: {
+          fetch: fetchWithGitHubApiVersion
+        }
+      }) as unknown as OctokitRestClientLike);
   }
 
   async getAuthenticatedUser(): Promise<GitHubUser> {

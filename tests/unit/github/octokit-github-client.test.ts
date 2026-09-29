@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { Readable } from "node:stream";
 import { deflateRawSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OctokitGitHubClient,
   type OctokitRestClientLike
@@ -472,6 +472,28 @@ const expectGitHubError = async (
 };
 
 describe("OctokitGitHubClient", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("configures the production Octokit client with the current GitHub REST API version", async () => {
+    let observedApiVersion: string | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      observedApiVersion = new Request(input, init).headers.get("x-github-api-version");
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: OctokitTestNumber.RepositoryId, name: REPO }), {
+          headers: { "content-type": "application/json" },
+          status: 200
+        })
+      );
+    });
+
+    await expect(
+      new OctokitGitHubClient({ token: TOKEN }).getRepository(OWNER, REPO)
+    ).resolves.toEqual(expect.objectContaining({ name: REPO }));
+    expect(observedApiVersion).toBe("2026-03-10");
+  });
+
   it("creates an uninitialized private repository in the configured organization", async () => {
     const octokit = createMockOctokit();
     let observedInput: Record<string, unknown> = {};

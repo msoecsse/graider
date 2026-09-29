@@ -1399,3 +1399,9 @@ WORKFLOW-FX-2 then resolved the demonstrated missing `javafx.swing` dependency
 without beginning ITEM-36.
 ITEM-51-BUG-1 then restored trusted local submission-SHA fallback for
 single-student replace-and-run without beginning ITEM-36.
+
+The GitHub REST API version warning observed during live workflow dispatch was
+resolved separately: production Octokit requests now centrally declare REST
+API version `2026-03-10`, with no dependency upgrade. See
+`summaries/github-api-1-rest-version.md`; ITEM-36 remains the next planned
+slice.
