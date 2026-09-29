@@ -1365,6 +1365,16 @@ workflow ownership/version behavior, or adding unrelated modules such as
 `javafx.web` or `javafx.media`. The live known-good student submission still
 requires a real repository retest after workflow replacement.
 
+## ITEM-51-BUG-1. Single-student replace-and-run cannot resolve submission SHA — **Resolved**
+
+Single-student replace-and-run now mirrors bulk repair's trusted local-HEAD
+fallback when grading state has no submission SHA. It uses only trusted request
+identity to resolve the registered local checkout, retries preparation with
+verified local Git `HEAD`, and resolves GitHub authentication only after that
+preparation succeeds. Replacement-only remains independent of local HEAD and
+dispatch. The renderer supplies neither a local path nor a SHA. See
+`summaries/item-51-bug-1-student-workflow-dispatch-sha.md`.
+
 The next planned slice is ITEM-36.
 
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
@@ -1372,7 +1382,8 @@ of this sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
 26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, 46, 47,
-48, 49, 51, and WORKFLOW-FX-2 are resolved. ITEM-36 is the next planned slice.
+48, 49, 51, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved. ITEM-36 is the next
+planned slice.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
@@ -1386,3 +1397,5 @@ retest remains ahead of the two WORKFLOW-FX-1 live smoke runs and ITEM-36.
 DASHBOARD-WORKFLOW-BUG-1 then resolved item 49 without beginning ITEM-36.
 WORKFLOW-FX-2 then resolved the demonstrated missing `javafx.swing` dependency
 without beginning ITEM-36.
+ITEM-51-BUG-1 then restored trusted local submission-SHA fallback for
+single-student replace-and-run without beginning ITEM-36.

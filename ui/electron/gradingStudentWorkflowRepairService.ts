@@ -5,6 +5,12 @@ import {
   type FacultyScopeServiceResult
 } from "./facultyScopeService.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
+import {
+  getLocalRepositoryLocatorPath,
+  resolveLocalStudentRepository,
+  type LocalRepositoryResolution
+} from "./localRepositoryLocator.js";
+import { readLocalRepositoryHead, type LocalRepositoryHeadResult } from "./localRepositoryHead.js";
 import { resolveGithubToken, type GithubTokenResolution } from "./tokenResolver.js";
 
 export interface GradingStudentWorkflowRepairRequest extends FacultyScopeServiceRequest {
@@ -59,6 +65,7 @@ export type GradingStudentWorkflowRepairResult =
         | "submission_commit_unavailable"
         | "repository_not_recorded"
         | "repository_unavailable"
+        | "registry_error"
         | "github_auth_unavailable"
         | "github_operation_failed";
       readonly studentId?: string;
@@ -82,6 +89,7 @@ interface WorkflowRepairBackend {
     readonly assignmentSlug: string;
     readonly studentId: string;
     readonly runAfterReplacement?: boolean;
+    readonly currentSubmissionCommitSha?: string;
   }): PrepareResult;
   executePreparedGradingStudentWorkflowRepair(
     prepared: PreparedContext,
@@ -103,6 +111,16 @@ export interface GradingStudentWorkflowRepairDependencies {
   readonly resolveFacultyScope: (request: FacultyScopeServiceRequest) => FacultyScopeServiceResult;
   readonly resolveToken: () => Promise<GithubTokenResolution>;
   readonly loadBackend: () => WorkflowRepairBackend;
+  readonly resolveLocalRepository: (
+    file: string,
+    key: {
+      readonly courseFolderId: string;
+      readonly termCode: string;
+      readonly assignmentSlug: string;
+      readonly studentId: string;
+    }
+  ) => LocalRepositoryResolution;
+  readonly readLocalHead: (repositoryRoot: string) => Promise<LocalRepositoryHeadResult>;
 }
 
 const loadBackend = (): WorkflowRepairBackend =>
@@ -122,6 +140,8 @@ export const createGradingStudentWorkflowRepairService = (
     overrides.resolveToken ??
     (async () => await resolveGithubToken({ runner: createNodeProcessRunner() }));
   const getBackend = overrides.loadBackend ?? loadBackend;
+  const resolveLocalRepository = overrides.resolveLocalRepository ?? resolveLocalStudentRepository;
+  const readLocalHead = overrides.readLocalHead ?? readLocalRepositoryHead;
 
   return async (request) => {
     const scope = resolveFacultyScope(request);
@@ -130,7 +150,7 @@ export const createGradingStudentWorkflowRepairService = (
       return { status: "student_not_accessible", studentId: request.studentId };
 
     const backend = getBackend();
-    const prepared = backend.prepareGradingStudentWorkflowRepairContext({
+    let prepared = backend.prepareGradingStudentWorkflowRepairContext({
       courseFolderPath: request.courseFolderPath,
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug,
@@ -139,6 +159,35 @@ export const createGradingStudentWorkflowRepairService = (
         ? {}
         : { runAfterReplacement: request.runAfterReplacement })
     });
+    if (
+      request.runAfterReplacement !== false &&
+      prepared.status === "submission_commit_unavailable"
+    ) {
+      const localRepository = resolveLocalRepository(
+        getLocalRepositoryLocatorPath(request.userDataPath),
+        {
+          courseFolderId: request.courseFolderId,
+          termCode: request.termCode,
+          assignmentSlug: request.assignmentSlug,
+          studentId: request.studentId
+        }
+      );
+      if (localRepository.status !== "success")
+        return { status: localRepository.status, studentId: request.studentId };
+      const head = await readLocalHead(localRepository.localPath);
+      if (head.status !== "success")
+        return { status: "submission_commit_unavailable", studentId: request.studentId };
+      prepared = backend.prepareGradingStudentWorkflowRepairContext({
+        courseFolderPath: request.courseFolderPath,
+        termCode: request.termCode,
+        assignmentSlug: request.assignmentSlug,
+        studentId: request.studentId,
+        ...(request.runAfterReplacement === undefined
+          ? {}
+          : { runAfterReplacement: request.runAfterReplacement }),
+        currentSubmissionCommitSha: head.submissionCommitSha
+      });
+    }
     if (prepared.status !== "success") return prepared;
 
     const token = await resolveToken();

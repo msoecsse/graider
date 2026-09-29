@@ -264,6 +264,40 @@ describe("GradingWorkspacePage workflow repair", () => {
     ).toHaveTextContent("already current");
   });
 
+  it("explains when replace and run cannot verify the submission commit", async () => {
+    const repair = vi.fn(({ studentId, confirmed }: { studentId: string; confirmed: boolean }) =>
+      Promise.resolve(
+        confirmed
+          ? { status: "submission_commit_unavailable" as const, studentId }
+          : {
+              status: "ready" as const,
+              studentId,
+              repositoryFullName: `trusted-org/lab1-${studentId}`
+            }
+      )
+    );
+    setApis(repair);
+    render(<GradingWorkspacePage request={REQUEST} />);
+
+    const action = await screen.findByRole("button", { name: "Replace Graider workflow…" });
+    await waitFor(() => expect(action).toBeEnabled());
+    fireEvent.click(action);
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", {
+        name: "I understand this replaces the repository's grading workflow."
+      })
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm replace workflow & run" }));
+
+    expect(
+      await screen.findAllByText(
+        /grading cannot start because the submission commit could not be verified/u
+      )
+    ).not.toHaveLength(0);
+    expect(screen.queryByText("Workflow repair is currently unavailable.")).not.toBeInTheDocument();
+  });
+
   it("ignores a stale availability result after switching students", async () => {
     const ada = deferred<{ status: "ready"; studentId: string; repositoryFullName: string }>();
     const repair = vi.fn(({ studentId }: { studentId: string }) =>

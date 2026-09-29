@@ -196,7 +196,11 @@ const workflowRepairUnavailableMessage = (status: string): string => {
       "Workflow repair is unavailable because GitHub authentication could not be resolved.",
     student_not_accessible: "Workflow repair is unavailable for this student.",
     assignment_config_error:
-      "Workflow repair is unavailable because assignment configuration could not be read."
+      "Workflow repair is unavailable because assignment configuration could not be read.",
+    submission_commit_unavailable:
+      "Workflow replacement is available, but grading cannot start because the submission commit could not be verified. Refresh or re-download the student's repository, then try again, or replace the workflow without running grading.",
+    registry_error:
+      "Workflow repair is unavailable because the local repository records could not be read safely."
   };
   return messages[status] ?? "Workflow repair is currently unavailable.";
 };
