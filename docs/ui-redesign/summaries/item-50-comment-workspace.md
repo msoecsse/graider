@@ -47,7 +47,11 @@ cannot change underneath an operation.
 
 Focused workspace/page, shortcut, sibling-panel, and course-level library
 tests cover the takeover, source anchor, save/cancel, filtering, reusable CRUD,
-promotion, shortcut focus, and navigation suppression. Full branch validation
-still requires the standard root/UI typecheck, lint, format check, tests,
-builds, and high-severity audit gate. A manual Electron smoke test should
-confirm source-view scroll/selection restoration across a takeover transition.
+promotion, shortcut focus, and navigation suppression. Manual Electron
+acceptance testing passed for source selection → Add comment → return to
+grading, source/view state restoration, comment library takeover, reusable
+comment application, promotion to the course library, `Esc` behavior, and
+student-navigation suppression while the comment workspace was active.
+Full branch validation still requires the standard root/UI typecheck, lint,
+format check, tests, builds, and high-severity audit gate; that full suite has
+not been rerun as part of this documentation cleanup.

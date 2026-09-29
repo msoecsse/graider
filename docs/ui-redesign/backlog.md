@@ -1318,20 +1318,18 @@ configuration are covered. See `summaries/dashboard-workflow-bug-1.md`.
 
 ---
 
-## 50. Comment authoring and library browsing overload the grading sidebar — **Should fix**
+## 50. Comment authoring and library browsing overload the grading sidebar — **Resolved**
 
 The grading sidebar currently mixes grading state, evidence, applied feedback,
 and publication actions with one-off comment authoring, reusable-comment
 search/tag filtering, reusable-library CRUD, and promotion. These are distinct
 tasks and make the selected student's grading state harder to scan.
 
-Move comment authoring and reusable-library work into a focused takeover inside
-the existing grading page, following Publish Review's replacement-of-the-grid
-pattern. Keep the selected student and grading session in memory; do not add a
-route, another Electron window, or a second comment model. The sidebar should
-retain applied comments and compact launch/promotion actions, not a search
-list or editor. Preserve source anchors, drafts/discard protection, reusable
-comment publication behavior, and course-level Comment Library management.
+Resolved: the same-page `GradingCommentWorkspace` takeover is implemented.
+The sidebar now retains only compact comment launch actions plus applied
+grading information; authoring and library browsing moved out of the sidebar.
+Manual Electron acceptance testing completed successfully for the implemented
+workspace behavior. The next planned sequence is ITEM-51, then ITEM-36.
 
 ---
 
@@ -1339,13 +1337,13 @@ comment publication behavior, and course-level Comment Library management.
 
 Nothing is blocking PR6b anymore — proceed to it directly.
 
-Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of this
-sequence.
+Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
+of this sequence.
 
 Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
 26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, 46, 47,
-48, and 49 are resolved. Item 50 is the next planned UI slice; items 51 and
-36 remain out of scope until it is complete.
+48, and 49 are resolved. ITEM-51 is the next planned slice, followed by
+ITEM-36.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
