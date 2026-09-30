@@ -68,12 +68,62 @@ jobs:
         with:
           ref: __GRAIDER_DOLLAR__{{ env.EFFECTIVE_SUBMISSION_SHA }}
 
+      - name: Detect JavaFX requirements
+        id: javafx
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_ROOTS=()
+          if [[ -d src ]]; then SOURCE_ROOTS+=(src); fi
+          if [[ -d test ]]; then SOURCE_ROOTS+=(test); fi
+          if [[ -d tests ]]; then SOURCE_ROOTS+=(tests); fi
+          JAVA_FILES=()
+          if (( __GRAIDER_DOLLAR__{#SOURCE_ROOTS[@]} > 0 )); then
+            while IFS= read -r -d '' java_file; do JAVA_FILES+=("__GRAIDER_DOLLAR__java_file"); done < <(find "__GRAIDER_DOLLAR__{SOURCE_ROOTS[@]}" -type f -name '*.java' -print0)
+          fi
+          JAVAFX_REQUIRED=false
+          JAVAFX_REASONS=()
+          if [[ -d src ]]; then
+            FXML_FILES=()
+            while IFS= read -r -d '' fxml_file; do FXML_FILES+=("__GRAIDER_DOLLAR__fxml_file"); done < <(find src -type f -name '*.fxml' -print0)
+            if (( __GRAIDER_DOLLAR__{#FXML_FILES[@]} > 0 )); then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("FXML resources found under src/")
+            fi
+          fi
+          if (( __GRAIDER_DOLLAR__{#JAVA_FILES[@]} > 0 )); then
+            if grep -h -E -q '^[[:space:]]*import[[:space:]]+(static[[:space:]]+)?javafx\.' "__GRAIDER_DOLLAR__{JAVA_FILES[@]}"; then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("JavaFX imports found")
+            fi
+            if grep -h -E -q '^[[:space:]]*import[[:space:]]+(static[[:space:]]+)?org\.testfx\.' "__GRAIDER_DOLLAR__{JAVA_FILES[@]}"; then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("TestFX imports found")
+            fi
+            if grep -h -E -q '(^|[;{])[[:space:]]*requires([[:space:]]+(transitive|static))*[[:space:]]+javafx\.[[:alnum:]_.]+[[:space:]]*;' "__GRAIDER_DOLLAR__{JAVA_FILES[@]}"; then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("JavaFX module requirements found")
+            fi
+            if grep -h -E -q '(^|[^[:alnum:]_])javafx\.[[:alpha:]_][[:alnum:]_]*\.' "__GRAIDER_DOLLAR__{JAVA_FILES[@]}"; then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("JavaFX package references found")
+            fi
+          fi
+          if [[ "__GRAIDER_DOLLAR__JAVAFX_REQUIRED" == true ]]; then
+            echo "JavaFX required: yes"
+            for reason in "__GRAIDER_DOLLAR__{JAVAFX_REASONS[@]}"; do echo "Reason: __GRAIDER_DOLLAR__reason"; done
+          else
+            echo "JavaFX required: no"
+            echo "Using standard Java/JUnit environment."
+          fi
+          printf 'GRAIDER_JAVAFX_REQUIRED=%s\n' "__GRAIDER_DOLLAR__JAVAFX_REQUIRED" >> "__GRAIDER_DOLLAR__GITHUB_ENV"
+
       - name: Prepare grading directories
         shell: bash
         run: |
           set -euo pipefail
           rm -rf "__GRAIDER_DOLLAR__TOOLS_DIR" "__GRAIDER_DOLLAR__BUILD_DIR" "__GRAIDER_DOLLAR__EVIDENCE_DIR" "__GRAIDER_DOLLAR__OUTPUT_DIR"
-          mkdir -p "__GRAIDER_DOLLAR__TOOLS_DIR" "__GRAIDER_DOLLAR__JAVAFX_LIB" "__GRAIDER_DOLLAR__BUILD_DIR" "__GRAIDER_DOLLAR__EVIDENCE_DIR" "__GRAIDER_DOLLAR__OUTPUT_DIR"
+          mkdir -p "__GRAIDER_DOLLAR__TOOLS_DIR" "__GRAIDER_DOLLAR__BUILD_DIR" "__GRAIDER_DOLLAR__EVIDENCE_DIR" "__GRAIDER_DOLLAR__OUTPUT_DIR"
 
       - name: Set up Java
         uses: actions/setup-java@v6
@@ -82,13 +132,14 @@ jobs:
           java-version: __GRAIDER_DOLLAR__{{ env.JAVA_VERSION }}
 
       - name: Install headless JavaFX dependencies
+        if: env.GRAIDER_JAVAFX_REQUIRED == 'true'
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y xvfb libgtk-3-0t64 libasound2t64
 
-      - name: Download grading tools
+      - name: Download core grading tools
         id: tools
         shell: bash
         run: |
@@ -110,14 +161,35 @@ jobs:
           download "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/__GRAIDER_DOLLAR__{BYTE_BUDDY_VERSION}/byte-buddy-__GRAIDER_DOLLAR__{BYTE_BUDDY_VERSION}.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/byte-buddy.jar"
           download "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/__GRAIDER_DOLLAR__{BYTE_BUDDY_VERSION}/byte-buddy-agent-__GRAIDER_DOLLAR__{BYTE_BUDDY_VERSION}.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/byte-buddy-agent.jar"
           download "https://repo.maven.apache.org/maven2/org/objenesis/objenesis/__GRAIDER_DOLLAR__{OBJENESIS_VERSION}/objenesis-__GRAIDER_DOLLAR__{OBJENESIS_VERSION}.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/objenesis.jar"
-          for javafx_module in base graphics controls fxml; do
-            download "https://repo.maven.apache.org/maven2/org/openjfx/javafx-__GRAIDER_DOLLAR__javafx_module/__GRAIDER_DOLLAR__{JAVAFX_VERSION}/javafx-__GRAIDER_DOLLAR__javafx_module-__GRAIDER_DOLLAR__{JAVAFX_VERSION}-linux.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-__GRAIDER_DOLLAR__javafx_module.jar"
-          done
-          JARS=("__GRAIDER_DOLLAR__TOOLS_DIR/checkstyle.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/junit-platform-console-standalone.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/mockito-core.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/byte-buddy.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/byte-buddy-agent.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/objenesis.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-base.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-graphics.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-controls.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-fxml.jar")
+          JARS=("__GRAIDER_DOLLAR__TOOLS_DIR/checkstyle.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/junit-platform-console-standalone.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/mockito-core.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/byte-buddy.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/byte-buddy-agent.jar" "__GRAIDER_DOLLAR__TOOLS_DIR/objenesis.jar")
           for jar_file in "__GRAIDER_DOLLAR__{JARS[@]}"; do
             if ! jar tf "__GRAIDER_DOLLAR__jar_file" >/dev/null; then echo "::error::Downloaded JAR is invalid: __GRAIDER_DOLLAR__jar_file"; exit 1; fi
           done
           if ! grep -q '<module' "__GRAIDER_DOLLAR__TOOLS_DIR/checkstyle.xml"; then echo "::error::Downloaded Checkstyle configuration is not valid XML configuration."; exit 1; fi
+
+      - name: Download JavaFX modules
+        if: env.GRAIDER_JAVAFX_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "__GRAIDER_DOLLAR__JAVAFX_LIB"
+          download() {
+            local url="__GRAIDER_DOLLAR__1"
+            local destination="__GRAIDER_DOLLAR__2"
+            echo "Downloading __GRAIDER_DOLLAR__(basename "__GRAIDER_DOLLAR__destination")"
+            curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors --output "__GRAIDER_DOLLAR__destination" "__GRAIDER_DOLLAR__url"
+            if [[ ! -s "__GRAIDER_DOLLAR__destination" ]]; then
+              echo "::error::Downloaded file is missing or empty: __GRAIDER_DOLLAR__destination"
+              return 1
+            fi
+          }
+          for javafx_module in base graphics controls fxml swing; do
+            download "https://repo.maven.apache.org/maven2/org/openjfx/javafx-__GRAIDER_DOLLAR__javafx_module/__GRAIDER_DOLLAR__{JAVAFX_VERSION}/javafx-__GRAIDER_DOLLAR__javafx_module-__GRAIDER_DOLLAR__{JAVAFX_VERSION}-linux.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-__GRAIDER_DOLLAR__javafx_module.jar"
+          done
+          JARS=("__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-base.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-graphics.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-controls.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-fxml.jar" "__GRAIDER_DOLLAR__JAVAFX_LIB/javafx-swing.jar")
+          for jar_file in "__GRAIDER_DOLLAR__{JARS[@]}"; do
+            if ! jar tf "__GRAIDER_DOLLAR__jar_file" >/dev/null; then echo "::error::Downloaded JAR is invalid: __GRAIDER_DOLLAR__jar_file"; exit 1; fi
+          done
 
       - name: CheckStyle
         id: checkstyle
@@ -155,11 +227,31 @@ jobs:
           CLASSPATH=__GRAIDER_DOLLAR__(IFS=:; echo "__GRAIDER_DOLLAR__{CLASSPATH_PARTS[*]}")
           rm -rf "__GRAIDER_DOLLAR__BUILD_DIR"
           mkdir -p "__GRAIDER_DOLLAR__BUILD_DIR"
-          javac --module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -cp "__GRAIDER_DOLLAR__CLASSPATH" -d "__GRAIDER_DOLLAR__BUILD_DIR" "__GRAIDER_DOLLAR__{JAVA_FILES[@]}"
+          JAVAFX_COMPILE_ARGS=()
+          if [[ "__GRAIDER_DOLLAR__GRAIDER_JAVAFX_REQUIRED" == true ]]; then
+            JAVAFX_COMPILE_ARGS=(--module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)
+          fi
+          javac "__GRAIDER_DOLLAR__{JAVAFX_COMPILE_ARGS[@]}" -cp "__GRAIDER_DOLLAR__CLASSPATH" -d "__GRAIDER_DOLLAR__BUILD_DIR" "__GRAIDER_DOLLAR__{JAVA_FILES[@]}"
+
+      - name: Stage FXML resources
+        id: fxml
+        if: steps.compile.outcome == 'success' && env.GRAIDER_JAVAFX_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d src ]]; then
+            while IFS= read -r -d '' fxml_file; do
+              relative_path="__GRAIDER_DOLLAR__{fxml_file#src/}"
+              destination="__GRAIDER_DOLLAR__BUILD_DIR/__GRAIDER_DOLLAR__relative_path"
+              mkdir -p "__GRAIDER_DOLLAR__(dirname "__GRAIDER_DOLLAR__destination")"
+              cp "__GRAIDER_DOLLAR__fxml_file" "__GRAIDER_DOLLAR__destination"
+              echo "Staged FXML resource: __GRAIDER_DOLLAR__fxml_file -> __GRAIDER_DOLLAR__destination"
+            done < <(find src -type f -name '*.fxml' -print0)
+          fi
 
       - name: Unit Tests
         id: unittests
-        if: steps.compile.outcome == 'success'
+        if: always() && steps.compile.outcome == 'success' && (env.GRAIDER_JAVAFX_REQUIRED != 'true' || steps.fxml.outcome == 'success')
         continue-on-error: true
         shell: bash
         run: |
@@ -172,9 +264,8 @@ jobs:
           TAG_ARGS=()
           JUNIT_TAGS_PRESENT=false
           while IFS= read -r -d '' class_file; do
-            if grep -a -q -E 'org/junit/jupiter/api/Tag(s)?' "__GRAIDER_DOLLAR__class_file"; then
+            if [[ "__GRAIDER_DOLLAR__JUNIT_TAGS_PRESENT" == false ]] && grep -a -q -E 'org/junit/jupiter/api/Tag(s)?' "__GRAIDER_DOLLAR__class_file"; then
               JUNIT_TAGS_PRESENT=true
-              break
             fi
           done < <(find "__GRAIDER_DOLLAR__BUILD_DIR" -type f -name '*.class' -print0)
           if [[ "__GRAIDER_DOLLAR__JUNIT_TAGS_PRESENT" == true ]]; then
@@ -183,7 +274,13 @@ jobs:
               COMMIT[0-9]*|DONE[0-9]*) TAG="__GRAIDER_DOLLAR__{COMMIT_MSG%% *}"; TAG_ARGS=(--include-tag "__GRAIDER_DOLLAR__TAG");;
             esac
           fi
-          xvfb-run -a -s "-screen 0 1280x1024x24" java -Dprism.order=sw --module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml -jar "__GRAIDER_DOLLAR__TOOLS_DIR/junit-platform-console-standalone.jar" execute "__GRAIDER_DOLLAR__{TAG_ARGS[@]}" --scan-class-path --class-path "__GRAIDER_DOLLAR__TEST_CLASSPATH" --reports-dir "__GRAIDER_DOLLAR__EVIDENCE_DIR/junit" --fail-if-no-tests
+          JUNIT_COMMAND=(java)
+          JAVAFX_RUNTIME_ARGS=()
+          if [[ "__GRAIDER_DOLLAR__GRAIDER_JAVAFX_REQUIRED" == true ]]; then
+            JUNIT_COMMAND=(xvfb-run -a -s "-screen 0 1280x1024x24" java)
+            JAVAFX_RUNTIME_ARGS=(-Dprism.order=sw --module-path "__GRAIDER_DOLLAR__JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)
+          fi
+          "__GRAIDER_DOLLAR__{JUNIT_COMMAND[@]}" "__GRAIDER_DOLLAR__{JAVAFX_RUNTIME_ARGS[@]}" -jar "__GRAIDER_DOLLAR__TOOLS_DIR/junit-platform-console-standalone.jar" execute "__GRAIDER_DOLLAR__{TAG_ARGS[@]}" --scan-class-path --class-path "__GRAIDER_DOLLAR__TEST_CLASSPATH" --reports-dir "__GRAIDER_DOLLAR__EVIDENCE_DIR/junit" --fail-if-no-tests
 
       - name: Write Graider grading result and evidence metadata
         if: always()

@@ -103,9 +103,15 @@ export const isGradingStudentWorkflowRepairRequest = (
   const request = record(value);
   return (
     request !== null &&
-    hasOnlyKeys(request, [...IDENTITY_KEYS, "confirmed"]) &&
+    hasOnlyKeys(
+      request,
+      request.runAfterReplacement === undefined
+        ? [...IDENTITY_KEYS, "confirmed"]
+        : [...IDENTITY_KEYS, "confirmed", "runAfterReplacement"]
+    ) &&
     hasIdentity(request) &&
-    typeof request.confirmed === "boolean"
+    typeof request.confirmed === "boolean" &&
+    (request.runAfterReplacement === undefined || typeof request.runAfterReplacement === "boolean")
   );
 };
 

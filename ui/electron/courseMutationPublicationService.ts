@@ -10,6 +10,8 @@ type CourseMutationResult = {
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 };
 
+type SuccessfulCourseMutationResult = CourseMutationResult & { readonly status: "success" };
+
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
 
 const publicationResult = (result: CoursePublishActionResult): CourseMutationPublicationResult => ({
@@ -26,11 +28,21 @@ const failedPublication = (error: unknown): CourseMutationPublicationResult => (
   ]
 });
 
-export const publishSuccessfulCourseMutation = async <T extends CourseMutationResult>(
+export function publishSuccessfulCourseMutation<T extends SuccessfulCourseMutationResult>(
+  courseFolderPath: string,
+  result: T,
+  publish?: (path: string) => Promise<CoursePublishActionResult>
+): Promise<T & { readonly publication: CourseMutationPublicationResult }>;
+export function publishSuccessfulCourseMutation<T extends CourseMutationResult>(
+  courseFolderPath: string,
+  result: T,
+  publish?: (path: string) => Promise<CoursePublishActionResult>
+): Promise<T & { readonly publication?: CourseMutationPublicationResult }>;
+export async function publishSuccessfulCourseMutation<T extends CourseMutationResult>(
   courseFolderPath: string,
   result: T,
   publish: (path: string) => Promise<CoursePublishActionResult> = publishCourseChanges
-): Promise<T & { readonly publication?: CourseMutationPublicationResult }> => {
+): Promise<T & { readonly publication?: CourseMutationPublicationResult }> {
   if (result.status !== "success") return result;
   const publication = await publish(courseFolderPath)
     .then(publicationResult)
@@ -48,4 +60,4 @@ export const publishSuccessfulCourseMutation = async <T extends CourseMutationRe
           )
         ]
       };
-};
+}

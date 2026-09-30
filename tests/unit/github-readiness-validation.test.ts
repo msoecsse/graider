@@ -4,7 +4,10 @@ import type {
   RawCourseConfig,
   RawTermConfig
 } from "../../src/config/config-models.js";
-import { FakeGitHubClient } from "../../src/github/fake-github-client.js";
+import {
+  FakeGitHubClient,
+  type FakeRepositoryFileRecord
+} from "../../src/github/fake-github-client.js";
 import { validateGitHubReadiness } from "../../src/github/github-readiness-validation.js";
 import type { GitHubTemplateRepository } from "../../src/github/github-models.js";
 import type { RosterStudent } from "../../src/roster/roster-models.js";
@@ -23,6 +26,7 @@ const TEMPLATE_BRANCH = "main";
 const FACULTY_TEAM = "faculty";
 const GRADER_TEAM = "graders";
 const README_FILE = "README.md";
+const WORKFLOW_PATH = ".github/workflows/grade.yml";
 const STUDENT_ID = "jones";
 const GITHUB_USERNAME = "seanjones";
 
@@ -129,10 +133,12 @@ const createTemplateRepository = (
 });
 
 const createReadyClient = (
-  templateRepository: GitHubTemplateRepository | null = createTemplateRepository()
+  templateRepository: GitHubTemplateRepository | null = createTemplateRepository(),
+  repositoryFiles: readonly FakeRepositoryFileRecord[] = []
 ): FakeGitHubClient =>
   new FakeGitHubClient({
     ...(templateRepository === null ? {} : { templateRepositories: [templateRepository] }),
+    repositoryFiles: [...repositoryFiles],
     users: [{ username: GITHUB_USERNAME, id: TestNumber.StudentUserId }],
     teams: [
       {
@@ -208,6 +214,80 @@ describe("GitHub readiness validation", () => {
     });
 
     expect(result.errors).toEqual([]);
+  });
+
+  it("continues requiring a configured custom workflow file", async () => {
+    const result = await validateGitHubReadiness({
+      courseConfig,
+      termConfig,
+      assignmentConfig: {
+        ...assignmentConfig,
+        grading: {
+          enabled: true,
+          mode: "custom-workflow",
+          workflow: WORKFLOW_PATH,
+          artifact: "grading-results",
+          result_file: "results.json"
+        }
+      },
+      students,
+      githubClient: createReadyClient(),
+      validateTemplateWorkflow: true
+    });
+
+    expect(result.errors).toEqual([expect.objectContaining({ code: "grading_workflow_missing" })]);
+  });
+
+  it("continues requiring workflow_dispatch for a configured custom workflow", async () => {
+    const result = await validateGitHubReadiness({
+      courseConfig,
+      termConfig,
+      assignmentConfig: {
+        ...assignmentConfig,
+        grading: {
+          enabled: true,
+          mode: "custom-workflow",
+          workflow: WORKFLOW_PATH,
+          artifact: "grading-results",
+          result_file: "results.json"
+        }
+      },
+      students,
+      githubClient: createReadyClient(createTemplateRepository(), [
+        {
+          owner: ORGANIZATION,
+          repo: TEMPLATE_REPO,
+          path: WORKFLOW_PATH,
+          branch: TEMPLATE_BRANCH,
+          content: "name: Grade\non: [push]\njobs: {}\n",
+          message: "Seed custom workflow",
+          commitSha: "workflow-sha"
+        }
+      ]),
+      validateTemplateWorkflow: true
+    });
+
+    expect(result.errors).toEqual([
+      expect.objectContaining({ code: "workflow_dispatch_unsupported" })
+    ]);
+  });
+
+  it("does not inspect a template workflow when assignment grading is disabled", async () => {
+    const githubClient = createReadyClient();
+    const result = await validateGitHubReadiness({
+      courseConfig,
+      termConfig,
+      assignmentConfig: {
+        ...assignmentConfig,
+        grading: { enabled: false, mode: "no-grading" }
+      },
+      students,
+      githubClient,
+      validateTemplateWorkflow: true
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(githubClient.fileReads).toEqual([]);
   });
 
   it("TC-GH-READY-001 template repo exists passes", async () => {

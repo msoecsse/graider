@@ -109,6 +109,19 @@ describe("apply recovery", () => {
     });
 
     expect(first.exitCode).toBe(ExitCode.GitHubOrNetworkFailure);
+    const repositories = first.summary.repositories;
+    if (!Array.isArray(repositories)) throw new Error("Expected repository outcomes.");
+    const firstOutcome: unknown = repositories[0];
+    if (typeof firstOutcome !== "object" || firstOutcome === null) {
+      throw new Error("Expected the first repository outcome.");
+    }
+    expect(firstOutcome).toMatchObject({
+      repository: JONES_REPOSITORY,
+      status: "created",
+      reason: "repository_created_with_issues"
+    });
+    const diagnostics: unknown = Reflect.get(firstOutcome, "diagnostics");
+    expect(JSON.stringify(diagnostics)).toContain('"operationType":"add_student_collaborator"');
     expect(second.exitCode).toBe(ExitCode.Success);
     expect(githubClient.mutations.createdRepositories).toHaveLength(createdAfterFirstRun);
   });

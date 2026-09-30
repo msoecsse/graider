@@ -1,5 +1,13 @@
 # Graider RC2 Faculty Pilot Release Notes
 
+> Historical release artifact. These notes describe the RC2 pilot, not every
+> capability or contract on the current `ui-redesign` branch. In particular,
+> RC2 documentation used the then-current seven-column roster terminology; the
+> current canonical stored roster is `student_id,github_username,section,status`.
+> Former seven-column files remain accepted for import where supported and are
+> saved in canonical four-column form. See the current [Faculty UI User
+> Guide](../../faculty-ui-user-guide.md) for present-day instructions.
+
 ## What Is Available
 
 RC2 supports the current faculty workflow: course/term/roster setup, assignment
@@ -20,7 +28,9 @@ workflow and the [RC2 smoke test](FACULTY-SMOKE-TEST.md) for pilot validation.
 
 - A local configured course folder and GitHub organization access.
 - GitHub authentication, normally through `gh auth login`.
-- Canonical seven-column rosters.
+- The RC2 pilot used seven-column roster files; current branch guidance uses
+  the canonical four-column roster contract described in the historical note
+  above.
 - A selected local clone of the configured Pages repository when sharing Canvas links.
 - A safe sandbox course for apply, workflow push, and grade dispatch testing.
 

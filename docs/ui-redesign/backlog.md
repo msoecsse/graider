@@ -4,7 +4,10 @@ Issues surfaced during PR1–PR6a that were deliberately left unfixed, either
 because they were out of a PR's scope or because fixing them needed its own
 decision. Each entry says what it is, why it matters, and how big it is.
 
-Work these between PR6a and PR6b. Item 1 is a hard prerequisite for PR6b.
+The first entries were recorded between PR6a and PR6b, but this file now also
+records later redesign, roster, comment-library, and workflow work. Preserve
+each item's history; use the end-of-file status summary for the current queue.
+Item 1 was the original hard prerequisite for PR6b.
 
 Status key: **Blocker** · **Should fix** · **Worth fixing** · **Optional** ·
 **Resolved** · **Accepted limitation**
@@ -398,14 +401,16 @@ marked blocked on item 1.
 
 ## 11. `PageHeader` is not expressive enough — **Worth fixing**
 
-It cannot express the orange blocked-state variant, and has no settable
-heading `id`. PR6a worked around this by rendering its primary button
-manually instead of using `primaryAction`. Every remaining screen that needs
-a blocked-state primary action will hit the same limitation.
+Partially addressed by the `PageHeader.titleId` work: routed pages can now give
+their external landmark a stable heading id, and the roster manager and comment
+library use it. The remaining gap is the orange blocked-state primary-action
+variant. Assignment Detail still renders that action manually with
+`primary-action--blocked` because `PageHeader.primaryAction` has no style or
+variant field.
 
-Fix: extend `PageHeader` deliberately (a style/variant prop for the primary
-action, a settable heading id) rather than accumulating bespoke headers
-screen by screen.
+Fix: extend `PageHeader` deliberately with a primary-action variant rather than
+accumulating bespoke headers screen by screen. Do not reopen the completed
+heading-id portion of this item.
 
 ---
 
@@ -637,7 +642,7 @@ The same one-job-three-implementations pattern PR8-1 fixed for dates.
 
 ---
 
-## 23. Raw enum text in status `<option>` labels — **Should fix**
+## 23. Raw enum text in status `<option>` labels — **Resolved**
 
 `RosterManagerPage.tsx:538–539` renders `<option value="active">active</option>`
 — the machine value is correct and also used verbatim as the visible label, so
@@ -645,6 +650,14 @@ faculty read lowercase enum words in a dropdown. `AssignmentEditPage.tsx:219`'s
 select has the same shape. A §2.3 violation that PR8-2's instructions excluded
 by treating the whole control as off-limits; the bound value must stay
 machine-readable, the option text should not.
+
+Resolved in PR12-5 for the roster manager. The raw status `<select>` was
+removed: each row now renders a humanized `StatusChip` (`Active`, `On hold`,
+`Dropped`) and changes the canonical `active`/`hold`/`dropped` value through an
+accessible row `OverflowMenu`. Dropped uses the error treatment, and tests
+protect both the faculty-facing labels and the unchanged machine value sent to
+the backend. `AssignmentEditPage.tsx` remains separate adjacent status-label
+debt; this item tracked the roster-manager violation rebuilt by §5.6.
 
 ---
 
@@ -945,7 +958,7 @@ have on hand, not queued work.
 
 ---
 
-## 36. Roster CSV parsing is implemented four times, not two — **Worth fixing**
+## 36. Roster CSV parsing is implemented four times, not two — **Resolved**
 
 **Corrected while assessing step 12
 (`docs/ui-redesign/step-12-feasibility.md`) — this item undercounted.**
@@ -969,9 +982,21 @@ of step 12's roster manager rebuild (§5.6), since that screen needs it
 fresh; step 11's `CourseSetupPage.tsx` redesign and the CLI path can adopt
 it afterward rather than each growing its own version further.
 
+PR12-5 converged the renderer's `RosterManagerPage` upload parser and row diff
+onto PR12-2's `parseAndValidateRosterCsv` and `diffRosterRows`. ITEM-36 then
+converged `src/roster/roster-loader.ts`, `ui/electron/courseSetupService.ts`,
+and `ui/electron/rosterManagerService.ts` on the same parser, exact column
+matcher, normalization, validation, and duplicate validation infrastructure.
+The Electron main process consumes its generated shared backend bundle; it does
+not maintain another parser. Course Setup deliberately retains a thin exact
+canonical-or-seven-column legacy header adapter and always writes canonical
+four-column storage. `src/io/csv.ts` remains in use by non-roster dashboard and
+group-preview callers. ITEM-33's user-editable arbitrary LMS header mapping
+remains open.
+
 ---
 
-## 37. Roster carries no provenance — **Worth fixing**
+## 37. Roster carries no provenance — **Resolved**
 
 Found while assessing step 12. `RosterRow` (`ui/electron/ipc.ts:522-527`)
 is `{studentId, githubUsername, section, status}`; `RosterLoadResult` and
@@ -991,9 +1016,18 @@ Fix: small. Add an optional `source` field (`kind: "csv_upload" |
 `currentFacultyMsoeUsername` local setting. No rearchitecture — one field
 threaded through three existing functions.
 
+Resolved in PR12-4. `RosterSource` is returned by roster load/save and persists
+in `terms/<term>/rosters/section-<section>.source.json`. The renderer supplies
+only `sourceKind`; the main process supplies the current faculty identity and a
+save-time clock. Missing companions preserve legacy compatibility, malformed
+companions fail soft, faculty-only saves preserve the prior source, and
+roster/section removal deletes the companion. The course-publication allowlist
+includes only the canonical companion pattern. ITEM-36 subsequently converged
+the remaining roster parsing paths.
+
 ---
 
-## 38. No per-section roster count aggregation in the Electron IPC layer — **Worth fixing**
+## 38. No per-section roster count aggregation in the Electron IPC layer — **Resolved**
 
 Found while assessing step 12. `AssignmentSetupTerm`
 (`ui/electron/ipc.ts:229-232`) is `{code, sections: string[]}` — section
@@ -1013,14 +1047,395 @@ once and returns per-section counts, reusing whichever shared parser item
 itself needs nothing new once a section is loaded — it's a client-side
 aggregate over data already in hand.
 
+Resolved in PR12-3: `getRosterSectionSummaries` is a bulk Electron IPC read
+that returns every configured section for one registered course + term. A
+successful section exposes `studentCount`, `activeStudentCount`,
+`droppedStudentCount`, and `holdStudentCount`; missing and invalid rosters
+remain explicit per-section states with faculty-safe diagnostics, so one bad
+CSV cannot hide usable neighboring counts. Its new
+`roster-section-summary-context.ts` backend is bundled to
+`ui/dist-electron/rosterSectionSummaryBackend.cjs` by the established
+context/CJS bridge and uses PR12-2's `parseAndValidateRosterCsv` plus the
+canonical shared summary helper. Focused context, service, request-validation,
+and preload tests protect the integration, including reordered canonical CSV
+columns, normalization warnings, empty valid rosters, missing rosters, and
+invalid rosters. ITEM-36 subsequently migrated the older roster-manager
+read/save paths.
+
+---
+
+## 39. Comment-library mutations exist but have no faculty UI — **Resolved**
+
+The course-level JSON model, context operations, Electron service, validated
+IPC handlers, and preload APIs already support reusable-comment create, edit,
+and delete. The renderer currently calls only the load operation. The grading
+workspace can browse and apply reusable comments, but cannot manage them, and
+there is no dedicated course-level Comment Library route.
+
+This leaves substantial implemented infrastructure inaccessible and forces any
+library maintenance outside Graider. The fix is shared create/edit/delete UI
+used by both the grading workspace and a dedicated course-level management
+screen, not another storage model or parallel set of APIs. See
+`comment-library-feasibility.md`.
+
+COMMENT-3 resolved the grading-workspace portion. COMMENT-5 adds the dedicated
+course-level route, dashboard course-term and assignment-detail navigation,
+search/tag filtering, shared editor/formatting, publication-aware CRUD, and
+an explicit deletion confirmation that preserves applied student snapshots.
+
+---
+
+## 40. The canonical comment library is excluded from safe course publication — **Resolved**
+
+The managed allowlist in `coursePublishService.ts` does not include
+`.graider/grading/comments.json`. Current local library mutations therefore
+cannot automatically publish and cannot be picked up by manual **Publish
+Course Changes**. This contradicts the library's course-shared purpose.
+
+Fix narrowly: allow exactly the canonical file, wrap create/edit/delete with
+the existing local-mutation-then-publication service, and expose full success
+versus saved-locally/publication-failed results. Do not allow `.graider/**` and
+do not weaken protection for unrelated staged or local files. A non-fast-
+forward push may safely fail initially; the local mutation must remain durable.
+
+Resolved in COMMENT-2: the publisher now allowlists exactly
+`.graider/grading/comments.json`; neighboring `.graider` paths remain
+unmanaged. The authorized Electron library service centrally publishes every
+successful create, edit, and delete while leaving loads read-only. Mutation
+results preserve local success and the created/edited value where applicable,
+add a typed publication outcome, and append **Publish Course Changes** recovery
+guidance when publication fails. Tests protect exact-path classification,
+create/edit/delete publishing, unrelated-file and unrelated-staged-work safety,
+no-upstream durability, preload typing, and two-clone non-fast-forward behavior
+without force-push, pull, merge, reset, or rollback.
+
+---
+
+## 41. Comment text has no shared safe code-formatting semantics — **Resolved**
+
+Reusable and applied comments render as plain React text, while the generated
+student report escapes the entire string into a whitespace-preserving
+paragraph. Faculty cannot visually distinguish example code from prose, and
+there is no shared interpretation layer keeping UI and report output aligned.
+
+Fix with a deliberately small parser over the existing string: inline
+backticks plus triple-backtick fenced blocks with optional language metadata.
+Feed a React renderer and an explicitly escaped report renderer from the same
+typed model. Do not enable general Markdown, raw HTML, or rich-text storage.
+
+Resolved in COMMENT-1: `src/shared/comment-content.ts` is the one neutral
+parser/model used by both the React `FormattedGradingComment` component and the
+student HTML report renderer. It recognizes only paired inline backticks and
+valid triple-backtick blocks, retains optional language metadata without
+rendering/highlighting it, and fails closed for unmatched backticks and
+unclosed/invalid fences. Scoped UI and standalone-report CSS make inline and
+block code distinct without affecting other code surfaces. Parser, React,
+report, editor, and keyboard-focus tests cover malformed input, escaped hostile
+HTML, whitespace, reusable/applied bodies, and report use for general and
+source-anchored feedback.
+
+---
+
+## 42. Free-form tag authoring lacks autocomplete and canonical duplicate normalization — **Resolved**
+
+The schema already accepts tags, search/filtering is case-insensitive, and the
+workspace derives a case-insensitively deduplicated list for filters. There is
+no tag authoring control, however, and backend normalization trims/removes
+blanks but still permits case-only duplicates such as `Java` and `java` in the
+same reusable entry.
+
+Fix with an accessible free-form tag/token input that suggests existing course
+tags and accepts new values. Normalize whitespace and deduplicate
+case-insensitively at the backend boundary while preserving established display
+casing.
+
+Resolved in COMMENT-3: the shared editor supplies accessible removable tag
+tokens, native keyboard/pointer suggestions from existing course tags, and
+free-form entry. Canonical storage now trims, removes blanks, and deduplicates
+case-insensitively while retaining the first accepted display spelling/order.
+
+---
+
+## 43. One-shot comments cannot be promoted to the course library — **Resolved**
+
+Faculty can apply an ad hoc student comment or apply a reusable snapshot, but
+there is no bridge between those workflows. Useful one-shot feedback must be
+manually recreated outside the current grading flow to become reusable.
+
+After the student comment is successfully applied, offer **Save to course
+library** with a prefilled reusable-comment editor. The library save remains a
+separate opt-in mutation; cancellation or failure leaves the student comment
+unchanged, and successful promotion does not retroactively couple the applied
+snapshot to the new library entry.
+
+Resolved in COMMENT-4: after a one-shot add is persisted, the grading workspace
+offers a compact, student-scoped **Save to course library** action. It opens the
+shared editor with the submitted title/text, a negative reusable default for
+the nonnegative applied deduction magnitude, any configured rubric category,
+and no inferred tags. The separate create mutation updates the in-memory
+library even if publication fails, preserves the recovery warning, and never
+rewrites the applied snapshot or adds `sourceCommentId`.
+
+---
+
+## 44. `removeRoster` also removes the configured section — **Resolved**
+
+Confirmed while rebuilding the roster manager in PR12-5. Despite its name,
+`ui/electron/rosterManagerService.ts` routes both `removeRoster` and
+`removeSection` through `removeSectionAndRoster`. Both rewrite `term.yml` to
+remove the selected section and delete its roster/source files; the only
+meaningful difference is that `removeRoster` requires an existing roster or
+roster reference.
+
+PR12-5 preserves that established backend behavior and uses accurate typed-
+confirmation copy rather than promising that **Remove roster** keeps the
+section. A follow-up should either give `removeRoster` true roster-only
+semantics or remove/rename the duplicate product action. That decision is a
+backend/product contract change and was not folded into the visual rebuild.
+
+**Decision, 2026-09-23 — implement true roster-only removal.** The ITEM-44
+feasibility pass verified that a section without `roster` is valid in the raw
+and loaded term model, is useful for faculty/assignment targeting, and is
+already rendered as **No roster** by the summary/UI path. Empty/header-only and
+absent rosters are distinct operational states. The next implementation slice
+will make `removeRoster` retain the section and faculty, remove only its
+`roster` reference, delete associated contained roster files and the provenance
+sidecar, refresh affected Student Repository Access Pages, and publish through
+the existing safe path. `removeSection` remains the stronger operation. See
+`item-44-remove-roster-feasibility.md` and `summaries/item-44-decision.md`.
+At the decision commit, this item remained open pending that behavior and its
+tests.
+
+**Resolved, 2026-09-23.** `removeRoster` now mutates the parsed YAML document by
+deleting only the matching section mapping's `roster` property. The section,
+faculty, other section fields, and surrounding YAML structure remain; contained
+canonical/configured roster files and the canonical source sidecar are deleted
+with snapshot rollback. The retained section loads as no roster and its PR12-3
+summary becomes **No roster**. The renderer keeps the selected tab and faculty,
+clears roster/source state, refreshes summaries and affected Student Repository
+Access Pages, and publishes the managed `term.yml` modification plus roster and
+source deletions through the existing safe path. `removeSection` remains the
+stronger section-plus-roster/source operation. **Clear roster rows** remains a
+staged save of a valid header-only roster, distinct from both removals. No IPC
+contract or schema change was required. See
+`summaries/item-44-implementation.md`.
+
+---
+
+## 45. Reusable comment editor crashes on the first typed character — **Resolved**
+
+Discovered during manual testing after COMMENT-5. The shared reusable-comment
+editor read `event.currentTarget.value` inside functional React state updaters.
+When React evaluated the updater after event dispatch, `currentTarget` was
+`null`, so the first transition from empty comment text to the formatted live
+preview crashed the routed Comment Library screen before Save.
+
+Resolved in COMMENT-BUG-1 by capturing Title, Comment text, Default adjustment,
+and Default rubric category values before their functional updates. StrictMode
+shared-editor coverage reproduces and protects the blank-to-first-character
+transition; dedicated-page coverage proves typing does not invoke create, edit,
+or delete persistence. The shared parser and formatter were not at fault and
+remain unchanged. See `summaries/comment-bug-1.md`.
+
+---
+
+## 46. Managed Java grading workflow always downloads JavaFX and does not stage FXML resources — **Resolved**
+
+The single `java-junit-checkstyle` preset now detects JavaFX need from the exact
+checked-out submission at runtime. FXML under `src/`, JavaFX/TestFX imports,
+JavaFX module requirements, and fully qualified JavaFX package references
+activate the JavaFX path. Ordinary Java submissions skip JavaFX downloads,
+Xvfb, and GTK/audio setup and compile/test without JavaFX arguments.
+
+JavaFX submissions retain Java 25 and JavaFX 25, install the Linux GUI runtime,
+compile and test with the conditional module path, and run JUnit under Xvfb.
+FXML is copied unchanged from `src/<relative-path>` to
+`$BUILD_DIR/<relative-path>`, including nested directories. TestFX remains
+repository-provided through recursive `lib/*.jar` discovery; Graider does not
+download or select it. Checkstyle remains 14.1.0 with the current MSOE config.
+
+The initial-repository/Classroom-bot suppression and workflow-file push-ignore
+remain intact. The managed marker stays at ownership version 1, so older
+canonical v1 workflows classify as `managed_outdated` and remain safely
+replaceable through existing Apply and workflow-repair paths. See
+`summaries/workflow-fx-1.md`.
+
+---
+
+## 47. New grading-enabled assignments are not marked as managed-preset assignments, and Assignment Detail shows pre-Apply/stale readiness blockers — **Resolved**
+
+Assignment Setup and Course Setup emitted enabled grading with the canonical
+workflow/artifact paths but omitted `mode: preset` and
+`preset: java-junit-checkstyle`. The strict ownership predicate therefore
+correctly treated the new configuration as legacy/custom, requiring a workflow
+copy in the template and preventing managed deployment eligibility.
+
+Resolved in ASSIGNMENT-CREATE-BUG-1. Both setup serializers now emit the
+explicit managed preset beneath `grading`, and omit empty optional grading
+collections instead of serializing YAML nulls. Assignment Edit preserves an
+explicit preset, keeps legacy/custom blocks legacy/custom, and retains existing
+no-grading behavior. Real config-loader tests prove both assignment-level and
+course-inherited output is schema-valid and managed-workflow eligible.
+
+Assignment Detail now prepares template sync only for `applied` and
+`partially_applied` assignments. `not_applied` is a neutral lifecycle state
+with no update action or manifest warning. Refresh clears and recomputes the
+state, and request-generation guards reject stale detail/preparation responses.
+The backend manifest requirement remains unchanged. Total detail/config
+failures no longer synthesize a misleading roster-summary blocker, while
+partial-success roster failures still do. See
+`summaries/assignment-create-bug-1.md`.
+
+---
+
+## 48. Individual Apply conflates post-creation errors with repository creation failure and drops per-target GitHub diagnostics — **Resolved**
+
+Individual Apply previously gave any target error precedence over successful
+repository creation or update, so a durable repository could appear as
+`Failed`. Its row contract also omitted `reason` and `diagnostics`, while the
+Octokit adapter discarded safe HTTP status/message context. The renderer then
+showed `Unavailable` and repeated every target error in the global diagnostics
+panel.
+
+Resolved in APPLY-RESULT-BUG-1. Individual result rows now keep durable
+`created`/`updated` outcomes separate from error state, carry stable reasons
+and target diagnostics, and add Apply operation/target context. Safe GitHub
+HTTP status and short response messages survive normalization. Freshly created
+repositories receive a bounded four-attempt Actions-readiness window using the
+existing 250/500/1000 ms backoff. The UI derives **Created with issues** or
+**Updated with issues**, counts durable repository outcomes from rows, shows
+target diagnostics beside the row, and keeps only non-target diagnostics in
+the global panel. See `summaries/apply-result-bug-1.md`.
+
+---
+
+## 49. Dashboard still requires `grade.yml` in the template for Graider-managed grading presets — **Resolved**
+
+Dashboard readiness treated every enabled grading workflow as faculty-owned
+and read the configured path from the template branch. Newly explicit managed
+presets therefore received `dashboard_grading_workflow_missing` even though
+Apply correctly deploys Graider's canonical workflow to student repositories.
+
+Resolved in DASHBOARD-WORKFLOW-BUG-1. Dashboard now retains effective grading
+internally and reuses the canonical managed-workflow eligibility predicate.
+Template repository and branch checks still run, but eligible managed presets
+do not read or validate a template workflow and report `gradingWorkflow` and
+`workflowDispatch` as `not_required`. Custom workflows, including custom
+ownership at `.github/workflows/grade.yml`, retain all existing file and
+`workflow_dispatch` validation. Course-inherited and assignment-level managed
+configuration are covered. See `summaries/dashboard-workflow-bug-1.md`.
+
+---
+
+## 50. Comment authoring and library browsing overload the grading sidebar — **Resolved**
+
+The grading sidebar currently mixes grading state, evidence, applied feedback,
+and publication actions with one-off comment authoring, reusable-comment
+search/tag filtering, reusable-library CRUD, and promotion. These are distinct
+tasks and make the selected student's grading state harder to scan.
+
+Resolved: the same-page `GradingCommentWorkspace` takeover is implemented.
+The sidebar now retains only compact comment launch actions plus applied
+grading information; authoring and library browsing moved out of the sidebar.
+Manual Electron acceptance testing completed successfully for the implemented
+workspace behavior. ITEM-51 was subsequently completed; ITEM-36 is now
+resolved.
+
+---
+
+## 51. Explicitly install/replace the canonical Graider grading workflow in a template or student repository — **Resolved**
+
+Apply remains conservative: it will not overwrite unmanaged or unsupported
+workflow content. ITEM-51 adds the deliberate, confirmed escape hatch for the
+sole Graider-owned path, `.github/workflows/grade.yml`. The shared installer
+uses the existing eligibility rule, canonical renderer, and ownership
+classifier; it creates missing content, leaves current content alone, and
+replaces outdated, unmanaged, or unsupported managed content only after
+confirmation. It never dispatches on its own.
+
+Assignment Detail previews the trusted configured template repository and
+branch, then confirms installation without running grading. The student dialog
+defaults to running grading after replacement, but faculty may uncheck it; a
+submission SHA is required only when dispatch is requested. Repository targets
+come from trusted assignment/manifest configuration, not renderer-provided
+owner, branch, path, or YAML. See
+`summaries/item-51-managed-workflow-replacement.md`.
+
+## 52. Assignment Edit status options expose raw labels — **Should fix**
+
+The roster-manager portion of item 23 is resolved: roster rows now use
+humanized status chips and an overflow menu while submitting the canonical
+`active`, `hold`, or `dropped` value. Assignment Edit is a separate remaining
+case: its status `<select>` still displays the raw option values `draft`,
+`active`, `closed`, and `archived`. Keep the machine values, but add a shared
+faculty-facing label mapping for the option text and focused coverage. This is
+adjacent status-label debt, not a reason to reopen item 23.
+
 ---
 
 ## Suggested order
 
-Nothing is blocking PR6b anymore — proceed to it directly.
+## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
 
-Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, and 32 are resolved and no longer part of this
-sequence.
+The canonical JavaFX path now downloads and validates `javafx-swing.jar` in
+addition to the base, graphics, controls, and FXML modules. Compile and JUnit
+runtime arguments include `javafx.swing`, fixing the demonstrated
+`SwingFXUtils` runtime failure without changing JavaFX detection, managed
+workflow ownership/version behavior, or adding unrelated modules such as
+`javafx.web` or `javafx.media`. Re-Apply using the updated workflow then
+completed successfully for a JavaFX program/course, closing the documented
+live retest gap for this fix. This does not imply support for unrelated JavaFX
+modules.
 
-Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-26, 27, 28, 33, 34, 35, 36, 37, and 38 can wait until after the redesign.
+## ITEM-51-BUG-1. Single-student replace-and-run cannot resolve submission SHA — **Resolved**
+
+Single-student replace-and-run now mirrors bulk repair's trusted local-HEAD
+fallback when grading state has no submission SHA. It uses only trusted request
+identity to resolve the registered local checkout, retries preparation with
+verified local Git `HEAD`, and resolves GitHub authentication only after that
+preparation succeeds. Replacement-only remains independent of local HEAD and
+dispatch. The renderer supplies neither a local path nor a SHA. See
+`summaries/item-51-bug-1-student-workflow-dispatch-sha.md`.
+
+The next planned slice is ITEM-36.
+
+Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
+of this sequence.
+
+Actionable open items are 5, 8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21,
+22, 24, 25, 27, 28, 33, 34, 35, and 52. Items 19 and 26 are accepted
+limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
+48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved.
+ITEM-36 is resolved.
+
+Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
+COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
+(item 37) and PR12-5. PR12-5 now completes the planned Step 12 roster-manager
+rebuild. COMMENT-BUG-1 then resolved item 45. Item 36 remains adjacent
+parser-convergence debt rather than a blocker to that visual slice. WORKFLOW-FX-1
+then resolved item 46 without adding another preset or faculty configuration.
+ASSIGNMENT-CREATE-BUG-1 resolved item 47 without beginning ITEM-36.
+APPLY-RESULT-BUG-1 then resolved item 48. Follow-up live validation of a
+plain-Java assignment using a newly generated managed workflow completed
+successfully without workflow replacement; this closes the successful managed
+workflow deployment smoke gap, while the detailed post-creation diagnostic
+failure path remains covered by local tests rather than a deliberately induced
+live failure.
+DASHBOARD-WORKFLOW-BUG-1 then resolved item 49 without beginning ITEM-36.
+WORKFLOW-FX-2 then resolved the demonstrated missing `javafx.swing` dependency
+without beginning ITEM-36. Follow-up live testing also succeeded for a JavaFX
+program/course after re-applying the updated workflow, and for a plain-Java
+assignment using the newly generated managed workflow; these close the
+previously documented WORKFLOW-FX-1 and WORKFLOW-FX-2 smoke gaps.
+ITEM-51-BUG-1 then restored trusted local submission-SHA fallback for
+single-student replace-and-run without beginning ITEM-36. A full-course
+explicit Graider workflow replacement followed by a grading rerun succeeded,
+closing the previously documented ITEM-51 and ITEM-51-BUG-1 live acceptance
+gaps. The post-fix GitHub REST warning has not been declared absent without a
+specific observation of a dispatch log; future dispatches may verify it
+opportunistically.
+
+The GitHub REST API version warning observed during live workflow dispatch was
+resolved separately: production Octokit requests now centrally declare REST
+API version `2026-03-10`, with no dependency upgrade. See
+`summaries/github-api-1-rest-version.md`; ITEM-36 is now resolved.

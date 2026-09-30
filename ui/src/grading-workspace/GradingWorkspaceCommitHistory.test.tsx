@@ -316,7 +316,7 @@ describe("GradingWorkspacePage commit history", () => {
     expect(loadHistory).toHaveBeenCalledTimes(1);
     expect(loadSource).toHaveBeenCalledTimes(1);
     expect(loadSnapshot).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Comment library")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Browse comment library" })).toBeInTheDocument();
     for (const mutation of Object.values(mutations)) expect(mutation).not.toHaveBeenCalled();
   });
 

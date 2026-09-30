@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveEffectiveAssignmentGrading } from "../config/effective-grading.js";
+import {
+  resolveEffectiveAssignmentGrading,
+  type EffectiveAssignmentGrading
+} from "../config/effective-grading.js";
 import type {
   RawAssignmentConfig,
   RawCourseConfig,
@@ -67,6 +70,7 @@ import type {
   DashboardStatus,
   DashboardSummary
 } from "./dashboard-models.js";
+import { isManagedGradingWorkflowEligible } from "../workflows/managed-workflow-deployment.js";
 import { hasWorkflowDispatchTrigger } from "../workflows/workflow-dispatch-validation.js";
 import { DASHBOARD_SCHEMA_VERSION } from "./dashboard-models.js";
 
@@ -125,6 +129,7 @@ interface LoadedTerm {
 interface LoadedAssignmentSummary {
   readonly summary: DashboardAssignmentSummary;
   readonly config?: RawAssignmentConfig;
+  readonly grading?: EffectiveAssignmentGrading;
 }
 
 interface DashboardGithubCheckCache {
@@ -523,12 +528,12 @@ const getAssignmentApplyState = (
 const createAssignmentSummary = (
   repoRoot: string,
   courseConfig: RawCourseConfig,
+  grading: EffectiveAssignmentGrading,
   assignmentConfig: RawAssignmentConfig,
   assignmentFile: string,
   expectedSlug: string,
   diagnostics: Diagnostic[]
 ): DashboardAssignmentSummary => {
-  const grading = resolveEffectiveAssignmentGrading(courseConfig.grading, assignmentConfig.grading);
   const assignmentStatus = mapAssignmentStatus(assignmentConfig.assignment.status);
 
   return {
@@ -625,6 +630,7 @@ const checkWorkflowReadiness = async (
   cache: DashboardGithubCheckCache,
   githubClient: GitHubClient,
   assignment: DashboardAssignmentSummary,
+  grading: EffectiveAssignmentGrading,
   owner: string,
   repo: string,
   branch: string,
@@ -632,6 +638,14 @@ const checkWorkflowReadiness = async (
   diagnostics: readonly Diagnostic[]
 ): Promise<DashboardAssignmentSummary> => {
   const workflowPath = assignment.workflow;
+
+  if (isManagedGradingWorkflowEligible(grading)) {
+    return withAssignmentGithubResult(assignment, diagnostics, {
+      ...currentGithub,
+      gradingWorkflow: GITHUB_STATUS_NOT_REQUIRED,
+      workflowDispatch: GITHUB_STATUS_NOT_REQUIRED
+    });
+  }
 
   if (!assignment.gradingEnabled || workflowPath === undefined) {
     return withAssignmentGithubResult(assignment, diagnostics, {
@@ -706,7 +720,7 @@ const checkAssignmentGithubReadiness = async (
   const assignment = loadedAssignment.summary;
   const github = createDefaultGithubStatus(assignment.gradingEnabled);
 
-  if (loadedAssignment.config === undefined) {
+  if (loadedAssignment.config === undefined || loadedAssignment.grading === undefined) {
     return {
       ...loadedAssignment,
       summary: withAssignmentGithubResult(assignment, assignment.diagnostics, github)
@@ -791,6 +805,7 @@ const checkAssignmentGithubReadiness = async (
         cache,
         githubClient,
         assignment,
+        loadedAssignment.grading,
         owner,
         repo,
         branch,
@@ -843,12 +858,15 @@ const loadAssignmentSummary = (
   }
 
   const diagnostics = validateAssignmentConfig(assignmentFile, loadResult.value, assignmentSlug);
+  const grading = resolveEffectiveAssignmentGrading(courseConfig.grading, loadResult.value.grading);
 
   return {
     config: loadResult.value,
+    grading,
     summary: createAssignmentSummary(
       repoRoot,
       courseConfig,
+      grading,
       loadResult.value,
       assignmentFile,
       assignmentSlug,

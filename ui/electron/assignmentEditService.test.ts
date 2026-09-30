@@ -245,6 +245,52 @@ describe("assignmentEditService", () => {
     expect(content).toContain('result_file: "grading-results.json"');
   });
 
+  it("preserves an explicit managed preset without emitting empty collection values", () => {
+    const root = createRoot();
+    writeFixture(root);
+    const filePath = path.join(root, assignmentFile);
+    fs.writeFileSync(
+      filePath,
+      fs
+        .readFileSync(filePath, "utf8")
+        .replace(
+          "  enabled: true\n",
+          "  enabled: true\n  mode: preset\n  preset: java-junit-checkstyle\n"
+        ),
+      "utf8"
+    );
+
+    const request = createRequest(root);
+    const parsed = parseDocument(previewAssignmentEdit(request).content).toJS() as {
+      grading: Record<string, unknown>;
+    };
+
+    expect(parsed.grading).toMatchObject({
+      enabled: true,
+      mode: "preset",
+      preset: "java-junit-checkstyle"
+    });
+    expect(parsed.grading).not.toHaveProperty("required_files");
+    expect(parsed.grading).not.toHaveProperty("rubric");
+  });
+
+  it("does not convert legacy grading to the managed preset and keeps disable behavior explicit", () => {
+    const root = createRoot();
+    writeFixture(root);
+    const legacyRequest = createRequest(root);
+    const legacy = parseDocument(previewAssignmentEdit(legacyRequest).content).toJS() as {
+      grading: Record<string, unknown>;
+    };
+    const disabled = parseDocument(
+      previewAssignmentEdit({ ...legacyRequest, gradingEnabled: false }).content
+    ).toJS() as { grading: Record<string, unknown> };
+
+    expect(legacy.grading).not.toHaveProperty("mode");
+    expect(legacy.grading).not.toHaveProperty("preset");
+    expect(disabled.grading).toMatchObject({ enabled: false, mode: "no-grading" });
+    expect(disabled.grading).not.toHaveProperty("preset");
+  });
+
   it("loads and saves an assignment without inventing a template", () => {
     const root = createRoot();
     writeFixture(root);

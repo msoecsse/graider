@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { renderWithProviders } from "../test/routeTestUtils";
+import { renderAtRoute, renderWithProviders } from "../test/routeTestUtils";
 import type {
   AssignmentDetailJsonResponse,
   AssignmentApplyPreviewJsonResponse,
@@ -604,6 +604,46 @@ const createDeferred = <T,>(): {
 };
 
 describe("DashboardPage", () => {
+  it("opens the comment library through the clicked course-term card", async () => {
+    const secondTermCard = {
+      ...COURSE_TERM_CARD,
+      displayName: "27s2-csc1120",
+      termSlug: "27s2",
+      termTitle: "Summer 2027"
+    };
+    const loadGradingCommentLibrary = vi
+      .fn()
+      .mockResolvedValue({ status: "success", comments: [] });
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      refreshDashboard: vi
+        .fn()
+        .mockResolvedValue(
+          createCombinedDashboardResult([
+            createDashboardResult({}, [COURSE_TERM_CARD, secondTermCard])
+          ])
+        ),
+      loadGradingCommentLibrary
+    });
+    renderAtRoute("/");
+
+    const secondTermHeading = await screen.findByRole("heading", {
+      level: 2,
+      name: "27s2-csc1120"
+    });
+    const secondTermCardElement = secondTermHeading.closest("article");
+    if (secondTermCardElement === null) throw new Error("Expected the second course-term card.");
+    fireEvent.click(within(secondTermCardElement).getByRole("button", { name: "Comment Library" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Comment Library" })
+    ).toBeInTheDocument();
+    expect(loadGradingCommentLibrary).toHaveBeenCalledWith({
+      courseFolderId: COURSE_FOLDER.id,
+      termCode: "27s2"
+    });
+  });
+
   it("confirms and publishes allowlisted course changes", async () => {
     const getCoursePublishStatus = vi.fn().mockResolvedValue({
       status: "changes_pending",

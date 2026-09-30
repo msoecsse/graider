@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parseDocument } from "yaml";
 import { describe, expect, it } from "vitest";
 import type { CourseSetupRequest } from "./ipc";
 import { previewCourseSetup, saveCourseSetup } from "./courseSetupService";
@@ -28,6 +29,7 @@ const ROSTER = "student_id,github_username,section,status\nS123,octocat,001,ACTI
 describe("course setup service", () => {
   it("generates course defaults without a Graders team and derives Fall 2026 for 27s1", () => {
     const preview = previewCourseSetup(createRequest(createRoot()));
+    const course = parseDocument(preview.files[0]?.content ?? "").toJS() as Record<string, unknown>;
 
     expect(preview.status).toBe("ready");
     expect(preview.files[0]?.content).toContain('code: "csc1120"');
@@ -36,6 +38,16 @@ describe("course setup service", () => {
     expect(preview.files[0]?.content).not.toContain("grader_team:");
     expect(preview.files[0]?.content).not.toContain("grader_permission:");
     expect(preview.files[0]?.content).toContain("timezone: America/Chicago");
+    expect(course).not.toHaveProperty("mode");
+    expect(course).not.toHaveProperty("preset");
+    expect(course.grading).toEqual({
+      enabled: true,
+      mode: "preset",
+      preset: "java-junit-checkstyle",
+      workflow: ".github/workflows/grade.yml",
+      artifact: "grading-results",
+      result_file: "grading-results.json"
+    });
     expect(preview.files[1]?.content).toContain('display_name: "Fall 2026"');
     expect(preview.files[1]?.content).toContain("faculty: []");
     expect(preview.files.map((file) => file.path)).toEqual(["course.yml", "terms/27s1/term.yml"]);
@@ -87,7 +99,7 @@ describe("course setup service", () => {
     expect(preview.status).toBe("ready");
     expect(roster?.path).toBe("terms/27s1/rosters/section-001.csv");
     expect(roster?.content).toContain(
-      "student_id,github_username,section,status\nS123,octocat,001,ACTIVE"
+      "student_id,github_username,section,status\ns123,octocat,001,active"
     );
   });
 
@@ -134,6 +146,24 @@ describe("course setup service", () => {
     expect(preview.status).toBe("ready");
     expect(preview.files.find((file) => file.path.endsWith("section-001.csv"))?.content).toBe(
       "student_id,github_username,section,status\ns1,octocat,001,active\n"
+    );
+  });
+
+  it("uses shared CSV parsing for quoted fields and reports shared validation diagnostics", () => {
+    const preview = previewCourseSetup(
+      createRequest(createRoot(), {
+        rosterUploads: [
+          {
+            sectionId: "001",
+            content: 'student_id,github_username,section,status\n"S123","octo""cat",001,ACTIVE\n'
+          }
+        ]
+      })
+    );
+
+    expect(preview.status).toBe("invalid");
+    expect(preview.diagnostics.map((item) => item.message)).toContain(
+      'Roster row 2 has invalid GitHub username octo"cat.'
     );
   });
 

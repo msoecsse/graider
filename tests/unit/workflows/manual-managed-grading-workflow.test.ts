@@ -5,6 +5,7 @@ import type { GitHubRepository } from "../../../src/github/github-models.js";
 import { renderJavaJunitCheckstyleWorkflow } from "../../../src/workflows/java-junit-checkstyle-workflow.js";
 import {
   isManualManagedGradingWorkflowEligible,
+  manuallyInstallManagedGradingWorkflow,
   manuallyInstallAndDispatchManagedGradingWorkflow
 } from "../../../src/workflows/manual-managed-grading-workflow.js";
 import {
@@ -73,6 +74,52 @@ const clientWithWorkflow = (content: string) =>
   });
 
 describe("manual managed grading workflow installation", () => {
+  it("installs only: it creates the canonical file and never dispatches", async () => {
+    const client = new FakeGitHubClient({ repositories: [repository] });
+
+    await expect(
+      manuallyInstallManagedGradingWorkflow({
+        githubClient: client,
+        repository: { owner: OWNER, name: REPOSITORY_NAME, defaultBranch: DEFAULT_BRANCH },
+        grading,
+        confirmed: true
+      })
+    ).resolves.toMatchObject({ workflow: { status: "created" } });
+    expect(client.mutations.fileWrites).toHaveLength(1);
+    expect(client.mutations.workflowDispatches).toEqual([]);
+  });
+
+  it("install-only does not read or mutate before explicit confirmation", async () => {
+    const client = new FakeGitHubClient({ repositories: [repository] });
+
+    await expect(
+      manuallyInstallManagedGradingWorkflow({
+        githubClient: client,
+        repository: { owner: OWNER, name: REPOSITORY_NAME, defaultBranch: DEFAULT_BRANCH },
+        grading,
+        confirmed: false
+      })
+    ).resolves.toMatchObject({ workflow: { status: "not_attempted" } });
+    expect(client.fileReads).toEqual([]);
+    expect(client.mutations.fileWrites).toEqual([]);
+  });
+
+  it("rejects a stale explicit-install preview without writing or dispatching", async () => {
+    const client = clientWithWorkflow("name: Faculty workflow changed after preview\n");
+
+    await expect(
+      manuallyInstallManagedGradingWorkflow({
+        githubClient: client,
+        repository: { owner: OWNER, name: REPOSITORY_NAME, defaultBranch: DEFAULT_BRANCH },
+        grading,
+        confirmed: true,
+        expectedContentFingerprint: "stale-preview"
+      })
+    ).resolves.toMatchObject({ workflow: { status: "stale" } });
+    expect(client.mutations.fileWrites).toEqual([]);
+    expect(client.mutations.workflowDispatches).toEqual([]);
+  });
+
   it("accepts both the explicit preset and Graider's legacy default workflow configuration", () => {
     expect(isManualManagedGradingWorkflowEligible(grading)).toBe(true);
     expect(isManualManagedGradingWorkflowEligible(legacyGrading)).toBe(true);

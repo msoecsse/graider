@@ -64,6 +64,7 @@ describe("UI security boundary", () => {
       "graider-ui:course-publish:status",
       "graider-ui:course-publish:publish",
       "graider-ui:roster-manager:terms",
+      "graider-ui:roster-manager:section-summaries",
       "graider-ui:roster-manager:get",
       "graider-ui:roster-manager:preview",
       "graider-ui:roster-manager:save",
@@ -72,6 +73,7 @@ describe("UI security boundary", () => {
       "graider-ui:template-workflow:get",
       "graider-ui:template-workflow:preview-save",
       "graider-ui:template-workflow:save",
+      "graider-ui:template-workflow:replace-managed",
       "graider-ui:course-registry:remove",
       "graider-ui:dashboard:refresh-course-folder",
       "graider-ui:dashboard:refresh-all",
@@ -128,6 +130,7 @@ describe("UI security boundary", () => {
     expect(preloadSource).toContain("prepareAssignmentTemplateSync:");
     expect(preloadSource).toContain("executeAssignmentTemplateSync:");
     expect(preloadSource).toContain("loadGradingStudentViewState:");
+    expect(preloadSource).toContain("getRosterSectionSummaries:");
     expect(preloadSource).toContain("saveGradingStudentViewState:");
     expect(preloadSource).toContain("clearGradingStudentViewState:");
     expect(preloadSource).toContain("loadGradingStudentSnapshot:");

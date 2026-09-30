@@ -201,4 +201,33 @@ describe("grading student workflow repair context", () => {
       confirmed: true
     });
   });
+
+  it("allows replacement-only without a submission SHA and never dispatches", async () => {
+    const replacementOnly = {
+      studentId: prepared.studentId,
+      repository: prepared.repository,
+      grading: prepared.grading
+    };
+    const client = new FakeGitHubClient({ repositories: [repository] });
+    const install = vi.fn().mockResolvedValue({
+      repository,
+      workflow: { status: "created" },
+      diagnostics: []
+    });
+
+    await expect(
+      executePreparedGradingStudentWorkflowRepair(
+        replacementOnly,
+        "token",
+        true,
+        { createClient: () => client, install },
+        false
+      )
+    ).resolves.toMatchObject({
+      status: "success",
+      result: { workflow: { status: "created" }, dispatch: { status: "not_attempted" } }
+    });
+    expect(install).toHaveBeenCalledOnce();
+    expect(client.mutations.workflowDispatches).toEqual([]);
+  });
 });

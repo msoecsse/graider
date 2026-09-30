@@ -209,4 +209,19 @@ describe("AssignmentDetailRoute", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 02" })).toBeInTheDocument();
   });
+
+  it("navigates to the course-level comment library from grading setup", async () => {
+    mockGraiderUI({
+      loadGradingCommentLibrary: vi.fn().mockResolvedValue({ status: "success", comments: [] })
+    });
+    renderAtRoute(`/course/csc1120/27s1/lab02`);
+
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
+    fireEvent.click(await screen.findByRole("button", { name: "More assignment actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Manage Comment Library/u }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Comment Library" })
+    ).toBeInTheDocument();
+  });
 });

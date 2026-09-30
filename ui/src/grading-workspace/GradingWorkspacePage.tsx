@@ -15,6 +15,7 @@ import type {
   PublishGradingStudentReportResult,
   PreviewGradingStudentReportResult
 } from "../../electron/ipc";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { Toast, useToast } from "../components/Toast";
 import {
@@ -36,6 +37,12 @@ import {
 } from "./GradingPublishReviewPanel";
 import type { GradingSourceAnnotation } from "./MonacoSourceViewer";
 import { filterReusableComments, listReusableCommentTags } from "./commentLibrarySearch";
+import {
+  commentLibraryLoadFailureMessage,
+  commentLibraryMutationFailureMessage,
+  commentLibraryPublicationWarning,
+  updateReusableCommentList
+} from "./commentLibraryFeedback";
 import { isGradingStudentSourceDto, type CanonicalSourceRange } from "./submissionSourceView";
 import { GradingFooterHintBar } from "./GradingFooterHintBar";
 import { GradingKeyboardCheatSheetModal } from "./GradingKeyboardCheatSheetModal";
@@ -64,11 +71,15 @@ import {
   type BulkWorkflowRepairState
 } from "./GradingWorkflowRepairPanel";
 import { GradingCommentEditorForm, type CommentEditorState } from "./GradingCommentEditorForm";
+import { type CommentLibraryLoadState, type ReusableComment } from "./GradingCommentLibraryBrowser";
 import {
-  GradingCommentLibraryBrowser,
-  type CommentLibraryLoadState,
-  type ReusableComment
-} from "./GradingCommentLibraryBrowser";
+  emptyReusableCommentEditorValue,
+  type ReusableCommentEditorValue
+} from "./ReusableCommentEditor";
+import {
+  GradingCommentWorkspace,
+  type GradingCommentWorkspaceMode
+} from "./GradingCommentWorkspace";
 
 type Student = { studentId: string; section: string; gradingStatus: string };
 type Ready = {
@@ -155,6 +166,24 @@ interface PendingViewStateSave {
   readonly viewState: GradingEditorViewState;
 }
 
+type LibraryEditorState =
+  | {
+      readonly operation: "create";
+      readonly value: ReusableCommentEditorValue;
+      readonly promotion?: PromotionOffer;
+    }
+  | {
+      readonly operation: "edit";
+      readonly commentId: string;
+      readonly value: ReusableCommentEditorValue;
+    };
+
+interface PromotionOffer {
+  readonly studentId: string;
+  readonly appliedCommentId: string;
+  readonly value: ReusableCommentEditorValue;
+}
+
 const workflowRepairUnavailableMessage = (status: string): string => {
   const messages: Readonly<Record<string, string>> = {
     grading_not_eligible:
@@ -167,7 +196,11 @@ const workflowRepairUnavailableMessage = (status: string): string => {
       "Workflow repair is unavailable because GitHub authentication could not be resolved.",
     student_not_accessible: "Workflow repair is unavailable for this student.",
     assignment_config_error:
-      "Workflow repair is unavailable because assignment configuration could not be read."
+      "Workflow repair is unavailable because assignment configuration could not be read.",
+    submission_commit_unavailable:
+      "Workflow replacement is available, but grading cannot start because the submission commit could not be verified. Refresh or re-download the student's repository, then try again, or replace the workflow without running grading.",
+    registry_error:
+      "Workflow repair is unavailable because the local repository records could not be read safely."
   };
   return messages[status] ?? "Workflow repair is currently unavailable.";
 };
@@ -183,6 +216,7 @@ const workflowRepairResultNotice = (
       "Unsupported managed workflow replaced with the current Graider workflow.",
     already_current: "Graider workflow was already current.",
     write_failed: "Workflow write failed. No grading run was started.",
+    stale: "The workflow changed after preview. Reload before replacing it.",
     read_failed: "The existing workflow could not be read. No grading run was started.",
     not_attempted: "Workflow repair was not attempted."
   };
@@ -446,6 +480,7 @@ const sourceTargetLabel = (location: CanonicalSourceRange): string =>
 const isGradingShortcutSuppressedTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof Element)) return false;
   if (target.closest(".grading-source-editor") !== null) return false;
+  if (target.closest(".grading-comment-formatting-controls") !== null) return true;
   const tag = target.tagName;
   return (
     tag === "INPUT" ||
@@ -470,6 +505,7 @@ export const GradingWorkspacePage = ({
   const [workflowRepair, setWorkflowRepair] = useState<WorkflowRepairState>({ status: "idle" });
   const [workflowRepairConfirmation, setWorkflowRepairConfirmation] =
     useState<WorkflowRepairConfirmation>();
+  const [workflowRepairRunAfterReplacement, setWorkflowRepairRunAfterReplacement] = useState(true);
   const [workflowRepairNotice, setWorkflowRepairNotice] = useState<WorkflowRepairNotice>();
   const [bulkWorkflowRepairState, setBulkWorkflowRepairState] =
     useState<BulkWorkflowRepairState>("idle");
@@ -481,6 +517,14 @@ export const GradingWorkspacePage = ({
   });
   const [commentSearch, setCommentSearch] = useState("");
   const [selectedCommentTags, setSelectedCommentTags] = useState<readonly string[]>([]);
+  const [commentWorkspaceMode, setCommentWorkspaceMode] = useState<
+    GradingCommentWorkspaceMode | undefined
+  >();
+  const [libraryEditor, setLibraryEditor] = useState<LibraryEditorState>();
+  const [promotionOffer, setPromotionOffer] = useState<PromotionOffer>();
+  const [libraryDeleteConfirmation, setLibraryDeleteConfirmation] = useState<ReusableComment>();
+  const [libraryMutationPending, setLibraryMutationPending] = useState(false);
+  const [libraryMutationMessage, setLibraryMutationMessage] = useState<string>();
   const [canonicalSourceTarget, setCanonicalSourceTarget] = useState<CanonicalSourceRange>();
   const [commentEditor, setCommentEditor] = useState<CommentEditorState>();
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteCommentConfirmation>();
@@ -541,6 +585,12 @@ export const GradingWorkspacePage = ({
   const autosaveBlockedStudents = useRef(new Set<string>());
   const mounted = useRef(true);
   currentStudentIdRef.current = currentStudentId;
+
+  useEffect(() => {
+    setPromotionOffer((current) =>
+      current === undefined || current.studentId === currentStudentId ? current : undefined
+    );
+  }, [currentStudentId]);
 
   const setStudentWarning = useCallback((studentId: string, message?: string): void => {
     if (!mounted.current) return;
@@ -702,10 +752,7 @@ export const GradingWorkspacePage = ({
           setCommentLibrary({ status: "success", comments: value.comments });
           return;
         }
-        setCommentLibrary({
-          status: "failure",
-          message: "The shared comment library could not be loaded safely."
-        });
+        setCommentLibrary({ status: "failure", message: commentLibraryLoadFailureMessage(value) });
       })
       .catch(() => {
         if (active)
@@ -747,7 +794,10 @@ export const GradingWorkspacePage = ({
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug,
       studentId,
-      confirmed: false
+      confirmed: false,
+      // Availability is installation-only, so a missing grading-state SHA
+      // must not hide the intentional replacement escape hatch.
+      runAfterReplacement: false
     })
       .then((value) => {
         if (
@@ -814,7 +864,8 @@ export const GradingWorkspacePage = ({
         termCode: request.termCode,
         assignmentSlug: request.assignmentSlug,
         studentId: confirmation.studentId,
-        confirmed: true
+        confirmed: true,
+        runAfterReplacement: workflowRepairRunAfterReplacement
       });
     } catch {
       if (
@@ -1235,6 +1286,107 @@ export const GradingWorkspacePage = ({
         : [],
     [commentLibrary, commentSearch, selectedCommentTags]
   );
+  const updateLibraryComments = (
+    update: (comments: readonly ReusableComment[]) => readonly ReusableComment[]
+  ): void => {
+    setCommentLibrary((current) =>
+      current.status === "success"
+        ? { status: "success", comments: update(current.comments) }
+        : current
+    );
+  };
+  const saveLibraryEditor = async (value: ReusableCommentEditorValue): Promise<void> => {
+    const editor = libraryEditor;
+    if (editor === undefined || libraryMutationPending) return;
+    const promotion = editor.operation === "create" ? editor.promotion : undefined;
+    if (
+      editor.operation === "create" &&
+      window.graiderUI.createGradingLibraryComment === undefined
+    ) {
+      setLibraryMutationMessage("The shared comment library is unavailable.");
+      return;
+    }
+    if (editor.operation === "edit" && window.graiderUI.editGradingLibraryComment === undefined) {
+      setLibraryMutationMessage("The shared comment library is unavailable.");
+      return;
+    }
+    setLibraryMutationPending(true);
+    setLibraryMutationMessage(undefined);
+    try {
+      const result =
+        editor.operation === "create"
+          ? await window.graiderUI.createGradingLibraryComment!({
+              courseFolderId: request.courseFolderId,
+              termCode: request.termCode,
+              comment: value
+            })
+          : await window.graiderUI.editGradingLibraryComment!({
+              courseFolderId: request.courseFolderId,
+              termCode: request.termCode,
+              commentId: editor.commentId,
+              replacement: value
+            });
+      if (result.status !== "success" || !("comment" in result)) {
+        setLibraryMutationMessage(commentLibraryMutationFailureMessage(result));
+      } else {
+        updateLibraryComments((comments) =>
+          updateReusableCommentList(comments, editor.operation, result.comment)
+        );
+        setLibraryEditor(undefined);
+        if (promotion !== undefined)
+          setPromotionOffer((current) =>
+            current !== undefined &&
+            current.studentId === promotion.studentId &&
+            current.appliedCommentId === promotion.appliedCommentId
+              ? undefined
+              : current
+          );
+        const warning = commentLibraryPublicationWarning(result);
+        if (warning === undefined)
+          showToast(
+            promotion === undefined
+              ? editor.operation === "create"
+                ? "Reusable comment created."
+                : "Reusable comment updated."
+              : "Comment saved to course library."
+          );
+        else if (promotion === undefined) setLibraryMutationMessage(warning);
+        else showToast(warning);
+        if (promotion !== undefined) setCommentWorkspaceMode(undefined);
+      }
+    } catch {
+      setLibraryMutationMessage("The reusable comment could not be saved safely.");
+    } finally {
+      if (mounted.current) setLibraryMutationPending(false);
+    }
+  };
+  const deleteLibraryComment = async (): Promise<void> => {
+    const comment = libraryDeleteConfirmation;
+    const remove = window.graiderUI.deleteGradingLibraryComment;
+    if (comment === undefined || remove === undefined || libraryMutationPending) return;
+    setLibraryMutationPending(true);
+    setLibraryMutationMessage(undefined);
+    try {
+      const result = await remove({
+        courseFolderId: request.courseFolderId,
+        termCode: request.termCode,
+        commentId: comment.id
+      });
+      if (result.status !== "success")
+        setLibraryMutationMessage(commentLibraryMutationFailureMessage(result));
+      else {
+        updateLibraryComments((comments) => updateReusableCommentList(comments, "delete", comment));
+        setLibraryDeleteConfirmation(undefined);
+        const warning = commentLibraryPublicationWarning(result);
+        if (warning === undefined) showToast("Reusable comment deleted.");
+        else setLibraryMutationMessage(warning);
+      }
+    } catch {
+      setLibraryMutationMessage("The reusable comment could not be deleted safely.");
+    } finally {
+      if (mounted.current) setLibraryMutationPending(false);
+    }
+  };
   const sourceAnnotations = useMemo<readonly GradingSourceAnnotation[]>(() => {
     if (snapshot.status !== "success") return [];
     return snapshot.snapshot.appliedComments.flatMap((comment) => {
@@ -1368,6 +1520,7 @@ export const GradingWorkspacePage = ({
     requestPanelOpen(() => {
       setCommentEditor(nextEditor);
       commentEditorBaseline.current = nextEditor;
+      setCommentWorkspaceMode("author");
     });
   };
 
@@ -1391,6 +1544,25 @@ export const GradingWorkspacePage = ({
     requestPanelOpen(() => {
       setCommentEditor(nextEditor);
       commentEditorBaseline.current = nextEditor;
+      setCommentWorkspaceMode("author");
+    });
+  };
+
+  const openGeneralCommentEditor = (): void => {
+    if (!isReady(result) || selectedStudent === undefined) return;
+    const nextEditor: CommentEditorState = {
+      operation: "add",
+      studentId: selectedStudent.studentId,
+      title: "",
+      text: "",
+      deduction: "0",
+      rubricCategoryId: "",
+      targetMode: "general"
+    };
+    requestPanelOpen(() => {
+      setCommentEditor(nextEditor);
+      commentEditorBaseline.current = nextEditor;
+      setCommentWorkspaceMode("author");
     });
   };
 
@@ -1411,6 +1583,34 @@ export const GradingWorkspacePage = ({
     requestPanelOpen(() => {
       setCommentEditor(nextEditor);
       commentEditorBaseline.current = nextEditor;
+      setCommentWorkspaceMode("author");
+    });
+  };
+
+  const openCommentLibrary = (): void => {
+    requestPanelOpen(() => {
+      setLibraryMutationMessage(undefined);
+      setCommentWorkspaceMode("library");
+    });
+  };
+
+  const closeCommentWorkspace = (): void => {
+    withDraftGuard(() => {
+      const promotion = libraryEditor?.operation === "create" ? libraryEditor.promotion : undefined;
+      if (promotion !== undefined)
+        setPromotionOffer((current) =>
+          current !== undefined &&
+          current.studentId === promotion.studentId &&
+          current.appliedCommentId === promotion.appliedCommentId
+            ? undefined
+            : current
+        );
+      setCommentEditor(undefined);
+      commentEditorBaseline.current = undefined;
+      setLibraryEditor(undefined);
+      setLibraryMutationMessage(undefined);
+      setGradingMutationError(undefined);
+      setCommentWorkspaceMode(undefined);
     });
   };
 
@@ -1493,7 +1693,10 @@ export const GradingWorkspacePage = ({
       studentId: workflowRepair.studentId,
       repositoryFullName: workflowRepair.repositoryFullName
     };
-    requestPanelOpen(() => setWorkflowRepairConfirmation(confirmation));
+    requestPanelOpen(() => {
+      setWorkflowRepairRunAfterReplacement(true);
+      setWorkflowRepairConfirmation(confirmation);
+    });
   };
 
   const openBulkWorkflowRepairConfirmation = (): void => {
@@ -1510,7 +1713,8 @@ export const GradingWorkspacePage = ({
     closeMutationEditor: () => void = () => {
       setCommentEditor(undefined);
       setDeleteConfirmation(undefined);
-    }
+    },
+    onMutationPersisted?: () => void
   ): Promise<boolean> => {
     if (studentId !== currentStudentIdRef.current || gradingMutationStudents.current.has(studentId))
       return false;
@@ -1546,6 +1750,7 @@ export const GradingWorkspacePage = ({
         return false;
       }
       commentWasSaved = true;
+      onMutationPersisted?.();
       if (currentStudentIdRef.current === studentId) {
         closeMutationEditor();
       }
@@ -1641,24 +1846,52 @@ export const GradingWorkspacePage = ({
         return;
       }
       const editor = commentEditor;
-      await runGradingMutation(studentId, () =>
-        addComment({
-          ...identity,
-          comment: {
-            id: globalThis.crypto.randomUUID(),
-            ...(editor.reusableCommentId === undefined
-              ? {}
-              : { sourceCommentId: editor.reusableCommentId }),
-            title,
-            text: editor.text,
-            deduction,
-            ...(editor.rubricCategoryId === ""
-              ? {}
-              : { rubricCategoryId: editor.rubricCategoryId }),
-            ...(sourceLocation === undefined ? {} : { sourceLocation })
-          }
-        })
+      const appliedCommentId = globalThis.crypto.randomUUID();
+      const appliedComment = {
+        id: appliedCommentId,
+        ...(editor.reusableCommentId === undefined
+          ? {}
+          : { sourceCommentId: editor.reusableCommentId }),
+        title,
+        text: editor.text,
+        deduction,
+        ...(editor.rubricCategoryId === "" ? {} : { rubricCategoryId: editor.rubricCategoryId }),
+        ...(sourceLocation === undefined ? {} : { sourceLocation })
+      };
+      const promotion: PromotionOffer | undefined =
+        editor.reusableCommentId === undefined
+          ? {
+              studentId,
+              appliedCommentId,
+              value: {
+                title,
+                text: editor.text,
+                // Applied comments submit a nonnegative deduction magnitude;
+                // reusable defaults store the equivalent score adjustment.
+                defaultDeduction: -deduction,
+                ...(editor.rubricCategoryId === ""
+                  ? {}
+                  : { defaultRubricCategoryId: editor.rubricCategoryId }),
+                tags: []
+              }
+            }
+          : undefined;
+      let persisted = false;
+      const saved = await runGradingMutation(
+        studentId,
+        () =>
+          addComment({
+            ...identity,
+            comment: appliedComment
+          }),
+        undefined,
+        () => {
+          persisted = true;
+          if (promotion !== undefined && currentStudentIdRef.current === studentId)
+            setPromotionOffer(promotion);
+        }
       );
+      if (saved || persisted) setCommentWorkspaceMode(undefined);
       return;
     }
     const editComment = window.graiderUI.editGradingStudentComment;
@@ -1667,7 +1900,7 @@ export const GradingWorkspacePage = ({
       return;
     }
     const editor = commentEditor;
-    await runGradingMutation(studentId, () =>
+    const saved = await runGradingMutation(studentId, () =>
       editComment({
         ...identity,
         commentId: editor.commentId,
@@ -1680,6 +1913,7 @@ export const GradingWorkspacePage = ({
         }
       })
     );
+    if (saved) setCommentWorkspaceMode(undefined);
   };
 
   const confirmDeleteComment = async (): Promise<void> => {
@@ -2380,6 +2614,10 @@ export const GradingWorkspacePage = ({
       cancelPublishReview();
       return;
     }
+    if (commentWorkspaceMode !== undefined) {
+      closeCommentWorkspace();
+      return;
+    }
     if (commentEditor !== undefined) {
       setCommentEditor(undefined);
       setGradingMutationError(undefined);
@@ -2412,9 +2650,15 @@ export const GradingWorkspacePage = ({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.defaultPrevented || event.altKey) return;
       if (isGradingShortcutSuppressedTarget(event.target)) return;
       const key = event.key;
+      if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "k") {
+        event.preventDefault();
+        openCommentLibrary();
+        return;
+      }
+      if (event.ctrlKey || event.metaKey) return;
       if (publishReviewOpen) {
         if (key === "Escape") {
           closeTopmostPanel();
@@ -2423,6 +2667,17 @@ export const GradingWorkspacePage = ({
         if (key === "?") {
           event.preventDefault();
           setCheatSheetOpen(true);
+        }
+        return;
+      }
+      if (commentWorkspaceMode !== undefined) {
+        if (key === "Escape") {
+          closeCommentWorkspace();
+          return;
+        }
+        if (key >= "1" && key <= "9") {
+          event.preventDefault();
+          applyReusableCommentByPosition(Number(key));
         }
         return;
       }
@@ -2595,6 +2850,29 @@ export const GradingWorkspacePage = ({
       />
     );
 
+  const libraryDeleteDialog = (
+    <ConfirmDialog
+      confirmLabel="Delete reusable comment"
+      diff={
+        libraryDeleteConfirmation === undefined
+          ? []
+          : [
+              {
+                id: libraryDeleteConfirmation.id,
+                type: "removed",
+                label: libraryDeleteConfirmation.title
+              }
+            ]
+      }
+      isConfirming={libraryMutationPending}
+      isOpen={libraryDeleteConfirmation !== undefined}
+      onCancel={() => setLibraryDeleteConfirmation(undefined)}
+      onConfirm={() => void deleteLibraryComment()}
+      summary="This deletes the reusable course-library entry. Comments already applied to students are unchanged."
+      title="Delete reusable comment?"
+    />
+  );
+
   if (publishReviewOpen)
     return (
       <main className="dashboard-shell grading-workspace">
@@ -2613,6 +2891,85 @@ export const GradingWorkspacePage = ({
         {footer}
         {cheatSheet}
         {discardDraftPrompt}
+        <Toast message={toastMessage} />
+      </main>
+    );
+
+  if (commentWorkspaceMode !== undefined && student !== undefined)
+    return (
+      <main className="dashboard-shell grading-workspace">
+        {header}
+        <GradingCommentWorkspace
+          assignmentTitle={result.assignment.title}
+          studentId={student.studentId}
+          mode={commentWorkspaceMode}
+          commentEditor={commentEditor}
+          onEditorChange={setCommentEditor}
+          rubric={result.rubric}
+          canonicalSourceTarget={canonicalSourceTarget}
+          gradingMutationStudentId={gradingMutationStudentId}
+          isStudentMutationBlocked={(studentId) =>
+            gradingMutationBlockedStudents.current.has(studentId)
+          }
+          onSaveStudentComment={() => void saveCommentEditor()}
+          onCancelStudentComment={closeCommentWorkspace}
+          sourceTargetLabel={sourceTargetLabel}
+          commentLibrary={commentLibrary}
+          commentSearch={commentSearch}
+          onSearchChange={setCommentSearch}
+          availableCommentTags={availableCommentTags}
+          selectedCommentTags={selectedCommentTags}
+          onTagsChange={setSelectedCommentTags}
+          matchingComments={matchingComments}
+          onApply={openApplyEditor}
+          libraryMutationPending={libraryMutationPending}
+          libraryEditor={libraryEditor}
+          onNewReusableComment={() => {
+            setLibraryMutationMessage(undefined);
+            setLibraryEditor({ operation: "create", value: emptyReusableCommentEditorValue() });
+          }}
+          onEditReusableComment={(comment) => {
+            setLibraryMutationMessage(undefined);
+            setLibraryEditor({
+              operation: "edit",
+              commentId: comment.id,
+              value: {
+                title: comment.title,
+                text: comment.text,
+                defaultDeduction: comment.defaultDeduction,
+                defaultRubricCategoryId: comment.defaultRubricCategoryId,
+                tags: comment.tags
+              }
+            });
+          }}
+          onDeleteReusableComment={(comment) => {
+            setLibraryMutationMessage(undefined);
+            setLibraryDeleteConfirmation(comment);
+          }}
+          onSaveReusableComment={(value) => void saveLibraryEditor(value)}
+          onCancelReusableEditor={() => {
+            const promotion =
+              libraryEditor?.operation === "create" ? libraryEditor.promotion : undefined;
+            if (promotion !== undefined)
+              setPromotionOffer((current) =>
+                current !== undefined &&
+                current.studentId === promotion.studentId &&
+                current.appliedCommentId === promotion.appliedCommentId
+                  ? undefined
+                  : current
+              );
+            setLibraryEditor(undefined);
+          }}
+          libraryMessage={libraryMutationMessage}
+          gradingMessage={gradingMutationError}
+          onShowAuthor={openGeneralCommentEditor}
+          onShowLibrary={openCommentLibrary}
+          onBack={closeCommentWorkspace}
+        />
+        {footer}
+        {cheatSheet}
+        {discardDraftPrompt}
+        {libraryDeleteDialog}
         <Toast message={toastMessage} />
       </main>
     );
@@ -2880,6 +3237,50 @@ export const GradingWorkspacePage = ({
                 </div>
               ) : null}
               <GradingScorePanel grade={snapshot.snapshot.grade} />
+              <div className="grading-comment-actions" aria-label="Comment actions">
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={openGeneralCommentEditor}
+                >
+                  Add comment
+                </button>
+                <button className="secondary-action" type="button" onClick={openCommentLibrary}>
+                  Browse comment library
+                </button>
+              </div>
+              {gradingMutationError === undefined ? null : (
+                <div className="grading-panel-message" role="alert">
+                  {gradingMutationError}
+                </div>
+              )}
+              {promotionOffer === undefined ||
+              promotionOffer.studentId !== snapshot.snapshot.studentId ? null : (
+                <div className="grading-comment-promotion" role="status">
+                  <span>Comment applied.</span>
+                  <button
+                    className="secondary-action"
+                    onClick={() => {
+                      setLibraryEditor({
+                        operation: "create",
+                        value: promotionOffer.value,
+                        promotion: promotionOffer
+                      });
+                      setCommentWorkspaceMode("library");
+                    }}
+                    type="button"
+                  >
+                    Save to course library
+                  </button>
+                  <button
+                    className="secondary-action"
+                    onClick={() => setPromotionOffer(undefined)}
+                    type="button"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
               <GradingAppliedCommentsPanel
                 appliedComments={snapshot.snapshot.appliedComments}
                 categories={snapshot.snapshot.grade.categories}
@@ -2950,53 +3351,15 @@ export const GradingWorkspacePage = ({
             workflowRepairConfirmation={workflowRepairConfirmation}
             onCancelWorkflowRepairConfirmation={() => setWorkflowRepairConfirmation(undefined)}
             onConfirmWorkflowRepair={confirmWorkflowRepair}
+            runAfterReplacement={workflowRepairRunAfterReplacement}
+            onRunAfterReplacementChange={setWorkflowRepairRunAfterReplacement}
           />
-          <section className="grading-comment-library" aria-labelledby="comment-library-heading">
-            <h3 id="comment-library-heading">Comment library</h3>
-            {gradingMutationError === undefined ? null : (
-              <div className="grading-panel-message" role="alert">
-                {gradingMutationError}
-              </div>
-            )}
-            {commentEditor !== undefined && commentEditor.studentId === student?.studentId ? (
-              <GradingCommentEditorForm
-                editor={commentEditor}
-                onEditorChange={setCommentEditor}
-                rubric={result.rubric}
-                canonicalSourceTarget={canonicalSourceTarget}
-                gradingMutationStudentId={gradingMutationStudentId}
-                isStudentMutationBlocked={(studentId) =>
-                  gradingMutationBlockedStudents.current.has(studentId)
-                }
-                onSubmit={() => void saveCommentEditor()}
-                onCancel={() => {
-                  setCommentEditor(undefined);
-                  setGradingMutationError(undefined);
-                }}
-                sourceTargetLabel={sourceTargetLabel}
-              />
-            ) : null}
-            <GradingCommentLibraryBrowser
-              commentLibrary={commentLibrary}
-              commentSearch={commentSearch}
-              onSearchChange={setCommentSearch}
-              availableCommentTags={availableCommentTags}
-              selectedCommentTags={selectedCommentTags}
-              onTagsChange={setSelectedCommentTags}
-              matchingComments={matchingComments}
-              studentId={student?.studentId}
-              gradingMutationStudentId={gradingMutationStudentId}
-              isStudentMutationBlocked={(studentId) =>
-                gradingMutationBlockedStudents.current.has(studentId)
-              }
-              onApply={openApplyEditor}
-            />
-          </section>
         </aside>
       </div>
       {footer}
       {cheatSheet}
       {discardDraftPrompt}
+      {libraryDeleteDialog}
       <Toast message={toastMessage} />
     </main>
   );

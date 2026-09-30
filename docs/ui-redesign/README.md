@@ -233,7 +233,7 @@ only the original six would have left that mechanism standing for five
 screens. See the note at the end of this section: this is the fourth time
 this document's description of the code has diverged from the code itself.
 
-The routes, as shipped:
+The PR10 routes, as shipped:
 
 ```
 /                                                    dashboard
@@ -246,6 +246,11 @@ The routes, as shipped:
 /course/:courseSlug/:termSlug/:assignment/report    faculty report       (extension)
 /course/:courseSlug/:termSlug/:assignment/edit      assignment edit      (extension)
 ```
+
+Later comment-library work added the course-scoped route
+`/course/:courseSlug/:termSlug/comment-library`. The current route table is in
+`ui/src/AppRoutes.tsx`; the PR10 list above is retained to keep that summary's
+scope and history clear.
 
 The four unmarked routes are the ones this section originally called for
 (dashboard, roster, assignment detail, grading workspace). The five marked
@@ -289,12 +294,26 @@ path); it is the only way back to grade status. Screens that aren't routed
 (`CourseSetupPage`, `AssignmentSetupPage`) keep their own "Back to dashboard"
 buttons too, since they have no breadcrumb trail to replace them with.
 
-### 4.2 Split the large components
+### 4.2 Component extraction (partly shipped)
 
-`GradingWorkspacePage.tsx` (2,638 lines), `AssignmentDetailPage.tsx` (2,482),
-and `DashboardPage.tsx` (1,048) each become a thin route component plus
-presentational children. Do this as part of the screen work, not as a separate
-refactor PR, so tests move with the code.
+The router work extracted route wrappers, `DashboardDataContext`, route
+resolution, breadcrumbs, and shared navigation paths. The major screens are no
+longer reached through `DashboardPage` early-return branches: the dashboard is
+the routed root, while assignment detail and grading remain screen
+orchestrators behind dedicated route components.
+
+The component split is also materially underway. Assignment detail delegates
+facts, roster, diagnostics, grade-status summary, workflow, template, access
+page, reports, repository downloads, and student-table rendering to focused
+panels. The grading workspace delegates student navigation, source viewing,
+score, comments, adjustments, evidence, workflow repair, publication, and the
+focused comment takeover to separate components. The dashboard delegates its
+data provider, toolbar, course cards, course folders, and error panels.
+
+The three page orchestrators are still intentionally substantial because they
+own screen-level state and mutation coordination. A future decomposition may
+make them thinner, but the old pre-router line-count proposal is not a current
+architecture or a requirement for ITEM-36.
 
 ### 4.3 Shared components to build first
 
@@ -309,9 +328,10 @@ refactor PR, so tests move with the code.
 
 ### 5.1 Grading workspace — highest priority
 
-This is the most-used screen and currently the least finished: it uses **none**
-of the app's shared button classes, so every control renders as a raw browser
-default. It also does not fill the window.
+This is the most-used screen and remains the largest screen orchestrator. Its
+controls use the shared action classes, while extracted panels and the focused
+comment workspace keep grading, evidence, workflow repair, and comment-library
+work scoped to the selected student.
 
 **Layout.** Full height, three panes between a header and a footer hint bar.
 
@@ -338,15 +358,16 @@ author, a points chip, a line reference, and the comment text.
 **Right pane (380px).** Fixed top block: student identity, grading status, the
 score as a large accent number over `/ 100`, and one bar per rubric category
 with `earned / max`. Scrolling middle: **Applied comments** (points chip, text,
-location), **Comment library** (each entry a button with a number-key badge,
-label, and points chip — clicking applies it and updates the score), and
+location), compact `Add comment` and `Browse comment library` actions, and
 **Automated checks** collapsed to a pass line plus any warning line with a View
-link. Pinned bottom: primary `Mark complete and go to next` with a `⏎` badge,
-and a quiet `Skip for now`.
+link. Authoring and reusable-library browse/edit work replace the grid with a
+student-scoped Comments workspace; they are not embedded in the sidebar.
+Pinned bottom: primary `Mark complete and go to next` with a `⏎` badge, and a
+quiet `Skip for now`.
 
 **Footer (40px).** Persistent hint bar: `J` next student in the active filter,
 `K` previous student in the active filter,
-`C` comment, `1–9` library, `⏎` complete, `?` all shortcuts. On the right,
+`C` comment, `⌘/Ctrl K` library, `1–9` library, `⏎` complete, `?` all shortcuts. On the right,
 `Saved automatically`.
 
 **Required behaviour changes**
@@ -680,9 +701,35 @@ Work on `ui-redesign` with one PR per step. Each PR keeps `npm test`,
 | 9   | Apply/grade preview merge                                                                          | Depends on 8                                                                                       |
 | 10  | Router + breadcrumbs, split large components                                                       | Larger refactor, safest once screens are settled                                                   |
 | 11  | `CourseSetupPage.tsx` redesign against §2, plus items 33-35 as independent improvements            | Replaces the term setup wizard — see §5.5's correction; not urgent, no new rosters until next term |
-| 12  | Roster manager rebuild + source field                                                              | Completes term-start work; give it a feasibility pass first, per item 27                           |
+| 12  | Roster manager rebuild + source field — **complete**                                               | PR12-1 through PR12-5, with the documented COMMENT-1 through COMMENT-5 priority detour             |
 
 PR 7 can jump the queue; it is a real bug.
+
+### Priority update after PR12-3
+
+PR12-3 (bulk roster section summaries) is complete. An explicit product
+priority decision inserts the shared comment-library and comment-formatting
+track before the remaining Step 12 work:
+
+```text
+PR12-3 (complete)
+  -> COMMENT-1 (complete)
+  -> COMMENT-2 (complete)
+  -> COMMENT-3 (complete)
+  -> COMMENT-4 (complete)
+  -> COMMENT-5 (complete)
+  -> PR12-4 roster source/provenance (complete)
+  -> PR12-5 roster-manager visual rebuild (complete)
+```
+
+PR12-5 is complete. The roster manager now consumes PR12-3's bulk section
+summaries and PR12-4's first-class roster source metadata in the rebuilt §5.6
+workspace. This completes the planned Step 12 roster-manager rebuild. The
+original Step 12 sequence and COMMENT-1 through COMMENT-5 priority detour remain
+part of the project history. See `summaries/pr12-5.md`,
+`comment-library-feasibility.md`, and
+`summaries/comment-library-priority-decision.md` for the verified existing
+infrastructure, gaps, and recommended comment-track slices.
 
 The term setup wizard shell (five steps, left rail, resumability) is
 **deferred indefinitely, not scheduled** — see §5.5.

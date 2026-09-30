@@ -50,13 +50,15 @@ describe("managed workflow policy", () => {
     });
   });
 
-  it("allows an older marked Graider workflow to be updated", () => {
+  it("classifies changed canonical v1 content as safely replaceable", () => {
     const canonical = canonicalWorkflow();
     const earlierManagedWorkflow = canonical.replace(
-      'CHECKSTYLE_VERSION: "14.1.0"',
-      'CHECKSTYLE_VERSION: "10.23.1"'
+      "      - name: Detect JavaFX requirements\n",
+      "      - name: Legacy always-on JavaFX setup\n"
     );
 
+    expect(earlierManagedWorkflow).not.toBe(canonical);
+    expect(earlierManagedWorkflow).toContain("# graider-workflow-version: 1");
     expect(classifyManagedWorkflow(earlierManagedWorkflow, canonical)).toEqual({
       classification: "managed_outdated",
       ownershipVersion: GRAIDER_MANAGED_WORKFLOW_VERSION

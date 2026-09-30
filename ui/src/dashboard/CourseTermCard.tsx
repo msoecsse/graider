@@ -13,6 +13,7 @@ interface CourseTermCardProps {
     combinedCard: CombinedDashboardCard,
     assignment: RecentAssignmentSummary
   ) => void;
+  readonly onManageCommentLibrary: (combinedCard: CombinedDashboardCard) => void;
 }
 
 const getSubtitle = (card: DashboardCard): string => {
@@ -69,7 +70,8 @@ const getAssignmentMeta = (assignment: RecentAssignmentSummary): string | null =
 
 export const CourseTermCard = ({
   combinedCard,
-  onOpenAssignment
+  onOpenAssignment,
+  onManageCommentLibrary
 }: CourseTermCardProps): ReactElement => {
   const { card } = combinedCard;
   const title = getCardTitle(card);
@@ -96,6 +98,16 @@ export const CourseTermCard = ({
         {summaryParts.length > 0 ? (
           <p className="course-card__summary">{summaryParts.join(" · ")}</p>
         ) : null}
+
+        <div className="course-card__actions">
+          <button
+            className="secondary-action"
+            onClick={() => onManageCommentLibrary(combinedCard)}
+            type="button"
+          >
+            Comment Library
+          </button>
+        </div>
 
         <details className="course-card__advanced">
           <summary>Advanced details</summary>

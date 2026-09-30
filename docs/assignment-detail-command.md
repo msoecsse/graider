@@ -19,11 +19,14 @@ The command is read-only. It loads course, term, assignment, roster, lightweight
 local apply-state data, and bounded GitHub readiness when a token is available.
 
 If `GRAIDER_GITHUB_TOKEN` or another project-supported token source is present,
-the command checks configured template repository, template branch, grading
-workflow file, and `workflow_dispatch` trigger. Absent template or grading
-configuration is represented as not required. If no token is available, the
-command still returns local detail with `partial_success` and
-`token_required` readiness statuses.
+the command checks the configured template repository and branch. For
+faculty-owned custom workflows, it also checks the grading workflow file and
+`workflow_dispatch` trigger. An explicit managed preset (`enabled: true`,
+`mode: preset`, `preset: java-junit-checkstyle`) does not require a template
+copy of the workflow because Apply deploys Graider's canonical workflow to the
+student repositories. Absent template or grading configuration is represented
+as not required. If no token is available, the command still returns local
+detail with `partial_success` and `token_required` readiness statuses.
 
 The command does not:
 
@@ -145,8 +148,12 @@ GitHub-backed readiness uses a bounded set of checks:
 
 - template repository existence/accessibility
 - configured template branch existence
-- configured grading workflow file content in the template repository branch
-- `workflow_dispatch` support in that workflow file
+- configured faculty/custom grading workflow file content in the template
+  repository branch
+- `workflow_dispatch` support in that faculty/custom workflow file
+
+Managed preset workflow readiness remains `not_checked` at the template level;
+the workflow is supplied and ownership-checked by the Apply deployment path.
 
 The command does not list repositories, inspect workflow runs, download
 artifacts, or inspect student repositories.

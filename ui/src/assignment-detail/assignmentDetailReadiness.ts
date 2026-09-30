@@ -114,7 +114,7 @@ export const collectNeedsAttentionItems = (
     );
   }
 
-  if (detail.roster === null) {
+  if (detail.status !== "failure" && detail.roster === null) {
     items.push(
       createAttentionItem(
         "roster-summary",

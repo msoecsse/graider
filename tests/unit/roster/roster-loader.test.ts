@@ -36,6 +36,10 @@ describe("roster loading and validation", () => {
     expect(result.errors).toEqual([]);
     expect(result.warnings).toEqual([]);
     expect(result.students).toHaveLength(4);
+    expect(result.students[0]).toMatchObject({
+      rosterPath: "terms/27s1/rosters/section-001.csv",
+      rowNumber: 2
+    });
     expect(result.summary).toMatchObject({
       rosterFiles: ["terms/27s1/rosters/section-001.csv", "terms/27s1/rosters/section-002.csv"],
       studentCount: 4,

@@ -12,7 +12,8 @@ Graider helps faculty:
 - create and edit assignments;
 - preview and apply student repository setup;
 - generate a student repository access page for Canvas;
-- view, edit, and push the configured grading workflow;
+- view, edit, and push a configured custom grading workflow, or use Graider's
+  managed workflow deployment and replacement actions;
 - preview and dispatch grading, check its status, and generate a faculty report.
 
 ## What Graider Does Not Do Yet
@@ -58,7 +59,10 @@ Prepare these items before an assignment cycle:
   hold students are skipped.
 - A local clone of the configured student-access Pages repository. The private
   course/admin repository can remain private.
-- A configured grading workflow before dispatching grading.
+- Either a configured custom grading workflow, or an assignment using Graider's
+  managed `java-junit-checkstyle` preset. Managed assignments receive the
+  canonical workflow during Apply; a custom workflow must be available before
+  dispatching grading.
 
 ## Launch Graider
 
@@ -113,13 +117,14 @@ save the canonical four-column CSV. Use **Add Student** to add an individual
 student; the selected section is filled in and the status defaults to `active`.
 Use **Remove Student** to remove a row, **Replace from CSV** to replace the
 selected roster with an uploaded canonical CSV, or **Clear Roster Rows** to
-save a header-only roster while keeping the section. **Remove Roster** instead
-deletes the roster CSV and removes its section from the term configuration after
-confirmation. To add it again later, choose **Add Section** and save/import its
-roster. Review the preview before using **Save Roster**. Keep `student_id` and
-`github_username` accurate. Use `active` for students who should receive
-repositories; use `dropped` or `hold` to exclude them from repository
-access-page generation.
+save a header-only roster while keeping the section and an explicitly configured
+zero-student roster. **Remove Roster** deletes the roster files, reference, and
+source history while keeping the section and its faculty. **Remove Section**
+removes the section configuration and any associated roster files. All three
+actions require confirmation, and none deletes student repositories. Review the
+preview before using **Save Roster**. Keep `student_id` and `github_username`
+accurate. Use `active` for students who should receive repositories; use
+`dropped` or `hold` to exclude them from repository access-page generation.
 
 To add a section after course setup, select the term and choose **Add Section**.
 Enter a safe, unique section ID, optionally upload a canonical roster CSV (or
@@ -181,6 +186,12 @@ usually means repositories have not been created yet; it is not automatically
 an error. The Dashboard presents this pre-Apply state as **Not applied**;
 **Blocked** is reserved for diagnostics that prevent Apply. Apply must succeed
 before repository links can be shared with students.
+
+For an assignment explicitly using Graider's managed
+`java-junit-checkstyle` preset, Apply also creates or updates the canonical
+`.github/workflows/grade.yml` in applicable student repositories. Apply remains
+conservative: it does not overwrite unmanaged or unsupported workflow content.
+Use the explicit workflow-replacement actions when replacement is intended.
 
 ## Share Repository Links with Students Using Canvas
 
@@ -253,14 +264,23 @@ that GitHub Pages is enabled or that the URL is live. Enable Pages in GitHub
 before sharing the Canvas link. Course configuration changes still require a
 separate commit and push of the admin repository.
 
-## View or Edit the Grading Workflow
+## View, Edit, or Replace the Grading Workflow
 
-From Assignment Detail select **View workflow**. Graider reads the configured
-template repository, branch, and workflow path (normally
-`.github/workflows/grade.yml`). Review changes carefully, use
-the workflow preview, and select **Confirm push** only for a safe, authorized
-template repository. If the workflow is missing, Graider shows the absence so
-you can provide the expected workflow before grading.
+From Assignment Detail select **View workflow**. For a custom workflow,
+Graider reads the configured template repository, branch, and workflow path
+(normally `.github/workflows/grade.yml`). Review changes carefully, use the
+workflow preview, and select **Confirm push** only for a safe, authorized
+template repository. If a required custom workflow is missing, provide it in
+the template before dispatching grading.
+
+For a managed `java-junit-checkstyle` assignment, the template copy is not
+required for readiness: Apply deploys the canonical workflow to applicable
+student repositories. Assignment Detail can explicitly **Replace template
+workflow with Graider's workflow** after a review and confirmation. In the
+grading workspace, **Replace Graider workflow…** can replace a student
+repository workflow; the confirmation offers replacement-only or replacement
+followed by grading. Both operations are targeted, confirmed mutations, and
+replacement never silently dispatches grading.
 
 ## Configure Group Assignment Membership
 
@@ -326,8 +346,11 @@ failed workflow results may leave report rows incomplete.
   the Pages repository.
 - **Access page uncommitted or unpushed:** Use the displayed copy-only commands
   in a terminal from the Pages repository, then refresh readiness.
-- **Workflow missing or grade dispatch fails:** Check the configured template,
-  branch, workflow path, GitHub auth, and Assignment Detail diagnostics.
+- **Workflow missing or grade dispatch fails:** For custom grading, check the
+  configured template, branch, workflow path, GitHub auth, and Assignment
+  Detail diagnostics. For managed grading, confirm the assignment explicitly
+  uses the managed preset, Apply has completed, and any intended replacement
+  was confirmed in the appropriate template or student-repository action.
 - **Grade status has no runs:** Confirm dispatch was completed and allow GitHub
   Actions time to start; then refresh status.
 - **Report unavailable:** Wait for grading results/artifacts and refresh the

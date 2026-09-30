@@ -30,6 +30,13 @@ Dashboard
 -> Faculty Report
 ```
 
+For assignments using the explicit Graider-managed Java preset, Apply also
+creates or updates the canonical grading workflow in applicable student
+repositories. Assignment Detail and the grading workspace provide separate,
+confirmed workflow-replacement actions for template or student repositories;
+replacement and grading dispatch remain distinct operations unless faculty
+explicitly chooses the replace-and-run option.
+
 Confirmed apply and confirmed grade dispatch are mutating flows. Run live smoke
 tests only against a safe sandbox course.
 
@@ -175,8 +182,10 @@ Actions workflow runs.
 - [ ] Confirm Back navigation works from each workflow page.
 - [ ] Confirm diagnostics never show tokens, authorization headers,
       `process.env`, or raw stack traces.
-- [ ] Confirm student publishing and workflow generation actions are absent or
-      disabled/deferred.
+- [ ] Confirm managed-workflow deployment occurs through confirmed Apply, and
+      template/student workflow replacement actions are explicit and scoped.
+- [ ] Confirm replacement-only does not dispatch grading, while the explicit
+      replace-and-run option requires confirmation before dispatch.
 
 ## Packaged App Smoke Test Checklist
 
@@ -361,7 +370,8 @@ These are intentionally outside the current release-readiness pass:
 - student report publish preview
 - student report publish confirmation
 - student-facing report preview
-- workflow generation UI
+- a general-purpose workflow-generation UI beyond the managed preset deployment
+  and explicit workflow-replacement actions
 - packaged installer/distribution
 - RC1 faculty zip distribution is scripted, but installer distribution remains
   deferred

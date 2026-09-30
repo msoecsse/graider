@@ -11,6 +11,7 @@ interface CourseCardGridProps {
     combinedCard: CombinedDashboardCard,
     assignment: RecentAssignmentSummary
   ) => void;
+  readonly onManageCommentLibrary: (combinedCard: CombinedDashboardCard) => void;
   readonly onSetupAssignment: (courseFolder: CourseFolderRecord) => void;
   readonly onManageRosters: (courseFolder: CourseFolderRecord) => void;
   readonly onRefresh: (courseFolderId: string) => void;
@@ -121,6 +122,7 @@ export const CourseCardGrid = ({
   courseFolders,
   refreshingId,
   onOpenAssignment,
+  onManageCommentLibrary,
   onSetupAssignment,
   onManageRosters,
   onRefresh
@@ -197,6 +199,7 @@ export const CourseCardGrid = ({
                 <CourseTermCard
                   combinedCard={card}
                   key={card.id}
+                  onManageCommentLibrary={onManageCommentLibrary}
                   onOpenAssignment={onOpenAssignment}
                 />
               ))}

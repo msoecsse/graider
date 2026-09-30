@@ -49,16 +49,26 @@ const normalizeResultStatus = (status: string | null): ApplyResultRepositoryStat
   return DEFAULT_RESULT_STATUS;
 };
 
+const getDefaultResultReason = (status: ApplyResultRepositoryStatus): string => {
+  if (status === "created") return "repository_created";
+  if (status === "updated") return "repository_updated";
+  if (status === "skipped") return "repository_apply_skipped";
+  if (status === "blocked") return "repository_apply_blocked";
+
+  return "repository_apply_failed";
+};
+
 const normalizeResultRow = (value: unknown): ApplyResultRepositoryRow => {
   const row = isRecord(value) ? value : {};
+  const status = normalizeResultStatus(getString(row, "status"));
 
   return {
     studentId: getString(row, "studentId"),
     githubUsername: getString(row, "githubUsername"),
     section: getString(row, "section"),
     repository: getString(row, "repository"),
-    status: normalizeResultStatus(getString(row, "status")),
-    reason: getString(row, "reason"),
+    status,
+    reason: getString(row, "reason") ?? getDefaultResultReason(status),
     diagnostics: normalizeAssignmentDetailDiagnostics(
       Array.isArray(row.diagnostics) ? row.diagnostics : []
     )

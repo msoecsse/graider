@@ -1,4 +1,11 @@
 import path from "node:path";
+import type {
+  CourseMutationPublicationResult,
+  CoursePublishActionResult,
+  CourseSetupDiagnostic
+} from "./ipc.js";
+import { publishSuccessfulCourseMutation } from "./courseMutationPublicationService.js";
+import { publishCourseChanges } from "./coursePublishService.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -10,7 +17,7 @@ export interface ReusableCommentDto {
   readonly title: string;
   readonly text: string;
   readonly defaultDeduction: number;
-  readonly defaultRubricCategoryId?: string;
+  readonly defaultRubricCategoryId?: string | undefined;
   readonly tags: readonly string[];
 }
 
@@ -37,41 +44,72 @@ export interface DeleteGradingLibraryCommentServiceRequest extends GradingCommen
   readonly commentId: string;
 }
 
-export type GradingCommentLibraryResult =
+type GradingCommentLibraryAccessFailure = {
+  readonly status:
+    | "faculty_identity_required"
+    | "no_assigned_sections"
+    | "roster_error"
+    | "term_config_error";
+};
+
+type GradingCommentLibraryOperationFailure = {
+  readonly status: "not_found" | "failure";
+  readonly code: string;
+};
+
+export type GradingCommentLibraryLoadResult =
   | { readonly status: "success"; readonly comments: readonly ReusableCommentDto[] }
+  | GradingCommentLibraryAccessFailure
+  | GradingCommentLibraryOperationFailure;
+
+type GradingCommentLibraryLocalMutationResult =
   | { readonly status: "success"; readonly comment: ReusableCommentDto }
   | { readonly status: "success" }
+  | GradingCommentLibraryAccessFailure
+  | GradingCommentLibraryOperationFailure;
+
+export type GradingCommentLibraryMutationResult =
   | {
-      readonly status:
-        | "faculty_identity_required"
-        | "no_assigned_sections"
-        | "roster_error"
-        | "term_config_error";
+      readonly status: "success";
+      readonly comment: ReusableCommentDto;
+      readonly diagnostics: readonly CourseSetupDiagnostic[];
+      readonly publication: CourseMutationPublicationResult;
     }
-  | { readonly status: "not_found" | "failure"; readonly code: string };
+  | {
+      readonly status: "success";
+      readonly diagnostics: readonly CourseSetupDiagnostic[];
+      readonly publication: CourseMutationPublicationResult;
+    }
+  | GradingCommentLibraryAccessFailure
+  | GradingCommentLibraryOperationFailure;
+
+export type GradingCommentLibraryResult =
+  | GradingCommentLibraryLoadResult
+  | GradingCommentLibraryMutationResult;
 
 interface GradingCommentLibraryBackend {
   loadGradingCommentLibraryContext(request: {
     readonly courseFolderPath: string;
-  }): GradingCommentLibraryResult;
+  }): GradingCommentLibraryLoadResult;
   createGradingLibraryCommentContext(request: {
     readonly courseFolderPath: string;
     readonly comment: ReusableCommentFieldsDto;
-  }): GradingCommentLibraryResult;
+  }): GradingCommentLibraryLocalMutationResult;
   editGradingLibraryCommentContext(request: {
     readonly courseFolderPath: string;
     readonly commentId: string;
     readonly replacement: ReusableCommentFieldsDto;
-  }): GradingCommentLibraryResult;
+  }): GradingCommentLibraryLocalMutationResult;
   deleteGradingLibraryCommentContext(request: {
     readonly courseFolderPath: string;
     readonly commentId: string;
-  }): GradingCommentLibraryResult;
+  }): GradingCommentLibraryLocalMutationResult;
 }
 
 export interface GradingCommentLibraryDependencies {
   readonly resolveFacultyScope: (request: FacultyScopeServiceRequest) => FacultyScopeServiceResult;
   readonly loadBackend: () => GradingCommentLibraryBackend;
+  readonly publishCourseChanges: (courseFolderPath: string) => Promise<CoursePublishActionResult>;
 }
 
 const loadBackend = (): GradingCommentLibraryBackend =>
@@ -80,24 +118,38 @@ const loadBackend = (): GradingCommentLibraryBackend =>
 export const createGradingCommentLibraryService = (
   dependencies: Partial<GradingCommentLibraryDependencies> = {}
 ): {
-  readonly load: (request: GradingCommentLibraryServiceRequest) => GradingCommentLibraryResult;
+  readonly load: (request: GradingCommentLibraryServiceRequest) => GradingCommentLibraryLoadResult;
   readonly create: (
     request: CreateGradingLibraryCommentServiceRequest
-  ) => GradingCommentLibraryResult;
-  readonly edit: (request: EditGradingLibraryCommentServiceRequest) => GradingCommentLibraryResult;
+  ) => Promise<GradingCommentLibraryMutationResult>;
+  readonly edit: (
+    request: EditGradingLibraryCommentServiceRequest
+  ) => Promise<GradingCommentLibraryMutationResult>;
   readonly delete: (
     request: DeleteGradingLibraryCommentServiceRequest
-  ) => GradingCommentLibraryResult;
+  ) => Promise<GradingCommentLibraryMutationResult>;
 } => {
   const resolveFacultyScope = dependencies.resolveFacultyScope ?? resolveCurrentFacultyScope;
   const getBackend = dependencies.loadBackend ?? loadBackend;
+  const publish = dependencies.publishCourseChanges ?? publishCourseChanges;
   const authorize = (
     request: GradingCommentLibraryServiceRequest
-  ): GradingCommentLibraryResult | undefined => {
+  ): GradingCommentLibraryAccessFailure | undefined => {
     const scope = resolveFacultyScope(request);
     if (scope.status !== "success") return { status: scope.status };
     if (scope.sections.length === 0) return { status: "no_assigned_sections" };
     return undefined;
+  };
+  const publishMutation = async (
+    courseFolderPath: string,
+    result: GradingCommentLibraryLocalMutationResult
+  ): Promise<GradingCommentLibraryMutationResult> => {
+    if (result.status !== "success") return result;
+    return await publishSuccessfulCourseMutation(
+      courseFolderPath,
+      { ...result, diagnostics: [] },
+      publish
+    );
   };
   return {
     load: (request) =>
@@ -105,25 +157,34 @@ export const createGradingCommentLibraryService = (
       getBackend().loadGradingCommentLibraryContext({
         courseFolderPath: request.courseFolderPath
       }),
-    create: (request) =>
-      authorize(request) ??
-      getBackend().createGradingLibraryCommentContext({
+    create: async (request) => {
+      const authorizationFailure = authorize(request);
+      if (authorizationFailure !== undefined) return authorizationFailure;
+      const result = getBackend().createGradingLibraryCommentContext({
         courseFolderPath: request.courseFolderPath,
         comment: request.comment
-      }),
-    edit: (request) =>
-      authorize(request) ??
-      getBackend().editGradingLibraryCommentContext({
+      });
+      return await publishMutation(request.courseFolderPath, result);
+    },
+    edit: async (request) => {
+      const authorizationFailure = authorize(request);
+      if (authorizationFailure !== undefined) return authorizationFailure;
+      const result = getBackend().editGradingLibraryCommentContext({
         courseFolderPath: request.courseFolderPath,
         commentId: request.commentId,
         replacement: request.replacement
-      }),
-    delete: (request) =>
-      authorize(request) ??
-      getBackend().deleteGradingLibraryCommentContext({
+      });
+      return await publishMutation(request.courseFolderPath, result);
+    },
+    delete: async (request) => {
+      const authorizationFailure = authorize(request);
+      if (authorizationFailure !== undefined) return authorizationFailure;
+      const result = getBackend().deleteGradingLibraryCommentContext({
         courseFolderPath: request.courseFolderPath,
         commentId: request.commentId
-      })
+      });
+      return await publishMutation(request.courseFolderPath, result);
+    }
   };
 };
 

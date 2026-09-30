@@ -129,20 +129,20 @@ terms/27s1/generated-workflows/lab04/grade.yml
 The command writes only to the local filesystem and refuses to overwrite an
 existing file unless `--force` is provided.
 
-Generated preset workflows include a self-contained Graider result writer helper
-at runtime. The workflow writes `.graider/write-grading-result.py`, runs grading
-steps, then calls the helper to write `graider-output/grading-results.json`.
-Student repositories do not need Graider, npm packages, or course-admin
-repository access installed for this result-writing step.
+The managed `java-junit-checkstyle` preset supports both ordinary Java/JUnit and
+JavaFX/FXML/TestFX submissions. After checking out the requested
+`submission_sha`, it detects JavaFX need from source, module declarations, and
+FXML resources in that exact checkout. Plain Java skips JavaFX downloads and
+GUI runtime installation. The JavaFX path uses JavaFX 25 and Xvfb, stages FXML
+from `src/` into the matching compiled package path, and obtains TestFX only
+from the course/template repository's recursive `lib/*.jar` classpath.
 
-For GitHub Classroom grader steps, `outputs.result` is a base64-encoded
-Classroom JSON payload. Generated Graider workflows pass that payload and the
-GitHub Actions step outcome into the helper. The helper decodes the Classroom
-payload, prefers its internal status, maps it to `passed`, `failed`, or
-`skipped`, and uses the step outcome only when the Classroom payload is missing
-or cannot be parsed. Custom workflows should not write `outputs.result`,
-`success`, `failure`, `cancelled`, `pass`, or `fail` directly into
-`checks[].status`.
+Both paths use Java 25 and Checkstyle 14.1.0 with the current MSOE Checkstyle
+configuration. An embedded standard-library Python step writes
+`graider-output/grading-results.json` plus evidence metadata after the grading
+steps. Student repositories do not need Graider, npm packages, or course-admin
+repository access for result writing. This conditional runtime setup does not
+change the artifact or result JSON schema.
 
 ### `custom-workflow`
 

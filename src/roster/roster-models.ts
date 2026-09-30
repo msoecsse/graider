@@ -26,6 +26,20 @@ export interface RosterSummary {
   holdStudentCount: number;
 }
 
+// Keep all consumers of roster totals on the same status definitions. The
+// Electron section-summary context uses this alongside the CLI roster loader.
+export const createRosterSummary = (
+  rosterFiles: readonly string[],
+  students: readonly Pick<RosterStudent, "status">[]
+): RosterSummary => ({
+  rosterFiles: [...rosterFiles],
+  studentCount: students.length,
+  activeStudentCount: students.filter((student) => student.status === ROSTER_STATUS_ACTIVE).length,
+  droppedStudentCount: students.filter((student) => student.status === ROSTER_STATUS_DROPPED)
+    .length,
+  holdStudentCount: students.filter((student) => student.status === ROSTER_STATUS_HOLD).length
+});
+
 export interface RosterLoadResult {
   students: RosterStudent[];
   warnings: Diagnostic[];

@@ -33,7 +33,7 @@ describe("GradingWorkflowRepairPanel", () => {
       />
     );
 
-    const button = screen.getByRole("button", { name: "Replace workflow & run" });
+    const button = screen.getByRole("button", { name: "Replace Graider workflow…" });
     expect(button).toBeEnabled();
     fireEvent.click(button);
     expect(onOpenWorkflowRepairConfirmation).toHaveBeenCalledTimes(1);

@@ -3,7 +3,15 @@
 Investigation only, per item 27's practice, applied before implementation.
 No implementation code below. All citations are to code read directly.
 
-## 1. Source as a first-class field — genuine gap, small
+PR12-5 has now shipped the planned §5.6 rebuild. The routed canonical term is
+the page context; bulk section summaries drive visible tabs; persisted source
+metadata is distinct from pending source intent; the renderer uses PR12-2's
+shared parser/diff; and the table, faculty/stats sidebar, dirty-state bar,
+structured review, typed destructive confirmations, and Technical details are
+implemented. See `summaries/pr12-5.md`. The historical feasibility findings
+below are preserved.
+
+## 1. Source as a first-class field — shipped in PR12-4
 
 Confirmed: no roster carries provenance today. `RosterRow`
 (`ui/electron/ipc.ts:522-527`) is `{studentId, githubUsername, section,
@@ -24,6 +32,13 @@ existing functions, comparable in size to backlog item 34's storage
 module. Store it in the roster CSV's sidecar or as a comment/companion
 field; either is fine, not investigated further since it's an
 implementation detail once the field itself is agreed on.
+
+PR12-4 closed this gap with a versioned companion file at
+`terms/<term>/rosters/section-<section>.source.json`. The renderer supplies only
+`sourceKind`; trusted main-process dependencies supply author and save-time.
+Load/save results expose the canonical stored source, legacy missing metadata
+stays absent, and malformed metadata fails soft. See `summaries/pr12-4.md` for
+the shipped contract and behavior.
 
 ## 2. The unsaved-changes model — the shared component needs nothing; the diffing is new, and client-side-only
 
@@ -193,6 +208,13 @@ PR breakdown, roughly in order:
 Nothing here needs to land before step 11's `CourseSetupPage.tsx`
 redesign or block it — (2)'s module is the one piece step 11 should adopt
 once it exists, not wait on.
+
+PR12-5 completed this sequence after PR12-4 and the documented COMMENT-1
+through COMMENT-5 priority detour. Backlog item 23 is resolved. Item 36 remains
+open with three parser call sites after the renderer converged. Items 37 and 38
+remain resolved. The implementation also confirmed that `removeRoster` removes
+the configured section, recorded separately as backlog item 44 rather than
+silently rearchitected here.
 
 ## Backlog items added or corrected
 

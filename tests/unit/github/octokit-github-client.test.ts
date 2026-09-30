@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { Readable } from "node:stream";
 import { deflateRawSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OctokitGitHubClient,
   type OctokitRestClientLike
@@ -20,6 +20,8 @@ enum OctokitTestNumber {
   EmptyBufferLength = 0,
   CreatedStatus = 201,
   NotFoundStatus = 404,
+  UnprocessableEntityStatus = 422,
+  TooManyRequestsStatus = 429,
   UnauthorizedStatus = 401,
   ForbiddenStatus = 403,
   ServerErrorStatus = 500,
@@ -109,17 +111,22 @@ interface RequestLikeErrorOptions {
   status?: number;
   message?: string;
   headers?: Record<string, string>;
+  responseMessage?: string;
 }
 
 const createRequestError = ({
   status,
   message = "GitHub request failed.",
-  headers = {}
+  headers = {},
+  responseMessage
 }: RequestLikeErrorOptions) =>
   Object.assign(new Error(message), {
     ...(status === undefined ? {} : { status }),
     response: {
-      headers
+      headers,
+      ...(responseMessage === undefined
+        ? {}
+        : { data: { message: responseMessage, authorization: TOKEN, body: "raw secret body" } })
     }
   });
 
@@ -465,6 +472,28 @@ const expectGitHubError = async (
 };
 
 describe("OctokitGitHubClient", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("configures the production Octokit client with the current GitHub REST API version", async () => {
+    let observedApiVersion: string | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      observedApiVersion = new Request(input, init).headers.get("x-github-api-version");
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: OctokitTestNumber.RepositoryId, name: REPO }), {
+          headers: { "content-type": "application/json" },
+          status: 200
+        })
+      );
+    });
+
+    await expect(
+      new OctokitGitHubClient({ token: TOKEN }).getRepository(OWNER, REPO)
+    ).resolves.toEqual(expect.objectContaining({ name: REPO }));
+    expect(observedApiVersion).toBe("2026-03-10");
+  });
+
   it("creates an uninitialized private repository in the configured organization", async () => {
     const octokit = createMockOctokit();
     let observedInput: Record<string, unknown> = {};
@@ -552,7 +581,11 @@ describe("OctokitGitHubClient", () => {
       rejectedResponse(createRequestError({ status: OctokitTestNumber.UnauthorizedStatus }));
     const client = new OctokitGitHubClient({ token: TOKEN, octokit });
 
-    await expectGitHubError(() => client.getAuthenticatedUser(), DiagnosticCode.GithubAuthFailed);
+    await expect(client.getAuthenticatedUser()).rejects.toMatchObject({
+      diagnosticCode: DiagnosticCode.GithubAuthFailed,
+      statusCode: OctokitTestNumber.UnauthorizedStatus,
+      retryable: false
+    });
   });
 
   it("permission denied maps to github_permission_denied", async () => {
@@ -561,17 +594,19 @@ describe("OctokitGitHubClient", () => {
       rejectedResponse(createRequestError({ status: OctokitTestNumber.ForbiddenStatus }));
     const client = new OctokitGitHubClient({ token: TOKEN, octokit });
 
-    await expectGitHubError(
-      () =>
-        client.createRepositoryFromTemplate({
-          templateOwner: OWNER,
-          templateRepo: TEMPLATE_REPO,
-          owner: OWNER,
-          name: REPO,
-          private: true
-        }),
-      DiagnosticCode.GithubPermissionDenied
-    );
+    await expect(
+      client.createRepositoryFromTemplate({
+        templateOwner: OWNER,
+        templateRepo: TEMPLATE_REPO,
+        owner: OWNER,
+        name: REPO,
+        private: true
+      })
+    ).rejects.toMatchObject({
+      diagnosticCode: DiagnosticCode.GithubPermissionDenied,
+      statusCode: OctokitTestNumber.ForbiddenStatus,
+      retryable: false
+    });
   });
 
   it("rate-limit response maps to github_rate_limited and preserves retry-after", async () => {
@@ -590,9 +625,63 @@ describe("OctokitGitHubClient", () => {
 
     await expect(client.getRepository(OWNER, REPO)).rejects.toMatchObject({
       diagnosticCode: DiagnosticCode.GithubRateLimited,
-      retryAfterSeconds: Number(RETRY_AFTER_SECONDS)
+      retryAfterSeconds: Number(RETRY_AFTER_SECONDS),
+      statusCode: OctokitTestNumber.ForbiddenStatus,
+      retryable: true
     });
   });
+
+  it("429 maps to a status-bearing retryable rate-limit error", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.actions.getGithubActionsPermissionsRepository = () =>
+      rejectedResponse(
+        createRequestError({
+          status: OctokitTestNumber.TooManyRequestsStatus,
+          responseMessage: "Too Many Requests"
+        })
+      );
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(client.getActionsState(OWNER, REPO)).rejects.toMatchObject({
+      diagnosticCode: DiagnosticCode.GithubRateLimited,
+      statusCode: OctokitTestNumber.TooManyRequestsStatus,
+      retryable: true,
+      message: "GitHub rate limit was reached (HTTP 429: Too Many Requests)."
+    });
+  });
+
+  it.each([
+    [OctokitTestNumber.NotFoundStatus, "Not Found"],
+    [OctokitTestNumber.UnprocessableEntityStatus, "Validation Failed"],
+    [OctokitTestNumber.ServerErrorStatus, "Internal Server Error"]
+  ] as const)(
+    "non-nullable HTTP %s retains safe API context without response leakage",
+    async (status, responseMessage) => {
+      const octokit = createMockOctokit();
+      octokit.rest.actions.getGithubActionsPermissionsRepository = () =>
+        rejectedResponse(
+          createRequestError({
+            status,
+            responseMessage,
+            headers: { authorization: `Bearer ${TOKEN}` },
+            message: `request failed with ${TOKEN}`
+          })
+        );
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+      const error = await client.getActionsState(OWNER, REPO).catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({
+        diagnosticCode: DiagnosticCode.GithubApiError,
+        statusCode: status,
+        retryable: true,
+        message: `GitHub API request failed (HTTP ${String(status)}: ${responseMessage}).`
+      });
+      expect(JSON.stringify(error)).not.toContain(TOKEN);
+      expect(JSON.stringify(error)).not.toContain("raw secret body");
+      expect(JSON.stringify(error)).not.toContain("authorization");
+    }
+  );
 
   it("5xx maps to github_api_error", async () => {
     const octokit = createMockOctokit();
@@ -600,7 +689,11 @@ describe("OctokitGitHubClient", () => {
       rejectedResponse(createRequestError({ status: OctokitTestNumber.ServerErrorStatus }));
     const client = new OctokitGitHubClient({ token: TOKEN, octokit });
 
-    await expectGitHubError(() => client.getRepository(OWNER, REPO), DiagnosticCode.GithubApiError);
+    await expect(client.getRepository(OWNER, REPO)).rejects.toMatchObject({
+      diagnosticCode: DiagnosticCode.GithubApiError,
+      statusCode: OctokitTestNumber.ServerErrorStatus,
+      retryable: true
+    });
   });
 
   it("network failure maps to github_network_error", async () => {
@@ -608,10 +701,11 @@ describe("OctokitGitHubClient", () => {
     octokit.rest.repos.get = () => rejectedResponse(new TypeError("fetch failed"));
     const client = new OctokitGitHubClient({ token: TOKEN, octokit });
 
-    await expectGitHubError(
-      () => client.getRepository(OWNER, REPO),
-      DiagnosticCode.GithubNetworkError
-    );
+    await expect(client.getRepository(OWNER, REPO)).rejects.toMatchObject({
+      diagnosticCode: DiagnosticCode.GithubNetworkError,
+      retryable: true,
+      message: "GitHub network request failed."
+    });
   });
 
   it("nullable read methods return null on 404", async () => {

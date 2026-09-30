@@ -18,26 +18,69 @@ const baseProps = {
   selectedCommentTags: [],
   onTagsChange: vi.fn(),
   matchingComments: [comment],
-  studentId: "ada",
-  gradingMutationStudentId: undefined,
-  isStudentMutationBlocked: () => false,
-  onApply: vi.fn()
+  applyAction: { isDisabled: () => false, onApply: vi.fn() }
 };
 
 describe("GradingCommentLibraryBrowser", () => {
   it("renders matching comments and applies one on click", () => {
     const onApply = vi.fn();
-    render(<GradingCommentLibraryBrowser {...baseProps} onApply={onApply} />);
+    render(
+      <GradingCommentLibraryBrowser
+        {...baseProps}
+        applyAction={{ isDisabled: () => false, onApply }}
+      />
+    );
 
     expect(screen.getByText("Check your loop bounds.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Apply Off-by-one" }));
     expect(onApply).toHaveBeenCalledWith(comment);
   });
 
+  it("renders formatted reusable-comment previews", () => {
+    const { container } = render(
+      <GradingCommentLibraryBrowser
+        {...baseProps}
+        matchingComments={[
+          { ...comment, text: "Use `scanner.nextLine()`\n```java\n  value();\n```" }
+        ]}
+      />
+    );
+
+    expect(screen.getByText("scanner.nextLine()").tagName).toBe("CODE");
+    expect(
+      container.querySelector(".formatted-grading-comment__code-block code")?.textContent
+    ).toBe("  value();");
+  });
+
   it("disables Apply when no student is selected", () => {
-    render(<GradingCommentLibraryBrowser {...baseProps} studentId={undefined} />);
+    render(
+      <GradingCommentLibraryBrowser
+        {...baseProps}
+        applyAction={{ isDisabled: () => true, onApply: vi.fn() }}
+      />
+    );
 
     expect(screen.getByRole("button", { name: "Apply Off-by-one" })).toBeDisabled();
+  });
+
+  it("exposes compact library management actions", () => {
+    const onNew = vi.fn();
+    const onEdit = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <GradingCommentLibraryBrowser
+        {...baseProps}
+        onDelete={onDelete}
+        onEdit={onEdit}
+        onNew={onNew}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New comment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onNew).toHaveBeenCalledOnce();
+    expect(onEdit).toHaveBeenCalledWith(comment);
+    expect(onDelete).toHaveBeenCalledWith(comment);
   });
 
   it("shows the loading and failure states instead of the browser", () => {

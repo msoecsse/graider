@@ -10,6 +10,13 @@ import type {
   AssignmentSetupTermsResult,
   CourseSetupDiagnostic
 } from "./ipc.js";
+import {
+  DEFAULT_GRADING_ARTIFACT,
+  DEFAULT_GRADING_RESULT_FILE,
+  DEFAULT_GRADING_WORKFLOW,
+  MANAGED_GRADING_MODE,
+  MANAGED_GRADING_PRESET
+} from "./gradingDefaults.js";
 
 const TERM_CODE_PATTERN = /^\d{2}s[123]$/;
 const ASSIGNMENT_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -29,12 +36,20 @@ const renderGradingConfiguration = (request: AssignmentSetupRequest): string => 
     name: category.name.trim(),
     points: category.points
   }));
-  return `  required_files:\n${requiredFiles.map((file) => `    - ${quoteYaml(file)}`).join("\n")}\n  rubric:\n${rubric
-    .map(
-      (category) =>
-        `    - id: ${quoteYaml(category.id)}\n      name: ${quoteYaml(category.name)}\n      points: ${String(category.points)}`
-    )
-    .join("\n")}\n`;
+  const requiredFilesBlock =
+    requiredFiles.length === 0
+      ? ""
+      : `  required_files:\n${requiredFiles.map((file) => `    - ${quoteYaml(file)}`).join("\n")}\n`;
+  const rubricBlock =
+    rubric.length === 0
+      ? ""
+      : `  rubric:\n${rubric
+          .map(
+            (category) =>
+              `    - id: ${quoteYaml(category.id)}\n      name: ${quoteYaml(category.name)}\n      points: ${String(category.points)}`
+          )
+          .join("\n")}\n`;
+  return `${requiredFilesBlock}${rubricBlock}`;
 };
 
 const decodeYamlScalar = (value: string): string => {
@@ -117,7 +132,7 @@ const createAssignmentYaml = (
     .join("\n");
   const hasGradingConfiguration = request.requiredFiles.length > 0 || request.rubric.length > 0;
   const grading = request.gradingEnabled
-    ? `grading:\n  enabled: true\n  workflow: .github/workflows/grade.yml\n  artifact: grading-results\n  result_file: grading-results.json\n${renderGradingConfiguration(request)}`
+    ? `grading:\n  enabled: true\n  mode: ${MANAGED_GRADING_MODE}\n  preset: ${MANAGED_GRADING_PRESET}\n  workflow: ${DEFAULT_GRADING_WORKFLOW}\n  artifact: ${DEFAULT_GRADING_ARTIFACT}\n  result_file: ${DEFAULT_GRADING_RESULT_FILE}\n${renderGradingConfiguration(request)}`
     : `grading:\n  enabled: false\n  mode: no-grading\n${hasGradingConfiguration ? renderGradingConfiguration(request) : ""}`;
   const deadline =
     request.dueAt.trim() === ""

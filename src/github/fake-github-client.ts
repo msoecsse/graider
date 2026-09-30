@@ -126,10 +126,11 @@ export interface FakeGitHubFailure {
   method?: GitHubClientMethodName;
   kind: GitHubErrorKind;
   retryAfterSeconds?: number;
+  statusCode?: number;
   persistent?: boolean;
 }
 
-type FakeGitHubFailureOptions = Pick<FakeGitHubFailure, "retryAfterSeconds">;
+type FakeGitHubFailureOptions = Pick<FakeGitHubFailure, "retryAfterSeconds" | "statusCode">;
 
 export interface FakeGitHubClientState {
   authenticatedUser?: GitHubUser;
@@ -215,7 +216,8 @@ const createGitHubClientError = (failure: FakeGitHubFailure): GitHubClientError 
   new GitHubClientError(failure.kind, `Fake GitHub ${failure.kind} failure.`, {
     ...(failure.retryAfterSeconds === undefined
       ? {}
-      : { retryAfterSeconds: failure.retryAfterSeconds })
+      : { retryAfterSeconds: failure.retryAfterSeconds }),
+    ...(failure.statusCode === undefined ? {} : { statusCode: failure.statusCode })
   });
 
 export class FakeGitHubClient implements GitHubClient {

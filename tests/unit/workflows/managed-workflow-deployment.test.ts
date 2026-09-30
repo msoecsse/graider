@@ -95,7 +95,11 @@ describe("managed workflow deployment", () => {
     expect(client.mutations.fileWrites).toEqual([]);
   });
 
-  it("updates an older recognized Graider-managed workflow", async () => {
+  it("updates changed canonical content that retains ownership version 1", async () => {
+    const previousCanonicalV1 = canonicalContent.replace(
+      "      - name: Detect JavaFX requirements\n",
+      "      - name: Legacy always-on JavaFX setup\n"
+    );
     const client = new FakeGitHubClient({
       repositories: [repository],
       repositoryFiles: [
@@ -103,7 +107,7 @@ describe("managed workflow deployment", () => {
           owner: OWNER,
           repo: REPOSITORY_NAME,
           path: GRAIDER_MANAGED_WORKFLOW_PATH,
-          content: `${GRAIDER_MANAGED_WORKFLOW_MARKER}\n# graider-workflow-version: 1\nname: Older\n`,
+          content: previousCanonicalV1,
           message: "Older workflow",
           commitSha: "existing-sha"
         }
@@ -114,6 +118,8 @@ describe("managed workflow deployment", () => {
     expect(client.mutations.fileWrites).toEqual([
       expect.objectContaining({ content: canonicalContent, path: GRAIDER_MANAGED_WORKFLOW_PATH })
     ]);
+    expect(previousCanonicalV1).toContain(`${GRAIDER_MANAGED_WORKFLOW_MARKER}\n`);
+    expect(previousCanonicalV1).toContain("# graider-workflow-version: 1");
   });
 
   it("protects unmanaged and unsupported-version workflows without writing", async () => {

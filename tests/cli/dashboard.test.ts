@@ -37,6 +37,14 @@ const WORKFLOW_WITHOUT_DISPATCH = `name: Grade
 on:
   push:
 `;
+const MANAGED_GRADING_BLOCK = `grading:
+  enabled: true
+  mode: preset
+  preset: java-junit-checkstyle
+  workflow: .github/workflows/grade.yml
+  artifact: grading-results
+  result_file: grading-results.json
+`;
 const EMPTY_LENGTH = 0;
 const SINGLE_CALL = 1;
 
@@ -53,7 +61,15 @@ const writeText = (cwd: string, relativePath: string, content: string): void => 
   fs.writeFileSync(absolutePath, content);
 };
 
-const writeCourse = (cwd: string): void => {
+const writeCourse = (
+  cwd: string,
+  gradingBlock = `grading:
+  enabled: true
+  workflow: .github/workflows/grade.yml
+  artifact: grading-results
+  result_file: grading-results.json
+`
+): void => {
   writeText(
     cwd,
     COURSE_FILE,
@@ -74,11 +90,7 @@ github:
 defaults:
   timezone: America/Chicago
   assignment_type: individual
-grading:
-  enabled: true
-  workflow: .github/workflows/grade.yml
-  artifact: grading-results
-  result_file: grading-results.json
+${gradingBlock.trimEnd()}
 reports:
   formats:
     - markdown
@@ -135,6 +147,8 @@ const writeAssignment = (
     readonly status?: string;
     readonly dueAt?: string;
     readonly gradingEnabled?: boolean;
+    readonly gradingMode?: "custom-workflow" | "preset";
+    readonly gradingPreset?: string;
     readonly templateRepository?: string;
     readonly templateBranch?: string;
     readonly workflowPath?: string;
@@ -152,8 +166,8 @@ const writeAssignment = (
     if (options.workflowPath !== undefined || options.gradingEnabled === true) {
       return `grading:
   enabled: true
-  mode: custom-workflow
-  workflow: ${workflowPath}
+  mode: ${options.gradingMode ?? "custom-workflow"}
+${options.gradingPreset === undefined ? "" : `  preset: ${options.gradingPreset}\n`}  workflow: ${workflowPath}
   artifact: grading-results
   result_file: grading-results.json
 `;
@@ -587,6 +601,106 @@ describe("graider dashboard command", () => {
     expect(githubClient.fileReads).toHaveLength(EMPTY_LENGTH);
   });
 
+  it("does not require or read a template workflow for an assignment managed preset", async () => {
+    const cwd = createTempRoot();
+    writeCourse(cwd);
+    writeTerm(cwd);
+    writeRoster(cwd);
+    writeAssignment(cwd, {
+      slug: "managed",
+      gradingEnabled: true,
+      gradingMode: "preset",
+      gradingPreset: "java-junit-checkstyle"
+    });
+    const githubClient = new CountingDashboardGitHubClient({
+      templateRepositories: [templateRepository("managed-template")]
+    });
+
+    const result = await runDashboard(cwd, { json: true }, dashboardEnv, githubClient);
+    const [card] = result.cards;
+    const [assignment] = card?.recentAssignments ?? [];
+
+    expect(result.status).toBe("success");
+    expect(result.summary.needsAttentionCount).toBe(EMPTY_LENGTH);
+    expect(card?.needsAttention).toBe(false);
+    expect(assignment).toMatchObject({
+      slug: "managed",
+      gradingEnabled: true,
+      gradingMode: "preset",
+      needsAttention: false,
+      diagnostics: [],
+      github: {
+        templateRepository: "available",
+        templateBranch: "available",
+        gradingWorkflow: "not_required",
+        workflowDispatch: "not_required"
+      }
+    });
+    expect(githubClient.templateRepositoryReads).toEqual([`${ORGANIZATION}/managed-template`]);
+    expect(githubClient.fileReads).toHaveLength(EMPTY_LENGTH);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
+      "dashboard_grading_workflow_missing"
+    );
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
+      "dashboard_workflow_dispatch_missing"
+    );
+  });
+
+  it("ignores a stale template workflow for an assignment managed preset", async () => {
+    const cwd = createTempRoot();
+    writeCourse(cwd);
+    writeTerm(cwd);
+    writeRoster(cwd);
+    writeAssignment(cwd, {
+      slug: "managed",
+      gradingEnabled: true,
+      gradingMode: "preset",
+      gradingPreset: "java-junit-checkstyle"
+    });
+    const githubClient = new FakeGitHubClient({
+      templateRepositories: [templateRepository("managed-template")],
+      repositoryFiles: [workflowFile("managed-template", "not: [valid")]
+    });
+
+    const result = await runDashboard(cwd, { json: true }, dashboardEnv, githubClient);
+    const [assignment] = result.cards[0]?.recentAssignments ?? [];
+
+    expect(result.status).toBe("success");
+    expect(assignment?.github).toMatchObject({
+      gradingWorkflow: "not_required",
+      workflowDispatch: "not_required"
+    });
+    expect(assignment?.diagnostics).toEqual([]);
+    expect(githubClient.fileReads).toHaveLength(EMPTY_LENGTH);
+  });
+
+  it("uses an inherited course managed preset without reading the template workflow", async () => {
+    const cwd = createTempRoot();
+    writeCourse(cwd, MANAGED_GRADING_BLOCK);
+    writeTerm(cwd);
+    writeRoster(cwd);
+    writeAssignment(cwd, { slug: "managed" });
+    const githubClient = new FakeGitHubClient({
+      templateRepositories: [templateRepository("managed-template")]
+    });
+
+    const result = await runDashboard(cwd, { json: true }, dashboardEnv, githubClient);
+    const [assignment] = result.cards[0]?.recentAssignments ?? [];
+
+    expect(result.status).toBe("success");
+    expect(assignment).toMatchObject({
+      gradingMode: "preset",
+      needsAttention: false,
+      github: {
+        templateRepository: "available",
+        templateBranch: "available",
+        gradingWorkflow: "not_required",
+        workflowDispatch: "not_required"
+      }
+    });
+    expect(githubClient.fileReads).toHaveLength(EMPTY_LENGTH);
+  });
+
   it("marks assignments and cards when the template repository is missing", async () => {
     const result = await runDashboard(
       createCourseFixture(),
@@ -651,16 +765,18 @@ describe("graider dashboard command", () => {
     expect(githubClient.fileReads).toHaveLength(EMPTY_LENGTH);
   });
 
-  it("checks the configured full workflow path and reports missing workflows", async () => {
+  it("still reads the canonical path for explicit custom ownership and reports it missing", async () => {
+    const cwd = createCourseFixture();
+    writeAssignment(cwd, {
+      slug: "lab01",
+      gradingEnabled: true,
+      gradingMode: "custom-workflow",
+      workflowPath: WORKFLOW_PATH
+    });
     const githubClient = new FakeGitHubClient({
       templateRepositories: [templateRepository("lab01-template")]
     });
-    const result = await runDashboard(
-      createCourseFixture(),
-      { json: true },
-      dashboardEnv,
-      githubClient
-    );
+    const result = await runDashboard(cwd, { json: true }, dashboardEnv, githubClient);
     const [assignment] = result.cards[0]?.recentAssignments ?? [];
 
     expect(result.status).toBe("partial_success");
@@ -673,6 +789,7 @@ describe("graider dashboard command", () => {
       }
     ]);
     expect(assignment).toMatchObject({
+      gradingMode: "custom-workflow",
       needsAttention: true,
       github: {
         templateRepository: "available",

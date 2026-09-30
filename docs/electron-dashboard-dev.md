@@ -161,9 +161,17 @@ Folder paths are normalized and deduplicated by normalized path key. On macOS an
 
 Missing or corrupt registry files load as an empty registry. Removing a folder removes it from the dashboard registry only. It does not delete anything from disk.
 
-## CLI Runner
+## CLI and bundled backend paths
 
-The UI calls the installed `graider` CLI directly. It does not import Graider backend TypeScript modules.
+The renderer never calls the installed `graider` CLI directly and does not
+import Graider backend TypeScript modules. The Electron main process invokes
+the CLI for dashboard, assignment detail, apply-preview, apply, grade, status,
+and report command paths. It also loads selected `src/**/*-context.ts` modules
+from generated `ui/dist-electron/*.cjs` bundles through narrow services for
+grading workspace state and mutations, grading evidence and workflow repair,
+comment-library operations, assignment grading lifecycle aggregation, and
+roster section summaries. Both paths return structured results through
+`window.graiderUI`; neither bypasses preload/IPC request validation.
 
 Dashboard refresh runs:
 
@@ -201,9 +209,11 @@ graider assignment detail <assignment.yml> --json
 That command returns local assignment, course, term, roster, grading, student
 report, apply-state, action availability, and diagnostics data for one
 assignment. With a token, it also performs bounded read-only checks for the
-template repository, template branch, configured grading workflow file, and
-`workflow_dispatch`. If no token is available, it still returns local detail
-with `partial_success` and `token_required` readiness fields.
+template repository and branch, plus the configured workflow file and
+`workflow_dispatch` for faculty/custom workflows. Explicit Graider-managed
+preset grading does not require the workflow to exist in the template because
+Apply deploys it. If no token is available, the command still returns local
+detail with `partial_success` and `token_required` readiness fields.
 
 UI code should not parse `assignment.yml` directly and should not import Graider
 backend modules. Assignment detail refresh must not run apply, grade, report,
@@ -239,6 +249,15 @@ generate workflow files, dispatch workflows, create repositories, push commits,
 or publish reports.
 
 ## Assignment Detail Page
+
+Repository template-sync controls are lifecycle-gated by the normalized Apply
+state. Before Apply (`not_applied`), Assignment Detail does not prepare
+template-sync availability, show update controls, or surface the backend's
+manifest-required safety blocker. For `applied` and `partially_applied`, it
+prepares availability normally. Refresh clears the prior preparation result and
+uses the newly loaded Apply state; generation guards prevent older detail or
+template-sync responses from replacing newer state. The main-process
+template-sync boundary still requires a valid manifest whenever it is called.
 
 Detailed assignment detail guidance lives in
 [Electron Assignment Detail Developer Guide](electron-assignment-detail-dev.md).

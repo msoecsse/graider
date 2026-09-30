@@ -1,4 +1,5 @@
 import type { EffectiveAssignmentGrading } from "../config/effective-grading.js";
+import { createHash } from "node:crypto";
 import { DiagnosticCode, createConfigDiagnostic } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import type { GitHubClient } from "../github/github-client.js";
@@ -48,6 +49,20 @@ export interface ManualManagedGradingWorkflowInput {
   readonly confirmed: boolean;
 }
 
+/**
+ * The destructive, explicitly-confirmed half of manual workflow repair.  Keep
+ * this separate from dispatch so templates and student repositories share the
+ * same canonical renderer, eligibility gate, path, and classifier.
+ */
+export interface ManualManagedGradingWorkflowInstallInput {
+  readonly githubClient: GitHubClient;
+  readonly repository: ManualManagedGradingWorkflowRepositoryTarget;
+  readonly grading: EffectiveAssignmentGrading;
+  readonly confirmed: boolean;
+  /** A preview fingerprint guards the destructive write against stale content. */
+  readonly expectedContentFingerprint?: string;
+}
+
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/iu;
 
 export type ManualManagedGradingWorkflowStatus =
@@ -58,6 +73,7 @@ export type ManualManagedGradingWorkflowStatus =
   | "already_current"
   | "read_failed"
   | "write_failed"
+  | "stale"
   | "not_attempted";
 
 export type ManualManagedGradingWorkflowDispatchStatus = "dispatched" | "failed" | "not_attempted";
@@ -79,12 +95,38 @@ export interface ManualManagedGradingWorkflowResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
+export interface ManualManagedGradingWorkflowInstallResult {
+  readonly repository: ManualManagedGradingWorkflowResult["repository"];
+  readonly workflow: ManualManagedGradingWorkflowResult["workflow"];
+  readonly diagnostics: readonly Diagnostic[];
+}
+
+export interface ManualManagedGradingWorkflowPreviewResult {
+  readonly repository: ManualManagedGradingWorkflowResult["repository"];
+  readonly classification:
+    | "missing"
+    | "current"
+    | "outdated"
+    | "unmanaged"
+    | "unsupported"
+    | "read_failed"
+    | "not_eligible";
+  readonly action: "create" | "no_change" | "replace" | "unavailable";
+  readonly contentFingerprint?: string;
+  readonly diagnostics: readonly Diagnostic[];
+}
+
 const repositoryIdentity = (repository: ManualManagedGradingWorkflowRepositoryTarget) => ({
   owner: repository.owner,
   name: repository.name,
   fullName: `${repository.owner}/${repository.name}`,
   defaultBranch: repository.defaultBranch
 });
+
+const contentFingerprint = (content: string | null): string =>
+  createHash("sha256")
+    .update(content ?? "<missing>", "utf8")
+    .digest("hex");
 
 const createUnexpectedGitHubDiagnostic = (operation: string): Diagnostic =>
   createConfigDiagnostic(DiagnosticCode.GithubApiError, "Unexpected GitHub operation failure.", {
@@ -138,6 +180,61 @@ const workflowStatusForClassification = (
   }
 };
 
+const previewForClassification = (
+  classification: ReturnType<typeof classifyManagedWorkflow>["classification"]
+): Pick<ManualManagedGradingWorkflowPreviewResult, "classification" | "action"> => {
+  switch (classification) {
+    case "absent":
+      return { classification: "missing", action: "create" };
+    case "identical":
+      return { classification: "current", action: "no_change" };
+    case "managed_outdated":
+      return { classification: "outdated", action: "replace" };
+    case "unmanaged_conflict":
+      return { classification: "unmanaged", action: "replace" };
+    case "managed_version_unsupported":
+      return { classification: "unsupported", action: "replace" };
+  }
+};
+
+/** Read-only canonical workflow inspection for destructive-operation previews. */
+export const previewManualManagedGradingWorkflowInstallation = async (
+  input: Omit<ManualManagedGradingWorkflowInstallInput, "confirmed">
+): Promise<ManualManagedGradingWorkflowPreviewResult> => {
+  const repository = repositoryIdentity(input.repository);
+  if (!isManualManagedGradingWorkflowEligible(input.grading))
+    return {
+      repository,
+      classification: "not_eligible",
+      action: "unavailable",
+      diagnostics: [createIneligibleGradingDiagnostic()]
+    };
+  const canonicalContent = renderJavaJunitCheckstyleWorkflow({ grading: input.grading });
+  try {
+    const existingContent = await input.githubClient.getRepositoryFileContent(
+      input.repository.owner,
+      input.repository.name,
+      GRAIDER_MANAGED_WORKFLOW_PATH,
+      input.repository.defaultBranch
+    );
+    return {
+      repository,
+      ...previewForClassification(
+        classifyManagedWorkflow(existingContent, canonicalContent).classification
+      ),
+      contentFingerprint: contentFingerprint(existingContent),
+      diagnostics: []
+    };
+  } catch (error: unknown) {
+    return {
+      repository,
+      classification: "read_failed",
+      action: "unavailable",
+      diagnostics: [normalizeGitHubError(error, "read_workflow")]
+    };
+  }
+};
+
 /**
  * Manually replaces Graider's managed workflow in one explicit repository and dispatches it.
  * This intentionally differs from Apply: confirmation authorizes replacement of unmanaged and
@@ -171,11 +268,55 @@ export const manuallyInstallAndDispatchManagedGradingWorkflow = async (
     };
   }
 
+  const installation = await manuallyInstallManagedGradingWorkflow(input);
+  if (
+    installation.workflow.status === "not_attempted" ||
+    installation.workflow.status === "read_failed" ||
+    installation.workflow.status === "write_failed" ||
+    installation.workflow.status === "stale"
+  )
+    return { ...installation, dispatch: { status: "not_attempted" } };
+
+  try {
+    await input.githubClient.dispatchWorkflow({
+      owner: input.repository.owner,
+      repo: input.repository.name,
+      workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
+      ref: input.repository.defaultBranch,
+      inputs: { submission_sha: input.submissionCommitSha }
+    });
+  } catch (error: unknown) {
+    return {
+      ...installation,
+      dispatch: { status: "failed" },
+      diagnostics: [createDispatchFailureDiagnostic(error)]
+    };
+  }
+
+  return { ...installation, dispatch: { status: "dispatched" } };
+};
+
+/**
+ * Explicitly installs the current canonical Graider workflow and never
+ * dispatches it. Normal Apply deliberately does not call this operation.
+ */
+export const manuallyInstallManagedGradingWorkflow = async (
+  input: ManualManagedGradingWorkflowInstallInput
+): Promise<ManualManagedGradingWorkflowInstallResult> => {
+  const repository = repositoryIdentity(input.repository);
+
+  if (!isManualManagedGradingWorkflowEligible(input.grading)) {
+    return {
+      repository,
+      workflow: { status: "not_attempted" },
+      diagnostics: [createIneligibleGradingDiagnostic()]
+    };
+  }
+
   if (!input.confirmed) {
     return {
       repository,
       workflow: { status: "not_attempted" },
-      dispatch: { status: "not_attempted" },
       diagnostics: [createConfirmationRequiredDiagnostic()]
     };
   }
@@ -193,10 +334,24 @@ export const manuallyInstallAndDispatchManagedGradingWorkflow = async (
     return {
       repository,
       workflow: { status: "read_failed" },
-      dispatch: { status: "not_attempted" },
       diagnostics: [normalizeGitHubError(error, "read_workflow")]
     };
   }
+
+  if (
+    input.expectedContentFingerprint !== undefined &&
+    input.expectedContentFingerprint !== contentFingerprint(existingContent)
+  )
+    return {
+      repository,
+      workflow: { status: "stale" },
+      diagnostics: [
+        createConfigDiagnostic(
+          DiagnosticCode.InvalidGradingConfig,
+          "The grading workflow changed after preview. Reload the preview before replacing it."
+        )
+      ]
+    };
 
   const status = workflowStatusForClassification(
     classifyManagedWorkflow(existingContent, canonicalContent).classification
@@ -218,33 +373,13 @@ export const manuallyInstallAndDispatchManagedGradingWorkflow = async (
       return {
         repository,
         workflow: { status: "write_failed" },
-        dispatch: { status: "not_attempted" },
         diagnostics: [normalizeGitHubError(error, "write_workflow")]
       };
     }
   }
-
-  try {
-    await input.githubClient.dispatchWorkflow({
-      owner: input.repository.owner,
-      repo: input.repository.name,
-      workflowPath: GRAIDER_MANAGED_WORKFLOW_PATH,
-      ref: input.repository.defaultBranch,
-      inputs: { submission_sha: input.submissionCommitSha }
-    });
-  } catch (error: unknown) {
-    return {
-      repository,
-      workflow: { status, ...(commitSha === undefined ? {} : { commitSha }) },
-      dispatch: { status: "failed" },
-      diagnostics: [createDispatchFailureDiagnostic(error)]
-    };
-  }
-
   return {
     repository,
     workflow: { status, ...(commitSha === undefined ? {} : { commitSha }) },
-    dispatch: { status: "dispatched" },
     diagnostics: []
   };
 };

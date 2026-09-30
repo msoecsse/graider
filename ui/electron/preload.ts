@@ -42,7 +42,8 @@ import {
   type CreateGradingLibraryCommentRequest,
   type EditGradingLibraryCommentRequest,
   type DeleteGradingLibraryCommentRequest,
-  type GradingCommentLibraryResult,
+  type GradingCommentLibraryLoadResult,
+  type GradingCommentLibraryMutationResult,
   type AssignmentTemplateSyncAvailability,
   type AssignmentTemplateSyncExecuteRequest,
   type AssignmentTemplateSyncExecutionResult,
@@ -88,11 +89,15 @@ import {
   type RosterSaveRequest,
   type RosterSaveResult,
   type RosterSectionRequest,
+  type RosterSectionSummariesRequest,
+  type RosterSectionSummariesResult,
   type TemplateWorkflowRequest,
   type TemplateWorkflowResult,
   type TemplateWorkflowSavePreview,
   type TemplateWorkflowSaveRequest,
   type TemplateWorkflowSaveResult,
+  type TemplateManagedWorkflowReplacementRequest,
+  type TemplateManagedWorkflowReplacementResult,
   type FacultyReportRequest,
   type FacultyReportResult,
   type GraiderUIApi,
@@ -209,6 +214,10 @@ const graiderUI: GraiderUIApi = {
     request: AssignmentSetupTermsRequest
   ): Promise<AssignmentSetupTermsResult> =>
     await invoke<AssignmentSetupTermsResult>(IPC_CHANNELS.loadRosterTerms, request),
+  getRosterSectionSummaries: async (
+    request: RosterSectionSummariesRequest
+  ): Promise<RosterSectionSummariesResult> =>
+    await invoke<RosterSectionSummariesResult>(IPC_CHANNELS.getRosterSectionSummaries, request),
   getRosterForSection: async (request: RosterSectionRequest): Promise<RosterLoadResult> =>
     await invoke<RosterLoadResult>(IPC_CHANNELS.getRosterForSection, request),
   previewRosterSave: async (request: RosterSaveRequest): Promise<RosterPreviewResult> =>
@@ -229,6 +238,13 @@ const graiderUI: GraiderUIApi = {
     request: TemplateWorkflowSaveRequest
   ): Promise<TemplateWorkflowSaveResult> =>
     await invoke<TemplateWorkflowSaveResult>(IPC_CHANNELS.saveTemplateWorkflow, request),
+  replaceTemplateManagedWorkflow: async (
+    request: TemplateManagedWorkflowReplacementRequest
+  ): Promise<TemplateManagedWorkflowReplacementResult> =>
+    await invoke<TemplateManagedWorkflowReplacementResult>(
+      IPC_CHANNELS.replaceTemplateManagedWorkflow,
+      request
+    ),
   listCourseFolders: async (): Promise<CourseFolderRecord[]> =>
     await invoke<CourseFolderRecord[]>(IPC_CHANNELS.listCourseFolders),
   removeCourseFolder: async (id: string): Promise<void> => {
@@ -343,20 +359,29 @@ const graiderUI: GraiderUIApi = {
     ),
   loadGradingCommentLibrary: async (
     request: LoadGradingCommentLibraryRequest
-  ): Promise<GradingCommentLibraryResult> =>
-    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.loadGradingCommentLibrary, request),
+  ): Promise<GradingCommentLibraryLoadResult> =>
+    await invoke<GradingCommentLibraryLoadResult>(IPC_CHANNELS.loadGradingCommentLibrary, request),
   createGradingLibraryComment: async (
     request: CreateGradingLibraryCommentRequest
-  ): Promise<GradingCommentLibraryResult> =>
-    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.createGradingLibraryComment, request),
+  ): Promise<GradingCommentLibraryMutationResult> =>
+    await invoke<GradingCommentLibraryMutationResult>(
+      IPC_CHANNELS.createGradingLibraryComment,
+      request
+    ),
   editGradingLibraryComment: async (
     request: EditGradingLibraryCommentRequest
-  ): Promise<GradingCommentLibraryResult> =>
-    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.editGradingLibraryComment, request),
+  ): Promise<GradingCommentLibraryMutationResult> =>
+    await invoke<GradingCommentLibraryMutationResult>(
+      IPC_CHANNELS.editGradingLibraryComment,
+      request
+    ),
   deleteGradingLibraryComment: async (
     request: DeleteGradingLibraryCommentRequest
-  ): Promise<GradingCommentLibraryResult> =>
-    await invoke<GradingCommentLibraryResult>(IPC_CHANNELS.deleteGradingLibraryComment, request),
+  ): Promise<GradingCommentLibraryMutationResult> =>
+    await invoke<GradingCommentLibraryMutationResult>(
+      IPC_CHANNELS.deleteGradingLibraryComment,
+      request
+    ),
   prepareAssignmentTemplateSync: async (
     request: AssignmentTemplateSyncRequest
   ): Promise<AssignmentTemplateSyncAvailability> =>

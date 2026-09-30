@@ -17,6 +17,8 @@ defaults:
   assignment_type: individual
 grading:
   enabled: true
+  mode: preset
+  preset: java-junit-checkstyle
   workflow: .github/workflows/grade.yml
   artifact: grading-results
   result_file: grading-results.json

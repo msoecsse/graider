@@ -84,20 +84,41 @@ The canonical workflow ignores pushes whose only changed path is its own
 meaningless grading run. Pushes that also contain source changes continue to
 run grading; repository and manual dispatch triggers remain available.
 
+The managed marker remains ownership version 1. Canonical content changes at
+that same version classify an older recognized workflow as `managed_outdated`,
+so Apply and the existing repair/bulk-repair operations can replace it safely.
+Unmarked faculty workflows and workflows with unsupported ownership versions
+remain protected.
+
+The `java-junit-checkstyle` workflow checks the exact checked-out submission
+before dependency setup. FXML files under `src/`, JavaFX or TestFX imports under
+`src/`, `test/`, or `tests/`, JavaFX module requirements, and fully qualified
+JavaFX package references activate the JavaFX path through
+`GRAIDER_JAVAFX_REQUIRED`. The Actions log records the decision and its detected
+reasons.
+
+Both paths use Java 25, Checkstyle 14.1.0 with the current MSOE configuration,
+JUnit, Mockito, Byte Buddy, Objenesis, and every repository JAR under `lib/`.
+Plain Java submissions download no JavaFX modules, install no Xvfb/GUI runtime,
+compile without JavaFX module arguments, and run JUnit directly. JavaFX
+submissions additionally download the Linux JavaFX 25 modules, install the
+Xvfb/GTK/audio runtime, compile with the JavaFX module path, and run the same
+JUnit discovery/tag command under Xvfb with software rendering.
+
+Graider does not download TestFX. Course/template repositories remain
+authoritative for TestFX and other course libraries through `lib/**/*.jar`.
+For the JavaFX path, each `src/<relative-path>/<name>.fxml` resource is copied
+unchanged to the matching `$BUILD_DIR/<relative-path>/<name>.fxml` path after
+compilation. This preserves package-relative and absolute resource lookups,
+including nested resource directories.
+
 Copyable workflow and assignment examples are maintained under
 [`examples/grading/`](../examples/grading/README.md). Those files are
 documentation examples, not generated command output.
 
-Generated preset workflows are self-contained. During a workflow run, the
-workflow writes a helper script at:
-
-```text
-.graider/write-grading-result.py
-```
-
-The helper uses only the Python standard library, maps GitHub Actions step
-outcomes to Graider result statuses, decodes GitHub Classroom base64
-`outputs.result` payloads when present, and writes:
+Generated preset workflows are self-contained. During a workflow run, an
+embedded Python step uses only the standard library, maps grading step outcomes
+to Graider's result statuses, and writes:
 
 ```text
 graider-output/grading-results.json

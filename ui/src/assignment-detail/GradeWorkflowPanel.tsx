@@ -11,7 +11,9 @@ export const GradeWorkflowPanel = ({
   preview,
   isLoading,
   isPushing,
+  isReplacingManagedWorkflow = false,
   onViewWorkflow,
+  onReplaceManagedWorkflow = () => undefined,
   onDraftChange,
   onPreview,
   onPush
@@ -22,7 +24,9 @@ export const GradeWorkflowPanel = ({
   readonly preview: TemplateWorkflowSavePreview | null;
   readonly isLoading: boolean;
   readonly isPushing: boolean;
+  readonly isReplacingManagedWorkflow?: boolean;
   readonly onViewWorkflow: () => void;
+  readonly onReplaceManagedWorkflow?: () => void;
   readonly onDraftChange: (value: string) => void;
   readonly onPreview: () => void;
   readonly onPush: () => void;
@@ -51,6 +55,16 @@ export const GradeWorkflowPanel = ({
           onClick={onViewWorkflow}
         >
           {isLoading ? "Loading workflow..." : "View workflow"}
+        </button>
+        <button
+          className="secondary-action"
+          type="button"
+          disabled={!isConfigured || isReplacingManagedWorkflow}
+          onClick={onReplaceManagedWorkflow}
+        >
+          {isReplacingManagedWorkflow
+            ? "Checking Graider workflow..."
+            : "Replace with Graider workflow"}
         </button>
       </div>
       {!isConfigured ? (

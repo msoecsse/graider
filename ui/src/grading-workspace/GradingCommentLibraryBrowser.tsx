@@ -1,8 +1,9 @@
 import type { Dispatch, ReactElement, SetStateAction } from "react";
-import type { GradingCommentLibraryResult } from "../../electron/ipc";
+import type { GradingCommentLibraryLoadResult } from "../../electron/ipc";
+import { FormattedGradingComment } from "./FormattedGradingComment";
 
 type LoadedLibrary = Extract<
-  GradingCommentLibraryResult,
+  GradingCommentLibraryLoadResult,
   { readonly status: "success"; readonly comments: unknown }
 >;
 
@@ -13,7 +14,12 @@ export type CommentLibraryLoadState =
 
 export type ReusableComment = LoadedLibrary["comments"][number];
 
-export const GradingCommentLibraryBrowser = ({
+interface ApplyAction {
+  readonly isDisabled: (comment: ReusableComment) => boolean;
+  readonly onApply: (comment: ReusableComment) => void;
+}
+
+export const ReusableCommentLibraryBrowser = ({
   commentLibrary,
   commentSearch,
   onSearchChange,
@@ -21,10 +27,13 @@ export const GradingCommentLibraryBrowser = ({
   selectedCommentTags,
   onTagsChange,
   matchingComments,
-  studentId,
-  gradingMutationStudentId,
-  isStudentMutationBlocked,
-  onApply
+  autoFocusSearch = false,
+  applyAction,
+  libraryMutationPending = false,
+  showNewAction = true,
+  onNew = () => undefined,
+  onEdit = () => undefined,
+  onDelete = () => undefined
 }: {
   readonly commentLibrary: CommentLibraryLoadState;
   readonly commentSearch: string;
@@ -33,10 +42,13 @@ export const GradingCommentLibraryBrowser = ({
   readonly selectedCommentTags: readonly string[];
   readonly onTagsChange: Dispatch<SetStateAction<readonly string[]>>;
   readonly matchingComments: readonly ReusableComment[];
-  readonly studentId: string | undefined;
-  readonly gradingMutationStudentId: string | undefined;
-  readonly isStudentMutationBlocked: (studentId: string) => boolean;
-  readonly onApply: (comment: ReusableComment) => void;
+  readonly autoFocusSearch?: boolean;
+  readonly applyAction?: ApplyAction;
+  readonly libraryMutationPending?: boolean;
+  readonly showNewAction?: boolean;
+  readonly onNew?: () => void;
+  readonly onEdit?: (comment: ReusableComment) => void;
+  readonly onDelete?: (comment: ReusableComment) => void;
 }): ReactElement => {
   if (commentLibrary.status === "loading")
     return <p aria-live="polite">Loading shared comments…</p>;
@@ -48,9 +60,22 @@ export const GradingCommentLibraryBrowser = ({
     );
   return (
     <>
+      {!showNewAction ? null : (
+        <div className="grading-comment-library__actions">
+          <button
+            className="secondary-action"
+            disabled={libraryMutationPending}
+            onClick={onNew}
+            type="button"
+          >
+            New comment
+          </button>
+        </div>
+      )}
       <label>
         Search comments
         <input
+          autoFocus={autoFocusSearch}
           type="search"
           value={commentSearch}
           onChange={(event) => onSearchChange(event.currentTarget.value)}
@@ -78,31 +103,49 @@ export const GradingCommentLibraryBrowser = ({
           ))}
         </fieldset>
       )}
-      {matchingComments.length === 0 ? (
+      {commentLibrary.comments.length === 0 ? (
+        <p>No reusable comments yet.</p>
+      ) : matchingComments.length === 0 ? (
         <p>No matching reusable comments.</p>
       ) : (
         <ul className="grading-comment-list" aria-label="Reusable comments">
           {matchingComments.map((comment) => (
             <li key={comment.id}>
               <strong>{comment.title}</strong>
-              <p>{comment.text}</p>
+              <FormattedGradingComment text={comment.text} />
               <p>Default adjustment: {comment.defaultDeduction}</p>
               {comment.defaultRubricCategoryId === undefined ? null : (
                 <p>Default category: {comment.defaultRubricCategoryId}</p>
               )}
               {comment.tags.length === 0 ? null : <p>Tags: {comment.tags.join(", ")}</p>}
-              <button
-                className="secondary-action"
-                type="button"
-                disabled={
-                  studentId === undefined ||
-                  gradingMutationStudentId !== undefined ||
-                  isStudentMutationBlocked(studentId)
-                }
-                onClick={() => onApply(comment)}
-              >
-                Apply {comment.title}
-              </button>
+              {applyAction === undefined ? null : (
+                <button
+                  className="secondary-action"
+                  type="button"
+                  disabled={applyAction.isDisabled(comment)}
+                  onClick={() => applyAction.onApply(comment)}
+                >
+                  Apply {comment.title}
+                </button>
+              )}
+              <span className="grading-comment-library__entry-actions">
+                <button
+                  className="secondary-action"
+                  disabled={libraryMutationPending}
+                  onClick={() => onEdit(comment)}
+                  type="button"
+                >
+                  Edit
+                </button>
+                <button
+                  className="secondary-action"
+                  disabled={libraryMutationPending}
+                  onClick={() => onDelete(comment)}
+                  type="button"
+                >
+                  Delete
+                </button>
+              </span>
             </li>
           ))}
         </ul>
@@ -110,3 +153,6 @@ export const GradingCommentLibraryBrowser = ({
     </>
   );
 };
+
+/** @deprecated Prefer ReusableCommentLibraryBrowser outside the workspace. */
+export const GradingCommentLibraryBrowser = ReusableCommentLibraryBrowser;

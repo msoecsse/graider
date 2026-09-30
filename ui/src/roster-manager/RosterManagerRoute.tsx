@@ -20,6 +20,9 @@ export const RosterManagerRoute = (): ReactElement => {
       <Breadcrumbs items={buildRosterBreadcrumbs(card.card)} />
       <RosterManagerPage
         courseFolder={courseFolder}
+        courseTitle={card.card.courseTitle ?? card.card.courseSlug ?? "Course"}
+        termCode={card.card.termSlug ?? ""}
+        termTitle={card.card.termTitle ?? card.card.termSlug ?? "Term"}
         onSaved={() => {
           void handleRefreshCourseFolder(courseFolder.id);
         }}

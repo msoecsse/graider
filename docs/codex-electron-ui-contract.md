@@ -19,11 +19,16 @@ Current detailed guides:
 
 - Renderer owns React UI, UI state, navigation, normalization for display, and
   renderer-local interactions.
-- Main process owns native dialogs, registry storage, command execution, token
-  resolution, and future `shell.openPath` / `shell.showItemInFolder` calls.
+- Main process owns native dialogs, registry storage, CLI command execution,
+  token resolution, and the narrowly scoped Electron services that call direct
+  or bundled backend modules. It also owns future `shell.openPath` /
+  `shell.showItemInFolder` calls.
 - Preload exposes narrow typed APIs through `window.graiderUI`.
-- The UI calls the installed `graider` CLI. It does not import backend
-  TypeScript modules.
+- The renderer never calls the installed `graider` CLI or imports backend
+  TypeScript modules directly. The main process invokes the CLI for command
+  paths and loads selected `src/**/*-context.ts` modules from generated
+  `ui/dist-electron/*.cjs` bundles for substantial grading, roster, comment,
+  and workflow-repair paths.
 
 ## Renderer Rules
 
@@ -47,7 +52,7 @@ Renderer code may:
 ## Main Process Rules
 
 - Own all filesystem-backed registry access.
-- Own all Graider command execution.
+- Own all Graider command execution and all direct/bundled backend calls.
 - Own token resolution.
 - Parse stdout JSON before returning structured results to the renderer.
 - Return bounded safe errors for invalid JSON, spawn failures, missing CLI, and
@@ -82,6 +87,10 @@ derived in the trusted process. Selective bulk publication accepts canonical
 assignment identity plus a strict, nonempty list of unique student IDs and
 sequentially delegates the same authorized single-student operation. Neither
 endpoint exposes a generic repository write or renderer-selected report path.
+Some channels are CLI-backed and return parsed command JSON; others call a
+generated in-process context bundle after the main process derives and
+validates the trusted course, assignment, faculty, repository, and student
+scope. The distinction remains behind the same narrow IPC boundary.
 
 ## Command Runner Rules
 

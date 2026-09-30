@@ -83,15 +83,22 @@ Graider is GitHub-based assignment management for university courses. Faculty
 create assignments, apply them to student repositories, grade submissions, and
 publish reports back to those repositories.
 
-It ships as two things from one repository:
+It ships as two cooperating entry points from one repository:
 
-- A **CLI** (`src/cli`, built with tsup to `dist/`), which owns all GitHub
-  interaction and business logic and emits machine-readable JSON.
-- An **Electron desktop app** (`ui/`), a React + Vite renderer that shells out to
-  the CLI through the Electron main process and renders its JSON.
+- A **CLI** (`src/cli`, built with tsup to `dist/`) that exposes the command and
+  JSON contracts. The shared `src/` backend contains the CLI's business logic
+  and GitHub paths.
+- An **Electron desktop app** (`ui/`), with a React + Vite renderer and an
+  Electron main/preload layer. Most dashboard, assignment, apply, grade, and
+  report flows invoke the CLI through the main process; substantial grading,
+  roster-summary, comment-library, and workflow-repair paths use bundled
+  in-process context modules from `src/`, loaded by Electron services.
 
-The renderer never talks to GitHub directly. It calls `window.graiderUI`, exposed
-by `ui/electron/preload.ts`. Keep that boundary intact.
+The renderer never talks to GitHub, the filesystem, or backend modules directly.
+It calls narrow methods on `window.graiderUI`, exposed by
+`ui/electron/preload.ts`; the main process validates requests and owns the
+backend or CLI call. Keep that renderer → preload/IPC → Electron/backend trust
+boundary intact.
 
 Users are faculty, not developers. Roughly four today, growing toward twenty,
 including people who use it a few times a term.
@@ -108,7 +115,8 @@ tests/                   backend tests (vitest)
 ui/                      Electron desktop app
   electron/              main process, preload, IPC contract
   src/                   React renderer
-    dashboard/           entry screen; also holds most navigation state
+    AppRoutes.tsx         HashRouter route table and routed screen entry points
+    dashboard/           dashboard, route resolution, and shared dashboard data
     assignment-detail/   assignment screen
     grading-workspace/   grading screen
     roster-manager/      roster editing
@@ -125,15 +133,19 @@ eslint.config.mjs        the only eslint config; it covers the repo root
 
 ### Things about this codebase that surprise people
 
-- `ui/src/App.tsx` renders `DashboardPage` and nothing else. There is no router.
-  Navigation is a set of nullable `useState` selections inside `DashboardPage`
-  resolved by early returns.
-- `DashboardPage.tsx`, `AssignmentDetailPage.tsx`, and
-  `GradingWorkspacePage.tsx` are each roughly 1,000–2,600 lines.
-- All styling lives in one `globals.css` of about 2,100 lines. There is no
-  CSS-in-JS and no module system for styles.
-- `GradingWorkspacePage` does not use the shared `primary-action` /
-  `secondary-action` classes at all, so its controls render as browser defaults.
+- `ui/src/App.tsx` provides dashboard data, a `HashRouter`, and the shared route
+  error boundary. `ui/src/AppRoutes.tsx` owns routes for the dashboard, roster
+  manager, comment library, assignment detail/edit, apply and grade previews,
+  grading workspace, grade status, and faculty report.
+- Routed screen wrappers resolve course/term/assignment slugs from the shared
+  dashboard-data context and render breadcrumbs. The large screen orchestrators
+  remain, but panels and route-specific concerns have been extracted into
+  focused components and services.
+- `ui/src/components/PageHeader.tsx` supports an optional `titleId`; its
+  blocked primary-action styling is still handled by the assignment-detail
+  screen rather than a PageHeader variant.
+- Styling remains centralized in `ui/src/styles/globals.css`; there is no
+  CSS-in-JS or CSS module system.
 - There is **no lint script in `ui/`**. ESLint is configured at the repo root
   only. `npm run lint` from inside `ui/` will fail.
 
@@ -178,8 +190,10 @@ the whole tree.
 
 ### Test health
 
-At the time this file was written the UI suite was 662 passing tests. Treat a
-drop in that number as a regression to explain, not a detail to move past.
+Use the repository's validation commands and compare failures with the current
+baseline for the branch. Do not treat any historical test count in this guide
+as a permanent architectural fact; the UI and backend suites are expected to
+grow as features are added.
 
 ---
 

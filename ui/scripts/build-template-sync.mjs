@@ -30,6 +30,9 @@ await build({
     gradingStudentWorkflowRepairBackend: fileURLToPath(
       new URL("../../src/grading/grading-student-workflow-repair-context.ts", import.meta.url)
     ),
+    templateManagedWorkflowReplacementBackend: fileURLToPath(
+      new URL("../../src/grading/template-managed-workflow-replacement-context.ts", import.meta.url)
+    ),
     gradingStudentCommitHistoryBackend: fileURLToPath(
       new URL("../../src/grading/grading-submission-context.ts", import.meta.url)
     ),
@@ -47,6 +50,12 @@ await build({
     ),
     gradingCommentLibraryBackend: fileURLToPath(
       new URL("../../src/grading/grading-comment-library-context.ts", import.meta.url)
+    ),
+    rosterSectionSummaryBackend: fileURLToPath(
+      new URL("../../src/roster/roster-section-summary-context.ts", import.meta.url)
+    ),
+    rosterSharedBackend: fileURLToPath(
+      new URL("../../src/roster/roster-shared.ts", import.meta.url)
     )
   },
   outDir: fileURLToPath(new URL("../dist-electron", import.meta.url)),

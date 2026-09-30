@@ -318,12 +318,13 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     setApis({});
     render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Browse comment library" }));
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search comments" }), {
       target: { value: "j" }
     });
     fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search comments" }), { key: "j" });
-    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada");
+    expect(screen.getByRole("heading", { name: "Comments · ada" })).toBeInTheDocument();
   });
 
   it("Enter opens the mark-complete confirmation, then confirms it and advances to the next ungraded student", async () => {
@@ -415,16 +416,19 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
-    sourceKeyboardTarget.focus();
-    fireEvent.keyDown(sourceKeyboardTarget, { key: "a" });
+    const returnedSourceKeyboardTarget = screen.getByRole("textbox", {
+      name: "Mock Monaco keyboard target"
+    });
+    returnedSourceKeyboardTarget.focus();
+    fireEvent.keyDown(returnedSourceKeyboardTarget, { key: "a" });
     expect(await screen.findByText("Automated Checks")).toBeInTheDocument();
 
-    sourceKeyboardTarget.focus();
-    fireEvent.keyDown(sourceKeyboardTarget, { key: "h" });
+    returnedSourceKeyboardTarget.focus();
+    fireEvent.keyDown(returnedSourceKeyboardTarget, { key: "h" });
     expect(await screen.findByText("Commit History")).toHaveFocus();
 
-    sourceKeyboardTarget.focus();
-    fireEvent.keyDown(sourceKeyboardTarget, { key: "j" });
+    returnedSourceKeyboardTarget.focus();
+    fireEvent.keyDown(returnedSourceKeyboardTarget, { key: "j" });
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace"));
 
     const nextSourceKeyboardTarget = screen.getByRole("textbox", {
@@ -444,8 +448,8 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     });
     setApis({ loadCommentLibrary });
     render(<GradingWorkspacePage request={REQUEST} />);
-    await screen.findByText("First comment");
     await screen.findByTestId("mock-monaco");
+    await waitFor(() => expect(loadCommentLibrary).toHaveBeenCalledTimes(1));
     const sourceKeyboardTarget = screen.getByRole("textbox", {
       name: "Mock Monaco keyboard target"
     });
@@ -477,11 +481,12 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     fireEvent.change(deduction, { target: { value: "1" } });
     fireEvent.keyDown(deduction, { key: "p" });
     fireEvent.keyDown(category, { key: "1" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Inline code" }), { key: "p" });
 
     expect(title).toHaveValue("j");
     expect(comment).toHaveValue("Needs a clearer justification");
     expect(deduction).toHaveValue(1);
-    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada");
+    expect(screen.getByRole("heading", { name: "Comments · ada" })).toBeInTheDocument();
     expect(loadEvidence).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("heading", { name: "Publish review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Apply First comment" })).not.toBeInTheDocument();
@@ -521,10 +526,25 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     });
     setApis({ loadCommentLibrary });
     render(<GradingWorkspacePage request={REQUEST} />);
-    await screen.findByText("First comment");
+    await screen.findByTestId("mock-monaco");
+    await waitFor(() => expect(loadCommentLibrary).toHaveBeenCalledTimes(1));
 
     fireEvent.keyDown(window, { key: "2" });
     expect(await screen.findByRole("form", { name: "Apply Second comment" })).toBeInTheDocument();
+  });
+
+  it("opens and focuses the library with Cmd/Ctrl-K, and suppresses student navigation there", async () => {
+    setApis({});
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const search = await screen.findByRole("searchbox", { name: "Search comments" });
+    expect(search).toHaveFocus();
+    fireEvent.keyDown(window, { key: "j" });
+    expect(screen.getByRole("heading", { name: "Comments · ada" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("ada");
   });
 
   it("A opens and focuses the automated checks panel, and pressing A again returns focus", async () => {

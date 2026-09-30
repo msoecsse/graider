@@ -56,10 +56,13 @@ export const GradingKeyboardCheatSheetModal = ({
               <KbdHint label="C" /> <span>Add a comment on the selected source</span>
             </div>
             <div>
+              <KbdHint label="⌘/Ctrl K" /> <span>Open comment library</span>
+            </div>
+            <div>
               <KbdHint label="M" /> <span>Add a manual adjustment</span>
             </div>
             <div>
-              <KbdHint label="1–9" /> <span>Apply that library comment</span>
+              <KbdHint label="1–9" /> <span>Open that library comment to apply</span>
             </div>
           </div>
           <div className="grading-shortcut-group">

@@ -295,6 +295,66 @@ describe("grading report HTML", () => {
     expect(html).toContain("Close the resource on every path.");
   });
 
+  it("formats general and source feedback with escaped inline and fenced code", () => {
+    const input = baseInput();
+    const html = renderGradingReportHtml(
+      buildModel({
+        ...input,
+        gradingState: {
+          ...input.gradingState,
+          appliedComments: input.gradingState.appliedComments.map((comment) => {
+            if (comment.id === "general-1")
+              return {
+                ...comment,
+                text: [
+                  "Use `scanner.nextLine()`.",
+                  "```java",
+                  "  <script>alert(1)</script>",
+                  "```"
+                ].join("\n")
+              };
+            if (comment.id === "source-1")
+              return { ...comment, text: "Use `<resource>` on every path." };
+            return comment;
+          })
+        }
+      })
+    );
+
+    expect(html).toContain('<code class="comment-content__inline-code">scanner.nextLine()</code>');
+    expect(html).toContain('<code class="comment-content__inline-code">&lt;resource&gt;</code>');
+    expect(html).toContain(
+      '<pre class="comment-content__code-block"><code>  &lt;script&gt;alert(1)&lt;/script&gt;</code></pre>'
+    );
+    expect(html).toContain(".comment-content__code-block");
+    expect(html).toContain(".comment-content__inline-code");
+    expect(html).toContain("default-src 'none'; style-src 'unsafe-inline'");
+    expect(html).not.toContain("<script>alert(1)</script>");
+  });
+
+  it("does not allow fence language metadata to create HTML or attributes", () => {
+    const input = baseInput();
+    const html = renderGradingReportHtml(
+      buildModel({
+        ...input,
+        gradingState: {
+          ...input.gradingState,
+          appliedComments: [
+            {
+              id: "hostile-language",
+              text: ['```"><img>', "example", "```"].join("\n"),
+              deduction: 0
+            }
+          ]
+        }
+      })
+    );
+
+    expect(html).toContain('<pre class="comment-content__code-block"><code>example</code></pre>');
+    expect(html).not.toContain("<img>");
+    expect(html).not.toContain('class="language-');
+  });
+
   it("renders legacy and positive stored deductions as negative score adjustments", () => {
     const positive = buildGradingReportModel({
       ...baseInput(),

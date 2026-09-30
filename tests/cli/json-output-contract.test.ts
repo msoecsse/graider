@@ -340,6 +340,15 @@ describe("CLI JSON output contract", () => {
     expect(json.generatedFiles).toContain(json.summary.manifestFile);
     expect(typeof json.summary.created).toBe("number");
     expect(json.summary.assignmentSlug).toBe("lab04");
+    expect(json.summary.repositories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: "created",
+          reason: "repository_created",
+          diagnostics: []
+        })
+      ])
+    );
   });
 
   it("grade --json dispatch success and no-grading no-op use stable summary fields", async () => {

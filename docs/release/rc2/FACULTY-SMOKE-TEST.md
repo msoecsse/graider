@@ -1,5 +1,13 @@
 # Graider RC2 Faculty Smoke Test
 
+> Historical RC2 checklist. Keep this file as the pilot record; do not use its
+> seven-column roster line or its template-only workflow assumptions as the
+> current branch contract. The current stored roster is
+> `student_id,github_username,section,status` (legacy seven-column files may be
+> accepted for import), and managed assignments can deploy or explicitly
+> replace Graider's canonical workflow. Use the current [Faculty UI User
+> Guide](../../faculty-ui-user-guide.md) for present-day behavior.
+
 Use a safe sandbox course. Items marked **Destructive** can create repositories,
 push a workflow, or dispatch GitHub Actions. Items marked **External** require
 GitHub/GitHub Pages access.
@@ -16,7 +24,7 @@ GitHub/GitHub Pages access.
 
 - [ ] Optional: use the Course Setup wizard for a new sandbox course and verify
       `course.yml`, `term.yml`, and roster files are created.
-- [ ] Open **Manage Rosters** and verify the canonical header:
+- [ ] Historical RC2 check: open **Manage Rosters** and verify the pilot header:
       `student_id,github_username,email,first_name,last_name,section,status`.
 - [ ] Confirm active, dropped, and hold rows are represented correctly.
 

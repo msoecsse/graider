@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RosterRemoveRequest, RosterSaveRequest, RosterSectionRequest } from "./ipc";
 import {
   getRosterForSection,
@@ -12,6 +12,7 @@ import {
 } from "./rosterManagerService";
 
 const CANONICAL_HEADER = "student_id,github_username,section,status";
+const SAVE_TIME = new Date("2026-09-22T22:00:00.000Z");
 const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-roster-manager-"));
 
 const createTerm = (root: string): void => {
@@ -41,12 +42,13 @@ const request = (root: string, overrides: Partial<RosterSaveRequest> = {}): Rost
   sectionId: "001",
   rows: [
     {
-      studentId: "S001",
+      studentId: "s001",
       githubUsername: "octocat",
       section: "001",
       status: "active"
     }
   ],
+  sourceKind: "manual_edit",
   confirmed: false,
   ...overrides
 });
@@ -61,6 +63,14 @@ const loadRequest = (root: string): RosterSectionRequest => ({
 const removeRequest = (root: string, confirmed = false): RosterRemoveRequest => ({
   ...loadRequest(root),
   confirmed
+});
+
+const sourcePath = (root: string, sectionId = "001"): string =>
+  path.join(root, `terms/27s1/rosters/section-${sectionId}.source.json`);
+
+const saveDependencies = (updatedBy: string | null = "jones") => ({
+  updatedBy,
+  now: () => SAVE_TIME
 });
 
 describe("roster manager service", () => {
@@ -95,7 +105,7 @@ describe("roster manager service", () => {
 
     expect(preview.status).toBe("ready");
     expect(preview.path).toBe("terms/27s1/rosters/section-001.csv");
-    expect(preview.content).toBe(`${CANONICAL_HEADER}\nS001,octocat,001,active\n`);
+    expect(preview.content).toBe(`${CANONICAL_HEADER}\ns001,octocat,001,active\n`);
     expect(preview.content).not.toContain("\r");
   });
 
@@ -114,7 +124,7 @@ describe("roster manager service", () => {
 
     expect(preview.status).toBe("invalid");
     expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain(
-      "missing githubUsername"
+      "missing required value github_username"
     );
     expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain("invalid status");
     expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain(
@@ -154,13 +164,32 @@ describe("roster manager service", () => {
       status: "ready",
       rows: [
         {
-          studentId: "S001",
+          studentId: "s001",
           githubUsername: "octocat",
           section: "001",
           status: "active"
         }
       ]
     });
+  });
+
+  it("loads reordered canonical CSV through the shared parser and preserves its validation", () => {
+    const root = createRoot();
+    createTerm(root);
+    const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    fs.mkdirSync(path.dirname(rosterPath), { recursive: true });
+    fs.writeFileSync(
+      rosterPath,
+      'status,section,github_username,student_id\r\nACTIVE,001,"octo""cat",S001\r\n',
+      "utf8"
+    );
+
+    const result = getRosterForSection(loadRequest(root));
+
+    expect(result.status).toBe("invalid");
+    expect(result.diagnostics[0]?.message).toBe(
+      'Roster row 2 has invalid GitHub username octo"cat.'
+    );
   });
 
   it("does not write during preview and writes only after confirmation in paths with spaces", () => {
@@ -187,6 +216,21 @@ describe("roster manager service", () => {
 
     expect(result.status).toBe("failure");
     expect(fs.existsSync(path.join(root, "../outside"))).toBe(false);
+  });
+
+  it("rejects a configured section whose derived roster/source paths escape the course", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    fs.appendFileSync(termPath, '  - id: "../../../../../../outside"\n', "utf8");
+
+    const result = getRosterForSection({
+      ...loadRequest(root),
+      sectionId: "../../../../../../outside"
+    });
+
+    expect(result.status).toBe("invalid");
+    expect(result.diagnostics[0]?.message).toMatch(/outside the selected course folder/u);
   });
 
   it("adds a safe section with an empty canonical roster while preserving term fields", () => {
@@ -228,29 +272,198 @@ describe("roster manager service", () => {
     expect(fs.readFileSync(rosterPath, "utf8")).toBe(`${CANONICAL_HEADER}\n`);
   });
 
-  it("removes the roster CSV and section only after confirmation, then allows re-adding", () => {
+  it("removes only the roster reference, files, and source while preserving the section", () => {
     const root = createRoot();
     createTerm(root);
     const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
     const termPath = path.join(root, "terms/27s1/term.yml");
+    fs.writeFileSync(
+      termPath,
+      fs
+        .readFileSync(termPath, "utf8")
+        .replace(
+          "    roster: rosters/section-001.csv\n",
+          "    roster: rosters/section-001.csv\n    # faculty ownership comment\n    faculty:\n      - jones\n"
+        ),
+      "utf8"
+    );
     expect(saveRoster({ ...request(root), confirmed: true }).status).toBe("success");
+    expect(fs.existsSync(sourcePath(root))).toBe(true);
 
     expect(removeRoster(removeRequest(root))).toMatchObject({ status: "failure" });
     expect(fs.existsSync(rosterPath)).toBe(true);
     expect(removeRoster(removeRequest(root, true))).toMatchObject({ status: "success" });
     expect(fs.existsSync(rosterPath)).toBe(false);
-    expect(fs.readFileSync(termPath, "utf8")).not.toContain('id: "001"');
-    expect(fs.readFileSync(termPath, "utf8")).not.toContain("roster:");
+    expect(fs.existsSync(sourcePath(root))).toBe(false);
+    expect(fs.readFileSync(termPath, "utf8")).toContain('id: "001"');
+    expect(fs.readFileSync(termPath, "utf8")).toContain("faculty:\n      - jones");
+    expect(fs.readFileSync(termPath, "utf8")).toContain("# faculty ownership comment");
+    expect(fs.readFileSync(termPath, "utf8")).not.toContain("roster: rosters/section-001.csv");
     expect(getRosterForSection(loadRequest(root))).toMatchObject({
-      status: "invalid",
-      exists: false
+      status: "ready",
+      exists: false,
+      rows: [],
+      faculty: ["jones"]
     });
+    expect(getRosterForSection(loadRequest(root)).source).toBeUndefined();
+    const rosterlessTerm = fs.readFileSync(termPath, "utf8");
+    expect(removeRoster(removeRequest(root, true))).toMatchObject({ status: "failure" });
+    expect(fs.readFileSync(termPath, "utf8")).toBe(rosterlessTerm);
 
-    expect(saveRoster({ ...request(root, { createSection: true }), confirmed: true }).status).toBe(
-      "success"
-    );
+    expect(saveRoster({ ...request(root), confirmed: true }).status).toBe("success");
     expect(fs.existsSync(rosterPath)).toBe(true);
     expect(fs.readFileSync(termPath, "utf8")).toContain("roster: rosters/section-001.csv");
+  });
+
+  it("deletes canonical and distinct configured roster paths while retaining the section", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    const canonicalPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    const configuredPath = path.join(root, "terms/27s1/imports/legacy-001.csv");
+    fs.writeFileSync(
+      termPath,
+      fs
+        .readFileSync(termPath, "utf8")
+        .replace("rosters/section-001.csv", "imports/legacy-001.csv"),
+      "utf8"
+    );
+    fs.mkdirSync(path.dirname(canonicalPath), { recursive: true });
+    fs.mkdirSync(path.dirname(configuredPath), { recursive: true });
+    fs.writeFileSync(canonicalPath, `${CANONICAL_HEADER}\n`, "utf8");
+    fs.writeFileSync(configuredPath, `${CANONICAL_HEADER}\n`, "utf8");
+    fs.writeFileSync(sourcePath(root), '{"schemaVersion":1}\n', "utf8");
+
+    expect(removeRoster(removeRequest(root, true))).toMatchObject({ status: "success" });
+    expect(fs.existsSync(canonicalPath)).toBe(false);
+    expect(fs.existsSync(configuredPath)).toBe(false);
+    expect(fs.existsSync(sourcePath(root))).toBe(false);
+    expect(fs.readFileSync(termPath, "utf8")).toContain('id: "001"');
+    expect(fs.readFileSync(termPath, "utf8")).not.toContain("roster:");
+  });
+
+  it("deduplicates configured and canonical paths that resolve to the same roster", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    const canonicalPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    fs.writeFileSync(
+      termPath,
+      fs
+        .readFileSync(termPath, "utf8")
+        .replace("rosters/section-001.csv", "rosters/../rosters/section-001.csv"),
+      "utf8"
+    );
+    fs.mkdirSync(path.dirname(canonicalPath), { recursive: true });
+    fs.writeFileSync(canonicalPath, `${CANONICAL_HEADER}\n`, "utf8");
+    const originalUnlink = fs.unlinkSync;
+    const unlink = vi.spyOn(fs, "unlinkSync").mockImplementation((filePath) => {
+      originalUnlink(filePath);
+    });
+
+    expect(removeRoster(removeRequest(root, true))).toMatchObject({ status: "success" });
+    expect(unlink).toHaveBeenCalledTimes(1);
+    expect(unlink).toHaveBeenCalledWith(canonicalPath);
+    vi.restoreAllMocks();
+  });
+
+  it("rejects roster removal when neither a file nor reference exists", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    fs.writeFileSync(
+      termPath,
+      fs.readFileSync(termPath, "utf8").replace("    roster: rosters/section-001.csv\n", ""),
+      "utf8"
+    );
+    const originalTerm = fs.readFileSync(termPath, "utf8");
+
+    const result = removeRoster(removeRequest(root, true));
+
+    expect(result.status).toBe("failure");
+    expect(result.diagnostics[0]?.message).toMatch(/No configured roster/u);
+    expect(fs.readFileSync(termPath, "utf8")).toBe(originalTerm);
+  });
+
+  it("rejects configured roster paths outside the course for both removal operations", () => {
+    for (const remove of [removeRoster, removeSection]) {
+      const root = createRoot();
+      createTerm(root);
+      const termPath = path.join(root, "terms/27s1/term.yml");
+      const outsidePath = path.join(path.dirname(root), `${path.basename(root)}-outside.csv`);
+      const configuredPath = path.relative(path.dirname(termPath), outsidePath);
+      fs.writeFileSync(
+        termPath,
+        fs.readFileSync(termPath, "utf8").replace("rosters/section-001.csv", configuredPath),
+        "utf8"
+      );
+      fs.writeFileSync(outsidePath, "outside\n", "utf8");
+      const originalTerm = fs.readFileSync(termPath, "utf8");
+
+      expect(remove(removeRequest(root, true))).toMatchObject({ status: "failure" });
+      expect(fs.readFileSync(termPath, "utf8")).toBe(originalTerm);
+      expect(fs.readFileSync(outsidePath, "utf8")).toBe("outside\n");
+      fs.unlinkSync(outsidePath);
+    }
+  });
+
+  it("rolls back term, roster files, and source when removal deletion fails", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    const canonicalPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    const configuredPath = path.join(root, "terms/27s1/imports/legacy-001.csv");
+    fs.writeFileSync(
+      termPath,
+      fs
+        .readFileSync(termPath, "utf8")
+        .replace("rosters/section-001.csv", "imports/legacy-001.csv"),
+      "utf8"
+    );
+    fs.mkdirSync(path.dirname(canonicalPath), { recursive: true });
+    fs.mkdirSync(path.dirname(configuredPath), { recursive: true });
+    fs.writeFileSync(canonicalPath, `${CANONICAL_HEADER}\ncanonical\n`, "utf8");
+    fs.writeFileSync(configuredPath, `${CANONICAL_HEADER}\nconfigured\n`, "utf8");
+    fs.writeFileSync(sourcePath(root), '{"schemaVersion":1}\n', "utf8");
+    const originalTerm = fs.readFileSync(termPath, "utf8");
+    const originalUnlink = fs.unlinkSync;
+    vi.spyOn(fs, "unlinkSync").mockImplementation((filePath) => {
+      if (filePath === sourcePath(root)) throw new Error("source delete failed");
+      originalUnlink(filePath);
+    });
+
+    const result = removeRoster(removeRequest(root, true));
+    vi.restoreAllMocks();
+
+    expect(result.status).toBe("failure");
+    expect(fs.readFileSync(termPath, "utf8")).toBe(originalTerm);
+    expect(fs.readFileSync(canonicalPath, "utf8")).toBe(`${CANONICAL_HEADER}\ncanonical\n`);
+    expect(fs.readFileSync(configuredPath, "utf8")).toBe(`${CANONICAL_HEADER}\nconfigured\n`);
+    expect(fs.readFileSync(sourcePath(root), "utf8")).toBe('{"schemaVersion":1}\n');
+  });
+
+  it("preserves remove-section rollback behavior", () => {
+    const root = createRoot();
+    createTerm(root);
+    const termPath = path.join(root, "terms/27s1/term.yml");
+    const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    fs.mkdirSync(path.dirname(rosterPath), { recursive: true });
+    fs.writeFileSync(rosterPath, `${CANONICAL_HEADER}\n`, "utf8");
+    fs.writeFileSync(sourcePath(root), '{"schemaVersion":1}\n', "utf8");
+    const originalTerm = fs.readFileSync(termPath, "utf8");
+    const originalUnlink = fs.unlinkSync;
+    vi.spyOn(fs, "unlinkSync").mockImplementation((filePath) => {
+      if (filePath === sourcePath(root)) throw new Error("source delete failed");
+      originalUnlink(filePath);
+    });
+
+    const result = removeSection(removeRequest(root, true));
+    vi.restoreAllMocks();
+
+    expect(result.status).toBe("failure");
+    expect(fs.readFileSync(termPath, "utf8")).toBe(originalTerm);
+    expect(fs.readFileSync(rosterPath, "utf8")).toBe(`${CANONICAL_HEADER}\n`);
+    expect(fs.readFileSync(sourcePath(root), "utf8")).toBe('{"schemaVersion":1}\n');
   });
 
   it("preserves faculty assignments when rendering a term after a roster update", () => {
@@ -384,5 +597,153 @@ describe("roster manager service", () => {
         .diagnostics.map((item) => item.message)
         .join(" ")
     ).toContain("expected 111");
+  });
+
+  it("round-trips trusted CSV and manual provenance, including a null author", () => {
+    const root = createRoot();
+    createTerm(root);
+
+    const csvResult = saveRoster(
+      request(root, { confirmed: true, sourceKind: "csv_upload" }),
+      saveDependencies()
+    );
+    expect(csvResult).toMatchObject({
+      status: "success",
+      source: {
+        kind: "csv_upload",
+        updatedAt: SAVE_TIME.toISOString(),
+        updatedBy: "jones"
+      }
+    });
+    expect(getRosterForSection(loadRequest(root)).source).toEqual(csvResult.source);
+
+    const manualResult = saveRoster(
+      request(root, { confirmed: true, sourceKind: "manual_edit", rows: [] }),
+      saveDependencies(null)
+    );
+    expect(manualResult.source).toEqual({
+      kind: "manual_edit",
+      updatedAt: SAVE_TIME.toISOString(),
+      updatedBy: null
+    });
+    expect(getRosterForSection(loadRequest(root)).source).toEqual(manualResult.source);
+    expect(JSON.parse(fs.readFileSync(sourcePath(root), "utf8"))).toEqual({
+      schemaVersion: 1,
+      source: manualResult.source
+    });
+  });
+
+  it("loads legacy rosters without source and fails soft for malformed or unsupported metadata", () => {
+    const root = createRoot();
+    createTerm(root);
+    const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    fs.mkdirSync(path.dirname(rosterPath), { recursive: true });
+    fs.writeFileSync(rosterPath, `${CANONICAL_HEADER}\nS001,octocat,001,active\n`, "utf8");
+
+    expect(getRosterForSection(loadRequest(root))).toMatchObject({
+      status: "ready",
+      rows: request(root).rows
+    });
+    expect(getRosterForSection(loadRequest(root)).source).toBeUndefined();
+
+    for (const content of [
+      "not json\n",
+      '{"schemaVersion":2,"source":{"kind":"csv_upload","updatedAt":"2026-09-22T22:00:00.000Z","updatedBy":"jones"}}\n',
+      '{"schemaVersion":1,"source":{"kind":"canvas","updatedAt":"2026-09-22T22:00:00.000Z","updatedBy":"jones"}}\n'
+    ]) {
+      fs.writeFileSync(sourcePath(root), content, "utf8");
+      const result = getRosterForSection(loadRequest(root));
+      expect(result.status).toBe("ready");
+      expect(result.rows).toEqual(request(root).rows);
+      expect(result.source).toBeUndefined();
+      expect(result.diagnostics[0]?.message).toMatch(/source metadata/u);
+    }
+  });
+
+  it("preserves source on faculty-only saves and replaces it on roster-data saves", () => {
+    const root = createRoot();
+    createTerm(root);
+    const initial = saveRoster(
+      request(root, { confirmed: true, sourceKind: "csv_upload" }),
+      saveDependencies()
+    );
+
+    const facultyOnly = saveRoster(
+      request(root, { confirmed: true, sourceKind: undefined, faculty: ["smith"] }),
+      { updatedBy: "smith", now: () => new Date("2026-09-23T12:00:00.000Z") }
+    );
+    expect(facultyOnly.source).toEqual(initial.source);
+
+    const manual = saveRoster(
+      request(root, { confirmed: true, sourceKind: "manual_edit", rows: [] }),
+      { updatedBy: "smith", now: () => new Date("2026-09-23T12:00:00.000Z") }
+    );
+    expect(manual.source).toEqual({
+      kind: "manual_edit",
+      updatedAt: "2026-09-23T12:00:00.000Z",
+      updatedBy: "smith"
+    });
+    const secondFacultyOnly = saveRoster(
+      request(root, { confirmed: true, sourceKind: undefined, rows: [], faculty: ["jones"] }),
+      { updatedBy: "jones", now: () => new Date("2026-09-24T12:00:00.000Z") }
+    );
+    expect(secondFacultyOnly.source).toEqual(manual.source);
+  });
+
+  it("does not write provenance for previews, unconfirmed saves, or invalid saves", () => {
+    const root = createRoot();
+    createTerm(root);
+    const saveRequest = request(root, { sourceKind: "csv_upload" });
+
+    expect(previewRosterSave(saveRequest).status).toBe("ready");
+    expect(saveRoster(saveRequest, saveDependencies()).status).toBe("failure");
+    expect(
+      saveRoster(
+        { ...saveRequest, confirmed: true, rows: [{ ...saveRequest.rows[0]!, status: "bad" }] },
+        saveDependencies()
+      ).status
+    ).toBe("failure");
+    expect(fs.existsSync(sourcePath(root))).toBe(false);
+  });
+
+  it("rolls the roster back when the source write cannot complete", () => {
+    const root = createRoot();
+    createTerm(root);
+    const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    fs.mkdirSync(path.dirname(rosterPath), { recursive: true });
+    const original = `${CANONICAL_HEADER}\nS001,octocat,001,active\n`;
+    fs.writeFileSync(rosterPath, original, "utf8");
+    const originalRename = fs.renameSync;
+    vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (String(to).endsWith(".source.json")) throw new Error("source rename failed");
+      originalRename(from, to);
+    });
+
+    const result = saveRoster(
+      request(root, { confirmed: true, sourceKind: "manual_edit", rows: [] }),
+      saveDependencies()
+    );
+    vi.restoreAllMocks();
+
+    expect(result.status).toBe("failure");
+    expect(fs.readFileSync(rosterPath, "utf8")).toBe(original);
+    expect(fs.existsSync(sourcePath(root))).toBe(false);
+  });
+
+  it("keeps section deletion stronger and removes its roster and source metadata", () => {
+    const root = createRoot();
+    createTerm(root);
+    expect(saveRoster(request(root, { confirmed: true }), saveDependencies()).status).toBe(
+      "success"
+    );
+    expect(fs.existsSync(sourcePath(root))).toBe(true);
+    expect(getRosterForSection(loadRequest(root)).source?.kind).toBe("manual_edit");
+    expect(removeSection(removeRequest(root, true)).status).toBe("success");
+    expect(fs.existsSync(sourcePath(root))).toBe(false);
+    expect(fs.readFileSync(path.join(root, "terms/27s1/term.yml"), "utf8")).not.toContain(
+      'id: "001"'
+    );
+    expect(fs.existsSync(path.join(root, "terms/27s1/rosters/section-001.csv"))).toBe(false);
+    expect(getRosterForSection(loadRequest(root)).status).toBe("invalid");
   });
 });

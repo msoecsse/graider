@@ -46,6 +46,7 @@ export const IPC_CHANNELS = {
   getCoursePublishStatus: "graider-ui:course-publish:status",
   publishCourseChanges: "graider-ui:course-publish:publish",
   loadRosterTerms: "graider-ui:roster-manager:terms",
+  getRosterSectionSummaries: "graider-ui:roster-manager:section-summaries",
   getRosterForSection: "graider-ui:roster-manager:get",
   previewRosterSave: "graider-ui:roster-manager:preview",
   saveRoster: "graider-ui:roster-manager:save",
@@ -54,6 +55,7 @@ export const IPC_CHANNELS = {
   getTemplateWorkflow: "graider-ui:template-workflow:get",
   previewTemplateWorkflowSave: "graider-ui:template-workflow:preview-save",
   saveTemplateWorkflow: "graider-ui:template-workflow:save",
+  replaceTemplateManagedWorkflow: "graider-ui:template-workflow:replace-managed",
   removeCourseFolder: "graider-ui:course-registry:remove",
   refreshCourseFolder: "graider-ui:dashboard:refresh-course-folder",
   refreshDashboard: "graider-ui:dashboard:refresh-all",
@@ -526,10 +528,63 @@ export interface RosterRow {
   readonly status: string;
 }
 
+export type RosterSourceKind = "csv_upload" | "manual_edit";
+
+export interface RosterSource {
+  readonly kind: RosterSourceKind;
+  readonly updatedAt: string;
+  readonly updatedBy: string | null;
+}
+
 export interface RosterSectionRequest extends AssignmentSetupTermsRequest {
   readonly termCode: string;
   readonly sectionId: string;
 }
+
+export interface RosterSectionSummariesRequest extends AssignmentSetupTermsRequest {
+  readonly termCode: string;
+}
+
+export interface RosterSectionSummaryDiagnostic {
+  readonly code: string;
+  readonly message: string;
+}
+
+export type RosterSectionSummary =
+  | {
+      readonly sectionId: string;
+      readonly status: "ready";
+      readonly exists: true;
+      readonly studentCount: number;
+      readonly activeStudentCount: number;
+      readonly droppedStudentCount: number;
+      readonly holdStudentCount: number;
+      readonly diagnostics: readonly RosterSectionSummaryDiagnostic[];
+    }
+  | {
+      readonly sectionId: string;
+      readonly status: "missing";
+      readonly exists: false;
+      readonly diagnostics: readonly RosterSectionSummaryDiagnostic[];
+    }
+  | {
+      readonly sectionId: string;
+      readonly status: "invalid";
+      readonly exists: true;
+      readonly diagnostics: readonly RosterSectionSummaryDiagnostic[];
+    };
+
+export type RosterSectionSummariesResult =
+  | {
+      readonly status: "ready";
+      readonly summaries: readonly RosterSectionSummary[];
+      readonly diagnostics: readonly [];
+    }
+  | {
+      readonly status: "term_config_error";
+      readonly summaries: readonly [];
+      readonly diagnostics: readonly RosterSectionSummaryDiagnostic[];
+    };
 
 export interface RosterLoadResult {
   readonly status: "ready" | "migration_required" | "invalid";
@@ -537,6 +592,7 @@ export interface RosterLoadResult {
   readonly exists: boolean;
   readonly rows: readonly RosterRow[];
   readonly faculty: readonly string[];
+  readonly source?: RosterSource;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
@@ -544,6 +600,7 @@ export interface RosterSaveRequest extends RosterSectionRequest {
   readonly rows: readonly RosterRow[];
   readonly faculty?: readonly string[];
   readonly createSection?: boolean;
+  readonly sourceKind?: RosterSourceKind;
   readonly confirmed: boolean;
 }
 
@@ -561,6 +618,7 @@ export interface RosterSaveResult {
   readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
+  readonly source?: RosterSource;
   readonly publication?: CourseMutationPublicationResult;
 }
 
@@ -621,6 +679,17 @@ export interface TemplateWorkflowSaveResult extends Omit<TemplateWorkflowSavePre
   readonly commitUrl: string | null;
 }
 
+export interface TemplateManagedWorkflowReplacementRequest {
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly termCode: string;
+  readonly assignmentSlug: string;
+  readonly confirmed: boolean;
+  readonly previewFingerprint?: string;
+}
+export type TemplateManagedWorkflowReplacementResult =
+  import("./templateManagedWorkflowReplacementService.js").TemplateManagedWorkflowReplacementResult;
+
 export interface CourseFolderSelectionError {
   readonly code: string;
   readonly message: string;
@@ -678,6 +747,7 @@ export type GradingStudentEvidenceRequest = GradingStudentSourceRequest;
 export type { GradingStudentEvidenceResult } from "./gradingStudentEvidenceService.js";
 export interface GradingStudentWorkflowRepairRequest extends GradingStudentSourceRequest {
   readonly confirmed: boolean;
+  readonly runAfterReplacement?: boolean;
 }
 
 export interface GradingBulkWorkflowRepairRequest extends Omit<
@@ -740,7 +810,11 @@ export interface EditGradingLibraryCommentRequest extends LoadGradingCommentLibr
 export interface DeleteGradingLibraryCommentRequest extends LoadGradingCommentLibraryRequest {
   readonly commentId: string;
 }
-export type { GradingCommentLibraryResult } from "./gradingCommentLibraryService.js";
+export type {
+  GradingCommentLibraryLoadResult,
+  GradingCommentLibraryMutationResult,
+  GradingCommentLibraryResult
+} from "./gradingCommentLibraryService.js";
 export type {
   AssignmentGradingLifecycleRequest,
   AssignmentGradingLifecycleResult
@@ -1033,6 +1107,9 @@ export interface GraiderUIApi {
   readonly loadRosterTerms?: (
     request: AssignmentSetupTermsRequest
   ) => Promise<AssignmentSetupTermsResult>;
+  readonly getRosterSectionSummaries?: (
+    request: RosterSectionSummariesRequest
+  ) => Promise<RosterSectionSummariesResult>;
   readonly getRosterForSection?: (request: RosterSectionRequest) => Promise<RosterLoadResult>;
   readonly previewRosterSave?: (request: RosterSaveRequest) => Promise<RosterPreviewResult>;
   readonly saveRoster?: (request: RosterSaveRequest) => Promise<RosterSaveResult>;
@@ -1047,6 +1124,9 @@ export interface GraiderUIApi {
   readonly saveTemplateWorkflow?: (
     request: TemplateWorkflowSaveRequest
   ) => Promise<TemplateWorkflowSaveResult>;
+  readonly replaceTemplateManagedWorkflow?: (
+    request: TemplateManagedWorkflowReplacementRequest
+  ) => Promise<TemplateManagedWorkflowReplacementResult>;
   readonly listCourseFolders: () => Promise<CourseFolderRecord[]>;
   readonly removeCourseFolder: (id: string) => Promise<void>;
   readonly refreshCourseFolder: (id: string) => Promise<CourseFolderDashboardResult>;
@@ -1124,16 +1204,16 @@ export interface GraiderUIApi {
   >;
   readonly loadGradingCommentLibrary?: (
     request: LoadGradingCommentLibraryRequest
-  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryLoadResult>;
   readonly createGradingLibraryComment?: (
     request: CreateGradingLibraryCommentRequest
-  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryMutationResult>;
   readonly editGradingLibraryComment?: (
     request: EditGradingLibraryCommentRequest
-  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryMutationResult>;
   readonly deleteGradingLibraryComment?: (
     request: DeleteGradingLibraryCommentRequest
-  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryResult>;
+  ) => Promise<import("./gradingCommentLibraryService.js").GradingCommentLibraryMutationResult>;
   readonly prepareAssignmentTemplateSync: (
     request: import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncRequest
   ) => Promise<import("./assignmentTemplateSyncService.js").AssignmentTemplateSyncAvailability>;

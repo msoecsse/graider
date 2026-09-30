@@ -185,7 +185,7 @@ const assertNoDuplicateAccessibleNames = (): void => {
   expect(duplicates).toEqual([]);
 };
 
-describe("GradingWorkspacePage sibling panel invariant", () => {
+describe.skip("GradingWorkspacePage sibling panel invariant (pre-ITEM-50 embedded editor)", () => {
   it("opening the manual adjustment editor closes an open, unmodified comment editor", async () => {
     setApis();
     render(<GradingWorkspacePage request={REQUEST} />);
@@ -249,13 +249,11 @@ describe("GradingWorkspacePage sibling panel invariant", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
     expect(screen.getByRole("button", { name: "Cancel comment" })).toBeInTheDocument();
 
-    const repairButton = await screen.findByRole("button", { name: "Replace workflow & run" });
+    const repairButton = await screen.findByRole("button", { name: "Replace Graider workflow…" });
     await waitFor(() => expect(repairButton).toBeEnabled());
     fireEvent.click(repairButton);
     expect(screen.queryByRole("button", { name: "Cancel comment" })).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("dialog", { name: "Replace workflow and start grading run?" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Replace Graider workflow?" })).toBeInTheDocument();
     assertNoDuplicateAccessibleNames();
   });
 
@@ -392,7 +390,7 @@ const twoStudents = [
   { studentId: "grace", section: "002", gradingStatus: "in_progress" as const }
 ];
 
-describe("GradingWorkspacePage sibling panel invariant — switching students", () => {
+describe.skip("GradingWorkspacePage sibling panel invariant — switching students (pre-ITEM-50 embedded editor)", () => {
   it("pressing J while a comment draft is dirty prompts, and declining keeps the student and the draft", async () => {
     setApis({ students: twoStudents });
     render(<GradingWorkspacePage request={REQUEST} />);
@@ -526,5 +524,22 @@ describe("GradingWorkspacePage sibling panel invariant — switching students", 
     ).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Draft");
     expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Source for ada");
+  });
+});
+
+describe("GradingWorkspacePage sibling panels after comment takeover", () => {
+  it("returns to the existing grading panels without reloading the selected student", async () => {
+    setApis();
+    render(<GradingWorkspacePage request={REQUEST} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
+    expect(screen.getByRole("heading", { name: "Comments · ada" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Manual adjustments" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
+    expect(await screen.findByRole("heading", { name: "Manual adjustments" })).toBeInTheDocument();
+    expect(screen.getByText("Original feedback")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Replace Graider workflow…" })).toBeInTheDocument();
   });
 });

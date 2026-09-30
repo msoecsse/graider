@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import type { GradingStudentSnapshotResult } from "../../electron/ipc";
+import { FormattedGradingComment } from "./FormattedGradingComment";
 import type { CanonicalSourceRange } from "./submissionSourceView";
 
 type Snapshot = Extract<GradingStudentSnapshotResult, { readonly status: "success" }>;
@@ -50,7 +51,7 @@ export const GradingAppliedCommentsPanel = ({
           {appliedComments.map((comment) => (
             <li key={comment.id}>
               {comment.title === undefined ? null : <h4>{comment.title}</h4>}
-              <p>{comment.text}</p>
+              <FormattedGradingComment text={comment.text} />
               <p>Adjustment: {comment.deduction}</p>
               {comment.rubricCategoryId === undefined ? null : (
                 <p>

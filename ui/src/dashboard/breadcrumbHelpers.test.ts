@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
-import { buildAssignmentBreadcrumbs, buildRosterBreadcrumbs } from "./breadcrumbHelpers";
+import {
+  buildAssignmentBreadcrumbs,
+  buildCommentLibraryBreadcrumbs,
+  buildRosterBreadcrumbs
+} from "./breadcrumbHelpers";
 import type { DashboardCard } from "./dashboardTypes";
 
 const SELECTION: AssignmentDetailSelection = {
@@ -91,6 +95,33 @@ describe("buildRosterBreadcrumbs", () => {
       { label: "Dashboard", to: "/" },
       { label: "CSC1120 · Spring 2027" },
       { label: "Roster" }
+    ]);
+  });
+});
+
+describe("buildCommentLibraryBreadcrumbs", () => {
+  it("ends on Comment Library as the current page", () => {
+    const card: DashboardCard = {
+      kind: "course-term",
+      displayName: "27s1-csc1120",
+      courseSlug: "csc1120",
+      courseTitle: "CSC1120",
+      coursePath: ".",
+      termSlug: "27s1",
+      termTitle: "Spring 2027",
+      status: "active",
+      needsAttention: false,
+      attentionCount: 0,
+      roster: null,
+      assignmentCount: 0,
+      assignments: [],
+      recentAssignments: [],
+      diagnostics: []
+    };
+    expect(buildCommentLibraryBreadcrumbs(card)).toEqual([
+      { label: "Dashboard", to: "/" },
+      { label: "CSC1120 · Spring 2027" },
+      { label: "Comment Library" }
     ]);
   });
 });

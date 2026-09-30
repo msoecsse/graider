@@ -16,6 +16,7 @@ import {
 } from "../manifest/repository-targets.js";
 import {
   isManualManagedGradingWorkflowEligible,
+  manuallyInstallManagedGradingWorkflow,
   manuallyInstallAndDispatchManagedGradingWorkflow,
   type ManualManagedGradingWorkflowResult
 } from "../workflows/manual-managed-grading-workflow.js";
@@ -31,13 +32,15 @@ export interface GradingStudentWorkflowRepairContextRequest {
   readonly assignmentSlug: string;
   readonly studentId: string;
   readonly currentSubmissionCommitSha?: string;
+  /** Defaults to the historical replace-and-run behavior. */
+  readonly runAfterReplacement?: boolean;
 }
 
 export interface PreparedGradingStudentWorkflowRepairContext {
   readonly studentId: string;
   readonly repository: { readonly owner: string; readonly name: string };
   readonly grading: EffectiveAssignmentGrading;
-  readonly submissionCommitSha: string;
+  readonly submissionCommitSha?: string;
 }
 
 export type PrepareGradingStudentWorkflowRepairResult =
@@ -79,6 +82,7 @@ export interface GradingStudentWorkflowRepairContextDependencies extends Grading
     options: GitHubClientFactoryOptions
   ) => ReturnType<typeof createGitHubClient>;
   readonly repair: typeof manuallyInstallAndDispatchManagedGradingWorkflow;
+  readonly install: typeof manuallyInstallManagedGradingWorkflow;
 }
 
 const dependencies: GradingStudentWorkflowRepairContextDependencies = {
@@ -86,6 +90,7 @@ const dependencies: GradingStudentWorkflowRepairContextDependencies = {
   loadAssignmentManifest: (manifestPath) => loadManifest(manifestPath, { required: true }),
   createClient: createGitHubClient,
   repair: manuallyInstallAndDispatchManagedGradingWorkflow,
+  install: manuallyInstallManagedGradingWorkflow,
   loadState: loadGradingState
 };
 
@@ -139,8 +144,11 @@ export const prepareGradingStudentWorkflowRepairContext = (
   if (owner === undefined || owner.trim() === "" || mapping.repositoryName.trim() === "")
     return { status: "repository_unavailable", studentId: request.studentId };
 
-  const submission = resolveGradingSubmissionContext(request, { loadState: resolved.loadState });
-  if (submission.status !== "success") {
+  const runAfterReplacement = request.runAfterReplacement !== false;
+  const submission = runAfterReplacement
+    ? resolveGradingSubmissionContext(request, { loadState: resolved.loadState })
+    : undefined;
+  if (submission !== undefined && submission.status !== "success") {
     if (submission.status === "grading_state_error") return submission;
     return { status: "submission_commit_unavailable", studentId: request.studentId };
   }
@@ -151,7 +159,9 @@ export const prepareGradingStudentWorkflowRepairContext = (
       studentId: request.studentId,
       repository: { owner, name: mapping.repositoryName },
       grading,
-      submissionCommitSha: submission.value.submissionCommitSha
+      ...(submission === undefined
+        ? {}
+        : { submissionCommitSha: submission.value.submissionCommitSha })
     }
   };
 };
@@ -160,7 +170,8 @@ export const executePreparedGradingStudentWorkflowRepair = async (
   prepared: PreparedGradingStudentWorkflowRepairContext,
   resolvedGithubToken: string,
   confirmed: boolean,
-  overrides: Partial<GradingStudentWorkflowRepairContextDependencies> = {}
+  overrides: Partial<GradingStudentWorkflowRepairContextDependencies> = {},
+  runAfterReplacement = true
 ): Promise<ExecutePreparedGradingStudentWorkflowRepairResult> => {
   const resolved = { ...dependencies, ...overrides };
   const githubClient = resolved.createClient({ token: resolvedGithubToken });
@@ -183,19 +194,32 @@ export const executePreparedGradingStudentWorkflowRepair = async (
         repositoryFullName: repository.fullName
       };
 
+    const common = {
+      githubClient,
+      repository: {
+        owner: repository.owner,
+        name: repository.name,
+        defaultBranch: repository.defaultBranch
+      },
+      grading: prepared.grading,
+      confirmed: true
+    };
+    if (!runAfterReplacement) {
+      const installed = await resolved.install(common);
+      return {
+        status: "success",
+        studentId: prepared.studentId,
+        result: { ...installed, dispatch: { status: "not_attempted" } }
+      };
+    }
+    if (prepared.submissionCommitSha === undefined)
+      return { status: "repository_unavailable", studentId: prepared.studentId };
     return {
       status: "success",
       studentId: prepared.studentId,
       result: await resolved.repair({
-        githubClient,
-        repository: {
-          owner: repository.owner,
-          name: repository.name,
-          defaultBranch: repository.defaultBranch
-        },
-        grading: prepared.grading,
-        submissionCommitSha: prepared.submissionCommitSha,
-        confirmed: true
+        ...common,
+        submissionCommitSha: prepared.submissionCommitSha
       })
     };
   } catch {

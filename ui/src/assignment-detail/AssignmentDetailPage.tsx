@@ -11,7 +11,8 @@ import type {
   StudentRepositoryAccessPageResult,
   TemplateWorkflowResult,
   TemplateWorkflowSavePreview,
-  TemplateWorkflowSaveResult
+  TemplateWorkflowSaveResult,
+  TemplateManagedWorkflowReplacementResult
 } from "../../electron/ipc";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
@@ -388,6 +389,7 @@ export const AssignmentDetailPage = ({
   onViewGradeStatus,
   onDetailLoaded,
   onEditAssignment = () => undefined,
+  onManageCommentLibrary = () => undefined,
   onDeleted = () => undefined
 }: AssignmentDetailPageProps): ReactElement => {
   const [loadResult, setLoadResult] = useState<AssignmentDetailLoadResult | null>(
@@ -413,6 +415,9 @@ export const AssignmentDetailPage = ({
     null
   );
   const [isPushingWorkflow, setIsPushingWorkflow] = useState(false);
+  const [managedWorkflowReplacement, setManagedWorkflowReplacement] =
+    useState<Extract<TemplateManagedWorkflowReplacementResult, { readonly status: "ready" }>>();
+  const [isReplacingManagedWorkflow, setIsReplacingManagedWorkflow] = useState(false);
   const [accessPage, setAccessPage] = useState<StudentRepositoryAccessPageResult | null>(null);
   const [isSelectingPagesFolder, setIsSelectingPagesFolder] = useState(false);
   const [accessPagePublishStatus, setAccessPagePublishStatus] =
@@ -445,6 +450,8 @@ export const AssignmentDetailPage = ({
   const [templateSyncError, setTemplateSyncError] = useState<string | null>(null);
   const templateSyncExecutionRef = useRef(false);
   const templateSyncProgressActiveRef = useRef(false);
+  const detailLoadGenerationRef = useRef(0);
+  const templateSyncPreparationGenerationRef = useRef(0);
   const [copyState, setCopyState] = useState<CopyState | null>(null);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
   const { message: toastMessage, showToast } = useToast();
@@ -470,6 +477,15 @@ export const AssignmentDetailPage = ({
   );
 
   const loadDetail = async (): Promise<void> => {
+    const generation = detailLoadGenerationRef.current + 1;
+    detailLoadGenerationRef.current = generation;
+    templateSyncPreparationGenerationRef.current += 1;
+    setTemplateSyncAvailability(null);
+    setTemplateSyncResult(null);
+    setTemplateSyncError(null);
+    setIsTemplateSyncModalOpen(false);
+    setTemplateSyncTarget(null);
+    setIsPreparingTemplateSync(false);
     setIsLoading(true);
 
     try {
@@ -479,8 +495,10 @@ export const AssignmentDetailPage = ({
         assignmentFile: selection.assignmentFile
       });
 
-      setLoadResult(nextResult);
-      onDetailLoaded?.(nextResult);
+      if (detailLoadGenerationRef.current === generation) {
+        setLoadResult(nextResult);
+        onDetailLoaded?.(nextResult);
+      }
     } catch {
       const failureResult = {
         courseFolderId: selection.courseFolderId,
@@ -498,10 +516,12 @@ export const AssignmentDetailPage = ({
         refreshedAt: null
       };
 
-      setLoadResult(failureResult);
-      onDetailLoaded?.(failureResult);
+      if (detailLoadGenerationRef.current === generation) {
+        setLoadResult(failureResult);
+        onDetailLoaded?.(failureResult);
+      }
     } finally {
-      setIsLoading(false);
+      if (detailLoadGenerationRef.current === generation) setIsLoading(false);
     }
   };
 
@@ -647,7 +667,13 @@ export const AssignmentDetailPage = ({
 
   const prepareSingleRepositoryTemplateSync = async (studentId: string): Promise<void> => {
     const prepareTemplateSync = window.graiderUI.prepareAssignmentTemplateSync;
-    if (prepareTemplateSync === undefined || templateSyncExecutionRef.current) return;
+    if (
+      prepareTemplateSync === undefined ||
+      templateSyncExecutionRef.current ||
+      (detail?.applyState.status !== "applied" && detail?.applyState.status !== "partially_applied")
+    )
+      return;
+    const generation = templateSyncPreparationGenerationRef.current;
     setIsPreparingTemplateSync(true);
     setTemplateSyncError(null);
     setTemplateSyncResult(null);
@@ -658,6 +684,7 @@ export const AssignmentDetailPage = ({
         assignmentFile: selection.assignmentFile,
         studentId
       });
+      if (templateSyncPreparationGenerationRef.current !== generation) return;
       if (!availability.available || availability.selectedRepository === undefined) {
         setTemplateSyncError(
           availability.blocker?.message ?? "This student repository cannot be updated safely."
@@ -667,9 +694,13 @@ export const AssignmentDetailPage = ({
       setTemplateSyncTarget(availability);
       setIsTemplateSyncModalOpen(true);
     } catch {
-      setTemplateSyncError("Unable to prepare this student repository update.");
+      if (templateSyncPreparationGenerationRef.current === generation) {
+        setTemplateSyncError("Unable to prepare this student repository update.");
+      }
     } finally {
-      setIsPreparingTemplateSync(false);
+      if (templateSyncPreparationGenerationRef.current === generation) {
+        setIsPreparingTemplateSync(false);
+      }
     }
   };
 
@@ -743,6 +774,71 @@ export const AssignmentDetailPage = ({
       }
     } finally {
       setIsPushingWorkflow(false);
+    }
+  };
+
+  const previewManagedWorkflowReplacement = async (): Promise<void> => {
+    if (
+      detail === null ||
+      detail.term.slug === null ||
+      detail.assignment.slug === null ||
+      window.graiderUI.replaceTemplateManagedWorkflow === undefined
+    )
+      return;
+    setIsReplacingManagedWorkflow(true);
+    try {
+      const result = await window.graiderUI.replaceTemplateManagedWorkflow({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        termCode: detail.term.slug,
+        assignmentSlug: detail.assignment.slug,
+        confirmed: false
+      });
+      if (result.status === "ready" && "preview" in result) setManagedWorkflowReplacement(result);
+      else showToast("Graider workflow replacement is unavailable for this assignment.");
+    } finally {
+      setIsReplacingManagedWorkflow(false);
+    }
+  };
+
+  const confirmManagedWorkflowReplacement = async (): Promise<void> => {
+    if (
+      detail === null ||
+      detail.term.slug === null ||
+      detail.assignment.slug === null ||
+      window.graiderUI.replaceTemplateManagedWorkflow === undefined
+    )
+      return;
+    setIsReplacingManagedWorkflow(true);
+    try {
+      const result = await window.graiderUI.replaceTemplateManagedWorkflow({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
+        termCode: detail.term.slug,
+        assignmentSlug: detail.assignment.slug,
+        confirmed: true,
+        ...(managedWorkflowReplacement === undefined
+          ? {}
+          : { previewFingerprint: managedWorkflowReplacement.preview.contentFingerprint })
+      });
+      if (result.status === "success" && "result" in result) {
+        setManagedWorkflowReplacement(undefined);
+        showToast(
+          result.result.workflow.status === "already_current"
+            ? "Graider workflow is already current."
+            : "Graider workflow installed in the template repository."
+        );
+        await loadTemplateWorkflow();
+      } else
+        showToast(
+          result.status === "success" &&
+            "result" in result &&
+            result.result.workflow.status === "stale"
+            ? "The template workflow changed after preview. Review it again before replacing it."
+            : "Unable to replace the template workflow safely."
+        );
+    } finally {
+      setIsReplacingManagedWorkflow(false);
     }
   };
 
@@ -907,9 +1003,13 @@ export const AssignmentDetailPage = ({
 
   useEffect(() => {
     if (hasInitialResultForSelection) {
+      detailLoadGenerationRef.current += 1;
+      templateSyncPreparationGenerationRef.current += 1;
+      setIsLoading(false);
       setLoadResult(initialLoadResult);
       onDetailLoaded?.(initialLoadResult);
     } else {
+      setLoadResult(null);
       void loadDetail();
     }
   }, [selection.assignmentFile, selection.courseFolderId]);
@@ -925,13 +1025,31 @@ export const AssignmentDetailPage = ({
   }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   useEffect(() => {
-    let isCurrent = true;
+    const generation = templateSyncPreparationGenerationRef.current + 1;
+    templateSyncPreparationGenerationRef.current = generation;
     const prepareTemplateSync = window.graiderUI.prepareAssignmentTemplateSync;
     setTemplateSyncAvailability(null);
     setTemplateSyncResult(null);
     setTemplateSyncError(null);
     setIsTemplateSyncModalOpen(false);
     setTemplateSyncTarget(null);
+
+    const detailMatchesSelection =
+      loadResult?.courseFolderId === selection.courseFolderId &&
+      loadResult.assignmentFile === selection.assignmentFile;
+    const isApplied =
+      detailMatchesSelection &&
+      (detail?.applyState.status === "applied" ||
+        detail?.applyState.status === "partially_applied");
+    if (!isApplied) {
+      setIsPreparingTemplateSync(false);
+      return () => {
+        if (templateSyncPreparationGenerationRef.current === generation) {
+          templateSyncPreparationGenerationRef.current += 1;
+        }
+      };
+    }
+
     setIsPreparingTemplateSync(true);
 
     if (prepareTemplateSync === undefined) {
@@ -943,7 +1061,9 @@ export const AssignmentDetailPage = ({
       });
       setIsPreparingTemplateSync(false);
       return () => {
-        isCurrent = false;
+        if (templateSyncPreparationGenerationRef.current === generation) {
+          templateSyncPreparationGenerationRef.current += 1;
+        }
       };
     }
 
@@ -953,10 +1073,12 @@ export const AssignmentDetailPage = ({
       assignmentFile: selection.assignmentFile
     })
       .then((availability) => {
-        if (isCurrent) setTemplateSyncAvailability(availability);
+        if (templateSyncPreparationGenerationRef.current === generation) {
+          setTemplateSyncAvailability(availability);
+        }
       })
       .catch(() => {
-        if (isCurrent) {
+        if (templateSyncPreparationGenerationRef.current === generation) {
           setTemplateSyncAvailability({
             available: false,
             repositoryCount: 0,
@@ -970,13 +1092,17 @@ export const AssignmentDetailPage = ({
         }
       })
       .finally(() => {
-        if (isCurrent) setIsPreparingTemplateSync(false);
+        if (templateSyncPreparationGenerationRef.current === generation) {
+          setIsPreparingTemplateSync(false);
+        }
       });
 
     return () => {
-      isCurrent = false;
+      if (templateSyncPreparationGenerationRef.current === generation) {
+        templateSyncPreparationGenerationRef.current += 1;
+      }
     };
-  }, [selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
+  }, [loadResult, selection.assignmentFile, selection.courseFolderId, selection.courseFolderPath]);
 
   useEffect(() => {
     setGroupConfig(null);
@@ -1173,6 +1299,12 @@ export const AssignmentDetailPage = ({
                 onSelect: () => revealExistingSection("grade-workflow-title", ADVANCED_DETAILS_ID)
               },
               {
+                id: "manage-comment-library",
+                label: "Manage Comment Library",
+                caption: "Create and maintain reusable comments shared across this course.",
+                onSelect: onManageCommentLibrary
+              },
+              {
                 id: "view-grading-status",
                 label: "View grading status",
                 caption: "See automated check status for every repository.",
@@ -1228,6 +1360,10 @@ export const AssignmentDetailPage = ({
   // README section 2.1/2.5 say that means hiding the action and its
   // guidance, not showing a disabled button or a failure banner for it.
   const templateSyncNotApplicable = templateSyncAvailability?.blocker?.code === "template_required";
+  const templateSyncLifecycleEligible =
+    loadResult?.courseFolderId === selection.courseFolderId &&
+    loadResult.assignmentFile === selection.assignmentFile &&
+    (detail?.applyState.status === "applied" || detail?.applyState.status === "partially_applied");
 
   return (
     <main className="dashboard-shell" aria-label={title}>
@@ -1236,7 +1372,7 @@ export const AssignmentDetailPage = ({
         title={title}
         meta={getCourseTermSubtitle(detail)}
         secondaryActions={
-          detail === null || templateSyncNotApplicable
+          detail === null || !templateSyncLifecycleEligible || templateSyncNotApplicable
             ? []
             : [
                 {
@@ -1419,7 +1555,9 @@ export const AssignmentDetailPage = ({
             {templateSyncError}
           </p>
         )}
-        {templateSyncAvailability?.blocker === undefined || templateSyncNotApplicable ? null : (
+        {!templateSyncLifecycleEligible ||
+        templateSyncAvailability?.blocker === undefined ||
+        templateSyncNotApplicable ? null : (
           <section className="detail-guidance" aria-label="Template update guidance">
             <h2>Student repository updates unavailable</h2>
             <p>{templateSyncAvailability.blocker.message}</p>
@@ -1498,8 +1636,12 @@ export const AssignmentDetailPage = ({
                     preview={workflowPreview}
                     isLoading={isLoadingWorkflow}
                     isPushing={isPushingWorkflow}
+                    isReplacingManagedWorkflow={isReplacingManagedWorkflow}
                     onViewWorkflow={() => {
                       void loadTemplateWorkflow();
+                    }}
+                    onReplaceManagedWorkflow={() => {
+                      void previewManagedWorkflowReplacement();
                     }}
                     onDraftChange={(value) => {
                       setWorkflowDraft(value);
@@ -1512,6 +1654,32 @@ export const AssignmentDetailPage = ({
                     onPush={() => {
                       void pushWorkflow();
                     }}
+                  />
+                  <ConfirmationWithPreviewModal
+                    isOpen={managedWorkflowReplacement !== undefined}
+                    title="Replace template workflow with Graider's workflow?"
+                    summary={
+                      <p>
+                        Replace .github/workflows/grade.yml in{" "}
+                        {managedWorkflowReplacement?.preview.repository.fullName} on{" "}
+                        {managedWorkflowReplacement?.preview.repository.defaultBranch} with
+                        Graider's current generated workflow?
+                      </p>
+                    }
+                    preview={
+                      <p>
+                        Current classification: {managedWorkflowReplacement?.preview.classification}
+                        . Resulting action: {managedWorkflowReplacement?.preview.action}.
+                        {managedWorkflowReplacement?.preview.action === "replace"
+                          ? " The existing workflow will be replaced."
+                          : ""}
+                      </p>
+                    }
+                    acknowledgementLabel="I understand this can replace the template's existing workflow."
+                    confirmLabel="Confirm replace with Graider workflow"
+                    onConfirm={confirmManagedWorkflowReplacement}
+                    onSuccess={() => undefined}
+                    onCancel={() => setManagedWorkflowReplacement(undefined)}
                   />
                   {workflowSaveResult?.status === "success" ? (
                     <p role="status">
@@ -1569,7 +1737,9 @@ export const AssignmentDetailPage = ({
               onViewFullGradeStatus={() => {
                 onViewGradeStatus(selection, detail, loadResult);
               }}
-              canUpdateRepositories={groupConfig?.repositoryMode === "individual"}
+              canUpdateRepositories={
+                templateSyncLifecycleEligible && groupConfig?.repositoryMode === "individual"
+              }
               isTemplateSyncPending={isPreparingTemplateSync || isExecutingTemplateSync}
               onUpdateRepository={(studentId) => {
                 void prepareSingleRepositoryTemplateSync(studentId);

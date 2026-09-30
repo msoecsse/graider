@@ -116,6 +116,22 @@ describe("course comment library", () => {
       expect(createReusableComment(root, invalid)).toMatchObject({ status: "failure" });
   });
 
+  it("canonicalizes tags case-insensitively while preserving first display casing and order", () => {
+    const root = courseRoot();
+    expect(
+      createReusableComment(root, {
+        ...comment("canonical-tags"),
+        tags: [" Java ", "java", "JAVA", "Loops", " loops ", ""]
+      })
+    ).toMatchObject({ status: "success", value: { tags: ["Java", "Loops"] } });
+    expect(
+      editReusableComment(root, "canonical-tags", {
+        ...comment("ignored"),
+        tags: ["Testing", " testing ", "STYLE"]
+      })
+    ).toMatchObject({ status: "success", value: { tags: ["Testing", "STYLE"] } });
+  });
+
   it("generates a trusted stable ID and normalizes canonical creation fields", () => {
     const root = courseRoot();
     expect(

@@ -243,13 +243,24 @@ describe("graider workflow generate command", () => {
     expect(parseDocument(workflow).errors).toEqual([]);
     expect(workflow).toContain("uses: actions/setup-java@v6");
     expect(workflow).toContain("checkstyle/checkstyle/releases/download/checkstyle-");
+    expect(workflow).toContain("- name: Detect JavaFX requirements");
+    expect(workflow).toContain("GRAIDER_JAVAFX_REQUIRED=%s");
+    expect(workflow).toContain("JavaFX required: no");
+    expect(workflow).toContain("- name: Download core grading tools");
+    expect(workflow).toContain("- name: Download JavaFX modules");
+    expect(workflow).toContain("if: env.GRAIDER_JAVAFX_REQUIRED == 'true'");
     expect(workflow).toContain("- name: CheckStyle");
     expect(workflow).toContain("- name: Compile Java sources");
+    expect(workflow).toContain("JAVAFX_COMPILE_ARGS=()");
+    expect(workflow).toContain("- name: Stage FXML resources");
+    expect(workflow).toContain('relative_path="${fxml_file#src/}"');
     expect(workflow).toContain("- name: Unit Tests");
-    expect(workflow).toContain("xvfb-run -a");
+    expect(workflow).toContain("JUNIT_COMMAND=(java)");
+    expect(workflow).toContain('JUNIT_COMMAND=(xvfb-run -a -s "-screen 0 1280x1024x24" java)');
     expect(workflow).toContain("grading-evidence/checkstyle.xml");
     expect(workflow).toContain("grading-evidence/");
     expect(workflow).not.toContain("classroom-resources/");
+    expect(workflow).not.toContain("repo.maven.apache.org/maven2/org/testfx/");
   });
 
   it("emits JSON output with generated file path", () => {
