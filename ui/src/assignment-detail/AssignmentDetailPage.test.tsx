@@ -11,6 +11,7 @@ import type {
   AssignmentTemplateSyncAvailability,
   GraiderUIApi
 } from "../../electron/ipc";
+import { createDefaultAssignmentGradingLifecycle } from "../test/pageFixtures";
 import { AssignmentDetailPage } from "./AssignmentDetailPage";
 import type { AssignmentDetailSelection } from "./assignmentDetailTypes";
 
@@ -302,6 +303,9 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getAssignmentApplyPreview: vi.fn(),
     getAssignmentGradePreview: vi.fn(),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
+    getAssignmentGradingLifecycle: vi
+      .fn()
+      .mockResolvedValue(createDefaultAssignmentGradingLifecycle()),
     getFacultyReport: vi.fn(),
     applyAssignment: vi.fn(),
     gradeAssignment: vi.fn(),
@@ -1514,6 +1518,18 @@ describe("AssignmentDetailPage", () => {
     expect(main).not.toBeNull();
     expect(sidebar).not.toBeNull();
     expect(main).not.toBe(sidebar);
+  });
+
+  it("uses the default page fixture lifecycle roster in the student table", async () => {
+    mockGraiderUI({});
+    renderAssignmentDetailPage();
+
+    const section = (await screen.findByRole("heading", { level: 2, name: "Students" })).closest(
+      "section"
+    ) as HTMLElement;
+    expect(within(section).getByRole("button", { name: "Needs grading 2" })).toBeInTheDocument();
+    fireEvent.click(within(section).getByRole("button", { name: "Done 1" }));
+    expect(within(section).getByText("s003")).toBeInTheDocument();
   });
 
   it("renders the existing assignment panels with the repository list outside Advanced details", async () => {

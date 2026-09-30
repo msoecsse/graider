@@ -17,5 +17,6 @@ ui/dist-electron/
 ui/dist-graider-cli/
 ui/dist-release/
 ui/release/
+ui/.ui-snapshots/
 release/
 tests/fixtures/**/malformed-yaml/*.yml

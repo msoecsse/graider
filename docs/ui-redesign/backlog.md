@@ -492,7 +492,7 @@ incorrect, just repeated.
 
 ---
 
-## 16. `tools/ui-snapshots` was never set up — **Should fix**
+## 16. `tools/ui-snapshots` was never set up — **Resolved**
 
 Section 7 requires screenshots attached to the PR, pointing at
 `tools/ui-snapshots`. The directory has `capture.cjs`, `snapshot-setup.ts`,
@@ -510,6 +510,13 @@ Fix: a one-time setup task — the vitest config, the package script, the
 `.gitignore` entry, and whatever the Electron-driven capture step needs to
 run headless. Small, but it belongs to nobody's feature PR, which is why it
 has stayed undone through eight of them.
+
+Resolved: `npm --prefix ui run snapshots` now runs the dedicated snapshot
+Vitest config, wraps generated DOM with the application stylesheet, and uses
+Electron to produce PNGs under `ui/.ui-snapshots/{html,pages,png}`. The output
+is ignored, Linux headless capture uses `xvfb-run` when needed, and missing or
+failed captures return a non-zero status. The full command was verified with
+real PNG capture.
 
 ---
 
@@ -539,7 +546,7 @@ UI-only draft identities, which are projected out before IPC requests.
 
 ---
 
-## 18. Page-level fixtures never mock `getAssignmentGradingLifecycle` — **Worth fixing**
+## 18. Page-level fixtures never mock `getAssignmentGradingLifecycle` — **Resolved**
 
 Neither `AssignmentDetailPage.test.tsx` nor `DashboardPage.test.tsx` mocks
 `getAssignmentGradingLifecycle` in its default fixture, so the endpoint is
@@ -565,6 +572,13 @@ Fix: a shared fixture (a default `getAssignmentGradingLifecycle` mock with
 a small, realistic roster) that page-level tests can pull in, so
 lifecycle-dependent UI is exercised through the page by default rather
 than by one exception.
+
+Resolved: the shared page fixture supplies three students spanning not-started,
+in-progress, and published states. Global page setup plus the Assignment Detail
+and Dashboard page mocks use it by default; focused Assignment Detail coverage
+proves the student table receives the lifecycle rows. Tests that need the
+missing/empty behavior continue to override or remove the lifecycle mock
+explicitly.
 
 ---
 
@@ -1426,7 +1440,7 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 5, 8, 10, 11, 12, 14, 15, 16, 18, 22, 27, 28,
+Actionable open items are 5, 8, 10, 11, 12, 14, 15, 22, 27, 28,
 33, 34, and 35. Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved.

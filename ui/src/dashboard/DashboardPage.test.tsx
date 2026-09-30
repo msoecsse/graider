@@ -19,6 +19,7 @@ import type {
   FacultyReportResult,
   GraiderUIApi
 } from "../../electron/ipc";
+import { createDefaultAssignmentGradingLifecycle } from "../test/pageFixtures";
 import { DashboardPage } from "./DashboardPage";
 
 const COURSE_FOLDER: CourseFolderRecord = {
@@ -524,6 +525,9 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createAssignmentApplyPreviewResult()),
     getAssignmentGradePreview: vi.fn().mockResolvedValue(createAssignmentGradePreviewResult()),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
+    getAssignmentGradingLifecycle: vi
+      .fn()
+      .mockResolvedValue(createDefaultAssignmentGradingLifecycle()),
     getFacultyReport: vi.fn().mockResolvedValue(createFacultyReportResult()),
     applyAssignment: vi.fn(),
     onAssignmentApplyProgress: vi.fn(() => () => undefined),

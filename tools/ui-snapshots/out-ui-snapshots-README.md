@@ -8,59 +8,25 @@ already builds realistic fixture data and drives the component into a specific
 state. This harness saves the resulting DOM, then renders it in Chromium with
 the real `globals.css`. No separate mock layer, no fake data to maintain.
 
-## One-time setup
-
-Add a Vitest config that loads the snapshot hook **after** the normal setup file
-(order matters — afterEach hooks run in reverse registration order):
-
-`ui/vitest.snapshot.config.ts`
-
-```ts
-import react from "@vitejs/plugin-react";
-import { defineConfig } from "vitest/config";
-
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    environment: "jsdom",
-    include: ["src/**/*.test.tsx"],
-    setupFiles: ["src/test/setup.ts", "../tools/ui-snapshots/snapshot-setup.ts"],
-    restoreMocks: true,
-    clearMocks: true
-  }
-});
-```
-
-Add to `ui/package.json`:
-
-```json
-"snapshots": "vitest run --config vitest.snapshot.config.ts && node ../tools/ui-snapshots/wrap.mjs && node ../tools/ui-snapshots/run-capture.mjs"
-```
-
-Add `.ui-snapshots/` to `.gitignore`.
-
 ## Running it
 
 ```bash
-cd ui
-
-# 1. render every test's DOM to .ui-snapshots/html/
-npx vitest run --config vitest.snapshot.config.ts
-
-# 2. wrap them in documents that load globals.css
-node ../tools/ui-snapshots/wrap.mjs
-
-# 3. screenshot them
-npx electron ../tools/ui-snapshots/capture.cjs
+npm --prefix ui run snapshots
 ```
 
-On a headless machine (CI, containers), Electron needs a virtual display and
-`--no-sandbox` when running as root:
+The command uses the dedicated `ui/vitest.snapshot.config.ts`, wraps the
+captured DOM with `globals.css`, and renders PNGs with Electron. It fails if no
+HTML is produced or if any page cannot be captured. Generated HTML, wrapped
+pages, and PNGs go under `ui/.ui-snapshots/{html,pages,png}` and are ignored by
+Git.
+
+On Linux without `DISPLAY`, the command automatically uses `xvfb-run` when it
+is installed. If it is unavailable, install Xvfb first:
 
 ```bash
 sudo apt-get install -y xvfb
 Xvfb :99 -screen 0 1600x6000x24 &
-DISPLAY=:99 npx electron --no-sandbox ../tools/ui-snapshots/capture.cjs
+DISPLAY=:99 npm --prefix ui run snapshots
 ```
 
 Pass a single filename as the last argument to capture just one page. Electron
