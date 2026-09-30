@@ -174,10 +174,13 @@ failed.
 
 ## Manual live retest
 
-No live GitHub Apply was performed in this noninteractive implementation run.
-The next safe small-assignment Apply remains the acceptance test and should
-capture row status/reason, operation type, HTTP status, retry count, repository
-existence, managed workflow, and Student Repository Access Page output.
+Live acceptance is now partially documented by a successful plain-Java
+assignment run using the newly generated managed workflow, without requiring
+workflow replacement. This confirms that a fresh managed-workflow deployment
+can complete successfully through the real course workflow. It does not claim
+that a deliberately induced post-creation GitHub failure was observed live;
+the durable row status/reason, operation type, HTTP status, retry count, and
+diagnostic handling remain covered by local tests.
 
 ## Backlog
 
@@ -192,6 +195,7 @@ evidence schema change is included.
 
 ## Next step
 
-Run the APPLY-RESULT-BUG-1 live Apply acceptance retest, then the WORKFLOW-FX-1
-plain-Java and JavaFX/FXML/TestFX live smoke runs. Consider ITEM-36 only after
-those checks.
+The successful plain-Java run closes the managed-workflow Apply smoke gap.
+Consider ITEM-36 only after the remaining documentation and validation work;
+the live failure-injection path is not a prerequisite for the already-resolved
+code item.

@@ -99,8 +99,9 @@ ITEM-49 is resolved. ITEM-36 was not started.
 
 ## Manual retest
 
-The live manual Dashboard retest was not performed during this implementation
-run. It remains to:
+The live tests recorded in the workflow and Apply summaries did not include a
+Dashboard-specific observation, so this summary does not claim that the
+Dashboard acceptance case was observed live. A future safe refresh can verify:
 
 1. Configure an assignment with the enabled `java-junit-checkstyle` preset and
    the canonical workflow, artifact, and result-file paths.
@@ -120,6 +121,7 @@ Apply results, WORKFLOW-FX-1, Dashboard visuals, or ITEM-36.
 
 ## Next step
 
-Refresh Dashboard manually for the managed-preset acceptance case, then run a
-small APPLY-RESULT-BUG-1 acceptance Apply and the WORKFLOW-FX-1 plain-Java and
-JavaFX/FXML/TestFX smoke runs. Begin ITEM-36 only after those checks.
+Verify the managed-preset Dashboard acceptance case opportunistically on a
+future safe refresh. The separate Apply and WORKFLOW-FX-1/2 live results are
+recorded in their own summaries; ITEM-36 remains the next planned engineering
+slice.

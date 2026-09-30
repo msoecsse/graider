@@ -139,15 +139,20 @@ managed Java preset and adds no assignment configuration field.
 
 ## Manual Smoke Validation
 
-No live GitHub Actions workflow was dispatched from this local implementation
-environment, so two live smoke runs remain required before bulk replacement:
+The live acceptance gap is now closed. Follow-up testing succeeded for both
+paths:
 
-1. An ordinary Java repository must log `JavaFX required: no`, skip JavaFX and
-   GUI setup, pass direct compile/JUnit execution, and upload result/evidence.
-2. A representative JavaFX/FXML/TestFX repository with its normal TestFX JARs
-   in `lib/` must log `JavaFX required: yes`, install/download the JavaFX path,
-   show FXML staging at its package-relative destination, run JUnit under Xvfb,
-   and upload Checkstyle XML, JUnit XML, metadata, and the Graider result.
+1. A plain-Java assignment using the newly generated managed workflow completed
+   successfully without requiring workflow replacement. This validates the
+   standard path where JavaFX is not needed and the managed workflow is created
+   as part of assignment setup/apply.
+2. Re-Apply using the updated JavaFX workflow worked successfully for a JavaFX
+   program/course. This validates the JavaFX workflow path after the workflow
+   update and replacement sequence.
+
+The live results establish successful end-to-end completion for these two
+representative courses. They do not replace the local detector and workflow
+regression coverage for every possible JavaFX module or repository layout.
 
 ## Deferred / Non-goals
 
@@ -157,5 +162,5 @@ repair UI changes, roster work, or ITEM-36 parser convergence.
 
 ## Next Step
 
-After the two manual smoke runs, ITEM-36 is the adjacent engineering slice. It
-should begin separately and is not part of WORKFLOW-FX-1.
+ITEM-36 remains the adjacent engineering slice. It should begin separately and
+is not part of WORKFLOW-FX-1.

@@ -10,7 +10,7 @@ Use this index to find the authoritative design and implementation documents bef
 
 ## Architecture and Development Contracts
 
-- [MVP Architecture](graider-architecture.md) — system structure, technology choices, command pipeline, and package boundaries.
+- [Architecture baseline and current implementation](graider-architecture.md) — historical MVP design plus the current npm, CLI/Electron, renderer/IPC, and bundled-context boundaries.
 - [Repository Target Foundation](repository-target-foundation.md) — supported repository and target-layout foundations.
 - [Codex Development Contract](codex-development-contract.md) — implementation constraints and development expectations.
 - [Backend JSON Command Contract](codex-backend-json-command-contract.md) — JSON interface expectations for backend commands.

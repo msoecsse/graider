@@ -24,7 +24,9 @@ No dependency upgrade or package-file change was made.
 - `npm audit --audit-level=high`: unable to query the npm registry because
   `registry.npmjs.org` was unavailable; dependencies were not modified.
 
-One live workflow dispatch after merge remains necessary to confirm the
-warning no longer appears.
+Later live workflow dispatches were completed during workflow acceptance, but
+the validation record does not include a specific observation that the
+post-fix warning was absent. This summary therefore does not claim the warning
+is gone; future dispatch logs can verify that opportunistically.
 
 ITEM-36 remains the next planned engineering slice.

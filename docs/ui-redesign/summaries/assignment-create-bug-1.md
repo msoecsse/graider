@@ -125,9 +125,12 @@ ITEM-47 is resolved. ITEM-36 was not started.
 ## Manual Retest
 
 The generated configuration and lifecycle transitions were exercised through
-service, real-loader, and renderer integration tests. A live Electron UI
-assignment creation/Apply/refresh retest and a deliberately malformed file
-retest were not performed in this noninteractive run and remain required.
+service, real-loader, and renderer integration tests. Follow-up live testing
+also completed a plain-Java assignment using the newly generated managed
+workflow without requiring workflow replacement. This closes the successful
+managed-assignment creation/Apply smoke gap. A deliberately malformed file
+retest was not part of that validation and remains outside this acceptance
+record.
 
 ## Deferred / Non-goals
 
@@ -137,5 +140,5 @@ manifest weakening, fake manifest, or roster-manager redesign is included.
 
 ## Next Step
 
-After the manual assignment-creation retest succeeds, return to the two
-WORKFLOW-FX-1 live GitHub smoke runs before considering ITEM-36.
+ITEM-36 remains the next planned engineering slice; the plain-Java live run
+does not begin it or change its parser-convergence scope.

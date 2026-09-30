@@ -33,8 +33,12 @@ The read-only preview carries a SHA-256 fingerprint of the observed content.
 The confirmed template write rereads it and rejects a changed file as stale,
 requiring a new preview rather than silently replacing newly changed content.
 A failed write never dispatches; a successful write is retained if dispatch
-subsequently fails. Manual acceptance testing of the new template and student
-dialogs remains required.
+subsequently fails.
+
+Live acceptance is complete: explicit Graider workflow replacement followed by
+a grading rerun succeeded across a full course. This closes the documented
+template/student replacement acceptance gap and confirms that the replacement
+flow can be followed by a successful grading rerun.
 
 ## Validation
 

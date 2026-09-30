@@ -31,6 +31,8 @@ compile/runtime module arguments, and a `javafx.embed.swing.SwingFXUtils`
 reference activating the existing JavaFX path. Standard repository validation
 passed as reported with this change.
 
-A live retest is still required: replace the known-good student repository's
-workflow again and run grading to confirm the original GitHub Actions failure
-is resolved in the real environment.
+Live acceptance is complete: Re-Apply using the updated workflow succeeded for
+a JavaFX program/course after the workflow replacement sequence. This closes
+the documented live retest gap for the `javafx.swing` fix. The result proves
+successful end-to-end completion for that course; it does not imply that every
+unrelated JavaFX module is supported.

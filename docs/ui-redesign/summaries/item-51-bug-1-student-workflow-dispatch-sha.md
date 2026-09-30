@@ -37,7 +37,8 @@ this change.
 
 ## Manual retest
 
-Live acceptance is still required: use the same student’s **Replace Graider
-workflow…** action with **Run grading after replacement** checked, confirm it
-dispatches with trusted local `HEAD`, and verify the resulting run uses the
-WORKFLOW-FX-2 workflow and no longer has the `SwingFXUtils` failure.
+Live acceptance is complete: explicit Graider workflow replacement followed by
+a grading rerun succeeded across a full course. This closes the documented
+replace-and-run acceptance gap for the repaired path. The test result confirms
+successful replacement followed by grading; it does not by itself establish a
+new remote-branch-HEAD fallback or broader JavaFX module support.

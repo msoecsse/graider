@@ -1,5 +1,10 @@
 # Graider MVP Architecture
 
+> This document began as the proposed CLI-first MVP design. Sections that say
+> “should” or “future” preserve that design history; the current implementation
+> overlay below is authoritative for the architecture that exists on the
+> repository's active UI branches.
+
 Working title: **graider**  
 Implementation stack: **TypeScript + Node.js LTS**
 
@@ -7,7 +12,9 @@ Implementation stack: **TypeScript + Node.js LTS**
 
 ## 1. Purpose
 
-This document defines the proposed MVP architecture for Graider.
+This document defines the proposed MVP architecture for Graider and records
+the current implementation boundaries where the shipped application has grown
+beyond that proposal.
 
 Graider is a CLI-first tool for managing GitHub-based course assignments. The MVP focuses on:
 
@@ -33,7 +40,7 @@ Graider should be:
 | Deterministic | Stable generated output for useful Git diffs                                    |
 | Maintainable  | Clear module boundaries and centralized schema/error handling                   |
 | Extensible    | Future support for groups, LMS integration, adoption flows, and GitHub App auth |
-| Deployable    | Packaged as a predictable CLI using Node.js LTS and pinned dependencies         |
+| Deployable    | CLI package plus a packaged Electron desktop app using Node.js and npm          |
 
 ---
 
@@ -46,7 +53,7 @@ Graider should be:
 | Language        | TypeScript                    |
 | Runtime         | Node.js LTS                   |
 | Module format   | ESM                           |
-| Package manager | pnpm, with lockfile committed |
+| Package manager | npm, with `package-lock.json` and `ui/package-lock.json` committed        |
 | Build tool      | tsup                          |
 | Test runner     | Vitest                        |
 
@@ -70,7 +77,7 @@ The MVP should keep dependencies intentionally small.
 
 Required controls:
 
-- commit `pnpm-lock.yaml`
+- commit the root `package-lock.json` and the UI package's `ui/package-lock.json`
 - enable strict TypeScript
 - use pinned dependency versions
 - run dependency audit in CI
@@ -82,7 +89,45 @@ Required controls:
 
 ## 4. High-Level Architecture
 
-Graider should be organized as a command pipeline:
+### 4.1 Current application boundary
+
+The repository now has two supported execution paths:
+
+```text
+CLI path:
+CLI -> src/ command orchestration/backend -> GitHub and course files -> JSON/text
+
+Electron path:
+React renderer -> preload -> narrow IPC -> Electron main process
+  -> CLI command runner -> parsed JSON
+  or -> bundled in-process src context/backend module -> structured result
+```
+
+The React renderer is not a second backend. It uses `window.graiderUI` and does
+not import Node APIs, read course files, call GitHub, or choose arbitrary
+repositories, paths, workflow content, tokens, or submission SHAs. The preload
+exposes typed workflow-specific methods; the main process validates requests,
+resolves trusted course and faculty scope, and owns command execution, token
+handling, filesystem access, and direct backend calls.
+
+The CLI remains the command-line interface and the main path for dashboard,
+assignment detail, apply, grade dispatch, status, and report operations. It is
+not accurate to describe every Electron feature as a CLI subprocess: grading
+workspace state and mutations, grading evidence and workflow repair, comment
+library operations, assignment grading lifecycle aggregation, and roster
+section summaries use context modules under `src/` bundled as CommonJS files in
+`ui/dist-electron/` and loaded by narrowly scoped Electron services. These
+in-process paths share domain code and trust rules but do not weaken the
+renderer/preload/IPC boundary.
+
+Production uses `HashRouter` in the renderer because the packaged app loads the
+renderer from `file://`. Routed screen wrappers resolve slugs from shared
+dashboard data and render the extracted screen components. This is current UI
+architecture, not a proposal for a future web service.
+
+### 4.2 Historical CLI command pipeline
+
+The original MVP command pipeline remains the architecture for CLI commands:
 
 ```text
 CLI parsing
@@ -946,9 +991,14 @@ CI must not require a GitHub token for normal test runs.
 
 ## 19. Packaging and Deployment
 
-### 19.1 MVP packaging
+### 19.1 Current and MVP packaging
 
-Recommended MVP packaging:
+The CLI remains publishable as an npm package with a `bin` entry. The desktop
+application is packaged separately from `ui/` with Electron Builder; packaged
+builds include the CLI and the generated Electron/context bundles rather than
+requiring a separate `graider` command on the user's `PATH`.
+
+The original MVP CLI packaging is:
 
 ```text
 npm package with bin entry
@@ -1110,11 +1160,11 @@ Deferred features must not affect MVP behavior until explicitly implemented.
 | Validation      | Zod                              |
 | GitHub API      | Octokit behind `GitHubClient`    |
 | Testing         | Vitest                           |
-| Package manager | pnpm                             |
+| Package manager | npm with committed lockfiles    |
 | Build           | tsup                             |
 | State           | course-admin repo files + GitHub |
 | Database        | none for MVP                     |
-| Service         | none for MVP                     |
+| Service         | Electron main process plus narrow IPC; no remote service |
 | Logs            | local JSON Lines                 |
 | Reports         | generated Markdown/CSV/JSON      |
 | Live tests      | optional, gated, sandboxed       |

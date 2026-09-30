@@ -161,9 +161,17 @@ Folder paths are normalized and deduplicated by normalized path key. On macOS an
 
 Missing or corrupt registry files load as an empty registry. Removing a folder removes it from the dashboard registry only. It does not delete anything from disk.
 
-## CLI Runner
+## CLI and bundled backend paths
 
-The UI calls the installed `graider` CLI directly. It does not import Graider backend TypeScript modules.
+The renderer never calls the installed `graider` CLI directly and does not
+import Graider backend TypeScript modules. The Electron main process invokes
+the CLI for dashboard, assignment detail, apply-preview, apply, grade, status,
+and report command paths. It also loads selected `src/**/*-context.ts` modules
+from generated `ui/dist-electron/*.cjs` bundles through narrow services for
+grading workspace state and mutations, grading evidence and workflow repair,
+comment-library operations, assignment grading lifecycle aggregation, and
+roster section summaries. Both paths return structured results through
+`window.graiderUI`; neither bypasses preload/IPC request validation.
 
 Dashboard refresh runs:
 

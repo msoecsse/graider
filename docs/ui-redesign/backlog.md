@@ -4,7 +4,10 @@ Issues surfaced during PR1–PR6a that were deliberately left unfixed, either
 because they were out of a PR's scope or because fixing them needed its own
 decision. Each entry says what it is, why it matters, and how big it is.
 
-Work these between PR6a and PR6b. Item 1 is a hard prerequisite for PR6b.
+The first entries were recorded between PR6a and PR6b, but this file now also
+records later redesign, roster, comment-library, and workflow work. Preserve
+each item's history; use the end-of-file status summary for the current queue.
+Item 1 was the original hard prerequisite for PR6b.
 
 Status key: **Blocker** · **Should fix** · **Worth fixing** · **Optional** ·
 **Resolved** · **Accepted limitation**
@@ -398,14 +401,16 @@ marked blocked on item 1.
 
 ## 11. `PageHeader` is not expressive enough — **Worth fixing**
 
-It cannot express the orange blocked-state variant, and has no settable
-heading `id`. PR6a worked around this by rendering its primary button
-manually instead of using `primaryAction`. Every remaining screen that needs
-a blocked-state primary action will hit the same limitation.
+Partially addressed by the `PageHeader.titleId` work: routed pages can now give
+their external landmark a stable heading id, and the roster manager and comment
+library use it. The remaining gap is the orange blocked-state primary-action
+variant. Assignment Detail still renders that action manually with
+`primary-action--blocked` because `PageHeader.primaryAction` has no style or
+variant field.
 
-Fix: extend `PageHeader` deliberately (a style/variant prop for the primary
-action, a settable heading id) rather than accumulating bespoke headers
-screen by screen.
+Fix: extend `PageHeader` deliberately with a primary-action variant rather than
+accumulating bespoke headers screen by screen. Do not reopen the completed
+heading-id portion of this item.
 
 ---
 
@@ -1329,7 +1334,8 @@ Resolved: the same-page `GradingCommentWorkspace` takeover is implemented.
 The sidebar now retains only compact comment launch actions plus applied
 grading information; authoring and library browsing moved out of the sidebar.
 Manual Electron acceptance testing completed successfully for the implemented
-workspace behavior. The next planned sequence is ITEM-51, then ITEM-36.
+workspace behavior. ITEM-51 was subsequently completed; ITEM-36 remains the
+next planned engineering slice.
 
 ---
 
@@ -1351,6 +1357,16 @@ come from trusted assignment/manifest configuration, not renderer-provided
 owner, branch, path, or YAML. See
 `summaries/item-51-managed-workflow-replacement.md`.
 
+## 52. Assignment Edit status options expose raw labels — **Should fix**
+
+The roster-manager portion of item 23 is resolved: roster rows now use
+humanized status chips and an overflow menu while submitting the canonical
+`active`, `hold`, or `dropped` value. Assignment Edit is a separate remaining
+case: its status `<select>` still displays the raw option values `draft`,
+`active`, `closed`, and `archived`. Keep the machine values, but add a shared
+faculty-facing label mapping for the option text and focused coverage. This is
+adjacent status-label debt, not a reason to reopen item 23.
+
 ---
 
 ## Suggested order
@@ -1362,8 +1378,10 @@ addition to the base, graphics, controls, and FXML modules. Compile and JUnit
 runtime arguments include `javafx.swing`, fixing the demonstrated
 `SwingFXUtils` runtime failure without changing JavaFX detection, managed
 workflow ownership/version behavior, or adding unrelated modules such as
-`javafx.web` or `javafx.media`. The live known-good student submission still
-requires a real repository retest after workflow replacement.
+`javafx.web` or `javafx.media`. Re-Apply using the updated workflow then
+completed successfully for a JavaFX program/course, closing the documented
+live retest gap for this fix. This does not imply support for unrelated JavaFX
+modules.
 
 ## ITEM-51-BUG-1. Single-student replace-and-run cannot resolve submission SHA — **Resolved**
 
@@ -1380,10 +1398,11 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Items 5, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25,
-26, 27, 28, 33, 34, 35, and 36 remain open. Items 23, 37, 38, 44, 45, 46, 47,
-48, 49, 51, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved. ITEM-36 is the next
-planned slice.
+Actionable open items are 5, 8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21,
+22, 24, 25, 27, 28, 33, 34, 35, 36, and 52. Items 19 and 26 are accepted
+limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
+48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved.
+ITEM-36 is the next planned engineering slice.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
@@ -1392,13 +1411,25 @@ rebuild. COMMENT-BUG-1 then resolved item 45. Item 36 remains adjacent
 parser-convergence debt rather than a blocker to that visual slice. WORKFLOW-FX-1
 then resolved item 46 without adding another preset or faculty configuration.
 ASSIGNMENT-CREATE-BUG-1 resolved item 47 without beginning ITEM-36.
-APPLY-RESULT-BUG-1 then resolved item 48; its live GitHub Apply acceptance
-retest remains ahead of the two WORKFLOW-FX-1 live smoke runs and ITEM-36.
+APPLY-RESULT-BUG-1 then resolved item 48. Follow-up live validation of a
+plain-Java assignment using a newly generated managed workflow completed
+successfully without workflow replacement; this closes the successful managed
+workflow deployment smoke gap, while the detailed post-creation diagnostic
+failure path remains covered by local tests rather than a deliberately induced
+live failure.
 DASHBOARD-WORKFLOW-BUG-1 then resolved item 49 without beginning ITEM-36.
 WORKFLOW-FX-2 then resolved the demonstrated missing `javafx.swing` dependency
-without beginning ITEM-36.
+without beginning ITEM-36. Follow-up live testing also succeeded for a JavaFX
+program/course after re-applying the updated workflow, and for a plain-Java
+assignment using the newly generated managed workflow; these close the
+previously documented WORKFLOW-FX-1 and WORKFLOW-FX-2 smoke gaps.
 ITEM-51-BUG-1 then restored trusted local submission-SHA fallback for
-single-student replace-and-run without beginning ITEM-36.
+single-student replace-and-run without beginning ITEM-36. A full-course
+explicit Graider workflow replacement followed by a grading rerun succeeded,
+closing the previously documented ITEM-51 and ITEM-51-BUG-1 live acceptance
+gaps. The post-fix GitHub REST warning has not been declared absent without a
+specific observation of a dispatch log; future dispatches may verify it
+opportunistically.
 
 The GitHub REST API version warning observed during live workflow dispatch was
 resolved separately: production Octokit requests now centrally declare REST
