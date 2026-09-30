@@ -958,7 +958,7 @@ have on hand, not queued work.
 
 ---
 
-## 36. Roster CSV parsing is implemented four times, not two — **Worth fixing**
+## 36. Roster CSV parsing is implemented four times, not two — **Resolved**
 
 **Corrected while assessing step 12
 (`docs/ui-redesign/step-12-feasibility.md`) — this item undercounted.**
@@ -983,13 +983,16 @@ fresh; step 11's `CourseSetupPage.tsx` redesign and the CLI path can adopt
 it afterward rather than each growing its own version further.
 
 PR12-5 converged the renderer's `RosterManagerPage` upload parser and row diff
-onto PR12-2's `parseAndValidateRosterCsv` and `diffRosterRows`. The old naive
-comma-splitting renderer parser was deleted. Three parsing paths remain, so the
-item stays open: `src/roster/roster-loader.ts` + `src/io/csv.ts`,
-`ui/electron/courseSetupService.ts`, and
-`ui/electron/rosterManagerService.ts`. The renderer imports the dependency-free
-shared module directly; Vite development access is allowlisted only for the
-shared roster module and its `io`/`diagnostics` dependencies.
+onto PR12-2's `parseAndValidateRosterCsv` and `diffRosterRows`. ITEM-36 then
+converged `src/roster/roster-loader.ts`, `ui/electron/courseSetupService.ts`,
+and `ui/electron/rosterManagerService.ts` on the same parser, exact column
+matcher, normalization, validation, and duplicate validation infrastructure.
+The Electron main process consumes its generated shared backend bundle; it does
+not maintain another parser. Course Setup deliberately retains a thin exact
+canonical-or-seven-column legacy header adapter and always writes canonical
+four-column storage. `src/io/csv.ts` remains in use by non-roster dashboard and
+group-preview callers. ITEM-33's user-editable arbitrary LMS header mapping
+remains open.
 
 ---
 
@@ -1019,7 +1022,8 @@ only `sourceKind`; the main process supplies the current faculty identity and a
 save-time clock. Missing companions preserve legacy compatibility, malformed
 companions fail soft, faculty-only saves preserve the prior source, and
 roster/section removal deletes the companion. The course-publication allowlist
-includes only the canonical companion pattern. Item 36 remains open.
+includes only the canonical companion pattern. ITEM-36 subsequently converged
+the remaining roster parsing paths.
 
 ---
 
@@ -1055,8 +1059,8 @@ context/CJS bridge and uses PR12-2's `parseAndValidateRosterCsv` plus the
 canonical shared summary helper. Focused context, service, request-validation,
 and preload tests protect the integration, including reordered canonical CSV
 columns, normalization warnings, empty valid rosters, missing rosters, and
-invalid rosters. Item 36 remains open: the older roster-manager read/save
-paths have not yet been migrated.
+invalid rosters. ITEM-36 subsequently migrated the older roster-manager
+read/save paths.
 
 ---
 
@@ -1334,8 +1338,8 @@ Resolved: the same-page `GradingCommentWorkspace` takeover is implemented.
 The sidebar now retains only compact comment launch actions plus applied
 grading information; authoring and library browsing moved out of the sidebar.
 Manual Electron acceptance testing completed successfully for the implemented
-workspace behavior. ITEM-51 was subsequently completed; ITEM-36 remains the
-next planned engineering slice.
+workspace behavior. ITEM-51 was subsequently completed; ITEM-36 is now
+resolved.
 
 ---
 
@@ -1399,10 +1403,10 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer par
 of this sequence.
 
 Actionable open items are 5, 8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21,
-22, 24, 25, 27, 28, 33, 34, 35, 36, and 52. Items 19 and 26 are accepted
+22, 24, 25, 27, 28, 33, 34, 35, and 52. Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved.
-ITEM-36 is the next planned engineering slice.
+ITEM-36 is resolved.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through
 COMMENT-5 then resolved items 39, 40, 42, and 43 before work resumed on PR12-4
@@ -1434,5 +1438,4 @@ opportunistically.
 The GitHub REST API version warning observed during live workflow dispatch was
 resolved separately: production Octokit requests now centrally declare REST
 API version `2026-03-10`, with no dependency upgrade. See
-`summaries/github-api-1-rest-version.md`; ITEM-36 remains the next planned
-slice.
+`summaries/github-api-1-rest-version.md`; ITEM-36 is now resolved.

@@ -22,6 +22,7 @@ describe("parseAndValidateRosterCsv", () => {
       { studentId: "jones", githubUsername: "jjones", section: "001", status: "active" },
       { studentId: "patel", githubUsername: "rpatel", section: "001", status: "dropped" }
     ]);
+    expect(result.recordRowNumbers).toEqual([2, 3]);
   });
 
   it("reuses validateRequiredColumns for a missing column", () => {

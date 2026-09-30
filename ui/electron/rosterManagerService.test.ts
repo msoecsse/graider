@@ -42,7 +42,7 @@ const request = (root: string, overrides: Partial<RosterSaveRequest> = {}): Rost
   sectionId: "001",
   rows: [
     {
-      studentId: "S001",
+      studentId: "s001",
       githubUsername: "octocat",
       section: "001",
       status: "active"
@@ -105,7 +105,7 @@ describe("roster manager service", () => {
 
     expect(preview.status).toBe("ready");
     expect(preview.path).toBe("terms/27s1/rosters/section-001.csv");
-    expect(preview.content).toBe(`${CANONICAL_HEADER}\nS001,octocat,001,active\n`);
+    expect(preview.content).toBe(`${CANONICAL_HEADER}\ns001,octocat,001,active\n`);
     expect(preview.content).not.toContain("\r");
   });
 
@@ -124,7 +124,7 @@ describe("roster manager service", () => {
 
     expect(preview.status).toBe("invalid");
     expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain(
-      "missing githubUsername"
+      "missing required value github_username"
     );
     expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain("invalid status");
     expect(preview.diagnostics.map((item) => item.message).join(" ")).toContain(
@@ -164,13 +164,32 @@ describe("roster manager service", () => {
       status: "ready",
       rows: [
         {
-          studentId: "S001",
+          studentId: "s001",
           githubUsername: "octocat",
           section: "001",
           status: "active"
         }
       ]
     });
+  });
+
+  it("loads reordered canonical CSV through the shared parser and preserves its validation", () => {
+    const root = createRoot();
+    createTerm(root);
+    const rosterPath = path.join(root, "terms/27s1/rosters/section-001.csv");
+    fs.mkdirSync(path.dirname(rosterPath), { recursive: true });
+    fs.writeFileSync(
+      rosterPath,
+      'status,section,github_username,student_id\r\nACTIVE,001,"octo""cat",S001\r\n',
+      "utf8"
+    );
+
+    const result = getRosterForSection(loadRequest(root));
+
+    expect(result.status).toBe("invalid");
+    expect(result.diagnostics[0]?.message).toBe(
+      'Roster row 2 has invalid GitHub username octo"cat.'
+    );
   });
 
   it("does not write during preview and writes only after confirmation in paths with spaces", () => {

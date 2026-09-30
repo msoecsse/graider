@@ -99,7 +99,7 @@ describe("course setup service", () => {
     expect(preview.status).toBe("ready");
     expect(roster?.path).toBe("terms/27s1/rosters/section-001.csv");
     expect(roster?.content).toContain(
-      "student_id,github_username,section,status\nS123,octocat,001,ACTIVE"
+      "student_id,github_username,section,status\ns123,octocat,001,active"
     );
   });
 
@@ -146,6 +146,24 @@ describe("course setup service", () => {
     expect(preview.status).toBe("ready");
     expect(preview.files.find((file) => file.path.endsWith("section-001.csv"))?.content).toBe(
       "student_id,github_username,section,status\ns1,octocat,001,active\n"
+    );
+  });
+
+  it("uses shared CSV parsing for quoted fields and reports shared validation diagnostics", () => {
+    const preview = previewCourseSetup(
+      createRequest(createRoot(), {
+        rosterUploads: [
+          {
+            sectionId: "001",
+            content: 'student_id,github_username,section,status\n"S123","octo""cat",001,ACTIVE\n'
+          }
+        ]
+      })
+    );
+
+    expect(preview.status).toBe("invalid");
+    expect(preview.diagnostics.map((item) => item.message)).toContain(
+      'Roster row 2 has invalid GitHub username octo"cat.'
     );
   });
 

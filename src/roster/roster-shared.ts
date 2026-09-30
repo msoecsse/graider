@@ -36,6 +36,7 @@ export {
   type RosterColumnIndexes,
   type RosterColumnMatcher
 } from "./roster-column-matching.js";
+export { validateRosterDuplicates } from "./roster-validation.js";
 export {
   diffRosterRows,
   type RosterDiffResult,
@@ -55,6 +56,9 @@ export interface RosterCsvParseRequest {
 
 export interface RosterCsvParseResult {
   readonly records: readonly RosterRecord[];
+  readonly recordRowNumbers: readonly number[];
+  readonly duplicateValidationRecords: readonly RosterRecord[];
+  readonly duplicateValidationRowNumbers: readonly number[];
   readonly warnings: readonly Diagnostic[];
   readonly errors: readonly Diagnostic[];
 }
@@ -109,18 +113,35 @@ export const parseAndValidateRosterCsv = (request: RosterCsvParseRequest): Roste
   const missingColumnErrors = validateRequiredColumns(request.rosterPath, document.headers);
 
   if (missingColumnErrors.length > EMPTY_COUNT) {
-    return { records: [], warnings: [], errors: missingColumnErrors };
+    return {
+      records: [],
+      recordRowNumbers: [],
+      duplicateValidationRecords: [],
+      duplicateValidationRowNumbers: [],
+      warnings: [],
+      errors: missingColumnErrors
+    };
   }
 
   const matcher = request.columnMatcher ?? matchRosterColumnsByExactName;
   const indexes = matcher(document.headers);
   const records: RosterRecord[] = [];
+  const recordRowNumbers: number[] = [];
+  const duplicateValidationRecords: RosterRecord[] = [];
+  const duplicateValidationRowNumbers: number[] = [];
   const warnings: Diagnostic[] = [];
   const errors: Diagnostic[] = [];
 
   for (const row of document.rows) {
     const raw = readRawRowValues(row.values, indexes);
     const missingValueErrors = getMissingValueErrors(request.rosterPath, row.rowNumber, raw);
+    duplicateValidationRecords.push({
+      studentId: raw.rawStudentId.toLowerCase(),
+      githubUsername: raw.rawGithubUsername.toLowerCase(),
+      section: raw.rawSection,
+      status: raw.rawStatus.toLowerCase()
+    });
+    duplicateValidationRowNumbers.push(row.rowNumber);
 
     if (missingValueErrors.length > EMPTY_COUNT) {
       errors.push(...missingValueErrors);
@@ -148,7 +169,6 @@ export const parseAndValidateRosterCsv = (request: RosterCsvParseRequest): Roste
         ),
         ...validateGithubUsername(request.rosterPath, row.rowNumber, normalizedGithubUsername.value)
       ];
-
       warnings.push(...rowWarnings);
       errors.push(...rowErrors);
 
@@ -159,9 +179,17 @@ export const parseAndValidateRosterCsv = (request: RosterCsvParseRequest): Roste
           section: raw.rawSection,
           status: normalizedStatus.value
         });
+        recordRowNumbers.push(row.rowNumber);
       }
     }
   }
 
-  return { records, warnings, errors };
+  return {
+    records,
+    recordRowNumbers,
+    duplicateValidationRecords,
+    duplicateValidationRowNumbers,
+    warnings,
+    errors
+  };
 };

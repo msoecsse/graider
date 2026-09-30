@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { isMap, isSeq, parseDocument } from "yaml";
 
+import { parseAndValidateRosterCsv, validateRosterDuplicates } from "./rosterSharedService.js";
 import { normalizeFacultyUsernames } from "./sectionFaculty.js";
 
 import { loadAssignmentSetupTerms } from "./assignmentSetupService.js";
@@ -21,16 +22,6 @@ import type {
 } from "./ipc.js";
 
 const ROSTER_HEADERS = ["student_id", "github_username", "section", "status"] as const;
-const LEGACY_ROSTER_HEADERS = [
-  "student_id",
-  "github_username",
-  "email",
-  "first_name",
-  "last_name",
-  "section",
-  "status"
-] as const;
-const VALID_STATUSES = ["active", "dropped", "hold"] as const;
 const SECTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 const ROSTER_SOURCE_SCHEMA_VERSION = 1;
 
@@ -81,50 +72,8 @@ const parseRosterSource = (content: string): RosterSource | null => {
 const createRosterSourceContent = (source: RosterSource): string =>
   `${JSON.stringify({ schemaVersion: ROSTER_SOURCE_SCHEMA_VERSION, source }, undefined, 2)}\n`;
 
-const parseCsvLine = (line: string): string[] => {
-  const values: string[] = [];
-  let value = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index] ?? "";
-    const nextCharacter = line[index + 1] ?? "";
-    if (character === '"' && inQuotes && nextCharacter === '"') {
-      value += '"';
-      index += 1;
-    } else if (character === '"') {
-      inQuotes = !inQuotes;
-    } else if (character === "," && !inQuotes) {
-      values.push(value);
-      value = "";
-    } else {
-      value += character;
-    }
-  }
-  values.push(value);
-  return values;
-};
-
 const encodeCsvValue = (value: string): string =>
   /[",\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
-
-const parseRows = (content: string, header: readonly string[]): RosterRow[] =>
-  content
-    .split(/\r?\n/u)
-    .slice(1)
-    .filter((line) => line.length > 0)
-    .map(parseCsvLine)
-    .map((values) => {
-      const fields = Object.fromEntries(
-        header.map((name, index) => [name, (values[index] ?? "").trim()])
-      );
-      return {
-        studentId: fields.student_id ?? "",
-        githubUsername: fields.github_username ?? "",
-        section: fields.section ?? "",
-        status: (fields.status ?? "").toLowerCase()
-      };
-    });
 
 const hasTermSection = (request: RosterSectionRequest): boolean => {
   const terms = loadAssignmentSetupTerms(request.courseFolderPath).terms;
@@ -396,15 +345,17 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
 
   try {
     const content = fs.readFileSync(absolutePath, "utf8");
-    const header = parseCsvLine(content.split(/\r?\n/u)[0] ?? "");
-    const isCanonicalHeader = header.join(",") === ROSTER_HEADERS.join(",");
-    const isLegacyHeader = header.join(",") === LEGACY_ROSTER_HEADERS.join(",");
-    if (isCanonicalHeader || isLegacyHeader) {
+    const parsed = parseAndValidateRosterCsv({
+      content,
+      rosterPath,
+      expectedSection: request.sectionId
+    });
+    if (parsed.errors.length === 0) {
       return {
         status: "ready",
         path: rosterPath,
         exists: true,
-        rows: parseRows(content, header),
+        rows: [...parsed.records],
         faculty: getSectionFaculty(request),
         ...(sourceResult.source === undefined ? {} : { source: sourceResult.source }),
         diagnostics: sourceResult.diagnostics
@@ -416,7 +367,7 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
       exists: true,
       rows: [],
       faculty: getSectionFaculty(request),
-      diagnostics: [diagnostic(`Roster header must be ${ROSTER_HEADERS.join(",")}.`)]
+      diagnostics: parsed.errors.map((item) => diagnostic(item.message))
     };
   } catch {
     return {
@@ -430,51 +381,6 @@ export const getRosterForSection = (request: RosterSectionRequest): RosterLoadRe
   }
 };
 
-const validateRows = (request: RosterSaveRequest): CourseSetupDiagnostic[] => {
-  const diagnostics: CourseSetupDiagnostic[] = [];
-  const ids = new Set<string>();
-  const usernames = new Set<string>();
-
-  for (const [index, row] of request.rows.entries()) {
-    const rowNumber = index + 2;
-    const values = {
-      studentId: row.studentId.trim(),
-      githubUsername: row.githubUsername.trim(),
-      section: row.section.trim(),
-      status: row.status.trim().toLowerCase()
-    };
-    for (const [name, value] of Object.entries(values)) {
-      if (value.length === 0)
-        diagnostics.push(diagnostic(`Roster row ${String(rowNumber)} is missing ${name}.`));
-    }
-    if (values.section.length > 0 && values.section !== request.sectionId) {
-      diagnostics.push(
-        diagnostic(
-          `Roster row ${String(rowNumber)} has section ${values.section}; expected ${request.sectionId}.`
-        )
-      );
-    }
-    if (
-      values.status.length > 0 &&
-      !VALID_STATUSES.includes(values.status as (typeof VALID_STATUSES)[number])
-    ) {
-      diagnostics.push(
-        diagnostic(`Roster row ${String(rowNumber)} has invalid status ${values.status}.`)
-      );
-    }
-    if (values.studentId.length > 0 && ids.has(values.studentId)) {
-      diagnostics.push(diagnostic(`Duplicate student_id ${values.studentId}.`));
-    }
-    if (values.githubUsername.length > 0 && usernames.has(values.githubUsername)) {
-      diagnostics.push(diagnostic(`Duplicate github_username ${values.githubUsername}.`));
-    }
-    ids.add(values.studentId);
-    usernames.add(values.githubUsername);
-  }
-
-  return diagnostics;
-};
-
 const createCsv = (rows: readonly RosterRow[]): string => {
   const content = rows
     .map((row) =>
@@ -486,12 +392,50 @@ const createCsv = (rows: readonly RosterRow[]): string => {
   return `${ROSTER_HEADERS.join(",")}\n${content.length === 0 ? "" : `${content}\n`}`;
 };
 
+const createRosterStudents = (
+  records: readonly RosterRow[],
+  rosterPath: string,
+  rowNumbers: readonly number[]
+): Parameters<typeof validateRosterDuplicates>[0] =>
+  records.map((record, index) => ({
+    ...record,
+    rosterPath,
+    rowNumber: rowNumbers[index] ?? index + 2
+  }));
+
+const validateRows = (
+  request: RosterSaveRequest
+): {
+  readonly rows: readonly RosterRow[];
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+} => {
+  const rosterPath = getRosterPath(request.termCode, request.sectionId);
+  const parsed = parseAndValidateRosterCsv({
+    content: createCsv(request.rows),
+    rosterPath,
+    expectedSection: request.sectionId
+  });
+  const duplicateDiagnostics = validateRosterDuplicates(
+    createRosterStudents(
+      parsed.duplicateValidationRecords,
+      rosterPath,
+      parsed.duplicateValidationRowNumbers
+    )
+  );
+
+  return {
+    rows: parsed.records,
+    diagnostics: [...parsed.errors, ...duplicateDiagnostics].map((item) => diagnostic(item.message))
+  };
+};
+
 export const previewRosterSave = (request: RosterSaveRequest): RosterPreviewResult => {
   const pathValue = getRosterPath(request.termCode, request.sectionId);
   const rosterExists = fs.existsSync(path.join(request.courseFolderPath, pathValue));
   const isValidSelection = request.createSection ? true : hasTermSection(request);
   const creationDiagnostics = getSectionCreationDiagnostics(request);
   const facultyResult = normalizeFaculty(request.faculty);
+  const rowValidation = validateRows(request);
   const diagnostics = [
     ...(isValidSelection
       ? []
@@ -501,12 +445,12 @@ export const previewRosterSave = (request: RosterSaveRequest): RosterPreviewResu
     ...(!rosterExists && request.sourceKind === undefined
       ? [diagnostic("A source kind is required when creating a roster.")]
       : []),
-    ...validateRows(request)
+    ...rowValidation.diagnostics
   ];
   return {
     status: diagnostics.length === 0 ? "ready" : "invalid",
     path: pathValue,
-    content: createCsv(request.rows),
+    content: createCsv(rowValidation.rows),
     exists: rosterExists,
     termPath:
       request.createSection || !hasRosterReference(request) || facultyResult.faculty !== undefined

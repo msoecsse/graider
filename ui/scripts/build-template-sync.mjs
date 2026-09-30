@@ -53,6 +53,9 @@ await build({
     ),
     rosterSectionSummaryBackend: fileURLToPath(
       new URL("../../src/roster/roster-section-summary-context.ts", import.meta.url)
+    ),
+    rosterSharedBackend: fileURLToPath(
+      new URL("../../src/roster/roster-shared.ts", import.meta.url)
     )
   },
   outDir: fileURLToPath(new URL("../dist-electron", import.meta.url)),

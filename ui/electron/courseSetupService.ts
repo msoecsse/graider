@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { parseAndValidateRosterCsv, parseRosterCsvText } from "./rosterSharedService.js";
 import type {
   CourseSetupPreviewResult,
   CourseSetupRequest,
@@ -29,7 +30,6 @@ const LEGACY_ROSTER_HEADERS = [
   "section",
   "status"
 ] as const;
-const REQUIRED_ROSTER_VALUE_HEADERS = ["student_id", "github_username", "section", "status"];
 const LINE_ENDING = "\n";
 
 const quoteYaml = (value: string): string => JSON.stringify(value);
@@ -81,43 +81,20 @@ const normalizeSections = (
   return { sections, diagnostics };
 };
 
-const parseCsvLine = (line: string): string[] => {
-  const values: string[] = [];
-  let value = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index] ?? "";
-    const nextCharacter = line[index + 1] ?? "";
-
-    if (character === '"' && inQuotes && nextCharacter === '"') {
-      value += '"';
-      index += 1;
-    } else if (character === '"') {
-      inQuotes = !inQuotes;
-    } else if (character === "," && !inQuotes) {
-      values.push(value.trim());
-      value = "";
-    } else {
-      value += character;
-    }
-  }
-
-  values.push(value.trim());
-  return values;
-};
-
 const encodeCsvValue = (value: string): string =>
   /[",\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+
+const hasExactHeader = (headers: readonly string[], expected: readonly string[]): boolean =>
+  headers.length === expected.length &&
+  headers.every((header, index) => header === expected[index]);
 
 const normalizeRoster = (
   sectionId: string,
   content: string
 ): { content: string | null; diagnostics: CourseSetupDiagnostic[] } => {
-  const lines = content.split(/\r?\n/u).filter((line) => line.trim().length > 0);
-  const headers = parseCsvLine(lines[0] ?? "");
-  const isCanonicalHeader = headers.join(",") === ROSTER_HEADERS.join(",");
-  const isLegacyHeader = headers.join(",") === LEGACY_ROSTER_HEADERS.join(",");
+  const document = parseRosterCsvText(content);
+  const isCanonicalHeader = hasExactHeader(document.headers, ROSTER_HEADERS);
+  const isLegacyHeader = hasExactHeader(document.headers, LEGACY_ROSTER_HEADERS);
 
   if (!isCanonicalHeader && !isLegacyHeader) {
     return {
@@ -130,42 +107,24 @@ const normalizeRoster = (
     };
   }
 
-  const rows = lines.slice(1).map(parseCsvLine);
-  const diagnostics = rows.flatMap((row, index) => {
-    const rowNumber = index + 2;
-    const values = Object.fromEntries(
-      ROSTER_HEADERS.map((header) => [header, row[headers.indexOf(header)] ?? ""])
-    );
-    const missing = REQUIRED_ROSTER_VALUE_HEADERS.filter(
-      (header) => values[header]?.trim().length === 0
-    );
-    const wrongSection = values.section?.trim() !== sectionId;
-
-    return [
-      ...missing.map((header) =>
-        createDiagnostic(`Roster row ${String(rowNumber)} is missing ${header}.`)
-      ),
-      ...(wrongSection
-        ? [
-            createDiagnostic(
-              `Roster row ${String(rowNumber)} has section ${values.section ?? ""}; expected ${sectionId}.`
-            )
-          ]
-        : [])
-    ];
+  const parsed = parseAndValidateRosterCsv({
+    content,
+    rosterPath: `roster upload for section ${sectionId}`,
+    expectedSection: sectionId
   });
+  const diagnostics = parsed.errors.map((item) => createDiagnostic(item.message));
 
   return {
     content:
       diagnostics.length > 0
         ? null
-        : `${ROSTER_HEADERS.join(",")}${LINE_ENDING}${rows
-            .map((row) =>
-              ROSTER_HEADERS.map((header) =>
-                encodeCsvValue((row[headers.indexOf(header)] ?? "").trim())
-              ).join(",")
+        : `${ROSTER_HEADERS.join(",")}${LINE_ENDING}${parsed.records
+            .map((record) =>
+              [record.studentId, record.githubUsername, record.section, record.status]
+                .map(encodeCsvValue)
+                .join(",")
             )
-            .join(LINE_ENDING)}${rows.length > 0 ? LINE_ENDING : ""}`,
+            .join(LINE_ENDING)}${parsed.records.length > 0 ? LINE_ENDING : ""}`,
     diagnostics
   };
 };
