@@ -480,8 +480,7 @@ export const GradeStatusPage = ({
         </p>
         {activeStatus?.refreshedAt === null || activeStatus?.refreshedAt === undefined ? null : (
           <p className="assignment-detail__path">
-            Last refreshed:{" "}
-            {formatReadableDateTime(activeStatus.refreshedAt) ?? activeStatus.refreshedAt}
+            Last refreshed: {formatReadableDateTime(activeStatus.refreshedAt) ?? "Not configured"}
           </p>
         )}
         {isLoading ? <p className="loading-state">Loading grade status...</p> : null}

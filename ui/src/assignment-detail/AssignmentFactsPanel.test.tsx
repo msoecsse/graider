@@ -146,4 +146,18 @@ describe("AssignmentFactsPanel", () => {
       .closest("section") as HTMLElement;
     expect(within(factsSection).getByText("No grading")).toBeInTheDocument();
   });
+
+  it("uses the faculty-facing absence label for an invalid due date", () => {
+    render(
+      <AssignmentFactsPanel
+        detail={createDetail({ deadline: { dueAt: "not-a-timestamp", latePolicy: "standard" } })}
+      />
+    );
+
+    const factsSection = screen
+      .getByRole("heading", { level: 2, name: "Assignment facts" })
+      .closest("section") as HTMLElement;
+    expect(within(factsSection).getByText("Not configured")).toBeInTheDocument();
+    expect(within(factsSection).queryByText("not-a-timestamp")).toBeNull();
+  });
 });

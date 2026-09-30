@@ -1602,6 +1602,14 @@ describe("AssignmentDetailPage", () => {
     expect(insideDetails.getByText("LMS assignment ID")).toBeInTheDocument();
     expect(insideDetails.getByText("lms-123")).toBeInTheDocument();
 
+    const advancedDetails = screen.getByText("Advanced details").closest("details");
+    expect(advancedDetails).not.toBeNull();
+    expect(
+      within(advancedDetails as HTMLDetailsElement).queryByText(
+        `Assignment file: ${ASSIGNMENT_FILE}`
+      )
+    ).toBeNull();
+
     const factsSection = screen
       .getByRole("heading", { level: 2, name: "Assignment facts" })
       .closest("section");
@@ -2358,10 +2366,13 @@ describe("AssignmentDetailPage", () => {
     const results = await screen.findByLabelText("Repository download results");
     expect(within(results).getByText(/2 cloned, 0 failed of 2/u)).toBeInTheDocument();
     expect(
-      within(results).getByText(/Destination:.*\/Users\/sean\/Downloads\/lab02/u)
-    ).toBeInTheDocument();
+      within(results).queryByText(/Destination:.*\/Users\/sean\/Downloads\/lab02/u)
+    ).toBeNull();
     expect(within(results).getByText("27s1-csc1120-lab02-alpha")).toBeInTheDocument();
     expect(within(results).getByText("27s1-csc1120-lab02-beta")).toBeInTheDocument();
+    expect(
+      within(results).queryByText(/\/Users\/sean\/Downloads\/lab02\/27s1-csc1120-lab02-alpha/u)
+    ).toBeNull();
     expect(within(results).getByText("alpha")).toBeInTheDocument();
     expect(within(results).queryByText(/alpha-gh/u)).toBeNull();
   });

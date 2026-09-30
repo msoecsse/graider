@@ -8,6 +8,7 @@ import type {
 import type { AssignmentDetailSelection } from "../assignment-detail/assignmentDetailTypes";
 import { ConfirmationWithPreviewModal } from "../components/ConfirmationWithPreviewModal";
 import { Toast, useToast } from "../components/Toast";
+import { formatStatusLabel } from "../components/statusLabels";
 
 interface RequiredFileDraft {
   readonly key: string;
@@ -257,7 +258,9 @@ export const AssignmentEditPage = ({
                   }}
                 >
                   {["draft", "active", "closed", "archived"].map((value) => (
-                    <option key={value}>{value}</option>
+                    <option key={value} value={value}>
+                      {formatStatusLabel(value)}
+                    </option>
                   ))}
                 </select>
               </label>

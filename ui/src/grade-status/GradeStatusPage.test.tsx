@@ -221,6 +221,22 @@ describe("GradeStatusPage", () => {
     expect(screen.queryByText(/2026-06-10T12:05:00/u)).not.toBeInTheDocument();
   });
 
+  it("uses the absence label instead of rendering an invalid refresh timestamp", async () => {
+    const invalidTimestamp = "not-a-timestamp";
+    mockGraiderUI({
+      getAssignmentGradeStatus: vi
+        .fn()
+        .mockResolvedValue(
+          createGradeStatusResult(createGradeStatusJson(), { refreshedAt: invalidTimestamp })
+        )
+    });
+
+    renderGradeStatusPage();
+
+    expect(await screen.findByText("Last refreshed: Not configured")).toBeInTheDocument();
+    expect(screen.queryByText(invalidTimestamp)).not.toBeInTheDocument();
+  });
+
   it("opens faculty report from the latest loaded status", async () => {
     const onViewFacultyReport = vi.fn();
 

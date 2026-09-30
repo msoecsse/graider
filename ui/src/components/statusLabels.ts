@@ -10,9 +10,8 @@
  * shared top-level command outcome (`success`, `partial_success`,
  * `failure` -- see `CommandStatus` in src/core/command-result.ts, reused by
  * every CLI command's JSON), and a repository download's per-target outcome
- * (`cloned`, `failed`). `error` also covers diagnostic severity, though
- * `warning` and `info` severities are not mapped here -- out of scope for
- * this pass; see the PR8-2 summary. None of these vocabularies assign
+ * (`cloned`, `failed`). Diagnostic severities use `error`, `warning`, and
+ * `info`. None of these vocabularies assign
  * conflicting meaning to the same raw word, so one flat table keeps a given
  * word reading the same way everywhere instead of drifting screen to
  * screen -- this was already happening in practice: `formatStatusLabel` (moved from
@@ -30,6 +29,8 @@ const STATUS_LABELS: Readonly<Record<string, string>> = {
   branch_missing: "Branch missing",
   disabled: "Disabled",
   error: "Error",
+  warning: "Warning",
+  info: "Info",
   inaccessible: "Inaccessible",
   missing: "Missing",
   not_checked: "Not checked",

@@ -1624,9 +1624,6 @@ export const AssignmentDetailPage = ({
                   id={ADVANCED_DETAILS_ID}
                 >
                   <summary>Advanced details</summary>
-                  <p className="assignment-detail__path">
-                    Assignment file: {detail.assignment.file}
-                  </p>
                   <TemplatePanel detail={detail} copyState={copyState} onCopy={handleCopy} />
                   <GradingPanel detail={detail} copyState={copyState} onCopy={handleCopy} />
                   <GradeWorkflowPanel

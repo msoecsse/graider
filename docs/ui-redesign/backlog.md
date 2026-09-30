@@ -430,7 +430,7 @@ detail line.
 
 ---
 
-## 13. Raw assignment file path in Advanced details — **Should fix**
+## 13. Raw assignment file path in Advanced details — **Resolved**
 
 `AssignmentDetailPage.tsx:2530` renders
 `<p className="assignment-detail__path">Assignment file: {detail.assignment.file}</p>`
@@ -443,6 +443,10 @@ button, in Technical details a few hundred lines away in the same file.
 
 Fix: delete the paragraph. The path is already available where section 2.4
 says it should be.
+
+Resolved in the UI correctness cleanup: the duplicate Advanced details paragraph
+was removed; the existing Technical details entry remains the only assignment
+file path display on Assignment Detail.
 
 ---
 
@@ -599,7 +603,7 @@ single value — the race disappears rather than needing to be tested.
 
 ---
 
-## 20. Remove course folder has no confirmation at all — **Worth fixing**
+## 20. Remove course folder has no confirmation at all — **Resolved**
 
 `DashboardPage.tsx:399` (`handleRemoveCourseFolder`) calls
 `window.graiderUI.removeCourseFolder(id)` directly from a button click,
@@ -623,9 +627,13 @@ Fix: a lightweight confirmation — a plain Cancel/Confirm prompt is enough,
 no typed word required — so a misclick doesn't silently drop a course
 folder from the list.
 
+Resolved in the UI correctness cleanup: Remove now opens the shared
+Cancel/Confirm dialog with the local-registration-only effect explained. The
+existing dashboard context still owns the removal operation and loading state.
+
 ---
 
-## 21. Raw ISO fallback defeats the date formatter — **Should fix**
+## 21. Raw ISO fallback defeats the date formatter — **Resolved**
 
 `AssignmentDetailPage.tsx:489` (Due) and `GradeStatusPage.tsx:488` (Last
 refreshed) fall back to the raw ISO string (`?? detail.deadline.dueAt`,
@@ -633,6 +641,9 @@ refreshed) fall back to the raw ISO string (`?? detail.deadline.dueAt`,
 The shared module guards invalid dates correctly; these two callers print
 the raw value anyway. A real §2.3 violation that survived the fix that
 found it.
+
+Resolved in the UI correctness cleanup: both callers now use the established
+faculty-facing absence wording when the shared formatter cannot render a date.
 
 ---
 
@@ -661,21 +672,31 @@ debt; this item tracked the roster-manager violation rebuilt by §5.6.
 
 ---
 
-## 24. Diagnostic severity renders lowercase, and a test pins it — **Should fix**
+## 24. Diagnostic severity renders lowercase, and a test pins it — **Resolved**
 
 `formatStatusLabel` has an entry for `error` but not `warning` or `info`, so
 those reach the fallback and render lowercase. `DashboardPage.test.tsx`
 explicitly asserts the lowercase text, so the violation is now held in place
 by a passing test. Fixing it means changing that assertion.
 
+Resolved in the UI correctness cleanup: the shared status formatter now maps
+`warning` to `Warning` and `info` to `Info`, and dashboard diagnostics use that
+shared formatter.
+
 ---
 
-## 25. Raw filesystem path in the repository-download results panel — **Should fix**
+## 25. Raw filesystem path in the repository-download results panel — **Resolved**
 
 `AssignmentDetailPage.tsx:2475` renders
 `{target.repositoryName} — {target.status} — {target.localPath}`. PR8-2 fixed
 the status; the path remains, outside any disclosure, on a screen that has
 been through the redesign. Deciding where it should live is a §2.4 question.
+
+Resolved in the UI correctness cleanup: destination and target local paths are
+omitted from the transient result panel. They were not moved into Technical
+details because retaining transient target paths would require disproportionate
+new page state; repository names, statuses, associations, counts, and
+diagnostics remain visible.
 
 ---
 
@@ -1361,7 +1382,7 @@ come from trusted assignment/manifest configuration, not renderer-provided
 owner, branch, path, or YAML. See
 `summaries/item-51-managed-workflow-replacement.md`.
 
-## 52. Assignment Edit status options expose raw labels — **Should fix**
+## 52. Assignment Edit status options expose raw labels — **Resolved**
 
 The roster-manager portion of item 23 is resolved: roster rows now use
 humanized status chips and an overflow menu while submitting the canonical
@@ -1370,6 +1391,9 @@ case: its status `<select>` still displays the raw option values `draft`,
 `active`, `closed`, and `archived`. Keep the machine values, but add a shared
 faculty-facing label mapping for the option text and focused coverage. This is
 adjacent status-label debt, not a reason to reopen item 23.
+
+Resolved in the UI correctness cleanup: Assignment Edit options retain their
+canonical lowercase values while displaying the shared humanized labels.
 
 ---
 
@@ -1402,8 +1426,8 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 5, 8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21,
-22, 24, 25, 27, 28, 33, 34, 35, and 52. Items 19 and 26 are accepted
+Actionable open items are 5, 8, 10, 11, 12, 14, 15, 16, 18, 22, 27, 28,
+33, 34, and 35. Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.
