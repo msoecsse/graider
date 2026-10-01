@@ -19,6 +19,7 @@ import type {
   FacultyReportResult,
   GraiderUIApi
 } from "../../electron/ipc";
+import { createDefaultAssignmentGradingLifecycle } from "../test/pageFixtures";
 import { DashboardPage } from "./DashboardPage";
 
 const COURSE_FOLDER: CourseFolderRecord = {
@@ -524,6 +525,9 @@ const mockGraiderUI = (api: Partial<GraiderUIApi>): GraiderUIApi => {
     getAssignmentApplyPreview: vi.fn().mockResolvedValue(createAssignmentApplyPreviewResult()),
     getAssignmentGradePreview: vi.fn().mockResolvedValue(createAssignmentGradePreviewResult()),
     getAssignmentGradeStatus: vi.fn().mockResolvedValue(createAssignmentGradeStatusResult()),
+    getAssignmentGradingLifecycle: vi
+      .fn()
+      .mockResolvedValue(createDefaultAssignmentGradingLifecycle()),
     getFacultyReport: vi.fn().mockResolvedValue(createFacultyReportResult()),
     applyAssignment: vi.fn(),
     onAssignmentApplyProgress: vi.fn(() => () => undefined),
@@ -1311,13 +1315,46 @@ describe("DashboardPage", () => {
       screen.getByRole("button", { name: `Remove ${COURSE_FOLDER.path} from dashboard` })
     );
 
+    expect(removeCourseFolder).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: "Remove course folder?" });
+    expect(
+      within(dialog).getByText(
+        "This removes the course folder from Graider's list. Files on disk will not be deleted. You can add the folder again later."
+      )
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove course folder" }));
+
     await waitFor(() => {
       expect(removeCourseFolder).toHaveBeenCalledWith(COURSE_FOLDER.id);
+      expect(removeCourseFolder).toHaveBeenCalledTimes(1);
     });
     expect(screen.queryByText(COURSE_FOLDER.path)).toBeNull();
     expect(
       await screen.findByRole("heading", { level: 2, name: "No courses added yet." })
     ).toBeInTheDocument();
+  });
+
+  it("keeps the course folder registered when removal is cancelled", async () => {
+    const removeCourseFolder = vi.fn().mockResolvedValue(undefined);
+
+    mockGraiderUI({
+      listCourseFolders: vi.fn().mockResolvedValue([COURSE_FOLDER]),
+      removeCourseFolder
+    });
+    renderWithProviders(<DashboardPage />);
+
+    expect(await screen.findByText(COURSE_FOLDER.path)).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: `Remove ${COURSE_FOLDER.path} from dashboard` })
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "Remove course folder?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(removeCourseFolder).not.toHaveBeenCalled();
+    expect(screen.getByText(COURSE_FOLDER.path)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Remove course folder?" })).toBeNull();
   });
 
   it("clicking folder Refresh calls the preload API and shows success", async () => {
@@ -1779,6 +1816,7 @@ describe("DashboardPage", () => {
     expect(
       screen.getByText("Repository settings were read successfully.").closest("details")
     ).not.toHaveAttribute("open");
+    expect(screen.getByText("Info · dashboard_info")).toBeInTheDocument();
   });
 
   it("shows no-card state when refresh succeeds with empty cards", async () => {

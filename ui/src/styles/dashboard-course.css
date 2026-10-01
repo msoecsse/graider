@@ -1,0 +1,607 @@
+.github-auth-status {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  margin: 0 0 22px;
+  padding: 16px 18px;
+}
+
+.github-auth-status summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.github-auth-status__content {
+  margin-top: 12px;
+}
+
+.github-auth-status__content + button {
+  margin-top: 12px;
+}
+
+.github-auth-status h2 {
+  margin-bottom: 6px;
+  font-size: 1rem;
+}
+
+.github-auth-status p {
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.github-auth-status p:last-child {
+  margin-bottom: 0;
+}
+
+.github-auth-status pre {
+  display: inline-block;
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-sunken);
+  color: var(--text);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+
+.github-auth-status__note {
+  max-width: 760px;
+}
+
+.github-auth-status__diagnostic {
+  font-size: 0.875rem;
+}
+
+.dashboard-advanced {
+  margin-top: 22px;
+}
+
+.dashboard-advanced > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.dashboard-advanced[open] > summary {
+  margin-bottom: 12px;
+}
+
+.danger-action {
+  min-height: 38px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #9a3412;
+  font-weight: 700;
+  padding: 0 12px;
+}
+
+.error-message {
+  border: 1px solid #ffebe9;
+  border-radius: 6px;
+  background: #fff8f7;
+  color: #9a3412;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+}
+
+.success-message {
+  border: 1px solid #aceebb;
+  border-radius: 6px;
+  background: #dafbe1;
+  color: #1a7f37;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+}
+
+.loading-state {
+  color: #57606a;
+}
+
+.dashboard-placeholder {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  margin-bottom: 22px;
+  padding: 28px;
+}
+
+.dashboard-placeholder h2 {
+  margin-bottom: 6px;
+  font-size: 1.15rem;
+}
+
+.dashboard-placeholder p {
+  color: var(--text-muted);
+  margin-bottom: 0;
+}
+
+.empty-state {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 44px;
+  text-align: center;
+}
+
+.empty-state__marker {
+  width: 72px;
+  height: 8px;
+  margin: 0 auto 24px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+
+.empty-state h2 {
+  margin-bottom: 8px;
+  font-size: 1.35rem;
+}
+
+.empty-state p {
+  color: var(--text-muted);
+}
+
+.empty-state__note {
+  margin: 16px 0 0;
+  font-size: 0.875rem;
+}
+
+.folder-errors {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.folder-error {
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-card);
+  background: var(--warn-surface);
+  color: var(--warn-text);
+  padding: 16px 18px;
+}
+
+.folder-error h2 {
+  margin-bottom: 6px;
+  font-size: 1rem;
+}
+
+.folder-error p {
+  margin-bottom: 8px;
+}
+
+.folder-error__code {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.course-card-section {
+  margin-bottom: 24px;
+}
+
+.course-dashboard {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 24px;
+  padding-top: 24px;
+}
+
+.course-dashboard:first-of-type {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.course-dashboard__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.course-dashboard__eyebrow,
+.course-dashboard__path,
+.assignment-table-section__header p {
+  color: var(--text-muted);
+}
+
+.course-dashboard__eyebrow {
+  font-size: var(--font-size-eyebrow);
+  font-weight: 800;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.course-dashboard__header h3 {
+  font-size: 1.4rem;
+  margin-bottom: 6px;
+}
+
+.course-dashboard__path {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+
+.course-dashboard__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.assignment-table-section {
+  margin-top: 20px;
+}
+
+.assignment-table-section__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.assignment-table-section__header h4,
+.assignment-table-section__header p {
+  margin-bottom: 0;
+}
+
+.assignment-table-section__header h4 {
+  font-size: 1.1rem;
+}
+
+.assignment-table__scroll {
+  overflow-x: auto;
+}
+
+.assignment-table {
+  border: 1px solid var(--border-subtle);
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.assignment-table th,
+.assignment-table td {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.assignment-table th {
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.assignment-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.assignment-table__open {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.assignment-table__empty {
+  border: 1px dashed var(--border);
+  padding: 18px;
+}
+
+.assignment-table__empty p {
+  color: var(--text-muted);
+}
+
+.visually-hidden {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.course-card-section__header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.course-card-section__header h2 {
+  margin-bottom: 0;
+  font-size: 1.2rem;
+}
+
+.course-card-section__header p {
+  color: var(--text-muted);
+  margin-bottom: 0;
+}
+
+.course-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.course-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.course-card__top-strip {
+  height: 8px;
+  background: var(--accent);
+}
+
+.course-card__body {
+  padding: 18px;
+}
+
+.course-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.course-card__header h2 {
+  color: var(--info);
+  font-size: 1.22rem;
+  margin-bottom: 4px;
+}
+
+.course-card__header p,
+.course-card__summary,
+.course-card__source,
+.course-card__empty {
+  color: var(--text-muted);
+}
+
+.course-card__summary,
+.course-card__source {
+  margin-bottom: 10px;
+}
+
+.course-card__actions {
+  margin-bottom: var(--space-2);
+}
+
+.course-card__source {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.attention-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-pill);
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 4px 9px;
+}
+
+.course-card__assignments {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.course-card__assignments h3 {
+  font-size: 0.95rem;
+  margin: 0 0 8px;
+}
+
+.assignment-list,
+.diagnostics-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.assignment-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px 0;
+}
+
+.assignment-list__item:first-child {
+  border-top: 0;
+}
+
+.assignment-list__button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  padding: 8px;
+  text-align: left;
+}
+
+.assignment-list__button:not(:disabled):hover {
+  background: var(--surface-sunken);
+}
+
+.assignment-list__title,
+.assignment-list__meta {
+  display: block;
+}
+
+.assignment-list__title {
+  font-weight: 700;
+}
+
+.assignment-list__meta {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.assignment-list__status {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  display: inline-block;
+  font-size: 0.76rem;
+  font-weight: 700;
+  margin-top: 4px;
+  padding: 2px 7px;
+}
+
+.assignment-list__attention {
+  color: var(--warn-text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.diagnostics-panel {
+  border-top: 1px solid #d8dee4;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.diagnostics-panel summary {
+  color: #0969da;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.diagnostics-panel__content {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.diagnostics-panel__assignment h4 {
+  font-size: 0.9rem;
+  margin: 0 0 6px;
+}
+
+.diagnostics-list li {
+  display: grid;
+  gap: 2px;
+  border-left: 3px solid #bf8700;
+  color: #57606a;
+  padding: 2px 0 8px 10px;
+}
+
+.diagnostics-list__title {
+  color: #24292f;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.folder-panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  margin-top: 24px;
+  overflow: hidden;
+}
+
+.folder-panel__header {
+  border-top: 8px solid var(--accent);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 20px 24px;
+}
+
+.folder-panel__header h2 {
+  margin-bottom: 4px;
+  font-size: 1.2rem;
+}
+
+.folder-panel__header p {
+  margin-bottom: 0;
+  color: var(--text-muted);
+}
+
+.folder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.folder-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 16px 24px;
+}
+
+.folder-list__item:last-child {
+  border-bottom: 0;
+}
+
+.folder-list__details {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.folder-list__path {
+  color: var(--text);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.folder-list__meta {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.folder-list__status {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.folder-list__status--success {
+  color: var(--accent);
+}
+
+.folder-list__status--error {
+  color: var(--warn-text);
+}
+
+.folder-list__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.assignment-detail__subtitle {
+  color: #57606a;
+  margin: 8px 0 0;
+}
+
+.assignment-detail__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}

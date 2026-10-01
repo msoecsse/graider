@@ -61,7 +61,7 @@ describe("CopyButton", () => {
 describe("getCopyStateText", () => {
   it("returns null when the state is for a different key", () => {
     expect(
-      getCopyStateText({ key: "workflow-path", status: "copied" }, "template-repository")
+      getCopyStateText({ key: "canvas-link", status: "copied" }, "template-repository")
     ).toBeNull();
   });
 

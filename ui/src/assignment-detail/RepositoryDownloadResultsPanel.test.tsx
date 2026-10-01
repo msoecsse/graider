@@ -4,7 +4,7 @@ import type { AssignmentRepositoryDownloadResult } from "../../electron/ipc";
 import { RepositoryDownloadResultsPanel } from "./RepositoryDownloadResultsPanel";
 
 describe("RepositoryDownloadResultsPanel", () => {
-  it("renders the clone summary, destination, and each target's repository and local path", () => {
+  it("renders the clone summary and useful target details without filesystem paths", () => {
     const result: AssignmentRepositoryDownloadResult = {
       status: "success",
       destination: "/Users/sean/Downloads/lab02",
@@ -28,13 +28,10 @@ describe("RepositoryDownloadResultsPanel", () => {
 
     render(<RepositoryDownloadResultsPanel result={result} />);
 
-    expect(
-      screen.getByText("2 cloned, 0 failed of 2. Destination: /Users/sean/Downloads/lab02")
-    ).toBeInTheDocument();
+    expect(screen.getByText("2 cloned, 0 failed of 2.")).toBeInTheDocument();
     expect(screen.getByText("27s1-csc1120-lab02-alpha")).toBeInTheDocument();
-    expect(
-      screen.getByText("/Users/sean/Downloads/lab02/27s1-csc1120-lab02-alpha", { exact: false })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("listitem")).toHaveTextContent("Cloned");
+    expect(screen.queryByText("/Users/sean/Downloads/lab02", { exact: false })).toBeNull();
   });
 
   it("renders target and command-level diagnostics as alerts", () => {

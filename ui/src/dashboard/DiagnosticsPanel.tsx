@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import { formatStatusLabel } from "../components/statusLabels";
 import type { DashboardCard, DashboardDiagnostic } from "./dashboardTypes";
 
 interface DiagnosticsPanelProps {
@@ -6,9 +7,10 @@ interface DiagnosticsPanelProps {
 }
 
 const getDiagnosticTitle = (diagnostic: DashboardDiagnostic): string => {
-  const parts = [diagnostic.severity, diagnostic.code].filter(
-    (part): part is string => part !== null
-  );
+  const parts = [
+    diagnostic.severity === null ? null : formatStatusLabel(diagnostic.severity),
+    diagnostic.code
+  ].filter((part): part is string => part !== null);
 
   return parts.length > 0 ? parts.join(" · ") : "diagnostic";
 };

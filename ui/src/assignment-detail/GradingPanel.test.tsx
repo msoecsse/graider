@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GradingPanel } from "./GradingPanel";
 import type { NormalizedAssignmentDetail } from "./assignmentDetailTypes";
@@ -43,8 +43,7 @@ const createDetail = (
 });
 
 describe("GradingPanel", () => {
-  it("renders grading configuration rows and copies the workflow path", () => {
-    const onCopy = vi.fn();
+  it("renders grading configuration and operational workflow status without duplicating the workflow path", () => {
     render(
       <GradingPanel
         detail={createDetail({
@@ -56,16 +55,13 @@ describe("GradingPanel", () => {
           workflowStatus: "available",
           workflowDispatch: "available"
         })}
-        copyState={null}
-        onCopy={onCopy}
       />
     );
 
-    expect(screen.getByText(".github/workflows/grade.yml")).toBeInTheDocument();
     expect(screen.getByText("grading-results")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Copy workflow path" }));
-    expect(onCopy).toHaveBeenCalledWith("workflow-path", ".github/workflows/grade.yml");
+    expect(screen.getAllByText("Available")).toHaveLength(2);
+    expect(screen.queryByText(".github/workflows/grade.yml")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy workflow path" })).toBeNull();
   });
 
   it("shows a plain note instead of a table when grading is disabled", () => {
@@ -80,12 +76,10 @@ describe("GradingPanel", () => {
           workflowStatus: "not_required",
           workflowDispatch: "not_required"
         })}
-        copyState={null}
-        onCopy={vi.fn()}
       />
     );
 
     expect(screen.getByText("No grading configured.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Copy workflow path" })).toBeNull();
+    expect(screen.queryByText("Workflow path")).toBeNull();
   });
 });

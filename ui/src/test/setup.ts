@@ -1,6 +1,7 @@
 import { cleanup, configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, vi } from "vitest";
+import { createDefaultAssignmentGradingLifecycle } from "./pageFixtures";
 
 // Testing Library's findBy*/waitFor default (1000ms) is tuned for an
 // isolated test. Under a full-suite parallel run, GradingWorkspacePage's
@@ -142,6 +143,9 @@ beforeEach(() => {
         error: null,
         refreshedAt: null
       }),
+      getAssignmentGradingLifecycle: vi
+        .fn()
+        .mockResolvedValue(createDefaultAssignmentGradingLifecycle()),
       getFacultyReport: vi.fn().mockResolvedValue({
         courseFolderId: "course-folder-default",
         courseFolderPath: "/tmp/course",

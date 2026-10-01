@@ -75,7 +75,6 @@ export const GradeWorkflowPanel = ({
           <dl className="detail-grid">
             <DetailItem label="Repository" value={workflowResult.repository} />
             <DetailItem label="Branch" value={workflowResult.branch} />
-            <DetailItem label="Workflow path" value={workflowResult.path} />
             <DetailItem label="Fetch status" value={formatStatusLabel(workflowResult.status)} />
           </dl>
           {workflowResult.diagnostics.map((item) => (
