@@ -22,17 +22,16 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 afterEach((ctx) => {
   try {
     const html = document.body.innerHTML;
-    if (html.length < MIN_BYTES) {
-      return;
+    if (html.length >= MIN_BYTES) {
+      const task = (ctx as { task?: { name?: string; suite?: { name?: string } } }).task;
+      const suite = task?.suite?.name ?? "";
+      const name = task?.name ?? "unknown";
+      const safe = `${suite}__${name}`.replace(/[^a-z0-9]+/gi, "_").slice(0, 110);
+
+      fs.writeFileSync(path.join(OUT_DIR, `${safe}.html`), html);
     }
-
-    const task = (ctx as { task?: { name?: string; suite?: { name?: string } } }).task;
-    const suite = task?.suite?.name ?? "";
-    const name = task?.name ?? "unknown";
-    const safe = `${suite}__${name}`.replace(/[^a-z0-9]+/gi, "_").slice(0, 110);
-
-    fs.writeFileSync(path.join(OUT_DIR, `${safe}.html`), html);
-  } catch {
-    // Never let snapshot capture fail a test run.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`UI snapshot DOM capture failed: ${message}`);
   }
 });

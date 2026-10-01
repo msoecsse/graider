@@ -11,7 +11,6 @@ export const RepositoryDownloadResultsPanel = ({
     <h2>Repository download</h2>
     <p>
       {result.clonedCount} cloned, {result.failedCount} failed of {result.totalTargets}.
-      Destination: {result.destination}
     </p>
     {result.diagnostics.map((diagnostic) => (
       <p key={diagnostic.message} role="alert">
@@ -21,8 +20,7 @@ export const RepositoryDownloadResultsPanel = ({
     <ul>
       {result.targets.map((target) => (
         <li key={target.targetId}>
-          <strong>{target.repositoryName}</strong> — {formatStatusLabel(target.status)} —{" "}
-          {target.localPath}
+          <strong>{target.repositoryName}</strong> — {formatStatusLabel(target.status)}
           {target.groupId === undefined ? null : ` (${target.groupId})`}
           <span> {target.studentIds.join(", ")}</span>
           {target.diagnostics.map((diagnostic) => (

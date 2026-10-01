@@ -6,7 +6,7 @@
  *   node tools/ui-snapshots/wrap.mjs
  *   electron tools/ui-snapshots/capture.cjs <file.html>
  *
- * One page per invocation keeps a single bad page from wedging the whole run.
+ * Pass one HTML filename to capture only that page.
  */
 const { app, BrowserWindow } = require("electron");
 const fs = require("node:fs");
@@ -20,50 +20,85 @@ const MAX_HEIGHT = 6000;
 
 app.commandLine.appendSwitch("disable-gpu");
 app.disableHardwareAcceleration();
+if (
+  process.platform === "linux" &&
+  typeof process.getuid === "function" &&
+  process.getuid() === 0
+) {
+  app.commandLine.appendSwitch("no-sandbox");
+}
 
-const capture = async (file) => {
-  const win = new BrowserWindow({
-    width: WIDTH,
-    height: 900,
-    show: false,
-    webPreferences: { backgroundThrottling: false }
-  });
+const waitForLayout = async (win) => {
+  await win.webContents.executeJavaScript(
+    "(document.fonts?.ready ?? Promise.resolve()).then(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))"
+  );
+};
 
+const capture = async (win, file) => {
   await win.loadFile(path.join(PAGES_DIR, file));
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  await waitForLayout(win);
 
   const height = await win.webContents.executeJavaScript(
     `Math.min(document.documentElement.scrollHeight, ${MAX_HEIGHT})`
   );
   win.setContentSize(WIDTH, Math.max(600, Math.ceil(height)));
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  await waitForLayout(win);
 
   const image = await win.webContents.capturePage();
   const out = path.join(OUT_DIR, file.replace(/\.html$/, ".png"));
   fs.writeFileSync(out, image.toPNG());
   console.log(`captured ${out} (${WIDTH}x${Math.ceil(height)})`);
-
-  win.destroy();
 };
 
 app.whenReady().then(async () => {
-  fs.mkdirSync(OUT_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  const arg = process.argv[process.argv.length - 1];
-  const files = arg.endsWith(".html")
-    ? [arg]
-    : fs
-        .readdirSync(PAGES_DIR)
-        .filter((f) => f.endsWith(".html"))
-        .sort();
-
-  for (const file of files) {
-    try {
-      await capture(file);
-    } catch (error) {
-      console.error(`FAILED ${file}: ${error.message}`);
+    if (!fs.existsSync(PAGES_DIR)) {
+      throw new Error(`UI snapshot pages are missing: ${PAGES_DIR}`);
     }
-  }
 
-  app.quit();
+    const arg = process.argv[process.argv.length - 1];
+    const files = arg.endsWith(".html")
+      ? [arg]
+      : fs
+          .readdirSync(PAGES_DIR)
+          .filter((f) => f.endsWith(".html"))
+          .sort();
+
+    if (files.length === 0) {
+      throw new Error(`No UI snapshot pages were found in ${PAGES_DIR}`);
+    }
+
+    const win = new BrowserWindow({
+      width: WIDTH,
+      height: 900,
+      show: false,
+      webPreferences: { backgroundThrottling: false }
+    });
+
+    try {
+      const failures = [];
+      for (const file of files) {
+        try {
+          await capture(win, file);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          failures.push(`${file}: ${message}`);
+          console.error(`FAILED ${file}: ${message}`);
+        }
+      }
+
+      if (failures.length > 0) {
+        throw new Error(`UI snapshot capture failed for ${failures.length} page(s).`);
+      }
+    } finally {
+      win.destroy();
+    }
+  } catch (error) {
+    process.exitCode = 1;
+    console.error(error instanceof Error ? error.message : String(error));
+  } finally {
+    app.quit();
+  }
 });

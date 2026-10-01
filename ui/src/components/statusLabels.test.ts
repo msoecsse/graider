@@ -21,6 +21,8 @@ describe("formatStatusLabel", () => {
     ["branch_missing", "Branch missing"],
     ["disabled", "Disabled"],
     ["error", "Error"],
+    ["warning", "Warning"],
+    ["info", "Info"],
     ["inaccessible", "Inaccessible"],
     ["missing", "Missing"],
     ["not_checked", "Not checked"],

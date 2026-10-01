@@ -26,7 +26,26 @@ describe("PageHeader", () => {
     fireEvent.click(button);
 
     expect(onClick).toHaveBeenCalledTimes(1);
+    expect(button).toHaveClass("primary-action");
+    expect(button).not.toHaveClass("primary-action--blocked");
     expect(screen.getByText("P")).toHaveClass("kbd-hint");
+  });
+
+  it("renders a blocked primary action while retaining its keyboard hint and click behavior", () => {
+    const onClick = vi.fn();
+    render(
+      <PageHeader
+        title="Lab 02"
+        primaryAction={{ label: "Fix template repository", onClick, kbd: "F", variant: "blocked" }}
+      />
+    );
+
+    const button = screen.getByRole("button", { name: "Fix template repository F" });
+    fireEvent.click(button);
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(button).toHaveClass("primary-action", "primary-action--blocked");
+    expect(screen.getByText("F")).toHaveClass("kbd-hint");
   });
 
   it("caps secondary actions at two even when more are supplied", () => {

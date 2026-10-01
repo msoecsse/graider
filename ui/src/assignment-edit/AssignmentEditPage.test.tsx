@@ -91,6 +91,21 @@ const getPanel = (name: string): HTMLElement => {
 };
 
 describe("AssignmentEditPage editable rows", () => {
+  it("shows human-readable status options while preserving canonical values", async () => {
+    setup();
+
+    const status = (await screen.findByLabelText("Assignment status")) as HTMLSelectElement;
+    expect(screen.getByRole("option", { name: "Draft" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Active" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Closed" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Archived" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "draft" })).toBeNull();
+
+    fireEvent.change(status, { target: { value: "closed" } });
+
+    expect(status).toHaveValue("closed");
+  });
+
   it("keeps loaded required-file and rubric inputs focused while typing successive characters", async () => {
     setup();
     const requiredFile = (await screen.findByRole("textbox", {

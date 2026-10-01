@@ -7,10 +7,9 @@ export const RosterPanel = ({
 }: {
   readonly detail: NormalizedAssignmentDetail;
 }): ReactElement => (
-  <section className="detail-panel" aria-labelledby="roster-sections-title">
-    <h2 id="roster-sections-title">Roster / Sections</h2>
+  <section className="detail-panel" aria-labelledby="roster-title">
+    <h2 id="roster-title">Roster</h2>
     <dl className="detail-grid">
-      <DetailItem label="Sections" value={detail.sections.join(", ") || null} />
       {detail.roster === null ? (
         <DetailItem label="Roster" value="Roster summary unavailable." />
       ) : (

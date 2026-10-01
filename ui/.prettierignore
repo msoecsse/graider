@@ -3,3 +3,4 @@ dist-electron/
 dist-graider-cli/
 dist-release/
 release/
+.ui-snapshots/

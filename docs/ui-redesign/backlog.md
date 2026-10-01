@@ -277,13 +277,21 @@ both suites unchanged (1024 root / 718 UI), no test needed changing.
 
 ---
 
-## 5. `globals.css` is a single 2,982-line file — **Worth fixing**
+## 5. `globals.css` is a single 2,982-line file — **Resolved**
 
 Up from 2,105 at the start of the redesign, a 42% increase, with five more
 screens still to come.
 
 Fix: split by screen or by concern, keeping the token block as the single
 source of truth. Best done at a natural boundary rather than mid-screen.
+
+Resolved: before this refactor, the stylesheet had grown from the historical
+2,982-line count to 3,680 lines (approximately 3,681 under the prior counting
+convention). It is now an ordered `globals.css` entry point importing five
+contiguous focused fragments. The design-token block remains defined once in
+the foundation fragment; reconstruction of the imported fragments preserves the
+prior stylesheet's source order and contents, apart from formatter-required
+blank whitespace at fragment boundaries.
 
 ---
 
@@ -388,7 +396,7 @@ marked blocked on item 1.
 
 ---
 
-## 10. Small deferred behaviours — **Optional**
+## 10. Small deferred behaviours — **Resolved**
 
 - Publish review: if a per-student snapshot fetch fails, the row shows "Score
   unavailable" with no retry affordance. Student is still publishable.
@@ -397,9 +405,16 @@ marked blocked on item 1.
 - `PageHeader`'s `.page-header__meta` uses a hardcoded font size rather than the
   PR1 type tokens. One line.
 
+Resolved: Publish review now offers a per-student Retry action for unavailable
+details, preserving selection and using per-student request generations so stale
+results cannot update a closed or superseded review. New source comments record
+their initial source target solely for dirty-state comparison while retaining
+their live canonical anchoring behavior. PageHeader metadata now uses
+`var(--font-size-body-sm)`.
+
 ---
 
-## 11. `PageHeader` is not expressive enough — **Worth fixing**
+## 11. `PageHeader` is not expressive enough — **Resolved**
 
 Partially addressed by the `PageHeader.titleId` work: routed pages can now give
 their external landmark a stable heading id, and the roster manager and comment
@@ -411,6 +426,11 @@ variant field.
 Fix: extend `PageHeader` deliberately with a primary-action variant rather than
 accumulating bespoke headers screen by screen. Do not reopen the completed
 heading-id portion of this item.
+
+Resolved: `PageHeaderAction` now accepts the typed optional `blocked` variant,
+and PageHeader owns its `primary-action--blocked` class selection. Assignment
+Detail passes its lifecycle action through `primaryAction`; the overflow slot
+now contains only refresh and the overflow menu.
 
 ---
 
@@ -430,7 +450,7 @@ detail line.
 
 ---
 
-## 13. Raw assignment file path in Advanced details — **Should fix**
+## 13. Raw assignment file path in Advanced details — **Resolved**
 
 `AssignmentDetailPage.tsx:2530` renders
 `<p className="assignment-detail__path">Assignment file: {detail.assignment.file}</p>`
@@ -444,9 +464,13 @@ button, in Technical details a few hundred lines away in the same file.
 Fix: delete the paragraph. The path is already available where section 2.4
 says it should be.
 
+Resolved in the UI correctness cleanup: the duplicate Advanced details paragraph
+was removed; the existing Technical details entry remains the only assignment
+file path display on Assignment Detail.
+
 ---
 
-## 14. Advanced details overlaps Technical details — **Worth fixing**
+## 14. Advanced details overlaps Technical details — **Resolved**
 
 `Advanced details` is a pre-redesign collapsed disclosure holding
 `TemplatePanel`, `GradingPanel`, `GradeWorkflowPanel`, `StudentReportsPanel`,
@@ -469,9 +493,17 @@ grading configuration panels plausibly stay; the raw path in item 13 and
 the duplicated workflow path do not), then reconcile the two disclosures.
 Bigger than a one-line fix — likely its own small PR.
 
+Resolved: the disclosure is now **Configuration and tools**, the secondary
+faculty-facing home for operational and configuration controls. **Technical
+details** remains the single collapsed sidebar disclosure for raw implementation
+identifiers and plumbing. Workflow path was removed from both GradingPanel and
+the loaded GradeWorkflowPanel, leaving Technical details as its canonical home.
+Overflow navigation still opens Configuration and tools and focuses Group
+settings or Grade workflow.
+
 ---
 
-## 15. `Sections` renders twice — **Optional**
+## 15. `Sections` renders twice — **Resolved**
 
 Once in the Assignment facts card, per section 5.3's explicit field list;
 once in the untouched Roster card, which already showed it before PR6b-1
@@ -486,9 +518,14 @@ reasonable place for it.
 Fix, if ever: drop it from one of the two cards. Low priority — it is not
 incorrect, just repeated.
 
+Resolved: Sections remains in Assignment facts, the canonical assignment-level
+location. The duplicate Roster row was removed and that card is now titled
+Roster while retaining its section, active-student, total-student, and
+unavailable-summary states.
+
 ---
 
-## 16. `tools/ui-snapshots` was never set up — **Should fix**
+## 16. `tools/ui-snapshots` was never set up — **Resolved**
 
 Section 7 requires screenshots attached to the PR, pointing at
 `tools/ui-snapshots`. The directory has `capture.cjs`, `snapshot-setup.ts`,
@@ -506,6 +543,13 @@ Fix: a one-time setup task — the vitest config, the package script, the
 `.gitignore` entry, and whatever the Electron-driven capture step needs to
 run headless. Small, but it belongs to nobody's feature PR, which is why it
 has stayed undone through eight of them.
+
+Resolved: `npm --prefix ui run snapshots` now runs the dedicated snapshot
+Vitest config, wraps generated DOM with the application stylesheet, and uses
+Electron to produce PNGs under `ui/.ui-snapshots/{html,pages,png}`. The output
+is ignored, Linux headless capture uses `xvfb-run` when needed, and missing or
+failed captures return a non-zero status. The full command was verified with
+real PNG capture.
 
 ---
 
@@ -535,7 +579,7 @@ UI-only draft identities, which are projected out before IPC requests.
 
 ---
 
-## 18. Page-level fixtures never mock `getAssignmentGradingLifecycle` — **Worth fixing**
+## 18. Page-level fixtures never mock `getAssignmentGradingLifecycle` — **Resolved**
 
 Neither `AssignmentDetailPage.test.tsx` nor `DashboardPage.test.tsx` mocks
 `getAssignmentGradingLifecycle` in its default fixture, so the endpoint is
@@ -561,6 +605,13 @@ Fix: a shared fixture (a default `getAssignmentGradingLifecycle` mock with
 a small, realistic roster) that page-level tests can pull in, so
 lifecycle-dependent UI is exercised through the page by default rather
 than by one exception.
+
+Resolved: the shared page fixture supplies three students spanning not-started,
+in-progress, and published states. Global page setup plus the Assignment Detail
+and Dashboard page mocks use it by default; focused Assignment Detail coverage
+proves the student table receives the lifecycle rows. Tests that need the
+missing/empty behavior continue to override or remove the lifecycle mock
+explicitly.
 
 ---
 
@@ -599,7 +650,7 @@ single value — the race disappears rather than needing to be tested.
 
 ---
 
-## 20. Remove course folder has no confirmation at all — **Worth fixing**
+## 20. Remove course folder has no confirmation at all — **Resolved**
 
 `DashboardPage.tsx:399` (`handleRemoveCourseFolder`) calls
 `window.graiderUI.removeCourseFolder(id)` directly from a button click,
@@ -623,9 +674,13 @@ Fix: a lightweight confirmation — a plain Cancel/Confirm prompt is enough,
 no typed word required — so a misclick doesn't silently drop a course
 folder from the list.
 
+Resolved in the UI correctness cleanup: Remove now opens the shared
+Cancel/Confirm dialog with the local-registration-only effect explained. The
+existing dashboard context still owns the removal operation and loading state.
+
 ---
 
-## 21. Raw ISO fallback defeats the date formatter — **Should fix**
+## 21. Raw ISO fallback defeats the date formatter — **Resolved**
 
 `AssignmentDetailPage.tsx:489` (Due) and `GradeStatusPage.tsx:488` (Last
 refreshed) fall back to the raw ISO string (`?? detail.deadline.dueAt`,
@@ -634,11 +689,17 @@ The shared module guards invalid dates correctly; these two callers print
 the raw value anyway. A real §2.3 violation that survived the fix that
 found it.
 
+Resolved in the UI correctness cleanup: both callers now use the established
+faculty-facing absence wording when the shared formatter cannot render a date.
+
 ---
 
-## 22. `assignmentDetailClipboard.ts` duplicates `components/clipboard.ts` verbatim — **Worth fixing**
+## 22. `assignmentDetailClipboard.ts` duplicates `components/clipboard.ts` verbatim — **Resolved**
 
 The same one-job-three-implementations pattern PR8-1 fixed for dates.
+
+Resolved: Assignment Detail and Apply Preview now import the canonical shared
+`components/clipboard` helper; the duplicate assignment-detail helper was deleted.
 
 ---
 
@@ -661,21 +722,31 @@ debt; this item tracked the roster-manager violation rebuilt by §5.6.
 
 ---
 
-## 24. Diagnostic severity renders lowercase, and a test pins it — **Should fix**
+## 24. Diagnostic severity renders lowercase, and a test pins it — **Resolved**
 
 `formatStatusLabel` has an entry for `error` but not `warning` or `info`, so
 those reach the fallback and render lowercase. `DashboardPage.test.tsx`
 explicitly asserts the lowercase text, so the violation is now held in place
 by a passing test. Fixing it means changing that assertion.
 
+Resolved in the UI correctness cleanup: the shared status formatter now maps
+`warning` to `Warning` and `info` to `Info`, and dashboard diagnostics use that
+shared formatter.
+
 ---
 
-## 25. Raw filesystem path in the repository-download results panel — **Should fix**
+## 25. Raw filesystem path in the repository-download results panel — **Resolved**
 
 `AssignmentDetailPage.tsx:2475` renders
 `{target.repositoryName} — {target.status} — {target.localPath}`. PR8-2 fixed
 the status; the path remains, outside any disclosure, on a screen that has
 been through the redesign. Deciding where it should live is a §2.4 question.
+
+Resolved in the UI correctness cleanup: destination and target local paths are
+omitted from the transient result panel. They were not moved into Technical
+details because retaining transient target paths would require disproportionate
+new page state; repository names, statuses, associations, counts, and
+diagnostics remain visible.
 
 ---
 
@@ -1361,7 +1432,7 @@ come from trusted assignment/manifest configuration, not renderer-provided
 owner, branch, path, or YAML. See
 `summaries/item-51-managed-workflow-replacement.md`.
 
-## 52. Assignment Edit status options expose raw labels — **Should fix**
+## 52. Assignment Edit status options expose raw labels — **Resolved**
 
 The roster-manager portion of item 23 is resolved: roster rows now use
 humanized status chips and an overflow menu while submitting the canonical
@@ -1370,6 +1441,9 @@ case: its status `<select>` still displays the raw option values `draft`,
 `active`, `closed`, and `archived`. Keep the machine values, but add a shared
 faculty-facing label mapping for the option text and focused coverage. This is
 adjacent status-label debt, not a reason to reopen item 23.
+
+Resolved in the UI correctness cleanup: Assignment Edit options retain their
+canonical lowercase values while displaying the shared humanized labels.
 
 ---
 
@@ -1402,10 +1476,11 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 5, 8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21,
-22, 24, 25, 27, 28, 33, 34, 35, and 52. Items 19 and 26 are accepted
+Actionable open items are 8, 12, 27, 28, 33, 34, and 35.
+Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
-48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved.
+48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
+ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through

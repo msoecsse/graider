@@ -33,7 +33,7 @@ export const AssignmentFactsPanel = ({
     <dl className="detail-grid">
       <DetailItem
         label="Due"
-        value={formatReadableDateTime(detail.deadline.dueAt) ?? detail.deadline.dueAt}
+        value={formatNullableValue(formatReadableDateTime(detail.deadline.dueAt))}
       />
       <DetailItem label="Points" value={detail.metadata.points} />
       <DetailItem label="Type" value={detail.assignment.type} />

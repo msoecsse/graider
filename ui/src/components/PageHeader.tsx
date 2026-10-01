@@ -6,6 +6,7 @@ export interface PageHeaderAction {
   readonly onClick: () => void;
   readonly kbd?: string;
   readonly disabled?: boolean;
+  readonly variant?: "blocked";
 }
 
 export interface PageHeaderProps {
@@ -51,7 +52,11 @@ export const PageHeader = ({
       ))}
       {primaryAction === undefined ? null : (
         <button
-          className="primary-action"
+          className={
+            primaryAction.variant === "blocked"
+              ? "primary-action primary-action--blocked"
+              : "primary-action"
+          }
           disabled={primaryAction.disabled === true}
           onClick={primaryAction.onClick}
           type="button"

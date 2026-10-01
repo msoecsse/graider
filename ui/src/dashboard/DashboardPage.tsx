@@ -8,6 +8,7 @@ import type {
 } from "../../electron/ipc";
 import { CourseSetupPage } from "../course-setup/CourseSetupPage";
 import { AssignmentSetupPage } from "../assignment-setup/AssignmentSetupPage";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { CourseCardGrid } from "./CourseCardGrid";
 import { CourseFolderList } from "./CourseFolderList";
@@ -174,6 +175,9 @@ export const DashboardPage = (): ReactElement => {
   const [viewFilter, setViewFilter] = useState<DashboardViewFilter>("active");
   const [sortOption, setSortOption] = useState<DashboardSortOption>("newest-first");
   const [isFacultySettingsOpen, setIsFacultySettingsOpen] = useState(false);
+  const [courseFolderRemovalConfirmation, setCourseFolderRemovalConfirmation] = useState<
+    string | null
+  >(null);
   const [facultyUsername, setFacultyUsername] = useState("");
   const [facultySettingsMessage, setFacultySettingsMessage] = useState<string | null>(null);
   const [githubAuthState, setGithubAuthState] = useState<GitHubAuthViewState>({
@@ -186,6 +190,16 @@ export const DashboardPage = (): ReactElement => {
   );
   const [selectedAssignmentSetupCourse, setSelectedAssignmentSetupCourse] =
     useState<CourseFolderRecord | null>(null);
+
+  const confirmCourseFolderRemoval = (): void => {
+    if (courseFolderRemovalConfirmation === null) {
+      return;
+    }
+
+    void handleRemoveCourseFolder(courseFolderRemovalConfirmation).then(() => {
+      setCourseFolderRemovalConfirmation(null);
+    });
+  };
   const githubAuthNeedsAttention =
     githubAuthState.status === "not_connected" || githubAuthState.status === "check_failed";
 
@@ -662,7 +676,7 @@ export const DashboardPage = (): ReactElement => {
                   void handleRefreshCourseFolder(id);
                 }}
                 onRemove={(id) => {
-                  void handleRemoveCourseFolder(id);
+                  setCourseFolderRemovalConfirmation(id);
                 }}
                 onSetupAssignment={handleOpenAssignmentSetup}
                 onManageRosters={handleOpenRosterManager}
@@ -671,6 +685,22 @@ export const DashboardPage = (): ReactElement => {
           </>
         ) : null}
       </section>
+      <ConfirmDialog
+        isOpen={courseFolderRemovalConfirmation !== null}
+        title="Remove course folder?"
+        summary={
+          <p>
+            This removes the course folder from Graider&apos;s list. Files on disk will not be
+            deleted. You can add the folder again later.
+          </p>
+        }
+        confirmLabel="Remove course folder"
+        isConfirming={
+          courseFolderRemovalConfirmation !== null && removingId === courseFolderRemovalConfirmation
+        }
+        onConfirm={confirmCourseFolderRemoval}
+        onCancel={() => setCourseFolderRemovalConfirmation(null)}
+      />
     </main>
   );
 };

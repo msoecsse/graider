@@ -57,6 +57,16 @@ const createDetail = (
 });
 
 describe("AssignmentFactsPanel", () => {
+  it("keeps the assignment section list in the canonical facts card", () => {
+    render(<AssignmentFactsPanel detail={createDetail()} />);
+
+    const factsSection = screen
+      .getByRole("heading", { level: 2, name: "Assignment facts" })
+      .closest("section") as HTMLElement;
+    expect(within(factsSection).getByText("Sections")).toBeInTheDocument();
+    expect(within(factsSection).getByText("001, 002")).toBeInTheDocument();
+  });
+
   // Moved from AssignmentDetailPage.test.tsx ("renders the assignment facts
   // Template row as a link to the repository, not a raw path") -- same
   // input, same assertions; only the render harness changed from the full
@@ -145,5 +155,19 @@ describe("AssignmentFactsPanel", () => {
       .getByRole("heading", { level: 2, name: "Assignment facts" })
       .closest("section") as HTMLElement;
     expect(within(factsSection).getByText("No grading")).toBeInTheDocument();
+  });
+
+  it("uses the faculty-facing absence label for an invalid due date", () => {
+    render(
+      <AssignmentFactsPanel
+        detail={createDetail({ deadline: { dueAt: "not-a-timestamp", latePolicy: "standard" } })}
+      />
+    );
+
+    const factsSection = screen
+      .getByRole("heading", { level: 2, name: "Assignment facts" })
+      .closest("section") as HTMLElement;
+    expect(within(factsSection).getByText("Not configured")).toBeInTheDocument();
+    expect(within(factsSection).queryByText("not-a-timestamp")).toBeNull();
   });
 });
