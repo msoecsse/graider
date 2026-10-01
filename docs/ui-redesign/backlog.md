@@ -399,7 +399,7 @@ marked blocked on item 1.
 
 ---
 
-## 11. `PageHeader` is not expressive enough — **Worth fixing**
+## 11. `PageHeader` is not expressive enough — **Resolved**
 
 Partially addressed by the `PageHeader.titleId` work: routed pages can now give
 their external landmark a stable heading id, and the roster manager and comment
@@ -411,6 +411,11 @@ variant field.
 Fix: extend `PageHeader` deliberately with a primary-action variant rather than
 accumulating bespoke headers screen by screen. Do not reopen the completed
 heading-id portion of this item.
+
+Resolved: `PageHeaderAction` now accepts the typed optional `blocked` variant,
+and PageHeader owns its `primary-action--blocked` class selection. Assignment
+Detail passes its lifecycle action through `primaryAction`; the overflow slot
+now contains only refresh and the overflow menu.
 
 ---
 
@@ -450,7 +455,7 @@ file path display on Assignment Detail.
 
 ---
 
-## 14. Advanced details overlaps Technical details — **Worth fixing**
+## 14. Advanced details overlaps Technical details — **Resolved**
 
 `Advanced details` is a pre-redesign collapsed disclosure holding
 `TemplatePanel`, `GradingPanel`, `GradeWorkflowPanel`, `StudentReportsPanel`,
@@ -472,6 +477,14 @@ Fix: decide what belongs in `Advanced details` going forward (template and
 grading configuration panels plausibly stay; the raw path in item 13 and
 the duplicated workflow path do not), then reconcile the two disclosures.
 Bigger than a one-line fix — likely its own small PR.
+
+Resolved: the disclosure is now **Configuration and tools**, the secondary
+faculty-facing home for operational and configuration controls. **Technical
+details** remains the single collapsed sidebar disclosure for raw implementation
+identifiers and plumbing. Workflow path was removed from both GradingPanel and
+the loaded GradeWorkflowPanel, leaving Technical details as its canonical home.
+Overflow navigation still opens Configuration and tools and focuses Group
+settings or Grade workflow.
 
 ---
 
@@ -661,9 +674,12 @@ faculty-facing absence wording when the shared formatter cannot render a date.
 
 ---
 
-## 22. `assignmentDetailClipboard.ts` duplicates `components/clipboard.ts` verbatim — **Worth fixing**
+## 22. `assignmentDetailClipboard.ts` duplicates `components/clipboard.ts` verbatim — **Resolved**
 
 The same one-job-three-implementations pattern PR8-1 fixed for dates.
+
+Resolved: Assignment Detail and Apply Preview now import the canonical shared
+`components/clipboard` helper; the duplicate assignment-detail helper was deleted.
 
 ---
 
@@ -1440,8 +1456,8 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 5, 8, 10, 11, 12, 14, 15, 22, 27, 28,
-33, 34, and 35. Items 19 and 26 are accepted
+Actionable open items are 5, 8, 10, 12, 15, 27, 28, 33, 34, and 35.
+Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.

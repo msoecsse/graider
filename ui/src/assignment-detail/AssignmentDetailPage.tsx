@@ -23,7 +23,7 @@ import {
 } from "../components/LifecycleStrip";
 import { OperationStatusBar } from "../components/OperationStatusBar";
 import { OverflowMenu, type OverflowMenuGroup } from "../components/OverflowMenu";
-import { PageHeader } from "../components/PageHeader";
+import { PageHeader, type PageHeaderAction } from "../components/PageHeader";
 import { TechnicalDetails, type TechnicalDetailsItem } from "../components/TechnicalDetails";
 import { Toast, useToast } from "../components/Toast";
 import { AssignmentDetailStudentTable } from "./AssignmentDetailStudentTable";
@@ -51,7 +51,7 @@ import {
   type CopyKey,
   type CopyState
 } from "./AssignmentDetailPrimitives";
-import { copyTextToClipboard } from "./assignmentDetailClipboard";
+import { copyTextToClipboard } from "../components/clipboard";
 import { normalizeAssignmentDetail } from "./assignmentDetailNormalization";
 import { normalizeGradeStatus } from "../grade-status/gradeStatusNormalization";
 import type {
@@ -78,7 +78,7 @@ const REFRESH_MINUTE_MS = 60_000;
 const REFRESH_HOUR_MS = 60 * REFRESH_MINUTE_MS;
 const REFRESH_DAY_MS = 24 * REFRESH_HOUR_MS;
 
-const ADVANCED_DETAILS_ID = "assignment-advanced-details";
+const CONFIGURATION_AND_TOOLS_ID = "assignment-configuration-and-tools";
 
 const BLOCKER_FIX_LABELS: Readonly<Record<string, string>> = {
   "github-token-required": "Fix GitHub authentication",
@@ -109,7 +109,7 @@ const formatRefreshedAgo = (refreshedAt: string | null): string => {
 };
 
 // Reveals a section that already exists on the page (optionally inside the
-// Advanced details disclosure) instead of performing an action of its own —
+// Configuration and tools disclosure) instead of performing an action of its own —
 // these panels are out of scope to restructure this PR, so the overflow menu
 // points faculty at the existing control rather than duplicating it.
 const revealExistingSection = (headingId: string, detailsId?: string): void => {
@@ -1182,7 +1182,7 @@ export const AssignmentDetailPage = ({
   const blockerItem =
     needsAttentionItems.find((item) => item.id !== "github-token-required") ??
     needsAttentionItems[0];
-  const primaryHeaderAction =
+  const primaryHeaderAction: PageHeaderAction | undefined =
     detail === null
       ? undefined
       : isBlocked
@@ -1191,6 +1191,7 @@ export const AssignmentDetailPage = ({
               blockerItem === undefined
                 ? "Review readiness checks"
                 : (BLOCKER_FIX_LABELS[blockerItem.id] ?? "Review readiness checks"),
+            variant: "blocked",
             onClick: () => revealExistingSection("assignment-readiness-title")
           }
         : detail.applyState.status === "applied" || detail.applyState.status === "partially_applied"
@@ -1255,7 +1256,8 @@ export const AssignmentDetailPage = ({
                 label: "Group settings",
                 caption: "Switch between individual and shared group repositories.",
                 disabled: groupConfig === null,
-                onSelect: () => revealExistingSection("repository-mode-title", ADVANCED_DETAILS_ID)
+                onSelect: () =>
+                  revealExistingSection("repository-mode-title", CONFIGURATION_AND_TOOLS_ID)
               },
               {
                 id: "student-access-page",
@@ -1296,7 +1298,8 @@ export const AssignmentDetailPage = ({
                 label: "Regenerate grading workflow",
                 caption: "View, edit, and push the grading workflow file.",
                 disabled: !detail.grading.enabled,
-                onSelect: () => revealExistingSection("grade-workflow-title", ADVANCED_DETAILS_ID)
+                onSelect: () =>
+                  revealExistingSection("grade-workflow-title", CONFIGURATION_AND_TOOLS_ID)
               },
               {
                 id: "manage-comment-library",
@@ -1392,17 +1395,9 @@ export const AssignmentDetailPage = ({
                 }
               ]
         }
+        {...(primaryHeaderAction === undefined ? {} : { primaryAction: primaryHeaderAction })}
         overflow={
           <>
-            {primaryHeaderAction === undefined ? null : (
-              <button
-                className={isBlocked ? "primary-action primary-action--blocked" : "primary-action"}
-                type="button"
-                onClick={primaryHeaderAction.onClick}
-              >
-                {primaryHeaderAction.label}
-              </button>
-            )}
             <span className="page-header__refresh">
               <button
                 className="page-header__refresh-button"
@@ -1620,12 +1615,12 @@ export const AssignmentDetailPage = ({
                   />
                 )}
                 <details
-                  className="detail-panel assignment-detail__advanced"
-                  id={ADVANCED_DETAILS_ID}
+                  className="detail-panel assignment-detail__configuration-and-tools"
+                  id={CONFIGURATION_AND_TOOLS_ID}
                 >
-                  <summary>Advanced details</summary>
+                  <summary>Configuration and tools</summary>
                   <TemplatePanel detail={detail} copyState={copyState} onCopy={handleCopy} />
-                  <GradingPanel detail={detail} copyState={copyState} onCopy={handleCopy} />
+                  <GradingPanel detail={detail} />
                   <GradeWorkflowPanel
                     detail={detail}
                     workflowResult={workflowResult}

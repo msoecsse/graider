@@ -85,7 +85,7 @@ describe("GradeWorkflowPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a draft editor once the workflow loads, and reports the fetched fields", () => {
+  it("shows a draft editor once the workflow loads without rendering the raw workflow path", () => {
     const workflowResult: TemplateWorkflowResult = {
       status: "success",
       repository: "graider-sandbox/csc1120L2Template",
@@ -115,6 +115,9 @@ describe("GradeWorkflowPanel", () => {
     expect(screen.getByRole("button", { name: "View workflow" })).toBeEnabled();
     expect(screen.getByLabelText("Grade workflow draft")).toHaveValue("name: Grade");
     expect(screen.getByRole("button", { name: "Preview save" })).toBeDisabled();
+    expect(screen.getByText("graider-sandbox/csc1120L2Template")).toBeInTheDocument();
+    expect(screen.queryByText("Workflow path")).toBeNull();
+    expect(screen.queryByText(".github/workflows/grade.yml")).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Grade workflow draft"), {
       target: { value: "name: Grade v2" }

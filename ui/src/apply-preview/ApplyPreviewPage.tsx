@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { copyTextToClipboard } from "../assignment-detail/assignmentDetailClipboard";
+import { copyTextToClipboard } from "../components/clipboard";
 import { OperationStatusBar } from "../components/OperationStatusBar";
 import {
   formatNullableValue,

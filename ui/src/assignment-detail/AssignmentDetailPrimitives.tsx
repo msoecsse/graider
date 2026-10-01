@@ -3,7 +3,7 @@ import { formatNullableValue, getDiagnosticCategory } from "./assignmentDetailRe
 import { formatStatusLabel, hasAttentionStatus } from "../components/statusLabels";
 import type { AssignmentDetailDiagnostic } from "./assignmentDetailTypes";
 
-export type CopyKey = "template-repository" | "workflow-path" | "canvas-link" | "publish-commands";
+export type CopyKey = "template-repository" | "canvas-link" | "publish-commands";
 
 export interface CopyState {
   readonly key: CopyKey;

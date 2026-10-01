@@ -1532,7 +1532,7 @@ describe("AssignmentDetailPage", () => {
     expect(within(section).getByText("s003")).toBeInTheDocument();
   });
 
-  it("renders the existing assignment panels with the repository list outside Advanced details", async () => {
+  it("renders the existing assignment panels with the repository list outside Configuration and tools", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(
         createAssignmentDetailResult(
@@ -1618,10 +1618,11 @@ describe("AssignmentDetailPage", () => {
     expect(insideDetails.getByText("LMS assignment ID")).toBeInTheDocument();
     expect(insideDetails.getByText("lms-123")).toBeInTheDocument();
 
-    const advancedDetails = screen.getByText("Advanced details").closest("details");
-    expect(advancedDetails).not.toBeNull();
+    const configurationAndTools = screen.getByText("Configuration and tools").closest("details");
+    expect(configurationAndTools).not.toBeNull();
+    expect(screen.queryByText("Advanced details")).toBeNull();
     expect(
-      within(advancedDetails as HTMLDetailsElement).queryByText(
+      within(configurationAndTools as HTMLDetailsElement).queryByText(
         `Assignment file: ${ASSIGNMENT_FILE}`
       )
     ).toBeNull();
@@ -1693,8 +1694,8 @@ describe("AssignmentDetailPage", () => {
     renderAssignmentDetailPage();
 
     const summary = await screen.findByLabelText("Grade status summary");
-    const advancedDetails = screen.getByText("Advanced details").closest("details");
-    expect(advancedDetails).not.toContainElement(summary);
+    const configurationAndTools = screen.getByText("Configuration and tools").closest("details");
+    expect(configurationAndTools).not.toContainElement(summary);
     expect(within(summary).getByText("s001")).toBeInTheDocument();
     expect(within(summary).getByText("Unknown student")).toBeInTheDocument();
     expect(within(summary).queryByText("ada.course")).toBeNull();
@@ -1959,7 +1960,7 @@ describe("AssignmentDetailPage", () => {
     expect(within(summary).getAllByText("No run link")).toHaveLength(3);
   });
 
-  it("copies assignment path, course folder path, template repository, and workflow path", async () => {
+  it("copies assignment path, course folder path, template repository, and the canonical workflow path", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
 
     mockClipboard(writeText);
@@ -1987,10 +1988,31 @@ describe("AssignmentDetailPage", () => {
       expect(writeText).toHaveBeenCalledWith("graider-sandbox/csc1120L2Template");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy workflow path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy Workflow path" }));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(".github/workflows/grade.yml");
     });
+  });
+
+  it("reveals and focuses configuration panels from the overflow menu", async () => {
+    mockGraiderUI({
+      getAssignmentDetail: vi.fn().mockResolvedValue(createAssignmentDetailResult())
+    });
+    renderAssignmentDetailPage();
+
+    await screen.findByRole("heading", { level: 1, name: "Lab 02" });
+    const configurationAndTools = screen.getByText("Configuration and tools").closest("details");
+    expect(configurationAndTools).not.toBeNull();
+    expect(screen.getAllByText("Technical details")).toHaveLength(1);
+
+    await openOverflowMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Group settings/u }));
+    expect(configurationAndTools).toHaveAttribute("open");
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Repository mode" }));
+
+    await openOverflowMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Regenerate grading workflow/u }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Grade workflow" }));
   });
 
   it("calls the grade preview entry point with current assignment detail", async () => {
