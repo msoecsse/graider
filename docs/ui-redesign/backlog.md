@@ -396,7 +396,7 @@ marked blocked on item 1.
 
 ---
 
-## 10. Small deferred behaviours — **Optional**
+## 10. Small deferred behaviours — **Resolved**
 
 - Publish review: if a per-student snapshot fetch fails, the row shows "Score
   unavailable" with no retry affordance. Student is still publishable.
@@ -404,6 +404,13 @@ marked blocked on item 1.
   be lost silently. Editing an existing comment's anchor is tracked.
 - `PageHeader`'s `.page-header__meta` uses a hardcoded font size rather than the
   PR1 type tokens. One line.
+
+Resolved: Publish review now offers a per-student Retry action for unavailable
+details, preserving selection and using per-student request generations so stale
+results cannot update a closed or superseded review. New source comments record
+their initial source target solely for dirty-state comparison while retaining
+their live canonical anchoring behavior. PageHeader metadata now uses
+`var(--font-size-body-sm)`.
 
 ---
 
@@ -496,7 +503,7 @@ settings or Grade workflow.
 
 ---
 
-## 15. `Sections` renders twice — **Optional**
+## 15. `Sections` renders twice — **Resolved**
 
 Once in the Assignment facts card, per section 5.3's explicit field list;
 once in the untouched Roster card, which already showed it before PR6b-1
@@ -510,6 +517,11 @@ reasonable place for it.
 
 Fix, if ever: drop it from one of the two cards. Low priority — it is not
 incorrect, just repeated.
+
+Resolved: Sections remains in Assignment facts, the canonical assignment-level
+location. The duplicate Roster row was removed and that card is now titled
+Roster while retaining its section, active-student, total-student, and
+unavailable-summary states.
 
 ---
 
@@ -1464,10 +1476,11 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 10, 12, 15, 27, 28, 33, 34, and 35.
+Actionable open items are 8, 12, 27, 28, 33, 34, and 35.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
-48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved.
+48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
+ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.
 
 Priority history after PR12-3: COMMENT-1 resolved item 41; COMMENT-2 through

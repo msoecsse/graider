@@ -1,6 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { GradingEditorViewState, GradingWorkspacePrepareRequest } from "../../electron/ipc";
+import type {
+  GradingEditorViewState,
+  GradingStudentSnapshotResult,
+  GradingWorkspacePrepareRequest
+} from "../../electron/ipc";
 
 vi.mock("./MonacoSourceViewer", () => ({
   MonacoSourceViewer: ({
@@ -165,6 +169,80 @@ const assertNoDuplicateAccessibleNames = (): void => {
 };
 
 describe("GradingWorkspacePage report publication", () => {
+  it("retries only an unavailable publish-review detail without changing selection", async () => {
+    const retry = deferred<GradingStudentSnapshotResult>();
+    let adaLoads = 0;
+    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) => {
+      if (studentId !== "ada") return Promise.resolve(studentSnapshot(studentId, "complete"));
+      adaLoads += 1;
+      if (adaLoads === 2) return Promise.resolve({ status: "repository_unavailable" });
+      if (adaLoads === 3) return retry.promise;
+      return Promise.resolve(studentSnapshot(studentId, "complete"));
+    });
+    configureApis({ loadSnapshot });
+    render(<GradingWorkspacePage request={REQUEST} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Publish 1 report" }));
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Select ada to publish")).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    expect(loadSnapshot.mock.calls.map(([value]) => value.studentId)).toEqual([
+      "ada",
+      "ada",
+      "ada"
+    ]);
+    expect(screen.getByLabelText("Select ada to publish")).toBeChecked();
+
+    await act(async () => retry.resolve(studentSnapshot("ada", "complete")));
+    expect(await screen.findByText("No rubric — enter a score manually")).toBeInTheDocument();
+    expect(screen.getByLabelText("Select ada to publish")).toBeChecked();
+  });
+
+  it("returns a failed retry to unavailable", async () => {
+    let adaLoads = 0;
+    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) => {
+      if (studentId !== "ada") return Promise.resolve(studentSnapshot(studentId, "complete"));
+      adaLoads += 1;
+      return Promise.resolve(
+        adaLoads === 1
+          ? studentSnapshot(studentId, "complete")
+          : { status: "repository_unavailable" }
+      );
+    });
+    configureApis({ loadSnapshot });
+    render(<GradingWorkspacePage request={REQUEST} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Publish 1 report" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByText("Score unavailable")).toBeInTheDocument();
+  });
+
+  it("returns a failed retry to unavailable and ignores its completion after publish review closes", async () => {
+    const retry = deferred<GradingStudentSnapshotResult>();
+    let adaLoads = 0;
+    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) => {
+      if (studentId !== "ada") return Promise.resolve(studentSnapshot(studentId, "complete"));
+      adaLoads += 1;
+      if (adaLoads === 2) return Promise.resolve({ status: "repository_unavailable" });
+      if (adaLoads === 3) return retry.promise;
+      return Promise.resolve(studentSnapshot(studentId, "complete"));
+    });
+    configureApis({ loadSnapshot });
+    render(<GradingWorkspacePage request={REQUEST} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Publish 1 report" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("heading", { name: "Publish review" })).not.toBeInTheDocument();
+
+    await act(async () => retry.resolve({ status: "repository_unavailable" }));
+    expect(screen.queryByText("Score unavailable")).not.toBeInTheDocument();
+  });
   it("shows publication controls only for Complete and Published students", async () => {
     configureApis({
       statuses: {

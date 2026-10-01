@@ -2,6 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GradingEditorViewState, GradingWorkspacePrepareRequest } from "../../electron/ipc";
 
+let updateCanonicalSourceSelection:
+  | ((target: { file: string; startLine: number; endLine: number }) => void)
+  | undefined;
+
 vi.mock("./MonacoSourceViewer", () => ({
   MonacoSourceViewer: ({
     annotations,
@@ -20,7 +24,11 @@ vi.mock("./MonacoSourceViewer", () => ({
     ) => void;
     studentId: string;
   }) => (
-    <div>
+    <div
+      ref={() => {
+        updateCanonicalSourceSelection = onCanonicalSelectionChange;
+      }}
+    >
       <div data-testid="mock-monaco">
         {studentId}:{model.combinedText}:
         {model.sections.map((section) => `${section.file}-${section.status}`).join(",")}:
@@ -262,6 +270,28 @@ const showAllStudents = async (): Promise<void> => {
 };
 
 describe("GradingWorkspacePage source viewer", () => {
+  it("treats a re-anchored new source comment as dirty but leaves an unchanged target clean", async () => {
+    setApis(vi.fn().mockResolvedValue(workspace()), vi.fn().mockResolvedValue(source("ada")));
+    render(<GradingWorkspacePage request={REQUEST} />);
+
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
+    expect(
+      screen.queryByRole("dialog", { name: "Discard the unsaved comment?" })
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Comment" }));
+    act(() =>
+      updateCanonicalSourceSelection?.({ file: "src/Main.java", startLine: 2, endLine: 5 })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
+    expect(
+      screen.getByRole("dialog", { name: "Discard the unsaved comment?" })
+    ).toBeInTheDocument();
+  });
+
   it("loads the first selected student using only canonical Slice 15 identity fields", async () => {
     const loadGradingStudentSource = vi.fn().mockResolvedValue(source("ada"));
     setApis(vi.fn().mockResolvedValue(workspace()), loadGradingStudentSource);

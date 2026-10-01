@@ -52,13 +52,14 @@ const createDetail = (
 });
 
 describe("RosterPanel", () => {
-  it("renders section list and roster counts", () => {
+  it("renders roster counts without duplicating the assignment section list", () => {
     render(<RosterPanel detail={createDetail()} />);
 
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Roster / Sections" })
-    ).toBeInTheDocument();
-    expect(screen.getByText("001, 002")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Roster" })).toBeInTheDocument();
+    expect(screen.queryByText("001, 002")).not.toBeInTheDocument();
+    expect(screen.getByText("Section count")).toBeInTheDocument();
+    expect(screen.getByText("Active students")).toBeInTheDocument();
+    expect(screen.getByText("Total students")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getAllByText("3")).toHaveLength(2);
   });

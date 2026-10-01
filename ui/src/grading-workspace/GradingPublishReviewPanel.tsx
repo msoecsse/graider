@@ -44,6 +44,7 @@ export const GradingPublishReviewPanel = ({
   onToggle,
   onCancel,
   onPublish,
+  onRetryDetail,
   running,
   refreshFailedStudentIds
 }: {
@@ -54,6 +55,7 @@ export const GradingPublishReviewPanel = ({
   readonly onToggle: (studentId: string, selected: boolean) => void;
   readonly onCancel: () => void;
   readonly onPublish: () => void;
+  readonly onRetryDetail: (studentId: string) => void;
   readonly running: boolean;
   readonly refreshFailedStudentIds: readonly string[];
 }): ReactElement => {
@@ -112,7 +114,18 @@ export const GradingPublishReviewPanel = ({
                       <label htmlFor={inputId}>{row.studentId}</label>
                     </th>
                     <td>Section {row.section}</td>
-                    <td>{detailScoreText(row.detail)}</td>
+                    <td>
+                      {detailScoreText(row.detail)}
+                      {row.detail.status !== "unavailable" ? null : (
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          onClick={() => onRetryDetail(row.studentId)}
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </td>
                     <td>{detailSummaryText(row.detail)}</td>
                     <td>
                       {row.outcome === undefined ? null : (

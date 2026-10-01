@@ -565,6 +565,7 @@ export const GradingWorkspacePage = ({
   const filterPillsContainerRef = useRef<HTMLDivElement>(null);
   const evidencePanelPriorFocusRef = useRef<HTMLElement | null>(null);
   const commentEditorBaseline = useRef<CommentEditorState | undefined>(undefined);
+  const commentEditorBaselineSourceTarget = useRef<CanonicalSourceRange | undefined>(undefined);
   const manualAdjustmentEditorBaseline = useRef<ManualAdjustmentEditorState | undefined>(undefined);
   const sourceRequestGeneration = useRef(0);
   const snapshotRequestGeneration = useRef(0);
@@ -575,6 +576,8 @@ export const GradingWorkspacePage = ({
   const reportPreviewRequestGeneration = useRef(0);
   const bulkPublicationRequestGeneration = useRef(0);
   const publishReviewDetailGeneration = useRef(0);
+  const publishReviewDetailRequestGenerations = useRef(new Map<string, number>());
+  const publishReviewOpenRef = useRef(false);
   const currentStudentId = isReady(result) ? result.students[selected]?.studentId : undefined;
   const currentStudentIdRef = useRef<string | undefined>(currentStudentId);
   const pendingViewStateSaves = useRef(new Map<string, GradingEditorViewState>());
@@ -1169,6 +1172,7 @@ export const GradingWorkspacePage = ({
     setCanonicalSourceTarget(undefined);
     setCommentEditor(undefined);
     commentEditorBaseline.current = undefined;
+    commentEditorBaselineSourceTarget.current = undefined;
     setDeleteConfirmation(undefined);
     setManualAdjustmentEditor(undefined);
     manualAdjustmentEditorBaseline.current = undefined;
@@ -1417,14 +1421,17 @@ export const GradingWorkspacePage = ({
   // For the comment editor, "unsaved changes" includes re-anchoring an edited
   // comment to different source lines (targetMode / sourceTarget), not just the
   // typed title, text, deduction, and rubric category.
-  const commentEditorContentKey = (editor: CommentEditorState): string =>
+  const commentEditorContentKey = (
+    editor: CommentEditorState,
+    newCommentSourceTarget: CanonicalSourceRange | undefined
+  ): string =>
     JSON.stringify([
       editor.title,
       editor.text,
       editor.deduction,
       editor.rubricCategoryId,
       editor.targetMode,
-      editor.operation === "edit" ? editor.sourceTarget : undefined
+      editor.operation === "edit" ? editor.sourceTarget : newCommentSourceTarget
     ]);
 
   const manualAdjustmentEditorContentKey = (editor: ManualAdjustmentEditorState): string =>
@@ -1437,8 +1444,11 @@ export const GradingWorkspacePage = ({
     commentEditor !== undefined &&
     gradingMutationStudentId !== commentEditor.studentId &&
     commentEditorBaseline.current !== undefined &&
-    commentEditorContentKey(commentEditor) !==
-      commentEditorContentKey(commentEditorBaseline.current);
+    commentEditorContentKey(commentEditor, canonicalSourceTarget) !==
+      commentEditorContentKey(
+        commentEditorBaseline.current,
+        commentEditorBaselineSourceTarget.current
+      );
 
   const hasUnsavedManualAdjustmentDraft = (): boolean =>
     manualAdjustmentEditor !== undefined &&
@@ -1450,6 +1460,7 @@ export const GradingWorkspacePage = ({
   const closeAllGradingPanels = (): void => {
     setCommentEditor(undefined);
     commentEditorBaseline.current = undefined;
+    commentEditorBaselineSourceTarget.current = undefined;
     setDeleteConfirmation(undefined);
     setManualAdjustmentEditor(undefined);
     manualAdjustmentEditorBaseline.current = undefined;
@@ -1520,6 +1531,7 @@ export const GradingWorkspacePage = ({
     requestPanelOpen(() => {
       setCommentEditor(nextEditor);
       commentEditorBaseline.current = nextEditor;
+      commentEditorBaselineSourceTarget.current = canonicalSourceTarget;
       setCommentWorkspaceMode("author");
     });
   };
@@ -1544,6 +1556,7 @@ export const GradingWorkspacePage = ({
     requestPanelOpen(() => {
       setCommentEditor(nextEditor);
       commentEditorBaseline.current = nextEditor;
+      commentEditorBaselineSourceTarget.current = canonicalSourceTarget;
       setCommentWorkspaceMode("author");
     });
   };
@@ -1562,6 +1575,7 @@ export const GradingWorkspacePage = ({
     requestPanelOpen(() => {
       setCommentEditor(nextEditor);
       commentEditorBaseline.current = nextEditor;
+      commentEditorBaselineSourceTarget.current = canonicalSourceTarget;
       setCommentWorkspaceMode("author");
     });
   };
@@ -1583,6 +1597,7 @@ export const GradingWorkspacePage = ({
     requestPanelOpen(() => {
       setCommentEditor(nextEditor);
       commentEditorBaseline.current = nextEditor;
+      commentEditorBaselineSourceTarget.current = canonicalSourceTarget;
       setCommentWorkspaceMode("author");
     });
   };
@@ -1607,6 +1622,7 @@ export const GradingWorkspacePage = ({
         );
       setCommentEditor(undefined);
       commentEditorBaseline.current = undefined;
+      commentEditorBaselineSourceTarget.current = undefined;
       setLibraryEditor(undefined);
       setLibraryMutationMessage(undefined);
       setGradingMutationError(undefined);
@@ -2317,12 +2333,65 @@ export const GradingWorkspacePage = ({
     }
   };
 
+  const fetchPublishReviewDetail = useCallback(
+    async (
+      studentId: string,
+      reviewGeneration: number,
+      loadingAlreadySet = false
+    ): Promise<void> => {
+      const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
+      if (loadSnapshot === undefined) {
+        setPublishReviewDetails((current) => ({
+          ...current,
+          [studentId]: { status: "unavailable" }
+        }));
+        return;
+      }
+      const requestGeneration =
+        (publishReviewDetailRequestGenerations.current.get(studentId) ?? 0) + 1;
+      publishReviewDetailRequestGenerations.current.set(studentId, requestGeneration);
+      if (!loadingAlreadySet)
+        setPublishReviewDetails((current) => ({
+          ...current,
+          [studentId]: { status: "loading" }
+        }));
+      const isCurrentFetch = (): boolean =>
+        mounted.current &&
+        publishReviewOpenRef.current &&
+        publishReviewDetailGeneration.current === reviewGeneration &&
+        publishReviewDetailRequestGenerations.current.get(studentId) === requestGeneration;
+      try {
+        const value = await loadSnapshot({ ...request, studentId });
+        if (!isCurrentFetch()) return;
+        setPublishReviewDetails((current) => ({
+          ...current,
+          [studentId]:
+            value.status === "success"
+              ? {
+                  status: "success",
+                  scoreLabel: scoreSummaryLabel(value.grade),
+                  summaryLabel: reportContentSummaryLabel(value)
+                }
+              : { status: "unavailable" }
+        }));
+      } catch {
+        if (!isCurrentFetch()) return;
+        setPublishReviewDetails((current) => ({
+          ...current,
+          [studentId]: { status: "unavailable" }
+        }));
+      }
+    },
+    [request]
+  );
+
   const openPublishReview = (): void => {
     requestPanelOpen(() => {
       void flushPendingViewState(currentStudentId);
       setPublishReviewResults(undefined);
       setPublishReviewRefreshFailedStudentIds([]);
       setPublishReviewSelectedIds(publishReviewReadyEntries.map((entry) => entry.studentId));
+      publishReviewOpenRef.current = true;
       setPublishReviewOpen(true);
     });
   };
@@ -2332,6 +2401,7 @@ export const GradingWorkspacePage = ({
     // Invalidates the in-flight detail-fetch generation so workers stop claiming
     // queued student ids instead of draining the whole batch for a closed screen.
     publishReviewDetailGeneration.current += 1;
+    publishReviewOpenRef.current = false;
     setPublishReviewDetails((current) => {
       const abandonedStudentIds = Object.entries(current)
         .filter(([, detail]) => detail.status === "loading")
@@ -2352,6 +2422,10 @@ export const GradingWorkspacePage = ({
           : [...current, studentId]
         : current.filter((candidate) => candidate !== studentId)
     );
+  };
+
+  const retryPublishReviewDetail = (studentId: string): void => {
+    void fetchPublishReviewDetail(studentId, publishReviewDetailGeneration.current);
   };
 
   const runPublishReview = async (): Promise<void> => {
@@ -2444,8 +2518,6 @@ export const GradingWorkspacePage = ({
 
   useEffect(() => {
     if (!publishReviewOpen) return;
-    const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
-    if (loadSnapshot === undefined) return;
     const missingIds = publishReviewReadyEntries
       .map((entry) => entry.studentId)
       .filter((studentId) => publishReviewDetails[studentId] === undefined);
@@ -2459,33 +2531,10 @@ export const GradingWorkspacePage = ({
       });
       return next;
     });
-
     const isCurrentFetch = (): boolean =>
-      mounted.current && publishReviewDetailGeneration.current === generation;
-
-    const fetchOne = async (studentId: string): Promise<void> => {
-      try {
-        const value = await loadSnapshot({ ...request, studentId });
-        if (!isCurrentFetch()) return;
-        setPublishReviewDetails((current) => ({
-          ...current,
-          [studentId]:
-            value.status === "success"
-              ? {
-                  status: "success",
-                  scoreLabel: scoreSummaryLabel(value.grade),
-                  summaryLabel: reportContentSummaryLabel(value)
-                }
-              : { status: "unavailable" }
-        }));
-      } catch {
-        if (!isCurrentFetch()) return;
-        setPublishReviewDetails((current) => ({
-          ...current,
-          [studentId]: { status: "unavailable" }
-        }));
-      }
-    };
+      mounted.current &&
+      publishReviewOpenRef.current &&
+      publishReviewDetailGeneration.current === generation;
 
     // Bounds concurrent git-backed snapshot fetches: each worker claims the next
     // queued student id only after its previous fetch resolves, so at most
@@ -2503,14 +2552,19 @@ export const GradingWorkspacePage = ({
         studentId !== undefined && isCurrentFetch();
         studentId = claimNextQueuedStudentId()
       ) {
-        await fetchOne(studentId);
+        await fetchPublishReviewDetail(studentId, generation, true);
       }
     };
     const workerCount = Math.min(PUBLISH_REVIEW_DETAIL_CONCURRENCY, missingIds.length);
     for (let worker = 0; worker < workerCount; worker += 1) {
       void runDetailFetchWorker();
     }
-  }, [publishReviewOpen, publishReviewReadyEntries, publishReviewDetails, request]);
+  }, [
+    fetchPublishReviewDetail,
+    publishReviewOpen,
+    publishReviewReadyEntries,
+    publishReviewDetails
+  ]);
 
   const currentEffectiveStatus =
     snapshot.status === "success"
@@ -2885,6 +2939,7 @@ export const GradingWorkspacePage = ({
           onToggle={togglePublishReviewSelection}
           onCancel={cancelPublishReview}
           onPublish={() => void runPublishReview()}
+          onRetryDetail={retryPublishReviewDetail}
           running={publishReviewRunning}
           refreshFailedStudentIds={publishReviewRefreshFailedStudentIds}
         />

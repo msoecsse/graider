@@ -1580,9 +1580,8 @@ describe("AssignmentDetailPage", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Assignment facts" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Template" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Grading" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Roster / Sections" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Roster" })).toBeInTheDocument();
+    expect(screen.getAllByText("001, 002")).toHaveLength(1);
     const summaryHeading = await screen.findByRole("heading", {
       level: 2,
       name: "Grade status summary"
