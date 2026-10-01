@@ -277,13 +277,21 @@ both suites unchanged (1024 root / 718 UI), no test needed changing.
 
 ---
 
-## 5. `globals.css` is a single 2,982-line file — **Worth fixing**
+## 5. `globals.css` is a single 2,982-line file — **Resolved**
 
 Up from 2,105 at the start of the redesign, a 42% increase, with five more
 screens still to come.
 
 Fix: split by screen or by concern, keeping the token block as the single
 source of truth. Best done at a natural boundary rather than mid-screen.
+
+Resolved: before this refactor, the stylesheet had grown from the historical
+2,982-line count to 3,680 lines (approximately 3,681 under the prior counting
+convention). It is now an ordered `globals.css` entry point importing five
+contiguous focused fragments. The design-token block remains defined once in
+the foundation fragment; reconstruction of the imported fragments preserves the
+prior stylesheet's source order and contents, apart from formatter-required
+blank whitespace at fragment boundaries.
 
 ---
 
@@ -1456,7 +1464,7 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 5, 8, 10, 12, 15, 27, 28, 33, 34, and 35.
+Actionable open items are 8, 10, 12, 15, 27, 28, 33, 34, and 35.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, and ITEM-51-BUG-1 are resolved.
