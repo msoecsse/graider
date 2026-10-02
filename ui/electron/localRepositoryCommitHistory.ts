@@ -1,4 +1,9 @@
-import { runLocalGit, type LocalGitReader } from "./localRepositoryHead.js";
+import {
+  getSystemGitWorkspaceFactory,
+  type GitCommitSummary,
+  type GitWorkspaceReader,
+  type GitWorkspaceReaderFactory
+} from "./gitWorkspaceReader.js";
 
 export const MAX_GRADING_COMMIT_HISTORY_COUNT = 10;
 const COMMIT_SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu;
@@ -6,7 +11,6 @@ const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/gu;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu;
-const LOG_FORMAT = "%H%x00%cI%x00%s%x00";
 
 export interface GradingCommitDto {
   readonly sha: string;
@@ -19,16 +23,13 @@ export type LocalRepositoryCommitHistoryResult =
   | { readonly status: "submission_commit_unavailable" }
   | { readonly status: "commit_history_unavailable" };
 
-const parseCommitHistory = (stdout: string): readonly GradingCommitDto[] | null => {
-  if (stdout === "") return null;
-  const fields = stdout.split("\u0000");
-  const trailing = fields.pop();
-  if (trailing === undefined || trailing.trim() !== "" || fields.length % 3 !== 0) return null;
+const mapCommitHistory = (
+  summaries: readonly GitCommitSummary[]
+): readonly GradingCommitDto[] | null => {
+  if (summaries.length === 0) return null;
   const commits: GradingCommitDto[] = [];
-  for (let index = 0; index < fields.length; index += 3) {
-    const sha = fields[index]?.replace(/^\r?\n/u, "") ?? "";
-    const committedAt = fields[index + 1] ?? "";
-    const message = fields[index + 2] ?? "";
+  for (const summary of summaries.slice(0, MAX_GRADING_COMMIT_HISTORY_COUNT)) {
+    const { id: sha, committedAt, subject } = summary;
     if (
       !COMMIT_SHA_PATTERN.test(sha) ||
       !ISO_TIMESTAMP_PATTERN.test(committedAt) ||
@@ -38,38 +39,38 @@ const parseCommitHistory = (stdout: string): readonly GradingCommitDto[] | null 
     commits.push({
       sha,
       committedAt,
-      message: message.replace(ANSI_ESCAPE_PATTERN, "").replace(CONTROL_CHARACTER_PATTERN, "")
+      message: subject.replace(ANSI_ESCAPE_PATTERN, "").replace(CONTROL_CHARACTER_PATTERN, "")
     });
   }
-  return commits.length === 0 ? null : commits.slice(0, MAX_GRADING_COMMIT_HISTORY_COUNT);
+  return commits;
 };
 
 export const createLocalRepositoryCommitHistoryReader =
-  (runGit: LocalGitReader = runLocalGit) =>
+  (factory?: GitWorkspaceReaderFactory) =>
   async (
     repositoryRoot: string,
     submissionCommitSha: string
   ): Promise<LocalRepositoryCommitHistoryResult> => {
     if (!COMMIT_SHA_PATTERN.test(submissionCommitSha))
       return { status: "submission_commit_unavailable" };
+    let workspace: GitWorkspaceReader;
+    let resolvedSubmissionCommitSha: string;
     try {
-      await runGit(repositoryRoot, ["cat-file", "-e", `${submissionCommitSha}^{commit}`]);
+      workspace = await (factory ?? getSystemGitWorkspaceFactory()).open(repositoryRoot);
+      resolvedSubmissionCommitSha = await workspace.resolveRevision(submissionCommitSha);
     } catch {
       return { status: "submission_commit_unavailable" };
     }
-    let stdout: string;
+    let summaries: readonly GitCommitSummary[];
     try {
-      stdout = await runGit(repositoryRoot, [
-        "log",
-        `--max-count=${MAX_GRADING_COMMIT_HISTORY_COUNT}`,
-        `--format=${LOG_FORMAT}`,
-        submissionCommitSha,
-        "--"
-      ]);
+      summaries = await workspace.listCommits({
+        anchor: resolvedSubmissionCommitSha,
+        maximumCount: MAX_GRADING_COMMIT_HISTORY_COUNT
+      });
     } catch {
       return { status: "commit_history_unavailable" };
     }
-    const commits = parseCommitHistory(stdout);
+    const commits = mapCommitHistory(summaries);
     return commits === null || commits[0]?.sha.toLowerCase() !== submissionCommitSha.toLowerCase()
       ? { status: "commit_history_unavailable" }
       : { status: "success", commits };

@@ -3,6 +3,9 @@ import { build } from "tsup";
 
 await build({
   entry: {
+    systemGitWorkspaceBackend: fileURLToPath(
+      new URL("../../src/git/system-git-workspace-context.ts", import.meta.url)
+    ),
     assignmentTemplateSyncBackend: fileURLToPath(
       new URL("../../src/template-sync/assignment-template-sync-context.ts", import.meta.url)
     ),
