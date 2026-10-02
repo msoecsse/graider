@@ -129,4 +129,30 @@ describe("studentRepositoryAccessPagePublishService", () => {
     expect(result.status).toBe("failure");
     expect(result.diagnostics[0]?.message).toMatch(/Git reported:.*fatal:/u);
   });
+
+  it("publishes new clone scripts and removals of stale ones alongside the access page", async () => {
+    const root = createFixture();
+    const remote = path.join(root, "remotes", "csc1120", "csc1120pages");
+    git(pagesRoot(root), ["remote", "set-url", "origin", remote.replaceAll("\\", "/")]);
+    const directory = path.dirname(path.join(pagesRoot(root), outputPath));
+    const staleScript = "terms/27s1/notifications/lab02/clone-csc1120-999.py";
+    const newScript = "terms/27s1/notifications/lab02/clone-csc1120-001.py";
+    fs.writeFileSync(path.join(pagesRoot(root), staleScript), "stale\n", "utf8");
+    git(pagesRoot(root), ["add", staleScript]);
+    git(pagesRoot(root), ["commit", "-m", "Add stale script"]);
+    git(pagesRoot(root), ["push"]);
+    fs.unlinkSync(path.join(pagesRoot(root), staleScript));
+    fs.writeFileSync(path.join(directory, "clone-csc1120-001.py"), "new\n", "utf8");
+    fs.writeFileSync(path.join(directory, "clone-csc1120-001.sh"), "legacy\n", "utf8");
+
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+
+    expect(result.status).toBe("success");
+    expect(
+      git(pagesRoot(root), ["show", "--format=", "--name-status", "HEAD"]).split("\n").sort()
+    ).toEqual([`A\t${newScript}`, `D\t${staleScript}`, `M\t${outputPath}`]);
+    expect(git(pagesRoot(root), ["status", "--porcelain"])).toBe(
+      "?? terms/27s1/notifications/lab02/clone-csc1120-001.sh"
+    );
+  });
 });

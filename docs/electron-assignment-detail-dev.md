@@ -94,13 +94,27 @@ repository. Missing active-student repository URLs are excluded from the
 generated page and reported to faculty. The standalone action is retained only
 to regenerate after correcting roster, repository-link, or Pages configuration.
 
+Generation also writes one Python clone script per section beside the page,
+named `clone-<course-code>-<section>.py` (lowercase), and links each section
+heading to its script with a `download` link. The script clones each included
+student's repository into a folder named after the MSOE username in the current
+directory, skipping folders that already exist. It runs a non-interactive
+`git ls-remote` over SSH against the section's first repository and falls back
+to HTTPS for every repository when that fails. SSH URLs are derived from the
+manifest's HTTPS repository URLs. Stale `clone-*.py` files in the assignment's
+notifications folder are removed on regeneration; other files, including older
+`.sh` scripts, are left alone. When the course code or section cannot form a
+safe file name, the heading is plain text and no script is written.
+
 The same panel also performs local publish-readiness checks against
 the selected Pages clone: page existence, git repository/branch/upstream
 detection, uncommitted access-page changes, and local commits ahead of upstream.
 It never checks GitHub Pages over the network and cannot guarantee the page is
 live. When readiness is `uncommitted` or `unpushed`, the faculty member may
 explicitly open a review and confirm **Publish Student Access Page**. Narrow
-main-process IPC rechecks readiness, runs fixed `git add -- <generated-page>`,
+main-process IPC rechecks readiness, runs fixed
+`git add -- <generated-page> [<notifications-folder>/clone-*.py]` (the script
+pathspec is included only when matching scripts exist or are tracked),
 `git commit -m <deterministic-message>`, and `git push` argv only, and never
 stages unrelated files. No generic Git or command IPC is exposed. Publishing
 the course/admin repository remains separate.

@@ -232,6 +232,16 @@ The page lists MSOE usernames (`student_id`) and repository links only. It does
 not list names, emails, grades, roster statuses, or diagnostics. Students find
 their MSOE username and select **Open repository**.
 
+Each section heading on the page (for example, **Section 121**) downloads a
+Python script named `clone-<course-code>-<section>.py`, such as
+`clone-swe4211-121.py`. Run it with `python3` (or `python` or `py` on Windows)
+from the folder that should hold the repositories. It clones each repository in
+that section into a folder named after the student's MSOE username, and skips
+any folder that already exists. The script first tries SSH against the section's
+first repository and uses HTTPS for every repository if SSH does not work.
+Scripts are written next to the page whenever it is generated, and scripts for
+sections that no longer appear are removed.
+
 For example:
 
 ```text
@@ -248,7 +258,7 @@ review **Publish readiness**:
 | -------------------- | -------------------------------------------------------------------------------------------------- |
 | Not generated        | Apply the assignment, or regenerate the access page after correcting its inputs.                   |
 | Not a git repository | Select the intended local Pages repository clone; Graider cannot assess publishing here.           |
-| Uncommitted          | Choose **Publish Student Access Page**, review the single page-file change, then confirm.          |
+| Uncommitted          | Choose **Publish Student Access Page**, review the page and clone-script changes, then confirm.    |
 | No upstream          | Configure/push an upstream branch using the displayed manual command.                              |
 | Behind upstream      | Pull, rebase, or otherwise synchronize the local Pages repository before publishing.               |
 | Unpushed             | Choose **Publish Student Access Page**, then confirm the push.                                     |
@@ -256,7 +266,8 @@ review **Publish readiness**:
 | Ready to publish     | Local file, commit, and push checks look ready. Confirm Pages is enabled before posting in Canvas. |
 
 **Publish Student Access Page** is always explicit and requires a review before
-it runs. It stages only the generated page for the current assignment, commits
+it runs. It stages only the generated page and section clone scripts for the
+current assignment, commits
 it with a predictable message, and pushes the current upstream branch; it never
 stages unrelated Pages-repository files. Suggested commands remain available
 for manual troubleshooting. Readiness is local-only: Graider does not verify
