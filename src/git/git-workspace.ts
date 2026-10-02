@@ -1,14 +1,20 @@
 const COMMIT_OBJECT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu;
 const FIRST_CONTROL_CODE_POINT = 32;
 const DELETE_CODE_POINT = 127;
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[A-Za-z]:\//u;
+const REMOTE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
 
 export type ObjectId = string & { readonly __objectId: unique symbol };
 export type ExactCommitRevision = string & { readonly __exactCommitRevision: unique symbol };
+export type RelativeGitPath = string & { readonly __relativeGitPath: unique symbol };
+export type RemoteName = string & { readonly __remoteName: unique symbol };
 
 export type GitOperationName =
   | "verify_available"
   | "clone"
   | "open"
+  | "inspect"
+  | "remote_url"
   | "resolve_head"
   | "resolve_revision"
   | "list_commits";
@@ -57,6 +63,52 @@ export interface GitCommitSummary {
   readonly subject: string;
 }
 
+export type PathChangeKind =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "type_changed"
+  | "other";
+
+export interface PathChange {
+  readonly kind: PathChangeKind;
+  readonly path: RelativeGitPath;
+  readonly originalPath?: RelativeGitPath;
+}
+
+export interface ConflictPath {
+  readonly path: RelativeGitPath;
+  readonly indexStatus: string;
+  readonly workingTreeStatus: string;
+}
+
+export interface RepositoryState {
+  readonly kind: "repository";
+  readonly root: string;
+  readonly head:
+    | { readonly kind: "unborn"; readonly branch: string | null }
+    | { readonly kind: "attached"; readonly branch: string; readonly commit: ObjectId }
+    | { readonly kind: "detached"; readonly commit: ObjectId };
+  readonly workingTree: {
+    readonly trackedChanges: readonly PathChange[];
+    readonly stagedChanges: readonly PathChange[];
+    readonly untrackedPaths: readonly RelativeGitPath[];
+    readonly conflicts: readonly ConflictPath[];
+  };
+  readonly upstream:
+    | { readonly kind: "missing" }
+    | {
+        readonly kind: "configured";
+        readonly remote: RemoteName | null;
+        readonly branch: string;
+        readonly ahead: number;
+        readonly behind: number;
+        readonly relation: "current" | "ahead" | "behind" | "diverged";
+      };
+}
+
 export interface CommitHistoryRequest {
   readonly anchor: ObjectId;
   readonly maximumCount: number;
@@ -72,6 +124,8 @@ export interface CloneRequest {
 
 export interface GitWorkspaceReader {
   readonly root: string;
+  inspect(options?: { readonly paths?: readonly RelativeGitPath[] }): Promise<RepositoryState>;
+  remoteUrl(remote: RemoteName): Promise<string | null>;
   resolveHead(): Promise<ObjectId>;
   resolveRevision(revision: ExactCommitRevision): Promise<ObjectId>;
   listCommits(request: CommitHistoryRequest): Promise<readonly GitCommitSummary[]>;
@@ -106,3 +160,30 @@ export const createTrustedGitRemote = (value: string): TrustedGitRemote | null =
   });
   return value.length > 0 && !hasControlCharacter ? (value as TrustedGitRemote) : null;
 };
+
+const hasControlCharacter = (value: string): boolean =>
+  Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return (
+      codePoint === undefined ||
+      codePoint < FIRST_CONTROL_CODE_POINT ||
+      codePoint === DELETE_CODE_POINT
+    );
+  });
+
+export const createRelativeGitPath = (value: string): RelativeGitPath | null => {
+  const normalized = value.replaceAll("\\", "/");
+  const parts = normalized.split("/");
+  return normalized.length > 0 &&
+    !normalized.startsWith("/") &&
+    !WINDOWS_ABSOLUTE_PATH_PATTERN.test(normalized) &&
+    !hasControlCharacter(normalized) &&
+    parts.every((part) => part.length > 0 && part !== "." && part !== "..")
+    ? (normalized as RelativeGitPath)
+    : null;
+};
+
+export const createRemoteName = (value: string): RemoteName | null =>
+  REMOTE_NAME_PATTERN.test(value) && !value.startsWith("-") && !value.includes("..")
+    ? (value as RemoteName)
+    : null;

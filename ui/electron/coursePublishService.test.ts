@@ -2,10 +2,15 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { publishSuccessfulCourseMutation } from "./courseMutationPublicationService";
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService";
+import {
+  createRelativeGitPath,
+  type GitRepositoryState,
+  type GitWorkspaceInspectionFactory
+} from "./gitWorkspaceReader";
 import { removeRoster } from "./rosterManagerService";
 
 const git = (root: string, arguments_: readonly string[]): string =>
@@ -306,5 +311,138 @@ describe("coursePublishService", () => {
     expect(git(remote, ["show", "main:.graider/grading/comments.json"])).not.toContain(
       "Faculty B comment"
     );
+  });
+});
+
+describe("course publish semantic status projection", () => {
+  const existingFolder = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-status-"));
+  const changedPath = (value: string) => {
+    const trusted = createRelativeGitPath(value);
+    if (trusted === null) throw new Error("Expected a trusted fixture path.");
+    return trusted;
+  };
+  const state = (overrides: Partial<GitRepositoryState> = {}): GitRepositoryState => ({
+    kind: "repository",
+    root: "/canonical/course",
+    head: { kind: "attached", branch: "main", commit: "a".repeat(40) },
+    workingTree: {
+      trackedChanges: [],
+      stagedChanges: [],
+      untrackedPaths: [],
+      conflicts: []
+    },
+    upstream: {
+      kind: "configured",
+      remote: "origin",
+      branch: "origin/main",
+      ahead: 0,
+      behind: 0,
+      relation: "current"
+    },
+    ...overrides
+  });
+  const factory = (
+    inspection: Awaited<ReturnType<GitWorkspaceInspectionFactory["inspect"]>>,
+    repositoryState = state()
+  ): GitWorkspaceInspectionFactory => ({
+    inspect: vi.fn().mockResolvedValue(inspection),
+    open: vi.fn().mockResolvedValue({
+      root: repositoryState.root,
+      inspect: vi.fn().mockResolvedValue(repositoryState),
+      remoteUrl: vi.fn()
+    })
+  });
+
+  it("preserves missing-folder and semantic non-repository outcomes", async () => {
+    const missing = path.join(os.tmpdir(), `missing-course-${String(Date.now())}`);
+    const unused = factory({ kind: "not_repository" });
+    const missingResult = await getCoursePublishStatus(missing, unused);
+    expect(missingResult).toMatchObject({
+      status: "failure",
+      courseFolderPath: path.resolve(missing),
+      currentBranch: null,
+      upstreamBranch: null,
+      aheadCount: null,
+      allowedChangedFiles: [],
+      unrelatedChangedFiles: []
+    });
+    expect(unused.inspect).not.toHaveBeenCalled();
+
+    const root = existingFolder();
+    const result = await getCoursePublishStatus(root, factory({ kind: "not_repository" }));
+    expect(result.status).toBe("not_git_repo");
+  });
+
+  it("projects allowed, unrelated, staged, untracked, and deleted paths without duplicates", async () => {
+    const root = existingFolder();
+    const course = changedPath("course.yml");
+    const roster = changedPath("terms/27s1/rosters/section-001.csv");
+    const notes = changedPath("notes.txt");
+    const repositoryState = state({
+      workingTree: {
+        trackedChanges: [
+          { kind: "modified", path: course },
+          { kind: "deleted", path: roster },
+          { kind: "modified", path: notes }
+        ],
+        stagedChanges: [{ kind: "modified", path: course }],
+        untrackedPaths: [course],
+        conflicts: []
+      }
+    });
+
+    const result = await getCoursePublishStatus(
+      root,
+      factory({ kind: "repository", root }, repositoryState)
+    );
+
+    expect(result.status).toBe("changes_pending");
+    expect(result.allowedChangedFiles).toEqual([
+      "course.yml",
+      "terms/27s1/rosters/section-001.csv"
+    ]);
+    expect(result.unrelatedChangedFiles).toEqual(["notes.txt"]);
+  });
+
+  it("preserves no-upstream, ahead, clean, detached, and inspection-failure mappings", async () => {
+    const root = existingFolder();
+    const opened = { kind: "repository" as const, root };
+    await expect(
+      getCoursePublishStatus(root, factory(opened, state({ upstream: { kind: "missing" } })))
+    ).resolves.toMatchObject({ status: "no_upstream", currentBranch: "main" });
+    await expect(
+      getCoursePublishStatus(
+        root,
+        factory(
+          opened,
+          state({
+            upstream: {
+              kind: "configured",
+              remote: "origin",
+              branch: "origin/main",
+              ahead: 1,
+              behind: 0,
+              relation: "ahead"
+            }
+          })
+        )
+      )
+    ).resolves.toMatchObject({ status: "unpushed", aheadCount: 1 });
+    await expect(getCoursePublishStatus(root, factory(opened))).resolves.toMatchObject({
+      status: "up_to_date",
+      aheadCount: 0
+    });
+    await expect(
+      getCoursePublishStatus(
+        root,
+        factory(opened, state({ head: { kind: "detached", commit: "a".repeat(40) } }))
+      )
+    ).resolves.toMatchObject({ status: "failure", currentBranch: null });
+
+    const rejected = factory(opened);
+    vi.mocked(rejected.open).mockRejectedValueOnce(new Error("private raw failure"));
+    const failed = await getCoursePublishStatus(root, rejected);
+    expect(failed.status).toBe("failure");
+    expect(failed.diagnostics.map(({ message }) => message).join(" ")).not.toContain("private");
   });
 });

@@ -4,12 +4,19 @@ import { realpath, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import {
   GitError,
+  createRelativeGitPath,
+  createRemoteName,
   isObjectId,
   type CommitHistoryRequest,
   type ExactCommitRevision,
   type GitCommitSummary,
   type CloneRequest,
   type GitOperationName,
+  type PathChange,
+  type PathChangeKind,
+  type RelativeGitPath,
+  type RemoteName,
+  type RepositoryState,
   type GitWorkspaceFactory,
   type GitWorkspaceReader,
   type ObjectId,
@@ -22,6 +29,10 @@ const MAX_COMMIT_HISTORY_COUNT = 100;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;
 const LOG_FORMAT = "%H%x00%cI%x00%s%x00";
+const STATUS_RECORD_PATTERN = /^1 ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ (.*)$/su;
+const RENAME_RECORD_PATTERN = /^2 ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ (.*)$/su;
+const CONFLICT_RECORD_PATTERN =
+  /^u ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ (.*)$/su;
 
 class SystemGitFailure extends Error {
   readonly code: unknown;
@@ -126,6 +137,107 @@ const parseCommitHistory = (stdout: string): readonly GitCommitSummary[] => {
   return commits;
 };
 
+const requireRelativePath = (value: string): RelativeGitPath => {
+  const path = createRelativeGitPath(value);
+  if (path === null) throw new GitError("unknown_engine_failure", "inspect");
+  return path;
+};
+
+const changeKind = (status: string): PathChangeKind => {
+  if (status === "A") return "added";
+  if (status === "M") return "modified";
+  if (status === "D") return "deleted";
+  if (status === "R") return "renamed";
+  if (status === "C") return "copied";
+  if (status === "T") return "type_changed";
+  return "other";
+};
+
+interface ParsedStatus {
+  readonly headOid: string | null;
+  readonly branch: string | null;
+  readonly upstreamBranch: string | null;
+  readonly ahead: number | null;
+  readonly behind: number | null;
+  readonly workingTree: RepositoryState["workingTree"];
+}
+
+const parseStatus = (stdout: string): ParsedStatus => {
+  let headOid: string | null = null;
+  let branch: string | null = null;
+  let upstreamBranch: string | null = null;
+  let ahead: number | null = null;
+  let behind: number | null = null;
+  const trackedChanges: PathChange[] = [];
+  const stagedChanges: PathChange[] = [];
+  const untrackedPaths: RelativeGitPath[] = [];
+  const conflicts: RepositoryState["workingTree"]["conflicts"][number][] = [];
+  const records = stdout.split("\u0000");
+  const trailing = records.pop();
+  if (trailing !== "") throw new GitError("unknown_engine_failure", "inspect");
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    if (record.startsWith("# branch.oid ")) headOid = record.slice("# branch.oid ".length);
+    else if (record.startsWith("# branch.head ")) {
+      const value = record.slice("# branch.head ".length);
+      branch = value === "(detached)" ? null : value;
+    } else if (record.startsWith("# branch.upstream "))
+      upstreamBranch = record.slice("# branch.upstream ".length);
+    else if (record.startsWith("# branch.ab ")) {
+      const match = record.match(/^# branch\.ab \+(\d+) -(\d+)$/u);
+      if (match === null) throw new GitError("unknown_engine_failure", "inspect");
+      ahead = Number(match[1]);
+      behind = Number(match[2]);
+    } else if (record.startsWith("? ")) untrackedPaths.push(requireRelativePath(record.slice(2)));
+    else if (record.startsWith("u ")) {
+      const match = record.match(CONFLICT_RECORD_PATTERN);
+      if (match === null) throw new GitError("unknown_engine_failure", "inspect");
+      conflicts.push({
+        path: requireRelativePath(match[2] ?? ""),
+        indexStatus: match[1]?.[0] ?? "U",
+        workingTreeStatus: match[1]?.[1] ?? "U"
+      });
+    } else if (record.startsWith("1 ") || record.startsWith("2 ")) {
+      const renamed = record.startsWith("2 ");
+      const match = record.match(renamed ? RENAME_RECORD_PATTERN : STATUS_RECORD_PATTERN);
+      if (match === null) throw new GitError("unknown_engine_failure", "inspect");
+      const statuses = match[1] ?? "..";
+      const path = requireRelativePath(match[2] ?? "");
+      let originalPath: RelativeGitPath | undefined;
+      if (renamed) {
+        index += 1;
+        originalPath = requireRelativePath(records[index] ?? "");
+      }
+      const toChange = (status: string): PathChange =>
+        originalPath === undefined
+          ? { kind: changeKind(status), path }
+          : { kind: changeKind(status), path, originalPath };
+      if (statuses[0] !== ".") stagedChanges.push(toChange(statuses[0] ?? "."));
+      if (statuses[1] !== ".") trackedChanges.push(toChange(statuses[1] ?? "."));
+    } else if (!record.startsWith("# ")) throw new GitError("unknown_engine_failure", "inspect");
+  }
+
+  return {
+    headOid,
+    branch,
+    upstreamBranch,
+    ahead,
+    behind,
+    workingTree: { trackedChanges, stagedChanges, untrackedPaths, conflicts }
+  };
+};
+
+const relationForCounts = (
+  ahead: number,
+  behind: number
+): "current" | "ahead" | "behind" | "diverged" => {
+  if (ahead > 0 && behind > 0) return "diverged";
+  if (ahead > 0) return "ahead";
+  if (behind > 0) return "behind";
+  return "current";
+};
+
 class SystemGitWorkspace implements GitWorkspaceReader {
   readonly root: string;
 
@@ -134,6 +246,70 @@ class SystemGitWorkspace implements GitWorkspaceReader {
     private readonly runGit: SystemGitRunner = runSystemGit
   ) {
     this.root = root;
+  }
+
+  async inspect(options?: {
+    readonly paths?: readonly RelativeGitPath[];
+  }): Promise<RepositoryState> {
+    try {
+      const arguments_ = ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"];
+      if (options?.paths !== undefined && options.paths.length > 0)
+        arguments_.push("--", ...options.paths);
+      const status = parseStatus(await this.runGit(this.root, arguments_));
+      if (status.headOid === null) throw new GitError("unknown_engine_failure", "inspect");
+      const head: RepositoryState["head"] =
+        status.headOid === "(initial)"
+          ? { kind: "unborn", branch: status.branch }
+          : !isObjectId(status.headOid)
+            ? (() => {
+                throw new GitError("unknown_engine_failure", "inspect");
+              })()
+            : status.branch === null
+              ? { kind: "detached", commit: status.headOid }
+              : { kind: "attached", branch: status.branch, commit: status.headOid };
+      let upstream: RepositoryState["upstream"] = { kind: "missing" };
+      if (status.upstreamBranch !== null) {
+        if (status.ahead === null || status.behind === null)
+          throw new GitError("unknown_engine_failure", "inspect");
+        const remoteOutput = await this.runGit(this.root, [
+          "for-each-ref",
+          "--format=%(upstream:remotename)",
+          "--count=1",
+          `refs/heads/${status.branch ?? ""}`
+        ]);
+        const remoteValue = remoteOutput.trim();
+        upstream = {
+          kind: "configured",
+          remote: remoteValue === "" ? null : createRemoteName(remoteValue),
+          branch: status.upstreamBranch,
+          ahead: status.ahead,
+          behind: status.behind,
+          relation: relationForCounts(status.ahead, status.behind)
+        };
+      }
+      return {
+        kind: "repository",
+        root: this.root,
+        head,
+        workingTree: status.workingTree,
+        upstream
+      };
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "inspect", "unknown_engine_failure");
+    }
+  }
+
+  async remoteUrl(remote: RemoteName): Promise<string | null> {
+    try {
+      const value = (
+        await this.runGit(this.root, ["config", "--get", `remote.${remote}.url`])
+      ).trim();
+      return value === "" ? null : value;
+    } catch (error) {
+      if (error instanceof SystemGitFailure && error.code === 1) return null;
+      throw errorForFailure(error, "remote_url", "remote_unavailable");
+    }
   }
 
   async resolveHead(): Promise<ObjectId> {

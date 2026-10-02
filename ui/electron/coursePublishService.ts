@@ -8,6 +8,12 @@ import type {
   CoursePublishStatusResult,
   CourseSetupDiagnostic
 } from "./ipc.js";
+import {
+  getSystemGitWorkspaceFactory,
+  type GitRepositoryInspection,
+  type GitRepositoryState,
+  type GitWorkspaceInspectionFactory
+} from "./gitWorkspaceReader.js";
 
 const execFileAsync = promisify(execFile);
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
@@ -56,7 +62,8 @@ const statusResult = (
 ): CoursePublishStatusResult => ({ status, ...values });
 
 export const getCoursePublishStatus = async (
-  courseFolderPath: string
+  courseFolderPath: string,
+  factory: GitWorkspaceInspectionFactory = getSystemGitWorkspaceFactory()
 ): Promise<CoursePublishStatusResult> => {
   const root = path.resolve(courseFolderPath);
   if (!fs.existsSync(root))
@@ -69,7 +76,6 @@ export const getCoursePublishStatus = async (
       unrelatedChangedFiles: [],
       diagnostics: [diagnostic("Selected course folder is unavailable.")]
     });
-  const repository = await runGit(root, ["rev-parse", "--show-toplevel"]);
   const base = {
     courseFolderPath: root,
     currentBranch: null,
@@ -78,52 +84,64 @@ export const getCoursePublishStatus = async (
     allowedChangedFiles: [],
     unrelatedChangedFiles: []
   };
-  if (!repository.ok)
-    return statusResult("not_git_repo", {
-      ...base,
-      diagnostics: [diagnostic("The selected course folder is not a git repository.")]
-    });
-  const [unstaged, staged, untracked, branch, upstream] = await Promise.all([
-    runGit(root, ["diff", "--name-only", "-z"]),
-    runGit(root, ["diff", "--cached", "--name-only", "-z"]),
-    runGit(root, ["ls-files", "--others", "--exclude-standard", "-z"]),
-    runGit(root, ["branch", "--show-current"]),
-    runGit(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
-  ]);
-  if (!unstaged.ok || !staged.ok || !untracked.ok || !branch.ok || branch.stdout.trim() === "")
+  let repository: GitRepositoryInspection;
+  try {
+    repository = await factory.inspect(root);
+  } catch {
     return statusResult("failure", {
       ...base,
       diagnostics: [diagnostic("Unable to inspect course repository publish readiness.")]
     });
-  const files = inspectChangedFiles(
-    [
-      ...unstaged.stdout.split("\u0000"),
-      ...staged.stdout.split("\u0000"),
-      ...untracked.stdout.split("\u0000")
-    ].filter((item) => item !== "")
-  );
+  }
+  if (repository.kind === "not_repository")
+    return statusResult("not_git_repo", {
+      ...base,
+      diagnostics: [diagnostic("The selected course folder is not a git repository.")]
+    });
+  if (repository.kind === "unavailable")
+    return statusResult("failure", {
+      ...base,
+      diagnostics: [diagnostic("Unable to inspect course repository publish readiness.")]
+    });
+  let state: GitRepositoryState;
+  try {
+    state = await (await factory.open(root)).inspect();
+  } catch {
+    return statusResult("failure", {
+      ...base,
+      diagnostics: [diagnostic("Unable to inspect course repository publish readiness.")]
+    });
+  }
+  if (state.head.kind !== "attached")
+    return statusResult("failure", {
+      ...base,
+      diagnostics: [diagnostic("Unable to inspect course repository publish readiness.")]
+    });
+  const changedPaths = [
+    ...state.workingTree.trackedChanges.map((change) => change.path),
+    ...state.workingTree.stagedChanges.map((change) => change.path),
+    ...state.workingTree.untrackedPaths,
+    ...state.workingTree.conflicts.map((conflict) => conflict.path)
+  ];
+  const files = inspectChangedFiles([...new Set(changedPaths)]);
   const withFiles = {
     ...base,
-    currentBranch: branch.stdout.trim(),
+    currentBranch: state.head.branch,
     allowedChangedFiles: files.allowed,
     unrelatedChangedFiles: files.unrelated
   };
-  if (!upstream.ok)
+  if (state.upstream.kind === "missing")
     return statusResult("no_upstream", {
       ...withFiles,
       diagnostics: [
         diagnostic("This course repository branch does not have an upstream branch configured.")
       ]
     });
-  const ahead = await runGit(root, ["rev-list", "--count", "@{u}..HEAD"]);
-  const aheadCount = ahead.ok && /^\d+\s*$/u.test(ahead.stdout) ? Number(ahead.stdout) : null;
-  if (aheadCount === null)
-    return statusResult("failure", {
-      ...withFiles,
-      upstreamBranch: upstream.stdout.trim(),
-      diagnostics: [diagnostic("Unable to determine whether course commits have been pushed.")]
-    });
-  const checked = { ...withFiles, upstreamBranch: upstream.stdout.trim(), aheadCount };
+  const checked = {
+    ...withFiles,
+    upstreamBranch: state.upstream.branch,
+    aheadCount: state.upstream.ahead
+  };
   if (files.allowed.length > 0)
     return statusResult("changes_pending", {
       ...checked,
@@ -131,7 +149,7 @@ export const getCoursePublishStatus = async (
         diagnostic("Graider-managed course changes are local and have not been published.")
       ]
     });
-  if (aheadCount > 0)
+  if (state.upstream.ahead > 0)
     return statusResult("unpushed", {
       ...checked,
       diagnostics: [diagnostic("Course repository has local commits that have not been pushed.")]

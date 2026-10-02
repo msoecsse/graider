@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   GitError,
   createExactCommitRevision,
+  createRelativeGitPath,
+  createRemoteName,
   createTrustedGitRemote,
   type ExactCommitRevision
 } from "../../../src/git/git-workspace.js";
@@ -234,5 +236,188 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
       expect(JSON.stringify(error)).not.toContain(privatePath);
       return true;
     });
+  });
+});
+
+describe("SystemGitWorkspace structured inspection contract", () => {
+  const createTrackedRepository = async (name = "repository") => {
+    const fixture = await createRepository(name);
+    const remote = join(fixture.parent, "upstream.git");
+    await git(fixture.parent, "init", "--bare", remote);
+    await git(fixture.repository, "remote", "add", "origin", remote);
+    await git(fixture.repository, "push", "-u", "origin", "HEAD");
+    return { ...fixture, remote };
+  };
+
+  it("reports clean attached HEAD and a current configured upstream", async () => {
+    const fixture = await createTrackedRepository("repository with spaces");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(workspace.inspect()).resolves.toMatchObject({
+      kind: "repository",
+      root: await realpath(fixture.repository),
+      head: { kind: "attached", commit: fixture.second },
+      workingTree: {
+        trackedChanges: [],
+        stagedChanges: [],
+        untrackedPaths: [],
+        conflicts: []
+      },
+      upstream: {
+        kind: "configured",
+        remote: "origin",
+        ahead: 0,
+        behind: 0,
+        relation: "current"
+      }
+    });
+  });
+
+  it("keeps unstaged, staged, untracked, deletion, and rename changes structured", async () => {
+    const fixture = await createTrackedRepository();
+    await writeFile(join(fixture.repository, "submission.txt"), "unstaged\n");
+    await writeFile(join(fixture.repository, "delete.txt"), "delete\n");
+    await writeFile(join(fixture.repository, "rename source.txt"), "rename\n");
+    await git(fixture.repository, "add", "delete.txt", "rename source.txt");
+    await git(fixture.repository, "commit", "-m", "Add rename fixtures");
+    await git(fixture.repository, "push");
+    await writeFile(join(fixture.repository, "staged file.txt"), "staged\n");
+    await git(fixture.repository, "add", "staged file.txt");
+    await writeFile(join(fixture.repository, "untracked file.txt"), "untracked\n");
+    await rm(join(fixture.repository, "delete.txt"));
+    await git(fixture.repository, "mv", "rename source.txt", "rename destination.txt");
+
+    const state = await (await new SystemGitWorkspaceFactory().open(fixture.repository)).inspect();
+
+    expect(state.workingTree.trackedChanges).toEqual(
+      expect.arrayContaining([
+        { kind: "modified", path: "submission.txt" },
+        { kind: "deleted", path: "delete.txt" }
+      ])
+    );
+    expect(state.workingTree.stagedChanges).toEqual(
+      expect.arrayContaining([
+        { kind: "added", path: "staged file.txt" },
+        {
+          kind: "renamed",
+          path: "rename destination.txt",
+          originalPath: "rename source.txt"
+        }
+      ])
+    );
+    expect(state.workingTree.untrackedPaths).toContain("untracked file.txt");
+  });
+
+  it("distinguishes realistic merge conflicts from ordinary changes", async () => {
+    const fixture = await createTrackedRepository();
+    await git(fixture.repository, "checkout", "-b", "other");
+    await writeFile(join(fixture.repository, "submission.txt"), "other\n");
+    await git(fixture.repository, "commit", "-am", "Other change");
+    await git(fixture.repository, "checkout", "-");
+    await writeFile(join(fixture.repository, "submission.txt"), "main\n");
+    await git(fixture.repository, "commit", "-am", "Main change");
+    await expect(git(fixture.repository, "merge", "other")).rejects.toBeDefined();
+
+    const state = await (await new SystemGitWorkspaceFactory().open(fixture.repository)).inspect();
+
+    expect(state.workingTree.conflicts).toEqual([
+      expect.objectContaining({ path: "submission.txt" })
+    ]);
+    expect(state.workingTree.trackedChanges).toEqual([]);
+    expect(state.workingTree.stagedChanges).toEqual([]);
+  });
+
+  it("limits only working-tree paths while retaining global repository state", async () => {
+    const fixture = await createTrackedRepository();
+    await writeFile(join(fixture.repository, "submission.txt"), "changed\n");
+    await writeFile(join(fixture.repository, "other file.txt"), "other\n");
+    const selected = createRelativeGitPath("submission.txt");
+    if (selected === null) throw new Error("The test path must be trusted.");
+
+    const state = await (
+      await new SystemGitWorkspaceFactory().open(fixture.repository)
+    ).inspect({ paths: [selected] });
+
+    expect(state.workingTree.trackedChanges).toEqual([
+      { kind: "modified", path: "submission.txt" }
+    ]);
+    expect(state.workingTree.untrackedPaths).toEqual([]);
+    expect(state.upstream).toMatchObject({ kind: "configured", relation: "current" });
+  });
+
+  it("validates and normalizes repository-relative paths", () => {
+    expect(createRelativeGitPath("folder\\file with spaces.txt")).toBe(
+      "folder/file with spaces.txt"
+    );
+    expect(createRelativeGitPath("/absolute.txt")).toBeNull();
+    expect(createRelativeGitPath("../escape.txt")).toBeNull();
+    expect(createRelativeGitPath("folder/../escape.txt")).toBeNull();
+    expect(createRelativeGitPath("")).toBeNull();
+    expect(createRelativeGitPath("bad\u0000path")).toBeNull();
+  });
+
+  it("reports missing, ahead, behind, and diverged upstream relations without fetching", async () => {
+    const missingFixture = await createRepository("missing upstream");
+    const missingWorkspace = await new SystemGitWorkspaceFactory().open(missingFixture.repository);
+    await expect(missingWorkspace.inspect()).resolves.toMatchObject({
+      upstream: { kind: "missing" }
+    });
+
+    const fixture = await createTrackedRepository("local repository");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    await git(fixture.repository, "commit", "--allow-empty", "-m", "Local ahead");
+    await expect(workspace.inspect()).resolves.toMatchObject({
+      upstream: { relation: "ahead", ahead: 1, behind: 0 }
+    });
+
+    const secondClone = join(fixture.parent, "second clone");
+    await git(fixture.parent, "clone", fixture.remote, secondClone);
+    await git(secondClone, "config", "user.email", "other@example.test");
+    await git(secondClone, "config", "user.name", "Other");
+    await git(secondClone, "commit", "--allow-empty", "-m", "Remote ahead");
+    await git(secondClone, "push");
+    await git(fixture.repository, "fetch", "origin");
+    await expect(workspace.inspect()).resolves.toMatchObject({
+      upstream: { relation: "diverged", ahead: 1, behind: 1 }
+    });
+
+    const branch = (await git(fixture.repository, "branch", "--show-current")).trim();
+    await git(fixture.repository, "reset", "--hard", `origin/${branch}`);
+    await git(secondClone, "commit", "--allow-empty", "-m", "Remote further ahead");
+    await git(secondClone, "push");
+    await git(fixture.repository, "fetch", "origin");
+    await expect(workspace.inspect()).resolves.toMatchObject({
+      upstream: { relation: "behind", ahead: 0, behind: 1 }
+    });
+  });
+
+  it("reports detached and unborn HEAD states", async () => {
+    const fixture = await createRepository();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    await git(fixture.repository, "checkout", "--detach", fixture.first);
+    await expect(workspace.inspect()).resolves.toMatchObject({
+      head: { kind: "detached", commit: fixture.first }
+    });
+
+    const unbornRoot = await mkdtemp(join(tmpdir(), "graider-git-unborn-"));
+    temporaryDirectories.push(unbornRoot);
+    await git(unbornRoot, "init");
+    const unborn = await new SystemGitWorkspaceFactory().open(unbornRoot);
+    await expect(unborn.inspect()).resolves.toMatchObject({
+      head: { kind: "unborn" },
+      upstream: { kind: "missing" }
+    });
+  });
+
+  it("resolves a trusted remote URL and represents a missing remote as null", async () => {
+    const fixture = await createTrackedRepository();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const origin = createRemoteName("origin");
+    const missing = createRemoteName("missing");
+    if (origin === null || missing === null) throw new Error("The test remotes must be trusted.");
+
+    await expect(workspace.remoteUrl(origin)).resolves.toBe(fixture.remote);
+    await expect(workspace.remoteUrl(missing)).resolves.toBeNull();
+    expect(createRemoteName("--upload-pack=bad")).toBeNull();
   });
 });

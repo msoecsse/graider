@@ -1,7 +1,11 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import { getAssignmentForEdit } from "./assignmentEditService.js";
+import {
+  createRelativeGitPath,
+  getSystemGitWorkspaceFactory,
+  type GitRepositoryInspection,
+  type GitRepositoryState,
+  type GitWorkspaceInspectionFactory
+} from "./gitWorkspaceReader.js";
 import { getStudentRepositoryAccessPageStatus } from "./studentRepositoryAccessPageService.js";
 import type { AssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import type {
@@ -11,7 +15,6 @@ import type {
   StudentRepositoryAccessPageRequest
 } from "./ipc.js";
 
-const execFileAsync = promisify(execFile);
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
 const emptyChecks = (
   fileExists = false,
@@ -31,22 +34,12 @@ const emptyChecks = (
 });
 const quoteCommandArgument = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
-const runGit = async (
-  repositoryFolderPath: string,
-  arguments_: readonly string[]
-): Promise<{ readonly ok: boolean; readonly stdout: string }> => {
-  try {
-    const result = await execFileAsync("git", arguments_, {
-      cwd: repositoryFolderPath,
-      shell: false,
-      windowsHide: true,
-      maxBuffer: 1024 * 1024
-    });
-    return { ok: true, stdout: result.stdout.trim() };
-  } catch {
-    return { ok: false, stdout: "" };
-  }
-};
+const changedPaths = (state: GitRepositoryState): readonly string[] => [
+  ...state.workingTree.trackedChanges.map((change) => change.path),
+  ...state.workingTree.stagedChanges.map((change) => change.path),
+  ...state.workingTree.untrackedPaths,
+  ...state.workingTree.conflicts.map((conflict) => conflict.path)
+];
 
 const resultFromAccessPage = (
   request: StudentRepositoryAccessPageRequest,
@@ -71,7 +64,8 @@ const resultFromAccessPage = (
 
 export const getStudentRepositoryAccessPagePublishStatus = async (
   request: StudentRepositoryAccessPageRequest,
-  mappings: AssignmentRepositoryMappings
+  mappings: AssignmentRepositoryMappings,
+  factory: GitWorkspaceInspectionFactory = getSystemGitWorkspaceFactory()
 ): Promise<StudentRepositoryAccessPagePublishResult> => {
   const accessPage = await getStudentRepositoryAccessPageStatus(request, mappings);
   const initialChecks = {
@@ -110,22 +104,29 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
     return resultFromAccessPage(request, accessPage, "pages_folder_not_selected", initialChecks, [
       diagnostic("Select the local Pages repository folder before checking publish readiness.")
     ]);
-  const repository = await runGit(pagesFolderPath, ["rev-parse", "--show-toplevel"]);
-  if (!repository.ok)
+  let repository: GitRepositoryInspection;
+  try {
+    repository = await factory.inspect(pagesFolderPath);
+  } catch {
+    return resultFromAccessPage(request, accessPage, "failure", initialChecks, [
+      ...accessPage.diagnostics,
+      diagnostic("Unable to inspect local git publish readiness.")
+    ]);
+  }
+  if (repository.kind === "not_repository")
     return resultFromAccessPage(request, accessPage, "not_git_repo", initialChecks, [
       ...accessPage.diagnostics,
       diagnostic(
         "This Pages repository folder does not appear to be a git repository. Graider cannot determine whether the access page is published."
       )
     ]);
-
-  const [pageStatus, allStatus, branch, remote] = await Promise.all([
-    runGit(pagesFolderPath, ["status", "--porcelain", "--", accessPage.outputPath]),
-    runGit(pagesFolderPath, ["status", "--porcelain"]),
-    runGit(pagesFolderPath, ["branch", "--show-current"]),
-    runGit(pagesFolderPath, ["remote", "get-url", "origin"])
-  ]);
-  if (!pageStatus.ok || !allStatus.ok || !branch.ok)
+  if (repository.kind === "unavailable")
+    return resultFromAccessPage(request, accessPage, "failure", initialChecks, [
+      ...accessPage.diagnostics,
+      diagnostic("Unable to inspect local git publish readiness.")
+    ]);
+  const outputPath = createRelativeGitPath(accessPage.outputPath);
+  if (outputPath === null)
     return resultFromAccessPage(
       request,
       accessPage,
@@ -133,20 +134,43 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
       { ...initialChecks, isGitRepository: true },
       [...accessPage.diagnostics, diagnostic("Unable to inspect local git publish readiness.")]
     );
-
-  const hasUncommittedAccessPage = pageStatus.stdout !== "";
-  const hasUncommittedOtherChanges =
-    allStatus.stdout !== "" && (pageStatus.stdout === "" || allStatus.stdout !== pageStatus.stdout);
+  let fullState: GitRepositoryState;
+  let pageState: GitRepositoryState;
+  let remoteUrl: string | null;
+  try {
+    const workspace = await factory.open(pagesFolderPath);
+    [fullState, pageState, remoteUrl] = await Promise.all([
+      workspace.inspect(),
+      workspace.inspect({ paths: [outputPath] }),
+      workspace.remoteUrl("origin").catch(() => null)
+    ]);
+  } catch {
+    return resultFromAccessPage(
+      request,
+      accessPage,
+      "failure",
+      { ...initialChecks, isGitRepository: true },
+      [...accessPage.diagnostics, diagnostic("Unable to inspect local git publish readiness.")]
+    );
+  }
+  const hasUncommittedAccessPage = changedPaths(pageState).length > 0;
+  const hasUncommittedOtherChanges = changedPaths(fullState).some(
+    (changedPath) => changedPath !== outputPath
+  );
+  const currentBranch =
+    fullState.head.kind === "attached" || fullState.head.kind === "unborn"
+      ? fullState.head.branch
+      : null;
   const baseChecks = {
     ...initialChecks,
     pagesRepositoryFolderSelected: true,
     isGitRepository: true,
-    currentBranch: branch.stdout === "" ? null : branch.stdout,
+    currentBranch,
     hasUncommittedAccessPage,
     hasUncommittedOtherChanges,
     remoteMatchesConfiguredRepository:
-      remote.ok && accessPage.pagesRepository !== null
-        ? remote.stdout.replace(/\.git$/u, "").endsWith(`/${accessPage.pagesRepository}`)
+      remoteUrl !== null && accessPage.pagesRepository !== null
+        ? remoteUrl.replace(/\.git$/u, "").endsWith(`/${accessPage.pagesRepository}`)
         : null
   };
   const assignment = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile);
@@ -165,13 +189,7 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
             )
           ]
         : [];
-  const upstream = await runGit(pagesFolderPath, [
-    "rev-parse",
-    "--abbrev-ref",
-    "--symbolic-full-name",
-    "@{u}"
-  ]);
-  if (!upstream.ok) {
+  if (fullState.upstream.kind === "missing") {
     if (hasUncommittedAccessPage)
       return resultFromAccessPage(
         request,
@@ -201,29 +219,13 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
       pushCommand
     );
   }
-  const divergence = await runGit(pagesFolderPath, [
-    "rev-list",
-    "--left-right",
-    "--count",
-    "@{u}...HEAD"
-  ]);
-  const divergenceCounts = divergence.ok ? divergence.stdout.match(/^(\d+)\s+(\d+)$/u) : null;
-  const behindCount = divergenceCounts === null ? null : Number(divergenceCounts[1]);
-  const aheadCount = divergenceCounts === null ? null : Number(divergenceCounts[2]);
-  if (behindCount === null || aheadCount === null)
-    return resultFromAccessPage(
-      request,
-      accessPage,
-      "failure",
-      { ...baseChecks, upstreamBranch: upstream.stdout, aheadCount, behindCount },
-      [
-        ...accessPage.diagnostics,
-        ...remoteDiagnostic,
-        diagnostic("Unable to determine whether local commits have been pushed.")
-      ]
-    );
-  const checks = { ...baseChecks, upstreamBranch: upstream.stdout, aheadCount, behindCount };
-  if (behindCount > 0)
+  const checks = {
+    ...baseChecks,
+    upstreamBranch: fullState.upstream.branch,
+    aheadCount: fullState.upstream.ahead,
+    behindCount: fullState.upstream.behind
+  };
+  if (fullState.upstream.behind > 0)
     return resultFromAccessPage(request, accessPage, "behind_upstream", checks, [
       ...accessPage.diagnostics,
       ...remoteDiagnostic,
@@ -243,7 +245,7 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
       ],
       commitCommands
     );
-  if (aheadCount > 0)
+  if (fullState.upstream.ahead > 0)
     return resultFromAccessPage(
       request,
       accessPage,

@@ -2,7 +2,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import {
+  createRelativeGitPath,
+  type GitRepositoryState,
+  type GitWorkspaceInspectionFactory
+} from "./gitWorkspaceReader";
 import type { StudentRepositoryAccessPageRequest } from "./ipc";
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService";
 
@@ -109,5 +114,176 @@ describe("studentRepositoryAccessPagePublishStatusService", () => {
     expect(result.pagesUrl).toBeNull();
     expect(result.status).toBe("failure");
     expect(result.diagnostics.map((item) => item.message).join(" ")).toContain("not configured");
+  });
+});
+
+describe("student access page semantic publish-status projection", () => {
+  const mappings = { manifestStatus: "not_applied" as const, mappings: [], diagnostics: [] };
+  const trustedPath = (value: string) => {
+    const trusted = createRelativeGitPath(value);
+    if (trusted === null) throw new Error("Expected a trusted fixture path.");
+    return trusted;
+  };
+  const state = (overrides: Partial<GitRepositoryState> = {}): GitRepositoryState => ({
+    kind: "repository",
+    root: "/pages",
+    head: { kind: "attached", branch: "main", commit: "a".repeat(40) },
+    workingTree: {
+      trackedChanges: [],
+      stagedChanges: [],
+      untrackedPaths: [],
+      conflicts: []
+    },
+    upstream: {
+      kind: "configured",
+      remote: "origin",
+      branch: "origin/main",
+      ahead: 0,
+      behind: 0,
+      relation: "current"
+    },
+    ...overrides
+  });
+  const factory = (
+    fullState: GitRepositoryState,
+    pageState = state(),
+    remoteUrl: string | null = "https://github.com/csc1120/csc1120pages.git"
+  ): GitWorkspaceInspectionFactory => {
+    const inspect = vi
+      .fn()
+      .mockImplementation((options?: { readonly paths?: readonly string[] }) =>
+        Promise.resolve(options?.paths === undefined ? fullState : pageState)
+      );
+    return {
+      inspect: vi.fn().mockResolvedValue({ kind: "repository", root: fullState.root }),
+      open: vi.fn().mockResolvedValue({
+        root: fullState.root,
+        inspect,
+        remoteUrl: vi.fn().mockResolvedValue(remoteUrl)
+      })
+    };
+  };
+  const preparedRoot = (): string => {
+    const root = createRoot();
+    writeFixture(root);
+    return root;
+  };
+
+  it("uses exact path inspection while retaining unrelated full-tree changes", async () => {
+    const root = preparedRoot();
+    const page = trustedPath(outputPath);
+    const other = trustedPath("notes.txt");
+    const result = await getStudentRepositoryAccessPagePublishStatus(
+      request(root),
+      mappings,
+      factory(
+        state({
+          workingTree: {
+            trackedChanges: [{ kind: "modified", path: page }],
+            stagedChanges: [],
+            untrackedPaths: [other],
+            conflicts: []
+          }
+        }),
+        state({
+          workingTree: {
+            trackedChanges: [{ kind: "modified", path: page }],
+            stagedChanges: [],
+            untrackedPaths: [],
+            conflicts: []
+          }
+        })
+      )
+    );
+
+    expect(result.status).toBe("uncommitted");
+    expect(result.checks.hasUncommittedAccessPage).toBe(true);
+    expect(result.checks.hasUncommittedOtherChanges).toBe(true);
+  });
+
+  it("projects missing, behind, ahead, and current upstream states", async () => {
+    const root = preparedRoot();
+    const opened = (repositoryState: GitRepositoryState) =>
+      getStudentRepositoryAccessPagePublishStatus(
+        request(root),
+        mappings,
+        factory(repositoryState)
+      );
+
+    await expect(opened(state({ upstream: { kind: "missing" } }))).resolves.toMatchObject({
+      status: "no_upstream",
+      checks: { currentBranch: "main", upstreamBranch: null }
+    });
+    await expect(
+      opened(
+        state({
+          upstream: {
+            kind: "configured",
+            remote: "origin",
+            branch: "origin/main",
+            ahead: 0,
+            behind: 1,
+            relation: "behind"
+          }
+        })
+      )
+    ).resolves.toMatchObject({ status: "behind_upstream", checks: { behindCount: 1 } });
+    await expect(
+      opened(
+        state({
+          upstream: {
+            kind: "configured",
+            remote: "origin",
+            branch: "origin/main",
+            ahead: 1,
+            behind: 0,
+            relation: "ahead"
+          }
+        })
+      )
+    ).resolves.toMatchObject({ status: "unpushed", checks: { aheadCount: 1 } });
+    await expect(opened(state())).resolves.toMatchObject({
+      status: "ready_to_publish",
+      checks: { aheadCount: 0, behindCount: 0 }
+    });
+  });
+
+  it("preserves true, false, and unknown origin matching semantics", async () => {
+    const root = preparedRoot();
+    const inspect = (remote: string | null) =>
+      getStudentRepositoryAccessPagePublishStatus(
+        request(root),
+        mappings,
+        factory(state(), state(), remote)
+      );
+
+    await expect(inspect("https://github.com/csc1120/csc1120pages.git")).resolves.toMatchObject({
+      checks: { remoteMatchesConfiguredRepository: true }
+    });
+    await expect(inspect("https://github.com/csc1120/other.git")).resolves.toMatchObject({
+      checks: { remoteMatchesConfiguredRepository: false }
+    });
+    await expect(inspect(null)).resolves.toMatchObject({
+      checks: { remoteMatchesConfiguredRepository: null }
+    });
+  });
+
+  it("maps semantic non-repositories and inspection failures to fixed results", async () => {
+    const root = preparedRoot();
+    const nonRepository = factory(state());
+    vi.mocked(nonRepository.inspect).mockResolvedValueOnce({ kind: "not_repository" });
+    await expect(
+      getStudentRepositoryAccessPagePublishStatus(request(root), mappings, nonRepository)
+    ).resolves.toMatchObject({ status: "not_git_repo" });
+
+    const failed = factory(state());
+    vi.mocked(failed.open).mockRejectedValueOnce(new Error("private raw failure"));
+    const result = await getStudentRepositoryAccessPagePublishStatus(
+      request(root),
+      mappings,
+      failed
+    );
+    expect(result.status).toBe("failure");
+    expect(result.diagnostics.map(({ message }) => message).join(" ")).not.toContain("private");
   });
 });
