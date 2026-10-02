@@ -1,13 +1,22 @@
 const COMMIT_OBJECT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu;
+const FIRST_CONTROL_CODE_POINT = 32;
+const DELETE_CODE_POINT = 127;
 
 export type ObjectId = string & { readonly __objectId: unique symbol };
 export type ExactCommitRevision = string & { readonly __exactCommitRevision: unique symbol };
 
-export type GitOperationName = "open" | "resolve_head" | "resolve_revision" | "list_commits";
+export type GitOperationName =
+  | "verify_available"
+  | "clone"
+  | "open"
+  | "resolve_head"
+  | "resolve_revision"
+  | "list_commits";
 
 export type GitErrorKind =
   | "engine_unavailable"
   | "repository_unavailable"
+  | "remote_unavailable"
   | "not_repository"
   | "revision_unavailable"
   | "operation_rejected"
@@ -16,6 +25,7 @@ export type GitErrorKind =
 const ERROR_MESSAGES: Readonly<Record<GitErrorKind, string>> = {
   engine_unavailable: "The Git engine is unavailable.",
   repository_unavailable: "The local repository path is unavailable.",
+  remote_unavailable: "The Git remote is unavailable.",
   not_repository: "The selected path is not a Git repository.",
   revision_unavailable: "The requested Git revision is unavailable.",
   operation_rejected: "The requested Git operation was rejected.",
@@ -52,6 +62,14 @@ export interface CommitHistoryRequest {
   readonly maximumCount: number;
 }
 
+export type TrustedGitRemote = string & { readonly __trustedGitRemote: unique symbol };
+
+export interface CloneRequest {
+  readonly remote: TrustedGitRemote;
+  readonly destination: string;
+  readonly checkout: "default";
+}
+
 export interface GitWorkspaceReader {
   readonly root: string;
   resolveHead(): Promise<ObjectId>;
@@ -65,6 +83,8 @@ export type RepositoryInspection =
   | { readonly kind: "unavailable"; readonly error: GitError };
 
 export interface GitWorkspaceFactory {
+  verifyAvailable(): Promise<void>;
+  clone(request: CloneRequest): Promise<GitWorkspaceReader>;
   inspect(path: string): Promise<RepositoryInspection>;
   open(path: string): Promise<GitWorkspaceReader>;
 }
@@ -74,3 +94,15 @@ export const createExactCommitRevision = (value: string): ExactCommitRevision | 
 
 export const isObjectId = (value: string): value is ObjectId =>
   COMMIT_OBJECT_ID_PATTERN.test(value);
+
+export const createTrustedGitRemote = (value: string): TrustedGitRemote | null => {
+  const hasControlCharacter = Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return (
+      codePoint === undefined ||
+      codePoint < FIRST_CONTROL_CODE_POINT ||
+      codePoint === DELETE_CODE_POINT
+    );
+  });
+  return value.length > 0 && !hasControlCharacter ? (value as TrustedGitRemote) : null;
+};

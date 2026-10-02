@@ -6,6 +6,12 @@ import {
   downloadAssignmentRepositories,
   type RepositoryDownloadDependencies
 } from "../../../src/repository-download/repository-download.js";
+import {
+  GitError,
+  type CloneRequest,
+  type GitWorkspaceFactory,
+  type GitWorkspaceReader
+} from "../../../src/git/git-workspace.js";
 import { renderManifestV2Yaml } from "../../../src/manifest/manifest-v2-renderer.js";
 
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
@@ -18,23 +24,41 @@ const copyFixture = (): string => {
 };
 
 const createDependencies = (
-  execFile = vi.fn().mockResolvedValue(undefined)
+  git = createGitFactory(),
+  existsSync: (value: string) => boolean = vi.fn().mockReturnValue(false)
 ): RepositoryDownloadDependencies => ({
-  existsSync: vi.fn().mockReturnValue(false),
+  existsSync,
   statSync: vi.fn(),
   mkdirSync: vi.fn(),
-  execFile
+  git
+});
+
+const createGitFactory = (
+  configuration: {
+    readonly verifyAvailable?: () => Promise<void>;
+    readonly clone?: (request: CloneRequest) => Promise<GitWorkspaceReader>;
+  } = {}
+): GitWorkspaceFactory => ({
+  verifyAvailable:
+    configuration.verifyAvailable ?? vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  clone:
+    configuration.clone ??
+    vi
+      .fn<(request: CloneRequest) => Promise<GitWorkspaceReader>>()
+      .mockResolvedValue({ root: "/downloaded" } as GitWorkspaceReader),
+  inspect: vi.fn(),
+  open: vi.fn()
 });
 
 describe("downloadAssignmentRepositories", () => {
   it("clones one target for each individual manifest repository with safe target rows", async () => {
     const cwd = copyFixture();
-    const execFile = vi.fn().mockResolvedValue(undefined);
+    const clone = vi.fn().mockResolvedValue({ root: "/downloaded" });
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
       destination: "/downloads/lab04",
-      dependencies: createDependencies(execFile)
+      dependencies: createDependencies(createGitFactory({ clone }))
     });
 
     expect(result).toMatchObject({
@@ -51,8 +75,29 @@ describe("downloadAssignmentRepositories", () => {
       "27s1-se2030-lab04-kimstudent",
       "27s1-se2030-lab04-leehold"
     ]);
-    expect(execFile).toHaveBeenCalledTimes(5);
-    expect(execFile).toHaveBeenNthCalledWith(1, "git", ["--version"]);
+    expect(clone).toHaveBeenCalledTimes(4);
+    expect(clone.mock.calls.map(([request]) => request as CloneRequest)).toEqual([
+      {
+        remote: "https://github.com/example-org/27s1-se2030-lab04-seanjones",
+        destination: "/downloads/lab04/27s1-se2030-lab04-seanjones",
+        checkout: "default"
+      },
+      {
+        remote: "https://github.com/example-org/27s1-se2030-lab04-janesmith",
+        destination: "/downloads/lab04/27s1-se2030-lab04-janesmith",
+        checkout: "default"
+      },
+      {
+        remote: "https://github.com/example-org/27s1-se2030-lab04-kimstudent",
+        destination: "/downloads/lab04/27s1-se2030-lab04-kimstudent",
+        checkout: "default"
+      },
+      {
+        remote: "https://github.com/example-org/27s1-se2030-lab04-leehold",
+        destination: "/downloads/lab04/27s1-se2030-lab04-leehold",
+        checkout: "default"
+      }
+    ]);
     expect(result.targets[0]).toMatchObject({
       studentIds: ["jones"],
       githubUsernames: ["seanjones"],
@@ -116,16 +161,15 @@ describe("downloadAssignmentRepositories", () => {
         ]
       })
     );
-    const execFile = vi
+    const clone = vi
       .fn()
-      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("clone failed"))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ root: "/downloaded" });
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
       destination: "/downloads/lab04",
-      dependencies: createDependencies(execFile)
+      dependencies: createDependencies(createGitFactory({ clone }))
     });
 
     expect(result).toMatchObject({
@@ -142,16 +186,97 @@ describe("downloadAssignmentRepositories", () => {
       status: "failed"
     });
     expect(result.targets[1]).toMatchObject({ targetId: "team-2", status: "cloned" });
-    expect(execFile).toHaveBeenCalledTimes(3);
-    expect(execFile).toHaveBeenNthCalledWith(2, "git", [
-      "clone",
-      "https://github.com/example-org/27s1-se2030-lab04-team-1.git",
-      "/downloads/lab04/27s1-se2030-lab04-team-1"
+    expect(clone).toHaveBeenCalledTimes(2);
+    expect(clone).toHaveBeenNthCalledWith(2, {
+      remote: "https://github.com/example-org/27s1-se2030-lab04-team-2",
+      destination: "/downloads/lab04/27s1-se2030-lab04-team-2",
+      checkout: "default"
+    });
+  });
+
+  it("fails before target validation when the Git engine is unavailable", async () => {
+    const cwd = copyFixture();
+    const clone = vi.fn();
+    const result = await downloadAssignmentRepositories({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      destination: "/downloads/lab04",
+      dependencies: createDependencies(
+        createGitFactory({
+          verifyAvailable: vi
+            .fn()
+            .mockRejectedValue(new GitError("engine_unavailable", "verify_available")),
+          clone
+        })
+      )
+    });
+
+    expect(result).toMatchObject({
+      status: "failure",
+      exitCode: 1,
+      clonedCount: 0,
+      failedCount: 0,
+      targets: []
+    });
+    expect(result.diagnostics.map((entry) => entry.code)).toEqual([
+      "repository_download_git_unavailable"
     ]);
-    expect(execFile).toHaveBeenNthCalledWith(3, "git", [
-      "clone",
-      "https://github.com/example-org/27s1-se2030-lab04-team-2",
-      "/downloads/lab04/27s1-se2030-lab04-team-2"
-    ]);
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it("does not clone an existing destination", async () => {
+    const cwd = copyFixture();
+    const clone = vi.fn();
+    const existsSync = vi.fn((value: string) => value.endsWith("seanjones"));
+    const dependencies = createDependencies(createGitFactory({ clone }), existsSync);
+    const result = await downloadAssignmentRepositories({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      destination: "/downloads/lab04",
+      dependencies
+    });
+
+    expect(result.targets[0]?.diagnostics[0]?.code).toBe("repository_download_destination_exists");
+    expect(clone).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not clone an unsafe repository-name-derived destination", async () => {
+    const cwd = copyFixture();
+    const clone = vi.fn();
+    const manifestPath = path.join(cwd, "terms/27s1/manifests/lab04/manifest.yml");
+    fs.writeFileSync(
+      manifestPath,
+      fs
+        .readFileSync(manifestPath, "utf8")
+        .replace("name: 27s1-se2030-lab04-seanjones", "name: ../outside-download-root")
+    );
+    const result = await downloadAssignmentRepositories({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      destination: "/downloads/lab04",
+      dependencies: createDependencies(createGitFactory({ clone }))
+    });
+
+    expect(result.targets[0]?.diagnostics[0]?.code).toBe("repository_download_unsafe_path");
+    expect(clone).toHaveBeenCalledTimes(3);
+  });
+
+  it("retains missing clone-source diagnostics without invoking clone", async () => {
+    const cwd = copyFixture();
+    const clone = vi.fn();
+    const manifestPath = path.join(cwd, "terms/27s1/manifests/lab04/manifest.yml");
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, "utf8").replaceAll(/html_url: .*/gu, 'html_url: ""')
+    );
+    const result = await downloadAssignmentRepositories({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      destination: "/downloads/lab04",
+      dependencies: createDependencies(createGitFactory({ clone }))
+    });
+
+    expect(result.targets[0]?.diagnostics[0]?.code).toBe("repository_download_clone_url_missing");
+    expect(clone).not.toHaveBeenCalled();
   });
 });

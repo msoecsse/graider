@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   GitError,
   createExactCommitRevision,
+  createTrustedGitRemote,
   type ExactCommitRevision
 } from "../../../src/git/git-workspace.js";
 import { SystemGitWorkspaceFactory } from "../../../src/git/system-git-workspace.js";
@@ -54,6 +55,77 @@ afterEach(async () => {
 });
 
 describe("SystemGitWorkspaceFactory reader contract", () => {
+  it("reports system Git availability without exposing a version string", async () => {
+    await new SystemGitWorkspaceFactory().verifyAvailable();
+  });
+
+  it("maps an unavailable engine to a semantic availability error", async () => {
+    const unavailableEngine = (): Promise<string> => {
+      const error = Object.assign(new Error("missing executable"), { code: "ENOENT" });
+      return Promise.reject(error);
+    };
+    const factory = new SystemGitWorkspaceFactory(unavailableEngine);
+
+    await expect(factory.verifyAvailable()).rejects.toMatchObject({
+      kind: "engine_unavailable",
+      operation: "verify_available"
+    });
+  });
+
+  it("clones with the default checkout and returns an opened canonical workspace", async () => {
+    const fixture = await createRepository("source with spaces");
+    const destination = join(fixture.parent, "clone with spaces");
+    const remote = createTrustedGitRemote(fixture.repository);
+    if (remote === null) throw new Error("The test remote must be trusted.");
+
+    const workspace = await new SystemGitWorkspaceFactory().clone({
+      remote,
+      destination,
+      checkout: "default"
+    });
+
+    expect(workspace.root).toBe(await realpath(destination));
+    await expect(workspace.resolveHead()).resolves.toBe(fixture.second);
+    await expect(readFile(join(destination, "submission.txt"), "utf8")).resolves.toBe("second\n");
+  });
+
+  it("rejects an existing clone destination without modifying it", async () => {
+    const fixture = await createRepository();
+    const destination = join(fixture.parent, "existing destination");
+    await mkdir(destination);
+    await writeFile(join(destination, "preserved.txt"), "preserved\n");
+    const remote = createTrustedGitRemote(fixture.repository);
+    if (remote === null) throw new Error("The test remote must be trusted.");
+
+    await expect(
+      new SystemGitWorkspaceFactory().clone({ remote, destination, checkout: "default" })
+    ).rejects.toMatchObject({ kind: "operation_rejected", operation: "clone" });
+    await expect(readFile(join(destination, "preserved.txt"), "utf8")).resolves.toBe("preserved\n");
+  });
+
+  it("maps a failed clone to a safe semantic error", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "graider-git-workspace-clone-failure-"));
+    temporaryDirectories.push(parent);
+    const remote = createTrustedGitRemote(join(parent, "private missing remote"));
+    if (remote === null) throw new Error("The test remote must be trusted.");
+
+    await expect(
+      new SystemGitWorkspaceFactory().clone({
+        remote,
+        destination: join(parent, "destination"),
+        checkout: "default"
+      })
+    ).rejects.toSatisfy((error: unknown) => {
+      expect(error).toMatchObject({ kind: "remote_unavailable", operation: "clone" });
+      expect(JSON.stringify(error)).not.toContain("private missing remote");
+      return true;
+    });
+  });
+
+  it("rejects control characters in untrusted clone remotes", () => {
+    expect(createTrustedGitRemote("-c\u0000bad.option=true")).toBeNull();
+  });
+
   it("opens a repository from an interior path and returns its canonical root", async () => {
     const fixture = await createRepository("repository with spaces");
     const interior = join(fixture.repository, "nested", "directory");

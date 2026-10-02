@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import {
@@ -7,6 +8,7 @@ import {
   type CommitHistoryRequest,
   type ExactCommitRevision,
   type GitCommitSummary,
+  type CloneRequest,
   type GitOperationName,
   type GitWorkspaceFactory,
   type GitWorkspaceReader,
@@ -58,12 +60,23 @@ const runSystemGit = async (root: string, arguments_: readonly string[]): Promis
   }
 };
 
+type SystemGitRunner = (root: string, arguments_: readonly string[]) => Promise<string>;
+
 const errorForFailure = (
   failure: unknown,
   operation: GitOperationName,
-  fallback: "repository_unavailable" | "revision_unavailable" | "unknown_engine_failure"
+  fallback:
+    | "repository_unavailable"
+    | "remote_unavailable"
+    | "revision_unavailable"
+    | "unknown_engine_failure"
 ): GitError => {
-  if (failure instanceof SystemGitFailure && failure.code === "ENOENT") {
+  if (
+    (failure instanceof SystemGitFailure && failure.code === "ENOENT") ||
+    (typeof failure === "object" &&
+      failure !== null &&
+      (failure as { readonly code?: unknown }).code === "ENOENT")
+  ) {
     return new GitError("engine_unavailable", operation, failure);
   }
   return new GitError(fallback, operation, failure);
@@ -116,14 +129,17 @@ const parseCommitHistory = (stdout: string): readonly GitCommitSummary[] => {
 class SystemGitWorkspace implements GitWorkspaceReader {
   readonly root: string;
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    private readonly runGit: SystemGitRunner = runSystemGit
+  ) {
     this.root = root;
   }
 
   async resolveHead(): Promise<ObjectId> {
     try {
       return parseObjectId(
-        await runSystemGit(this.root, ["rev-parse", "--verify", "HEAD^{commit}"]),
+        await this.runGit(this.root, ["rev-parse", "--verify", "HEAD^{commit}"]),
         "resolve_head"
       );
     } catch (error) {
@@ -135,7 +151,7 @@ class SystemGitWorkspace implements GitWorkspaceReader {
   async resolveRevision(revision: ExactCommitRevision): Promise<ObjectId> {
     try {
       return parseObjectId(
-        await runSystemGit(this.root, ["rev-parse", "--verify", `${revision}^{commit}`]),
+        await this.runGit(this.root, ["rev-parse", "--verify", `${revision}^{commit}`]),
         "resolve_revision"
       );
     } catch (error) {
@@ -153,7 +169,7 @@ class SystemGitWorkspace implements GitWorkspaceReader {
       throw new GitError("operation_rejected", "list_commits");
     }
     try {
-      const stdout = await runSystemGit(this.root, [
+      const stdout = await this.runGit(this.root, [
         "log",
         `--max-count=${String(request.maximumCount)}`,
         `--format=${LOG_FORMAT}`,
@@ -172,6 +188,29 @@ class SystemGitWorkspace implements GitWorkspaceReader {
 }
 
 export class SystemGitWorkspaceFactory implements GitWorkspaceFactory {
+  constructor(private readonly runGit: SystemGitRunner = runSystemGit) {}
+
+  async verifyAvailable(): Promise<void> {
+    try {
+      await this.runGit(process.cwd(), ["--version"]);
+    } catch (error) {
+      throw errorForFailure(error, "verify_available", "unknown_engine_failure");
+    }
+  }
+
+  async clone(request: CloneRequest): Promise<GitWorkspaceReader> {
+    if (request.destination.length === 0 || existsSync(request.destination)) {
+      throw new GitError("operation_rejected", "clone");
+    }
+    try {
+      await this.runGit(process.cwd(), ["clone", "--", request.remote, request.destination]);
+      return await this.open(request.destination);
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "clone", "remote_unavailable");
+    }
+  }
+
   async inspect(path: string): Promise<RepositoryInspection> {
     try {
       return { kind: "repository", root: (await this.open(path)).root };
@@ -190,9 +229,9 @@ export class SystemGitWorkspaceFactory implements GitWorkspaceFactory {
   async open(path: string): Promise<GitWorkspaceReader> {
     await requireDirectory(path);
     try {
-      const discoveredRoot = (await runSystemGit(path, ["rev-parse", "--show-toplevel"])).trim();
+      const discoveredRoot = (await this.runGit(path, ["rev-parse", "--show-toplevel"])).trim();
       if (discoveredRoot === "") throw new GitError("unknown_engine_failure", "open");
-      return new SystemGitWorkspace(await realpath(discoveredRoot));
+      return new SystemGitWorkspace(await realpath(discoveredRoot), this.runGit);
     } catch (error) {
       if (error instanceof GitError) throw error;
       if (

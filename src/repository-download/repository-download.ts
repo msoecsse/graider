@@ -1,12 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { createTrustedGitRemote, type GitWorkspaceFactory } from "../git/git-workspace.js";
+import { createSystemGitWorkspaceFactory } from "../git/system-git-workspace-context.js";
 import { buildAssignmentRepositoryMappings } from "../repository-mappings/repository-mappings-builder.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { createConfigDiagnostic } from "../diagnostics/error-catalog.js";
-
-const execFileAsync = promisify(execFile);
 
 export interface RepositoryDownloadTargetResult {
   readonly targetId: string;
@@ -40,16 +38,14 @@ export interface RepositoryDownloadDependencies {
   readonly existsSync: (value: string) => boolean;
   readonly statSync: (value: string) => fs.Stats;
   readonly mkdirSync: (value: string, options: { recursive: true }) => void;
-  readonly execFile: (file: string, args: readonly string[]) => Promise<void>;
+  readonly git: GitWorkspaceFactory;
 }
 
 const defaultDependencies: RepositoryDownloadDependencies = {
   existsSync: fs.existsSync,
   statSync: fs.statSync,
   mkdirSync: fs.mkdirSync,
-  execFile: async (file, args) => {
-    await execFileAsync(file, [...args]);
-  }
+  git: createSystemGitWorkspaceFactory()
 };
 
 const safeTargetPath = (destination: string, repositoryName: string): string | null => {
@@ -122,7 +118,7 @@ export const downloadAssignmentRepositories = async ({
     };
   }
   try {
-    await dependencies.execFile("git", ["--version"]);
+    await dependencies.git.verifyAvailable();
   } catch {
     return {
       ...base,
@@ -199,7 +195,9 @@ export const downloadAssignmentRepositories = async ({
       continue;
     }
     try {
-      await dependencies.execFile("git", ["clone", cloneUrl, localPath]);
+      const remote = createTrustedGitRemote(cloneUrl);
+      if (remote === null) throw new Error("invalid_clone_remote");
+      await dependencies.git.clone({ remote, destination: localPath, checkout: "default" });
       results.push({ ...baseTarget, status: "cloned", diagnostics: [] });
     } catch {
       results.push({
