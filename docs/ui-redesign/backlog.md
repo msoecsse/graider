@@ -1519,11 +1519,12 @@ calls the result a "public access page"
 
 Requested behaviour (direct collaborators):
 
-- Give each active student's GitHub account read access to the configured
-  Pages repository as a direct collaborator, using the same GitHub collaborator
-  calls Graider already makes for student repositories.
-- Students on hold keep their access; remove it only when a student is
-  dropped, so access follows the roster.
+- Give each active or on-hold student's GitHub account read access to the
+  configured Pages repository as a direct collaborator, using the same GitHub
+  collaborator calls Graider already makes for student repositories.
+- Remove that access only when a student is dropped, so access follows the
+  roster.
+- Check and correct access during Apply and whenever a roster is saved.
 - Do not use the organization base permission (it would expose every
   repository, including other students') or internal visibility (it would open
   the pages to the whole enterprise).
@@ -1532,10 +1533,6 @@ Requested behaviour (direct collaborators):
 
 Open questions before implementation:
 
-- When access is granted and removed: during Apply, on roster saves, from an
-  explicit action, or a combination.
-- Whether a student who is already on hold when access is first set up is
-  granted access, or only keeps access granted while active.
 - Whether a student who is active in any section or term keeps access while
   inactive elsewhere, since one Pages repository serves every term.
 - How failures are reported, and whether faculty preview the changes before
