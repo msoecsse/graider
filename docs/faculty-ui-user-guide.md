@@ -242,6 +242,21 @@ first repository and uses HTTPS for every repository if SSH does not work.
 Scripts are written next to the page whenever it is generated, and scripts for
 sections that no longer appear are removed.
 
+Generating a page also updates an assignments page, `index.html`, at the root of
+the Pages repository. It is titled with the course code, course title, term, and
+"Assignments" (for example, **SWE4211 Real Time Systems Fall 2026
+Assignments**). It lists the most recent term's assignments that have a
+generated page, newest first, each linked by title and followed by its slug. The
+course code at the top of each assignment page links back to it, so you can post
+a single link in Canvas instead of one per assignment. If the Pages repository
+already has an `index.html` that Graider did not create, Graider leaves it alone
+and tells you.
+
+Graider also adds a `robots.txt` file at the root of the Pages repository and
+marks every page it generates so that search engines are asked not to crawl or
+index them. This does not control who can open the pages. As with `index.html`,
+an existing `robots.txt` that Graider did not create is left alone.
+
 For example:
 
 ```text
@@ -267,7 +282,8 @@ review **Publish readiness**:
 
 **Publish Student Access Page** is always explicit and requires a review before
 it runs. It stages only the generated page and section clone scripts for the
-current assignment, commits
+current assignment, plus the assignments page and `robots.txt` when Graider
+created them, commits
 it with a predictable message, and pushes the current upstream branch; it never
 stages unrelated Pages-repository files. Suggested commands remain available
 for manual troubleshooting. Readiness is local-only: Graider does not verify

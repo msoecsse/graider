@@ -12,6 +12,7 @@ import type {
 } from "./ipc.js";
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService.js";
 import { getStudentRepositoryAccessPageCloneScriptPattern } from "./studentRepositoryAccessPageService.js";
+import { getGraiderStudentAccessPagesRootFiles } from "./studentAccessPagesIndexService.js";
 
 const execFileAsync = promisify(execFile);
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
@@ -136,7 +137,8 @@ export const publishStudentRepositoryAccessPage = async (
     ]);
     const publishPaths = [
       readiness.outputPath,
-      ...(cloneScripts.stdout === "" ? [] : [cloneScriptPattern])
+      ...(cloneScripts.stdout === "" ? [] : [cloneScriptPattern]),
+      ...getGraiderStudentAccessPagesRootFiles(repositoryFolderPath)
     ];
     if (!(await runGit(repositoryRoot, ["add", "--", ...publishPaths])).ok)
       return failure("Unable to stage the generated student access page.");
