@@ -1,4 +1,7 @@
+import type { GitCredentialResolver } from "./git-credential-resolver.js";
 import { SystemGitWorkspaceFactory } from "./system-git-workspace.js";
 
-export const createSystemGitWorkspaceFactory = (): SystemGitWorkspaceFactory =>
-  new SystemGitWorkspaceFactory();
+export const createSystemGitWorkspaceFactory = (
+  credentialResolver?: GitCredentialResolver
+): SystemGitWorkspaceFactory =>
+  new SystemGitWorkspaceFactory(credentialResolver === undefined ? {} : { credentialResolver });

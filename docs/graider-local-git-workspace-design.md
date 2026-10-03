@@ -1,8 +1,10 @@
 # Graider Local Git Workspace Design
 
-**Status:** Phase 1 / Slice 1.1A implementation contract
+**Status:** Phase 1 / Slice 1.1B implementation contract; operation-scoped
+credential transport resolved
 
-**Scope:** inventory and abstraction design only; no production migration or Git-engine selection
+**Scope:** local Git abstraction and replaceable system-Git adapter; template-sync
+adoption steps 6 and 7 remain incomplete
 
 **Authority:** [remote-course architecture](graider-remote-course-architecture.md),
 [architecture evolution roadmap](graider-architecture-evolution-roadmap.md), and
@@ -354,10 +356,56 @@ The engine implementation must ensure that credentials:
 - work for clone, fetch, and push without requiring `gh` or faculty-managed
   credential helpers in the packaged application.
 
-The system-Git adapter used in Phase 1.1B may need an internal mechanism
-equivalent to the current template-sync header. That is private implementation
-detail. The public contract carries only the opaque context. OAuth acquisition,
-refresh, and secure-store design remain out of scope.
+The system-Git adapter used in Phase 1.1B implements the current
+GitHub-compatible header semantics as a private engine detail. The public
+contract carries only the opaque context. OAuth acquisition, refresh, and
+secure-store design remain out of scope.
+
+### 8.1 Phase 1.1B system-Git credential transport
+
+The operation-scoped mechanism is now resolved for the temporary system-Git
+adapter:
+
+- The semantic API carries only a branded `GitAuthenticationContext` containing
+  an assigned opaque ID. The ID is not derived from a token and JSON
+  serialization exposes only that ID.
+- Trusted backend composition supplies a narrow `GitCredentialResolver`. The
+  resolver may temporarily be backed by the current token source, but raw and
+  encoded credentials do not enter the semantic Git request. The resolver is
+  not available to renderer or preload code.
+- For each explicitly authenticated operation, the adapter resolves the
+  credential, validates the effective remote, builds a fresh child-process
+  environment from the normal parent environment, invokes Git, and releases
+  the operation-local resolved value. A workspace retains the resolver, not a
+  resolved credential or credential environment.
+- GitHub credentials are bound to HTTPS operations whose effective host is
+  exactly `github.com`. Clone rejects other HTTPS hosts, SSH remotes, local
+  remotes, embedded URL credentials, and non-default ports before resolving or
+  passing credential material to child Git. Authenticated upstream push also
+  validates configured `pushurl` values, or the normal remote URLs when no
+  `pushurl` is present.
+- Runtime Git configuration is passed only through `GIT_CONFIG_COUNT` and
+  matching `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` child-environment entries.
+  It clears `credential.helper` for the operation and sets
+  `http.https://github.com/.extraHeader` to the existing GitHub-compatible Basic
+  authorization value derived from `x-access-token:<token>`.
+- `GIT_TERMINAL_PROMPT=0` disables terminal credential prompting. Clearing the
+  helper list prevents Git Credential Manager or a keychain helper from
+  supplying a different ambient credential. These protections affect only the
+  authenticated child invocation; global, system, and repository Git config
+  remain unchanged. No askpass script or platform shell mechanism is used.
+- Credential material is absent from Git argv, remote URLs, repository config,
+  semantic errors, diagnostics, and logs. Captured authenticated-process
+  failures are scrubbed before a non-enumerable internal cause is retained.
+- Operations without an authentication context preserve the existing ambient
+  system-Git behavior. Each authenticated invocation receives a new environment,
+  so sequential and concurrent contexts cannot share a current token.
+
+This transport is deliberately an adapter detail, not the future acquisition
+architecture. Phase 2 will replace the current token acquisition and storage
+source behind the same resolver/context boundary without changing semantic Git
+operations. Adoption-plan step 6 is still incomplete: production template sync
+continues using its current direct-Git implementation until the next slice.
 
 Network operations without an authentication context may remain possible for
 public/local remotes and current behavior, but the caller must choose that
@@ -562,7 +610,7 @@ the packaged application is independent of system Git. Phase 1.2 replaces or
 bundles the engine behind the same contract and proves private authenticated
 clone/fetch/push on supported packaged platforms.
 
-## 15. Genuine open implementation questions
+## 15. Resolved and open implementation questions
 
 The first Phase 1.1B reader slice resolved the shared build-placement question:
 the contract and single system-Git implementation live under `src/git`. Root
@@ -581,10 +629,18 @@ publication now uses fixed faculty-facing failure messages. Raw Git stderr is
 retained only as a non-enumerable internal engine cause and is never appended to
 the publication result.
 
-| Question                                                                                                                                                                           | Phase 1.1B blocker?                                                                                                                                                       | Resolution point                              |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| How should the initial system-Git adapter provide operation-scoped credentials without argv leakage while preserving current authenticated template behavior on macOS and Windows? | **Yes for migrating authenticated template clone/push, not for earlier local/read-only steps.** The public opaque context is settled; only the adapter mechanism remains. | Before adoption step 6, with redaction tests. |
-| Does the selected Phase 1.2 engine natively support binary three-way patch application and index semantics, or will the engine adapter need a private compatibility layer?         | No for Phase 1.1B; the system-Git adapter proves the semantic contract. It is a Phase 1.2 selection criterion.                                                            | Embedded-engine proof.                        |
+The operation-scoped credential question is resolved by the child-environment
+runtime configuration described in section 8.1. This proof covers authenticated
+clone and upstream push through the replaceable system-Git engine without
+migrating production template sync. Phase 1.2 must prove the equivalent private
+authenticated transport with the selected embedded or bundled engine in
+packaged macOS Apple Silicon and Windows x64 applications. That proof must not
+reintroduce a system-Git, shell, credential-helper, or terminal-prompt
+dependency.
+
+| Question                                                                                                                                                                   | Phase 1.1B blocker?                                                                                            | Resolution point       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| Does the selected Phase 1.2 engine natively support binary three-way patch application and index semantics, or will the engine adapter need a private compatibility layer? | No for Phase 1.1B; the system-Git adapter proves the semantic contract. It is a Phase 1.2 selection criterion. | Embedded-engine proof. |
 
 The placement of clone on the factory, representation of missing upstream, and
 continued existence of the template-domain gateway are resolved by this design

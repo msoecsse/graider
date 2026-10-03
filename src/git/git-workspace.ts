@@ -3,6 +3,14 @@ const FIRST_CONTROL_CODE_POINT = 32;
 const DELETE_CODE_POINT = 127;
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[A-Za-z]:\//u;
 const REMOTE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
+const MAX_AUTHENTICATION_CONTEXT_ID_LENGTH = 256;
+
+declare const gitAuthenticationContextBrand: unique symbol;
+
+export interface GitAuthenticationContext {
+  readonly id: string;
+  readonly [gitAuthenticationContextBrand]: true;
+}
 
 export type ObjectId = string & { readonly __objectId: unique symbol };
 export type ExactCommitRevision = string & { readonly __exactCommitRevision: unique symbol };
@@ -25,6 +33,7 @@ export type GitOperationName =
 export type GitErrorKind =
   | "engine_unavailable"
   | "repository_unavailable"
+  | "authentication_failed"
   | "remote_unavailable"
   | "not_repository"
   | "revision_unavailable"
@@ -34,6 +43,7 @@ export type GitErrorKind =
 const ERROR_MESSAGES: Readonly<Record<GitErrorKind, string>> = {
   engine_unavailable: "The Git engine is unavailable.",
   repository_unavailable: "The local repository path is unavailable.",
+  authentication_failed: "Git authentication failed.",
   remote_unavailable: "The Git remote is unavailable.",
   not_repository: "The selected path is not a Git repository.",
   revision_unavailable: "The requested Git revision is unavailable.",
@@ -123,6 +133,7 @@ export interface CloneRequest {
   readonly remote: TrustedGitRemote;
   readonly destination: string;
   readonly checkout: "default";
+  readonly authentication?: GitAuthenticationContext;
 }
 
 export interface GitWorkspaceReader {
@@ -137,7 +148,7 @@ export interface GitWorkspaceReader {
 export interface GitWorkspaceWriter extends GitWorkspaceReader {
   stage(paths: readonly RelativeGitPath[]): Promise<void>;
   commit(request: CommitRequest): Promise<ObjectId>;
-  pushUpstream(): Promise<PushResult>;
+  pushUpstream(request?: PushUpstreamRequest): Promise<PushResult>;
 }
 
 export interface CommitRequest {
@@ -146,6 +157,10 @@ export interface CommitRequest {
 
 export interface PushResult {
   readonly kind: "pushed";
+}
+
+export interface PushUpstreamRequest {
+  readonly authentication?: GitAuthenticationContext;
 }
 
 export type RepositoryInspection =
@@ -181,6 +196,11 @@ export const createTrustedGitRemote = (value: string): TrustedGitRemote | null =
   });
   return value.length > 0 && !hasControlCharacter ? (value as TrustedGitRemote) : null;
 };
+
+export const createGitAuthenticationContext = (id: string): GitAuthenticationContext | null =>
+  id.length > 0 && id.length <= MAX_AUTHENTICATION_CONTEXT_ID_LENGTH && !hasControlCharacter(id)
+    ? (Object.freeze({ id }) as GitAuthenticationContext)
+    : null;
 
 const hasControlCharacter = (value: string): boolean =>
   Array.from(value).some((character) => {

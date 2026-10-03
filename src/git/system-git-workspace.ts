@@ -4,18 +4,21 @@ import { realpath, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import {
   GitError,
+  createGitAuthenticationContext,
   createRelativeGitPath,
   createRemoteName,
   isObjectId,
   type CommitHistoryRequest,
   type CommitRequest,
   type ExactCommitRevision,
+  type GitAuthenticationContext,
   type GitCommitSummary,
   type CloneRequest,
   type GitOperationName,
   type PathChange,
   type PathChangeKind,
   type PushResult,
+  type PushUpstreamRequest,
   type RelativeGitPath,
   type RemoteName,
   type RepositoryState,
@@ -24,10 +27,19 @@ import {
   type ObjectId,
   type RepositoryInspection
 } from "./git-workspace.js";
+import type { GitCredentialResolver, GitResolvedCredential } from "./git-credential-resolver.js";
 
 const executeFile = promisify(execFile);
 const MAX_GIT_OUTPUT_BYTES = 1_048_576;
 const MAX_COMMIT_HISTORY_COUNT = 100;
+const GITHUB_HTTPS_HOST = "github.com";
+const GITHUB_TOKEN_USERNAME = "x-access-token";
+const AUTHORIZATION_CONFIG_KEY = "http.https://github.com/.extraHeader";
+const CREDENTIAL_HELPER_CONFIG_KEY = "credential.helper";
+const AUTHENTICATED_CONFIG_COUNT = 2;
+const REDACTED_VALUE = "[REDACTED]";
+const AUTHENTICATION_REJECTION_PATTERN =
+  /authentication failed|invalid username or token|http basic: access denied|requested url returned error:\s*401/iu;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;
 const LOG_FORMAT = "%H%x00%cI%x00%s%x00";
@@ -39,29 +51,77 @@ const CONFLICT_RECORD_PATTERN =
 class SystemGitFailure extends Error {
   readonly code: unknown;
   readonly stderr: string;
+  readonly authenticationRejected: boolean;
+  readonly explicitAuthentication: boolean;
 
-  constructor(error: unknown) {
+  constructor(error: unknown, secrets: readonly string[] = [], explicitAuthentication = false) {
     super("System Git command failed.");
     this.name = "SystemGitFailure";
-    const details = error as { readonly code?: unknown; readonly stderr?: unknown };
+    const details = error as {
+      readonly code?: unknown;
+      readonly command?: unknown;
+      readonly message?: unknown;
+      readonly stderr?: unknown;
+      readonly stdout?: unknown;
+    };
     this.code = details.code;
-    this.stderr = typeof details.stderr === "string" ? details.stderr : "";
+    const rawMessage = typeof details.message === "string" ? details.message : String(error);
+    const rawStderr = typeof details.stderr === "string" ? details.stderr : "";
+    this.authenticationRejected = AUTHENTICATION_REJECTION_PATTERN.test(
+      `${rawMessage}\n${rawStderr}`
+    );
+    this.explicitAuthentication = explicitAuthentication;
+    this.stderr = redact(rawStderr, secrets);
+    const sanitizedCause = new Error(redact(rawMessage, secrets));
+    sanitizedCause.name =
+      typeof (error as { readonly name?: unknown }).name === "string"
+        ? (error as { readonly name: string }).name
+        : "Error";
+    for (const [key, value] of [
+      ["stderr", details.stderr],
+      ["stdout", details.stdout],
+      ["command", details.command]
+    ] as const) {
+      if (typeof value === "string") {
+        Object.defineProperty(sanitizedCause, key, {
+          configurable: true,
+          enumerable: false,
+          value: redact(value, secrets)
+        });
+      }
+    }
     Object.defineProperty(this, "cause", {
       configurable: true,
       enumerable: false,
-      value: error
+      value: sanitizedCause
     });
   }
 }
 
-const runSystemGit = async (root: string, arguments_: readonly string[]): Promise<string> => {
+export interface SystemGitExecutionRequest {
+  readonly cwd: string;
+  readonly args: readonly string[];
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+type SystemGitRunner = (request: SystemGitExecutionRequest) => Promise<string>;
+
+const redact = (value: string, secrets: readonly string[]): string =>
+  secrets.reduce(
+    (sanitized, secret) =>
+      secret.length === 0 ? sanitized : sanitized.replaceAll(secret, REDACTED_VALUE),
+    value
+  );
+
+const runSystemGit: SystemGitRunner = async ({ cwd, args, env }): Promise<string> => {
   try {
     const result = await executeFile(
       "git",
-      ["-c", "color.ui=false", "-c", "core.quotepath=false", ...arguments_],
+      ["-c", "color.ui=false", "-c", "core.quotepath=false", ...args],
       {
-        cwd: root,
+        cwd,
         encoding: "utf8",
+        ...(env === undefined ? {} : { env }),
         maxBuffer: MAX_GIT_OUTPUT_BYTES,
         shell: false,
         windowsHide: true
@@ -73,7 +133,115 @@ const runSystemGit = async (root: string, arguments_: readonly string[]): Promis
   }
 };
 
-type SystemGitRunner = (root: string, arguments_: readonly string[]) => Promise<string>;
+interface AuthenticatedExecution {
+  readonly authentication?: GitAuthenticationContext;
+  readonly remote?: string;
+}
+
+export interface SystemGitWorkspaceFactoryOptions {
+  readonly runGit?: SystemGitRunner;
+  readonly credentialResolver?: GitCredentialResolver;
+}
+
+const isTrustedGitHubHttpsRemote = (remote: string, host: string): boolean => {
+  try {
+    const url = new URL(remote);
+    return (
+      url.protocol === "https:" &&
+      url.hostname.toLowerCase() === host &&
+      url.port === "" &&
+      url.username === "" &&
+      url.password === ""
+    );
+  } catch {
+    return false;
+  }
+};
+
+const requireAuthenticationContext = (
+  context: GitAuthenticationContext,
+  operation: GitOperationName
+): void => {
+  if (createGitAuthenticationContext(context.id) === null) {
+    throw new GitError("authentication_failed", operation);
+  }
+};
+
+const requireResolvedCredential = (
+  credential: GitResolvedCredential | null,
+  operation: GitOperationName
+): GitResolvedCredential => {
+  if (
+    credential === null ||
+    credential.host !== GITHUB_HTTPS_HOST ||
+    credential.token.length === 0
+  ) {
+    throw new GitError("authentication_failed", operation);
+  }
+  return credential;
+};
+
+const authenticatedEnvironment = (
+  credential: GitResolvedCredential
+): { readonly env: NodeJS.ProcessEnv; readonly secrets: readonly string[] } => {
+  const encoded = Buffer.from(`${GITHUB_TOKEN_USERNAME}:${credential.token}`).toString("base64");
+  const authorization = `AUTHORIZATION: basic ${encoded}`;
+  return {
+    env: {
+      ...process.env,
+      GIT_CONFIG_COUNT: String(AUTHENTICATED_CONFIG_COUNT),
+      GIT_CONFIG_KEY_0: CREDENTIAL_HELPER_CONFIG_KEY,
+      GIT_CONFIG_VALUE_0: "",
+      GIT_CONFIG_KEY_1: AUTHORIZATION_CONFIG_KEY,
+      GIT_CONFIG_VALUE_1: authorization,
+      GIT_TERMINAL_PROMPT: "0"
+    },
+    secrets: [credential.token, encoded, authorization]
+  };
+};
+
+class SystemGitOperationExecutor {
+  constructor(
+    private readonly runner: SystemGitRunner,
+    private readonly credentialResolver?: GitCredentialResolver
+  ) {}
+
+  async run(
+    cwd: string,
+    args: readonly string[],
+    operation: GitOperationName,
+    execution: AuthenticatedExecution = {}
+  ): Promise<string> {
+    if (execution.authentication === undefined) return await this.runner({ cwd, args });
+
+    requireAuthenticationContext(execution.authentication, operation);
+    if (
+      execution.remote === undefined ||
+      !isTrustedGitHubHttpsRemote(execution.remote, GITHUB_HTTPS_HOST)
+    ) {
+      throw new GitError("operation_rejected", operation);
+    }
+    if (this.credentialResolver === undefined) {
+      throw new GitError("authentication_failed", operation);
+    }
+    let resolvedCredential: GitResolvedCredential | null;
+    try {
+      resolvedCredential = await this.credentialResolver.resolve(execution.authentication);
+    } catch {
+      throw new GitError("authentication_failed", operation);
+    }
+    const credential = requireResolvedCredential(resolvedCredential, operation);
+    if (!isTrustedGitHubHttpsRemote(execution.remote, credential.host)) {
+      throw new GitError("operation_rejected", operation);
+    }
+    const { env, secrets } = authenticatedEnvironment(credential);
+    try {
+      return await this.runner({ cwd, args, env });
+    } catch (error) {
+      throw new SystemGitFailure(error, secrets, true);
+    }
+  }
+}
 
 const errorForFailure = (
   failure: unknown,
@@ -92,6 +260,13 @@ const errorForFailure = (
       (failure as { readonly code?: unknown }).code === "ENOENT")
   ) {
     return new GitError("engine_unavailable", operation, failure);
+  }
+  if (
+    failure instanceof SystemGitFailure &&
+    failure.explicitAuthentication &&
+    failure.authenticationRejected
+  ) {
+    return new GitError("authentication_failed", operation, failure);
   }
   return new GitError(fallback, operation, failure);
 };
@@ -246,7 +421,7 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
 
   constructor(
     root: string,
-    private readonly runGit: SystemGitRunner = runSystemGit
+    private readonly executor: SystemGitOperationExecutor
   ) {
     this.root = root;
   }
@@ -258,7 +433,7 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
       const arguments_ = ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"];
       if (options?.paths !== undefined && options.paths.length > 0)
         arguments_.push("--", ...options.paths);
-      const status = parseStatus(await this.runGit(this.root, arguments_));
+      const status = parseStatus(await this.executor.run(this.root, arguments_, "inspect"));
       if (status.headOid === null) throw new GitError("unknown_engine_failure", "inspect");
       const head: RepositoryState["head"] =
         status.headOid === "(initial)"
@@ -274,12 +449,16 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
       if (status.upstreamBranch !== null) {
         if (status.ahead === null || status.behind === null)
           throw new GitError("unknown_engine_failure", "inspect");
-        const remoteOutput = await this.runGit(this.root, [
-          "for-each-ref",
-          "--format=%(upstream:remotename)",
-          "--count=1",
-          `refs/heads/${status.branch ?? ""}`
-        ]);
+        const remoteOutput = await this.executor.run(
+          this.root,
+          [
+            "for-each-ref",
+            "--format=%(upstream:remotename)",
+            "--count=1",
+            `refs/heads/${status.branch ?? ""}`
+          ],
+          "inspect"
+        );
         const remoteValue = remoteOutput.trim();
         upstream = {
           kind: "configured",
@@ -307,7 +486,7 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
     if (paths.length === 0 || paths.some((path) => createRelativeGitPath(path) !== path))
       throw new GitError("operation_rejected", "stage");
     try {
-      await this.runGit(this.root, ["add", "--", ...paths]);
+      await this.executor.run(this.root, ["add", "--", ...paths], "stage");
     } catch (error) {
       if (error instanceof GitError) throw error;
       throw errorForFailure(error, "stage", "unknown_engine_failure");
@@ -318,17 +497,28 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
     if (request.message.trim() === "" || request.message.includes("\u0000"))
       throw new GitError("operation_rejected", "commit");
     try {
-      await this.runGit(this.root, ["commit", "-m", request.message]);
-      return parseObjectId(await this.runGit(this.root, ["rev-parse", "HEAD"]), "commit");
+      await this.executor.run(this.root, ["commit", "-m", request.message], "commit");
+      return parseObjectId(
+        await this.executor.run(this.root, ["rev-parse", "HEAD"], "commit"),
+        "commit"
+      );
     } catch (error) {
       if (error instanceof GitError) throw error;
       throw errorForFailure(error, "commit", "operation_rejected");
     }
   }
 
-  async pushUpstream(): Promise<PushResult> {
+  async pushUpstream(request: PushUpstreamRequest = {}): Promise<PushResult> {
     try {
-      await this.runGit(this.root, ["push"]);
+      if (request.authentication === undefined) {
+        await this.executor.run(this.root, ["push"], "push");
+      } else {
+        const remote = await this.resolveUpstreamRemoteUrl();
+        await this.executor.run(this.root, ["push"], "push", {
+          authentication: request.authentication,
+          remote
+        });
+      }
       return { kind: "pushed" };
     } catch (error) {
       if (error instanceof GitError) throw error;
@@ -336,10 +526,70 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
     }
   }
 
+  private async resolveUpstreamRemoteUrl(): Promise<string> {
+    const branch = (
+      await this.executor.run(this.root, ["symbolic-ref", "--quiet", "--short", "HEAD"], "push")
+    ).trim();
+    if (branch === "") throw new GitError("operation_rejected", "push");
+    const remoteNameValue = (
+      await this.executor.run(
+        this.root,
+        ["for-each-ref", "--format=%(upstream:remotename)", "--count=1", `refs/heads/${branch}`],
+        "push"
+      )
+    ).trim();
+    const remoteName = createRemoteName(remoteNameValue);
+    if (remoteName === null) throw new GitError("operation_rejected", "push");
+    let pushRemotes: readonly string[] = [];
+    try {
+      pushRemotes = (
+        await this.executor.run(
+          this.root,
+          ["config", "--get-all", `remote.${remoteName}.pushurl`],
+          "push"
+        )
+      )
+        .split(/\r?\n/u)
+        .filter((value) => value.length > 0);
+    } catch (error) {
+      if (!(error instanceof SystemGitFailure && error.code === 1)) throw error;
+    }
+    if (pushRemotes.length > 0) {
+      if (pushRemotes.some((remote) => !isTrustedGitHubHttpsRemote(remote, GITHUB_HTTPS_HOST))) {
+        throw new GitError("operation_rejected", "push");
+      }
+      const firstPushRemote = pushRemotes[0];
+      if (firstPushRemote === undefined) throw new GitError("operation_rejected", "push");
+      return firstPushRemote;
+    }
+    const fetchRemotes = (
+      await this.executor.run(
+        this.root,
+        ["config", "--get-all", `remote.${remoteName}.url`],
+        "push"
+      )
+    )
+      .split(/\r?\n/u)
+      .filter((value) => value.length > 0);
+    if (
+      fetchRemotes.length === 0 ||
+      fetchRemotes.some((remote) => !isTrustedGitHubHttpsRemote(remote, GITHUB_HTTPS_HOST))
+    ) {
+      throw new GitError("operation_rejected", "push");
+    }
+    const firstFetchRemote = fetchRemotes[0];
+    if (firstFetchRemote === undefined) throw new GitError("operation_rejected", "push");
+    return firstFetchRemote;
+  }
+
   async remoteUrl(remote: RemoteName): Promise<string | null> {
     try {
       const value = (
-        await this.runGit(this.root, ["config", "--get", `remote.${remote}.url`])
+        await this.executor.run(
+          this.root,
+          ["config", "--get", `remote.${remote}.url`],
+          "remote_url"
+        )
       ).trim();
       return value === "" ? null : value;
     } catch (error) {
@@ -351,7 +601,11 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
   async resolveHead(): Promise<ObjectId> {
     try {
       return parseObjectId(
-        await this.runGit(this.root, ["rev-parse", "--verify", "HEAD^{commit}"]),
+        await this.executor.run(
+          this.root,
+          ["rev-parse", "--verify", "HEAD^{commit}"],
+          "resolve_head"
+        ),
         "resolve_head"
       );
     } catch (error) {
@@ -363,7 +617,11 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
   async resolveRevision(revision: ExactCommitRevision): Promise<ObjectId> {
     try {
       return parseObjectId(
-        await this.runGit(this.root, ["rev-parse", "--verify", `${revision}^{commit}`]),
+        await this.executor.run(
+          this.root,
+          ["rev-parse", "--verify", `${revision}^{commit}`],
+          "resolve_revision"
+        ),
         "resolve_revision"
       );
     } catch (error) {
@@ -381,13 +639,17 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
       throw new GitError("operation_rejected", "list_commits");
     }
     try {
-      const stdout = await this.runGit(this.root, [
-        "log",
-        `--max-count=${String(request.maximumCount)}`,
-        `--format=${LOG_FORMAT}`,
-        request.anchor,
-        "--"
-      ]);
+      const stdout = await this.executor.run(
+        this.root,
+        [
+          "log",
+          `--max-count=${String(request.maximumCount)}`,
+          `--format=${LOG_FORMAT}`,
+          request.anchor,
+          "--"
+        ],
+        "list_commits"
+      );
       const commits = parseCommitHistory(stdout);
       return commits.length > request.maximumCount
         ? commits.slice(0, request.maximumCount)
@@ -400,11 +662,18 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
 }
 
 export class SystemGitWorkspaceFactory implements GitWorkspaceWriterFactory {
-  constructor(private readonly runGit: SystemGitRunner = runSystemGit) {}
+  private readonly executor: SystemGitOperationExecutor;
+
+  constructor(options: SystemGitWorkspaceFactoryOptions = {}) {
+    this.executor = new SystemGitOperationExecutor(
+      options.runGit ?? runSystemGit,
+      options.credentialResolver
+    );
+  }
 
   async verifyAvailable(): Promise<void> {
     try {
-      await this.runGit(process.cwd(), ["--version"]);
+      await this.executor.run(process.cwd(), ["--version"], "verify_available");
     } catch (error) {
       throw errorForFailure(error, "verify_available", "unknown_engine_failure");
     }
@@ -415,7 +684,16 @@ export class SystemGitWorkspaceFactory implements GitWorkspaceWriterFactory {
       throw new GitError("operation_rejected", "clone");
     }
     try {
-      await this.runGit(process.cwd(), ["clone", "--", request.remote, request.destination]);
+      await this.executor.run(
+        process.cwd(),
+        ["clone", "--", request.remote, request.destination],
+        "clone",
+        {
+          ...(request.authentication === undefined
+            ? {}
+            : { authentication: request.authentication, remote: request.remote })
+        }
+      );
       return await this.open(request.destination);
     } catch (error) {
       if (error instanceof GitError) throw error;
@@ -441,9 +719,11 @@ export class SystemGitWorkspaceFactory implements GitWorkspaceWriterFactory {
   async open(path: string): Promise<GitWorkspaceWriter> {
     await requireDirectory(path);
     try {
-      const discoveredRoot = (await this.runGit(path, ["rev-parse", "--show-toplevel"])).trim();
+      const discoveredRoot = (
+        await this.executor.run(path, ["rev-parse", "--show-toplevel"], "open")
+      ).trim();
       if (discoveredRoot === "") throw new GitError("unknown_engine_failure", "open");
-      return new SystemGitWorkspace(await realpath(discoveredRoot), this.runGit);
+      return new SystemGitWorkspace(await realpath(discoveredRoot), this.executor);
     } catch (error) {
       if (error instanceof GitError) throw error;
       if (

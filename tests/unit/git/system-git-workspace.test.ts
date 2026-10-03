@@ -67,7 +67,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
       const error = Object.assign(new Error("missing executable"), { code: "ENOENT" });
       return Promise.reject(error);
     };
-    const factory = new SystemGitWorkspaceFactory(unavailableEngine);
+    const factory = new SystemGitWorkspaceFactory({ runGit: unavailableEngine });
 
     await expect(factory.verifyAvailable()).rejects.toMatchObject({
       kind: "engine_unavailable",
