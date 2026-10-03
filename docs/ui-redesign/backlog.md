@@ -1522,8 +1522,8 @@ Requested behaviour (direct collaborators):
 - Give each active student's GitHub account read access to the configured
   Pages repository as a direct collaborator, using the same GitHub collaborator
   calls Graider already makes for student repositories.
-- Remove that access when a student is no longer active, so access follows the
-  roster.
+- Students on hold keep their access; remove it only when a student is
+  dropped, so access follows the roster.
 - Do not use the organization base permission (it would expose every
   repository, including other students') or internal visibility (it would open
   the pages to the whole enterprise).
@@ -1534,7 +1534,8 @@ Open questions before implementation:
 
 - When access is granted and removed: during Apply, on roster saves, from an
   explicit action, or a combination.
-- Whether students on hold keep access, or only active students have it.
+- Whether a student who is already on hold when access is first set up is
+  granted access, or only keeps access granted while active.
 - Whether a student who is active in any section or term keeps access while
   inactive elsewhere, since one Pages repository serves every term.
 - How failures are reported, and whether faculty preview the changes before
