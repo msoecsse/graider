@@ -59,6 +59,12 @@ export interface GitWorkspaceInspector {
   remoteUrl(remote: "origin"): Promise<string | null>;
 }
 
+export interface GitWorkspaceWriter extends GitWorkspaceInspector {
+  stage(paths: readonly RelativeGitPath[]): Promise<void>;
+  commit(request: { readonly message: string }): Promise<string>;
+  pushUpstream(): Promise<{ readonly kind: "pushed" }>;
+}
+
 export type GitRepositoryInspection =
   | { readonly kind: "repository"; readonly root: string }
   | { readonly kind: "not_repository" }
@@ -69,11 +75,20 @@ export interface GitWorkspaceInspectionFactory {
   open(repositoryPath: string): Promise<GitWorkspaceInspector>;
 }
 
+export interface GitWorkspaceWriterFactory extends GitWorkspaceInspectionFactory {
+  open(repositoryPath: string): Promise<GitWorkspaceWriter>;
+}
+
 export interface GitWorkspaceReaderFactory {
   open(repositoryPath: string): Promise<GitWorkspaceReader>;
 }
 
-export type GitWorkspaceFactory = GitWorkspaceReaderFactory & GitWorkspaceInspectionFactory;
+export interface GitWorkspace extends GitWorkspaceReader, GitWorkspaceWriter {}
+
+export interface GitWorkspaceFactory {
+  inspect(repositoryPath: string): Promise<GitRepositoryInspection>;
+  open(repositoryPath: string): Promise<GitWorkspace>;
+}
 
 interface SystemGitWorkspaceBackend {
   createSystemGitWorkspaceFactory(): GitWorkspaceFactory;

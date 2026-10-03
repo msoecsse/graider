@@ -1,7 +1,5 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import { parseDocument } from "yaml";
 
 import type { AssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
@@ -10,37 +8,18 @@ import type {
   StudentRepositoryAccessPagePublishActionResult,
   StudentRepositoryAccessPageRequest
 } from "./ipc.js";
+import {
+  createRelativeGitPath,
+  getSystemGitWorkspaceFactory,
+  type GitWorkspaceWriterFactory
+} from "./gitWorkspaceReader.js";
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService.js";
 
-const execFileAsync = promisify(execFile);
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
 
 const isContainedPath = (root: string, target: string): boolean => {
   const relative = path.relative(root, target);
   return relative.length > 0 && !relative.startsWith(`..${path.sep}`) && relative !== "..";
-};
-
-const runGit = async (
-  repositoryFolderPath: string,
-  arguments_: readonly string[]
-): Promise<{ readonly ok: boolean; readonly stderr: string }> => {
-  try {
-    await execFileAsync("git", arguments_, {
-      cwd: repositoryFolderPath,
-      shell: false,
-      windowsHide: true,
-      maxBuffer: 1024 * 1024
-    });
-    return { ok: true, stderr: "" };
-  } catch (error) {
-    const stderr =
-      error instanceof Error && "stderr" in error && typeof error.stderr === "string"
-        ? error.stderr.trim()
-        : error instanceof Error
-          ? error.message
-          : "";
-    return { ok: false, stderr };
-  }
 };
 
 const failure = (message: string): StudentRepositoryAccessPagePublishActionResult => ({
@@ -54,7 +33,7 @@ const getConfiguredPagesBranch = (courseFolderPath: string): string | null => {
     const document = parseDocument(
       fs.readFileSync(path.join(courseFolderPath, "course.yml"), "utf8")
     );
-    const branch = document.getIn(["notifications", "student_access_pages", "branch"], true);
+    const branch = document.getIn(["notifications", "student_access_pages", "branch"]);
     return typeof branch === "string" && branch.trim() !== "" ? branch.trim() : null;
   } catch {
     return null;
@@ -63,9 +42,10 @@ const getConfiguredPagesBranch = (courseFolderPath: string): string | null => {
 
 export const publishStudentRepositoryAccessPage = async (
   request: StudentRepositoryAccessPageRequest,
-  mappings: AssignmentRepositoryMappings
+  mappings: AssignmentRepositoryMappings,
+  factory: GitWorkspaceWriterFactory = getSystemGitWorkspaceFactory()
 ): Promise<StudentRepositoryAccessPagePublishActionResult> => {
-  const readiness = await getStudentRepositoryAccessPagePublishStatus(request, mappings);
+  const readiness = await getStudentRepositoryAccessPagePublishStatus(request, mappings, factory);
   const repositoryFolderPath = request.pagesRepositoryFolderPath;
   if (repositoryFolderPath === null || repositoryFolderPath === undefined)
     return failure("Select the local Pages repository folder before publishing the access page.");
@@ -116,22 +96,44 @@ export const publishStudentRepositoryAccessPage = async (
     };
 
   const commitMessage = `Publish student access page for ${readiness.assignmentSlug ?? "assignment"}`;
-  if (readiness.status === "uncommitted") {
-    if (
-      !(await runGit(repositoryRoot, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]))
-        .ok
-    )
+  const outputPath = createRelativeGitPath(readiness.outputPath);
+  if (outputPath === null) return failure("Unable to stage the generated student access page.");
+  let workspace: Awaited<ReturnType<GitWorkspaceWriterFactory["open"]>>;
+  try {
+    workspace = await factory.open(repositoryRoot);
+    const currentState = await workspace.inspect();
+    if (currentState.head.kind !== "attached" || currentState.upstream.kind === "missing")
       return failure("This Pages repository branch does not have an upstream branch configured.");
-    if (!(await runGit(repositoryRoot, ["add", "--", readiness.outputPath])).ok)
-      return failure("Unable to stage the generated student access page.");
-    if (!(await runGit(repositoryRoot, ["commit", "-m", commitMessage])).ok)
-      return failure("Unable to commit the generated student access page.");
-  }
-  const push = await runGit(repositoryRoot, ["push"]);
-  if (!push.ok)
+    if (currentState.upstream.behind > 0)
+      return failure(
+        "The local Pages repository must be pulled, rebased, or synchronized with its upstream before publishing the access page."
+      );
+    if (configuredBranch !== null && currentState.head.branch !== configuredBranch)
+      return failure(
+        "The local Pages repository branch does not match the configured Student Access Pages branch."
+      );
+  } catch {
     return failure(
-      `Unable to push the student access page to the configured upstream branch. Git reported: ${push.stderr || "No additional Git error output was available."}`
+      "Student Access Pages are not ready to publish. Review the publish readiness diagnostics."
     );
+  }
+  if (readiness.status === "uncommitted") {
+    try {
+      await workspace.stage([outputPath]);
+    } catch {
+      return failure("Unable to stage the generated student access page.");
+    }
+    try {
+      await workspace.commit({ message: commitMessage });
+    } catch {
+      return failure("Unable to commit the generated student access page.");
+    }
+  }
+  try {
+    await workspace.pushUpstream();
+  } catch {
+    return failure("Unable to push the student access page to the configured upstream branch.");
+  }
   return {
     status: "success",
     diagnostics: [

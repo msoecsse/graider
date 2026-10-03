@@ -14,6 +14,9 @@ export type GitOperationName =
   | "clone"
   | "open"
   | "inspect"
+  | "stage"
+  | "commit"
+  | "push"
   | "remote_url"
   | "resolve_head"
   | "resolve_revision"
@@ -131,6 +134,20 @@ export interface GitWorkspaceReader {
   listCommits(request: CommitHistoryRequest): Promise<readonly GitCommitSummary[]>;
 }
 
+export interface GitWorkspaceWriter extends GitWorkspaceReader {
+  stage(paths: readonly RelativeGitPath[]): Promise<void>;
+  commit(request: CommitRequest): Promise<ObjectId>;
+  pushUpstream(): Promise<PushResult>;
+}
+
+export interface CommitRequest {
+  readonly message: string;
+}
+
+export interface PushResult {
+  readonly kind: "pushed";
+}
+
 export type RepositoryInspection =
   | { readonly kind: "repository"; readonly root: string }
   | { readonly kind: "not_repository" }
@@ -141,6 +158,10 @@ export interface GitWorkspaceFactory {
   clone(request: CloneRequest): Promise<GitWorkspaceReader>;
   inspect(path: string): Promise<RepositoryInspection>;
   open(path: string): Promise<GitWorkspaceReader>;
+}
+
+export interface GitWorkspaceWriterFactory extends GitWorkspaceFactory {
+  open(path: string): Promise<GitWorkspaceWriter>;
 }
 
 export const createExactCommitRevision = (value: string): ExactCommitRevision | null =>

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { getSystemGitWorkspaceFactory, type GitWorkspaceWriterFactory } from "./gitWorkspaceReader";
 import type { StudentRepositoryAccessPageRequest } from "./ipc";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService";
 
@@ -115,18 +116,92 @@ describe("studentRepositoryAccessPagePublishService", () => {
     expect(git(pagesRoot(root), ["status", "--porcelain"])).toContain(outputPath);
   });
 
-  it("includes Git's failure output when the push fails", async () => {
+  it("rechecks the upstream immediately before staging", async () => {
     const root = createFixture();
-    git(pagesRoot(root), [
-      "remote",
-      "set-url",
-      "origin",
-      path.join(root, "missing", "csc1120", "csc1120pages")
+    const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
+    const backend = getSystemGitWorkspaceFactory();
+    let openCount = 0;
+    const factory: GitWorkspaceWriterFactory = {
+      inspect: (repositoryPath) => backend.inspect(repositoryPath),
+      open: async (repositoryPath) => {
+        openCount += 1;
+        if (openCount === 2) git(pagesRoot(root), ["branch", "--unset-upstream"]);
+        return await backend.open(repositoryPath);
+      }
+    };
+
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings, factory);
+
+    expect(result.diagnostics).toEqual([
+      { message: "This Pages repository branch does not have an upstream branch configured." }
     ]);
+    expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(headBefore);
+    expect(git(pagesRoot(root), ["status", "--porcelain"])).toContain(outputPath);
+  });
+
+  it("rechecks behind state immediately before staging", async () => {
+    const root = createFixture();
+    const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
+    const backend = getSystemGitWorkspaceFactory();
+    let openCount = 0;
+    const factory: GitWorkspaceWriterFactory = {
+      inspect: (repositoryPath) => backend.inspect(repositoryPath),
+      open: async (repositoryPath) => {
+        openCount += 1;
+        if (openCount === 2) advanceUpstream(root);
+        return await backend.open(repositoryPath);
+      }
+    };
+
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings, factory);
+
+    expect(result.diagnostics[0]?.message).toMatch(/pulled.*rebased.*synchronized/u);
+    expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(headBefore);
+    expect(git(pagesRoot(root), ["status", "--porcelain"])).toContain(outputPath);
+  });
+
+  it("blocks a configured branch mismatch before staging", async () => {
+    const root = createFixture();
+    fs.writeFileSync(
+      path.join(root, "course.yml"),
+      "notifications:\n  student_access_pages:\n    repository: csc1120/csc1120pages\n    base_url: https://csc1120.github.io/csc1120pages\n    branch: release\n",
+      "utf8"
+    );
+    const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
+
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+
+    expect(result.diagnostics[0]?.message).toMatch(/branch does not match/u);
+    expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(headBefore);
+  });
+
+  it("blocks a configured repository mismatch before staging", async () => {
+    const root = createFixture();
+    fs.writeFileSync(
+      path.join(root, "course.yml"),
+      "notifications:\n  student_access_pages:\n    repository: csc1120/different-pages\n    base_url: https://csc1120.github.io/different-pages\n    branch: main\n",
+      "utf8"
+    );
+    const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
+
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+
+    expect(result.diagnostics[0]?.message).toMatch(/remote does not match/u);
+    expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(headBefore);
+  });
+
+  it("returns a fixed safe diagnostic when the push fails", async () => {
+    const root = createFixture();
+    const privateRemotePath = path.join(root, "missing", "csc1120", "csc1120pages");
+    git(pagesRoot(root), ["remote", "set-url", "origin", privateRemotePath]);
 
     const result = await publishStudentRepositoryAccessPage(request(root), mappings);
 
     expect(result.status).toBe("failure");
-    expect(result.diagnostics[0]?.message).toMatch(/Git reported:.*fatal:/u);
+    expect(result.diagnostics).toEqual([
+      { message: "Unable to push the student access page to the configured upstream branch." }
+    ]);
+    expect(result.diagnostics[0]?.message).not.toContain("fatal:");
+    expect(result.diagnostics[0]?.message).not.toContain(privateRemotePath);
   });
 });

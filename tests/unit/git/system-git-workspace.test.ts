@@ -10,7 +10,8 @@ import {
   createRelativeGitPath,
   createRemoteName,
   createTrustedGitRemote,
-  type ExactCommitRevision
+  type ExactCommitRevision,
+  type RelativeGitPath
 } from "../../../src/git/git-workspace.js";
 import { SystemGitWorkspaceFactory } from "../../../src/git/system-git-workspace.js";
 
@@ -419,5 +420,232 @@ describe("SystemGitWorkspace structured inspection contract", () => {
     await expect(workspace.remoteUrl(origin)).resolves.toBe(fixture.remote);
     await expect(workspace.remoteUrl(missing)).resolves.toBeNull();
     expect(createRemoteName("--upload-pack=bad")).toBeNull();
+  });
+});
+
+describe("SystemGitWorkspace exact-path staging contract", () => {
+  const trustedPath = (value: string) => {
+    const relativePath = createRelativeGitPath(value);
+    if (relativePath === null) throw new Error("The test path must be trusted.");
+    return relativePath;
+  };
+
+  it("stages only the explicitly supplied path", async () => {
+    const fixture = await createRepository();
+    await writeFile(join(fixture.repository, "submission.txt"), "changed\n");
+    await writeFile(join(fixture.repository, "unrelated.txt"), "unrelated\n");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await workspace.stage([trustedPath("submission.txt")]);
+
+    const state = await workspace.inspect();
+    expect(state.workingTree.stagedChanges).toEqual([{ kind: "modified", path: "submission.txt" }]);
+    expect(state.workingTree.untrackedPaths).toEqual(["unrelated.txt"]);
+  });
+
+  it("stages a tracked deletion by exact path", async () => {
+    const fixture = await createRepository();
+    await rm(join(fixture.repository, "submission.txt"));
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await workspace.stage([trustedPath("submission.txt")]);
+
+    await expect(workspace.inspect()).resolves.toMatchObject({
+      workingTree: {
+        stagedChanges: [{ kind: "deleted", path: "submission.txt" }],
+        trackedChanges: []
+      }
+    });
+  });
+
+  it("stages a repository-relative path containing spaces", async () => {
+    const fixture = await createRepository();
+    await writeFile(join(fixture.repository, "page with spaces.html"), "page\n");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await workspace.stage([trustedPath("page with spaces.html")]);
+
+    await expect(workspace.inspect()).resolves.toMatchObject({
+      workingTree: {
+        stagedChanges: [{ kind: "added", path: "page with spaces.html" }]
+      }
+    });
+  });
+
+  it("rejects an empty list without staging unrelated changes", async () => {
+    const fixture = await createRepository();
+    await writeFile(join(fixture.repository, "submission.txt"), "changed\n");
+    await writeFile(join(fixture.repository, "unrelated.txt"), "unrelated\n");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(workspace.stage([])).rejects.toMatchObject({
+      kind: "operation_rejected",
+      operation: "stage"
+    });
+    await expect(workspace.inspect()).resolves.toMatchObject({
+      workingTree: { stagedChanges: [] }
+    });
+  });
+
+  it("rejects invalid paths before they can reach a workspace operation", () => {
+    expect(createRelativeGitPath("../private-course/secret.txt")).toBeNull();
+    expect(createRelativeGitPath("-n")).not.toBeNull();
+  });
+
+  it("defensively rejects an invalid branded path before Git execution", async () => {
+    const fixture = await createRepository();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(
+      workspace.stage(["../private-course/secret.txt" as RelativeGitPath])
+    ).rejects.toMatchObject({ kind: "operation_rejected", operation: "stage" });
+  });
+});
+
+describe("SystemGitWorkspace commit contract", () => {
+  const trustedPath = (value: string) => {
+    const relativePath = createRelativeGitPath(value);
+    if (relativePath === null) throw new Error("The test path must be trusted.");
+    return relativePath;
+  };
+
+  it("commits staged changes and returns the new HEAD object ID", async () => {
+    const fixture = await createRepository();
+    await writeFile(join(fixture.repository, "submission.txt"), "published\n");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    await workspace.stage([trustedPath("submission.txt")]);
+
+    const commit = await workspace.commit({ message: "Publish course changes" });
+
+    expect(commit).toBe((await git(fixture.repository, "rev-parse", "HEAD")).trim());
+    expect((await git(fixture.repository, "log", "-1", "--format=%s")).trim()).toBe(
+      "Publish course changes"
+    );
+  });
+
+  it("fails semantically without staged changes and creates no commit", async () => {
+    const fixture = await createRepository();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(workspace.commit({ message: "Nothing to commit" })).rejects.toMatchObject({
+      kind: "operation_rejected",
+      operation: "commit"
+    });
+    await expect(workspace.resolveHead()).resolves.toBe(fixture.second);
+  });
+
+  it("uses the repository-configured author identity", async () => {
+    const fixture = await createRepository();
+    await git(fixture.repository, "config", "user.name", "Configured Faculty");
+    await git(fixture.repository, "config", "user.email", "configured@example.test");
+    await writeFile(join(fixture.repository, "submission.txt"), "authored\n");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    await workspace.stage([trustedPath("submission.txt")]);
+
+    await workspace.commit({ message: "Configured identity" });
+
+    expect((await git(fixture.repository, "log", "-1", "--format=%an <%ae>")).trim()).toBe(
+      "Configured Faculty <configured@example.test>"
+    );
+  });
+
+  it("commits punctuation and spaces literally without shell interpretation", async () => {
+    const fixture = await createRepository();
+    await writeFile(join(fixture.repository, "submission.txt"), "literal\n");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    await workspace.stage([trustedPath("submission.txt")]);
+    const message = "Publish: faculty's page; $(touch should-not-run) & finish";
+
+    await workspace.commit({ message });
+
+    expect((await git(fixture.repository, "log", "-1", "--format=%s")).trim()).toBe(message);
+    await expect(
+      readFile(join(fixture.repository, "should-not-run"), "utf8")
+    ).rejects.toBeDefined();
+  });
+
+  it("rejects an empty commit message", async () => {
+    const fixture = await createRepository();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(workspace.commit({ message: "   " })).rejects.toMatchObject({
+      kind: "operation_rejected",
+      operation: "commit"
+    });
+  });
+});
+
+describe("SystemGitWorkspace upstream push contract", () => {
+  const createUpstreamRepository = async () => {
+    const fixture = await createRepository("faculty repository");
+    const remote = join(fixture.parent, "private upstream.git");
+    await git(fixture.parent, "init", "--bare", remote);
+    await git(fixture.repository, "remote", "add", "origin", remote);
+    await git(fixture.repository, "push", "-u", "origin", "HEAD");
+    return { ...fixture, remote };
+  };
+
+  it("pushes the current branch to its already-configured upstream", async () => {
+    const fixture = await createUpstreamRepository();
+    await git(fixture.repository, "commit", "--allow-empty", "-m", "Local publication");
+    const localHead = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(workspace.pushUpstream()).resolves.toEqual({ kind: "pushed" });
+
+    expect((await git(fixture.remote, "rev-parse", "HEAD")).trim()).toBe(localHead);
+  });
+
+  it("rejects a divergent push without overwriting the remote or local commit", async () => {
+    const fixture = await createUpstreamRepository();
+    const secondClone = join(fixture.parent, "other faculty clone");
+    await git(fixture.parent, "clone", fixture.remote, secondClone);
+    await git(secondClone, "config", "user.name", "Other Faculty");
+    await git(secondClone, "config", "user.email", "other@example.test");
+    await git(secondClone, "commit", "--allow-empty", "-m", "Remote publication");
+    await git(secondClone, "push");
+    const remoteHead = (await git(fixture.remote, "rev-parse", "HEAD")).trim();
+    await git(fixture.repository, "commit", "--allow-empty", "-m", "Local publication");
+    const localHead = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(workspace.pushUpstream()).rejects.toMatchObject({
+      kind: "remote_unavailable",
+      operation: "push"
+    });
+
+    expect((await git(fixture.repository, "rev-parse", "HEAD")).trim()).toBe(localHead);
+    expect((await git(fixture.remote, "rev-parse", "HEAD")).trim()).toBe(remoteHead);
+  });
+
+  it("fails semantically when the current branch has no upstream", async () => {
+    const fixture = await createRepository();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(workspace.pushUpstream()).rejects.toMatchObject({
+      kind: "remote_unavailable",
+      operation: "push"
+    });
+    await expect(workspace.inspect()).resolves.toMatchObject({ upstream: { kind: "missing" } });
+  });
+
+  it("keeps raw remote errors and private paths out of enumerable error data", async () => {
+    const fixture = await createUpstreamRepository();
+    const secondClone = join(fixture.parent, "private competing clone");
+    await git(fixture.parent, "clone", fixture.remote, secondClone);
+    await git(secondClone, "config", "user.name", "Other Faculty");
+    await git(secondClone, "config", "user.email", "other@example.test");
+    await git(secondClone, "commit", "--allow-empty", "-m", "Remote publication");
+    await git(secondClone, "push");
+    await git(fixture.repository, "commit", "--allow-empty", "-m", "Local publication");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(workspace.pushUpstream()).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(GitError);
+      expect(JSON.stringify(error)).not.toContain(fixture.remote);
+      expect(JSON.stringify(error)).not.toContain("fetch first");
+      expect(String(error)).not.toContain("rejected");
+      return true;
+    });
   });
 });

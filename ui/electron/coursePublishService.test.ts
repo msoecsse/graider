@@ -9,7 +9,8 @@ import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishSer
 import {
   createRelativeGitPath,
   type GitRepositoryState,
-  type GitWorkspaceInspectionFactory
+  type GitWorkspaceInspectionFactory,
+  type GitWorkspaceWriterFactory
 } from "./gitWorkspaceReader";
 import { removeRoster } from "./rosterManagerService";
 
@@ -312,6 +313,24 @@ describe("coursePublishService", () => {
       "Faculty B comment"
     );
   });
+
+  it("retries an existing unpushed commit successfully when the upstream permits it", async () => {
+    const root = fixture();
+    writeCommentLibrary(root, "Retry publication");
+    git(root, ["add", ".graider/grading/comments.json"]);
+    git(root, ["commit", "-m", "Local unpublished change"]);
+
+    const before = await getCoursePublishStatus(root);
+    const result = await publishCourseChanges(root);
+    const after = await getCoursePublishStatus(root);
+
+    expect(before.status).toBe("unpushed");
+    expect(result).toMatchObject({ status: "success", commitMessage: null });
+    expect(after.status).toBe("unrelated_changes");
+    expect(git(root, ["rev-parse", "HEAD"])).toBe(
+      git(path.join(root, "remote"), ["rev-parse", "HEAD"])
+    );
+  });
 });
 
 describe("course publish semantic status projection", () => {
@@ -444,5 +463,57 @@ describe("course publish semantic status projection", () => {
     const failed = await getCoursePublishStatus(root, rejected);
     expect(failed.status).toBe("failure");
     expect(failed.diagnostics.map(({ message }) => message).join(" ")).not.toContain("private");
+  });
+
+  it("reinspects staged paths immediately before mutation and blocks a newly staged unrelated file", async () => {
+    const root = existingFolder();
+    const course = changedPath("course.yml");
+    const notes = changedPath("private-notes.txt");
+    const readyState = state({
+      workingTree: {
+        trackedChanges: [{ kind: "modified", path: course }],
+        stagedChanges: [],
+        untrackedPaths: [],
+        conflicts: []
+      }
+    });
+    const stagedState = state({
+      workingTree: {
+        trackedChanges: [{ kind: "modified", path: course }],
+        stagedChanges: [{ kind: "added", path: notes }],
+        untrackedPaths: [],
+        conflicts: []
+      }
+    });
+    const stage = vi.fn();
+    const commit = vi.fn();
+    const pushUpstream = vi.fn();
+    const inspect = vi.fn().mockResolvedValueOnce(readyState).mockResolvedValueOnce(stagedState);
+    const writerFactory: GitWorkspaceWriterFactory = {
+      inspect: vi.fn().mockResolvedValue({ kind: "repository", root }),
+      open: vi.fn().mockResolvedValue({
+        root,
+        inspect,
+        remoteUrl: vi.fn(),
+        stage,
+        commit,
+        pushUpstream
+      })
+    };
+
+    const result = await publishCourseChanges(root, writerFactory);
+
+    expect(result).toMatchObject({
+      status: "failure",
+      diagnostics: [
+        {
+          message:
+            "Unrelated files are already staged. Unstage them before publishing course changes."
+        }
+      ]
+    });
+    expect(stage).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(pushUpstream).not.toHaveBeenCalled();
   });
 });

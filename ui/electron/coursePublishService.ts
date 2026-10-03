@@ -1,7 +1,5 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 
 import type {
   CoursePublishActionResult,
@@ -9,34 +7,18 @@ import type {
   CourseSetupDiagnostic
 } from "./ipc.js";
 import {
+  createRelativeGitPath,
   getSystemGitWorkspaceFactory,
   type GitRepositoryInspection,
   type GitRepositoryState,
-  type GitWorkspaceInspectionFactory
+  type GitWorkspaceInspectionFactory,
+  type GitWorkspaceWriterFactory
 } from "./gitWorkspaceReader.js";
 
-const execFileAsync = promisify(execFile);
 const diagnostic = (message: string): CourseSetupDiagnostic => ({ message });
 const COMMIT_MESSAGE = "Publish Graider course changes";
 const ALLOWED_PATH =
   /^(?:course\.yml|\.graider\/grading\/comments\.json|terms\/[^/]+\/term\.yml|terms\/[^/]+\/rosters\/(?:[^/]+\.csv|section-[A-Za-z0-9][A-Za-z0-9_-]*\.source\.json)|terms\/[^/]+\/assignments\/[^/]+\/(?:assignment\.yml|groups\.csv|\.github\/workflows\/grade\.yml))$/u;
-
-const runGit = async (
-  courseFolderPath: string,
-  arguments_: readonly string[]
-): Promise<{ readonly ok: boolean; readonly stdout: string }> => {
-  try {
-    const result = await execFileAsync("git", arguments_, {
-      cwd: courseFolderPath,
-      shell: false,
-      windowsHide: true,
-      maxBuffer: 1024 * 1024
-    });
-    return { ok: true, stdout: result.stdout };
-  } catch {
-    return { ok: false, stdout: "" };
-  }
-};
 
 const normalizeChangedPath = (entry: string): string | null => {
   const candidate = entry.replaceAll("\\", "/");
@@ -168,24 +150,38 @@ export const getCoursePublishStatus = async (
 };
 
 export const publishCourseChanges = async (
-  courseFolderPath: string
+  courseFolderPath: string,
+  factory: GitWorkspaceWriterFactory = getSystemGitWorkspaceFactory()
 ): Promise<CoursePublishActionResult> => {
-  const status = await getCoursePublishStatus(courseFolderPath);
+  const status = await getCoursePublishStatus(courseFolderPath, factory);
   if (status.status === "up_to_date" || status.status === "unrelated_changes")
     return { status: "up_to_date", diagnostics: status.diagnostics, commitMessage: null };
   if (status.status !== "changes_pending" && status.status !== "unpushed")
     return { status: "failure", diagnostics: status.diagnostics, commitMessage: null };
+  let workspace: Awaited<ReturnType<GitWorkspaceWriterFactory["open"]>>;
+  try {
+    workspace = await factory.open(status.courseFolderPath);
+  } catch {
+    return {
+      status: "failure",
+      diagnostics: [diagnostic("Unable to inspect staged course changes.")],
+      commitMessage: null
+    };
+  }
   if (status.status === "changes_pending") {
-    const staged = await runGit(status.courseFolderPath, ["diff", "--cached", "--name-only", "-z"]);
-    if (!staged.ok)
+    let currentState: GitRepositoryState;
+    try {
+      currentState = await workspace.inspect();
+    } catch {
       return {
         status: "failure",
         diagnostics: [diagnostic("Unable to inspect staged course changes.")],
         commitMessage: null
       };
+    }
     if (
-      inspectChangedFiles(staged.stdout.split("\u0000").filter((item) => item !== "")).unrelated
-        .length > 0
+      inspectChangedFiles(currentState.workingTree.stagedChanges.map((change) => change.path))
+        .unrelated.length > 0
     )
       return {
         status: "failure",
@@ -196,25 +192,41 @@ export const publishCourseChanges = async (
         ],
         commitMessage: null
       };
-    if (!(await runGit(status.courseFolderPath, ["add", "--", ...status.allowedChangedFiles])).ok)
+    const paths = status.allowedChangedFiles.map(createRelativeGitPath);
+    if (paths.some((changedPath) => changedPath === null))
       return {
         status: "failure",
         diagnostics: [diagnostic("Unable to stage Graider-managed course changes.")],
         commitMessage: null
       };
-    if (!(await runGit(status.courseFolderPath, ["commit", "-m", COMMIT_MESSAGE])).ok)
+    try {
+      await workspace.stage(paths.filter((changedPath) => changedPath !== null));
+    } catch {
+      return {
+        status: "failure",
+        diagnostics: [diagnostic("Unable to stage Graider-managed course changes.")],
+        commitMessage: null
+      };
+    }
+    try {
+      await workspace.commit({ message: COMMIT_MESSAGE });
+    } catch {
       return {
         status: "failure",
         diagnostics: [diagnostic("Unable to commit Graider-managed course changes.")],
         commitMessage: null
       };
+    }
   }
-  if (!(await runGit(status.courseFolderPath, ["push"])).ok)
+  try {
+    await workspace.pushUpstream();
+  } catch {
     return {
       status: "failure",
       diagnostics: [diagnostic("Unable to push course changes to the configured upstream branch.")],
       commitMessage: null
     };
+  }
   return {
     status: "success",
     diagnostics: [

@@ -8,17 +8,19 @@ import {
   createRemoteName,
   isObjectId,
   type CommitHistoryRequest,
+  type CommitRequest,
   type ExactCommitRevision,
   type GitCommitSummary,
   type CloneRequest,
   type GitOperationName,
   type PathChange,
   type PathChangeKind,
+  type PushResult,
   type RelativeGitPath,
   type RemoteName,
   type RepositoryState,
-  type GitWorkspaceFactory,
-  type GitWorkspaceReader,
+  type GitWorkspaceWriterFactory,
+  type GitWorkspaceWriter,
   type ObjectId,
   type RepositoryInspection
 } from "./git-workspace.js";
@@ -80,6 +82,7 @@ const errorForFailure = (
     | "repository_unavailable"
     | "remote_unavailable"
     | "revision_unavailable"
+    | "operation_rejected"
     | "unknown_engine_failure"
 ): GitError => {
   if (
@@ -105,7 +108,7 @@ const requireDirectory = async (path: string): Promise<void> => {
 
 const parseObjectId = (
   stdout: string,
-  operation: "resolve_head" | "resolve_revision"
+  operation: "resolve_head" | "resolve_revision" | "commit"
 ): ObjectId => {
   const value = stdout.trim();
   if (!isObjectId(value)) throw new GitError("unknown_engine_failure", operation);
@@ -238,7 +241,7 @@ const relationForCounts = (
   return "current";
 };
 
-class SystemGitWorkspace implements GitWorkspaceReader {
+class SystemGitWorkspace implements GitWorkspaceWriter {
   readonly root: string;
 
   constructor(
@@ -297,6 +300,39 @@ class SystemGitWorkspace implements GitWorkspaceReader {
     } catch (error) {
       if (error instanceof GitError) throw error;
       throw errorForFailure(error, "inspect", "unknown_engine_failure");
+    }
+  }
+
+  async stage(paths: readonly RelativeGitPath[]): Promise<void> {
+    if (paths.length === 0 || paths.some((path) => createRelativeGitPath(path) !== path))
+      throw new GitError("operation_rejected", "stage");
+    try {
+      await this.runGit(this.root, ["add", "--", ...paths]);
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "stage", "unknown_engine_failure");
+    }
+  }
+
+  async commit(request: CommitRequest): Promise<ObjectId> {
+    if (request.message.trim() === "" || request.message.includes("\u0000"))
+      throw new GitError("operation_rejected", "commit");
+    try {
+      await this.runGit(this.root, ["commit", "-m", request.message]);
+      return parseObjectId(await this.runGit(this.root, ["rev-parse", "HEAD"]), "commit");
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "commit", "operation_rejected");
+    }
+  }
+
+  async pushUpstream(): Promise<PushResult> {
+    try {
+      await this.runGit(this.root, ["push"]);
+      return { kind: "pushed" };
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "push", "remote_unavailable");
     }
   }
 
@@ -363,7 +399,7 @@ class SystemGitWorkspace implements GitWorkspaceReader {
   }
 }
 
-export class SystemGitWorkspaceFactory implements GitWorkspaceFactory {
+export class SystemGitWorkspaceFactory implements GitWorkspaceWriterFactory {
   constructor(private readonly runGit: SystemGitRunner = runSystemGit) {}
 
   async verifyAvailable(): Promise<void> {
@@ -374,7 +410,7 @@ export class SystemGitWorkspaceFactory implements GitWorkspaceFactory {
     }
   }
 
-  async clone(request: CloneRequest): Promise<GitWorkspaceReader> {
+  async clone(request: CloneRequest): Promise<GitWorkspaceWriter> {
     if (request.destination.length === 0 || existsSync(request.destination)) {
       throw new GitError("operation_rejected", "clone");
     }
@@ -402,7 +438,7 @@ export class SystemGitWorkspaceFactory implements GitWorkspaceFactory {
     }
   }
 
-  async open(path: string): Promise<GitWorkspaceReader> {
+  async open(path: string): Promise<GitWorkspaceWriter> {
     await requireDirectory(path);
     try {
       const discoveredRoot = (await this.runGit(path, ["rev-parse", "--show-toplevel"])).trim();
