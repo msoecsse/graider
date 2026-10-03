@@ -3,7 +3,12 @@ import path from "node:path";
 
 import { parseDocument } from "yaml";
 import { getAssignmentForEdit } from "./assignmentEditService.js";
+import { escapeHtml } from "./htmlEscape.js";
 import { getRosterForSection } from "./rosterManagerService.js";
+import {
+  getStudentAccessPagesIndexLink,
+  writeStudentAccessPagesIndex
+} from "./studentAccessPagesIndexService.js";
 import type { AssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import type {
   CourseSetupDiagnostic,
@@ -45,13 +50,6 @@ const emptySummary = (): StudentRepositoryAccessPageSummary => ({
   skippedInactive: 0,
   missingRepository: 0
 });
-const escapeHtml = (value: string): string =>
-  value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 const asString = (value: unknown): string | null => (typeof value === "string" ? value : null);
 const isSafeRepositoryUrl = (value: string | null): value is string => {
   if (value === null) return false;
@@ -293,6 +291,7 @@ const renderPage = (
   assignmentTitle: string,
   assignmentSlug: string,
   termCode: string,
+  outputPath: string,
   rows: readonly StudentRepositoryAccessPageRow[]
 ): string => {
   const courseLabel = [course.code, course.title]
@@ -303,6 +302,19 @@ const renderPage = (
       .filter((value) => value !== "")
       .join(" ")
       .trim() || assignmentSlug;
+  const linkedCourseLabel = [
+    course.code === null
+      ? null
+      : `<a class="course-index-link" href="${escapeHtml(getStudentAccessPagesIndexLink(outputPath))}">${escapeHtml(course.code)}</a>`,
+    course.title === null ? null : escapeHtml(course.title)
+  ]
+    .filter((value): value is string => value !== null)
+    .join(" — ");
+  const heading =
+    [linkedCourseLabel, escapeHtml(assignmentTitle)]
+      .filter((value) => value !== "")
+      .join(" ")
+      .trim() || escapeHtml(assignmentSlug);
   const rowsBySection = groupIncludedRowsBySection(rows);
   const sectionContent = [...rowsBySection.entries()]
     .map(([section, sectionRows]) => {
@@ -335,6 +347,8 @@ const renderPage = (
       h1, h2, p { margin-top: 0; }
       h1 { margin-bottom: 0.75rem; font-size: clamp(1.75rem, 5vw, 2.25rem); letter-spacing: -0.025em; }
       h2 { margin-bottom: 1rem; font-size: 1.125rem; }
+      .course-index-link { color: inherit; }
+      .course-index-link:focus-visible { outline: 3px solid #2d6cdf; outline-offset: 3px; }
       .clone-script-link { color: inherit; text-decoration: none; border-bottom: 1px dashed #aebddb; }
       .clone-script-link:hover { border-bottom-color: #2d6cdf; }
       .clone-script-link:focus-visible { outline: 3px solid #2d6cdf; outline-offset: 3px; }
@@ -350,7 +364,7 @@ const renderPage = (
   </head>
   <body>
     <main>
-      <h1>${escapeHtml(title)} Repositories</h1>
+      <h1>${heading} Repositories</h1>
       <p>Term: ${escapeHtml(termCode)}. Assignment: ${escapeHtml(assignmentTitle)} (${escapeHtml(assignmentSlug)}).</p>
       <p>Find your MSOE username below and open your repository.</p>
       <p>If you do not see your username or cannot access your repository, contact your instructor.</p>
@@ -665,6 +679,7 @@ export const generateStudentRepositoryAccessPage = (
         assignment.model.assignmentTitle,
         result.assignmentSlug,
         result.termCode,
+        result.outputPath,
         result.rows
       ),
       "utf8"
@@ -677,8 +692,15 @@ export const generateStudentRepositoryAccessPage = (
       result.rows,
       now
     );
+    const indexDiagnostics = writeStudentAccessPagesIndex(
+      request.courseFolderPath,
+      root,
+      { code: course.code, title: course.title },
+      now
+    );
     return Promise.resolve({
       ...result,
+      diagnostics: [...result.diagnostics, ...indexDiagnostics],
       exists: true,
       generatedAt: now().toISOString(),
       status: result.summary.missingRepository > 0 ? "partial" : "generated"

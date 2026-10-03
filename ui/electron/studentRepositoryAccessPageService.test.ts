@@ -192,6 +192,30 @@ describe("studentRepositoryAccessPageService", () => {
     ]);
   });
 
+  it("links the course code to the assignments index it writes at the Pages root", async () => {
+    const root = createRoot();
+    writeFixture(root);
+    fs.writeFileSync(
+      path.join(root, "terms/27s1/term.yml"),
+      'term:\n  code: 27s1\n  academic_year: 2027\n  semester: 1\n  display_name: "Fall 2026"\nsections:\n  - id: "001"\n',
+      "utf8"
+    );
+    const result = await generateStudentRepositoryAccessPage(request(root), mappings);
+    const page = fs.readFileSync(path.join(root, "pages repo", result.outputPath), "utf8");
+    const index = fs.readFileSync(path.join(root, "pages repo", "index.html"), "utf8");
+
+    expect(page).toContain(
+      '<h1><a class="course-index-link" href="../../../../index.html">CSC1120</a> — Data Structures Lab &lt;02&gt; Repositories</h1>'
+    );
+    expect(index).toContain("<h1>CSC1120 Data Structures Fall 2026 Assignments</h1>");
+    expect(index).toContain(
+      '<a class="assignment-link" href="terms/27s1/notifications/lab02/student-repositories.html">Lab &lt;02&gt;</a> (slug: lab02)'
+    );
+    expect(result.diagnostics.map((item) => item.message)).not.toContain(
+      "Unable to write the assignments page."
+    );
+  });
+
   it("omits the clone script link when the course code cannot name a script", async () => {
     const root = createRoot();
     writeFixture(root);

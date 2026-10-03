@@ -155,4 +155,43 @@ describe("studentRepositoryAccessPagePublishService", () => {
       "?? terms/27s1/notifications/lab02/clone-csc1120-001.sh"
     );
   });
+
+  it("publishes the Graider assignments index but never a hand-made index.html", async () => {
+    const graiderRoot = createFixture();
+    git(pagesRoot(graiderRoot), [
+      "remote",
+      "set-url",
+      "origin",
+      path.join(graiderRoot, "remotes", "csc1120", "csc1120pages").replaceAll("\\", "/")
+    ]);
+    fs.writeFileSync(
+      path.join(pagesRoot(graiderRoot), "index.html"),
+      '<!doctype html><meta name="generator" content="Graider student access pages" />\n',
+      "utf8"
+    );
+
+    expect((await publishStudentRepositoryAccessPage(request(graiderRoot), mappings)).status).toBe(
+      "success"
+    );
+    expect(
+      git(pagesRoot(graiderRoot), ["show", "--format=", "--name-only", "HEAD"]).split("\n").sort()
+    ).toEqual(["index.html", outputPath]);
+
+    const handMadeRoot = createFixture();
+    git(pagesRoot(handMadeRoot), [
+      "remote",
+      "set-url",
+      "origin",
+      path.join(handMadeRoot, "remotes", "csc1120", "csc1120pages").replaceAll("\\", "/")
+    ]);
+    fs.writeFileSync(path.join(pagesRoot(handMadeRoot), "index.html"), "<p>Mine</p>\n", "utf8");
+
+    expect((await publishStudentRepositoryAccessPage(request(handMadeRoot), mappings)).status).toBe(
+      "success"
+    );
+    expect(git(pagesRoot(handMadeRoot), ["show", "--format=", "--name-only", "HEAD"])).toBe(
+      outputPath
+    );
+    expect(git(pagesRoot(handMadeRoot), ["status", "--porcelain"])).toBe("?? index.html");
+  });
 });

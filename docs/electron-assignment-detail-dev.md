@@ -109,6 +109,20 @@ The script's `REPOSITORIES` list holds one tuple per student, with each element
 on its own line: MSOE username, URL to clone using HTTPS, and URL to clone using
 SSH.
 
+Generation also rewrites an assignments page, `index.html`, at the root of the
+selected Pages clone. Its heading is the course code, course title, the term's
+`display_name` (falling back to the term code), and "Assignments". It covers the
+most recent term in the course repository, ordered by `academic_year` and
+`semester`, even when that term has no generated pages yet. It lists only that
+term's assignments whose `student-repositories.html` exists, as a bulleted list
+of links named by assignment title, each followed by `(slug: <assignment-slug>)`.
+Assignments are ordered by the earliest repository `created_at` in their
+manifest, newest first; assignments without one go last, ordered by title. The
+page carries a `generator` meta tag; an existing `index.html` without that tag
+is left untouched and reported as a diagnostic. Each `student-repositories.html`
+links its course code in the page heading to the assignments page with a
+relative link.
+
 The same panel also performs local publish-readiness checks against
 the selected Pages clone: page existence, git repository/branch/upstream
 detection, uncommitted access-page changes, and local commits ahead of upstream.
@@ -119,8 +133,9 @@ shows a **Clone scripts** row with the number of uncommitted `clone-*.py`
 changes (new, modified, or removed), as reported by the readiness check's
 `changedCloneScriptCount`; the row is hidden when that number is zero. Narrow
 main-process IPC rechecks readiness, runs fixed
-`git add -- <generated-page> [<notifications-folder>/clone-*.py]` (the script
-pathspec is included only when matching scripts exist or are tracked),
+`git add -- <generated-page> [<notifications-folder>/clone-*.py] [index.html]`
+(the script pathspec is included only when matching scripts exist or are
+tracked, and `index.html` only when Graider wrote it),
 `git commit -m <deterministic-message>`, and `git push` argv only, and never
 stages unrelated files. No generic Git or command IPC is exposed. Publishing
 the course/admin repository remains separate.

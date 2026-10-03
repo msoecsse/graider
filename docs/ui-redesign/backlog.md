@@ -1516,6 +1516,9 @@ Requested behaviour:
   lab5lights)".
 - On each `student-repositories.html` page, link the course identifier (for
   example "SWE4211") to the assignments page.
+- Add appropriate files at the root of the published pages (beside the
+  assignments page) to restrict scans by external robots, with an exception for
+  the Graider application.
 
 ---
 

@@ -3,6 +3,10 @@ import { promisify } from "node:util";
 
 import { getAssignmentForEdit } from "./assignmentEditService.js";
 import {
+  isGraiderStudentAccessPagesIndex,
+  STUDENT_ACCESS_PAGES_INDEX_PATH
+} from "./studentAccessPagesIndexService.js";
+import {
   getStudentRepositoryAccessPageCloneScriptPattern,
   getStudentRepositoryAccessPageStatus
 } from "./studentRepositoryAccessPageService.js";
@@ -126,6 +130,9 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
   const cloneScriptPattern = getStudentRepositoryAccessPageCloneScriptPattern(
     accessPage.outputPath
   );
+  const indexPaths = isGraiderStudentAccessPagesIndex(pagesFolderPath)
+    ? [STUDENT_ACCESS_PAGES_INDEX_PATH]
+    : [];
   const [pageStatus, allStatus, branch, remote, cloneScripts, cloneScriptStatus] =
     await Promise.all([
       runGit(pagesFolderPath, [
@@ -133,7 +140,8 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
         "--porcelain",
         "--",
         accessPage.outputPath,
-        cloneScriptPattern
+        cloneScriptPattern,
+        ...indexPaths
       ]),
       runGit(pagesFolderPath, ["status", "--porcelain"]),
       runGit(pagesFolderPath, ["branch", "--show-current"]),
@@ -183,7 +191,7 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
   const assignment = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile);
   const label = assignment.model?.assignmentTitle ?? accessPage.assignmentSlug ?? "assignment";
   const commitCommands = [
-    `git add ${[accessPage.outputPath, ...(cloneScripts.stdout === "" ? [] : [cloneScriptPattern])].map(quoteCommandArgument).join(" ")}`,
+    `git add ${[accessPage.outputPath, ...(cloneScripts.stdout === "" ? [] : [cloneScriptPattern]), ...indexPaths].map(quoteCommandArgument).join(" ")}`,
     `git commit -m ${quoteCommandArgument(`Add ${label} student repository access page`)}`
   ];
   const remoteDiagnostic =
