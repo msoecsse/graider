@@ -75,12 +75,14 @@ export const getStudentRepositoryAccessPageCloneScriptPattern = (outputPath: str
 
 const getSectionCloneScriptFileName = (
   courseCode: string | null,
+  assignmentSlug: string,
   section: string
 ): string | null => {
-  const course = courseCode?.trim().toLowerCase() ?? "";
-  const sectionPart = section.trim().toLowerCase();
-  return SCRIPT_NAME_PART_PATTERN.test(course) && SCRIPT_NAME_PART_PATTERN.test(sectionPart)
-    ? `${CLONE_SCRIPT_PREFIX}${course}-${sectionPart}${CLONE_SCRIPT_SUFFIX}`
+  const nameParts = [courseCode?.trim() ?? "", assignmentSlug.trim(), section.trim()].map((part) =>
+    part.toLowerCase()
+  );
+  return nameParts.every((part) => SCRIPT_NAME_PART_PATTERN.test(part))
+    ? `${CLONE_SCRIPT_PREFIX}${nameParts.join("-")}${CLONE_SCRIPT_SUFFIX}`
     : null;
 };
 
@@ -122,7 +124,7 @@ const buildCloneScript = (
   const repositories = sectionRows
     .map(
       (row) =>
-        `    (${pythonString(row.studentId)}, ${pythonString(row.repositoryUrl)}, ${pythonString(toSshCloneUrl(row.repositoryUrl ?? ""))}),`
+        `    (\n        ${pythonString(row.studentId)},\n        ${pythonString(row.repositoryUrl)},\n        ${pythonString(toSshCloneUrl(row.repositoryUrl ?? ""))},\n    ),`
     )
     .join("\n");
   return `#!/usr/bin/env python3
@@ -144,7 +146,7 @@ import sys
 
 SSH_CHECK_TIMEOUT_SECONDS = 30
 
-# (MSOE username, HTTPS URL, SSH URL)
+# (MSOE username, URL to clone using HTTPS, URL to clone using SSH)
 REPOSITORIES = [
 ${repositories}
 ]
@@ -305,7 +307,7 @@ const renderPage = (
   const sectionContent = [...rowsBySection.entries()]
     .map(([section, sectionRows]) => {
       const sectionId = `section-${escapeHtml(section)}`;
-      const scriptFileName = getSectionCloneScriptFileName(course.code, section);
+      const scriptFileName = getSectionCloneScriptFileName(course.code, assignmentSlug, section);
       const heading =
         scriptFileName === null
           ? `Section ${escapeHtml(section)}`
@@ -365,12 +367,13 @@ ${sectionContent}
 const writeCloneScripts = (
   directory: string,
   courseCode: string | null,
+  assignmentSlug: string,
   rows: readonly StudentRepositoryAccessPageRow[],
   now: () => Date
 ): void => {
   const scripts = [...groupIncludedRowsBySection(rows).entries()].flatMap(
     ([section, sectionRows]) => {
-      const fileName = getSectionCloneScriptFileName(courseCode, section);
+      const fileName = getSectionCloneScriptFileName(courseCode, assignmentSlug, section);
       return fileName === null
         ? []
         : [{ fileName, content: buildCloneScript(section, fileName, sectionRows) }];
@@ -667,7 +670,13 @@ export const generateStudentRepositoryAccessPage = (
       "utf8"
     );
     fs.renameSync(temporaryPath, absolutePath);
-    writeCloneScripts(path.dirname(absolutePath), course.code, result.rows, now);
+    writeCloneScripts(
+      path.dirname(absolutePath),
+      course.code,
+      result.assignmentSlug,
+      result.rows,
+      now
+    );
     return Promise.resolve({
       ...result,
       exists: true,

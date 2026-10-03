@@ -135,14 +135,14 @@ describe("studentRepositoryAccessPagePublishService", () => {
     const remote = path.join(root, "remotes", "csc1120", "csc1120pages");
     git(pagesRoot(root), ["remote", "set-url", "origin", remote.replaceAll("\\", "/")]);
     const directory = path.dirname(path.join(pagesRoot(root), outputPath));
-    const staleScript = "terms/27s1/notifications/lab02/clone-csc1120-999.py";
-    const newScript = "terms/27s1/notifications/lab02/clone-csc1120-001.py";
+    const staleScript = "terms/27s1/notifications/lab02/clone-csc1120-lab02-999.py";
+    const newScript = "terms/27s1/notifications/lab02/clone-csc1120-lab02-001.py";
     fs.writeFileSync(path.join(pagesRoot(root), staleScript), "stale\n", "utf8");
     git(pagesRoot(root), ["add", staleScript]);
     git(pagesRoot(root), ["commit", "-m", "Add stale script"]);
     git(pagesRoot(root), ["push"]);
     fs.unlinkSync(path.join(pagesRoot(root), staleScript));
-    fs.writeFileSync(path.join(directory, "clone-csc1120-001.py"), "new\n", "utf8");
+    fs.writeFileSync(path.join(directory, "clone-csc1120-lab02-001.py"), "new\n", "utf8");
     fs.writeFileSync(path.join(directory, "clone-csc1120-001.sh"), "legacy\n", "utf8");
 
     const result = await publishStudentRepositoryAccessPage(request(root), mappings);

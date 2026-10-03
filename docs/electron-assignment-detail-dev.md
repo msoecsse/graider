@@ -95,7 +95,7 @@ generated page and reported to faculty. The standalone action is retained only
 to regenerate after correcting roster, repository-link, or Pages configuration.
 
 Generation also writes one Python clone script per section beside the page,
-named `clone-<course-code>-<section>.py` (lowercase), and links each section
+named `clone-<course-code>-<assignment-slug>-<section>.py` (lowercase), and links each section
 heading to its script with a `download` link. The script clones each included
 student's repository into a folder named after the MSOE username in the current
 directory, skipping folders that already exist. It runs a non-interactive
@@ -103,8 +103,11 @@ directory, skipping folders that already exist. It runs a non-interactive
 to HTTPS for every repository when that fails. SSH URLs are derived from the
 manifest's HTTPS repository URLs. Stale `clone-*.py` files in the assignment's
 notifications folder are removed on regeneration; other files, including older
-`.sh` scripts, are left alone. When the course code or section cannot form a
-safe file name, the heading is plain text and no script is written.
+`.sh` scripts, are left alone. When the course code, assignment slug, or section
+cannot form a safe file name, the heading is plain text and no script is written.
+The script's `REPOSITORIES` list holds one tuple per student, with each element
+on its own line: MSOE username, URL to clone using HTTPS, and URL to clone using
+SSH.
 
 The same panel also performs local publish-readiness checks against
 the selected Pages clone: page existence, git repository/branch/upstream

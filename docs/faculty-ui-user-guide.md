@@ -233,8 +233,8 @@ not list names, emails, grades, roster statuses, or diagnostics. Students find
 their MSOE username and select **Open repository**.
 
 Each section heading on the page (for example, **Section 121**) downloads a
-Python script named `clone-<course-code>-<section>.py`, such as
-`clone-swe4211-121.py`. Run it with `python3` (or `python` or `py` on Windows)
+Python script named `clone-<course-code>-<assignment>-<section>.py`, such as
+`clone-swe4211-lab5lights-121.py`. Run it with `python3` (or `python` or `py` on Windows)
 from the folder that should hold the repositories. It clones each repository in
 that section into a folder named after the student's MSOE username, and skips
 any folder that already exists. The script first tries SSH against the section's

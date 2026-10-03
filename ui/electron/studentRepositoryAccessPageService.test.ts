@@ -109,7 +109,7 @@ describe("studentRepositoryAccessPageService", () => {
     expect(content).toContain("z002");
     expect(content).toContain('<section class="repository-section" aria-labelledby="section-001">');
     expect(content).toContain(
-      '<h2 id="section-001"><a class="clone-script-link" href="clone-csc1120-001.py" download>Section 001</a></h2>'
+      '<h2 id="section-001"><a class="clone-script-link" href="clone-csc1120-lab02-001.py" download>Section 001</a></h2>'
     );
     expect(content).toContain(
       '<a class="student-repository-link" href="https://github.com/org/a-repo">a001</a>'
@@ -136,18 +136,33 @@ describe("studentRepositoryAccessPageService", () => {
     expect(fs.existsSync(path.join(root, "terms/27s1/manifests/lab02/manifest.yml"))).toBe(true);
   });
 
-  it("writes a per-section Python clone script named after the course and section", async () => {
+  it("writes a per-section Python clone script named after the course, assignment, and section", async () => {
     const root = createRoot();
     writeFixture(root);
     const result = await generateStudentRepositoryAccessPage(request(root), mappings);
     const directory = path.dirname(path.join(root, "pages repo", result.outputPath));
-    const script = fs.readFileSync(path.join(directory, "clone-csc1120-001.py"), "utf8");
+    const script = fs.readFileSync(path.join(directory, "clone-csc1120-lab02-001.py"), "utf8");
     expect(script.startsWith("#!/usr/bin/env python3\n")).toBe(true);
     expect(script).toContain(
-      '    ("a001", "https://github.com/org/a-repo", "git@github.com:org/a-repo.git"),'
+      "# (MSOE username, URL to clone using HTTPS, URL to clone using SSH)\n"
     );
     expect(script).toContain(
-      '    ("z002", "https://github.com/org/z-repo?x=<unsafe>", "git@github.com:org/z-repo.git"),'
+      [
+        "    (",
+        '        "a001",',
+        '        "https://github.com/org/a-repo",',
+        '        "git@github.com:org/a-repo.git",',
+        "    ),"
+      ].join("\n")
+    );
+    expect(script).toContain(
+      [
+        "    (",
+        '        "z002",',
+        '        "https://github.com/org/z-repo?x=<unsafe>",',
+        '        "git@github.com:org/z-repo.git",',
+        "    ),"
+      ].join("\n")
     );
     expect(script).not.toContain("m001");
     expect(script).not.toContain("d001");
@@ -165,13 +180,13 @@ describe("studentRepositoryAccessPageService", () => {
     writeFixture(root);
     const directory = path.join(root, "pages repo", "terms/27s1/notifications/lab02");
     fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(path.join(directory, "clone-csc1120-999.py"), "stale", "utf8");
+    fs.writeFileSync(path.join(directory, "clone-csc1120-lab02-999.py"), "stale", "utf8");
     fs.writeFileSync(path.join(directory, "clone-csc1120-001.sh"), "legacy", "utf8");
     fs.writeFileSync(path.join(directory, "notes.txt"), "keep", "utf8");
     await generateStudentRepositoryAccessPage(request(root), mappings);
     expect(fs.readdirSync(directory).sort()).toEqual([
-      "clone-csc1120-001.py",
       "clone-csc1120-001.sh",
+      "clone-csc1120-lab02-001.py",
       "notes.txt",
       "student-repositories.html"
     ]);
