@@ -1525,6 +1525,10 @@ Requested behaviour (direct collaborators):
 - Remove that access only when a student is dropped, so access follows the
   roster.
 - Check and correct access during Apply and whenever a roster is saved.
+- Access changes run after the local save or Apply, with no separate preview
+  (roster saves already show one). If a GitHub call fails, the save or Apply
+  stays done, and faculty see which students' access could not be updated, with
+  a way to retry.
 - Do not use the organization base permission (it would expose every
   repository, including other students') or internal visibility (it would open
   the pages to the whole enterprise).
@@ -1535,8 +1539,6 @@ Open questions before implementation:
 
 - Whether a student who is active in any section or term keeps access while
   inactive elsewhere, since one Pages repository serves every term.
-- How failures are reported, and whether faculty preview the changes before
-  they are made.
 
 Read access also shows students the Pages repository's files and history: the
 same usernames, repository links, clone scripts, and assignments page the site
