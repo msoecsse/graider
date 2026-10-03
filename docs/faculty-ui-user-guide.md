@@ -252,6 +252,11 @@ a single link in Canvas instead of one per assignment. If the Pages repository
 already has an `index.html` that Graider did not create, Graider leaves it alone
 and tells you.
 
+Graider also adds a `robots.txt` file at the root of the Pages repository and
+marks every page it generates so that search engines are asked not to crawl or
+index them. This does not control who can open the pages. As with `index.html`,
+an existing `robots.txt` that Graider did not create is left alone.
+
 For example:
 
 ```text
@@ -277,7 +282,8 @@ review **Publish readiness**:
 
 **Publish Student Access Page** is always explicit and requires a review before
 it runs. It stages only the generated page and section clone scripts for the
-current assignment, plus the assignments page when Graider created it, commits
+current assignment, plus the assignments page and `robots.txt` when Graider
+created them, commits
 it with a predictable message, and pushes the current upstream branch; it never
 stages unrelated Pages-repository files. Suggested commands remain available
 for manual troubleshooting. Readiness is local-only: Graider does not verify

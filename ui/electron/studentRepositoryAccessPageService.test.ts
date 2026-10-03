@@ -207,6 +207,10 @@ describe("studentRepositoryAccessPageService", () => {
     expect(page).toContain(
       '<h1><a class="course-index-link" href="../../../../index.html">CSC1120</a> — Data Structures Lab &lt;02&gt; Repositories</h1>'
     );
+    expect(page).toContain('<meta name="robots" content="noindex, nofollow" />');
+    expect(fs.readFileSync(path.join(root, "pages repo", "robots.txt"), "utf8")).toContain(
+      "Disallow: /"
+    );
     expect(index).toContain("<h1>CSC1120 Data Structures Fall 2026 Assignments</h1>");
     expect(index).toContain(
       '<a class="assignment-link" href="terms/27s1/notifications/lab02/student-repositories.html">Lab &lt;02&gt;</a> (slug: lab02)'

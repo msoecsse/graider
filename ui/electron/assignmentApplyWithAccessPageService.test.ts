@@ -114,7 +114,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     expect(fs.existsSync(path.join(pagesRoot(root), outputPath))).toBe(true);
     expect(
       git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"]).split("\n").sort()
-    ).toEqual([cloneScriptPath, outputPath]);
+    ).toEqual(["robots.txt", cloneScriptPath, outputPath]);
   });
 
   it("replaces an existing generated page without creating files beyond the clone script", async () => {
@@ -152,7 +152,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(firstHead);
   });
 
-  it("publishes only the generated page and clone script and leaves unrelated page-repository files untouched", async () => {
+  it("publishes only the generated page, clone script, and robots.txt and leaves unrelated page-repository files untouched", async () => {
     const root = createRoot();
     writeFixture(root);
     initializePagesRepository(root);
@@ -170,7 +170,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     );
     expect(
       git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"]).split("\n").sort()
-    ).toEqual([cloneScriptPath, outputPath]);
+    ).toEqual(["robots.txt", cloneScriptPath, outputPath]);
     expect(git(pagesRoot(root), ["status", "--porcelain"])).toContain("unrelated.txt");
   });
 

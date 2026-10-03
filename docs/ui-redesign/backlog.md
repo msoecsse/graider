@@ -1495,7 +1495,7 @@ backend and UI tests.
 
 ---
 
-## 55. Student access pages are not linked together — **Should fix**
+## 55. Student access pages are not linked together — **Resolved**
 
 Each Apply generates a standalone
 `terms/<term-code>/notifications/<assignment-slug>/student-repositories.html` in
@@ -1519,6 +1519,18 @@ Requested behaviour:
 - Add appropriate files at the root of the published pages (beside the
   assignments page) to restrict scans by external robots, with an exception for
   the Graider application.
+
+Resolved on `feat/link-student-access-pages`. Generating any student access page
+rewrites `index.html` at the Pages root for the most recent term in the course
+repository (even when it has no pages yet), listing assignments with a generated
+page, newest first by the earliest repository `created_at` in each manifest
+(assignments without one go last, by title). The course code in each page
+heading links to it. Generation also writes a root `robots.txt` that disallows
+all crawlers, and every generated page carries `noindex, nofollow`. No Graider
+exception was needed: the desktop app never fetches the published pages, and
+robots rules do not affect browsers, `curl`, or `git`. An existing `index.html`
+or `robots.txt` that Graider did not write is left untouched and reported, and
+publishing stages these root files only when Graider wrote them.
 
 ---
 
@@ -1563,10 +1575,10 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 55, and 56.
+Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, and 56.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
-48, 49, 50, 51, 53, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
+48, 49, 50, 51, 53, 55, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
 ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.
 

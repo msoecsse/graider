@@ -7,7 +7,9 @@ import { escapeHtml } from "./htmlEscape.js";
 import { getRosterForSection } from "./rosterManagerService.js";
 import {
   getStudentAccessPagesIndexLink,
-  writeStudentAccessPagesIndex
+  STUDENT_ACCESS_PAGES_ROBOTS_META,
+  writeStudentAccessPagesIndex,
+  writeStudentAccessPagesRobots
 } from "./studentAccessPagesIndexService.js";
 import type { AssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import type {
@@ -338,6 +340,7 @@ const renderPage = (
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    ${STUDENT_ACCESS_PAGES_ROBOTS_META}
     <title>${escapeHtml(title)} Repositories</title>
     <style>
       :root { color: #172033; background: #f6f8fc; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -698,9 +701,10 @@ export const generateStudentRepositoryAccessPage = (
       { code: course.code, title: course.title },
       now
     );
+    const robotsDiagnostics = writeStudentAccessPagesRobots(root, now);
     return Promise.resolve({
       ...result,
-      diagnostics: [...result.diagnostics, ...indexDiagnostics],
+      diagnostics: [...result.diagnostics, ...indexDiagnostics, ...robotsDiagnostics],
       exists: true,
       generatedAt: now().toISOString(),
       status: result.summary.missingRepository > 0 ? "partial" : "generated"
