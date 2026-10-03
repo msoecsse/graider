@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   GitError,
+  createBranchName,
   createExactCommitRevision,
   createRelativeGitPath,
   createRemoteName,
@@ -49,6 +50,25 @@ const createRepository = async (name = "repository") => {
   return { parent, repository, first, second };
 };
 
+const createBareRemoteFixture = async (branch: string) => {
+  const fixture = await createRepository("remote source");
+  const remote = join(fixture.parent, "remote with spaces.git");
+  await git(fixture.repository, "branch", "-M", branch);
+  await git(fixture.parent, "init", "--bare", remote);
+  await git(fixture.repository, "remote", "add", "origin", remote);
+  await git(fixture.repository, "push", "origin", branch);
+  await git(remote, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
+  const trustedRemote = createTrustedGitRemote(remote);
+  if (trustedRemote === null) throw new Error("The test remote must be trusted.");
+  const destination = join(fixture.parent, "prepared clone with spaces");
+  const workspace = await new SystemGitWorkspaceFactory().clone({
+    remote: trustedRemote,
+    destination,
+    checkout: "none"
+  });
+  return { ...fixture, remote, destination, workspace };
+};
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories
@@ -90,6 +110,28 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
     expect(workspace.root).toBe(await realpath(destination));
     await expect(workspace.resolveHead()).resolves.toBe(fixture.second);
     await expect(readFile(join(destination, "submission.txt"), "utf8")).resolves.toBe("second\n");
+  });
+
+  it("clones without checkout while retaining remote refs and resolvable commits", async () => {
+    const fixture = await createRepository("no checkout source with spaces");
+    const destination = join(fixture.parent, "no checkout clone with spaces");
+    const remote = createTrustedGitRemote(fixture.repository);
+    if (remote === null) throw new Error("The test remote must be trusted.");
+
+    const workspace = await new SystemGitWorkspaceFactory().clone({
+      remote,
+      destination,
+      checkout: "none"
+    });
+
+    expect(workspace.root).toBe(await realpath(destination));
+    await expect(access(join(destination, "submission.txt"))).rejects.toBeDefined();
+    await expect(workspace.resolveRevision(exactCommit(fixture.second))).resolves.toBe(
+      fixture.second
+    );
+    expect(
+      (await git(destination, "for-each-ref", "--format=%(refname)", "refs/remotes")).trim()
+    ).toContain("refs/remotes/origin/");
   });
 
   it("rejects an existing clone destination without modifying it", async () => {
@@ -420,6 +462,184 @@ describe("SystemGitWorkspace structured inspection contract", () => {
     await expect(workspace.remoteUrl(origin)).resolves.toBe(fixture.remote);
     await expect(workspace.remoteUrl(missing)).resolves.toBeNull();
     expect(createRemoteName("--upload-pack=bad")).toBeNull();
+  });
+});
+
+describe("SystemGitWorkspace template preparation contract", () => {
+  const origin = createRemoteName("origin");
+  if (origin === null) throw new Error("The origin remote must be trusted.");
+
+  it("validates trusted branch names without accepting revision expressions", () => {
+    expect(createBranchName("main")).toBe("main");
+    expect(createBranchName("master")).toBe("master");
+    expect(createBranchName("release/course")).toBe("release/course");
+    expect(createBranchName("--detach")).toBeNull();
+    expect(createBranchName("HEAD~1")).toBeNull();
+    expect(createBranchName("main^{commit}")).toBeNull();
+    expect(createBranchName("bad\u0000branch")).toBeNull();
+    expect(createBranchName("refs/heads/main")).toBeNull();
+  });
+
+  it.each(["main", "master", "release/course"])(
+    "resolves an existing remote default branch named %s",
+    async (branch) => {
+      const fixture = await createBareRemoteFixture(branch);
+      await expect(fixture.workspace.remoteDefaultBranch(origin)).resolves.toBe(branch);
+    }
+  );
+
+  it("returns null when the remote default symbolic ref is missing", async () => {
+    const fixture = await createBareRemoteFixture("main");
+    await git(fixture.destination, "update-ref", "-d", "refs/remotes/origin/HEAD");
+
+    await expect(fixture.workspace.remoteDefaultBranch(origin)).resolves.toBeNull();
+  });
+
+  it("returns null when the remote default symbolic ref names a nonexistent branch", async () => {
+    const fixture = await createBareRemoteFixture("main");
+    await git(
+      fixture.destination,
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/missing"
+    );
+
+    await expect(fixture.workspace.remoteDefaultBranch(origin)).resolves.toBeNull();
+  });
+
+  it("returns null when the requested remote is missing", async () => {
+    const fixture = await createBareRemoteFixture("main");
+    const missing = createRemoteName("missing");
+    if (missing === null) throw new Error("The missing remote name must be trusted.");
+
+    await expect(fixture.workspace.remoteDefaultBranch(missing)).resolves.toBeNull();
+  });
+
+  it("checks out an exact commit with detached HEAD and returns that commit", async () => {
+    const fixture = await createBareRemoteFixture("main");
+
+    await expect(fixture.workspace.checkoutDetached(exactCommit(fixture.first))).resolves.toBe(
+      fixture.first
+    );
+    await expect(fixture.workspace.inspect()).resolves.toMatchObject({
+      head: { kind: "detached", commit: fixture.first }
+    });
+    await expect(readFile(join(fixture.destination, "submission.txt"), "utf8")).resolves.toBe(
+      "first\n"
+    );
+  });
+
+  it("reports a missing exact commit as an unavailable revision", async () => {
+    const fixture = await createBareRemoteFixture("main");
+
+    await expect(
+      fixture.workspace.checkoutDetached(exactCommit("f".repeat(SHA_1_LENGTH)))
+    ).rejects.toMatchObject({ kind: "revision_unavailable", operation: "resolve_revision" });
+  });
+
+  it("defensively rejects an invalid branded checkout revision", async () => {
+    const fixture = await createBareRemoteFixture("main");
+
+    await expect(
+      fixture.workspace.checkoutDetached("HEAD --force" as ExactCommitRevision)
+    ).rejects.toMatchObject({ kind: "operation_rejected", operation: "checkout" });
+  });
+
+  it("does not force checkout over conflicting working-tree changes", async () => {
+    const fixture = await createRepository();
+    await writeFile(join(fixture.repository, "submission.txt"), "local change\n");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    await expect(workspace.checkoutDetached(exactCommit(fixture.first))).rejects.toMatchObject({
+      kind: "operation_rejected",
+      operation: "checkout"
+    });
+    await expect(readFile(join(fixture.repository, "submission.txt"), "utf8")).resolves.toBe(
+      "local change\n"
+    );
+  });
+
+  it("creates an absent local branch from the matching remote branch", async () => {
+    const fixture = await createBareRemoteFixture("main");
+    const main = createBranchName("main");
+    if (main === null) throw new Error("The branch must be trusted.");
+    await git(fixture.destination, "update-ref", "-d", "refs/heads/main");
+
+    await expect(
+      fixture.workspace.createOrResetBranch({
+        branch: main,
+        startPoint: { remote: origin, branch: main }
+      })
+    ).resolves.toBe(fixture.second);
+    await expect(fixture.workspace.inspect()).resolves.toMatchObject({
+      head: { kind: "attached", branch: "main", commit: fixture.second }
+    });
+  });
+
+  it("resets an existing local branch to the remote-tracking commit without mutating remote refs", async () => {
+    const fixture = await createBareRemoteFixture("main");
+    const main = createBranchName("main");
+    if (main === null) throw new Error("The branch must be trusted.");
+    const remoteRefsBefore = await git(
+      fixture.destination,
+      "for-each-ref",
+      "--format=%(refname):%(objectname)",
+      "refs/remotes"
+    );
+    await fixture.workspace.createOrResetBranch({
+      branch: main,
+      startPoint: { remote: origin, branch: main }
+    });
+    await git(fixture.destination, "config", "user.email", "faculty@example.test");
+    await git(fixture.destination, "config", "user.name", "Faculty");
+    await git(fixture.destination, "commit", "--allow-empty", "-m", "Local only");
+
+    await expect(
+      fixture.workspace.createOrResetBranch({
+        branch: main,
+        startPoint: { remote: origin, branch: main }
+      })
+    ).resolves.toBe(fixture.second);
+    await expect(fixture.workspace.inspect()).resolves.toMatchObject({
+      head: { kind: "attached", branch: "main", commit: fixture.second }
+    });
+    expect(
+      await git(
+        fixture.destination,
+        "for-each-ref",
+        "--format=%(refname):%(objectname)",
+        "refs/remotes"
+      )
+    ).toBe(remoteRefsBefore);
+  });
+
+  it("creates a slash-containing branch from its remote-tracking branch", async () => {
+    const fixture = await createBareRemoteFixture("release/course");
+    const branch = createBranchName("release/course");
+    if (branch === null) throw new Error("The branch must be trusted.");
+    await git(fixture.destination, "update-ref", "-d", "refs/heads/release/course");
+
+    await fixture.workspace.createOrResetBranch({
+      branch,
+      startPoint: { remote: origin, branch }
+    });
+
+    await expect(fixture.workspace.inspect()).resolves.toMatchObject({
+      head: { kind: "attached", branch: "release/course", commit: fixture.second }
+    });
+  });
+
+  it("fails safely when the requested remote branch does not exist", async () => {
+    const fixture = await createBareRemoteFixture("main");
+    const missing = createBranchName("missing");
+    if (missing === null) throw new Error("The branch must be trusted.");
+
+    await expect(
+      fixture.workspace.createOrResetBranch({
+        branch: missing,
+        startPoint: { remote: origin, branch: missing }
+      })
+    ).rejects.toMatchObject({ kind: "revision_unavailable", operation: "branch" });
   });
 });
 

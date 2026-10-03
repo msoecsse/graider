@@ -4,7 +4,7 @@
 credential transport resolved
 
 **Scope:** local Git abstraction and replaceable system-Git adapter; template-sync
-adoption steps 6 and 7 remain incomplete
+adoption step 6 is complete and step 7 remains incomplete
 
 **Authority:** [remote-course architecture](graider-remote-course-architecture.md),
 [architecture evolution roadmap](graider-architecture-evolution-roadmap.md), and
@@ -404,8 +404,11 @@ adapter:
 This transport is deliberately an adapter detail, not the future acquisition
 architecture. Phase 2 will replace the current token acquisition and storage
 source behind the same resolver/context boundary without changing semantic Git
-operations. Adoption-plan step 6 is still incomplete: production template sync
-continues using its current direct-Git implementation until the next slice.
+operations. Adoption-plan step 6 is complete: the production disposable
+template workspace now uses authenticated semantic no-checkout clone, detached
+checkout, remote-default-branch discovery, and create/reset-from-remote branch
+preparation. Its current raw token input is bridged to an operation-scoped opaque
+authentication context and resolver at this trusted orchestration boundary.
 
 Network operations without an authentication context may remain possible for
 public/local remotes and current behavior, but the caller must choose that
@@ -573,7 +576,7 @@ Each step preserves current domain results before the next direct caller moves.
 |     3 | `repository-download.ts`                                                                                | Clone with default checkout; semantic engine availability check                                        | Semantic factory fakes for per-target behavior plus system-Git clone contract tests                                              | Complete: network-capable, clone-only, and destinations remain safety-checked                        |
 |     4 | `studentRepositoryAccessPagePublishStatusService.ts` and read-only portion of `coursePublishService.ts` | Open/root, structured status/path status, branch/upstream/ahead-behind, remote URL                     | Real-repository readiness/publish-status tests                                                                                   | Complete: structured inspection is adopted; publication mutation remains deferred to step 5          |
 |     5 | Mutating portions of `coursePublishService.ts` and `studentRepositoryAccessPagePublishService.ts`       | Exact-path stage, commit, push                                                                         | Integration tests for allowlists, deletions, unrelated staged files, missing upstream, behind state, and rejected/divergent push | Complete: exact-path staging, configured-author commits, upstream push, and safe diagnostics adopted |
-|     6 | `withProductionTemplateSyncWorkspace`                                                                   | Authenticated no-checkout clone, remote default branch, detached checkout, create/reset branch         | Workspace tests for stage classification, default branch, cleanup, and safe diagnostics                                          | Medium: moves the only current explicit credential-to-Git bridge                                     |
+|     6 | `withProductionTemplateSyncWorkspace`                                                                   | Authenticated no-checkout clone, remote default branch, detached checkout, create/reset branch         | Workspace tests for stage classification, default branch, cleanup, and safe diagnostics                                          | Complete: disposable preparation and the explicit clone credential bridge now use the common engine  |
 |     7 | `LocalGitTemplateSyncGateway`                                                                           | Tree/history, binary diff, three-way indexed apply, branch operations, commit/push, disposable restore | Extensive real-Git integration suite plus fake domain gateway tests                                                              | High: broadest and most destructive operation set; migrate last after the engine contract is proven  |
 |     8 | Repository-wide enforcement                                                                             | Remove obsolete raw runners; add a lint/search guard for production direct Git execution               | Existing suites plus a production-source search                                                                                  | Low after convergence                                                                                |
 
@@ -586,6 +589,13 @@ No step introduces automatic fetch/update of current clones in Phase 1.1B.
 Fetch and fast-forward are implemented and contract-tested for the approved
 future synchronization engine, but adopting synchronization policy belongs to
 later roadmap slices.
+
+`LocalGitTemplateSyncGateway` remains the final direct domain Git consumer.
+Its tree, diff, patch, commit, branch, recovery, and push mechanics are deferred
+to step 7. In particular, gateway network pushes do not yet use the operation-
+scoped authentication context used by the two workspace clones; template sync
+must not be described as fully authenticated through the common engine until
+that final migration lands.
 
 ## 14. Direct-system-Git end state
 

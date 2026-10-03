@@ -4,12 +4,16 @@ import { realpath, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import {
   GitError,
+  createBranchName,
+  createExactCommitRevision,
   createGitAuthenticationContext,
   createRelativeGitPath,
   createRemoteName,
   isObjectId,
   type CommitHistoryRequest,
   type CommitRequest,
+  type CreateOrResetBranchRequest,
+  type BranchName,
   type ExactCommitRevision,
   type GitAuthenticationContext,
   type GitCommitSummary,
@@ -22,8 +26,8 @@ import {
   type RelativeGitPath,
   type RemoteName,
   type RepositoryState,
-  type GitWorkspaceWriterFactory,
-  type GitWorkspaceWriter,
+  type GitWorkspacePreparationFactory,
+  type GitWorkspacePreparer,
   type ObjectId,
   type RepositoryInspection
 } from "./git-workspace.js";
@@ -416,7 +420,7 @@ const relationForCounts = (
   return "current";
 };
 
-class SystemGitWorkspace implements GitWorkspaceWriter {
+class SystemGitWorkspace implements GitWorkspacePreparer {
   readonly root: string;
 
   constructor(
@@ -598,6 +602,86 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
     }
   }
 
+  async remoteDefaultBranch(remote: RemoteName): Promise<BranchName | null> {
+    if (createRemoteName(remote) !== remote)
+      throw new GitError("operation_rejected", "remote_default_branch");
+    const symbolicReference = `refs/remotes/${remote}/HEAD`;
+    let target: string;
+    try {
+      target = (
+        await this.executor.run(
+          this.root,
+          ["symbolic-ref", "--quiet", symbolicReference],
+          "remote_default_branch"
+        )
+      ).trim();
+    } catch (error) {
+      if (error instanceof SystemGitFailure && error.code === 1) return null;
+      throw errorForFailure(error, "remote_default_branch", "remote_unavailable");
+    }
+    const prefix = `refs/remotes/${remote}/`;
+    if (!target.startsWith(prefix)) return null;
+    const branch = createBranchName(target.slice(prefix.length));
+    if (branch === null) return null;
+    try {
+      await this.executor.run(
+        this.root,
+        ["show-ref", "--verify", "--quiet", `${prefix}${branch}`],
+        "remote_default_branch"
+      );
+      return branch;
+    } catch (error) {
+      if (error instanceof SystemGitFailure && error.code === 1) return null;
+      throw errorForFailure(error, "remote_default_branch", "remote_unavailable");
+    }
+  }
+
+  async checkoutDetached(revision: ExactCommitRevision): Promise<ObjectId> {
+    if (createExactCommitRevision(revision) !== revision)
+      throw new GitError("operation_rejected", "checkout");
+    const commit = await this.resolveRevision(revision);
+    try {
+      await this.executor.run(this.root, ["checkout", "--detach", commit], "checkout");
+      return await this.resolveHead();
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "checkout", "operation_rejected");
+    }
+  }
+
+  async createOrResetBranch(request: CreateOrResetBranchRequest): Promise<ObjectId> {
+    if (
+      createBranchName(request.branch) !== request.branch ||
+      createRemoteName(request.startPoint.remote) !== request.startPoint.remote ||
+      createBranchName(request.startPoint.branch) !== request.startPoint.branch
+    ) {
+      throw new GitError("operation_rejected", "branch");
+    }
+    const remoteReference = `refs/remotes/${request.startPoint.remote}/${request.startPoint.branch}`;
+    try {
+      await this.executor.run(
+        this.root,
+        ["show-ref", "--verify", "--quiet", remoteReference],
+        "branch"
+      );
+    } catch (error) {
+      if (error instanceof SystemGitFailure && error.code === 1)
+        throw new GitError("revision_unavailable", "branch", error);
+      throw errorForFailure(error, "branch", "revision_unavailable");
+    }
+    try {
+      await this.executor.run(
+        this.root,
+        ["checkout", "-B", request.branch, remoteReference, "--"],
+        "branch"
+      );
+      return await this.resolveHead();
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "branch", "operation_rejected");
+    }
+  }
+
   async resolveHead(): Promise<ObjectId> {
     try {
       return parseObjectId(
@@ -661,7 +745,7 @@ class SystemGitWorkspace implements GitWorkspaceWriter {
   }
 }
 
-export class SystemGitWorkspaceFactory implements GitWorkspaceWriterFactory {
+export class SystemGitWorkspaceFactory implements GitWorkspacePreparationFactory {
   private readonly executor: SystemGitOperationExecutor;
 
   constructor(options: SystemGitWorkspaceFactoryOptions = {}) {
@@ -679,14 +763,25 @@ export class SystemGitWorkspaceFactory implements GitWorkspaceWriterFactory {
     }
   }
 
-  async clone(request: CloneRequest): Promise<GitWorkspaceWriter> {
-    if (request.destination.length === 0 || existsSync(request.destination)) {
+  async clone(request: CloneRequest): Promise<GitWorkspacePreparer> {
+    const checkout: string = request.checkout;
+    if (
+      (checkout !== "default" && checkout !== "none") ||
+      request.destination.length === 0 ||
+      existsSync(request.destination)
+    ) {
       throw new GitError("operation_rejected", "clone");
     }
     try {
       await this.executor.run(
         process.cwd(),
-        ["clone", "--", request.remote, request.destination],
+        [
+          "clone",
+          ...(request.checkout === "none" ? ["--no-checkout"] : []),
+          "--",
+          request.remote,
+          request.destination
+        ],
         "clone",
         {
           ...(request.authentication === undefined
@@ -716,7 +811,7 @@ export class SystemGitWorkspaceFactory implements GitWorkspaceWriterFactory {
     }
   }
 
-  async open(path: string): Promise<GitWorkspaceWriter> {
+  async open(path: string): Promise<GitWorkspacePreparer> {
     await requireDirectory(path);
     try {
       const discoveredRoot = (

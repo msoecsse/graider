@@ -1,9 +1,18 @@
-import { execFile as executeFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
+import type { GitCredentialResolver } from "../git/git-credential-resolver.js";
+import {
+  createExactCommitRevision,
+  createGitAuthenticationContext,
+  createRemoteName,
+  createTrustedGitRemote,
+  type GitAuthenticationContext,
+  type GitWorkspacePreparationFactory
+} from "../git/git-workspace.js";
+import { createSystemGitWorkspaceFactory } from "../git/system-git-workspace-context.js";
 import type { GitHubClient } from "../github/github-client.js";
 import { LocalGitTemplateSyncGateway } from "./local-git-template-sync-gateway.js";
 import {
@@ -17,13 +26,7 @@ import type {
   TemplateSyncPullRequestGateway
 } from "./template-sync.js";
 
-const execFile = promisify(executeFile);
-const GIT = "git";
-const BYTES_PER_KIBIBYTE = 1024;
-const KIBIBYTES_PER_MEBIBYTE = BYTES_PER_KIBIBYTE;
-const BYTES_PER_MEBIBYTE = BYTES_PER_KIBIBYTE * KIBIBYTES_PER_MEBIBYTE;
-const MAX_GIT_COMMAND_OUTPUT_MEBIBYTES = 10;
-const MAX_GIT_COMMAND_OUTPUT_BYTES = MAX_GIT_COMMAND_OUTPUT_MEBIBYTES * BYTES_PER_MEBIBYTE;
+const GITHUB_HOST = "github.com";
 
 export interface ProductionTemplateSyncWorkspaceInput {
   templateCloneUrl: string;
@@ -42,23 +45,49 @@ export interface PreparedTemplateSyncWorkspace {
 }
 
 export interface ProductionTemplateSyncWorkspaceDependencies {
-  runGit(
-    directory: string | undefined,
-    args: string[],
-    token: string | null
-  ): Promise<{ stdout: string }>;
+  createGitWorkspaceFactory(
+    credentialResolver?: GitCredentialResolver
+  ): GitWorkspacePreparationFactory;
+  createAuthenticationContext(): GitAuthenticationContext;
 }
 
-const runWorkspaceStage = async (
+const runWorkspaceStage = async <T>(
   stage: TemplateSyncFailureStage,
   message: string,
-  operation: () => Promise<unknown>
-): Promise<void> => {
+  operation: () => Promise<T>
+): Promise<T> => {
   try {
-    await operation();
+    return await operation();
   } catch (error: unknown) {
     throw createTemplateSyncOperationError(stage, message, error);
   }
+};
+
+const defaultDependencies: ProductionTemplateSyncWorkspaceDependencies = {
+  createGitWorkspaceFactory: createSystemGitWorkspaceFactory,
+  createAuthenticationContext: () => {
+    const context = createGitAuthenticationContext(randomUUID());
+    if (context === null) throw new Error("Unable to create Git authentication context.");
+    return context;
+  }
+};
+
+const authenticationForOperation = (
+  token: string | null,
+  dependencies: ProductionTemplateSyncWorkspaceDependencies
+): {
+  readonly authentication?: GitAuthenticationContext;
+  readonly credentialResolver?: GitCredentialResolver;
+} => {
+  if (token === null) return {};
+  const authentication = dependencies.createAuthenticationContext();
+  const credentialResolver: GitCredentialResolver = {
+    resolve: (context) =>
+      Promise.resolve(
+        context.id === authentication.id ? { kind: "github_token", host: GITHUB_HOST, token } : null
+      )
+  };
+  return { authentication, credentialResolver };
 };
 
 /** Creates disposable clones for exactly one template-sync operation. */
@@ -74,48 +103,76 @@ export const withProductionTemplateSyncWorkspace = async <T>(
   try {
     const templateDirectory = join(directory, "template");
     const studentDirectory = join(directory, "student");
-    const runGit = overrides.runGit ?? git;
-    await runWorkspaceStage(
+    const dependencies = { ...defaultDependencies, ...overrides };
+    const authentication = authenticationForOperation(input.token, dependencies);
+    const factory = dependencies.createGitWorkspaceFactory(authentication.credentialResolver);
+    const templateWorkspace = await runWorkspaceStage(
       "template_clone_failed",
       "Unable to clone template repository.",
       async () => {
-        await clone(input.templateCloneUrl, templateDirectory, input.token, runGit);
+        const remote = createTrustedGitRemote(input.templateCloneUrl);
+        if (remote === null) throw new Error("The template clone remote is invalid.");
+        return await factory.clone({
+          remote,
+          destination: templateDirectory,
+          checkout: "none",
+          ...(authentication.authentication === undefined
+            ? {}
+            : { authentication: authentication.authentication })
+        });
       }
     );
-    await runWorkspaceStage(
+    const studentWorkspace = await runWorkspaceStage(
       "student_clone_failed",
       "Unable to clone student repository.",
       async () => {
-        await clone(input.studentCloneUrl, studentDirectory, input.token, runGit);
+        const remote = createTrustedGitRemote(input.studentCloneUrl);
+        if (remote === null) throw new Error("The student clone remote is invalid.");
+        return await factory.clone({
+          remote,
+          destination: studentDirectory,
+          checkout: "none",
+          ...(authentication.authentication === undefined
+            ? {}
+            : { authentication: authentication.authentication })
+        });
       }
     );
     await runWorkspaceStage(
       "template_checkout_failed",
       "Unable to check out the requested template revision.",
-      async () =>
-        await runGit(
-          templateDirectory,
-          ["checkout", "--detach", input.templateCommitSha],
-          input.token
-        )
+      async () => {
+        const revision = createExactCommitRevision(input.templateCommitSha);
+        if (revision === null) throw new Error("The template commit is invalid.");
+        await templateWorkspace.checkoutDetached(revision);
+      }
     );
-    const studentDefaultBranch = await resolveRemoteDefaultBranch(
-      studentDirectory,
-      input.token,
-      runGit
+    const origin = createRemoteName("origin");
+    if (origin === null) throw new Error("The origin remote name is invalid.");
+    const studentDefaultBranch = await runWorkspaceStage(
+      "student_checkout_failed",
+      "Graider could not determine the repository default branch.",
+      async () => {
+        const branch = await studentWorkspace.remoteDefaultBranch(origin);
+        if (branch === null) throw new Error("The remote default branch is unavailable.");
+        return branch;
+      }
     );
     await runWorkspaceStage(
       "student_checkout_failed",
       "Unable to check out the student default branch.",
-      async () =>
-        await runGit(
-          studentDirectory,
-          ["checkout", "-B", studentDefaultBranch, `origin/${studentDefaultBranch}`],
-          input.token
-        )
+      async () => {
+        await studentWorkspace.createOrResetBranch({
+          branch: studentDefaultBranch,
+          startPoint: { remote: origin, branch: studentDefaultBranch }
+        });
+      }
     );
     result = await operation({
-      gateway: new LocalGitTemplateSyncGateway({ templateDirectory, studentDirectory }),
+      gateway: new LocalGitTemplateSyncGateway({
+        templateDirectory: templateWorkspace.root,
+        studentDirectory: studentWorkspace.root
+      }),
       pullRequests: createGitHubPullRequestGateway(input.githubClient),
       studentDefaultBranch
     });
@@ -133,68 +190,6 @@ export const withProductionTemplateSyncWorkspace = async <T>(
     throw new Error("Template-sync workspace operation failed.", { cause: operationError });
   }
   return result as T;
-};
-
-const resolveRemoteDefaultBranch = async (
-  studentDirectory: string,
-  token: string | null,
-  runGit: ProductionTemplateSyncWorkspaceDependencies["runGit"]
-): Promise<string> => {
-  let branch = "";
-  await runWorkspaceStage(
-    "student_checkout_failed",
-    "Graider could not determine the repository default branch.",
-    async () => {
-      const result = await runGit(
-        studentDirectory,
-        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-        token
-      );
-      const symbolicRef = result.stdout.trim();
-      if (!symbolicRef.startsWith("origin/") || symbolicRef.length === "origin/".length) {
-        throw new Error("The origin default-branch symbolic ref is invalid.");
-      }
-      branch = symbolicRef.slice("origin/".length);
-      await runGit(
-        studentDirectory,
-        ["show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`],
-        token
-      );
-    }
-  );
-  return branch;
-};
-
-const clone = async (
-  url: string,
-  directory: string,
-  token: string | null,
-  runGit: ProductionTemplateSyncWorkspaceDependencies["runGit"]
-): Promise<void> => {
-  await runGit(undefined, ["clone", "--no-checkout", url, directory], token);
-};
-
-const git = async (
-  directory: string | undefined,
-  args: string[],
-  token: string | null
-): Promise<{ stdout: string }> => {
-  const authorization =
-    token === null
-      ? []
-      : [
-          "-c",
-          `http.extraHeader=AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`
-        ];
-  const { stdout } = await execFile(
-    GIT,
-    [...authorization, ...(directory === undefined ? [] : ["-C", directory]), ...args],
-    {
-      encoding: "utf8",
-      maxBuffer: MAX_GIT_COMMAND_OUTPUT_BYTES
-    }
-  );
-  return { stdout };
 };
 
 export const createGitHubPullRequestGateway = (

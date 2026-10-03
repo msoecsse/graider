@@ -116,7 +116,7 @@ describe("Git authentication context contract", () => {
 });
 
 describe("System Git authenticated execution contract", () => {
-  it("supplies GitHub clone credentials only through a fresh process environment", async () => {
+  it("supplies GitHub no-checkout clone credentials only through a fresh process environment", async () => {
     const parent = await createTemporaryDirectory("graider-auth-clone-");
     const requests: SystemGitExecutionRequest[] = [];
     const context = authenticationContext("clone-context");
@@ -130,7 +130,7 @@ describe("System Git authenticated execution contract", () => {
     await factory.clone({
       remote: trustedRemote(GITHUB_REMOTE),
       destination: join(parent, "clone"),
-      checkout: "default",
+      checkout: "none",
       authentication: context
     });
 
@@ -145,7 +145,13 @@ describe("System Git authenticated execution contract", () => {
     );
     expect(config.get("credential.helper")).toBe("");
     expect(cloneRequest.env.GIT_TERMINAL_PROMPT).toBe("0");
-    expect(cloneRequest.args).toEqual(["clone", "--", GITHUB_REMOTE, join(parent, "clone")]);
+    expect(cloneRequest.args).toEqual([
+      "clone",
+      "--no-checkout",
+      "--",
+      GITHUB_REMOTE,
+      join(parent, "clone")
+    ]);
     const argv = cloneRequest.args.join(" ");
     expect(argv).not.toContain(TOKEN_A);
     expect(argv).not.toContain(encodedCredential(TOKEN_A));
@@ -287,6 +293,27 @@ describe("System Git authenticated execution contract", () => {
         remote: trustedRemote(OTHER_HTTPS_REMOTE),
         destination: join(parent, "rejected"),
         checkout: "default",
+        authentication: context
+      })
+    ).rejects.toMatchObject({ kind: "operation_rejected", operation: "clone" });
+
+    expect(requests).toEqual([]);
+  });
+
+  it("rejects authenticated local remotes before invoking child Git", async () => {
+    const parent = await createTemporaryDirectory("graider-auth-local-host-");
+    const requests: SystemGitExecutionRequest[] = [];
+    const context = authenticationContext("local-host-context");
+    const factory = new SystemGitWorkspaceFactory({
+      runGit: createFakeCloneRunner(requests),
+      credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
+    });
+
+    await expect(
+      factory.clone({
+        remote: trustedRemote(join(parent, "local.git")),
+        destination: join(parent, "rejected"),
+        checkout: "none",
         authentication: context
       })
     ).rejects.toMatchObject({ kind: "operation_rejected", operation: "clone" });
