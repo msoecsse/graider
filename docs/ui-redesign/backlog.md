@@ -1502,23 +1502,8 @@ Each Apply generates a standalone
 the Pages repository, and nothing links them, so an instructor has to set up a
 new link for every assignment.
 
-Requested behaviour:
-
-- Generate a simple assignments page at the root of the Pages repository that
-  links to each assignment's student repository page.
-- Title it with the course identifier and course title (for example "SWE 4211
-  Real Time Systems"), then the term, then "Assignments".
-- List only the assignments for the most recent term; assignments from earlier
-  terms do not appear.
-- Show the assignments as a bulleted list with space between items, most
-  recently created first. Each link is named with the assignment title and is
-  followed by the slug in parentheses, for example "Lab 5 Lights (slug:
-  lab5lights)".
-- On each `student-repositories.html` page, link the course identifier (for
-  example "SWE4211") to the assignments page.
-- Add appropriate files at the root of the published pages (beside the
-  assignments page) to restrict scans by external robots, with an exception for
-  the Graider application.
+Requirements are recorded in
+`docs/features/requests/graider-feature-request-student-access-pages-index.md`.
 
 Resolved on `feat/link-student-access-pages`. Generating any student access page
 rewrites `index.html` at the Pages root for the most recent term in the course
