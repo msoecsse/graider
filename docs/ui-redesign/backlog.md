@@ -1497,10 +1497,25 @@ backend and UI tests.
 
 ## 55. Student access pages are not linked together — **Should fix**
 
-Placeholder; direction to follow. Each Apply generates a standalone
+Each Apply generates a standalone
 `terms/<term-code>/notifications/<assignment-slug>/student-repositories.html` in
-the Pages repository, and nothing links them: there is no index or landing
-page, and assignment pages do not link to one another.
+the Pages repository, and nothing links them, so an instructor has to set up a
+new link for every assignment.
+
+Requested behaviour:
+
+- Generate a simple assignments page at the root of the Pages repository that
+  links to each assignment's student repository page.
+- Title it with the course identifier and course title (for example "SWE 4211
+  Real Time Systems"), then the term, then "Assignments".
+- List only the assignments for the most recent term; assignments from earlier
+  terms do not appear.
+- Show the assignments as a bulleted list with space between items, most
+  recently created first. Each link is named with the assignment title and is
+  followed by the slug in parentheses, for example "Lab 5 Lights (slug:
+  lab5lights)".
+- On each `student-repositories.html` page, link the course identifier (for
+  example "SWE4211") to the assignments page.
 
 ---
 
