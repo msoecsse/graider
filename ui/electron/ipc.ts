@@ -493,6 +493,7 @@ export interface StudentRepositoryAccessPagePublishChecks {
   readonly isGitRepository: boolean;
   readonly currentBranch: string | null;
   readonly hasUncommittedAccessPage: boolean;
+  readonly changedCloneScriptCount: number;
   readonly hasUncommittedOtherChanges: boolean;
   readonly upstreamBranch: string | null;
   readonly aheadCount: number | null;

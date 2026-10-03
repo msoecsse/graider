@@ -2,7 +2,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { getAssignmentForEdit } from "./assignmentEditService.js";
-import { getStudentRepositoryAccessPageStatus } from "./studentRepositoryAccessPageService.js";
+import {
+  getStudentRepositoryAccessPageCloneScriptPattern,
+  getStudentRepositoryAccessPageStatus
+} from "./studentRepositoryAccessPageService.js";
 import type { AssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import type {
   CourseSetupDiagnostic,
@@ -22,6 +25,7 @@ const emptyChecks = (
   isGitRepository: false,
   currentBranch: null,
   hasUncommittedAccessPage: false,
+  changedCloneScriptCount: 0,
   hasUncommittedOtherChanges: false,
   upstreamBranch: null,
   aheadCount: null,
@@ -119,13 +123,38 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
       )
     ]);
 
-  const [pageStatus, allStatus, branch, remote] = await Promise.all([
-    runGit(pagesFolderPath, ["status", "--porcelain", "--", accessPage.outputPath]),
-    runGit(pagesFolderPath, ["status", "--porcelain"]),
-    runGit(pagesFolderPath, ["branch", "--show-current"]),
-    runGit(pagesFolderPath, ["remote", "get-url", "origin"])
-  ]);
-  if (!pageStatus.ok || !allStatus.ok || !branch.ok)
+  const cloneScriptPattern = getStudentRepositoryAccessPageCloneScriptPattern(
+    accessPage.outputPath
+  );
+  const [pageStatus, allStatus, branch, remote, cloneScripts, cloneScriptStatus] =
+    await Promise.all([
+      runGit(pagesFolderPath, [
+        "status",
+        "--porcelain",
+        "--",
+        accessPage.outputPath,
+        cloneScriptPattern
+      ]),
+      runGit(pagesFolderPath, ["status", "--porcelain"]),
+      runGit(pagesFolderPath, ["branch", "--show-current"]),
+      runGit(pagesFolderPath, ["remote", "get-url", "origin"]),
+      runGit(pagesFolderPath, [
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        cloneScriptPattern
+      ]),
+      runGit(pagesFolderPath, [
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        cloneScriptPattern
+      ])
+    ]);
+  if (!pageStatus.ok || !allStatus.ok || !branch.ok || !cloneScriptStatus.ok)
     return resultFromAccessPage(
       request,
       accessPage,
@@ -143,6 +172,8 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
     isGitRepository: true,
     currentBranch: branch.stdout === "" ? null : branch.stdout,
     hasUncommittedAccessPage,
+    changedCloneScriptCount:
+      cloneScriptStatus.stdout === "" ? 0 : cloneScriptStatus.stdout.split("\n").length,
     hasUncommittedOtherChanges,
     remoteMatchesConfiguredRepository:
       remote.ok && accessPage.pagesRepository !== null
@@ -152,7 +183,7 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
   const assignment = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile);
   const label = assignment.model?.assignmentTitle ?? accessPage.assignmentSlug ?? "assignment";
   const commitCommands = [
-    `git add ${quoteCommandArgument(accessPage.outputPath)}`,
+    `git add ${[accessPage.outputPath, ...(cloneScripts.stdout === "" ? [] : [cloneScriptPattern])].map(quoteCommandArgument).join(" ")}`,
     `git commit -m ${quoteCommandArgument(`Add ${label} student repository access page`)}`
   ];
   const remoteDiagnostic =
