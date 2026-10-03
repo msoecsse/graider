@@ -1519,15 +1519,182 @@ publishing stages these root files only when Graider wrote them.
 
 ---
 
-## 56. Students cannot open student access pages without permission changes — **Should fix**
+## 56. Students cannot open student access pages without permission changes — **Resolved**
 
-Placeholder; direction to follow. A private Pages repository publishes its
-Pages site privately, so only people with read access to the repository can
-view the pages. The working assumption is that the pages stay non-public, which
-requires infrastructure changes to how students are given access. The docs
-imply a public Pages repository (`docs/faculty-ui-user-guide.md:59-60`), and
-the access-page configuration error calls the result a "public access page"
+A private Pages repository publishes its Pages site privately, so only people
+signed in to GitHub with read access to the repository can view the pages.
+Students are organization members, but the organization's base repository
+permission is `none` and the Pages repository has no teams or collaborators, so
+students cannot open the pages linked from Canvas. The organization allows
+private Pages sites and does not allow public ones, and the pages should stay
+non-public. The docs imply a public Pages repository
+(`docs/faculty-ui-user-guide.md:59-60`), and the access-page configuration error
+calls the result a "public access page"
 (`ui/electron/studentRepositoryAccessPageService.ts:463`).
+
+Requirements, settled with the course owner (direct collaborators, following
+the most recent term's rosters), are recorded in
+`docs/features/requests/graider-feature-request-student-access-pages-access.md`.
+
+Resolved on `feat/restrict-student-access-pages`. After a successful roster
+save, roster or section removal, or Apply, the desktop app grants read access on
+the Pages repository to every active or on-hold student in the most recent term
+and removes it from students dropped in every section of that term, using the
+bundled `src/pages-access/pages-access-context.ts`. Failures never undo the save
+or Apply; faculty see which students could not be updated and retry by saving or
+applying again. The docs and the configuration message no longer imply a public
+Pages repository.
+
+---
+
+## 57. The most-recent-term rule is implemented twice — **Worth fixing**
+
+The assignments page (`ui/electron/studentAccessPagesIndexService.ts`, item 55)
+and the Pages access check (`src/pages-access/pages-access-context.ts`, item 56)
+each pick the most recent term by `term.yml` `academic_year`, then `semester`.
+Electron services cannot import `src/` directly, so the rule was written twice;
+each copy has its own tests.
+
+If the rule changes in one place only, the assignments page and student access
+could follow different terms. Fix: move the rule into `src/` and expose it to
+Electron through the existing bundled-backend pattern
+(`ui/scripts/build-template-sync.mjs`), then use it from both places. Small
+change.
+
+---
+
+## 58. Pending Pages invitations are re-sent and never cancelled — **Should fix**
+
+When GitHub answers an add-collaborator request with an invitation rather than
+direct access, `OctokitGitHubClient.addCollaborator` reports
+`pendingInvite: true`, but `getCollaboratorPermission` always reports
+`pendingInvite: false` and permission `none` until the student accepts
+(`src/github/octokit-github-client.ts`). The item 56 access check therefore
+re-sends the invitation on every roster save, roster or section removal, and
+Apply.
+
+Removal has the opposite gap: `removeCollaborator` removes collaborators but
+does not cancel an unaccepted invitation, and the client has no call to list or
+cancel invitations. A dropped student, or one in a removed roster, can still
+accept an outstanding invitation and gain read access. A dropped student is
+removed again at the next check; a student from a removed roster is not, because
+nothing records them after the removal.
+
+Fix: add invitation listing and cancellation to `GitHubClient` (and
+`FakeGitHubClient`), skip re-inviting students with a pending invitation, and
+cancel invitations for students whose access is being removed. Whether students
+who are organization members receive invitations at all has not been verified
+against GitHub.
+
+---
+
+## 59. Roster manager hides access-page refresh messages when course publication succeeds — **Worth fixing**
+
+After a roster save or removal, `withStudentRepositoryPageRefresh`
+(`ui/electron/rosterStudentRepositoryAccessPageService.ts`) adds a diagnostic
+such as "Roster changes were saved, but Student Repository page publication
+needs attention." while leaving `status: "success"`. `RosterManagerPage.tsx`
+shows `result.diagnostics` only when `result.publication?.status === "failure"`,
+so when course publication succeeds those access-page messages are never shown.
+
+Faculty can believe the student access pages were refreshed and published when
+they were not. Fix: show the refresh diagnostics whenever they are present,
+separately from the course-publication warning, with focused tests. Small
+change; this predates items 55 and 56.
+
+---
+
+## 60. An access page generated with zero students looks like success — **Should fix**
+
+When no active student has a repository link, `buildResult` in
+`ui/electron/studentRepositoryAccessPageService.ts` returns status `not_ready`,
+but generation still writes `student-repositories.html` with an empty sections
+list and adds no diagnostic when the manifest exists. The renderer has no
+handling for `not_ready`; `StudentRepositoryAccessPagePanel.tsx` only shows an
+"Included" count of 0.
+
+This happened for swe4211 `lab5lights` on 2026-10-02: the page was regenerated
+on a machine whose course repository had not been pulled, the empty page was
+committed and pushed, and a later merge put conflict markers on the live page.
+Fix: when no students are included, either do not write the page or show a clear
+warning (for example, suggesting the course repository may be out of date)
+before it can be published. Needs a decision on which.
+
+---
+
+## 61. Publish readiness does not detect merge-conflict markers — **Worth fixing**
+
+Publish readiness
+(`ui/electron/studentRepositoryAccessPagePublishStatusService.ts`) checks only
+git state: existence, branch, upstream, and uncommitted or unpushed changes. It
+never reads the generated files, so a page containing `<<<<<<<`, `=======`, or
+`>>>>>>>` lines from a hand-resolved merge is reported as ready and can be
+published to students, as happened for swe4211 `lab5lights`.
+
+Fix: scan the generated page, clone scripts, and Graider's `index.html` and
+`robots.txt` for conflict-marker lines, and block publishing with a
+plain-language reason that suggests regenerating the page. Small change.
+
+---
+
+## 62. The publish review hides committed-but-unpushed clone scripts — **Optional**
+
+The **Clone scripts** row in the Publish Student Access Page review counts only
+uncommitted `clone-*.py` changes (`changedCloneScriptCount`) and is hidden when
+that count is zero. When the status is **Unpushed** because scripts were
+committed by hand, the push will include them but the review does not say so.
+The **Generated page** row has the same limitation.
+
+Fix, if wanted: also count script changes in commits ahead of upstream. Accepted
+behaviour today; recorded so the gap is visible.
+
+---
+
+## 63. Editing an assignment may drop its group settings — **Should fix**
+
+`ui/electron/assignmentEditService.ts` rebuilds the whole `assignment.yml` from
+a template on every save, and the template has no `repository_mode` or `groups`
+fields, which the assignment schema allows (`src/config/config-schemas.ts`).
+Saving an edit to a group assignment therefore appears to remove its group
+configuration. Found by reading the code; not yet reproduced.
+
+Fix: carry `repository_mode` and `groups` through the edit model and template,
+or rewrite only the edited fields, with a test that edits a group assignment.
+The same rebuild would drop any future field, including the creation date in
+item 64.
+
+---
+
+## 64. Assignments have no creation date — **Worth fixing**
+
+`assignment.yml` records no creation date, so the assignments page (item 55)
+orders assignments by the earliest repository `created_at` in each manifest,
+falling back to title for assignments without one. Repositories that are
+re-created change that order.
+
+Fix: add an optional `metadata.created_at` to the strict assignment schema,
+write it in assignment setup (`ui/electron/assignmentSetupService.ts`), keep it
+through edits (see item 63), and have the assignments page read it before
+falling back to the manifest. Older Graider builds reject unknown fields, so
+every faculty build must be upgraded before anything writes it. Existing
+assignments need a fallback or a backfill, which changes course data and needs
+explicit approval. Own PR.
+
+---
+
+## 65. Access-page test fixtures lack required term fields — **Optional**
+
+The `term.yml` fixtures in `assignmentApplyWithAccessPageService.test.ts`,
+`rosterStudentRepositoryAccessPageService.test.ts`, and most of
+`studentRepositoryAccessPageService.test.ts` (all under `ui/electron/`) contain
+only `term.code` and `sections`, without the schema-required `academic_year`,
+`semester`, and `display_name`. The assignments page skips such terms, so those
+tests never write an assignments page and do not exercise it alongside
+generation and publishing.
+
+Fix: give the fixtures schema-valid `term.yml` content and update expectations
+to include `index.html` where it is now written. Dedicated tests already cover
+the assignments page itself.
 
 ---
 
@@ -1560,10 +1727,11 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, and 56.
+Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, 59, 60, 61, 62,
+63, 64, and 65.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
-48, 49, 50, 51, 53, 55, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
+48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
 ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.
 
