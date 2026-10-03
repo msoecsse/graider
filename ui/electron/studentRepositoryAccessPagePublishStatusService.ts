@@ -25,6 +25,7 @@ const emptyChecks = (
   isGitRepository: false,
   currentBranch: null,
   hasUncommittedAccessPage: false,
+  changedCloneScriptCount: 0,
   hasUncommittedOtherChanges: false,
   upstreamBranch: null,
   aheadCount: null,
@@ -125,27 +126,35 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
   const cloneScriptPattern = getStudentRepositoryAccessPageCloneScriptPattern(
     accessPage.outputPath
   );
-  const [pageStatus, allStatus, branch, remote, cloneScripts] = await Promise.all([
-    runGit(pagesFolderPath, [
-      "status",
-      "--porcelain",
-      "--",
-      accessPage.outputPath,
-      cloneScriptPattern
-    ]),
-    runGit(pagesFolderPath, ["status", "--porcelain"]),
-    runGit(pagesFolderPath, ["branch", "--show-current"]),
-    runGit(pagesFolderPath, ["remote", "get-url", "origin"]),
-    runGit(pagesFolderPath, [
-      "ls-files",
-      "--cached",
-      "--others",
-      "--exclude-standard",
-      "--",
-      cloneScriptPattern
-    ])
-  ]);
-  if (!pageStatus.ok || !allStatus.ok || !branch.ok)
+  const [pageStatus, allStatus, branch, remote, cloneScripts, cloneScriptStatus] =
+    await Promise.all([
+      runGit(pagesFolderPath, [
+        "status",
+        "--porcelain",
+        "--",
+        accessPage.outputPath,
+        cloneScriptPattern
+      ]),
+      runGit(pagesFolderPath, ["status", "--porcelain"]),
+      runGit(pagesFolderPath, ["branch", "--show-current"]),
+      runGit(pagesFolderPath, ["remote", "get-url", "origin"]),
+      runGit(pagesFolderPath, [
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        cloneScriptPattern
+      ]),
+      runGit(pagesFolderPath, [
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        cloneScriptPattern
+      ])
+    ]);
+  if (!pageStatus.ok || !allStatus.ok || !branch.ok || !cloneScriptStatus.ok)
     return resultFromAccessPage(
       request,
       accessPage,
@@ -163,6 +172,8 @@ export const getStudentRepositoryAccessPagePublishStatus = async (
     isGitRepository: true,
     currentBranch: branch.stdout === "" ? null : branch.stdout,
     hasUncommittedAccessPage,
+    changedCloneScriptCount:
+      cloneScriptStatus.stdout === "" ? 0 : cloneScriptStatus.stdout.split("\n").length,
     hasUncommittedOtherChanges,
     remoteMatchesConfiguredRepository:
       remote.ok && accessPage.pagesRepository !== null

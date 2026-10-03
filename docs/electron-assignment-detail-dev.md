@@ -114,7 +114,10 @@ the selected Pages clone: page existence, git repository/branch/upstream
 detection, uncommitted access-page changes, and local commits ahead of upstream.
 It never checks GitHub Pages over the network and cannot guarantee the page is
 live. When readiness is `uncommitted` or `unpushed`, the faculty member may
-explicitly open a review and confirm **Publish Student Access Page**. Narrow
+explicitly open a review and confirm **Publish Student Access Page**. The review
+shows a **Clone scripts** row with the number of uncommitted `clone-*.py`
+changes (new, modified, or removed), as reported by the readiness check's
+`changedCloneScriptCount`; the row is hidden when that number is zero. Narrow
 main-process IPC rechecks readiness, runs fixed
 `git add -- <generated-page> [<notifications-folder>/clone-*.py]` (the script
 pathspec is included only when matching scripts exist or are tracked),

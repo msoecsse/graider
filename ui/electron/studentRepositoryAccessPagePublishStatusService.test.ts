@@ -73,7 +73,27 @@ describe("studentRepositoryAccessPagePublishStatusService", () => {
     const result = await getStudentRepositoryAccessPagePublishStatus(request(root), mappings);
     expect(result.status).toBe("uncommitted");
     expect(result.checks.hasUncommittedAccessPage).toBe(true);
+    expect(result.checks.changedCloneScriptCount).toBe(0);
     expect(result.suggestedCommands.join(" ")).toContain(outputPath);
+  });
+
+  it("counts new, modified, and removed clone scripts but not other files", async () => {
+    const root = createRoot();
+    writeFixture(root);
+    const directory = path.dirname(path.join(pagesRoot(root), outputPath));
+    fs.writeFileSync(path.join(directory, "clone-csc1120-lab02-001.py"), "one\n", "utf8");
+    fs.writeFileSync(path.join(directory, "clone-csc1120-lab02-002.py"), "two\n", "utf8");
+    initializeRepository(pagesRoot(root));
+    commitAll(pagesRoot(root));
+
+    fs.writeFileSync(path.join(directory, "clone-csc1120-lab02-001.py"), "changed\n", "utf8");
+    fs.unlinkSync(path.join(directory, "clone-csc1120-lab02-002.py"));
+    fs.writeFileSync(path.join(directory, "clone-csc1120-lab02-003.py"), "three\n", "utf8");
+    fs.writeFileSync(path.join(directory, "notes.txt"), "not a script\n", "utf8");
+    const result = await getStudentRepositoryAccessPagePublishStatus(request(root), mappings);
+
+    expect(result.status).toBe("uncommitted");
+    expect(result.checks.changedCloneScriptCount).toBe(3);
   });
 
   it("distinguishes no upstream, unpushed commits, and ready local checks without a network remote", async () => {
