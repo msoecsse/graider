@@ -26,8 +26,15 @@ const PERMISSION_RANK = {
   admin: 5
 } as const satisfies Record<GitHubPermission, number>;
 
+export interface PagesAccessRemovedStudents {
+  readonly termCode: string;
+  readonly githubUsernames: readonly string[];
+}
+
 export interface PagesAccessRequest {
   readonly courseFolderPath: string;
+  /** Students in a roster or section that was just removed; they lose access like dropped students. */
+  readonly removedStudents?: PagesAccessRemovedStudents;
 }
 
 export interface PagesAccessFailure {
@@ -130,8 +137,15 @@ const loadSectionStudents = (
   };
 };
 
-const planAccess = (courseFolderPath: string, term: LoadedTerm): AccessPlan => {
+const planAccess = (
+  courseFolderPath: string,
+  term: LoadedTerm,
+  removedStudents: PagesAccessRemovedStudents | undefined
+): AccessPlan => {
   const { students, failedSections } = loadSectionStudents(courseFolderPath, term);
+  // A removed roster from an earlier term is ignored, like every earlier-term student.
+  const removedUsernames =
+    removedStudents?.termCode === term.code ? removedStudents.githubUsernames : [];
   const keep = new Set(
     students
       .filter(
@@ -141,10 +155,12 @@ const planAccess = (courseFolderPath: string, term: LoadedTerm): AccessPlan => {
       .map((student) => student.githubUsername)
   );
   const dropped = new Set(
-    students
-      .filter((student) => student.status === ROSTER_STATUS_DROPPED)
-      .map((student) => student.githubUsername)
-      .filter((username) => !keep.has(username))
+    [
+      ...students
+        .filter((student) => student.status === ROSTER_STATUS_DROPPED)
+        .map((student) => student.githubUsername),
+      ...removedUsernames
+    ].filter((username) => !keep.has(username))
   );
   // Without every roster, a student dropped here may be active in an unreadable section,
   // so removals wait until all rosters load.
@@ -228,7 +244,7 @@ export const syncStudentPagesAccess = async (
     return emptyResult("failure", pagesRepository, [
       "Unable to determine the most recent term, so student access to the Pages site was not checked."
     ]);
-  const plan = planAccess(request.courseFolderPath, term);
+  const plan = planAccess(request.courseFolderPath, term, request.removedStudents);
   const outcome = await applyPlan(resolved.createClient({ token }), pagesRepository, plan);
   return {
     status: outcome.failed.length === 0 ? "success" : "partial_failure",

@@ -76,7 +76,11 @@ import { assignmentTemplateSyncService } from "./assignmentTemplateSyncService.j
 import { saveStudentAccessPagesConfig } from "./studentAccessPagesConfigService.js";
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService.js";
 import { publishSuccessfulCourseMutation } from "./courseMutationPublicationService.js";
-import { withStudentPagesAccess } from "./studentPagesAccessService.js";
+import {
+  getRosterStudentsForRemoval,
+  syncStudentPagesAccess,
+  withStudentPagesAccess
+} from "./studentPagesAccessService.js";
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import { getFacultyReport } from "./facultyReportRunner.js";
 import { previewCourseSetup, saveCourseSetup } from "./courseSetupService.js";
@@ -920,6 +924,7 @@ export const registerIpcHandlers = (): void => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
+    const removedStudents = getRosterStudentsForRemoval(request);
     return await withStudentPagesAccess(
       request.courseFolderPath,
       await publishSuccessfulCourseMutation(
@@ -928,13 +933,15 @@ export const registerIpcHandlers = (): void => {
           runner: processRunner,
           pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
         })
-      )
+      ),
+      (courseFolderPath) => syncStudentPagesAccess(courseFolderPath, removedStudents)
     );
   });
   ipcMain.handle(IPC_CHANNELS.removeSection, async (_event, request: unknown) => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
+    const removedStudents = getRosterStudentsForRemoval(request);
     return await withStudentPagesAccess(
       request.courseFolderPath,
       await publishSuccessfulCourseMutation(
@@ -943,7 +950,8 @@ export const registerIpcHandlers = (): void => {
           runner: processRunner,
           pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
         })
-      )
+      ),
+      (courseFolderPath) => syncStudentPagesAccess(courseFolderPath, removedStudents)
     );
   });
 

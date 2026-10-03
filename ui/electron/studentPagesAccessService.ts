@@ -1,7 +1,13 @@
 import path from "node:path";
 
 import { createNodeProcessRunner } from "./commandRunner.js";
-import type { CourseSetupDiagnostic, StudentPagesAccessResult } from "./ipc.js";
+import type {
+  CourseSetupDiagnostic,
+  RosterLoadResult,
+  RosterSectionRequest,
+  StudentPagesAccessResult
+} from "./ipc.js";
+import { getRosterForSection } from "./rosterManagerService.js";
 import { resolveGithubToken, type GithubTokenResolution } from "./tokenResolver.js";
 
 interface PagesAccessBackendResult {
@@ -12,9 +18,17 @@ interface PagesAccessBackendResult {
   readonly diagnostics: readonly string[];
 }
 
+export interface PagesAccessRemovedStudents {
+  readonly termCode: string;
+  readonly githubUsernames: readonly string[];
+}
+
 interface PagesAccessBackend {
   readonly syncStudentPagesAccess: (
-    request: { readonly courseFolderPath: string },
+    request: {
+      readonly courseFolderPath: string;
+      readonly removedStudents?: PagesAccessRemovedStudents;
+    },
     token: string
   ) => Promise<PagesAccessBackendResult>;
 }
@@ -43,20 +57,28 @@ const loadBackend = (): PagesAccessBackend =>
 
 export const createStudentPagesAccessService = (
   overrides: Partial<StudentPagesAccessDependencies> = {}
-): ((courseFolderPath: string) => Promise<StudentPagesAccessResult>) => {
+): ((
+  courseFolderPath: string,
+  removedStudents?: PagesAccessRemovedStudents
+) => Promise<StudentPagesAccessResult>) => {
   const resolveToken =
     overrides.resolveToken ??
     (async () => await resolveGithubToken({ runner: createNodeProcessRunner() }));
   const getBackend = overrides.loadBackend ?? loadBackend;
 
-  return async (courseFolderPath) => {
+  return async (courseFolderPath, removedStudents) => {
     const token = await resolveToken();
     if (token.status === "failure")
       return failure(
         "GitHub sign-in is unavailable, so student access to the Pages site was not checked."
       );
     try {
-      const result = await getBackend().syncStudentPagesAccess({ courseFolderPath }, token.token);
+      const result = await getBackend().syncStudentPagesAccess(
+        removedStudents === undefined
+          ? { courseFolderPath }
+          : { courseFolderPath, removedStudents },
+        token.token
+      );
       return {
         status: result.status,
         granted: result.granted,
@@ -71,8 +93,23 @@ export const createStudentPagesAccessService = (
 };
 
 export const syncStudentPagesAccess = (
-  courseFolderPath: string
-): Promise<StudentPagesAccessResult> => createStudentPagesAccessService()(courseFolderPath);
+  courseFolderPath: string,
+  removedStudents?: PagesAccessRemovedStudents
+): Promise<StudentPagesAccessResult> =>
+  createStudentPagesAccessService()(courseFolderPath, removedStudents);
+
+// Read before a roster or section is removed: afterwards there is no record of who was in it.
+// An unreadable roster yields no usernames, so nobody loses access on its account.
+export const getRosterStudentsForRemoval = (
+  request: RosterSectionRequest,
+  loadRoster: (request: RosterSectionRequest) => RosterLoadResult = getRosterForSection
+): PagesAccessRemovedStudents => {
+  const roster = loadRoster(request);
+  return {
+    termCode: request.termCode,
+    githubUsernames: roster.status === "ready" ? roster.rows.map((row) => row.githubUsername) : []
+  };
+};
 
 // Runs only after a successful save or Apply, and never changes that outcome.
 export const withStudentPagesAccess = async <T extends { readonly status: string }>(

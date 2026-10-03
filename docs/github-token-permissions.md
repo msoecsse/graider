@@ -57,7 +57,7 @@ the `apply` command above. It needs admin authority on the Pages repository to:
 
 - read collaborator permissions
 - add students as read (`pull`) collaborators
-- remove dropped students as collaborators
+- remove dropped students, and students in a removed roster or section, as collaborators
 
 It changes collaborators only on the Pages repository, never on student
 repositories.

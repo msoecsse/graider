@@ -276,12 +276,12 @@ After each roster save, roster or section removal, and Apply, Graider checks the
 most recent term's rosters and gives every active or on-hold student read access
 to the Pages repository. It removes that access only from a student who is
 dropped and is not active or on hold in another section of that term, so a
-student who switches sections keeps access. Students from earlier terms are left
-alone, and so are students in a roster or section you remove, because they are
-not marked dropped. If any change fails, the roster change or Apply still
-completes, and Graider names the students whose access could not be updated;
-save a roster, or run Apply again, to retry. Your GitHub sign-in needs admin
-access to the Pages repository.
+student who switches sections keeps access. Students in a roster or section you
+remove lose access the same way, unless they are active or on hold in another
+section. Students from earlier terms are left alone. If any change fails, the
+roster change or Apply still completes, and Graider names the students whose
+access could not be updated; save a roster, or run Apply again, to retry. Your
+GitHub sign-in needs admin access to the Pages repository.
 
 ## Publish the Student Repository Access Page
 

@@ -212,6 +212,7 @@ Functional requirements:
 ```text
 - [x] Active and on-hold students in the most recent term have read access to the Pages repository as direct collaborators.
 - [x] Access is removed only for students dropped in every section of the most recent term in which they appear.
+- [x] Students in a removed roster or section lose access unless active or on hold in another section of the most recent term.
 - [x] Students only in earlier terms are left alone.
 - [x] Access is checked and corrected after every roster save, roster removal, section removal, and every successful Apply.
 - [x] Access changes never undo or block the roster save or Apply.
@@ -335,7 +336,7 @@ Teams (option A), internal visibility, removing access for students from earlier
 Implementation hints, architecture notes, or preferred approach:
 
 ```text
-Later addition from the course owner: the check also runs after removing a roster or a whole section. Students in a removed roster or section are not marked dropped, so the check does not remove their access; it only re-applies the rules to the remaining rosters.
+Later additions from the course owner: the check also runs after removing a roster or a whole section, and students in the removed roster or section lose access like dropped students, unless they are active or on hold in another section of the most recent term. The desktop app reads the roster's GitHub usernames before removing it, since nothing records them afterwards; an unreadable roster removes nobody, and a removed roster from an earlier term is ignored.
 
 Decided: one shared module, src/pages-access/pages-access-context.ts, bundled for Electron as pagesAccessBackend and run by the desktop app after a successful roster save and after a successful Apply (the step after Apply already runs in the desktop app). Retry is by saving the roster again or running Apply again; there is no separate retry button.
 

@@ -144,8 +144,11 @@ examined. If any section roster cannot be read, no access is removed. The result
 is attached as `pagesAccess` to `RosterSaveResult`, `RosterRemoveResult`, and
 `AssignmentApplyResult`; it never changes their `status`. The roster manager and
 Apply page show a warning naming students whose access could not be updated, and
-faculty retry by saving a roster or running Apply again. Students in a removed
-roster or section are not dropped, so the check does not remove their access.
+faculty retry by saving a roster or running Apply again. For a roster or section
+removal, the main process reads the roster's GitHub usernames before removing it
+and passes them as `removedStudents`; they lose access like dropped students
+unless active or on hold in another section, and a removed roster from an
+earlier term is ignored.
 
 The same panel also performs local publish-readiness checks against
 the selected Pages clone: page existence, git repository/branch/upstream

@@ -186,6 +186,47 @@ describe("syncStudentPagesAccess", () => {
     ]);
   });
 
+  it("removes access for students in a removed roster unless they are active elsewhere", async () => {
+    const root = createRoot();
+    writeTerm(root, "27s1", CURRENT_ACADEMIC_YEAR, 1, { "002": "sam,sam,002,active\n" });
+    const client = new FakeGitHubClient({
+      collaboratorPermissions: [collaborator("gone"), collaborator("sam")]
+    });
+
+    const result = await syncStudentPagesAccess(
+      {
+        courseFolderPath: root,
+        removedStudents: { termCode: "27s1", githubUsernames: ["gone", "sam", "never"] }
+      },
+      TOKEN,
+      { createClient: () => client }
+    );
+
+    expect(result).toMatchObject({ status: "success", removed: ["gone"] });
+    expect(client.mutations.removedCollaborators).toEqual([
+      { owner: OWNER, repo: REPO, username: "gone" }
+    ]);
+  });
+
+  it("ignores a removed roster from an earlier term", async () => {
+    const root = createRoot();
+    writeTerm(root, "26s3", PRIOR_ACADEMIC_YEAR, 3, { "001": "" });
+    writeTerm(root, "27s1", CURRENT_ACADEMIC_YEAR, 1, { "001": "now,now,001,active\n" });
+    const client = new FakeGitHubClient({ collaboratorPermissions: [collaborator("past")] });
+
+    const result = await syncStudentPagesAccess(
+      {
+        courseFolderPath: root,
+        removedStudents: { termCode: "26s3", githubUsernames: ["past"] }
+      },
+      TOKEN,
+      { createClient: () => client }
+    );
+
+    expect(result.removed).toEqual([]);
+    expect(client.mutations.removedCollaborators).toEqual([]);
+  });
+
   it("does nothing when no Pages repository is configured", async () => {
     const root = createRoot(false);
     writeTerm(root, "27s1", CURRENT_ACADEMIC_YEAR, 1, { "001": "ada,ada,001,active\n" });

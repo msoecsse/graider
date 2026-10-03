@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { StudentPagesAccessResult } from "./ipc";
 import {
   createStudentPagesAccessService,
+  getRosterStudentsForRemoval,
   withStudentPagesAccess
 } from "./studentPagesAccessService";
 
@@ -98,6 +99,56 @@ describe("studentPagesAccessService", () => {
     expect(await withStudentPagesAccess("/course", { status: "success" }, sync)).toEqual({
       status: "success",
       pagesAccess: synced
+    });
+  });
+
+  it("passes students from a removed roster to the backend", async () => {
+    const syncStudentPagesAccess = vi.fn(async () => ({
+      status: "success" as const,
+      granted: [],
+      removed: ["gone"],
+      failed: [],
+      diagnostics: []
+    }));
+    const sync = createStudentPagesAccessService({
+      resolveToken: async () => ({ status: "success" as const, token: "secret-token" }),
+      loadBackend: () => ({ syncStudentPagesAccess })
+    });
+
+    await sync("/course", { termCode: "27s1", githubUsernames: ["gone"] });
+
+    expect(syncStudentPagesAccess).toHaveBeenCalledWith(
+      {
+        courseFolderPath: "/course",
+        removedStudents: { termCode: "27s1", githubUsernames: ["gone"] }
+      },
+      "secret-token"
+    );
+  });
+
+  it("reads a roster's GitHub usernames before removal, and none from an unreadable roster", () => {
+    const request = {
+      courseFolderId: "course",
+      courseFolderPath: "/course",
+      termCode: "27s1",
+      sectionId: "001"
+    };
+    const roster = (status: "ready" | "invalid") => () => ({
+      status,
+      path: "terms/27s1/rosters/section-001.csv",
+      exists: true,
+      rows: [{ studentId: "ada", githubUsername: "ada-gh", section: "001", status: "active" }],
+      faculty: [],
+      diagnostics: []
+    });
+
+    expect(getRosterStudentsForRemoval(request, roster("ready"))).toEqual({
+      termCode: "27s1",
+      githubUsernames: ["ada-gh"]
+    });
+    expect(getRosterStudentsForRemoval(request, roster("invalid"))).toEqual({
+      termCode: "27s1",
+      githubUsernames: []
     });
   });
 });
