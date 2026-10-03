@@ -422,7 +422,10 @@ describe("commandRunner", () => {
   });
 
   it("falls back to the repository CLI build in development when PATH has no graider", () => {
-    const appPath = path.join("C:\\apps", "graider", "ui");
+    // Electron always supplies an absolute app path; build one that is absolute on the host
+    // platform so path.resolve does not prefix the working directory on macOS or Linux.
+    const appsRoot = path.resolve(path.sep, "apps");
+    const appPath = path.join(appsRoot, "graider", "ui");
     const developmentPath = getDevelopmentGraiderCliPath(appPath);
 
     const result = resolveProcessRunRequest(
@@ -440,7 +443,7 @@ describe("commandRunner", () => {
       }
     );
 
-    expect(developmentPath).toBe(path.join("C:\\apps", "graider", "dist", "index.js"));
+    expect(developmentPath).toBe(path.join(appsRoot, "graider", "dist", "index.js"));
     expect(result).toEqual({
       command: WINDOWS_EXEC_PATH,
       args: [developmentPath, "dashboard", "--json"],
