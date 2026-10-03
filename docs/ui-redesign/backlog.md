@@ -1604,6 +1604,100 @@ change; this predates items 55 and 56.
 
 ---
 
+## 60. An access page generated with zero students looks like success — **Should fix**
+
+When no active student has a repository link, `buildResult` in
+`ui/electron/studentRepositoryAccessPageService.ts` returns status `not_ready`,
+but generation still writes `student-repositories.html` with an empty sections
+list and adds no diagnostic when the manifest exists. The renderer has no
+handling for `not_ready`; `StudentRepositoryAccessPagePanel.tsx` only shows an
+"Included" count of 0.
+
+This happened for swe4211 `lab5lights` on 2026-10-02: the page was regenerated
+on a machine whose course repository had not been pulled, the empty page was
+committed and pushed, and a later merge put conflict markers on the live page.
+Fix: when no students are included, either do not write the page or show a clear
+warning (for example, suggesting the course repository may be out of date)
+before it can be published. Needs a decision on which.
+
+---
+
+## 61. Publish readiness does not detect merge-conflict markers — **Worth fixing**
+
+Publish readiness
+(`ui/electron/studentRepositoryAccessPagePublishStatusService.ts`) checks only
+git state: existence, branch, upstream, and uncommitted or unpushed changes. It
+never reads the generated files, so a page containing `<<<<<<<`, `=======`, or
+`>>>>>>>` lines from a hand-resolved merge is reported as ready and can be
+published to students, as happened for swe4211 `lab5lights`.
+
+Fix: scan the generated page, clone scripts, and Graider's `index.html` and
+`robots.txt` for conflict-marker lines, and block publishing with a
+plain-language reason that suggests regenerating the page. Small change.
+
+---
+
+## 62. The publish review hides committed-but-unpushed clone scripts — **Optional**
+
+The **Clone scripts** row in the Publish Student Access Page review counts only
+uncommitted `clone-*.py` changes (`changedCloneScriptCount`) and is hidden when
+that count is zero. When the status is **Unpushed** because scripts were
+committed by hand, the push will include them but the review does not say so.
+The **Generated page** row has the same limitation.
+
+Fix, if wanted: also count script changes in commits ahead of upstream. Accepted
+behaviour today; recorded so the gap is visible.
+
+---
+
+## 63. Editing an assignment may drop its group settings — **Should fix**
+
+`ui/electron/assignmentEditService.ts` rebuilds the whole `assignment.yml` from
+a template on every save, and the template has no `repository_mode` or `groups`
+fields, which the assignment schema allows (`src/config/config-schemas.ts`).
+Saving an edit to a group assignment therefore appears to remove its group
+configuration. Found by reading the code; not yet reproduced.
+
+Fix: carry `repository_mode` and `groups` through the edit model and template,
+or rewrite only the edited fields, with a test that edits a group assignment.
+The same rebuild would drop any future field, including the creation date in
+item 64.
+
+---
+
+## 64. Assignments have no creation date — **Worth fixing**
+
+`assignment.yml` records no creation date, so the assignments page (item 55)
+orders assignments by the earliest repository `created_at` in each manifest,
+falling back to title for assignments without one. Repositories that are
+re-created change that order.
+
+Fix: add an optional `metadata.created_at` to the strict assignment schema,
+write it in assignment setup (`ui/electron/assignmentSetupService.ts`), keep it
+through edits (see item 63), and have the assignments page read it before
+falling back to the manifest. Older Graider builds reject unknown fields, so
+every faculty build must be upgraded before anything writes it. Existing
+assignments need a fallback or a backfill, which changes course data and needs
+explicit approval. Own PR.
+
+---
+
+## 65. Access-page test fixtures lack required term fields — **Optional**
+
+The `term.yml` fixtures in `assignmentApplyWithAccessPageService.test.ts`,
+`rosterStudentRepositoryAccessPageService.test.ts`, and most of
+`studentRepositoryAccessPageService.test.ts` (all under `ui/electron/`) contain
+only `term.code` and `sections`, without the schema-required `academic_year`,
+`semester`, and `display_name`. The assignments page skips such terms, so those
+tests never write an assignments page and do not exercise it alongside
+generation and publishing.
+
+Fix: give the fixtures schema-valid `term.yml` content and update expectations
+to include `index.html` where it is now written. Dedicated tests already cover
+the assignments page itself.
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1633,7 +1727,8 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, and 59.
+Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, 59, 60, 61, 62,
+63, 64, and 65.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
