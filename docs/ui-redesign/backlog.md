@@ -1547,6 +1547,63 @@ Pages repository.
 
 ---
 
+## 57. The most-recent-term rule is implemented twice — **Worth fixing**
+
+The assignments page (`ui/electron/studentAccessPagesIndexService.ts`, item 55)
+and the Pages access check (`src/pages-access/pages-access-context.ts`, item 56)
+each pick the most recent term by `term.yml` `academic_year`, then `semester`.
+Electron services cannot import `src/` directly, so the rule was written twice;
+each copy has its own tests.
+
+If the rule changes in one place only, the assignments page and student access
+could follow different terms. Fix: move the rule into `src/` and expose it to
+Electron through the existing bundled-backend pattern
+(`ui/scripts/build-template-sync.mjs`), then use it from both places. Small
+change.
+
+---
+
+## 58. Pending Pages invitations are re-sent and never cancelled — **Should fix**
+
+When GitHub answers an add-collaborator request with an invitation rather than
+direct access, `OctokitGitHubClient.addCollaborator` reports
+`pendingInvite: true`, but `getCollaboratorPermission` always reports
+`pendingInvite: false` and permission `none` until the student accepts
+(`src/github/octokit-github-client.ts`). The item 56 access check therefore
+re-sends the invitation on every roster save, roster or section removal, and
+Apply.
+
+Removal has the opposite gap: `removeCollaborator` removes collaborators but
+does not cancel an unaccepted invitation, and the client has no call to list or
+cancel invitations. A dropped student, or one in a removed roster, can still
+accept an outstanding invitation and gain read access. A dropped student is
+removed again at the next check; a student from a removed roster is not, because
+nothing records them after the removal.
+
+Fix: add invitation listing and cancellation to `GitHubClient` (and
+`FakeGitHubClient`), skip re-inviting students with a pending invitation, and
+cancel invitations for students whose access is being removed. Whether students
+who are organization members receive invitations at all has not been verified
+against GitHub.
+
+---
+
+## 59. Roster manager hides access-page refresh messages when course publication succeeds — **Worth fixing**
+
+After a roster save or removal, `withStudentRepositoryPageRefresh`
+(`ui/electron/rosterStudentRepositoryAccessPageService.ts`) adds a diagnostic
+such as "Roster changes were saved, but Student Repository page publication
+needs attention." while leaving `status: "success"`. `RosterManagerPage.tsx`
+shows `result.diagnostics` only when `result.publication?.status === "failure"`,
+so when course publication succeeds those access-page messages are never shown.
+
+Faculty can believe the student access pages were refreshed and published when
+they were not. Fix: show the refresh diagnostics whenever they are present,
+separately from the course-publication warning, with focused tests. Small
+change; this predates items 55 and 56.
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1576,7 +1633,7 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 12, 27, 28, 33, 34, 35, and 54.
+Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, and 59.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
