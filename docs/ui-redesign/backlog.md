@@ -1506,13 +1506,43 @@ page, and assignment pages do not link to one another.
 
 ## 56. Students cannot open student access pages without permission changes — **Should fix**
 
-Placeholder; direction to follow. A private Pages repository publishes its
-Pages site privately, so only people with read access to the repository can
-view the pages. The working assumption is that the pages stay non-public, which
-requires infrastructure changes to how students are given access. The docs
-imply a public Pages repository (`docs/faculty-ui-user-guide.md:59-60`), and
-the access-page configuration error calls the result a "public access page"
+A private Pages repository publishes its Pages site privately, so only people
+signed in to GitHub with read access to the repository can view the pages.
+Students are organization members, but the organization's base repository
+permission is `none` and the Pages repository has no teams or collaborators, so
+students cannot open the pages linked from Canvas. The organization allows
+private Pages sites and does not allow public ones, and the pages should stay
+non-public. The docs imply a public Pages repository
+(`docs/faculty-ui-user-guide.md:59-60`), and the access-page configuration error
+calls the result a "public access page"
 (`ui/electron/studentRepositoryAccessPageService.ts:463`).
+
+Requested behaviour (direct collaborators):
+
+- Give each active student's GitHub account read access to the configured
+  Pages repository as a direct collaborator, using the same GitHub collaborator
+  calls Graider already makes for student repositories.
+- Remove that access when a student is no longer active, so access follows the
+  roster.
+- Do not use the organization base permission (it would expose every
+  repository, including other students') or internal visibility (it would open
+  the pages to the whole enterprise).
+- Correct the docs and messages that imply the Pages repository is public, and
+  tell faculty that students must be signed in to GitHub to open the link.
+
+Open questions before implementation:
+
+- When access is granted and removed: during Apply, on roster saves, from an
+  explicit action, or a combination.
+- Whether students on hold keep access, or only active students have it.
+- Whether a student who is active in any section or term keeps access while
+  inactive elsewhere, since one Pages repository serves every term.
+- How failures are reported, and whether faculty preview the changes before
+  they are made.
+
+Read access also shows students the Pages repository's files and history: the
+same usernames, repository links, clone scripts, and assignments page the site
+shows, including earlier versions.
 
 ---
 
