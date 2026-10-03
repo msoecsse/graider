@@ -15,6 +15,9 @@ import {
 const COMMAND_RUNNER_SOURCE = path.join(__dirname, "commandRunner.ts");
 const SUCCESS_EXIT_CODE = 0;
 const WINDOWS_EXEC_PATH = "C:\\Program Files\\Graider\\Graider.exe";
+// Electron always supplies an absolute app path; build fixtures from a root that is absolute on
+// the host platform so path.resolve never prefixes the working directory.
+const APPS_ROOT = path.resolve(path.sep, "apps");
 
 describe("commandRunner", () => {
   it("runs a command with an argument array and captures stdout, stderr, and exit code", async () => {
@@ -377,7 +380,7 @@ describe("commandRunner", () => {
 
   it("prefers an explicit GRAIDER_CLI_PATH override over every other location", () => {
     const overridePath = path.join("C:\\tools", "graider-cli", "index.js");
-    const appPath = path.join("C:\\apps", "graider", "ui");
+    const appPath = path.join(APPS_ROOT, "graider", "ui");
 
     const result = resolveProcessRunRequest(
       { command: "graider", args: ["dashboard", "--json"], env: {} },
@@ -422,10 +425,7 @@ describe("commandRunner", () => {
   });
 
   it("falls back to the repository CLI build in development when PATH has no graider", () => {
-    // Electron always supplies an absolute app path; build one that is absolute on the host
-    // platform so path.resolve does not prefix the working directory on macOS or Linux.
-    const appsRoot = path.resolve(path.sep, "apps");
-    const appPath = path.join(appsRoot, "graider", "ui");
+    const appPath = path.join(APPS_ROOT, "graider", "ui");
     const developmentPath = getDevelopmentGraiderCliPath(appPath);
 
     const result = resolveProcessRunRequest(
@@ -443,7 +443,7 @@ describe("commandRunner", () => {
       }
     );
 
-    expect(developmentPath).toBe(path.join(appsRoot, "graider", "dist", "index.js"));
+    expect(developmentPath).toBe(path.join(APPS_ROOT, "graider", "dist", "index.js"));
     expect(result).toEqual({
       command: WINDOWS_EXEC_PATH,
       args: [developmentPath, "dashboard", "--json"],
@@ -452,7 +452,7 @@ describe("commandRunner", () => {
   });
 
   it("prefers the repository build over a stale bundled build in development", () => {
-    const appPath = path.join("C:\\apps", "graider", "ui");
+    const appPath = path.join(APPS_ROOT, "graider", "ui");
 
     expect(
       resolveGraiderCli({
@@ -523,7 +523,7 @@ describe("commandRunner", () => {
   });
 
   it("resolves without PATH when the environment has no npm shim directory", () => {
-    const appPath = path.join("C:\\apps", "graider", "ui");
+    const appPath = path.join(APPS_ROOT, "graider", "ui");
     const developmentPath = getDevelopmentGraiderCliPath(appPath);
 
     expect(
@@ -556,7 +556,7 @@ describe("commandRunner", () => {
       resolveGraiderCli({
         mode: "external",
         platform: "win32",
-        appPath: path.join("C:\\apps", "graider", "ui"),
+        appPath: path.join(APPS_ROOT, "graider", "ui"),
         env: { Path: npmPrefix, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
         fileExists: (candidatePath) => existingFiles.has(candidatePath),
         readFile: () => JSON.stringify({ bin: { graider: "dist/index.js" } })
