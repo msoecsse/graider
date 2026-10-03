@@ -131,6 +131,21 @@ the root of the Pages clone (`User-agent: *`, `Disallow: /`, headed by a
 without the Graider comment is left untouched and reported. These are advisory only; they do not restrict access,
 and they never affect the desktop app, which works on the local clone and git.
 
+Access to the private Pages site is granted through the Pages repository's
+collaborators. After a successful roster save and after a successful Apply, the
+main process runs `withStudentPagesAccess`
+(`ui/electron/studentPagesAccessService.ts`), which resolves the GitHub token and
+calls the bundled `pagesAccessBackend`
+(`src/pages-access/pages-access-context.ts`). The backend reads the most recent
+term's section rosters one at a time, grants read (`pull`) to every active or
+on-hold student who lacks it, and removes collaborators who are dropped and not
+active or on hold in another section of that term. Earlier terms are not
+examined. If any section roster cannot be read, no access is removed. The
+result is attached as `pagesAccess` to `RosterSaveResult` and
+`AssignmentApplyResult`; it never changes their `status`. The roster manager and
+Apply page show a warning naming students whose access could not be updated, and
+faculty retry by saving the roster or running Apply again.
+
 The same panel also performs local publish-readiness checks against
 the selected Pages clone: page existence, git repository/branch/upstream
 detection, uncommitted access-page changes, and local commits ahead of upstream.

@@ -29,6 +29,7 @@ import { PageHeader } from "../components/PageHeader";
 import { TechnicalDetails } from "../components/TechnicalDetails";
 import { Toast, useToast } from "../components/Toast";
 import { UnsavedChangesBar } from "../components/UnsavedChangesBar";
+import { getStudentPagesAccessWarning } from "../components/studentPagesAccessWarning";
 import { RosterSaveReview } from "./RosterSaveReview";
 import { RosterSectionTabs } from "./RosterSectionTabs";
 import { RosterFacultyPanel, RosterStatsCard } from "./RosterSidebar";
@@ -108,6 +109,7 @@ export const RosterManagerPage = ({
   const [rosterPath, setRosterPath] = useState<string | null>(null);
   const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null);
   const [publicationWarning, setPublicationWarning] = useState<string | null>(null);
+  const [pagesAccessWarning, setPagesAccessWarning] = useState<string | null>(null);
   const [preview, setPreview] = useState<RosterPreviewResult | null>(null);
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
@@ -517,6 +519,9 @@ export const RosterManagerPage = ({
               "Roster saved locally, but publication failed. Use Publish Course Changes to retry.")
           : null
       );
+      setPagesAccessWarning(
+        getStudentPagesAccessWarning(result.pagesAccess, "Save the roster again to retry.")
+      );
       if (isCreatingSection) {
         setSections((current) => (current.includes(sectionId) ? current : [...current, sectionId]));
         setIsCreatingSection(false);
@@ -735,6 +740,11 @@ export const RosterManagerPage = ({
         {publicationWarning === null ? null : (
           <p className="roster-manager__publication-warning" role="alert">
             <strong>Saved locally.</strong> {publicationWarning}
+          </p>
+        )}
+        {pagesAccessWarning === null ? null : (
+          <p className="roster-manager__publication-warning" role="alert">
+            <strong>Roster saved.</strong> {pagesAccessWarning}
           </p>
         )}
 

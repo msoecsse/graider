@@ -666,6 +666,38 @@ describe("RosterManagerPage", () => {
     expect(screen.getByRole("button", { name: "Review and save" })).toBeInTheDocument();
   });
 
+  it("tells faculty which students' Pages access could not be updated after a save", async () => {
+    const saveRoster = vi.fn().mockResolvedValue({
+      status: "success",
+      path: "terms/27s1/rosters/section-001.csv",
+      diagnostics: [],
+      publication: { status: "success", diagnostics: [] },
+      pagesAccess: {
+        status: "partial_failure",
+        granted: [],
+        removed: [],
+        failedGithubUsernames: ["jones-gh"],
+        diagnostics: []
+      }
+    });
+    setupApi({ saveRoster });
+    renderPage();
+    await waitForInitialRoster();
+    openStudentMenu("S001");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mark dropped" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review and save" }));
+    const dialog = await screen.findByRole("dialog", { name: "Review roster changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save roster" }));
+
+    await waitFor(() => expect(saveRoster).toHaveBeenCalledOnce());
+    const warning = (await screen.findByText("Roster saved.")).parentElement;
+    expect(warning).toHaveAttribute("role", "alert");
+    expect(warning).toHaveTextContent(
+      "Student access to the Pages site could not be updated for jones-gh. Save the roster again to retry."
+    );
+    expect(screen.queryByText(/Saved locally/u)).not.toBeInTheDocument();
+  });
+
   it("adopts local roster-only state when publication fails", async () => {
     const api = setupApi({
       removeRoster: vi.fn().mockResolvedValue({

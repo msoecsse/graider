@@ -76,6 +76,7 @@ import { assignmentTemplateSyncService } from "./assignmentTemplateSyncService.j
 import { saveStudentAccessPagesConfig } from "./studentAccessPagesConfigService.js";
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService.js";
 import { publishSuccessfulCourseMutation } from "./courseMutationPublicationService.js";
+import { withStudentPagesAccess } from "./studentPagesAccessService.js";
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 import { getFacultyReport } from "./facultyReportRunner.js";
 import { previewCourseSetup, saveCourseSetup } from "./courseSetupService.js";
@@ -901,15 +902,18 @@ export const registerIpcHandlers = (): void => {
     if (!isRosterSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
-    return await publishSuccessfulCourseMutation(
+    return await withStudentPagesAccess(
       request.courseFolderPath,
-      await saveRosterWithStudentRepositoryAccessPageRefresh(request, {
-        runner: processRunner,
-        pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId),
-        saveDependencies: createRosterSaveDependencies(
-          getLocalSettingsPath(app.getPath("userData"))
-        )
-      })
+      await publishSuccessfulCourseMutation(
+        request.courseFolderPath,
+        await saveRosterWithStudentRepositoryAccessPageRefresh(request, {
+          runner: processRunner,
+          pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId),
+          saveDependencies: createRosterSaveDependencies(
+            getLocalSettingsPath(app.getPath("userData"))
+          )
+        })
+      )
     );
   });
   ipcMain.handle(IPC_CHANNELS.removeRoster, async (_event, request: unknown) => {
@@ -1298,19 +1302,22 @@ export const registerIpcHandlers = (): void => {
       throw new Error("Assignment apply request is required.");
     }
 
-    return await applyAssignmentWithStudentRepositoryAccessPage(request, {
-      runner: processRunner,
-      env: process.env,
-      onProgress: (progress) => {
-        event.sender.send(IPC_CHANNELS.assignmentApplyProgress, {
-          courseFolderId: request.courseFolderId,
-          assignmentFile: request.assignmentFile,
-          progress
-        });
-      },
-      pagesRepositoryFolderPath:
-        withRegisteredPagesFolder(request).pagesRepositoryFolderPath ?? null
-    });
+    return await withStudentPagesAccess(
+      request.courseFolderPath,
+      await applyAssignmentWithStudentRepositoryAccessPage(request, {
+        runner: processRunner,
+        env: process.env,
+        onProgress: (progress) => {
+          event.sender.send(IPC_CHANNELS.assignmentApplyProgress, {
+            courseFolderId: request.courseFolderId,
+            assignmentFile: request.assignmentFile,
+            progress
+          });
+        },
+        pagesRepositoryFolderPath:
+          withRegisteredPagesFolder(request).pagesRepositoryFolderPath ?? null
+      })
+    );
   });
   ipcMain.handle(IPC_CHANNELS.downloadAssignmentRepositories, async (_event, request: unknown) => {
     if (!isAssignmentRepositoryDownloadRequest(request))

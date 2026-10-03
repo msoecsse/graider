@@ -1519,7 +1519,7 @@ publishing stages these root files only when Graider wrote them.
 
 ---
 
-## 56. Students cannot open student access pages without permission changes — **Should fix**
+## 56. Students cannot open student access pages without permission changes — **Resolved**
 
 A private Pages repository publishes its Pages site privately, so only people
 signed in to GitHub with read access to the repository can view the pages.
@@ -1535,6 +1535,15 @@ calls the result a "public access page"
 Requirements, settled with the course owner (direct collaborators, following
 the most recent term's rosters), are recorded in
 `docs/features/requests/graider-feature-request-student-access-pages-access.md`.
+
+Resolved on `feat/restrict-student-access-pages`. After a successful roster save
+or Apply, the desktop app grants read access on the Pages repository to every
+active or on-hold student in the most recent term and removes it from students
+dropped in every section of that term, using the bundled
+`src/pages-access/pages-access-context.ts`. Failures never undo the save or
+Apply; faculty see which students could not be updated and retry by saving or
+applying again. The docs and the configuration message no longer imply a public
+Pages repository.
 
 ---
 
@@ -1567,10 +1576,10 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, and 56.
+Actionable open items are 8, 12, 27, 28, 33, 34, 35, and 54.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
-48, 49, 50, 51, 53, 55, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
+48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
 ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.
 

@@ -48,6 +48,20 @@ Needed capabilities:
 
 `apply` is additive. It does not delete repositories, archive repositories, remove collaborators, or downgrade permissions.
 
+### Student access to the Pages site (desktop app)
+
+After a roster save or a successful Apply, the desktop app checks read access
+to the configured student-access Pages repository
+(`notifications.student_access_pages.repository`). This step is separate from
+the `apply` command above. It needs admin authority on the Pages repository to:
+
+- read collaborator permissions
+- add students as read (`pull`) collaborators
+- remove dropped students as collaborators
+
+It changes collaborators only on the Pages repository, never on student
+repositories.
+
 ### Managed grading-workflow deployment
 
 Assignment Apply writes or updates `.github/workflows/grade.yml` for effective

@@ -210,43 +210,43 @@ None.
 Functional requirements:
 
 ```text
-- [ ] Active and on-hold students in the most recent term have read access to the Pages repository as direct collaborators.
-- [ ] Access is removed only for students dropped in every section of the most recent term in which they appear.
-- [ ] Students only in earlier terms are left alone.
-- [ ] Access is checked and corrected after every roster save and every successful Apply.
-- [ ] Access changes never undo or block the roster save or Apply.
-- [ ] Failed access changes name the affected students and can be retried.
-- [ ] The organization base permission and repository visibility are never changed.
-- [ ] Faculty, grader, and other collaborators' access is never changed.
+- [x] Active and on-hold students in the most recent term have read access to the Pages repository as direct collaborators.
+- [x] Access is removed only for students dropped in every section of the most recent term in which they appear.
+- [x] Students only in earlier terms are left alone.
+- [x] Access is checked and corrected after every roster save and every successful Apply.
+- [x] Access changes never undo or block the roster save or Apply.
+- [x] Failed access changes name the affected students and can be retried.
+- [x] The organization base permission and repository visibility are never changed.
+- [x] Faculty, grader, and other collaborators' access is never changed.
 ```
 
 Nonfunctional requirements:
 
 ```text
-- [ ] Safe to rerun; granting existing access and removing absent access are no-ops.
-- [ ] Uses the existing GitHub collaborator calls.
-- [ ] Tests use FakeGitHubClient; no live GitHub calls.
-- [ ] Tokens are never logged, rendered, or stored.
+- [x] Safe to rerun; granting existing access and removing absent access are no-ops.
+- [x] Uses the existing GitHub collaborator calls.
+- [x] Tests use FakeGitHubClient; no live GitHub calls.
+- [x] Tokens are never logged, rendered, or stored.
 ```
 
 Acceptance criteria:
 
 ```text
-- [ ] The feature is covered by tests.
-- [ ] Existing behavior is preserved.
-- [ ] JSON/YAML fixtures remain valid.
-- [ ] npm run typecheck passes.
-- [ ] npm run lint passes.
-- [ ] npm run format:check passes.
-- [ ] npm test passes.
-- [ ] npm run build passes.
+- [x] The feature is covered by tests.
+- [x] Existing behavior is preserved.
+- [x] JSON/YAML fixtures remain valid.
+- [x] npm run typecheck passes.
+- [x] npm run lint passes.
+- [x] npm run format:check passes.
+- [x] npm test passes.
+- [x] npm run build passes.
 ```
 
 Additional acceptance criteria:
 
 ```text
-- [ ] Docs and messages no longer imply the Pages repository is public.
-- [ ] Faculty docs say students must be signed in to GitHub to open the link.
+- [x] Docs and messages no longer imply the Pages repository is public.
+- [x] Faculty docs say students must be signed in to GitHub to open the link.
 ```
 
 ---
@@ -335,7 +335,11 @@ Teams (option A), internal visibility, removing access for students from earlier
 Implementation hints, architecture notes, or preferred approach:
 
 ```text
-Roster saves run in the Electron main process, while Apply runs through the CLI; decide where reconciliation lives so both paths share one implementation. The most recent term rule should be shared with the assignments page (PR #8) rather than reimplemented; this branch may need to be rebased onto feat/link-student-access-pages first.
+Decided: one shared module, src/pages-access/pages-access-context.ts, bundled for Electron as pagesAccessBackend and run by the desktop app after a successful roster save and after a successful Apply (the step after Apply already runs in the desktop app). Retry is by saving the roster again or running Apply again; there is no separate retry button.
+
+Each section roster is loaded on its own, because a student who switched sections appears in two rosters and a whole-term load reports that as a duplicate. If any roster in the term cannot be read, removals are skipped and reported, since the student may be active in the unreadable section.
+
+The most recent term rule is duplicated between src/pages-access/pages-access-context.ts and ui/electron/studentAccessPagesIndexService.ts (each tested), because Electron services cannot import src/ directly; both order by academic_year, then semester.
 ```
 
 Potential edge cases:
