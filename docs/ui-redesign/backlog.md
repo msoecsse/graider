@@ -1495,6 +1495,27 @@ backend and UI tests.
 
 ---
 
+## 55. Student access pages are not linked together — **Should fix**
+
+Placeholder; direction to follow. Each Apply generates a standalone
+`terms/<term-code>/notifications/<assignment-slug>/student-repositories.html` in
+the Pages repository, and nothing links them: there is no index or landing
+page, and assignment pages do not link to one another.
+
+---
+
+## 56. Students cannot open student access pages without permission changes — **Should fix**
+
+Placeholder; direction to follow. A private Pages repository publishes its
+Pages site privately, so only people with read access to the repository can
+view the pages. The working assumption is that the pages stay non-public, which
+requires infrastructure changes to how students are given access. The docs
+imply a public Pages repository (`docs/faculty-ui-user-guide.md:59-60`), and
+the access-page configuration error calls the result a "public access page"
+(`ui/electron/studentRepositoryAccessPageService.ts:463`).
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1524,7 +1545,7 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 12, 27, 28, 33, 34, 35, and 54.
+Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 55, and 56.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, 53, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
