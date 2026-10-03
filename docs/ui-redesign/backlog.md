@@ -1472,6 +1472,29 @@ yet been run on Windows.
 
 ---
 
+## 54. Git-backed tests depend on the developer's global git configuration — **Should fix**
+
+Eight test files outside `tests/live` create real git repositories: three
+backend (`tests/unit/grading/grading-comment-library-service.test.ts`,
+`tests/unit/template-sync/local-git-template-sync-gateway.test.ts`,
+`tests/unit/template-sync/production-template-sync-workspace.test.ts`) and five
+UI (`assignmentApplyWithAccessPageService`, `coursePublishService`,
+`rosterStudentRepositoryAccessPageService`,
+`studentRepositoryAccessPagePublishService`, and
+`studentRepositoryAccessPagePublishStatusService` tests under `ui/electron/`).
+Git applies the developer's global `.gitignore` and `.gitconfig` inside those
+repositories, so results can differ between machines: item 53 found a global
+`*.bak` ignore rule that hid a file `coursePublishService.test.ts` expected to
+see. Settings such as `init.defaultBranch`, `commit.gpgsign`, or `core.autocrlf`
+could cause similar failures. Only `coursePublishService.test.ts` is guarded
+today, and only against the excludes file. Fix: make every git-backed test
+ignore global and system git configuration, for example by setting
+`GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM` in both vitest setups so the code
+under test inherits them, then remove the per-file workaround. This spans
+backend and UI tests.
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1501,7 +1524,7 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 12, 27, 28, 33, 34, and 35.
+Actionable open items are 8, 12, 27, 28, 33, 34, 35, and 54.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, 53, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
