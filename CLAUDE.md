@@ -75,6 +75,9 @@ If a cleanup is genuinely required to complete the task, say so before doing it.
 When you finish, list anything you deliberately left alone under **Deferred**.
 That list is valuable; it is how the backlog gets written.
 
+Todo items for the Electron application are kept in
+`docs/ui-redesign/backlog.md`.
+
 ---
 
 ## 3. What this project is
