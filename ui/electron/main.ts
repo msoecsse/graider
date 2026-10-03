@@ -920,24 +920,30 @@ export const registerIpcHandlers = (): void => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
-    return await publishSuccessfulCourseMutation(
+    return await withStudentPagesAccess(
       request.courseFolderPath,
-      await removeRosterWithStudentRepositoryAccessPageRefresh(request, {
-        runner: processRunner,
-        pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
-      })
+      await publishSuccessfulCourseMutation(
+        request.courseFolderPath,
+        await removeRosterWithStudentRepositoryAccessPageRefresh(request, {
+          runner: processRunner,
+          pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+        })
+      )
     );
   });
   ipcMain.handle(IPC_CHANNELS.removeSection, async (_event, request: unknown) => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
-    return await publishSuccessfulCourseMutation(
+    return await withStudentPagesAccess(
       request.courseFolderPath,
-      await removeSectionWithStudentRepositoryAccessPageRefresh(request, {
-        runner: processRunner,
-        pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
-      })
+      await publishSuccessfulCourseMutation(
+        request.courseFolderPath,
+        await removeSectionWithStudentRepositoryAccessPageRefresh(request, {
+          runner: processRunner,
+          pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
+        })
+      )
     );
   });
 

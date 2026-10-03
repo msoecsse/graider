@@ -698,6 +698,41 @@ describe("RosterManagerPage", () => {
     expect(screen.queryByText(/Saved locally/u)).not.toBeInTheDocument();
   });
 
+  it("tells faculty when Pages access could not be updated after removing a roster", async () => {
+    const api = setupApi({
+      removeRoster: vi.fn().mockResolvedValue({
+        status: "success",
+        path: "terms/27s1/rosters/section-001.csv",
+        diagnostics: [],
+        publication: { status: "success", diagnostics: [] },
+        pagesAccess: {
+          status: "partial_failure",
+          granted: [],
+          removed: [],
+          failedGithubUsernames: ["smith-gh"],
+          diagnostics: []
+        }
+      })
+    });
+    renderPage();
+    await waitForInitialRoster();
+    fireEvent.click(screen.getByRole("button", { name: "More roster actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Remove roster/u }));
+    const dialog = screen.getByRole("dialog", { name: "Remove roster" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Type 001 to confirm/u }), {
+      target: { value: "001" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove roster" }));
+
+    await waitFor(() => expect(api.removeRoster).toHaveBeenCalledOnce());
+    const warning = (await screen.findByText("Roster removed.", { selector: "strong" }))
+      .parentElement;
+    expect(warning).toHaveAttribute("role", "alert");
+    expect(warning).toHaveTextContent(
+      "Student access to the Pages site could not be updated for smith-gh. Save a roster or run Apply again to retry."
+    );
+  });
+
   it("adopts local roster-only state when publication fails", async () => {
     const api = setupApi({
       removeRoster: vi.fn().mockResolvedValue({

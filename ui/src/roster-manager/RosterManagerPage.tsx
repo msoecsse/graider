@@ -109,7 +109,13 @@ export const RosterManagerPage = ({
   const [rosterPath, setRosterPath] = useState<string | null>(null);
   const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null);
   const [publicationWarning, setPublicationWarning] = useState<string | null>(null);
-  const [pagesAccessWarning, setPagesAccessWarning] = useState<string | null>(null);
+  const [pagesAccessWarning, setPagesAccessWarning] = useState<{
+    readonly lead: string;
+    readonly message: string;
+  } | null>(null);
+  const setPagesAccessWarningFor = (lead: string, message: string | null): void => {
+    setPagesAccessWarning(message === null ? null : { lead, message });
+  };
   const [preview, setPreview] = useState<RosterPreviewResult | null>(null);
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
@@ -196,6 +202,7 @@ export const RosterManagerPage = ({
       setLoadState(result.status === "ready" ? "ready" : "invalid");
       setDiagnosticMessage(getDiagnosticsMessage(result.diagnostics));
       setPublicationWarning(null);
+      setPagesAccessWarning(null);
       clearReview();
     },
     [createDraftRows]
@@ -210,6 +217,7 @@ export const RosterManagerPage = ({
       setLoadState("loading");
       setDiagnosticMessage(null);
       setPublicationWarning(null);
+      setPagesAccessWarning(null);
       setBaselineRows([]);
       setDraftRows([]);
       setBaselineFaculty([]);
@@ -307,6 +315,7 @@ export const RosterManagerPage = ({
     setRosterPath(null);
     setDiagnosticMessage(null);
     setPublicationWarning(null);
+    setPagesAccessWarning(null);
     clearReview();
   };
 
@@ -328,6 +337,7 @@ export const RosterManagerPage = ({
     clearReview();
     setDiagnosticMessage(null);
     setPublicationWarning(null);
+    setPagesAccessWarning(null);
     if (isCreatingSection) {
       const previousSection = sectionBeforeNew.current;
       setIsCreatingSection(false);
@@ -519,7 +529,8 @@ export const RosterManagerPage = ({
               "Roster saved locally, but publication failed. Use Publish Course Changes to retry.")
           : null
       );
-      setPagesAccessWarning(
+      setPagesAccessWarningFor(
+        "Roster saved.",
         getStudentPagesAccessWarning(result.pagesAccess, "Save the roster again to retry.")
       );
       if (isCreatingSection) {
@@ -580,6 +591,13 @@ export const RosterManagerPage = ({
             ? (getDiagnosticsMessage(result.diagnostics) ??
                 "The local removal succeeded, but publication failed. Use Publish Course Changes to retry.")
             : null
+        );
+        setPagesAccessWarningFor(
+          action === "remove_roster" ? "Roster removed." : "Section removed.",
+          getStudentPagesAccessWarning(
+            result.pagesAccess,
+            "Save a roster or run Apply again to retry."
+          )
         );
         await refreshSummaries();
         onSaved();
@@ -744,7 +762,7 @@ export const RosterManagerPage = ({
         )}
         {pagesAccessWarning === null ? null : (
           <p className="roster-manager__publication-warning" role="alert">
-            <strong>Roster saved.</strong> {pagesAccessWarning}
+            <strong>{pagesAccessWarning.lead}</strong> {pagesAccessWarning.message}
           </p>
         )}
 

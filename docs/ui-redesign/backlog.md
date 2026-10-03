@@ -1536,12 +1536,12 @@ Requirements, settled with the course owner (direct collaborators, following
 the most recent term's rosters), are recorded in
 `docs/features/requests/graider-feature-request-student-access-pages-access.md`.
 
-Resolved on `feat/restrict-student-access-pages`. After a successful roster save
-or Apply, the desktop app grants read access on the Pages repository to every
-active or on-hold student in the most recent term and removes it from students
-dropped in every section of that term, using the bundled
-`src/pages-access/pages-access-context.ts`. Failures never undo the save or
-Apply; faculty see which students could not be updated and retry by saving or
+Resolved on `feat/restrict-student-access-pages`. After a successful roster
+save, roster or section removal, or Apply, the desktop app grants read access on
+the Pages repository to every active or on-hold student in the most recent term
+and removes it from students dropped in every section of that term, using the
+bundled `src/pages-access/pages-access-context.ts`. Failures never undo the save
+or Apply; faculty see which students could not be updated and retry by saving or
 applying again. The docs and the configuration message no longer imply a public
 Pages repository.
 

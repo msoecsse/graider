@@ -50,8 +50,8 @@ Needed capabilities:
 
 ### Student access to the Pages site (desktop app)
 
-After a roster save or a successful Apply, the desktop app checks read access
-to the configured student-access Pages repository
+After a roster save, roster or section removal, or a successful Apply, the
+desktop app checks read access to the configured student-access Pages repository
 (`notifications.student_access_pages.repository`). This step is separate from
 the `apply` command above. It needs admin authority on the Pages repository to:
 

@@ -641,6 +641,7 @@ export interface RosterRemoveResult {
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
   readonly publication?: CourseMutationPublicationResult;
+  readonly pagesAccess?: StudentPagesAccessResult;
 }
 
 export interface TemplateWorkflowRequest {

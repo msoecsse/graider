@@ -272,14 +272,16 @@ The Pages site is published privately, so only people signed in to GitHub with
 read access to the Pages repository can open it. Students must be signed in to
 GitHub in the browser they use to open the Canvas link.
 
-After each roster save and each Apply, Graider checks the most recent term's
-rosters and gives every active or on-hold student read access to the Pages
-repository. It removes that access only from a student who is dropped and is not
-active or on hold in another section of that term, so a student who switches
-sections keeps access. Students from earlier terms are left alone. If any change
-fails, the roster save or Apply still completes, and Graider names the students
-whose access could not be updated; save the roster again, or run Apply again, to
-retry. Your GitHub sign-in needs admin access to the Pages repository.
+After each roster save, roster or section removal, and Apply, Graider checks the
+most recent term's rosters and gives every active or on-hold student read access
+to the Pages repository. It removes that access only from a student who is
+dropped and is not active or on hold in another section of that term, so a
+student who switches sections keeps access. Students from earlier terms are left
+alone, and so are students in a roster or section you remove, because they are
+not marked dropped. If any change fails, the roster change or Apply still
+completes, and Graider names the students whose access could not be updated;
+save a roster, or run Apply again, to retry. Your GitHub sign-in needs admin
+access to the Pages repository.
 
 ## Publish the Student Repository Access Page
 
