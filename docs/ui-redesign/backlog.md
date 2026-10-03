@@ -1447,6 +1447,31 @@ canonical lowercase values while displaying the shared humanized labels.
 
 ---
 
+## 53. Windows development startup, section clone scripts, and machine-dependent UI tests — **Resolved**
+
+Resolved on `fix/dev-electron-windows`. `npm run dev:electron` failed on Windows
+because the script set `VITE_DEV_SERVER_URL` with POSIX inline syntax; the
+launch now goes through `ui/scripts/dev-electron.cjs`. The development app also
+spawned a bare `graider`, which shows "Graider CLI not found" unless a global
+install is on the GUI process's PATH; the CLI is now resolved through
+`GRAIDER_CLI_PATH`, then the build shipped with the app (repository
+`dist/index.js` in development, the bundled copy when packaged), then a PATH
+lookup that follows npm's Windows shim layout. Generating the student repository
+access page now also writes one Python clone script per section,
+`clone-<course>-<assignment-slug>-<section>.py`, linked from each section
+heading; it clones every included repository into a folder named after the MSOE
+username, skips existing folders, and uses SSH when a non-interactive
+`git ls-remote` succeeds, falling back to HTTPS. Stale `clone-*.py` files are removed
+on regeneration, **Publish Student Access Page** stages the scripts with the
+page, and the publish review shows "Clone scripts: N changed" when any script
+changed. Two UI tests that passed only on particular machines were fixed:
+`commandRunner.test.ts` used a hard-coded `C:\apps` root that is not absolute on
+macOS, and `coursePublishService.test.ts` was defeated by a global `*.bak`
+ignore rule. The full UI suite now passes on macOS; the Windows paths have not
+yet been run on Windows.
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1479,7 +1504,7 @@ of this sequence.
 Actionable open items are 8, 12, 27, 28, 33, 34, and 35.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
-48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
+48, 49, 50, 51, 53, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
 ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.
 
