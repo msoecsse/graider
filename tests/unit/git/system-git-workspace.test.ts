@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -22,6 +22,12 @@ const SHA_1_LENGTH = 40;
 const SHA_256_LENGTH = 64;
 const SHORT_SHA_LENGTH = SHA_1_LENGTH - 1;
 const HISTORY_LIMIT = 2;
+const EXECUTABLE_FILE_MODE = 0o755;
+const BYTE_SIX = 6;
+const BYTE_SEVEN = 7;
+const BYTE_EIGHT = 8;
+const BYTE_NINE = 9;
+const MAX_BYTE = 0xff;
 
 const exactCommit = (value: string): ExactCommitRevision => {
   const revision = createExactCommitRevision(value);
@@ -279,6 +285,229 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
       expect(JSON.stringify(error)).not.toContain(privatePath);
       return true;
     });
+  });
+});
+
+describe("SystemGitWorkspace template tree and history contract", () => {
+  const origin = createRemoteName("origin");
+  if (origin === null) throw new Error("The origin remote must be trusted.");
+
+  it("resolves an exact commit tree and recursively lists structured entries deterministically", async () => {
+    const fixture = await createRepository("tree repository with spaces");
+    await mkdir(join(fixture.repository, "nested folder"));
+    await writeFile(join(fixture.repository, "nested folder", "path with spaces.txt"), "nested\n");
+    await writeFile(join(fixture.repository, "executable.sh"), "#!/bin/sh\nexit 0\n");
+    await chmod(join(fixture.repository, "executable.sh"), EXECUTABLE_FILE_MODE);
+    await git(fixture.repository, "add", ".");
+    await git(fixture.repository, "commit", "-m", "Tree fixtures");
+    const commit = await (
+      await new SystemGitWorkspaceFactory().open(fixture.repository)
+    ).resolveHead();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    const tree = await workspace.resolveTree(commit);
+    const entries = await workspace.listTree(commit);
+
+    expect(tree).toBe((await git(fixture.repository, "rev-parse", `${commit}^{tree}`)).trim());
+    expect(entries.map((entry) => entry.path)).toEqual([
+      "executable.sh",
+      "nested folder/path with spaces.txt",
+      "submission.txt"
+    ]);
+    expect(entries.find((entry) => entry.path === "executable.sh")).toMatchObject({
+      mode: "100755",
+      objectType: "blob"
+    });
+    expect(entries.every((entry) => entry.objectId.length === SHA_1_LENGTH)).toBe(true);
+  });
+
+  it("parses unusual valid filenames without line or space splitting", async () => {
+    const fixture = await createRepository("unusual tree paths");
+    const unusualPath = "line break\nand tab\tand backslash\\name.txt";
+    await writeFile(join(fixture.repository, unusualPath), "unusual\n");
+    await git(fixture.repository, "add", ".");
+    await git(fixture.repository, "commit", "-m", "Unusual path");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    const entries = await workspace.listTree(await workspace.resolveHead());
+
+    expect(entries.map((entry) => entry.path)).toContain(unusualPath);
+  });
+
+  it("returns commit and tree IDs from first-parent history only", async () => {
+    const fixture = await createRepository();
+    await git(fixture.repository, "switch", "-c", "feature");
+    await writeFile(join(fixture.repository, "feature.txt"), "feature\n");
+    await git(fixture.repository, "add", "feature.txt");
+    await git(fixture.repository, "commit", "-m", "Feature");
+    const feature = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    await git(fixture.repository, "switch", "-");
+    await writeFile(join(fixture.repository, "main.txt"), "main\n");
+    await git(fixture.repository, "add", "main.txt");
+    await git(fixture.repository, "commit", "-m", "Main");
+    const main = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    await git(fixture.repository, "merge", "--no-ff", "feature", "-m", "Merge feature");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const merge = await workspace.resolveHead();
+
+    const history = await workspace.listFirstParentCommitTrees(merge);
+
+    expect(history.map((item) => item.commit)).toEqual([
+      merge,
+      main,
+      fixture.second,
+      fixture.first
+    ]);
+    expect(history.map((item) => item.commit)).not.toContain(feature);
+    for (const item of history) {
+      expect(item.tree).toBe(
+        (await git(fixture.repository, "rev-parse", `${item.commit}^{tree}`)).trim()
+      );
+    }
+  });
+
+  it("resolves a validated remote-tracking branch to an exact commit", async () => {
+    const fixture = await createBareRemoteFixture("release/course");
+    const branch = createBranchName("release/course");
+    const missing = createBranchName("missing");
+    if (branch === null || missing === null) throw new Error("The branches must be trusted.");
+
+    await expect(fixture.workspace.resolveRemoteBranch(origin, branch)).resolves.toBe(
+      fixture.second
+    );
+    await expect(fixture.workspace.resolveRemoteBranch(origin, missing)).rejects.toMatchObject({
+      kind: "revision_unavailable",
+      operation: "resolve_remote_branch"
+    });
+  });
+});
+
+describe("SystemGitWorkspace binary revision diff contract", () => {
+  it("returns binary-safe patch bytes between exact commits and represents an empty diff", async () => {
+    const fixture = await createRepository();
+    await writeFile(join(fixture.repository, "binary.dat"), Buffer.from([0, 1, 2, 3, MAX_BYTE]));
+    await git(fixture.repository, "add", "binary.dat");
+    await git(fixture.repository, "commit", "-m", "Add binary");
+    const base = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    await writeFile(
+      join(fixture.repository, "binary.dat"),
+      Buffer.from([0, BYTE_NINE, BYTE_EIGHT, BYTE_SEVEN, MAX_BYTE])
+    );
+    await git(fixture.repository, "commit", "-am", "Change binary");
+    const target = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const baseCommit = await workspace.resolveRevision(exactCommit(base));
+    const targetCommit = await workspace.resolveRevision(exactCommit(target));
+
+    const changed = await workspace.diff({ base: baseCommit, target: targetCommit });
+    const empty = await workspace.diff({ base: targetCommit, target: targetCommit });
+
+    expect(changed.patch).toBeInstanceOf(Uint8Array);
+    expect(Buffer.from(changed.patch).toString("ascii")).toContain("GIT binary patch");
+    expect(empty.patch).toEqual(new Uint8Array());
+  });
+});
+
+describe("SystemGitWorkspace three-way indexed patch contract", () => {
+  const createPatchFixture = async () => {
+    const fixture = await createRepository("template source");
+    await writeFile(join(fixture.repository, "deleted.txt"), "remove me\n");
+    await git(fixture.repository, "add", "deleted.txt");
+    await git(fixture.repository, "commit", "-m", "Template base");
+    const base = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    const student = join(fixture.parent, "student workspace");
+    await git(fixture.parent, "clone", fixture.repository, student);
+    await git(student, "config", "user.email", "student@example.test");
+    await git(student, "config", "user.name", "Student");
+    return { ...fixture, base, student };
+  };
+
+  it("applies template changes to index/worktree while preserving unrelated student work", async () => {
+    const fixture = await createPatchFixture();
+    await writeFile(join(fixture.student, "student-only.txt"), "student work\n");
+    await git(fixture.student, "add", "student-only.txt");
+    await git(fixture.student, "commit", "-m", "Student work");
+    await writeFile(join(fixture.repository, "submission.txt"), "template target\n");
+    await writeFile(join(fixture.repository, "added file.txt"), "added\n");
+    await rm(join(fixture.repository, "deleted.txt"));
+    await git(fixture.repository, "add", ".");
+    await git(fixture.repository, "commit", "-m", "Template target");
+    const target = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    const templateWorkspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const studentWorkspace = await new SystemGitWorkspaceFactory().open(fixture.student);
+    const patch = await templateWorkspace.diff({
+      base: await templateWorkspace.resolveRevision(exactCommit(fixture.base)),
+      target: await templateWorkspace.resolveRevision(exactCommit(target))
+    });
+
+    await expect(studentWorkspace.applyPatchToIndex({ patch: patch.patch })).resolves.toEqual({
+      kind: "applied"
+    });
+
+    const state = await studentWorkspace.inspect();
+    expect(state.workingTree.conflicts).toEqual([]);
+    expect(state.workingTree.trackedChanges).toEqual([]);
+    expect(state.workingTree.stagedChanges).toEqual(
+      expect.arrayContaining([
+        { kind: "modified", path: "submission.txt" },
+        { kind: "added", path: "added file.txt" },
+        { kind: "deleted", path: "deleted.txt" }
+      ])
+    );
+    await expect(readFile(join(fixture.student, "student-only.txt"), "utf8")).resolves.toBe(
+      "student work\n"
+    );
+    await expect(readFile(join(fixture.student, "submission.txt"), "utf8")).resolves.toBe(
+      "template target\n"
+    );
+  });
+
+  it("returns a typed conflict when student and template edits are incompatible", async () => {
+    const fixture = await createPatchFixture();
+    await writeFile(join(fixture.student, "submission.txt"), "student version\n");
+    await git(fixture.student, "commit", "-am", "Student edit");
+    await writeFile(join(fixture.repository, "submission.txt"), "template version\n");
+    await git(fixture.repository, "commit", "-am", "Template edit");
+    const target = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    const templateWorkspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const studentWorkspace = await new SystemGitWorkspaceFactory().open(fixture.student);
+    const patch = await templateWorkspace.diff({
+      base: await templateWorkspace.resolveRevision(exactCommit(fixture.base)),
+      target: await templateWorkspace.resolveRevision(exactCommit(target))
+    });
+
+    await expect(studentWorkspace.applyPatchToIndex({ patch: patch.patch })).resolves.toEqual({
+      kind: "conflict"
+    });
+    expect((await studentWorkspace.inspect()).workingTree.conflicts).toEqual([
+      expect.objectContaining({ path: "submission.txt" })
+    ]);
+  });
+
+  it("applies a binary-file patch without transforming its bytes", async () => {
+    const fixture = await createPatchFixture();
+    const baseBytes = Buffer.from([0, 1, 2, 3, 4, MAX_BYTE]);
+    const targetBytes = Buffer.from([0, BYTE_EIGHT, BYTE_SEVEN, BYTE_SIX, 5, MAX_BYTE]);
+    await writeFile(join(fixture.repository, "asset.bin"), baseBytes);
+    await git(fixture.repository, "add", "asset.bin");
+    await git(fixture.repository, "commit", "-m", "Binary base");
+    const binaryBase = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    await git(fixture.student, "fetch", "origin");
+    await git(fixture.student, "reset", "--hard", binaryBase);
+    await writeFile(join(fixture.repository, "asset.bin"), targetBytes);
+    await git(fixture.repository, "commit", "-am", "Binary target");
+    const binaryTarget = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    const templateWorkspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const studentWorkspace = await new SystemGitWorkspaceFactory().open(fixture.student);
+    const patch = await templateWorkspace.diff({
+      base: await templateWorkspace.resolveRevision(exactCommit(binaryBase)),
+      target: await templateWorkspace.resolveRevision(exactCommit(binaryTarget))
+    });
+
+    await expect(studentWorkspace.applyPatchToIndex({ patch: patch.patch })).resolves.toEqual({
+      kind: "applied"
+    });
+    expect(await readFile(join(fixture.student, "asset.bin"))).toEqual(targetBytes);
   });
 });
 
@@ -641,6 +870,27 @@ describe("SystemGitWorkspace template preparation contract", () => {
       })
     ).rejects.toMatchObject({ kind: "revision_unavailable", operation: "branch" });
   });
+
+  it("creates a new local branch at current detached HEAD and switches existing branches", async () => {
+    const fixture = await createBareRemoteFixture("main");
+    const managed = createBranchName("graider/template-update-123456789abc");
+    const main = createBranchName("main");
+    if (managed === null || main === null) throw new Error("The branches must be trusted.");
+    await fixture.workspace.checkoutDetached(exactCommit(fixture.first));
+
+    await expect(fixture.workspace.createBranch(managed)).resolves.toBe(fixture.first);
+    await expect(fixture.workspace.inspect()).resolves.toMatchObject({
+      head: { kind: "attached", branch: managed, commit: fixture.first }
+    });
+    await expect(fixture.workspace.createBranch(managed)).rejects.toMatchObject({
+      kind: "operation_rejected",
+      operation: "branch"
+    });
+    await expect(fixture.workspace.switchBranch(main)).resolves.toBe(fixture.second);
+    await expect(fixture.workspace.inspect()).resolves.toMatchObject({
+      head: { kind: "attached", branch: main, commit: fixture.second }
+    });
+  });
 });
 
 describe("SystemGitWorkspace exact-path staging contract", () => {
@@ -752,6 +1002,19 @@ describe("SystemGitWorkspace commit contract", () => {
       operation: "commit"
     });
     await expect(workspace.resolveHead()).resolves.toBe(fixture.second);
+  });
+
+  it("creates and returns an allow-empty commit only when explicitly requested", async () => {
+    const fixture = await createRepository();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+
+    const commit = await workspace.commit({ message: "Apply template update", allowEmpty: true });
+
+    expect(commit).not.toBe(fixture.second);
+    expect((await git(fixture.repository, "rev-parse", `${commit}^`)).trim()).toBe(fixture.second);
+    expect((await git(fixture.repository, "log", "-1", "--format=%s")).trim()).toBe(
+      "Apply template update"
+    );
   });
 
   it("uses the repository-configured author identity", async () => {
@@ -866,6 +1129,137 @@ describe("SystemGitWorkspace upstream push contract", () => {
       expect(JSON.stringify(error)).not.toContain("fetch first");
       expect(String(error)).not.toContain("rejected");
       return true;
+    });
+  });
+});
+
+describe("SystemGitWorkspace explicit branch push contract", () => {
+  it("pushes current HEAD non-forcibly to the requested remote branch without requiring upstream", async () => {
+    const fixture = await createRepository("explicit push repository");
+    const remote = join(fixture.parent, "explicit remote.git");
+    await git(fixture.parent, "init", "--bare", remote);
+    await git(fixture.repository, "remote", "add", "origin", remote);
+    await git(fixture.repository, "commit", "--allow-empty", "-m", "Template update");
+    const head = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const origin = createRemoteName("origin");
+    const branch = createBranchName("release/course");
+    if (origin === null || branch === null) throw new Error("The push target must be trusted.");
+
+    await expect(workspace.pushBranch({ remote: origin, branch })).resolves.toEqual({
+      kind: "pushed"
+    });
+
+    expect((await git(remote, "rev-parse", "refs/heads/release/course")).trim()).toBe(head);
+    expect((await git(fixture.repository, "branch", "--show-current")).trim()).not.toBe(
+      "release/course"
+    );
+  });
+
+  it("rejects a non-fast-forward explicit push without overwriting either side", async () => {
+    const fixture = await createRepository("divergent explicit push repository");
+    const remote = join(fixture.parent, "divergent explicit remote.git");
+    await git(fixture.parent, "init", "--bare", remote);
+    await git(fixture.repository, "branch", "-M", "main");
+    await git(fixture.repository, "remote", "add", "origin", remote);
+    await git(fixture.repository, "push", "origin", "main");
+    await git(remote, "symbolic-ref", "HEAD", "refs/heads/main");
+    const competitor = join(fixture.parent, "competitor");
+    await git(fixture.parent, "clone", remote, competitor);
+    await git(competitor, "config", "user.email", "other@example.test");
+    await git(competitor, "config", "user.name", "Other");
+    await git(competitor, "commit", "--allow-empty", "-m", "Remote advance");
+    await git(competitor, "push");
+    const remoteHead = (await git(remote, "rev-parse", "refs/heads/main")).trim();
+    await git(fixture.repository, "commit", "--allow-empty", "-m", "Local advance");
+    const localHead = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const origin = createRemoteName("origin");
+    const main = createBranchName("main");
+    if (origin === null || main === null) throw new Error("The push target must be trusted.");
+
+    await expect(workspace.pushBranch({ remote: origin, branch: main })).rejects.toMatchObject({
+      kind: "remote_unavailable",
+      operation: "push"
+    });
+    expect((await git(remote, "rev-parse", "refs/heads/main")).trim()).toBe(remoteHead);
+    expect((await git(fixture.repository, "rev-parse", "HEAD")).trim()).toBe(localHead);
+  });
+});
+
+describe("SystemGitWorkspace disposable-attempt restoration contract", () => {
+  it("restores exact HEAD, discards index/worktree changes, removes untracked content, and preserves siblings", async () => {
+    const fixture = await createRepository("disposable repository");
+    const outside = join(fixture.parent, "outside sibling.txt");
+    await writeFile(outside, "preserve me\n");
+    await git(fixture.repository, "commit", "--allow-empty", "-m", "Attempt commit");
+    await writeFile(join(fixture.repository, "staged.txt"), "staged\n");
+    await git(fixture.repository, "add", "staged.txt");
+    await writeFile(join(fixture.repository, "submission.txt"), "unstaged\n");
+    await writeFile(join(fixture.repository, "untracked.txt"), "untracked\n");
+    await mkdir(join(fixture.repository, "untracked directory"));
+    await writeFile(join(fixture.repository, "untracked directory", "nested.txt"), "nested\n");
+    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const expectedHead = await workspace.resolveRevision(exactCommit(fixture.second));
+
+    await workspace.restoreDisposableAttempt({ expectedHead, removeUntracked: true });
+
+    await expect(workspace.resolveHead()).resolves.toBe(fixture.second);
+    await expect(workspace.inspect()).resolves.toMatchObject({
+      workingTree: {
+        trackedChanges: [],
+        stagedChanges: [],
+        untrackedPaths: [],
+        conflicts: []
+      }
+    });
+    await expect(readFile(join(fixture.repository, "submission.txt"), "utf8")).resolves.toBe(
+      "second\n"
+    );
+    await expect(access(join(fixture.repository, "staged.txt"))).rejects.toBeDefined();
+    await expect(access(join(fixture.repository, "untracked.txt"))).rejects.toBeDefined();
+    await expect(access(join(fixture.repository, "untracked directory"))).rejects.toBeDefined();
+    await expect(readFile(outside, "utf8")).resolves.toBe("preserve me\n");
+  });
+});
+
+describe("SystemGitWorkspace managed branch deletion contract", () => {
+  const origin = createRemoteName("origin");
+  if (origin === null) throw new Error("The origin remote must be trusted.");
+
+  it("deletes the named remote branch then force-deletes an inactive local managed branch", async () => {
+    const fixture = await createBareRemoteFixture("main");
+    const managed = createBranchName("graider/template-update-123456789abc");
+    const main = createBranchName("main");
+    if (managed === null || main === null) throw new Error("The branches must be trusted.");
+    await fixture.workspace.createBranch(managed);
+    await git(fixture.destination, "config", "user.email", "faculty@example.test");
+    await git(fixture.destination, "config", "user.name", "Faculty");
+    await git(fixture.destination, "commit", "--allow-empty", "-m", "Managed branch");
+    await fixture.workspace.pushBranch({ remote: origin, branch: managed });
+    await fixture.workspace.switchBranch(main);
+
+    await fixture.workspace.deleteRemoteBranch({ remote: origin, branch: managed });
+    await fixture.workspace.deleteLocalBranch({ branch: managed, force: true });
+
+    await expect(
+      git(fixture.remote, "show-ref", "--verify", `refs/heads/${managed}`)
+    ).rejects.toBeDefined();
+    await expect(
+      git(fixture.destination, "show-ref", "--verify", `refs/heads/${managed}`)
+    ).rejects.toBeDefined();
+  });
+
+  it("refuses to delete the currently checked-out local branch", async () => {
+    const fixture = await createBareRemoteFixture("main");
+    const main = createBranchName("main");
+    if (main === null) throw new Error("The branch must be trusted.");
+
+    await expect(
+      fixture.workspace.deleteLocalBranch({ branch: main, force: true })
+    ).rejects.toMatchObject({ kind: "operation_rejected", operation: "branch" });
+    await expect(fixture.workspace.inspect()).resolves.toMatchObject({
+      head: { kind: "attached", branch: main }
     });
   });
 });

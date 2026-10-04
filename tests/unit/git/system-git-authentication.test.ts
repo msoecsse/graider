@@ -11,7 +11,9 @@ import type {
 } from "../../../src/git/git-credential-resolver.js";
 import {
   GitError,
+  createBranchName,
   createGitAuthenticationContext,
+  createRemoteName,
   createTrustedGitRemote,
   type GitAuthenticationContext
 } from "../../../src/git/git-workspace.js";
@@ -199,6 +201,81 @@ describe("System Git authenticated execution contract", () => {
     expect(pushRequest.args.join(" ")).not.toContain(TOKEN_A);
     expect(pushRequest.args.join(" ")).not.toMatch(/authorization|extraheader/iu);
     expect(pushRequest.args.join(" ")).not.toContain(GITHUB_TOKEN_USERNAME);
+  });
+
+  it("uses the protected environment for an authenticated explicit branch push", async () => {
+    const root = await createTemporaryDirectory("graider-auth-explicit-push-");
+    const requests: SystemGitExecutionRequest[] = [];
+    const context = authenticationContext("explicit-push-context");
+    const runGit = (request: SystemGitExecutionRequest): Promise<string> => {
+      requests.push(request);
+      if (request.args.join(" ") === "rev-parse --show-toplevel")
+        return Promise.resolve(`${root}\n`);
+      if (request.args.join(" ") === "config --get-all remote.origin.pushurl")
+        return Promise.resolve("");
+      if (request.args.join(" ") === "config --get-all remote.origin.url")
+        return Promise.resolve(`${GITHUB_REMOTE}\n`);
+      if (request.args[0] === "push") return Promise.resolve("");
+      return Promise.reject(new Error(`Unexpected Git test operation: ${request.args.join(" ")}`));
+    };
+    const factory = new SystemGitWorkspaceFactory({
+      runGit,
+      credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
+    });
+    const workspace = await factory.open(root);
+    const origin = createRemoteName("origin");
+    const branch = createBranchName("release/course");
+    if (origin === null || branch === null) throw new Error("The push target must be trusted.");
+
+    await workspace.pushBranch({ remote: origin, branch, authentication: context });
+
+    const pushRequest = requests.find((request) => request.args[0] === "push");
+    expect(pushRequest?.args).toEqual(["push", "origin", "HEAD:refs/heads/release/course"]);
+    if (pushRequest?.env === undefined) throw new Error("Authenticated environment missing.");
+    expect(runtimeConfig(pushRequest.env).get("http.https://github.com/.extraHeader")).toBe(
+      `AUTHORIZATION: basic ${encodedCredential(TOKEN_A)}`
+    );
+    expect(JSON.stringify(pushRequest.args)).not.toContain(TOKEN_A);
+  });
+
+  it("uses the protected environment for authenticated remote branch deletion", async () => {
+    const root = await createTemporaryDirectory("graider-auth-delete-branch-");
+    const requests: SystemGitExecutionRequest[] = [];
+    const context = authenticationContext("delete-branch-context");
+    const runGit = (request: SystemGitExecutionRequest): Promise<string> => {
+      requests.push(request);
+      if (request.args.join(" ") === "rev-parse --show-toplevel")
+        return Promise.resolve(`${root}\n`);
+      if (request.args.join(" ") === "config --get-all remote.origin.pushurl")
+        return Promise.resolve("");
+      if (request.args.join(" ") === "config --get-all remote.origin.url")
+        return Promise.resolve(`${GITHUB_REMOTE}\n`);
+      if (request.args[0] === "push") return Promise.resolve("");
+      return Promise.reject(new Error(`Unexpected Git test operation: ${request.args.join(" ")}`));
+    };
+    const factory = new SystemGitWorkspaceFactory({
+      runGit,
+      credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
+    });
+    const workspace = await factory.open(root);
+    const origin = createRemoteName("origin");
+    const branch = createBranchName("graider/template-update-123456789abc");
+    if (origin === null || branch === null) throw new Error("The delete target must be trusted.");
+
+    await workspace.deleteRemoteBranch({ remote: origin, branch, authentication: context });
+
+    const deleteRequest = requests.find((request) => request.args[0] === "push");
+    expect(deleteRequest?.args).toEqual([
+      "push",
+      "origin",
+      "--delete",
+      "graider/template-update-123456789abc"
+    ]);
+    if (deleteRequest?.env === undefined) throw new Error("Authenticated environment missing.");
+    expect(runtimeConfig(deleteRequest.env).get("http.https://github.com/.extraHeader")).toBe(
+      `AUTHORIZATION: basic ${encodedCredential(TOKEN_A)}`
+    );
+    expect(JSON.stringify(deleteRequest.args)).not.toContain(TOKEN_A);
   });
 
   it("isolates authenticated, ambient, and differently authenticated operations", async () => {

@@ -3,12 +3,15 @@ import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type { GitCredentialResolver } from "../../../src/git/git-credential-resolver.js";
 import {
+  GitError,
   createBranchName,
   createGitAuthenticationContext,
+  type DeleteRemoteBranchRequest,
+  type PushBranchRequest,
   type GitWorkspacePreparer,
   type GitWorkspacePreparationFactory
 } from "../../../src/git/git-workspace.js";
@@ -23,6 +26,7 @@ const SHA_LENGTH = 40;
 const MAX_GIT_OUTPUT_BYTES = 10_485_760;
 const TEMPLATE_SHA = "a".repeat(SHA_LENGTH);
 const STUDENT_SHA = "b".repeat(SHA_LENGTH);
+const UPDATED_SHA = "c".repeat(SHA_LENGTH);
 const TOKEN = "distinctive-secret-token-42";
 const input = {
   templateCloneUrl: "https://github.com/course/template.git",
@@ -48,6 +52,15 @@ interface FakeWorkspace {
   remoteDefaultBranch: ReturnType<typeof vi.fn>;
   checkoutDetached: ReturnType<typeof vi.fn>;
   createOrResetBranch: ReturnType<typeof vi.fn>;
+  deleteRemoteBranch: Mock<(request: DeleteRemoteBranchRequest) => Promise<void>>;
+  deleteLocalBranch: ReturnType<typeof vi.fn>;
+  resolveHead: ReturnType<typeof vi.fn>;
+  resolveRevision: ReturnType<typeof vi.fn>;
+  inspect: ReturnType<typeof vi.fn>;
+  diff: ReturnType<typeof vi.fn>;
+  commit: ReturnType<typeof vi.fn>;
+  pushBranch: Mock<(request: PushBranchRequest) => Promise<{ kind: "pushed" }>>;
+  restoreDisposableAttempt: ReturnType<typeof vi.fn>;
 }
 
 const fakeWorkspace = (root: string, branch = "release/course"): FakeWorkspace => {
@@ -57,7 +70,25 @@ const fakeWorkspace = (root: string, branch = "release/course"): FakeWorkspace =
     root,
     remoteDefaultBranch: vi.fn(() => Promise.resolve(trustedBranch)),
     checkoutDetached: vi.fn(() => Promise.resolve(TEMPLATE_SHA)),
-    createOrResetBranch: vi.fn(() => Promise.resolve(STUDENT_SHA))
+    createOrResetBranch: vi.fn(() => Promise.resolve(STUDENT_SHA)),
+    deleteRemoteBranch: vi.fn(() => Promise.resolve()),
+    deleteLocalBranch: vi.fn(() => Promise.resolve()),
+    resolveHead: vi.fn(() => Promise.resolve(STUDENT_SHA)),
+    resolveRevision: vi.fn((revision: string) => Promise.resolve(revision)),
+    inspect: vi.fn(() =>
+      Promise.resolve({
+        workingTree: {
+          trackedChanges: [],
+          stagedChanges: [],
+          untrackedPaths: [],
+          conflicts: []
+        }
+      })
+    ),
+    diff: vi.fn(() => Promise.resolve({ patch: new Uint8Array() })),
+    commit: vi.fn(() => Promise.resolve(UPDATED_SHA)),
+    pushBranch: vi.fn(() => Promise.resolve({ kind: "pushed" as const })),
+    restoreDisposableAttempt: vi.fn(() => Promise.resolve())
   };
 };
 
@@ -98,8 +129,9 @@ describe("production template-sync semantic preparation", () => {
         ({ gateway, pullRequests, studentDefaultBranch }) => {
           expect(gateway).toMatchObject({
             options: {
-              templateDirectory: "/canonical/template",
-              studentDirectory: "/canonical/student"
+              templateWorkspace: fixture.template,
+              studentWorkspace: fixture.student,
+              authentication: fixture.context
             }
           });
           expect(pullRequests).toBeDefined();
@@ -147,13 +179,97 @@ describe("production template-sync semantic preparation", () => {
     const fixture = semanticFixture();
     await withProductionTemplateSyncWorkspace(
       { ...input, token: null },
-      () => Promise.resolve(),
+      ({ gateway }) => {
+        expect(gateway).toMatchObject({
+          options: {
+            templateWorkspace: fixture.template,
+            studentWorkspace: fixture.student
+          }
+        });
+        const options = gateway as unknown as {
+          readonly options: { readonly authentication?: unknown };
+        };
+        expect(options.options.authentication).toBeUndefined();
+        return Promise.resolve();
+      },
       fixture.dependencies
     );
     expect(fixture.resolver()).toBeUndefined();
     expect(
       fixture.clone.mock.calls.every(([request]) => request.authentication === undefined)
     ).toBe(true);
+  });
+
+  it("passes opaque authentication to gateway branch deletion and keeps failures redacted", async () => {
+    const fixture = semanticFixture();
+    fixture.student.deleteRemoteBranch.mockImplementation((request: DeleteRemoteBranchRequest) => {
+      expect(request.authentication).toBe(fixture.context);
+      return Promise.reject(
+        new GitError("remote_unavailable", "delete_remote_branch", new Error(TOKEN))
+      );
+    });
+
+    await withProductionTemplateSyncWorkspace(
+      input,
+      async ({ gateway }) => {
+        const error = await gateway
+          .deleteRemoteBranch(
+            { owner: "course", name: "student", defaultBranch: "main" },
+            "graider/template-update-123456789abc"
+          )
+          .catch((caught: unknown) => caught);
+
+        expect(getTemplateSyncFailure(error)).toEqual({
+          stage: "push_failed",
+          message: "Unable to delete the template-update branch."
+        });
+        expect(JSON.stringify(error)).not.toContain(TOKEN);
+        expect(JSON.stringify(getTemplateSyncFailure(error))).not.toContain(TOKEN);
+      },
+      fixture.dependencies
+    );
+
+    expect(fixture.student.deleteRemoteBranch).toHaveBeenCalledOnce();
+    expect(fixture.student.deleteLocalBranch).not.toHaveBeenCalled();
+  });
+
+  it("passes opaque authentication to gateway push and keeps push failures redacted", async () => {
+    const fixture = semanticFixture();
+    fixture.student.pushBranch.mockImplementation((request: PushBranchRequest) => {
+      expect(request.authentication).toBe(fixture.context);
+      return Promise.reject(new GitError("remote_unavailable", "push", new Error(TOKEN)));
+    });
+
+    await withProductionTemplateSyncWorkspace(
+      input,
+      async ({ gateway }) => {
+        const error = await gateway
+          .applyAndPushTemplateDelta({
+            templateRepository: { owner: "course", name: "template" },
+            studentRepository: { owner: "course", name: "student", defaultBranch: "main" },
+            templateBaseCommitSha: TEMPLATE_SHA,
+            templateTargetCommitSha: TEMPLATE_SHA,
+            studentBaseCommitSha: STUDENT_SHA,
+            studentCurrentCommitSha: STUDENT_SHA,
+            changes: []
+          })
+          .catch((caught: unknown) => caught);
+
+        expect(getTemplateSyncFailure(error)).toEqual({
+          stage: "push_failed",
+          message: "Push to student repository was rejected."
+        });
+        expect(JSON.stringify(error)).not.toContain(TOKEN);
+        expect(JSON.stringify(getTemplateSyncFailure(error))).not.toContain(TOKEN);
+      },
+      fixture.dependencies
+    );
+
+    expect(fixture.student.pushBranch).toHaveBeenCalledOnce();
+    expect(fixture.student.restoreDisposableAttempt).toHaveBeenCalledWith({
+      expectedHead: STUDENT_SHA,
+      removeUntracked: true
+    });
   });
 
   it.each([
@@ -332,17 +448,24 @@ describe("production template-sync local integration", () => {
       },
       async (workspace) => {
         const gateway = workspace.gateway as unknown as {
-          options: { templateDirectory: string; studentDirectory: string };
+          options: {
+            templateWorkspace: { root: string };
+            studentWorkspace: { root: string };
+          };
         };
         expect(workspace.studentDefaultBranch).toBe(branch);
-        expect(await git(gateway.options.templateDirectory, "branch", "--show-current")).toBe("");
-        expect(await git(gateway.options.templateDirectory, "rev-parse", "HEAD")).toBe(
+        expect(await git(gateway.options.templateWorkspace.root, "branch", "--show-current")).toBe(
+          ""
+        );
+        expect(await git(gateway.options.templateWorkspace.root, "rev-parse", "HEAD")).toBe(
           template.sha
         );
-        expect(await git(gateway.options.studentDirectory, "branch", "--show-current")).toBe(
+        expect(await git(gateway.options.studentWorkspace.root, "branch", "--show-current")).toBe(
           branch
         );
-        expect(await git(gateway.options.studentDirectory, "rev-parse", "HEAD")).toBe(student.sha);
+        expect(await git(gateway.options.studentWorkspace.root, "rev-parse", "HEAD")).toBe(
+          student.sha
+        );
       }
     );
     expect(

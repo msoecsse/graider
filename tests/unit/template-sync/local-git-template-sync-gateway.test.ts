@@ -1,14 +1,16 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import { SystemGitWorkspaceFactory } from "../../../src/git/system-git-workspace.js";
 import { LocalGitTemplateSyncGateway } from "../../../src/template-sync/local-git-template-sync-gateway.js";
 import { getTemplateSyncFailure } from "../../../src/template-sync/template-sync-failure.js";
 
 const run = promisify(execFile);
 const temporaryDirectories: string[] = [];
+const EXECUTABLE_FILE_MODE = 0o755;
 const template = { owner: "course", name: "template" };
 const student = { owner: "course", name: "student", defaultBranch: "main" };
 
@@ -66,6 +68,17 @@ const setup = async (
   return { templateDirectory, studentDirectory, studentRemote, base, studentBase };
 };
 
+const gatewayFor = async (fixture: {
+  readonly templateDirectory: string;
+  readonly studentDirectory: string;
+}): Promise<LocalGitTemplateSyncGateway> => {
+  const factory = new SystemGitWorkspaceFactory();
+  return new LocalGitTemplateSyncGateway({
+    templateWorkspace: await factory.open(fixture.templateDirectory),
+    studentWorkspace: await factory.open(fixture.studentDirectory)
+  });
+};
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories
@@ -80,7 +93,7 @@ describe("LocalGitTemplateSyncGateway", () => {
     await writeFile(join(fixture.templateDirectory, "shared.txt"), "faculty update\n");
     await git(fixture.templateDirectory, "commit", "-am", "template update");
     const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await expect(
       gateway.recoverTemplateAndStudentBaseline({
@@ -97,7 +110,7 @@ describe("LocalGitTemplateSyncGateway", () => {
 
   it("does not recover both anchors when template files are only a subset of student state", async () => {
     const fixture = await setup("main", true, true);
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await expect(
       gateway.recoverTemplateAndStudentBaseline({
@@ -114,7 +127,7 @@ describe("LocalGitTemplateSyncGateway", () => {
     const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
     await git(fixture.studentDirectory, "commit", "--allow-empty", "-m", "same student tree");
     await git(fixture.studentDirectory, "push");
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await expect(
       gateway.recoverTemplateAndStudentBaseline({
@@ -144,7 +157,7 @@ describe("LocalGitTemplateSyncGateway", () => {
     expect((await git(fixture.templateDirectory, "rev-parse", `${feature}^{tree}`)).trim()).toBe(
       (await git(fixture.studentDirectory, "rev-parse", "HEAD^{tree}")).trim()
     );
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await expect(
       gateway.recoverTemplateAndStudentBaseline({
@@ -157,7 +170,7 @@ describe("LocalGitTemplateSyncGateway", () => {
 
   it("recovers an independent initial student commit with an identical tree", async () => {
     const fixture = await setup("main", true);
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     expect(fixture.studentBase).not.toBe(fixture.base);
     await expect(
@@ -178,7 +191,7 @@ describe("LocalGitTemplateSyncGateway", () => {
     await git(fixture.studentDirectory, "commit", "-am", "student work");
     await git(fixture.studentDirectory, "push");
     const currentHead = (await git(fixture.studentDirectory, "rev-parse", "HEAD")).trim();
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await expect(
       gateway.recoverStudentBaseline({
@@ -195,7 +208,7 @@ describe("LocalGitTemplateSyncGateway", () => {
 
   it("uses exact template-managed path state when the student tree has extra paths", async () => {
     const fixture = await setup("main", true, true);
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await expect(
       gateway.recoverStudentBaseline({
@@ -216,13 +229,30 @@ describe("LocalGitTemplateSyncGateway", () => {
     const unmatchedTemplateCommit = (
       await git(fixture.templateDirectory, "rev-parse", "HEAD")
     ).trim();
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await expect(
       gateway.recoverStudentBaseline({
         templateRepository: template,
         studentRepository: student,
         templateCommitSha: unmatchedTemplateCommit
+      })
+    ).resolves.toEqual({ status: "not_found" });
+  });
+
+  it("does not treat matching blob contents with a different executable mode as equal", async () => {
+    const fixture = await setup("main", true);
+    await chmod(join(fixture.templateDirectory, "shared.txt"), EXECUTABLE_FILE_MODE);
+    await git(fixture.templateDirectory, "add", "shared.txt");
+    await git(fixture.templateDirectory, "commit", "-m", "Make shared executable");
+    const executableTemplate = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
+    const gateway = await gatewayFor(fixture);
+
+    await expect(
+      gateway.recoverStudentBaseline({
+        templateRepository: template,
+        studentRepository: student,
+        templateCommitSha: executableTemplate
       })
     ).resolves.toEqual({ status: "not_found" });
   });
@@ -234,7 +264,7 @@ describe("LocalGitTemplateSyncGateway", () => {
     await writeFile(join(fixture.studentDirectory, "shared.txt"), "base\n");
     await git(fixture.studentDirectory, "commit", "-am", "restore template state");
     await git(fixture.studentDirectory, "push");
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await expect(
       gateway.recoverStudentBaseline({
@@ -250,7 +280,7 @@ describe("LocalGitTemplateSyncGateway", () => {
     const before = (
       await run("git", ["--git-dir", fixture.studentRemote, "show-ref", "refs/heads/main"])
     ).stdout;
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await gateway.recoverStudentBaseline({
       templateRepository: template,
@@ -270,7 +300,7 @@ describe("LocalGitTemplateSyncGateway", () => {
     await writeFile(join(fixture.templateDirectory, "shared.txt"), "faculty edit\n");
     await git(fixture.templateDirectory, "commit", "-am", "template update");
     const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     const result = await gateway.applyAndPushTemplateDelta({
       templateRepository: template,
@@ -295,6 +325,32 @@ describe("LocalGitTemplateSyncGateway", () => {
     ).toBe(result.status === "clean" ? result.commitSha : "");
   });
 
+  it("creates the expected allow-empty update commit for an empty template delta", async () => {
+    const fixture = await setup();
+    const originalHead = (await git(fixture.studentDirectory, "rev-parse", "HEAD")).trim();
+    const gateway = await gatewayFor(fixture);
+
+    const result = await gateway.applyAndPushTemplateDelta({
+      templateRepository: template,
+      studentRepository: student,
+      templateBaseCommitSha: fixture.base,
+      templateTargetCommitSha: fixture.base,
+      studentBaseCommitSha: fixture.studentBase,
+      studentCurrentCommitSha: originalHead,
+      changes: []
+    });
+
+    expect(result.status).toBe("clean");
+    if (result.status !== "clean") throw new Error("Expected a clean update.");
+    expect(result.commitSha).not.toBe(originalHead);
+    expect((await git(fixture.studentDirectory, "rev-parse", `${result.commitSha}^`)).trim()).toBe(
+      originalHead
+    );
+    expect((await git(fixture.studentDirectory, "log", "-1", "--format=%s")).trim()).toBe(
+      "Apply template update"
+    );
+  });
+
   it("three-way applies only template changes, including additions and deletions", async () => {
     const fixture = await setup();
     await writeFile(join(fixture.studentDirectory, "student.txt"), "student edit\n");
@@ -306,7 +362,7 @@ describe("LocalGitTemplateSyncGateway", () => {
     await git(fixture.templateDirectory, "add", ".");
     await git(fixture.templateDirectory, "commit", "-m", "template update");
     const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     const result = await gateway.applyAndPushTemplateDelta({
       templateRepository: template,
@@ -340,7 +396,7 @@ describe("LocalGitTemplateSyncGateway", () => {
     await writeFile(join(fixture.templateDirectory, "shared.txt"), "faculty edit\n");
     await git(fixture.templateDirectory, "commit", "-am", "template update");
     const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
 
     await expect(
       gateway.applyAndPushTemplateDelta({
@@ -374,6 +430,27 @@ describe("LocalGitTemplateSyncGateway", () => {
       git(fixture.studentDirectory, "show", "graider/template-update-123456789abc:shared.txt")
     ).resolves.toBe("faculty edit\n");
     await expect(git(fixture.studentDirectory, "rev-parse", "main")).resolves.toBe(`${before}\n`);
+    await expect(git(fixture.studentDirectory, "branch", "--show-current")).resolves.toBe("main\n");
+    await expect(git(fixture.studentDirectory, "status", "--porcelain")).resolves.toBe("");
+
+    await gateway.deleteRemoteBranch(student, "graider/template-update-123456789abc");
+    await expect(
+      git(
+        fixture.studentDirectory,
+        "show-ref",
+        "--verify",
+        "refs/heads/graider/template-update-123456789abc"
+      )
+    ).rejects.toThrow();
+    await expect(
+      run("git", [
+        "--git-dir",
+        fixture.studentRemote,
+        "show-ref",
+        "--verify",
+        "refs/heads/graider/template-update-123456789abc"
+      ])
+    ).rejects.toThrow();
   });
 
   it("classifies a rejected student push without exposing Git command details", async () => {
@@ -382,7 +459,8 @@ describe("LocalGitTemplateSyncGateway", () => {
     await git(fixture.templateDirectory, "commit", "-am", "template update");
     const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
     await git(fixture.studentDirectory, "remote", "set-url", "origin", join("missing", "repo.git"));
-    const gateway = new LocalGitTemplateSyncGateway(fixture);
+    const gateway = await gatewayFor(fixture);
+    const originalHead = (await git(fixture.studentDirectory, "rev-parse", "HEAD")).trim();
 
     const error = await gateway
       .applyAndPushTemplateDelta({
@@ -402,6 +480,95 @@ describe("LocalGitTemplateSyncGateway", () => {
     });
     expect(JSON.stringify(getTemplateSyncFailure(error))).not.toMatch(
       /missing|git|authorization/iu
+    );
+    await expect(git(fixture.studentDirectory, "rev-parse", "HEAD")).resolves.toBe(
+      `${originalHead}\n`
+    );
+    await expect(git(fixture.studentDirectory, "status", "--porcelain")).resolves.toBe("");
+  });
+
+  it("restores the default branch cleanly when conflict-branch push fails", async () => {
+    const fixture = await setup();
+    await writeFile(join(fixture.templateDirectory, "shared.txt"), "faculty edit\n");
+    await git(fixture.templateDirectory, "commit", "-am", "template update");
+    const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
+    await git(fixture.studentDirectory, "remote", "set-url", "origin", join("missing", "repo.git"));
+    const gateway = await gatewayFor(fixture);
+
+    const error = await gateway
+      .prepareConflictBranch({
+        templateRepository: template,
+        studentRepository: student,
+        templateBaseCommitSha: fixture.base,
+        templateTargetCommitSha: target,
+        studentBaseCommitSha: fixture.studentBase,
+        studentCurrentCommitSha: fixture.studentBase,
+        changes: [],
+        branchName: "graider/template-update-abcdef123456"
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(getTemplateSyncFailure(error)).toEqual({
+      stage: "push_failed",
+      message: "Push to student repository was rejected."
+    });
+    await expect(git(fixture.studentDirectory, "branch", "--show-current")).resolves.toBe("main\n");
+    await expect(git(fixture.studentDirectory, "status", "--porcelain")).resolves.toBe("");
+    await expect(
+      git(
+        fixture.studentDirectory,
+        "show-ref",
+        "--verify",
+        "refs/heads/graider/template-update-abcdef123456"
+      )
+    ).resolves.toContain("refs/heads/graider/template-update-abcdef123456");
+  });
+
+  it("maps malformed commit identifiers through the patch failure without mutating the student", async () => {
+    const fixture = await setup();
+    const gateway = await gatewayFor(fixture);
+    const originalHead = (await git(fixture.studentDirectory, "rev-parse", "HEAD")).trim();
+
+    const error = await gateway
+      .applyAndPushTemplateDelta({
+        templateRepository: template,
+        studentRepository: student,
+        templateBaseCommitSha: "HEAD --all",
+        templateTargetCommitSha: fixture.base,
+        studentBaseCommitSha: fixture.studentBase,
+        studentCurrentCommitSha: fixture.studentBase,
+        changes: []
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(getTemplateSyncFailure(error)).toEqual({
+      stage: "patch_failed",
+      message: "Unable to apply the template changes to the student repository."
+    });
+    await expect(git(fixture.studentDirectory, "rev-parse", "HEAD")).resolves.toBe(
+      `${originalHead}\n`
+    );
+    await expect(git(fixture.studentDirectory, "status", "--porcelain")).resolves.toBe("");
+  });
+
+  it("does not discard a dirty student workspace before an update attempt", async () => {
+    const fixture = await setup();
+    await writeFile(join(fixture.studentDirectory, "untracked student work.txt"), "preserve\n");
+    const gateway = await gatewayFor(fixture);
+
+    await expect(
+      gateway.applyAndPushTemplateDelta({
+        templateRepository: template,
+        studentRepository: student,
+        templateBaseCommitSha: fixture.base,
+        templateTargetCommitSha: fixture.base,
+        studentBaseCommitSha: fixture.studentBase,
+        studentCurrentCommitSha: fixture.studentBase,
+        changes: []
+      })
+    ).rejects.toThrow("Student repository worktree is not clean.");
+    await expect(git(fixture.studentDirectory, "status", "--porcelain")).resolves.toContain(
+      "untracked student work.txt"
     );
   });
 });

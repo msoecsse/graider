@@ -4,7 +4,7 @@
 credential transport resolved
 
 **Scope:** local Git abstraction and replaceable system-Git adapter; template-sync
-adoption step 6 is complete and step 7 remains incomplete
+adoption step 7 is complete and enforcement step 8 remains incomplete
 
 **Authority:** [remote-course architecture](graider-remote-course-architecture.md),
 [architecture evolution roadmap](graider-architecture-evolution-roadmap.md), and
@@ -404,11 +404,14 @@ adapter:
 This transport is deliberately an adapter detail, not the future acquisition
 architecture. Phase 2 will replace the current token acquisition and storage
 source behind the same resolver/context boundary without changing semantic Git
-operations. Adoption-plan step 6 is complete: the production disposable
-template workspace now uses authenticated semantic no-checkout clone, detached
-checkout, remote-default-branch discovery, and create/reset-from-remote branch
-preparation. Its current raw token input is bridged to an operation-scoped opaque
-authentication context and resolver at this trusted orchestration boundary.
+operations. Adoption-plan step 7 is complete. The production disposable template
+workspace uses authenticated semantic no-checkout clone, detached checkout,
+remote-default-branch discovery, and create/reset-from-remote branch preparation.
+`LocalGitTemplateSyncGateway` receives those two workspaces directly and reuses
+the same opaque operation authentication context for explicit branch pushes and
+remote managed-branch deletion. Its current raw token input is bridged to an
+operation-scoped opaque authentication context and resolver only at this trusted
+orchestration boundary.
 
 Network operations without an authentication context may remain possible for
 public/local remotes and current behavior, but the caller must choose that
@@ -577,7 +580,7 @@ Each step preserves current domain results before the next direct caller moves.
 |     4 | `studentRepositoryAccessPagePublishStatusService.ts` and read-only portion of `coursePublishService.ts` | Open/root, structured status/path status, branch/upstream/ahead-behind, remote URL                     | Real-repository readiness/publish-status tests                                                                                   | Complete: structured inspection is adopted; publication mutation remains deferred to step 5          |
 |     5 | Mutating portions of `coursePublishService.ts` and `studentRepositoryAccessPagePublishService.ts`       | Exact-path stage, commit, push                                                                         | Integration tests for allowlists, deletions, unrelated staged files, missing upstream, behind state, and rejected/divergent push | Complete: exact-path staging, configured-author commits, upstream push, and safe diagnostics adopted |
 |     6 | `withProductionTemplateSyncWorkspace`                                                                   | Authenticated no-checkout clone, remote default branch, detached checkout, create/reset branch         | Workspace tests for stage classification, default branch, cleanup, and safe diagnostics                                          | Complete: disposable preparation and the explicit clone credential bridge now use the common engine  |
-|     7 | `LocalGitTemplateSyncGateway`                                                                           | Tree/history, binary diff, three-way indexed apply, branch operations, commit/push, disposable restore | Extensive real-Git integration suite plus fake domain gateway tests                                                              | High: broadest and most destructive operation set; migrate last after the engine contract is proven  |
+|     7 | `LocalGitTemplateSyncGateway`                                                                           | Tree/history, binary diff, three-way indexed apply, branch operations, commit/push, disposable restore | Extensive real-Git integration suite plus fake domain gateway tests                                                              | Complete: semantic workspaces now own all Git mechanics and authenticated transport                  |
 |     8 | Repository-wide enforcement                                                                             | Remove obsolete raw runners; add a lint/search guard for production direct Git execution               | Existing suites plus a production-source search                                                                                  | Low after convergence                                                                                |
 
 Course and Pages publication can share infrastructure without merging their
@@ -590,12 +593,14 @@ Fetch and fast-forward are implemented and contract-tested for the approved
 future synchronization engine, but adopting synchronization policy belongs to
 later roadmap slices.
 
-`LocalGitTemplateSyncGateway` remains the final direct domain Git consumer.
-Its tree, diff, patch, commit, branch, recovery, and push mechanics are deferred
-to step 7. In particular, gateway network pushes do not yet use the operation-
-scoped authentication context used by the two workspace clones; template sync
-must not be described as fully authenticated through the common engine until
-that final migration lands.
+`LocalGitTemplateSyncGateway` remains the template-domain adapter, but it no
+longer executes Git directly. Tree and first-parent history inspection, remote
+branch resolution, binary diff generation, three-way indexed patching, typed
+conflict classification, commits, branch mechanics, explicit pushes/deletes,
+and disposable rollback now live behind the common workspaces. Template
+baseline ambiguity and subset-matching policy remain in the gateway. Network
+pushes and deletes receive the same opaque operation authentication context as
+the clones; no token, header, or resolver crosses into the gateway.
 
 ## 14. Direct-system-Git end state
 
@@ -620,6 +625,11 @@ the packaged application is independent of system Git. Phase 1.2 replaces or
 bundles the engine behind the same contract and proves private authenticated
 clone/fetch/push on supported packaged platforms.
 
+After adoption step 7, `src/git/system-git-workspace.ts` is the sole production
+location that invokes the system Git executable. Repository-wide automated
+enforcement of that invariant remains adoption step 8 and is intentionally not
+part of this slice.
+
 ## 15. Resolved and open implementation questions
 
 The first Phase 1.1B reader slice resolved the shared build-placement question:
@@ -640,17 +650,25 @@ retained only as a non-enumerable internal engine cause and is never appended to
 the publication result.
 
 The operation-scoped credential question is resolved by the child-environment
-runtime configuration described in section 8.1. This proof covers authenticated
-clone and upstream push through the replaceable system-Git engine without
-migrating production template sync. Phase 1.2 must prove the equivalent private
-authenticated transport with the selected embedded or bundled engine in
-packaged macOS Apple Silicon and Windows x64 applications. That proof must not
-reintroduce a system-Git, shell, credential-helper, or terminal-prompt
-dependency.
+runtime configuration described in section 8.1. This proof now covers
+authenticated clone, upstream and explicit branch push, and remote branch
+deletion through the replaceable system-Git engine. Phase 1.2 must prove the
+equivalent private authenticated transport with the selected embedded or
+bundled engine in packaged macOS Apple Silicon and Windows x64 applications.
+That proof must not reintroduce a system-Git, shell, credential-helper, or
+terminal-prompt dependency.
 
 | Question                                                                                                                                                                   | Phase 1.1B blocker?                                                                                            | Resolution point       |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | Does the selected Phase 1.2 engine natively support binary three-way patch application and index semantics, or will the engine adapter need a private compatibility layer? | No for Phase 1.1B; the system-Git adapter proves the semantic contract. It is a Phase 1.2 selection criterion. | Embedded-engine proof. |
+
+The Phase 1.2 engine must support or privately emulate recursive tree
+inspection, first-parent history with tree IDs, binary revision diff generation,
+three-way indexed patch application with typed conflict classification, exact
+branch push/deletion, disposable reset/cleanup, and authenticated GitHub
+clone/push. Any compatibility technique remains below the semantic interface;
+callers do not depend on CLI flags, refspec strings, stderr wording, or process
+execution.
 
 The placement of clone on the factory, representation of missing upstream, and
 continued existence of the template-domain gateway are resolved by this design

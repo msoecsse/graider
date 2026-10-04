@@ -170,8 +170,11 @@ export const withProductionTemplateSyncWorkspace = async <T>(
     );
     result = await operation({
       gateway: new LocalGitTemplateSyncGateway({
-        templateDirectory: templateWorkspace.root,
-        studentDirectory: studentWorkspace.root
+        templateWorkspace,
+        studentWorkspace,
+        ...(authentication.authentication === undefined
+          ? {}
+          : { authentication: authentication.authentication })
       }),
       pullRequests: createGitHubPullRequestGateway(input.githubClient),
       studentDefaultBranch

@@ -1,6 +1,12 @@
-import { execFile as executeFile, spawn } from "node:child_process";
-import { promisify } from "node:util";
-
+import {
+  createBranchName,
+  createExactCommitRevision,
+  createRemoteName,
+  type GitAuthenticationContext,
+  type GitTreeEntry,
+  type GitWorkspacePreparer,
+  type ObjectId
+} from "../git/git-workspace.js";
 import type {
   ApplyTemplateDeltaInput,
   ApplyTemplateDeltaResult,
@@ -19,12 +25,7 @@ import {
   type TemplateSyncFailureStage
 } from "./template-sync-failure.js";
 
-const execFile = promisify(executeFile);
-const GIT = "git";
 const TEMPLATE_UPDATE_MESSAGE = "Apply template update";
-const BYTES_PER_MEBIBYTE = 1_048_576;
-const MAX_GIT_COMMAND_OUTPUT_MEBIBYTES = 10;
-const MAX_GIT_COMMAND_OUTPUT_BYTES = MAX_GIT_COMMAND_OUTPUT_MEBIBYTES * BYTES_PER_MEBIBYTE;
 
 const withFailureStage = async <T>(
   stage: TemplateSyncFailureStage,
@@ -39,118 +40,119 @@ const withFailureStage = async <T>(
 };
 
 export interface LocalGitTemplateSyncGatewayOptions {
-  /** Clean, local clones; the student clone's origin is the student's repository. */
-  templateDirectory: string;
-  studentDirectory: string;
+  readonly templateWorkspace: GitWorkspacePreparer;
+  readonly studentWorkspace: GitWorkspacePreparer;
+  readonly authentication?: GitAuthenticationContext;
 }
 
-/**
- * Git-backed gateway for a single already-cloned student repository. It uses
- * `git apply --3way --index`, which applies only the template patch and lets
- * Git detect overlapping student edits. It never creates branches or force-pushes.
- */
+const requireOrigin = () => {
+  const origin = createRemoteName("origin");
+  if (origin === null) throw new Error("The origin remote name is invalid.");
+  return origin;
+};
+
+const requireBranch = (value: string) => {
+  const branch = createBranchName(value);
+  if (branch === null) throw new Error("The Git branch name is invalid.");
+  return branch;
+};
+
+const treeEntryState = (entry: GitTreeEntry): string =>
+  `${entry.mode}\u0000${entry.objectType}\u0000${entry.objectId}`;
+
+const treeState = (entries: readonly GitTreeEntry[]): ReadonlyMap<string, string> =>
+  new Map(entries.map((entry) => [entry.path, treeEntryState(entry)]));
+
+const isClean = (state: Awaited<ReturnType<GitWorkspacePreparer["inspect"]>>): boolean =>
+  state.workingTree.trackedChanges.length === 0 &&
+  state.workingTree.stagedChanges.length === 0 &&
+  state.workingTree.untrackedPaths.length === 0 &&
+  state.workingTree.conflicts.length === 0;
+
+/** Template-domain policy implemented over two already-prepared semantic Git workspaces. */
 export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
   constructor(private readonly options: LocalGitTemplateSyncGatewayOptions) {}
 
   async getTree(_repository: TemplateRepositoryRef, commitSha: string): Promise<TemplateTree> {
-    const { stdout } = await this.git(this.options.templateDirectory, [
-      "ls-tree",
-      "-r",
-      "--format=%(objectname) %(path)",
-      commitSha
-    ]);
-    return Object.fromEntries(
-      stdout
-        .split("\n")
-        .filter((line) => line.length > 0)
-        .map((line) => {
-          const separator = line.indexOf(" ");
-          return [line.slice(separator + 1), line.slice(0, separator)];
-        })
-    );
+    const commit = await this.resolveCommit(this.options.templateWorkspace, commitSha);
+    const entries = await this.options.templateWorkspace.listTree(commit);
+    return Object.fromEntries(entries.map((entry) => [entry.path, entry.objectId]));
   }
 
   async getDefaultBranchCommitSha(): Promise<string> {
-    const { stdout } = await this.git(this.options.studentDirectory, ["rev-parse", "HEAD"]);
-    return stdout.trim();
+    return await this.options.studentWorkspace.resolveHead();
   }
 
   async recoverStudentBaseline(
     input: RecoverStudentBaselineInput
   ): Promise<TemplateSyncBaselineRecoveryResult> {
-    const templateTreeSha = (
-      await this.git(this.options.templateDirectory, [
-        "rev-parse",
-        `${input.templateCommitSha}^{tree}`
-      ])
-    ).stdout.trim();
-    const history = (
-      await this.git(this.options.studentDirectory, [
-        "log",
-        "--first-parent",
-        "--format=%H %T",
-        `refs/remotes/origin/${input.studentRepository.defaultBranch}`
-      ])
-    ).stdout
-      .trim()
-      .split("\n")
-      .filter((line) => line.length > 0)
-      .map((line) => {
-        const separator = line.indexOf(" ");
-        return { commitSha: line.slice(0, separator), treeSha: line.slice(separator + 1) };
-      });
-
-    const exactTreeMatches = history.filter((commit) => commit.treeSha === templateTreeSha);
-    if (exactTreeMatches.length > 1) return { status: "ambiguous" };
-    const exactTreeMatch = exactTreeMatches[0];
-    if (exactTreeMatch !== undefined && exactTreeMatches.length === 1)
-      return {
-        status: "recovered",
-        studentDefaultBranchCommitSha: exactTreeMatch.commitSha
-      };
-
-    const templateManagedState = await this.getTreeState(
-      this.options.templateDirectory,
+    const templateCommit = await this.resolveCommit(
+      this.options.templateWorkspace,
       input.templateCommitSha
     );
-    if (Object.keys(templateManagedState).length === 0) return { status: "not_found" };
+    const studentHead = await this.options.studentWorkspace.resolveRemoteBranch(
+      requireOrigin(),
+      requireBranch(input.studentRepository.defaultBranch)
+    );
+    const [templateTree, history] = await Promise.all([
+      this.options.templateWorkspace.resolveTree(templateCommit),
+      this.options.studentWorkspace.listFirstParentCommitTrees(studentHead)
+    ]);
 
-    let matchingCommitSha: string | undefined;
+    const exactTreeMatches = history.filter((commit) => commit.tree === templateTree);
+    if (exactTreeMatches.length > 1) return { status: "ambiguous" };
+    const exactTreeMatch = exactTreeMatches[0];
+    if (exactTreeMatch !== undefined)
+      return {
+        status: "recovered",
+        studentDefaultBranchCommitSha: exactTreeMatch.commit
+      };
+
+    const templateManagedState = treeState(
+      await this.options.templateWorkspace.listTree(templateCommit)
+    );
+    if (templateManagedState.size === 0) return { status: "not_found" };
+
+    let matchingCommit: ObjectId | undefined;
     for (const commit of history) {
-      const studentState = await this.getTreeState(this.options.studentDirectory, commit.commitSha);
-      const matches = Object.entries(templateManagedState).every(
-        ([path, state]) => studentState[path] === state
+      const studentState = treeState(await this.options.studentWorkspace.listTree(commit.commit));
+      const matches = [...templateManagedState.entries()].every(
+        ([path, state]) => studentState.get(path) === state
       );
-      if (!matches) continue;
-      if (matchingCommitSha !== undefined) return { status: "ambiguous" };
-      matchingCommitSha = commit.commitSha;
+      if (matches && matchingCommit !== undefined) return { status: "ambiguous" };
+      if (matches) matchingCommit = commit.commit;
     }
-    return matchingCommitSha === undefined
+    return matchingCommit === undefined
       ? { status: "not_found" }
-      : { status: "recovered", studentDefaultBranchCommitSha: matchingCommitSha };
+      : { status: "recovered", studentDefaultBranchCommitSha: matchingCommit };
   }
 
   async recoverTemplateAndStudentBaseline(
     input: RecoverTemplateAndStudentBaselineInput
   ): Promise<TemplateAndStudentBaselineRecoveryResult> {
+    const templateHead = await this.resolveCommit(
+      this.options.templateWorkspace,
+      input.currentTemplateCommitSha
+    );
+    const studentHead = await this.options.studentWorkspace.resolveRemoteBranch(
+      requireOrigin(),
+      requireBranch(input.studentRepository.defaultBranch)
+    );
     const [templateHistory, studentHistory] = await Promise.all([
-      this.getFirstParentHistory(this.options.templateDirectory, input.currentTemplateCommitSha),
-      this.getFirstParentHistory(
-        this.options.studentDirectory,
-        `refs/remotes/origin/${input.studentRepository.defaultBranch}`
-      )
+      this.options.templateWorkspace.listFirstParentCommitTrees(templateHead),
+      this.options.studentWorkspace.listFirstParentCommitTrees(studentHead)
     ]);
-    const studentCommitsByTree = new Map<string, string[]>();
+    const studentCommitsByTree = new Map<string, ObjectId[]>();
     for (const studentCommit of studentHistory) {
-      const commits = studentCommitsByTree.get(studentCommit.treeSha) ?? [];
-      commits.push(studentCommit.commitSha);
-      studentCommitsByTree.set(studentCommit.treeSha, commits);
+      const commits = studentCommitsByTree.get(studentCommit.tree) ?? [];
+      commits.push(studentCommit.commit);
+      studentCommitsByTree.set(studentCommit.tree, commits);
     }
 
     const candidates = templateHistory.flatMap((templateCommit) =>
-      (studentCommitsByTree.get(templateCommit.treeSha) ?? []).map(
+      (studentCommitsByTree.get(templateCommit.tree) ?? []).map(
         (studentDefaultBranchCommitSha) => ({
-          templateCommitSha: templateCommit.commitSha,
+          templateCommitSha: templateCommit.commit,
           studentDefaultBranchCommitSha
         })
       )
@@ -158,24 +160,35 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
     if (candidates.length === 0) return { status: "not_found" };
     if (candidates.length > 1) return { status: "ambiguous" };
     const candidate = candidates[0];
-    if (candidate === undefined) return { status: "not_found" };
-    return { status: "recovered", ...candidate };
+    return candidate === undefined
+      ? { status: "not_found" }
+      : { status: "recovered", ...candidate };
   }
 
   async applyAndPushTemplateDelta(
     input: ApplyTemplateDeltaInput
   ): Promise<ApplyTemplateDeltaResult> {
     await this.ensureCleanStudentWorktree();
-    const originalHead = await this.getDefaultBranchCommitSha();
+    const originalHead = await this.options.studentWorkspace.resolveHead();
     try {
-      const patch = await this.templatePatch(
-        input.templateBaseCommitSha,
-        input.templateTargetCommitSha
-      );
-      if (patch.length > 0) await this.applyThreeWayPatch(patch);
+      const [base, target] = await Promise.all([
+        this.resolveCommit(this.options.templateWorkspace, input.templateBaseCommitSha),
+        this.resolveCommit(this.options.templateWorkspace, input.templateTargetCommitSha),
+        this.resolveCommit(this.options.studentWorkspace, input.studentBaseCommitSha),
+        this.resolveCommit(this.options.studentWorkspace, input.studentCurrentCommitSha)
+      ]);
+      const patch = await this.options.templateWorkspace.diff({ base, target });
+      if (patch.patch.length > 0) {
+        const applied = await this.options.studentWorkspace.applyPatchToIndex({
+          patch: patch.patch
+        });
+        if (applied.kind === "conflict") {
+          await this.abortAttemptSafely(originalHead);
+          return { status: "conflict" };
+        }
+      }
     } catch (error: unknown) {
       await this.abortAttemptSafely(originalHead);
-      if (isGitConflict(error)) return { status: "conflict" };
       throw createTemplateSyncOperationError(
         "patch_failed",
         "Unable to apply the template changes to the student repository.",
@@ -183,13 +196,12 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
       );
     }
 
+    let commitSha: ObjectId;
     try {
-      await this.git(this.options.studentDirectory, [
-        "commit",
-        "--allow-empty",
-        "-m",
-        TEMPLATE_UPDATE_MESSAGE
-      ]);
+      commitSha = await this.options.studentWorkspace.commit({
+        message: TEMPLATE_UPDATE_MESSAGE,
+        allowEmpty: true
+      });
     } catch (error: unknown) {
       await this.abortAttemptSafely(originalHead);
       throw createTemplateSyncOperationError(
@@ -199,17 +211,14 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
       );
     }
 
-    const commitSha = await withFailureStage(
-      "commit_failed",
-      "Unable to read the template-update commit.",
-      async () => await this.getDefaultBranchCommitSha()
-    );
     try {
-      await this.git(this.options.studentDirectory, [
-        "push",
-        "origin",
-        `HEAD:${input.studentRepository.defaultBranch}`
-      ]);
+      await this.options.studentWorkspace.pushBranch({
+        remote: requireOrigin(),
+        branch: requireBranch(input.studentRepository.defaultBranch),
+        ...(this.options.authentication === undefined
+          ? {}
+          : { authentication: this.options.authentication })
+      });
       return { status: "clean", commitSha };
     } catch (error: unknown) {
       await this.abortAttemptSafely(originalHead);
@@ -223,58 +232,75 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
 
   async prepareConflictBranch(input: PrepareConflictBranchInput): Promise<void> {
     await this.ensureCleanStudentWorktree();
-
+    const originalHead = await this.options.studentWorkspace.resolveHead();
+    let restoreHead = originalHead;
     let operationError: Error | undefined;
     try {
       await withFailureStage(
         "student_checkout_failed",
         "Unable to prepare the student repository baseline.",
         async () => {
-          await this.git(this.options.studentDirectory, [
-            "switch",
-            "--detach",
+          const studentBase = await this.resolveCommit(
+            this.options.studentWorkspace,
             input.studentBaseCommitSha
-          ]);
-          await this.git(this.options.studentDirectory, ["switch", "-c", input.branchName]);
+          );
+          await this.resolveCommit(this.options.studentWorkspace, input.studentCurrentCommitSha);
+          await this.options.studentWorkspace.checkoutDetached(this.exactRevision(studentBase));
+          restoreHead = studentBase;
+          await this.options.studentWorkspace.createBranch(requireBranch(input.branchName));
         }
       );
-      const patch = await this.templatePatch(
-        input.templateBaseCommitSha,
-        input.templateTargetCommitSha
-      );
-      if (patch.length > 0)
-        await withFailureStage(
-          "patch_failed",
-          "Unable to apply the template changes to the conflict branch.",
-          () => this.applyThreeWayPatch(patch)
-        );
       await withFailureStage(
+        "patch_failed",
+        "Unable to apply the template changes to the conflict branch.",
+        async () => {
+          const [base, target] = await Promise.all([
+            this.resolveCommit(this.options.templateWorkspace, input.templateBaseCommitSha),
+            this.resolveCommit(this.options.templateWorkspace, input.templateTargetCommitSha)
+          ]);
+          const patch = await this.options.templateWorkspace.diff({ base, target });
+          if (patch.patch.length > 0) {
+            const applied = await this.options.studentWorkspace.applyPatchToIndex({
+              patch: patch.patch
+            });
+            if (applied.kind === "conflict")
+              throw new Error("The template patch conflicted with its recorded baseline.");
+          }
+        }
+      );
+      restoreHead = await withFailureStage(
         "commit_failed",
         "Unable to commit the template update.",
         async () =>
-          await this.git(this.options.studentDirectory, [
-            "commit",
-            "--allow-empty",
-            "-m",
-            TEMPLATE_UPDATE_MESSAGE
-          ])
+          await this.options.studentWorkspace.commit({
+            message: TEMPLATE_UPDATE_MESSAGE,
+            allowEmpty: true
+          })
       );
       await withFailureStage(
         "push_failed",
         "Push to student repository was rejected.",
         async () =>
-          await this.git(this.options.studentDirectory, [
-            "push",
-            "origin",
-            `HEAD:${input.branchName}`
-          ])
+          await this.options.studentWorkspace.pushBranch({
+            remote: requireOrigin(),
+            branch: requireBranch(input.branchName),
+            ...(this.options.authentication === undefined
+              ? {}
+              : { authentication: this.options.authentication })
+          })
       );
     } catch (error: unknown) {
       operationError = error instanceof Error ? error : new Error(String(error));
     }
 
     try {
-      await this.restoreDefaultBranch(input.studentRepository.defaultBranch);
+      await this.options.studentWorkspace.restoreDisposableAttempt({
+        expectedHead: restoreHead,
+        removeUntracked: true
+      });
+      await this.options.studentWorkspace.switchBranch(
+        requireBranch(input.studentRepository.defaultBranch)
+      );
     } catch (error: unknown) {
       if (operationError === undefined) {
         operationError = createTemplateSyncOperationError(
@@ -289,121 +315,48 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
   }
 
   async deleteRemoteBranch(_repository: StudentRepositoryRef, branchName: string): Promise<void> {
+    const branch = requireBranch(branchName);
     await withFailureStage(
       "push_failed",
       "Unable to delete the template-update branch.",
-      async () =>
-        this.git(this.options.studentDirectory, ["push", "origin", "--delete", branchName])
+      async () => {
+        await this.options.studentWorkspace.deleteRemoteBranch({
+          remote: requireOrigin(),
+          branch,
+          ...(this.options.authentication === undefined
+            ? {}
+            : { authentication: this.options.authentication })
+        });
+      }
     );
-    await this.git(this.options.studentDirectory, ["branch", "-D", branchName]);
+    await this.options.studentWorkspace.deleteLocalBranch({ branch, force: true });
   }
 
   private async ensureCleanStudentWorktree(): Promise<void> {
-    const { stdout } = await this.git(this.options.studentDirectory, ["status", "--porcelain"]);
-    if (stdout.length > 0) throw new Error("Student repository worktree is not clean.");
+    if (!isClean(await this.options.studentWorkspace.inspect()))
+      throw new Error("Student repository worktree is not clean.");
   }
 
-  private async getTreeState(directory: string, commitSha: string): Promise<TemplateTree> {
-    const { stdout } = await this.git(directory, ["ls-tree", "-r", "-z", commitSha]);
-    return Object.fromEntries(
-      stdout
-        .split("\0")
-        .filter((record) => record.length > 0)
-        .map((record) => {
-          const separator = record.indexOf("\t");
-          return [record.slice(separator + 1), record.slice(0, separator)];
-        })
-    );
+  private async resolveCommit(workspace: GitWorkspacePreparer, value: string): Promise<ObjectId> {
+    const revision = createExactCommitRevision(value);
+    if (revision === null) throw new Error("The Git commit identifier is invalid.");
+    return await workspace.resolveRevision(revision);
   }
 
-  private async getFirstParentHistory(
-    directory: string,
-    revision: string
-  ): Promise<{ commitSha: string; treeSha: string }[]> {
-    const { stdout } = await this.git(directory, [
-      "log",
-      "--first-parent",
-      "--format=%H %T",
-      revision
-    ]);
-    return stdout
-      .trim()
-      .split("\n")
-      .filter((line) => line.length > 0)
-      .map((line) => {
-        const separator = line.indexOf(" ");
-        return { commitSha: line.slice(0, separator), treeSha: line.slice(separator + 1) };
-      });
+  private exactRevision(commit: ObjectId) {
+    const revision = createExactCommitRevision(commit);
+    if (revision === null) throw new Error("The Git commit identifier is invalid.");
+    return revision;
   }
 
-  private async templatePatch(base: string, target: string): Promise<string> {
-    return await withFailureStage(
-      "patch_failed",
-      "Unable to compute the template changes.",
-      async () => {
-        const { stdout } = await this.git(this.options.templateDirectory, [
-          "diff",
-          "--binary",
-          base,
-          target
-        ]);
-        return stdout;
-      }
-    );
-  }
-
-  private async applyThreeWayPatch(patch: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const process = spawn(GIT, [
-        "-C",
-        this.options.studentDirectory,
-        "apply",
-        "--3way",
-        "--index",
-        "-"
-      ]);
-      let stderr = "";
-      process.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
-      process.on("error", reject);
-      process.on("close", (code) => {
-        if (code === 0) resolve();
-        else
-          reject(
-            new Error(stderr || `git apply exited with ${String(code ?? "an unknown")} status.`)
-          );
-      });
-      process.stdin.end(patch);
-    });
-  }
-
-  private async abortAttempt(originalHead: string): Promise<void> {
-    await this.git(this.options.studentDirectory, ["reset", "--hard", originalHead]);
-    await this.git(this.options.studentDirectory, ["clean", "-fd"]);
-  }
-
-  private async abortAttemptSafely(originalHead: string): Promise<void> {
+  private async abortAttemptSafely(originalHead: ObjectId): Promise<void> {
     try {
-      await this.abortAttempt(originalHead);
+      await this.options.studentWorkspace.restoreDisposableAttempt({
+        expectedHead: originalHead,
+        removeUntracked: true
+      });
     } catch {
       // Cleanup must not replace the primary classified failure.
     }
   }
-
-  private async restoreDefaultBranch(defaultBranch: string): Promise<void> {
-    await this.git(this.options.studentDirectory, ["reset", "--hard"]);
-    await this.git(this.options.studentDirectory, ["clean", "-fd"]);
-    await this.git(this.options.studentDirectory, ["switch", defaultBranch]);
-  }
-
-  private async git(directory: string, args: string[]) {
-    return execFile(GIT, ["-C", directory, ...args], { maxBuffer: MAX_GIT_COMMAND_OUTPUT_BYTES });
-  }
 }
-
-const isGitConflict = (error: unknown): boolean =>
-  error instanceof Error &&
-  (error.message.includes("patch does not apply") ||
-    error.message.includes("with conflicts") ||
-    error.message.includes("does not match index"));

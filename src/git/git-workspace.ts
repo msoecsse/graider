@@ -34,7 +34,15 @@ export type GitOperationName =
   | "branch"
   | "resolve_head"
   | "resolve_revision"
-  | "list_commits";
+  | "resolve_tree"
+  | "list_tree"
+  | "diff"
+  | "apply_patch"
+  | "restore_disposable_attempt"
+  | "delete_remote_branch"
+  | "list_commits"
+  | "list_first_parent_history"
+  | "resolve_remote_branch";
 
 export type GitErrorKind =
   | "engine_unavailable"
@@ -81,6 +89,35 @@ export interface GitCommitSummary {
   readonly committedAt: string;
   readonly subject: string;
 }
+
+export interface GitCommitTreeSummary {
+  readonly commit: ObjectId;
+  readonly tree: ObjectId;
+}
+
+export type GitTreeObjectType = "blob" | "tree" | "commit" | "tag";
+
+export interface GitTreeEntry {
+  readonly path: RelativeGitPath;
+  readonly objectId: ObjectId;
+  readonly mode: string;
+  readonly objectType: GitTreeObjectType;
+}
+
+export interface RevisionDiffRequest {
+  readonly base: ObjectId;
+  readonly target: ObjectId;
+}
+
+export interface RevisionDiff {
+  readonly patch: Uint8Array;
+}
+
+export interface ThreeWayPatchRequest {
+  readonly patch: Uint8Array;
+}
+
+export type PatchApplyResult = { readonly kind: "applied" } | { readonly kind: "conflict" };
 
 export type PathChangeKind =
   | "added"
@@ -148,13 +185,20 @@ export interface GitWorkspaceReader {
   remoteUrl(remote: RemoteName): Promise<string | null>;
   resolveHead(): Promise<ObjectId>;
   resolveRevision(revision: ExactCommitRevision): Promise<ObjectId>;
+  resolveTree(commit: ObjectId): Promise<ObjectId>;
+  listTree(commit: ObjectId): Promise<readonly GitTreeEntry[]>;
   listCommits(request: CommitHistoryRequest): Promise<readonly GitCommitSummary[]>;
+  listFirstParentCommitTrees(anchor: ObjectId): Promise<readonly GitCommitTreeSummary[]>;
+  resolveRemoteBranch(remote: RemoteName, branch: BranchName): Promise<ObjectId>;
+  diff(request: RevisionDiffRequest): Promise<RevisionDiff>;
 }
 
 export interface GitWorkspaceWriter extends GitWorkspaceReader {
   stage(paths: readonly RelativeGitPath[]): Promise<void>;
+  applyPatchToIndex(request: ThreeWayPatchRequest): Promise<PatchApplyResult>;
   commit(request: CommitRequest): Promise<ObjectId>;
   pushUpstream(request?: PushUpstreamRequest): Promise<PushResult>;
+  pushBranch(request: PushBranchRequest): Promise<PushResult>;
 }
 
 export interface CreateOrResetBranchRequest {
@@ -169,10 +213,32 @@ export interface GitWorkspacePreparer extends GitWorkspaceWriter {
   remoteDefaultBranch(remote: RemoteName): Promise<BranchName | null>;
   checkoutDetached(revision: ExactCommitRevision): Promise<ObjectId>;
   createOrResetBranch(request: CreateOrResetBranchRequest): Promise<ObjectId>;
+  createBranch(branch: BranchName): Promise<ObjectId>;
+  switchBranch(branch: BranchName): Promise<ObjectId>;
+  restoreDisposableAttempt(request: DisposableAttemptRestorationRequest): Promise<void>;
+  deleteRemoteBranch(request: DeleteRemoteBranchRequest): Promise<void>;
+  deleteLocalBranch(request: DeleteLocalBranchRequest): Promise<void>;
+}
+
+export interface DisposableAttemptRestorationRequest {
+  readonly expectedHead: ObjectId;
+  readonly removeUntracked: true;
+}
+
+export interface DeleteRemoteBranchRequest {
+  readonly remote: RemoteName;
+  readonly branch: BranchName;
+  readonly authentication?: GitAuthenticationContext;
+}
+
+export interface DeleteLocalBranchRequest {
+  readonly branch: BranchName;
+  readonly force: true;
 }
 
 export interface CommitRequest {
   readonly message: string;
+  readonly allowEmpty?: boolean;
 }
 
 export interface PushResult {
@@ -180,6 +246,12 @@ export interface PushResult {
 }
 
 export interface PushUpstreamRequest {
+  readonly authentication?: GitAuthenticationContext;
+}
+
+export interface PushBranchRequest {
+  readonly remote: RemoteName;
+  readonly branch: BranchName;
   readonly authentication?: GitAuthenticationContext;
 }
 
