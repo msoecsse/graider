@@ -224,6 +224,8 @@ describe("Dugite bundled Git executor proof", () => {
 
     await git(noCheckoutClone, ["checkout", "-B", "main", "refs/remotes/origin/main", "--"]);
     await git(noCheckoutClone, ["checkout", "--detach", base]);
+    await git(noCheckoutClone, ["config", "user.email", "faculty@example.test"]);
+    await git(noCheckoutClone, ["config", "user.name", "Faculty"]);
     await git(noCheckoutClone, ["checkout", "-b", "proof branch", "--"]).then(
       () => {
         throw new Error("Git should reject a branch containing a space.");

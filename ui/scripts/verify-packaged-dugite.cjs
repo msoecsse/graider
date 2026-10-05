@@ -294,6 +294,8 @@ const main = async () => {
 
     await git(noCheckoutClone, ["checkout", "-B", "main", "refs/remotes/origin/main", "--"]);
     await git(noCheckoutClone, ["checkout", "--detach", base]);
+    await git(noCheckoutClone, ["config", "user.email", "faculty@example.test"]);
+    await git(noCheckoutClone, ["config", "user.name", "Faculty"]);
     assert(
       (await gitResult(noCheckoutClone, ["symbolic-ref", "-q", "HEAD"])).exitCode === 1,
       "HEAD is not detached."
