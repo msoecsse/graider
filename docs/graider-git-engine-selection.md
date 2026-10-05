@@ -1,7 +1,7 @@
 # Graider bundled Git engine selection
 
-**Status:** Selected; Phase 1.2B-1 deterministic packaged proof is implemented, production cutover
-has not begun
+**Status:** Selected; Phase 1.2B-1 deterministic packaged proof passed on native macOS arm64 and
+Windows x64, production cutover has not begun
 
 **Decision date:** 2026-10-04
 
@@ -64,7 +64,8 @@ to `node_modules/dugite/git`. See its versioned
 [`embedded-git.json`](https://github.com/desktop/dugite/blob/v3.2.3/script/embedded-git.json).
 
 The 3.2.3 manifest includes `darwin-arm64` and `win32-x64` archives from dugite-native 2.53.0-4.
-That release carries Git 2.53.0, Git for Windows 2.53.0.windows.1, and Git Credential Manager 2.7.0.
+That release carries Git 2.53.0, Git for Windows 2.53.0.windows.4, Git LFS 3.7.1, and Git
+Credential Manager 2.9.0.
 The toolchain also bundles Git LFS. Updating Dugite updates a versioned, checksummed Git payload;
 Graider must monitor both Dugite and dugite-native/Git security releases.
 
@@ -318,12 +319,12 @@ shipping canonical Git, preserves the exact mechanics on which template synchron
 fits the current operation-scoped credential environment, and permits a narrow executor-layer
 migration rather than a second Git implementation.
 
-The following are acceptance work, not completed claims:
+The following records completed and remaining acceptance work:
 
 1. **Packaged macOS arm64:** deterministic packaged proof is complete in Phase 1.2B-1; credentialed
    private-GitHub transport remains for Phase 1.2B-2.
-2. **Packaged Windows x64:** Phase 1.2B-1 provides the native Windows workflow; acceptance remains
-   pending until that GitHub Actions run is green.
+2. **Packaged Windows x64:** deterministic packaged proof is complete in Phase 1.2B-1; credentialed
+   private-GitHub transport remains for Phase 1.2B-2.
 3. **Private GitHub:** Phase 1.2B-2 must run the explicitly gated sandbox proof for clone, fetch, non-force push,
    ref verification, and managed proof-branch deletion on both packaged platforms. Confirm no
    helper/prompt fallback and inspect argv, config, remote URL, errors, and logs for the distinctive
@@ -410,7 +411,15 @@ runs on `windows-latest` with Node 24, installs both dependency graphs on that h
 Phase 1.2A spike, typechecks/builds, packages the x64 directory application, runs the same packaged
 Electron-as-Node proof, and independently checks `git.exe` for the PE signature and machine type
 `0x8664`. GitHub Actions checkout may use runner Git; candidate repository operations cannot.
-Windows packaged acceptance is not claimed until this workflow exits green.
+
+On 2026-10-05, native Windows x64
+[workflow run 37304994199](https://github.com/msoecsse/graider/actions/runs/37304994199) exited
+green. The packaged process reported Git 2.53.0.windows.4 at
+`app.asar.unpacked/node_modules/dugite/git/cmd/git.exe`; the independent inspection confirmed its PE
+x64 machine type. The same proof passed empty-initial-`PATH` repository mechanics, clone/fetch/
+status/commit, local push/ref deletion, binary diff, clean and conflicting three-way apply, the
+byte-exact binary update, output bounding, and fake-auth isolation. This establishes deterministic
+Windows x64 packaged acceptance for Slice 1.2B-1.
 
 ### Measured distribution cost
 
@@ -420,17 +429,21 @@ directory measured 76,668 KiB and `app.asar` measured 148,272 KiB. Compared with
 approximately 407 MiB local-app measurement, the total artifact is approximately 115 MiB larger;
 that comparison is approximate because the historical baseline was not rebuilt from the same
 dependency state. The installed UI `node_modules/dugite/git` source tree measures 151,656 KiB.
-The native Windows workflow should record its unpacked directory size when a stable reporting
-surface is added; size is not an acceptance gate in this slice.
+
+The native Windows x64 unpacked directory artifact measured 641,796,956 bytes (about 612.1 MiB) in
+the green workflow. A same-dependency-state pre-Dugite Windows artifact was not retained, so no
+defensible Windows-specific increase is claimed. Size is recorded here as distribution evidence,
+not optimized in this slice.
 
 ### Packaged notices and Phase 3 follow-up
 
 This is an engineering inventory, not a legal conclusion. The actual macOS artifact contains
 Dugite's MIT `LICENSE` in `app.asar` and GCM's `NOTICE` beside the unpacked helper. That notice names
-and includes MIT terms for GitHub/VisualStudio and dotnet/runtime material. The selected payload
-contains Git 2.53.0, Git LFS, GCM, its .NET runtime assemblies, and other Git helper/runtime files,
-but it does not itself contain standalone Git `COPYING`, Git LFS `LICENSE.md`, or a standalone GCM
-`LICENSE` file.
+and includes MIT terms for GitHub/VisualStudio and dotnet/runtime material. The native Windows proof
+also inspected the actual artifact and confirmed the packaged Dugite metadata plus Git LFS, GCM,
+and that helper `NOTICE`. The selected payload contains Git 2.53.0, Git LFS 3.7.1, GCM 2.9.0, its
+.NET runtime assemblies, and other Git helper/runtime files, but it does not itself contain
+standalone Git `COPYING`, Git LFS `LICENSE.md`, or a standalone GCM `LICENSE` file.
 
 Before a public Stable release, Phase 3 must assemble and package the exact Dugite, Git, Git LFS,
 GCM, .NET/runtime, and other applicable third-party license/notice texts; retain version/source and
