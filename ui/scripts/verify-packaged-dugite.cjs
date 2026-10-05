@@ -16,7 +16,7 @@ const PE_X64_MACHINE_TYPE = Number.parseInt("8664", 16);
 const EXPECTED_VERSION = "3.2.3";
 const EXPECTED_GIT_VERSIONS = {
   darwin: "git version 2.53.0",
-  win32: "git version 2.53.0.windows.1"
+  win32: "git version 2.53.0.windows.4"
 };
 const EXPECTED_HOSTS = {
   darwin: "arm64",
