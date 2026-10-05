@@ -8,7 +8,7 @@ jobs:
     name: Native macOS arm64 private GitHub proof
     # macos-14 is GitHub's Apple Silicon hosted runner label. The assertion below
     # fails clearly if this repository/account is not assigned an arm64 host.
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Check out repository
