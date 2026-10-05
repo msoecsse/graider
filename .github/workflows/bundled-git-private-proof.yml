@@ -1,0 +1,112 @@
+name: Bundled Git private GitHub proof
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-arm64-live-private-proof:
+    name: Native macOS arm64 private GitHub proof
+    # macos-14 is GitHub's Apple Silicon hosted runner label. The assertion below
+    # fails clearly if this repository/account is not assigned an arm64 host.
+    runs-on: macos-15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install native macOS UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Validate native host and live-proof configuration
+        env:
+          GRAIDER_GITHUB_TOKEN: ${{ secrets.GRAIDER_LIVE_DUGITE_GITHUB_TOKEN }}
+          GRAIDER_LIVE_DUGITE_REPOSITORY: ${{ vars.GRAIDER_LIVE_DUGITE_REPOSITORY }}
+          GRAIDER_LIVE_DUGITE_BRANCH_PREFIX: ${{ vars.GRAIDER_LIVE_DUGITE_BRANCH_PREFIX }}
+        run: |
+          node -e "if (process.platform !== 'darwin' || process.arch !== 'arm64') { throw new Error('A GitHub-hosted native macOS arm64 runner is required; Intel macOS is not a substitute.'); }"
+          missing=0
+          for key in GRAIDER_GITHUB_TOKEN GRAIDER_LIVE_DUGITE_REPOSITORY GRAIDER_LIVE_DUGITE_BRANCH_PREFIX; do
+            if [ -z "${!key}" ]; then
+              echo "Missing required live-proof configuration: $key" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Package native macOS arm64 proof app
+        run: npm --prefix ui run package:git-proof:mac
+
+      - name: Run packaged private GitHub proof
+        env:
+          GRAIDER_RUN_LIVE_GITHUB_TESTS: "true"
+          GRAIDER_RUN_LIVE_DUGITE_GIT_TESTS: "true"
+          GRAIDER_RUN_LIVE_DESTRUCTIVE_TESTS: "true"
+          GRAIDER_GITHUB_TOKEN: ${{ secrets.GRAIDER_LIVE_DUGITE_GITHUB_TOKEN }}
+          GRAIDER_LIVE_DUGITE_REPOSITORY: ${{ vars.GRAIDER_LIVE_DUGITE_REPOSITORY }}
+          GRAIDER_LIVE_DUGITE_BRANCH_PREFIX: ${{ vars.GRAIDER_LIVE_DUGITE_BRANCH_PREFIX }}
+        run: npm --prefix ui run verify:git-proof:mac -- --live-private
+
+  windows-x64-live-private-proof:
+    name: Native Windows x64 private GitHub proof
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install native Windows UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Validate native host and live-proof configuration
+        shell: pwsh
+        env:
+          GRAIDER_GITHUB_TOKEN: ${{ secrets.GRAIDER_LIVE_DUGITE_GITHUB_TOKEN }}
+          GRAIDER_LIVE_DUGITE_REPOSITORY: ${{ vars.GRAIDER_LIVE_DUGITE_REPOSITORY }}
+          GRAIDER_LIVE_DUGITE_BRANCH_PREFIX: ${{ vars.GRAIDER_LIVE_DUGITE_BRANCH_PREFIX }}
+        run: |
+          node -e "if (process.platform !== 'win32' || process.arch !== 'x64') { throw new Error('A GitHub-hosted native Windows x64 runner is required.'); }"
+          $missing = $false
+          foreach ($key in 'GRAIDER_GITHUB_TOKEN', 'GRAIDER_LIVE_DUGITE_REPOSITORY', 'GRAIDER_LIVE_DUGITE_BRANCH_PREFIX') {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($key))) {
+              Write-Error "Missing required live-proof configuration: $key"
+              $missing = $true
+            }
+          }
+          if ($missing) { exit 1 }
+
+      - name: Package native Windows x64 proof app
+        run: npm --prefix ui run package:git-proof:win
+
+      - name: Run packaged private GitHub proof
+        env:
+          GRAIDER_RUN_LIVE_GITHUB_TESTS: "true"
+          GRAIDER_RUN_LIVE_DUGITE_GIT_TESTS: "true"
+          GRAIDER_RUN_LIVE_DESTRUCTIVE_TESTS: "true"
+          GRAIDER_GITHUB_TOKEN: ${{ secrets.GRAIDER_LIVE_DUGITE_GITHUB_TOKEN }}
+          GRAIDER_LIVE_DUGITE_REPOSITORY: ${{ vars.GRAIDER_LIVE_DUGITE_REPOSITORY }}
+          GRAIDER_LIVE_DUGITE_BRANCH_PREFIX: ${{ vars.GRAIDER_LIVE_DUGITE_BRANCH_PREFIX }}
+        run: npm --prefix ui run verify:git-proof:win -- --live-private
