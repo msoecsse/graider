@@ -460,10 +460,11 @@ does not establish nested signing behavior.
 
 The packaged harness accepts `--live-private`, but it refuses to run unless all documented GitHub,
 Dugite, and destructive gates plus token, HTTPS sandbox repository, and required branch prefix are
-present. That mode uses a unique non-default proof branch, non-force push, operation-scoped auth,
-fetch/ref verification, and `finally` deletion. It has not been executed here. Phase 1.2B-2 must run
-it against a dedicated private sandbox on packaged macOS arm64 and packaged Windows x64 and inspect
-safe errors/logs for credential leakage. It must not use the Graider repository as the sandbox.
+present. The manual `Bundled Git private GitHub proof` workflow now wires that packaged live proof
+on native macOS arm64 and Windows x64. Results remain pending until both native jobs run
+successfully against a dedicated private sandbox. That mode uses a unique non-default proof branch,
+non-force push, operation-scoped auth, fetch/ref verification, and `finally` deletion. It must not
+use the Graider repository as the sandbox.
 
 Production still constructs `SystemGitWorkspace`; its availability behavior, diagnostics, semantic
 contract, and sole-production-executor architecture test are unchanged. Production cutover remains

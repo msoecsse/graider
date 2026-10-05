@@ -46,8 +46,26 @@ Signing, installers, and notarization remain Phase 3 work.
 
 ## Phase 1.2B-2 private-GitHub live proof
 
-Use a dedicated private sandbox repository, never a course or production repository. Extend the
-existing `tests/live` convention with these gates:
+The manual `Bundled Git private GitHub proof` workflow
+(`.github/workflows/bundled-git-private-proof.yml`) runs the existing packaged verifier on native
+macOS arm64 and Windows x64. Dispatch it from the Actions tab only after configuring a dedicated
+private sandbox repository; never use Graider itself, a course repository, or a student repository.
+
+Configure these repository settings before dispatching:
+
+```text
+secret: GRAIDER_LIVE_DUGITE_GITHUB_TOKEN
+variables: GRAIDER_LIVE_DUGITE_REPOSITORY
+           GRAIDER_LIVE_DUGITE_BRANCH_PREFIX
+```
+
+The token is mapped inside the workflow to `GRAIDER_GITHUB_TOKEN`. Set the repository variable to
+the explicit HTTPS URL of the dedicated private sandbox and use a dedicated prefix such as
+`graider-git-engine-proof/`. The workflow fails before packaging or GitHub mutation when any of
+these settings is unavailable. Use **Actions → Bundled Git private GitHub proof → Run workflow** to
+dispatch it; a successful run must leave no generated proof branch behind.
+
+The packaged verifier requires these gates:
 
 ```text
 GRAIDER_RUN_LIVE_GITHUB_TESTS=true
