@@ -1,6 +1,7 @@
 # Graider bundled Git engine selection
 
-**Status:** Selected for Phase 1.2B; production cutover has not begun
+**Status:** Selected; Phase 1.2B-1 deterministic packaged proof is implemented, production cutover
+has not begun
 
 **Decision date:** 2026-10-04
 
@@ -73,10 +74,11 @@ the executable reports Git 2.53.0. All candidate operations passed an empty `PAT
 successfully. The spawned executable's real path matched the resolved packaged binary. This is a
 bundled Git executable, not a faculty/system-installed Git executable.
 
-The root package pins Dugite as a `devDependency` and allows its install script solely because this
-slice is an isolated proof. Phase 1.2B must move it to the Electron application's runtime dependency
-graph when production cutover begins. Eliminated candidates were not added to the repository; the
-isomorphic-git probe used an isolated temporary install.
+The root package pins Dugite as a `devDependency` and allows its install script for the Phase 1.2A
+spike. Phase 1.2B-1 also pins the same version in the Electron application's runtime dependency
+graph solely so the packaged proof can load the real application dependency. Production remains on
+`SystemGitWorkspace`. Eliminated candidates were not added to the repository; the isomorphic-git
+probe used an isolated temporary install.
 
 ## 4. Executable semantic evidence
 
@@ -303,9 +305,10 @@ The current Electron Builder configuration will **not** package Dugite correctly
    asset-staging mechanism. The current macOS-to-Windows portable cross-build cannot simply reuse a
    macOS-installed `node_modules/dugite/git` directory.
 
-No production packaging configuration is changed in this slice.
+No production packaging configuration was changed during Phase 1.2A. Phase 1.2B-1 changes and
+packaged evidence are recorded below.
 
-## 12. Decision and remaining proof
+## 12. Decision and remaining proof at selection time
 
 ## Selected
 
@@ -317,14 +320,11 @@ migration rather than a second Git implementation.
 
 The following are acceptance work, not completed claims:
 
-1. **Packaged macOS arm64:** move Dugite into the Electron runtime graph, add the explicit ASAR
-   unpack rule, package/sign helpers, launch the packaged app, and rerun embedded-path, empty-PATH,
-   binary diff/apply, and private-GitHub operations. The local native arm64 proof is complete; the
-   packaged app proof is not.
-2. **Packaged Windows x64:** install on native Windows x64, run the shared spike including PE machine
-   `0x8664`, package with the Windows payload, verify `app.asar.unpacked` resolution/signing, and run
-   empty-PATH clone/status/commit/binary diff/apply/push/delete in paths containing spaces.
-3. **Private GitHub:** run the explicitly gated sandbox proof for clone, fetch, non-force push,
+1. **Packaged macOS arm64:** deterministic packaged proof is complete in Phase 1.2B-1; credentialed
+   private-GitHub transport remains for Phase 1.2B-2.
+2. **Packaged Windows x64:** Phase 1.2B-1 provides the native Windows workflow; acceptance remains
+   pending until that GitHub Actions run is green.
+3. **Private GitHub:** Phase 1.2B-2 must run the explicitly gated sandbox proof for clone, fetch, non-force push,
    ref verification, and managed proof-branch deletion on both packaged platforms. Confirm no
    helper/prompt fallback and inspect argv, config, remote URL, errors, and logs for the distinctive
    test token.
@@ -339,3 +339,119 @@ availability checks and diagnostics are unchanged, and the Phase 1.1 architectur
 force. Phase 1.2B should decide whether to inject a bundled executor into the existing semantic
 implementation or rename the implementation more neutrally; this slice does not introduce a
 production `DugiteGitWorkspace`.
+
+## 13. Phase 1.2B-1 deterministic packaged proof
+
+### Runtime dependency and packaged layout
+
+`ui/package.json` now pins `dugite` exactly at 3.2.3 as a runtime dependency and authorizes only
+`dugite@3.2.3` for its postinstall download. The root 3.2.3 development dependency remains for the
+independent Phase 1.2A spike. There is no workspace restructuring or dependency-graph
+deduplication.
+
+Electron Builder retains `dist-graider-cli/**/*` in `asarUnpack` and additionally unpacks
+`node_modules/dugite/git/**/*`. In the native macOS arm64 artifact the JS entry point, package
+metadata, and Dugite MIT `LICENSE` resolve beneath:
+
+```text
+Graider.app/Contents/Resources/app.asar/node_modules/dugite/
+```
+
+The selected executable resolves to:
+
+```text
+Graider.app/Contents/Resources/app.asar.unpacked/node_modules/dugite/git/bin/git
+```
+
+The unpacked payload also contains `git-lfs`, `git-credential-manager`, the Git remote helpers, and
+GCM's `NOTICE`. The proof canonicalizes the payload and executable paths and rejects resolution
+outside that exact unpacked tree.
+
+### Reusable packaged-runtime proof
+
+`ui/scripts/run-packaged-dugite-proof.cjs` locates the normal packaged application executable and
+launches it with `ELECTRON_RUN_AS_NODE=1`. The external proof script then uses
+`createRequire(<resources>/app.asar/package.json)`; it does not load Dugite from either root or UI
+development `node_modules`. Every candidate operation starts from `PATH=""`, removes inherited
+`LOCAL_GIT_DIRECTORY` and `GIT_EXEC_PATH`, invokes Dugite's packaged API, and verifies the spawned
+file is the same canonical packaged executable returned by `resolveGitBinary()`.
+
+The proof fails closed and emits one safe success line beginning with
+`PACKAGED_DUGITE_PROOF_OK`. It verifies wrapper/package layout, Git/Git LFS/GCM helper presence,
+native executable headers, the 10 MiB configured Buffer-output bound plus a deliberately exceeded
+four-byte bound, and paths with spaces. It covers init, identity configuration, normal and
+no-checkout clone, status, HEAD, detached checkout, branch create/reset/switch, normal and
+allow-empty commit, recursive tree/first-parent log, fetch, upstream and explicit branch push,
+remote-ref verification/deletion, hard reset, and untracked cleanup using only packaged Git.
+
+The same packaged process generates a Buffer with
+`diff --binary --full-index <base> <target> --`, verifies text addition/deletion/change and the
+canonical binary-patch marker, and passes that Buffer directly to `apply --3way --index -`. The
+clean case preserves an unrelated student edit, applies the addition/deletion and byte-exact binary
+update, stages every expected path, and leaves no unstaged change. The conflict case exposes index
+stages 1/2/3 and porcelain `u` state, then restores cleanly.
+
+The mechanical authentication proof supplies a distinctive fake GitHub header through
+`GIT_CONFIG_COUNT`, indexed key/value variables, an empty `credential.helper`, and
+`GIT_TERMINAL_PROMPT=0`. The value is observed only in that child, never enters argv, does not alter
+the parent environment, and is absent from repository config and the clean remote URL. Normal proof
+runs do not contact GitHub.
+
+### Native platform results
+
+On 2026-10-04 a native `darwin/arm64` host packaged the unsigned directory application with
+Electron 44.1.0 and ran the complete proof successfully. The proof inspected a Mach-O 64-bit Git
+executable with arm64 CPU type `0x0100000c` and reported Git 2.53.0 at the unpacked path above. This
+establishes the deterministic macOS arm64 packaged acceptance for Slice 1.2B-1; it is not a signing
+or notarization claim.
+
+`.github/workflows/bundled-git-proof.yml` provides the isolated native Windows acceptance job. It
+runs on `windows-latest` with Node 24, installs both dependency graphs on that host, reruns the root
+Phase 1.2A spike, typechecks/builds, packages the x64 directory application, runs the same packaged
+Electron-as-Node proof, and independently checks `git.exe` for the PE signature and machine type
+`0x8664`. GitHub Actions checkout may use runner Git; candidate repository operations cannot.
+Windows packaged acceptance is not claimed until this workflow exits green.
+
+### Measured distribution cost
+
+The native macOS directory artifact measured 534,892 KiB (about 522.4 MiB). Its unpacked Dugite Git
+tree measured 74,964 KiB allocated in the packaged application; the complete unpacked resources
+directory measured 76,668 KiB and `app.asar` measured 148,272 KiB. Compared with the earlier
+approximately 407 MiB local-app measurement, the total artifact is approximately 115 MiB larger;
+that comparison is approximate because the historical baseline was not rebuilt from the same
+dependency state. The installed UI `node_modules/dugite/git` source tree measures 151,656 KiB.
+The native Windows workflow should record its unpacked directory size when a stable reporting
+surface is added; size is not an acceptance gate in this slice.
+
+### Packaged notices and Phase 3 follow-up
+
+This is an engineering inventory, not a legal conclusion. The actual macOS artifact contains
+Dugite's MIT `LICENSE` in `app.asar` and GCM's `NOTICE` beside the unpacked helper. That notice names
+and includes MIT terms for GitHub/VisualStudio and dotnet/runtime material. The selected payload
+contains Git 2.53.0, Git LFS, GCM, its .NET runtime assemblies, and other Git helper/runtime files,
+but it does not itself contain standalone Git `COPYING`, Git LFS `LICENSE.md`, or a standalone GCM
+`LICENSE` file.
+
+Before a public Stable release, Phase 3 must assemble and package the exact Dugite, Git, Git LFS,
+GCM, .NET/runtime, and other applicable third-party license/notice texts; retain version/source and
+checksum provenance for each native archive; and implement the reviewed corresponding-source or
+source-offer release mechanism required for the GPL-covered payload. Release validation must inspect
+the final installers rather than relying on npm metadata.
+
+Phase 3 signing/notarization must also enumerate nested unpacked executables and libraries before
+signing the outer application. At minimum this includes Git, Git LFS, GCM, Git remote/helper
+executables, and GCM native/.NET runtime libraries on macOS and Windows. The present unsigned proof
+does not establish nested signing behavior.
+
+### Remaining Phase 1.2B-2 work
+
+The packaged harness accepts `--live-private`, but it refuses to run unless all documented GitHub,
+Dugite, and destructive gates plus token, HTTPS sandbox repository, and required branch prefix are
+present. That mode uses a unique non-default proof branch, non-force push, operation-scoped auth,
+fetch/ref verification, and `finally` deletion. It has not been executed here. Phase 1.2B-2 must run
+it against a dedicated private sandbox on packaged macOS arm64 and packaged Windows x64 and inspect
+safe errors/logs for credential leakage. It must not use the Graider repository as the sandbox.
+
+Production still constructs `SystemGitWorkspace`; its availability behavior, diagnostics, semantic
+contract, and sole-production-executor architecture test are unchanged. Production cutover remains
+Phase 1.2C.

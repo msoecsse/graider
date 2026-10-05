@@ -1,0 +1,64 @@
+name: Bundled Git packaged proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - remote-course-v2
+    paths:
+      - ".github/workflows/bundled-git-proof.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tests/spikes/git-engine/**"
+      - "ui/package.json"
+      - "ui/package-lock.json"
+      - "ui/electron-builder.config.cjs"
+      - "ui/scripts/package-git-proof.cjs"
+      - "ui/scripts/run-packaged-dugite-proof.cjs"
+      - "ui/scripts/verify-packaged-dugite.cjs"
+
+jobs:
+  windows-x64-packaged-proof:
+    name: Native Windows x64 packaged Dugite proof
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install native Windows UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Run the Phase 1.2A Dugite spike on Windows
+        run: npx vitest run tests/spikes/git-engine/dugite-executor.test.ts --no-file-parallelism
+
+      - name: Typecheck root and UI
+        run: |
+          npm run typecheck
+          npm --prefix ui run typecheck
+
+      - name: Build UI
+        run: npm --prefix ui run build
+
+      - name: Package native Windows x64 directory app
+        run: npm --prefix ui run package:git-proof:win
+
+      - name: Run packaged Electron-as-Node proof
+        run: npm --prefix ui run verify:git-proof:win
+
+      - name: Inspect packaged git.exe PE machine type
+        shell: pwsh
+        run: |
+          node -e "const fs=require('node:fs');const p='ui/release/win-unpacked/resources/app.asar.unpacked/node_modules/dugite/git/cmd/git.exe';const b=fs.readFileSync(p);const o=b.readUInt32LE(0x3c);if(b.subarray(0,2).toString('ascii')!=='MZ'||b.subarray(o,o+4).toString('hex')!=='50450000'||b.readUInt16LE(o+4)!==0x8664)process.exit(1);console.log('PACKAGED_DUGITE_PE_X64_OK');"

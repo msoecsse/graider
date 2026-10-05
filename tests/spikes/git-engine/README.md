@@ -18,12 +18,18 @@ configuration, SHA-1/SHA-256 local repositories, an ASAR-path simulation, and a 
 sanity fixture. The macOS-only interoperability case deliberately uses `/usr/bin/git` only to
 create and validate a canonical external repository; it is separate from the no-system-Git proof.
 
-## Phase 1.2B Windows x64 packaged proof
+## Phase 1.2B-1 packaged proof
 
-Run the deterministic test on a native Windows x64 runner after a clean install. The PE-header
-assertion must execute (not skip), and the first test must report `process.platform === "win32"`
-and `process.arch === "x64"`. Then package the Electron app after making the runtime dependency and
-ASAR changes described in `docs/graider-git-engine-selection.md` and verify:
+The reusable packaged proof lives under `ui/scripts`. On native macOS arm64 run:
+
+```bash
+npm --prefix ui run package:git-proof:mac
+npm --prefix ui run verify:git-proof:mac
+```
+
+On native Windows x64 run the corresponding `:win` commands. The isolated
+`Bundled Git packaged proof` workflow performs the Windows commands automatically. The proof
+verifies:
 
 1. `resources/app.asar.unpacked/node_modules/dugite/git/cmd/git.exe` exists and has PE machine type
    `0x8664`.
@@ -31,14 +37,14 @@ ASAR changes described in `docs/graider-git-engine-selection.md` and verify:
 3. With the Git child environment's `PATH` empty, the packaged probe repeats clone, status, commit,
    binary diff, clean/conflicting `apply --3way --index -`, and push/delete against a sandbox bare
    remote whose path contains spaces.
-4. The packaged app starts after code signing and installer assembly, proving that ASAR unpacking,
-   executable signing, and resource resolution survived packaging.
+4. The ordinary packaged Electron executable, launched with `ELECTRON_RUN_AS_NODE=1`, runs all
+   repository mechanics and emits `PACKAGED_DUGITE_PROOF_OK`.
 
 Do not count a macOS cross-built Windows artifact as this proof: Dugite's postinstall selects the
-payload using the install host platform, so the acceptance run must install dependencies on native
-Windows x64 unless Phase 1.2B first adds an explicit target-payload staging step.
+payload using the install host platform, so acceptance installs dependencies on native Windows x64.
+Signing, installers, and notarization remain Phase 3 work.
 
-## Phase 1.2B private-GitHub live proof
+## Phase 1.2B-2 private-GitHub live proof
 
 Use a dedicated private sandbox repository, never a course or production repository. Extend the
 existing `tests/live` convention with these gates:

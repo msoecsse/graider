@@ -14,6 +14,10 @@
     "package": "npm run build:cli && npm run build && electron-builder --config electron-builder.config.cjs",
     "package:mac": "npm run build:cli && npm run build && electron-builder --mac dir --arm64 --config electron-builder.config.cjs",
     "package:win": "npm run build:cli && npm run build && node scripts/package-win.cjs",
+    "package:git-proof:mac": "npm run build:cli && npm run build && node scripts/package-git-proof.cjs mac",
+    "package:git-proof:win": "npm run build:cli && npm run build && node scripts/package-git-proof.cjs win",
+    "verify:git-proof:mac": "node scripts/run-packaged-dugite-proof.cjs mac",
+    "verify:git-proof:win": "node scripts/run-packaged-dugite-proof.cjs win",
     "release:rc1": "npm run package:mac && node scripts/assemble-rc1-release.cjs",
     "make": "npm run build:cli && npm run build && electron-builder --mac dmg --publish never --config electron-builder.config.cjs",
     "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.node.json",
@@ -23,6 +27,7 @@
     "format:check": "prettier . --check"
   },
   "dependencies": {
+    "dugite": "3.2.3",
     "monaco-editor": "^0.52.2",
     "react": "latest",
     "react-dom": "latest",
@@ -43,6 +48,7 @@
     "vitest": "latest"
   },
   "allowScripts": {
+    "dugite@3.2.3": true,
     "electron-winstaller@5.4.0": true,
     "fsevents@2.3.3": true
   }

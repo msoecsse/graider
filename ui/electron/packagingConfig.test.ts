@@ -33,7 +33,8 @@ describe("packaging configuration", () => {
     expect(packagingConfigSource).toContain('"dist-electron/**/*"');
     expect(packagingConfigSource).toContain('"dist-graider-cli/**/*"');
     expect(packagingConfigSource).toContain('"package.json"');
-    expect(packagingConfigSource).toContain('asarUnpack: ["dist-graider-cli/**/*"]');
+    expect(packagingConfigSource).toContain('"dist-graider-cli/**/*"');
+    expect(packagingConfigSource).toContain('"node_modules/dugite/git/**/*"');
   });
 
   it("builds the bundled CLI before packaging app artifacts", () => {
@@ -41,8 +42,12 @@ describe("packaging configuration", () => {
       fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8")
     ) as {
       readonly scripts?: Record<string, string>;
+      readonly dependencies?: Record<string, string>;
+      readonly allowScripts?: Record<string, boolean>;
     };
 
+    expect(packageJson.dependencies?.dugite).toBe("3.2.3");
+    expect(packageJson.allowScripts?.["dugite@3.2.3"]).toBe(true);
     expect(packageJson.scripts?.["build:cli"]).toContain(
       "tsup --config ui/scripts/tsup.graider-cli.config.mjs"
     );
@@ -59,8 +64,42 @@ describe("packaging configuration", () => {
       "npm run build:cli && npm run build && node scripts/package-win.cjs"
     );
     expect(packageJson.scripts?.["package:win"]).not.toContain("--mac");
+    expect(packageJson.scripts?.["package:git-proof:mac"]).toBe(
+      "npm run build:cli && npm run build && node scripts/package-git-proof.cjs mac"
+    );
+    expect(packageJson.scripts?.["package:git-proof:win"]).toBe(
+      "npm run build:cli && npm run build && node scripts/package-git-proof.cjs win"
+    );
+    expect(packageJson.scripts?.["verify:git-proof:mac"]).toBe(
+      "node scripts/run-packaged-dugite-proof.cjs mac"
+    );
+    expect(packageJson.scripts?.["verify:git-proof:win"]).toBe(
+      "node scripts/run-packaged-dugite-proof.cjs win"
+    );
     expect(packageJson.scripts?.["release:rc1"]).toContain("npm run package:mac");
     expect(packageJson.scripts?.make).toContain("npm run build:cli");
+  });
+
+  it("keeps the packaged Dugite proof outside production application behavior", () => {
+    const proofSource = fs.readFileSync(
+      path.join(process.cwd(), "scripts", "verify-packaged-dugite.cjs"),
+      "utf8"
+    );
+    const runnerSource = fs.readFileSync(
+      path.join(process.cwd(), "scripts", "run-packaged-dugite-proof.cjs"),
+      "utf8"
+    );
+
+    expect(runnerSource).toContain('ELECTRON_RUN_AS_NODE: "1"');
+    expect(runnerSource).toContain("const result = spawnSync(");
+    expect(runnerSource).toContain('[proofScript, "--resources", resourcesDirectory');
+    expect(runnerSource).toContain("shell: false");
+    expect(proofSource).toContain(
+      'createRequire(join(resourcesDirectory, "app.asar", "package.json"))'
+    );
+    expect(proofSource).toContain("app.asar.unpacked");
+    expect(proofSource).toContain('PATH: ""');
+    expect(proofSource).toContain("PACKAGED_DUGITE_PROOF_OK");
   });
 
   it("packages explicit macOS and unsigned Windows x64 portable targets", () => {

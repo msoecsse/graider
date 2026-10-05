@@ -51,10 +51,20 @@ export default tseslint.config(
   },
 
   {
-    files: ["ui/scripts/package-win.cjs"],
+    files: [
+      "ui/scripts/package-win.cjs",
+      "ui/scripts/package-git-proof.cjs",
+      "ui/scripts/run-packaged-dugite-proof.cjs",
+      "ui/scripts/verify-packaged-dugite.cjs"
+    ],
     languageOptions: {
       sourceType: "commonjs",
-      globals: { process: "readonly" }
+      globals: {
+        __dirname: "readonly",
+        Buffer: "readonly",
+        process: "readonly",
+        URL: "readonly"
+      }
     }
   },
 
