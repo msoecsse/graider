@@ -62,3 +62,9 @@ jobs:
         shell: pwsh
         run: |
           node -e "const fs=require('node:fs');const p='ui/release/win-unpacked/resources/app.asar.unpacked/node_modules/dugite/git/cmd/git.exe';const b=fs.readFileSync(p);const o=b.readUInt32LE(0x3c);if(b.subarray(0,2).toString('ascii')!=='MZ'||b.subarray(o,o+4).toString('hex')!=='50450000'||b.readUInt16LE(o+4)!==0x8664)process.exit(1);console.log('PACKAGED_DUGITE_PE_X64_OK');"
+
+      - name: Record unpacked application size
+        shell: pwsh
+        run: |
+          $bytes = (Get-ChildItem -Path "ui/release/win-unpacked" -File -Recurse | Measure-Object -Property Length -Sum).Sum
+          Write-Output "PACKAGED_WINDOWS_SIZE_BYTES=$bytes"

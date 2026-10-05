@@ -14,6 +14,10 @@ const MACH_O_ARM64_CPU_TYPE = Number.parseInt("0100000c", 16);
 const PE_HEADER_OFFSET_LOCATION = Number.parseInt("3c", 16);
 const PE_X64_MACHINE_TYPE = Number.parseInt("8664", 16);
 const EXPECTED_VERSION = "3.2.3";
+const EXPECTED_GIT_VERSIONS = {
+  darwin: "git version 2.53.0",
+  win32: "git version 2.53.0.windows.1"
+};
 const EXPECTED_HOSTS = {
   darwin: "arm64",
   win32: "x64"
@@ -678,7 +682,10 @@ const main = async () => {
   const temporaryRoot = await mkdtemp(join(tmpdir(), "graider packaged dugite proof with spaces "));
   try {
     const versionOutput = (await git(temporaryRoot, ["--version"])).toString("utf8").trim();
-    assert(versionOutput === "git version 2.53.0", "The packaged Git version is not 2.53.0.");
+    assert(
+      versionOutput === EXPECTED_GIT_VERSIONS[process.platform],
+      "The packaged Git version is not the selected 2.53.0 distribution."
+    );
     await runBoundedOutputProof(temporaryRoot);
     await runCoreRepositoryProof(temporaryRoot);
     await runBinaryPatchProof(temporaryRoot);

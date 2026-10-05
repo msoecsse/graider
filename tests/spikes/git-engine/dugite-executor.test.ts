@@ -33,6 +33,7 @@ const MACH_O_ARM64_CPU_TYPE = Number.parseInt("0100000c", 16);
 const PE_HEADER_OFFSET_LOCATION = Number.parseInt("3c", 16);
 const PE_X64_MACHINE_TYPE = Number.parseInt("8664", 16);
 const MODULE_BUCKET_COUNT = 10;
+const REPRESENTATIVE_REPOSITORY_TIMEOUT_MS = 20_000;
 const portablePath = (value: string): string => value.split("\\").join("/");
 const bundledOnlyEnvironment = (): NodeJS.ProcessEnv => {
   const environment: NodeJS.ProcessEnv = { ...process.env, PATH: "" };
@@ -485,37 +486,49 @@ describe("Dugite bundled Git executor proof", () => {
     expect(String((safeFailure as { readonly cause?: unknown }).cause)).toContain("[REDACTED]");
   });
 
-  it("handles a nontrivial repository without a change in execution strategy", async () => {
-    const root = await createTemporaryRoot("performance sanity");
-    const repository = join(root, "representative repository");
-    await initializeRepository(repository);
-    const fileCount = 200;
-    const commitCount = 20;
-    await Promise.all(
-      Array.from({ length: fileCount }, async (_, index) => {
-        const folder = join(repository, `module ${String(index % MODULE_BUCKET_COUNT)}`);
-        await mkdir(folder, { recursive: true });
-        await writeFile(join(folder, `file ${String(index)}.txt`), `content ${String(index)}\n`);
-      })
-    );
-    await commitAll(repository, "Representative tree");
-    for (let index = 0; index < commitCount; index += 1) {
-      await writeFile(join(repository, "history.txt"), `revision ${String(index)}\n`);
-      await commitAll(repository, `History ${String(index)}`);
-    }
+  it(
+    "handles a nontrivial repository without a change in execution strategy",
+    async () => {
+      const root = await createTemporaryRoot("performance sanity");
+      const repository = join(root, "representative repository");
+      await initializeRepository(repository);
+      const fileCount = 200;
+      const commitCount = 20;
+      await Promise.all(
+        Array.from({ length: fileCount }, async (_, index) => {
+          const folder = join(repository, `module ${String(index % MODULE_BUCKET_COUNT)}`);
+          await mkdir(folder, { recursive: true });
+          await writeFile(join(folder, `file ${String(index)}.txt`), `content ${String(index)}\n`);
+        })
+      );
+      await commitAll(repository, "Representative tree");
+      for (let index = 0; index < commitCount; index += 1) {
+        await writeFile(join(repository, "history.txt"), `revision ${String(index)}\n`);
+        await commitAll(repository, `History ${String(index)}`);
+      }
 
-    const clone = join(root, "representative clone with spaces");
-    await git(root, ["clone", "--", repository, clone]);
-    expect((await git(clone, ["status", "--porcelain"])).length).toBe(0);
-    const entries = (await git(clone, ["ls-tree", "-r", "--name-only", "HEAD"])).toString("utf8");
-    expect(entries.trim().split("\n")).toHaveLength(fileCount + 1);
-    expect(
-      (await git(clone, ["log", `--max-count=${String(commitCount)}`, "--format=%H", "HEAD", "--"]))
-        .toString("utf8")
-        .trim()
-        .split("\n")
-    ).toHaveLength(commitCount);
-  });
+      const clone = join(root, "representative clone with spaces");
+      await git(root, ["clone", "--", repository, clone]);
+      expect((await git(clone, ["status", "--porcelain"])).length).toBe(0);
+      const entries = (await git(clone, ["ls-tree", "-r", "--name-only", "HEAD"])).toString("utf8");
+      expect(entries.trim().split("\n")).toHaveLength(fileCount + 1);
+      expect(
+        (
+          await git(clone, [
+            "log",
+            `--max-count=${String(commitCount)}`,
+            "--format=%H",
+            "HEAD",
+            "--"
+          ])
+        )
+          .toString("utf8")
+          .trim()
+          .split("\n")
+      ).toHaveLength(commitCount);
+    },
+    REPRESENTATIVE_REPOSITORY_TIMEOUT_MS
+  );
 
   it("operates on both SHA-1 and local SHA-256 object formats", async () => {
     const root = await createTemporaryRoot("object formats");
