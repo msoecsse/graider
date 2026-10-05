@@ -33,6 +33,7 @@ const MACH_O_ARM64_CPU_TYPE = Number.parseInt("0100000c", 16);
 const PE_HEADER_OFFSET_LOCATION = Number.parseInt("3c", 16);
 const PE_X64_MACHINE_TYPE = Number.parseInt("8664", 16);
 const MODULE_BUCKET_COUNT = 10;
+const portablePath = (value: string): string => value.split("\\").join("/");
 const bundledOnlyEnvironment = (): NodeJS.ProcessEnv => {
   const environment: NodeJS.ProcessEnv = { ...process.env, PATH: "" };
   delete environment.LOCAL_GIT_DIRECTORY;
@@ -97,7 +98,7 @@ describe("Dugite bundled Git executor proof", () => {
     let spawnedArguments: readonly string[] = [];
 
     await expect(access(binary)).resolves.toBeUndefined();
-    expect(binary).toContain("node_modules/dugite/git/");
+    expect(portablePath(binary)).toContain("node_modules/dugite/git/");
     const executableBytes = await readFile(binary);
     if (process.platform === "darwin" && process.arch === "arm64") {
       expect(executableBytes.subarray(0, MACH_O_ARM64_HEADER.length)).toEqual(MACH_O_ARM64_HEADER);
@@ -452,7 +453,7 @@ describe("Dugite bundled Git executor proof", () => {
 
     const configured = setupEnvironment(authentication.env, {});
     expect(configured.gitLocation).toBe(embeddedGitBinary());
-    expect(configured.env.GIT_EXEC_PATH).toContain("node_modules/dugite/git/");
+    expect(portablePath(configured.env.GIT_EXEC_PATH ?? "")).toContain("node_modules/dugite/git/");
     if (process.platform !== "win32") {
       expect(configured.env.GIT_CONFIG_SYSTEM).toContain("node_modules/dugite/git/etc/gitconfig");
     }

@@ -84,7 +84,15 @@ export const embeddedGitBinary = (): string => resolveGitBinary();
 /** Disposable Phase 1.2A seam; production code continues to use SystemGitWorkspace. */
 export const runBundledGit = async (request: BundledGitRequest): Promise<BundledGitResult> => {
   const result = await executeDugite(
-    ["-c", "color.ui=false", "-c", "core.quotepath=false", ...request.args],
+    [
+      "-c",
+      "color.ui=false",
+      "-c",
+      "core.quotepath=false",
+      "-c",
+      "core.autocrlf=false",
+      ...request.args
+    ],
     request.cwd,
     {
       encoding: "buffer",

@@ -174,7 +174,15 @@ const main = async () => {
     let spawnedArguments = [];
     try {
       const result = await dugite.exec(
-        ["-c", "color.ui=false", "-c", "core.quotepath=false", ...args],
+        [
+          "-c",
+          "color.ui=false",
+          "-c",
+          "core.quotepath=false",
+          "-c",
+          "core.autocrlf=false",
+          ...args
+        ],
         cwd,
         {
           encoding: "buffer",
