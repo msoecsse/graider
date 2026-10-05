@@ -1,10 +1,10 @@
 # Graider Local Git Workspace Design
 
-**Status:** Phase 1 / Slice 1.1B implementation contract; operation-scoped
-credential transport resolved
+**Status:** Phase 1 / Slice 1.1B complete; the system-Git engine remains the
+temporary underlying implementation
 
-**Scope:** local Git abstraction and replaceable system-Git adapter; template-sync
-adoption step 7 is complete and enforcement step 8 remains incomplete
+**Scope:** completed local Git abstraction and replaceable system-Git adapter;
+Phase 1.2 embedded/bundled engine selection remains intentionally untouched
 
 **Authority:** [remote-course architecture](graider-remote-course-architecture.md),
 [architecture evolution roadmap](graider-architecture-evolution-roadmap.md), and
@@ -14,9 +14,9 @@ adoption step 7 is complete and enforcement step 8 remains incomplete
 
 ## 1. Purpose and decisions
 
-Graider currently invokes the system `git` executable from several production
-paths. This document defines the narrow boundary that Phase 1.1B will put around
-those behaviors without changing them. Phase 1.1B may use a system-Git-backed
+Graider previously invoked the system `git` executable from several production
+paths. Phase 1.1B has moved those behaviors behind the narrow boundary defined
+by this document without changing them. Phase 1.1B uses a system-Git-backed
 implementation. Phase 1.2 will prove and select an embedded or bundled engine.
 
 The design makes these decisions:
@@ -581,7 +581,7 @@ Each step preserves current domain results before the next direct caller moves.
 |     5 | Mutating portions of `coursePublishService.ts` and `studentRepositoryAccessPagePublishService.ts`       | Exact-path stage, commit, push                                                                         | Integration tests for allowlists, deletions, unrelated staged files, missing upstream, behind state, and rejected/divergent push | Complete: exact-path staging, configured-author commits, upstream push, and safe diagnostics adopted |
 |     6 | `withProductionTemplateSyncWorkspace`                                                                   | Authenticated no-checkout clone, remote default branch, detached checkout, create/reset branch         | Workspace tests for stage classification, default branch, cleanup, and safe diagnostics                                          | Complete: disposable preparation and the explicit clone credential bridge now use the common engine  |
 |     7 | `LocalGitTemplateSyncGateway`                                                                           | Tree/history, binary diff, three-way indexed apply, branch operations, commit/push, disposable restore | Extensive real-Git integration suite plus fake domain gateway tests                                                              | Complete: semantic workspaces now own all Git mechanics and authenticated transport                  |
-|     8 | Repository-wide enforcement                                                                             | Remove obsolete raw runners; add a lint/search guard for production direct Git execution               | Existing suites plus a production-source search                                                                                  | Low after convergence                                                                                |
+|     8 | Repository-wide enforcement                                                                             | Complete: automated source-boundary test and direct-Git process-runner guard                           | The test permits only the system-Git engine and Electron non-Git runner child-process boundaries; the runner rejects direct Git  | Complete                                                                                             |
 
 Course and Pages publication can share infrastructure without merging their
 domain services: their allowed paths, readiness rules, messages, and repository
@@ -601,6 +601,15 @@ and disposable rollback now live behind the common workspaces. Template
 baseline ambiguity and subset-matching policy remain in the gateway. Network
 pushes and deletes receive the same opaque operation authentication context as
 the clones; no token, header, or resolver crosses into the gateway.
+
+Phase 1.1B is complete. The implemented semantic surface covers repository
+detection/open, default and no-checkout clone, operation-scoped authentication,
+structured inspection, HEAD/revision/history, remote URL/default branch,
+tree/tree history, binary diff, typed three-way patching, staging, normal and
+allow-empty commit, upstream and explicit branch push, branch
+prepare/create/switch/delete, remote branch deletion, and disposable rollback.
+Fetch and fast-forward remain implemented contract capabilities for a later
+synchronization slice; they do not introduce synchronization policy here.
 
 ## 14. Direct-system-Git end state
 
@@ -625,10 +634,19 @@ the packaged application is independent of system Git. Phase 1.2 replaces or
 bundles the engine behind the same contract and proves private authenticated
 clone/fetch/push on supported packaged platforms.
 
-After adoption step 7, `src/git/system-git-workspace.ts` is the sole production
-location that invokes the system Git executable. Repository-wide automated
-enforcement of that invariant remains adoption step 8 and is intentionally not
-part of this slice.
+The completed architectural test enforces one production Git execution
+implementation: `src/git/system-git-workspace.ts`. It rejects direct
+child-process imports in all other production `src/` and `ui/electron/` source,
+and rejects explicit process-runner requests for `git` or `git.exe` outside the
+engine. `ui/electron/commandRunner.ts` remains the separately approved generic
+non-Git process boundary for Graider CLI, temporary `gh` authentication, and
+other trusted workflows; its runtime guard rejects direct Git executable paths.
+
+`LocalGitTemplateSyncGateway` is fully migrated to semantic workspaces.
+Operation-scoped authentication covers template no-checkout clone and network
+pushes/deletes. The underlying engine is still system Git; Graider does not
+become independent of system Git until Phase 1.2 proves the selected embedded
+or bundled engine.
 
 ## 15. Resolved and open implementation questions
 

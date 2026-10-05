@@ -6,6 +6,8 @@ import {
   BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE,
   BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE,
   createNodeProcessRunner,
+  DIRECT_GIT_COMMAND_FORBIDDEN_CODE,
+  DIRECT_GIT_COMMAND_FORBIDDEN_MESSAGE,
   getBundledGraiderCliPath,
   resolveProcessRunRequest
 } from "./commandRunner.js";
@@ -72,6 +74,50 @@ describe("commandRunner", () => {
     });
 
     expect(result.exitCode).toBeNull();
+    expect(result.error?.code).toBe("ENOENT");
+  });
+
+  it.each([
+    "git",
+    "git.exe",
+    "/usr/bin/git",
+    "/opt/homebrew/bin/git",
+    "C:\\Program Files\\Git\\bin\\git.exe",
+    "C:/Program Files/Git/bin/GiT.ExE"
+  ])("rejects direct Git executable %s without starting a subprocess", async (command) => {
+    const runner = createNodeProcessRunner();
+
+    await expect(runner({ command, args: ["status"] })).resolves.toEqual({
+      stdout: "",
+      stderr: "",
+      exitCode: null,
+      signal: null,
+      error: {
+        code: DIRECT_GIT_COMMAND_FORBIDDEN_CODE,
+        message: DIRECT_GIT_COMMAND_FORBIDDEN_MESSAGE
+      },
+      diagnostic: {
+        runnerMode: "direct",
+        command,
+        args: ["status"],
+        cwd: null,
+        executablePath: command,
+        helperPath: null
+      }
+    });
+  });
+
+  it("continues to permit the trusted gh process workflow", async () => {
+    const runner = createNodeProcessRunner();
+    const result = await runner({ command: "gh", args: ["--version"] });
+
+    expect(result.error?.code).not.toBe(DIRECT_GIT_COMMAND_FORBIDDEN_CODE);
+  });
+
+  it("does not treat executable names containing git as the Git executable", async () => {
+    const runner = createNodeProcessRunner();
+    const result = await runner({ command: "my-git-helper", args: [] });
+
     expect(result.error?.code).toBe("ENOENT");
   });
 

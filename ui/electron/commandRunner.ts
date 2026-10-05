@@ -11,12 +11,15 @@ const ELECTRON_RUN_AS_NODE_ENV = "ELECTRON_RUN_AS_NODE";
 const ELECTRON_RUN_AS_NODE_VALUE = "1";
 
 export const BUNDLED_GRAIDER_CLI_MISSING_PROCESS_CODE = "BUNDLED_GRAIDER_CLI_MISSING";
+export const DIRECT_GIT_COMMAND_FORBIDDEN_CODE = "DIRECT_GIT_COMMAND_FORBIDDEN";
 export const EXTERNAL_GRAIDER_CLI_NOT_FOUND_CODE = "graider_cli_not_found";
 export const BUNDLED_GRAIDER_CLI_NOT_FOUND_CODE = "bundled_graider_cli_not_found";
 export const EXTERNAL_GRAIDER_CLI_NOT_FOUND_MESSAGE =
   "Graider CLI not found. Install Graider or make sure graider is available on PATH.";
 export const BUNDLED_GRAIDER_CLI_NOT_FOUND_MESSAGE =
   "Bundled Graider CLI could not be started. Rebuild or reinstall the Graider app.";
+export const DIRECT_GIT_COMMAND_FORBIDDEN_MESSAGE =
+  "Direct Git execution is not allowed outside the Git workspace engine.";
 
 export interface ProcessRunRequest {
   readonly command: string;
@@ -156,6 +159,12 @@ const getErrorCode = (error: Error): string | null => {
   return typeof maybeNodeError.code === "string" ? maybeNodeError.code : null;
 };
 
+const isDirectGitExecutable = (command: string): boolean => {
+  const executableNames = [path.basename(command), path.win32.basename(command)];
+
+  return executableNames.some((executableName) => /^(?:git|git\.exe)$/iu.test(executableName));
+};
+
 export const createNodeProcessRunner =
   (options: NodeProcessRunnerOptions = {}): ProcessRunner =>
   async (request) =>
@@ -173,7 +182,19 @@ export const createNodeProcessRunner =
       const resolvedRequest = resolveProcessRunRequest(request, options);
       const diagnostic = createProcessRunDiagnostic(request, resolvedRequest, options);
 
-      if (isMissingBundledGraiderCli(request, resolvedRequest, options)) {
+      if (isDirectGitExecutable(request.command)) {
+        finish({
+          stdout,
+          stderr,
+          exitCode: null,
+          signal: null,
+          error: {
+            code: DIRECT_GIT_COMMAND_FORBIDDEN_CODE,
+            message: DIRECT_GIT_COMMAND_FORBIDDEN_MESSAGE
+          },
+          diagnostic
+        });
+      } else if (isMissingBundledGraiderCli(request, resolvedRequest, options)) {
         finish({
           stdout,
           stderr,

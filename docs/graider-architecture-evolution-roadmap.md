@@ -63,7 +63,7 @@ This becomes the executable permission contract for later slices.
 
 These are prerequisites for seamless new-machine operation.
 
-## Slice 1.1 — Local Git workspace abstraction
+## Slice 1.1 — Local Git workspace abstraction — Complete
 
 Introduce a narrow local Git abstraction without changing behavior yet.
 
@@ -80,6 +80,10 @@ Required capabilities:
 - branch/default-branch inspection.
 
 Do not bind domain code to a specific implementation.
+
+Phase 1.1B completed the system-Git-backed abstraction and its production
+execution boundary. Phase 1.2 embedded/bundled Git-engine proof and selection
+is the next architectural task.
 
 ## Slice 1.2 — Embedded/bundled Git engine proof
 
