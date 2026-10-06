@@ -1715,14 +1715,24 @@ Re-running cannot recover: each orphaned repository is a name collision in
 guard refuse the whole apply. The only recovery is deleting the repositories
 on GitHub or writing manifest records by hand.
 
-Fix: when a course file (the manifest at minimum, and other files Graider
-writes during a run) cannot be opened for writing, pause with a plain-language
-message naming the file and suggesting it may be open in another program, and
-offer **Retry** (and a way to stop). Applies to the CLI and the Electron app.
-Needs decisions on which files are covered, how the CLI prompts when run with
-`--yes`/`--json`, and whether an apply that cannot save its manifest should
-stop rather than continue. Related gap worth its own ticket: no way to adopt a
-repository that exists on GitHub but is missing from the manifest.
+Fix, in order of preference:
+
+1. Take a lock on the manifest (and any other course file the run writes) at
+   the start of the operation, before any GitHub change, and hold it until the
+   run ends. If the lock cannot be taken, do not start.
+2. Otherwise, when a course file cannot be opened for writing, pause with a
+   plain-language message naming the file and suggesting it may be open in
+   another program, and offer **Retry** (and a way to stop).
+3. At minimum, warn faculty before the run not to open course files while it
+   is in progress.
+
+Applies to the CLI and the Electron app. Needs decisions on which files are
+covered, the lock mechanism (an advisory lock file does not stop vi or a
+Windows editor; an OS-level lock behaves differently on macOS, Windows, and
+network shares), how the CLI prompts when run with `--yes`/`--json`, and
+whether an apply that cannot save its manifest should stop rather than
+continue. Related gap worth its own ticket: no way to adopt a repository that
+exists on GitHub but is missing from the manifest.
 
 ---
 
