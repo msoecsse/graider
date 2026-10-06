@@ -245,7 +245,8 @@ describe("dashboardRunner", () => {
           cwd: SPACE_COURSE_FOLDER.path,
           executablePath: "/Applications/Graider.app/Contents/MacOS/Graider",
           helperPath:
-            "/Applications/Graider.app/Contents/Resources/app.asar.unpacked/dist-graider-cli/index.js"
+            "/Applications/Graider.app/Contents/Resources/app.asar.unpacked/dist-graider-cli/index.js",
+          resolutionSource: "bundled"
         }
       })
     ]);

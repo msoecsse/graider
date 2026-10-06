@@ -85,6 +85,12 @@ export const StudentRepositoryAccessPagePublishPanel = ({
             <DetailItem label="Branch" value={result.checks.currentBranch} />
             <DetailItem label="Upstream" value={result.checks.upstreamBranch} />
             <DetailItem label="Generated page" value={result.outputPath} />
+            {result.checks.changedCloneScriptCount === 0 ? null : (
+              <DetailItem
+                label="Clone scripts"
+                value={`${String(result.checks.changedCloneScriptCount)} changed`}
+              />
+            )}
             <DetailItem label="Commit message" value={commitMessage} />
           </dl>
           <p className="detail-panel__note">

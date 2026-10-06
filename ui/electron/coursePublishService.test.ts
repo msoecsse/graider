@@ -20,6 +20,9 @@ const fixture = (withUpstream = true): string => {
   git(root, ["symbolic-ref", "HEAD", "refs/heads/main"]);
   git(root, ["config", "user.email", "test@example.invalid"]);
   git(root, ["config", "user.name", "Test User"]);
+  // Ignore the machine's global excludes file (for example a "*.bak" rule) so that
+  // changed-file detection does not depend on who runs the tests.
+  git(root, ["config", "core.excludesFile", path.join(root, ".git", "no-global-excludes")]);
   git(root, ["add", "course.yml", "terms/27s1/term.yml"]);
   git(root, ["commit", "-m", "Initial"]);
   if (withUpstream) {
