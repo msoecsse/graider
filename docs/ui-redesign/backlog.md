@@ -1519,15 +1519,386 @@ publishing stages these root files only when Graider wrote them.
 
 ---
 
-## 56. Students cannot open student access pages without permission changes — **Should fix**
+## 56. Students cannot open student access pages without permission changes — **Resolved**
 
-Placeholder; direction to follow. A private Pages repository publishes its
-Pages site privately, so only people with read access to the repository can
-view the pages. The working assumption is that the pages stay non-public, which
-requires infrastructure changes to how students are given access. The docs
-imply a public Pages repository (`docs/faculty-ui-user-guide.md:59-60`), and
-the access-page configuration error calls the result a "public access page"
+A private Pages repository publishes its Pages site privately, so only people
+signed in to GitHub with read access to the repository can view the pages.
+Students are organization members, but the organization's base repository
+permission is `none` and the Pages repository has no teams or collaborators, so
+students cannot open the pages linked from Canvas. The organization allows
+private Pages sites and does not allow public ones, and the pages should stay
+non-public. The docs imply a public Pages repository
+(`docs/faculty-ui-user-guide.md:59-60`), and the access-page configuration error
+calls the result a "public access page"
 (`ui/electron/studentRepositoryAccessPageService.ts:463`).
+
+Requirements, settled with the course owner (direct collaborators, following
+the most recent term's rosters), are recorded in
+`docs/features/requests/graider-feature-request-student-access-pages-access.md`.
+
+Resolved on `feat/restrict-student-access-pages`. After a successful roster
+save, roster or section removal, or Apply, the desktop app grants read access on
+the Pages repository to every active or on-hold student in the most recent term
+and removes it from students dropped in every section of that term, using the
+bundled `src/pages-access/pages-access-context.ts`. Failures never undo the save
+or Apply; faculty see which students could not be updated and retry by saving or
+applying again. The docs and the configuration message no longer imply a public
+Pages repository.
+
+---
+
+## 57. The most-recent-term rule is implemented twice — **Worth fixing**
+
+The assignments page (`ui/electron/studentAccessPagesIndexService.ts`, item 55)
+and the Pages access check (`src/pages-access/pages-access-context.ts`, item 56)
+each pick the most recent term by `term.yml` `academic_year`, then `semester`.
+Electron services cannot import `src/` directly, so the rule was written twice;
+each copy has its own tests.
+
+If the rule changes in one place only, the assignments page and student access
+could follow different terms. Fix: move the rule into `src/` and expose it to
+Electron through the existing bundled-backend pattern
+(`ui/scripts/build-template-sync.mjs`), then use it from both places. Small
+change.
+
+---
+
+## 58. Pending Pages invitations are re-sent and never cancelled — **Should fix**
+
+When GitHub answers an add-collaborator request with an invitation rather than
+direct access, `OctokitGitHubClient.addCollaborator` reports
+`pendingInvite: true`, but `getCollaboratorPermission` always reports
+`pendingInvite: false` and permission `none` until the student accepts
+(`src/github/octokit-github-client.ts`). The item 56 access check therefore
+re-sends the invitation on every roster save, roster or section removal, and
+Apply.
+
+Removal has the opposite gap: `removeCollaborator` removes collaborators but
+does not cancel an unaccepted invitation, and the client has no call to list or
+cancel invitations. A dropped student, or one in a removed roster, can still
+accept an outstanding invitation and gain read access. A dropped student is
+removed again at the next check; a student from a removed roster is not, because
+nothing records them after the removal.
+
+Fix: add invitation listing and cancellation to `GitHubClient` (and
+`FakeGitHubClient`), skip re-inviting students with a pending invitation, and
+cancel invitations for students whose access is being removed. Whether students
+who are organization members receive invitations at all has not been verified
+against GitHub.
+
+---
+
+## 59. Roster manager hides access-page refresh messages when course publication succeeds — **Worth fixing**
+
+After a roster save or removal, `withStudentRepositoryPageRefresh`
+(`ui/electron/rosterStudentRepositoryAccessPageService.ts`) adds a diagnostic
+such as "Roster changes were saved, but Student Repository page publication
+needs attention." while leaving `status: "success"`. `RosterManagerPage.tsx`
+shows `result.diagnostics` only when `result.publication?.status === "failure"`,
+so when course publication succeeds those access-page messages are never shown.
+
+Faculty can believe the student access pages were refreshed and published when
+they were not. Fix: show the refresh diagnostics whenever they are present,
+separately from the course-publication warning, with focused tests. Small
+change; this predates items 55 and 56.
+
+---
+
+## 60. An access page generated with zero students looks like success — **Should fix**
+
+When no active student has a repository link, `buildResult` in
+`ui/electron/studentRepositoryAccessPageService.ts` returns status `not_ready`,
+but generation still writes `student-repositories.html` with an empty sections
+list and adds no diagnostic when the manifest exists. The renderer has no
+handling for `not_ready`; `StudentRepositoryAccessPagePanel.tsx` only shows an
+"Included" count of 0.
+
+This happened for swe4211 `lab5lights` on 2026-10-02: the page was regenerated
+on a machine whose course repository had not been pulled, the empty page was
+committed and pushed, and a later merge put conflict markers on the live page.
+Fix: when no students are included, either do not write the page or show a clear
+warning (for example, suggesting the course repository may be out of date)
+before it can be published. Needs a decision on which.
+
+---
+
+## 61. Publish readiness does not detect merge-conflict markers — **Worth fixing**
+
+Publish readiness
+(`ui/electron/studentRepositoryAccessPagePublishStatusService.ts`) checks only
+git state: existence, branch, upstream, and uncommitted or unpushed changes. It
+never reads the generated files, so a page containing `<<<<<<<`, `=======`, or
+`>>>>>>>` lines from a hand-resolved merge is reported as ready and can be
+published to students, as happened for swe4211 `lab5lights`.
+
+Fix: scan the generated page, clone scripts, and Graider's `index.html` and
+`robots.txt` for conflict-marker lines, and block publishing with a
+plain-language reason that suggests regenerating the page. Small change.
+
+---
+
+## 62. The publish review hides committed-but-unpushed clone scripts — **Optional**
+
+The **Clone scripts** row in the Publish Student Access Page review counts only
+uncommitted `clone-*.py` changes (`changedCloneScriptCount`) and is hidden when
+that count is zero. When the status is **Unpushed** because scripts were
+committed by hand, the push will include them but the review does not say so.
+The **Generated page** row has the same limitation.
+
+Fix, if wanted: also count script changes in commits ahead of upstream. Accepted
+behaviour today; recorded so the gap is visible.
+
+---
+
+## 63. Editing an assignment may drop its group settings — **Should fix**
+
+`ui/electron/assignmentEditService.ts` rebuilds the whole `assignment.yml` from
+a template on every save, and the template has no `repository_mode` or `groups`
+fields, which the assignment schema allows (`src/config/config-schemas.ts`).
+Saving an edit to a group assignment therefore appears to remove its group
+configuration. Found by reading the code; not yet reproduced.
+
+Fix: carry `repository_mode` and `groups` through the edit model and template,
+or rewrite only the edited fields, with a test that edits a group assignment.
+The same rebuild would drop any future field, including the creation date in
+item 64.
+
+---
+
+## 64. Assignments have no creation date — **Worth fixing**
+
+`assignment.yml` records no creation date, so the assignments page (item 55)
+orders assignments by the earliest repository `created_at` in each manifest,
+falling back to title for assignments without one. Repositories that are
+re-created change that order.
+
+Fix: add an optional `metadata.created_at` to the strict assignment schema,
+write it in assignment setup (`ui/electron/assignmentSetupService.ts`), keep it
+through edits (see item 63), and have the assignments page read it before
+falling back to the manifest. Older Graider builds reject unknown fields, so
+every faculty build must be upgraded before anything writes it. Existing
+assignments need a fallback or a backfill, which changes course data and needs
+explicit approval. Own PR.
+
+---
+
+## 65. Access-page test fixtures lack required term fields — **Optional**
+
+The `term.yml` fixtures in `assignmentApplyWithAccessPageService.test.ts`,
+`rosterStudentRepositoryAccessPageService.test.ts`, and most of
+`studentRepositoryAccessPageService.test.ts` (all under `ui/electron/`) contain
+only `term.code` and `sections`, without the schema-required `academic_year`,
+`semester`, and `display_name`. The assignments page skips such terms, so those
+tests never write an assignments page and do not exercise it alongside
+generation and publishing.
+
+Fix: give the fixtures schema-valid `term.yml` content and update expectations
+to include `index.html` where it is now written. Dedicated tests already cover
+the assignments page itself.
+
+---
+
+## 66. A locked course file silently loses apply results — **Should fix**
+
+Observed 2026-10-05 applying SWE2410 `coco26` in term `27s1`. The manifest was
+open in vi from a Windows system while apply ran. GitHub created all 52
+repositories, but only 42 reached `manifest.yml`. The other 10 (section 131,
+`riedln` onward) exist on GitHub with only the template commit and no student
+collaborator. No students were added and nothing was recorded.
+
+When `writeManifest` fails, `persistManifest`
+(`src/execution/apply-executor.ts`) records `manifest_write_failed` in the
+transient CLI result and stops work on that student. The run continues, the
+UI treats `partial_success` as success, and the error is not saved anywhere.
+Re-running cannot recover: each orphaned repository is a name collision in
+`src/planning/plan-builder.ts`, and any blocked operation makes the mutation
+guard refuse the whole apply. The only recovery is deleting the repositories
+on GitHub or writing manifest records by hand.
+
+Fix, in order of preference:
+
+1. Take a lock on the manifest (and any other course file the run writes) at
+   the start of the operation, before any GitHub change, and hold it until the
+   run ends. If the lock cannot be taken, do not start.
+2. Otherwise, when a course file cannot be opened for writing, pause with a
+   plain-language message naming the file and suggesting it may be open in
+   another program, and offer **Retry** (and a way to stop).
+3. At minimum, warn faculty before the run not to open course files while it
+   is in progress.
+
+Applies to the CLI and the Electron app. Needs decisions on which files are
+covered, the lock mechanism (an advisory lock file does not stop vi or a
+Windows editor; an OS-level lock behaves differently on macOS, Windows, and
+network shares), how the CLI prompts when run with `--yes`/`--json`, and
+whether an apply that cannot save its manifest should stop rather than
+continue. Related gap worth its own ticket: no way to adopt a repository that
+exists on GitHub but is missing from the manifest.
+
+---
+
+## 67. Review the Assignment Detail page and its More assignment actions menu — **Should fix**
+
+Raised by the course owner on 2026-10-05 while recovering SWE2410 `coco26`. The
+**More assignment actions** (⋯) menu on Assignment Detail
+(`ui/src/assignment-detail/AssignmentDetailPage.tsx`, `overflowGroups`) is
+grouped in a way that does not help faculty find things: every item relates to
+the assignment, so headings such as **Assignment** and **Repositories** do not
+distinguish anything, and some captions only restate their label. For example,
+**Faculty report** sits under **Reports**, which is redundant, and its caption
+says only "Generate and view the faculty report."
+
+Current menu:
+
+| Heading       | Item                          | Caption                                                          |
+| ------------- | ----------------------------- | ---------------------------------------------------------------- |
+| Assignment    | Edit assignment               | Change assignment settings, points, and due date.                |
+| Assignment    | Group settings                | Switch between individual and shared group repositories.         |
+| Assignment    | Student access page           | Generate the public page students use to find their repository.  |
+| Repositories  | Apply to new students         | Create repositories for students not yet applied.                |
+| Repositories  | Download student repositories | Clone all student repositories locally.                          |
+| Grading setup | Regenerate grading workflow   | View, edit, and push the grading workflow file.                  |
+| Grading setup | Manage Comment Library        | Create and maintain reusable comments shared across this course. |
+| Grading setup | View grading status           | See automated check status for every repository.                 |
+| Reports       | Faculty report                | Generate and view the faculty report.                            |
+| (separated)   | Delete assignment             | Remove the local assignment configuration only.                  |
+
+Related problems on the same page, found during the same recovery:
+
+- Once an assignment is applied, the primary action becomes **Continue grading**
+  and Apply moves into the menu as **Apply to new students**. The visible
+  secondary action **Update Student Repositories** (template sync) sounds like
+  the way to add missing students but only processes repositories already in the
+  manifest, so the course owner used it repeatedly without reaching Apply.
+- The lifecycle strip's **Applied** step shows the active roster count ("Applied
+  52 repositories") rather than repositories recorded in the manifest (42 at the
+  time), and treats `partially_applied` as complete.
+- The **Student access page** caption still says "public page"; since item 56
+  the Pages site is private.
+
+Review the page with the course owner before changing it: what the menu is for,
+how its items are grouped and named, which captions add information, where Apply
+belongs after the first Apply, how template sync is named and explained, and
+what the lifecycle strip counts. `docs/ui-redesign/README.md` §2.1 (action
+hierarchy and overflow menus) and §2.3 (plain language) govern the result.
+
+---
+
+## 68. Template sync fails when the template change is larger than 10 MiB — **Should fix**
+
+Found on 2026-10-05 with SWE4211 `roboc` (Basic Robot Control, template
+`msoecsse/swe4211-rwh-lab6-baseline`). **Update Student Repositories** changed no
+student repository: no commit, no `graider/template-update-*` branch, no pull
+request, and the manifest still records template commit `c4e8e76` for every
+repository.
+
+Cause: `LocalGitTemplateSyncGateway.templatePatch`
+(`src/template-sync/local-git-template-sync-gateway.ts`) reads the entire
+`git diff --binary <base> <target>` output into memory through `execFile` with
+`maxBuffer` set to `MAX_GIT_COMMAND_OUTPUT_BYTES` (10 MiB). Larger output fails
+with `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`, which is reported as `patch_failed`
+("Unable to compute the template changes."). The same patch is used by both
+`applyAndPushTemplateDelta` and `prepareConflictBranch`.
+
+Measured:
+
+- `c4e8e76..c4bf48c` (2,420 files, ~108k lines, mostly generated Doxygen HTML and
+  PNGs): 25,046,867 bytes.
+- `c4e8e76..77b0c08` (after the course owner removed `pi/docs/html`): 12,883,574
+  bytes, still over the limit. `pi/baselineDocs/html` alone is ~10.4 MB.
+- In both cases `git apply --3way --index --check` applies the patch cleanly to a
+  student clone, so the 3-way approach works; only the buffer limit fails.
+
+Options for the fix (to be chosen before implementation):
+
+- Stream `git diff --binary` stdout directly into the existing
+  `git apply --3way --index -` process, so there is no size limit and no new
+  constant.
+- Write the diff to a file in the disposable sync workspace and `git apply` the
+  file.
+- Raise `maxBuffer`. This only moves the limit and needs a value to be chosen.
+
+Other `execFile` calls in the gateway (`ls-tree`, `log`) share the same constant
+but produce much smaller output; check them against a large template while fixing
+this.
+
+Tests: add a gateway test that syncs a template change larger than the current
+limit using local repositories (no live GitHub).
+
+---
+
+## 69. Template sync results look like success when every repository failed — **Should fix**
+
+Reported by the course owner on 2026-10-05 during the item 68 failure: after
+**Update Student Repositories** finished, the run appeared to succeed even though
+no repository was updated.
+
+What the code does (`ui/src/assignment-detail/AssignmentDetailPage.tsx`,
+`executeTemplateSync`; `TemplateSyncResultsPanel.tsx`;
+`src/template-sync/assignment-template-sync-context.ts`):
+
+- When every repository fails, the bridge returns `completed_with_failures`, which
+  the context maps to `partial_success` with no `blocker`. The results panel
+  shows a `role="alert"` message only when there is a `blocker`, so nothing
+  stands out as an error.
+- The panel's summary line is "N student repositories processed." It does not
+  say how many were updated or how many failed. Failures appear only as a
+  per-student "Failed" chip.
+- The confirmation modal closes and the results panel appears below the main
+  two-column layout, which is likely off-screen, so the page looks unchanged.
+
+Expected: after a run, faculty can see at once whether it worked, for example
+"0 of N repositories updated; N failed", shown where they are looking, with an
+error treatment when nothing succeeded. Confirm wording and placement with the
+course owner; `docs/ui-redesign/README.md` §2 governs.
+
+---
+
+## 70. Template sync hangs because its push has no GitHub credentials — **Should fix**
+
+Found on 2026-10-05 with SWE4211 `roboc`, after item 68's size problem was
+avoided by trimming the template. **Update Student Repositories** never finished
+the first repository (`msoecsse/behnkem747-roboc-swe4211-27s1`). The template
+change applied cleanly and was committed in the temporary clone, but
+`git push origin HEAD:main` waited indefinitely. The course owner deleted the
+assignment to start over, so the sync could not be completed for `roboc`.
+
+Cause:
+
+- `withProductionTemplateSyncWorkspace`
+  (`src/template-sync/production-template-sync-workspace.ts`) passes the token
+  as a per-command `-c http.extraHeader=...` for clone and checkout only. The
+  header is not stored in the clones.
+- `LocalGitTemplateSyncGateway.git()`
+  (`src/template-sync/local-git-template-sync-gateway.ts`) runs every later
+  command, including `push origin HEAD:<branch>` (clean updates and conflict
+  branches) and `push origin --delete <branch>` (cleanup), without the header.
+  Git then falls back to the machine's credential helper. On a Mac whose
+  `osxkeychain` helper has no GitHub entry, git prompts for a username on the
+  terminal that launched the app.
+- Nothing sets `GIT_TERMINAL_PROMPT=0` for template-sync git commands (compare
+  `ui/electron/studentRepositoryAccessPageService.ts`), and there is no timeout,
+  so the prompt hangs the run instead of failing it.
+
+Observed: the hung `git push` was a child of the Electron main process, attached
+to the launching terminal's TTY, with no credential-helper process running.
+GitHub and the manifest were unchanged.
+
+Impact: template sync can push only on machines whose git already has stored
+GitHub credentials, for example after `gh auth setup-git`. Elsewhere, every
+clean update, conflict branch, and branch cleanup hangs. This is inferred from
+the code and the `roboc` run, not tested on other machines.
+
+Fix direction: give the gateway's network commands the same token header the
+workspace uses, without logging, persisting, or serializing the token; set
+`GIT_TERMINAL_PROMPT=0` for all template-sync git commands so a missing
+credential fails at once as `push_failed`. Tests must use local repositories
+and a mocked or absent credential, never a real token.
+
+Related: killed or hung runs leave their temporary workspaces
+(`graider-template-sync-*` under the OS temp directory) behind, because cleanup
+runs only when the operation returns. Three were present on the course owner's
+Mac on 2026-10-05, two from 2026-09-15. Each holds full clones of a template and
+a student repository.
 
 ---
 
@@ -1560,10 +1931,11 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, and 56.
+Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, 59, 60, 61, 62,
+63, 64, 65, 66, 67, 68, 69, and 70.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
-48, 49, 50, 51, 53, 55, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
+48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
 ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.
 

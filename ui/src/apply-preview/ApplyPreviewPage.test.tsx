@@ -744,6 +744,49 @@ describe("ApplyPreviewPage", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("tells faculty when student Pages access could not be checked after Apply", async () => {
+    mockGraiderUI({
+      getAssignmentApplyPreview: vi
+        .fn()
+        .mockResolvedValue(createApplyPreviewResult(createReadyApplyPreviewJson())),
+      applyAssignment: vi.fn().mockResolvedValue(
+        createApplyResult(createApplyJson(), {
+          pagesAccess: {
+            status: "failure",
+            granted: [],
+            removed: [],
+            failedGithubUsernames: [],
+            diagnostics: [
+              {
+                message:
+                  "GitHub sign-in is unavailable, so student access to the Pages site was not checked."
+              }
+            ]
+          }
+        })
+      )
+    });
+    render(
+      <ApplyPreviewPage
+        selection={SELECTION}
+        assignmentDetail={null}
+        onRefreshAssignmentDetail={vi.fn()}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review apply changes" }));
+    fireEvent.click(
+      screen.getByLabelText("I understand this will apply changes to student repositories")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    const warning = (await screen.findByText("Assignment applied.")).parentElement;
+    expect(warning).toHaveAttribute("role", "alert");
+    expect(warning).toHaveTextContent(
+      "GitHub sign-in is unavailable, so student access to the Pages site was not checked. Run Apply again to retry."
+    );
+  });
+
   it("renders success result summary, completed rows, and post-apply actions", async () => {
     const onRefreshAssignmentDetail = vi.fn();
 

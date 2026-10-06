@@ -152,6 +152,14 @@ export interface CourseMutationPublicationResult {
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
+export interface StudentPagesAccessResult {
+  readonly status: "success" | "partial_failure" | "failure" | "not_configured";
+  readonly granted: readonly string[];
+  readonly removed: readonly string[];
+  readonly failedGithubUsernames: readonly string[];
+  readonly diagnostics: readonly CourseSetupDiagnostic[];
+}
+
 export type GitHubAuthStatus = "connected" | "not_connected";
 
 export interface GitHubAuthResult {
@@ -621,6 +629,7 @@ export interface RosterSaveResult {
   readonly diagnostics: readonly CourseSetupDiagnostic[];
   readonly source?: RosterSource;
   readonly publication?: CourseMutationPublicationResult;
+  readonly pagesAccess?: StudentPagesAccessResult;
 }
 
 export interface RosterRemoveRequest extends RosterSectionRequest {
@@ -632,6 +641,7 @@ export interface RosterRemoveResult {
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
   readonly publication?: CourseMutationPublicationResult;
+  readonly pagesAccess?: StudentPagesAccessResult;
 }
 
 export interface TemplateWorkflowRequest {
@@ -1011,6 +1021,7 @@ export interface AssignmentApplyResult {
   readonly apply: AssignmentApplyJsonResponse | null;
   readonly error: DashboardCommandError | null;
   readonly appliedAt: string | null;
+  readonly pagesAccess?: StudentPagesAccessResult;
 }
 
 export interface AssignmentGradeJsonResponse {
