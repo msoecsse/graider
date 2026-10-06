@@ -1,7 +1,7 @@
 # Graider bundled Git engine selection
 
-**Status:** Selected; Phase 1.2B-1 deterministic packaged proof passed on native macOS arm64 and
-Windows x64, production cutover has not begun
+**Status:** Selected; Phase 1.2B packaged macOS arm64 and Windows x64 private-transport proofs are
+complete, production cutover remains incomplete
 
 **Decision date:** 2026-10-04
 
@@ -188,8 +188,10 @@ continue validating the effective remote as exact GitHub HTTPS before resolving 
 must redact token, encoded token, header, raw stdout/stderr, and candidate error objects before a
 semantic error can escape.
 
-**Not yet verified:** live private GitHub clone/fetch/push/delete from packaged macOS and Windows.
-The exact gated proof is specified in `tests/spikes/git-engine/README.md`.
+**Spike verified:** packaged macOS arm64 and Windows x64 each completed private GitHub clone,
+fetch, non-force push, ref verification, and remote branch deletion against the gated sandbox. Both
+jobs cleaned their generated proof branches. The exact harness remains specified in
+`tests/spikes/git-engine/README.md`.
 
 ## 8. isomorphic-git evaluation
 
@@ -321,14 +323,10 @@ migration rather than a second Git implementation.
 
 The following records completed and remaining acceptance work:
 
-1. **Packaged macOS arm64:** deterministic packaged proof is complete in Phase 1.2B-1; credentialed
-   private-GitHub transport remains for Phase 1.2B-2.
-2. **Packaged Windows x64:** deterministic packaged proof is complete in Phase 1.2B-1; credentialed
-   private-GitHub transport remains for Phase 1.2B-2.
-3. **Private GitHub:** Phase 1.2B-2 must run the explicitly gated sandbox proof for clone, fetch, non-force push,
-   ref verification, and managed proof-branch deletion on both packaged platforms. Confirm no
-   helper/prompt fallback and inspect argv, config, remote URL, errors, and logs for the distinctive
-   test token.
+1. **Packaged macOS arm64:** deterministic and credentialed private-GitHub transport proof passed.
+2. **Packaged Windows x64:** deterministic and credentialed private-GitHub transport proof passed.
+3. **Private GitHub:** both Phase 1.2B-2 jobs completed the gated clone, fetch, non-force push,
+   ref verification, and managed proof-branch deletion flow, and cleaned their generated branches.
 4. **Normal-size packaged repositories:** repeat the sanity fixture plus a representative real
    course/student sandbox repository on both packaged platforms and record wall time/memory only to
    identify gross regressions.
@@ -338,8 +336,8 @@ The following records completed and remaining acceptance work:
 No semantic-contract requirement requires redesign. Production remains on `SystemGitWorkspace`, its
 availability checks and diagnostics are unchanged, and the Phase 1.1 architecture guard remains in
 force. Phase 1.2B should decide whether to inject a bundled executor into the existing semantic
-implementation or rename the implementation more neutrally; this slice does not introduce a
-production `DugiteGitWorkspace`.
+implementation or rename the implementation more neutrally; production integration remains a
+separate Phase 1.2C task.
 
 ## 13. Phase 1.2B-1 deterministic packaged proof
 
@@ -456,16 +454,13 @@ signing the outer application. At minimum this includes Git, Git LFS, GCM, Git r
 executables, and GCM native/.NET runtime libraries on macOS and Windows. The present unsigned proof
 does not establish nested signing behavior.
 
-### Remaining Phase 1.2B-2 work
+### Phase 1.2B-2 completion
 
-The packaged harness accepts `--live-private`, but it refuses to run unless all documented GitHub,
-Dugite, and destructive gates plus token, HTTPS sandbox repository, and required branch prefix are
-present. The manual `Bundled Git private GitHub proof` workflow now wires that packaged live proof
-on native macOS arm64 and Windows x64. Results remain pending until both native jobs run
-successfully against a dedicated private sandbox. That mode uses a unique non-default proof branch,
-non-force push, operation-scoped auth, fetch/ref verification, and `finally` deletion. It must not
-use the Graider repository as the sandbox.
+The gated `--live-private` packaged proof completed successfully on native macOS arm64 and native
+Windows x64 against the dedicated private sandbox. Each job used a unique non-default proof branch,
+performed clone, fetch, non-force push, ref verification, and `finally` remote deletion; both
+generated proof branches were cleaned. Phase 1.2B is complete.
 
 Production still constructs `SystemGitWorkspace`; its availability behavior, diagnostics, semantic
-contract, and sole-production-executor architecture test are unchanged. Production cutover remains
-Phase 1.2C.
+contract, and sole-production-executor architecture test are unchanged. Production integration and
+cutover remain in progress in Phase 1.2C.

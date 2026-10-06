@@ -122,18 +122,18 @@ export interface SystemGitExecutionRequest {
   readonly env?: NodeJS.ProcessEnv;
 }
 
-type SystemGitRunner = (request: SystemGitExecutionRequest) => Promise<string>;
+export type SystemGitRunner = (request: SystemGitExecutionRequest) => Promise<string>;
 
-interface SystemGitBinaryExecutionRequest extends SystemGitExecutionRequest {
+export interface SystemGitBinaryExecutionRequest extends SystemGitExecutionRequest {
   readonly input?: Uint8Array;
 }
 
-interface SystemGitBinaryExecutionResult {
+export interface SystemGitBinaryExecutionResult {
   readonly stdout: Uint8Array;
   readonly stderr: Uint8Array;
 }
 
-type SystemGitBinaryRunner = (
+export type SystemGitBinaryRunner = (
   request: SystemGitBinaryExecutionRequest
 ) => Promise<SystemGitBinaryExecutionResult>;
 
@@ -243,6 +243,7 @@ interface AuthenticatedExecution {
 
 export interface SystemGitWorkspaceFactoryOptions {
   readonly runGit?: SystemGitRunner;
+  readonly runGitBinary?: SystemGitBinaryRunner;
   readonly credentialResolver?: GitCredentialResolver;
 }
 
@@ -1200,7 +1201,8 @@ export class SystemGitWorkspaceFactory implements GitWorkspacePreparationFactory
   constructor(options: SystemGitWorkspaceFactoryOptions = {}) {
     this.executor = new SystemGitOperationExecutor(
       options.runGit ?? runSystemGit,
-      options.credentialResolver
+      options.credentialResolver,
+      options.runGitBinary ?? runSystemGitBinary
     );
   }
 

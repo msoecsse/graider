@@ -100,13 +100,10 @@ Acceptance must include:
 
 This deserves an explicit technical spike before widespread refactoring.
 
-Phase 1.2B-1 completed the deterministic packaged-engine portion on native macOS arm64 and native
-Windows x64: the application loads Dugite from `app.asar`, executes its architecture-correct Git
-from `app.asar.unpacked`, and passes the local repository, binary diff, three-way apply/conflict,
-bounded-output, and credential-environment mechanics with no system Git available to candidate
-operations. Phase 1.2 is not complete: Phase 1.2B-2 must still prove explicitly gated private
-GitHub clone/fetch/push/delete on both packaged platforms, and Phase 1.2C owns production cutover
-from `SystemGitWorkspace`.
+Engine selection and packaged cross-platform/private transport proof are complete: native macOS
+arm64 and Windows x64 packaged jobs passed the explicitly gated private GitHub clone, fetch, push,
+verification, and delete proof. Production integration and cutover from `SystemGitWorkspace` remain
+in progress in Phase 1.2C; Phase 1.2 is not complete.
 
 ## Slice 1.3 — GitHub host abstraction cleanup
 
