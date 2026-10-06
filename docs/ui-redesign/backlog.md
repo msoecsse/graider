@@ -1698,6 +1698,34 @@ the assignments page itself.
 
 ---
 
+## 66. A locked course file silently loses apply results — **Should fix**
+
+Observed 2026-10-05 applying SWE2410 `coco26` in term `27s1`. The manifest was
+open in vi from a Windows system while apply ran. GitHub created all 52
+repositories, but only 42 reached `manifest.yml`. The other 10 (section 131,
+`riedln` onward) exist on GitHub with only the template commit and no student
+collaborator. No students were added and nothing was recorded.
+
+When `writeManifest` fails, `persistManifest`
+(`src/execution/apply-executor.ts`) records `manifest_write_failed` in the
+transient CLI result and stops work on that student. The run continues, the
+UI treats `partial_success` as success, and the error is not saved anywhere.
+Re-running cannot recover: each orphaned repository is a name collision in
+`src/planning/plan-builder.ts`, and any blocked operation makes the mutation
+guard refuse the whole apply. The only recovery is deleting the repositories
+on GitHub or writing manifest records by hand.
+
+Fix: when a course file (the manifest at minimum, and other files Graider
+writes during a run) cannot be opened for writing, pause with a plain-language
+message naming the file and suggesting it may be open in another program, and
+offer **Retry** (and a way to stop). Applies to the CLI and the Electron app.
+Needs decisions on which files are covered, how the CLI prompts when run with
+`--yes`/`--json`, and whether an apply that cannot save its manifest should
+stop rather than continue. Related gap worth its own ticket: no way to adopt a
+repository that exists on GitHub but is missing from the manifest.
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1728,7 +1756,7 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer par
 of this sequence.
 
 Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, 59, 60, 61, 62,
-63, 64, and 65.
+63, 64, 65, and 66.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
