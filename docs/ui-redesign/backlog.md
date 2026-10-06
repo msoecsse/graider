@@ -1783,6 +1783,76 @@ hierarchy and overflow menus) and §2.3 (plain language) govern the result.
 
 ---
 
+## 68. Template sync fails when the template change is larger than 10 MiB — **Should fix**
+
+Found on 2026-10-05 with SWE4211 `roboc` (Basic Robot Control, template
+`msoecsse/swe4211-rwh-lab6-baseline`). **Update Student Repositories** changed no
+student repository: no commit, no `graider/template-update-*` branch, no pull
+request, and the manifest still records template commit `c4e8e76` for every
+repository.
+
+Cause: `LocalGitTemplateSyncGateway.templatePatch`
+(`src/template-sync/local-git-template-sync-gateway.ts`) reads the entire
+`git diff --binary <base> <target>` output into memory through `execFile` with
+`maxBuffer` set to `MAX_GIT_COMMAND_OUTPUT_BYTES` (10 MiB). Larger output fails
+with `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`, which is reported as `patch_failed`
+("Unable to compute the template changes."). The same patch is used by both
+`applyAndPushTemplateDelta` and `prepareConflictBranch`.
+
+Measured:
+
+- `c4e8e76..c4bf48c` (2,420 files, ~108k lines, mostly generated Doxygen HTML and
+  PNGs): 25,046,867 bytes.
+- `c4e8e76..77b0c08` (after the course owner removed `pi/docs/html`): 12,883,574
+  bytes, still over the limit. `pi/baselineDocs/html` alone is ~10.4 MB.
+- In both cases `git apply --3way --index --check` applies the patch cleanly to a
+  student clone, so the 3-way approach works; only the buffer limit fails.
+
+Options for the fix (to be chosen before implementation):
+
+- Stream `git diff --binary` stdout directly into the existing
+  `git apply --3way --index -` process, so there is no size limit and no new
+  constant.
+- Write the diff to a file in the disposable sync workspace and `git apply` the
+  file.
+- Raise `maxBuffer`. This only moves the limit and needs a value to be chosen.
+
+Other `execFile` calls in the gateway (`ls-tree`, `log`) share the same constant
+but produce much smaller output; check them against a large template while fixing
+this.
+
+Tests: add a gateway test that syncs a template change larger than the current
+limit using local repositories (no live GitHub).
+
+---
+
+## 69. Template sync results look like success when every repository failed — **Should fix**
+
+Reported by the course owner on 2026-10-05 during the item 68 failure: after
+**Update Student Repositories** finished, the run appeared to succeed even though
+no repository was updated.
+
+What the code does (`ui/src/assignment-detail/AssignmentDetailPage.tsx`,
+`executeTemplateSync`; `TemplateSyncResultsPanel.tsx`;
+`src/template-sync/assignment-template-sync-context.ts`):
+
+- When every repository fails, the bridge returns `completed_with_failures`, which
+  the context maps to `partial_success` with no `blocker`. The results panel
+  shows a `role="alert"` message only when there is a `blocker`, so nothing
+  stands out as an error.
+- The panel's summary line is "N student repositories processed." It does not
+  say how many were updated or how many failed. Failures appear only as a
+  per-student "Failed" chip.
+- The confirmation modal closes and the results panel appears below the main
+  two-column layout, which is likely off-screen, so the page looks unchanged.
+
+Expected: after a run, faculty can see at once whether it worked, for example
+"0 of N repositories updated; N failed", shown where they are looking, with an
+error treatment when nothing succeeded. Confirm wording and placement with the
+course owner; `docs/ui-redesign/README.md` §2 governs.
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1813,7 +1883,7 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer par
 of this sequence.
 
 Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, 59, 60, 61, 62,
-63, 64, 65, 66, and 67.
+63, 64, 65, 66, 67, 68, and 69.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
