@@ -12,7 +12,7 @@ import {
   type GitAuthenticationContext,
   type GitWorkspacePreparationFactory
 } from "../git/git-workspace.js";
-import { createSystemGitWorkspaceFactory } from "../git/system-git-workspace-context.js";
+import { createDugiteGitWorkspaceFactory } from "../git/dugite-git-workspace-context.js";
 import type { GitHubClient } from "../github/github-client.js";
 import { LocalGitTemplateSyncGateway } from "./local-git-template-sync-gateway.js";
 import {
@@ -64,7 +64,7 @@ const runWorkspaceStage = async <T>(
 };
 
 const defaultDependencies: ProductionTemplateSyncWorkspaceDependencies = {
-  createGitWorkspaceFactory: createSystemGitWorkspaceFactory,
+  createGitWorkspaceFactory: createDugiteGitWorkspaceFactory,
   createAuthenticationContext: () => {
     const context = createGitAuthenticationContext(randomUUID());
     if (context === null) throw new Error("Unable to create Git authentication context.");

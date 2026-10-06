@@ -423,6 +423,51 @@ const realFixture = async (studentBranch: string) => {
 };
 
 describe("production template-sync local integration", () => {
+  it("uses bundled Git for the default production workspace when PATH is unavailable", async () => {
+    const { template, student } = await realFixture("release/course");
+    const originalPath = process.env.PATH;
+    let prepared:
+      | {
+          readonly templateRoot: string;
+          readonly studentRoot: string;
+          readonly studentDefaultBranch: string;
+        }
+      | undefined;
+
+    process.env.PATH = "";
+    try {
+      prepared = await withProductionTemplateSyncWorkspace(
+        {
+          ...input,
+          templateCloneUrl: template.remote,
+          studentCloneUrl: student.remote,
+          templateCommitSha: template.sha,
+          token: null
+        },
+        ({ gateway, studentDefaultBranch }) => {
+          const options = gateway as unknown as {
+            readonly options: {
+              readonly templateWorkspace: { readonly root: string };
+              readonly studentWorkspace: { readonly root: string };
+            };
+          };
+          return Promise.resolve({
+            templateRoot: options.options.templateWorkspace.root,
+            studentRoot: options.options.studentWorkspace.root,
+            studentDefaultBranch
+          });
+        }
+      );
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+    }
+
+    expect(prepared.studentDefaultBranch).toBe("release/course");
+    expect(prepared.templateRoot).toMatch(/graider-template-sync-.*\/template$/u);
+    expect(prepared.studentRoot).toMatch(/graider-template-sync-.*\/student$/u);
+  });
+
   it.each([
     ["main", "master"],
     ["master", "main"],

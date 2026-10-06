@@ -463,13 +463,13 @@ generated proof branches were cleaned. Phase 1.2B is complete.
 
 ### Phase 1.2C transition state
 
-C-1 proved the `SystemGitWorkspaceFactory` executor seam with Dugite. C-2A now composes that
-proven runner in `src/git/dugite-git-runners.ts` and routes direct Electron-main workspace services
-(local HEAD/history, Course Publish, and Student Access Pages readiness/publication) through the
-generated Dugite backend. The semantic workspace contract and architecture boundary remain
-unchanged.
+C-1 proved the `SystemGitWorkspaceFactory` executor seam with Dugite. C-2A composes that proven
+runner in `src/git/dugite-git-runners.ts` for direct Electron-main workspace consumers (local
+HEAD/history, Course Publish, and Student Access Pages readiness/publication). C-2B-1 now also
+uses it for production template sync. The semantic workspace contract and architecture boundary
+remain unchanged.
 
-This is deliberately not the production cutover: template sync still defaults to
-`createSystemGitWorkspaceFactory`, and the bundled `graider assignment download-repositories` path
-still uses the system-Git repository-download factory. Those paths are reserved for C-2B, so Phase
-1.2 is not complete.
+Repository download and the bundled `graider assignment download-repositories` CLI still use the
+system-Git repository-download factory. They are the remaining production system-Git consumer and
+require the separate C-2B-2 bundled-CLI packaging/module-resolution decision. Phase 1.2 is not yet
+complete.
