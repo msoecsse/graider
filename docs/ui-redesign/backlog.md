@@ -1853,6 +1853,55 @@ course owner; `docs/ui-redesign/README.md` §2 governs.
 
 ---
 
+## 70. Template sync hangs because its push has no GitHub credentials — **Should fix**
+
+Found on 2026-10-05 with SWE4211 `roboc`, after item 68's size problem was
+avoided by trimming the template. **Update Student Repositories** never finished
+the first repository (`msoecsse/behnkem747-roboc-swe4211-27s1`). The template
+change applied cleanly and was committed in the temporary clone, but
+`git push origin HEAD:main` waited indefinitely. The course owner deleted the
+assignment to start over, so the sync could not be completed for `roboc`.
+
+Cause:
+
+- `withProductionTemplateSyncWorkspace`
+  (`src/template-sync/production-template-sync-workspace.ts`) passes the token
+  as a per-command `-c http.extraHeader=...` for clone and checkout only. The
+  header is not stored in the clones.
+- `LocalGitTemplateSyncGateway.git()`
+  (`src/template-sync/local-git-template-sync-gateway.ts`) runs every later
+  command, including `push origin HEAD:<branch>` (clean updates and conflict
+  branches) and `push origin --delete <branch>` (cleanup), without the header.
+  Git then falls back to the machine's credential helper. On a Mac whose
+  `osxkeychain` helper has no GitHub entry, git prompts for a username on the
+  terminal that launched the app.
+- Nothing sets `GIT_TERMINAL_PROMPT=0` for template-sync git commands (compare
+  `ui/electron/studentRepositoryAccessPageService.ts`), and there is no timeout,
+  so the prompt hangs the run instead of failing it.
+
+Observed: the hung `git push` was a child of the Electron main process, attached
+to the launching terminal's TTY, with no credential-helper process running.
+GitHub and the manifest were unchanged.
+
+Impact: template sync can push only on machines whose git already has stored
+GitHub credentials, for example after `gh auth setup-git`. Elsewhere, every
+clean update, conflict branch, and branch cleanup hangs. This is inferred from
+the code and the `roboc` run, not tested on other machines.
+
+Fix direction: give the gateway's network commands the same token header the
+workspace uses, without logging, persisting, or serializing the token; set
+`GIT_TERMINAL_PROMPT=0` for all template-sync git commands so a missing
+credential fails at once as `push_failed`. Tests must use local repositories
+and a mocked or absent credential, never a real token.
+
+Related: killed or hung runs leave their temporary workspaces
+(`graider-template-sync-*` under the OS temp directory) behind, because cleanup
+runs only when the operation returns. Three were present on the course owner's
+Mac on 2026-10-05, two from 2026-09-15. Each holds full clones of a template and
+a student repository.
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1883,7 +1932,7 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer par
 of this sequence.
 
 Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, 59, 60, 61, 62,
-63, 64, 65, 66, 67, 68, and 69.
+63, 64, 65, 66, 67, 68, 69, and 70.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
