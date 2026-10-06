@@ -1736,6 +1736,53 @@ exists on GitHub but is missing from the manifest.
 
 ---
 
+## 67. Review the Assignment Detail page and its More assignment actions menu — **Should fix**
+
+Raised by the course owner on 2026-10-05 while recovering SWE2410 `coco26`. The
+**More assignment actions** (⋯) menu on Assignment Detail
+(`ui/src/assignment-detail/AssignmentDetailPage.tsx`, `overflowGroups`) is
+grouped in a way that does not help faculty find things: every item relates to
+the assignment, so headings such as **Assignment** and **Repositories** do not
+distinguish anything, and some captions only restate their label. For example,
+**Faculty report** sits under **Reports**, which is redundant, and its caption
+says only "Generate and view the faculty report."
+
+Current menu:
+
+| Heading       | Item                          | Caption                                                          |
+| ------------- | ----------------------------- | ---------------------------------------------------------------- |
+| Assignment    | Edit assignment               | Change assignment settings, points, and due date.                |
+| Assignment    | Group settings                | Switch between individual and shared group repositories.         |
+| Assignment    | Student access page           | Generate the public page students use to find their repository.  |
+| Repositories  | Apply to new students         | Create repositories for students not yet applied.                |
+| Repositories  | Download student repositories | Clone all student repositories locally.                          |
+| Grading setup | Regenerate grading workflow   | View, edit, and push the grading workflow file.                  |
+| Grading setup | Manage Comment Library        | Create and maintain reusable comments shared across this course. |
+| Grading setup | View grading status           | See automated check status for every repository.                 |
+| Reports       | Faculty report                | Generate and view the faculty report.                            |
+| (separated)   | Delete assignment             | Remove the local assignment configuration only.                  |
+
+Related problems on the same page, found during the same recovery:
+
+- Once an assignment is applied, the primary action becomes **Continue grading**
+  and Apply moves into the menu as **Apply to new students**. The visible
+  secondary action **Update Student Repositories** (template sync) sounds like
+  the way to add missing students but only processes repositories already in the
+  manifest, so the course owner used it repeatedly without reaching Apply.
+- The lifecycle strip's **Applied** step shows the active roster count ("Applied
+  52 repositories") rather than repositories recorded in the manifest (42 at the
+  time), and treats `partially_applied` as complete.
+- The **Student access page** caption still says "public page"; since item 56
+  the Pages site is private.
+
+Review the page with the course owner before changing it: what the menu is for,
+how its items are grouped and named, which captions add information, where Apply
+belongs after the first Apply, how template sync is named and explained, and
+what the lifecycle strip counts. `docs/ui-redesign/README.md` §2.1 (action
+hierarchy and overflow menus) and §2.3 (plain language) govern the result.
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1766,7 +1813,7 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer par
 of this sequence.
 
 Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, 59, 60, 61, 62,
-63, 64, 65, and 66.
+63, 64, 65, 66, and 67.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
