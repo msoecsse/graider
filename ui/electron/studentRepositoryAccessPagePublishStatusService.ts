@@ -1,7 +1,7 @@
 import { getAssignmentForEdit } from "./assignmentEditService.js";
 import {
   createRelativeGitPath,
-  getSystemGitWorkspaceFactory,
+  getProductionGitWorkspaceFactory,
   type GitRepositoryInspection,
   type GitRepositoryState,
   type GitWorkspaceInspectionFactory
@@ -65,7 +65,7 @@ const resultFromAccessPage = (
 export const getStudentRepositoryAccessPagePublishStatus = async (
   request: StudentRepositoryAccessPageRequest,
   mappings: AssignmentRepositoryMappings,
-  factory: GitWorkspaceInspectionFactory = getSystemGitWorkspaceFactory()
+  factory: GitWorkspaceInspectionFactory = getProductionGitWorkspaceFactory()
 ): Promise<StudentRepositoryAccessPagePublishResult> => {
   const accessPage = await getStudentRepositoryAccessPageStatus(request, mappings);
   const initialChecks = {

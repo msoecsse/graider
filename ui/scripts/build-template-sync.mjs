@@ -6,6 +6,9 @@ await build({
     systemGitWorkspaceBackend: fileURLToPath(
       new URL("../../src/git/system-git-workspace-context.ts", import.meta.url)
     ),
+    dugiteGitWorkspaceBackend: fileURLToPath(
+      new URL("../../src/git/dugite-git-workspace-context.ts", import.meta.url)
+    ),
     assignmentTemplateSyncBackend: fileURLToPath(
       new URL("../../src/template-sync/assignment-template-sync-context.ts", import.meta.url)
     ),
@@ -67,5 +70,6 @@ await build({
   target: "node24",
   clean: false,
   dts: false,
-  noExternal: ["@octokit/rest", "fast-xml-parser", "yauzl", "yaml", "zod"]
+  noExternal: ["@octokit/rest", "fast-xml-parser", "yauzl", "yaml", "zod"],
+  external: ["dugite"]
 });

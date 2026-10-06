@@ -1,5 +1,5 @@
 import {
-  getSystemGitWorkspaceFactory,
+  getProductionGitWorkspaceFactory,
   type GitCommitSummary,
   type GitWorkspaceReader,
   type GitWorkspaceReaderFactory
@@ -56,7 +56,7 @@ export const createLocalRepositoryCommitHistoryReader =
     let workspace: GitWorkspaceReader;
     let resolvedSubmissionCommitSha: string;
     try {
-      workspace = await (factory ?? getSystemGitWorkspaceFactory()).open(repositoryRoot);
+      workspace = await (factory ?? getProductionGitWorkspaceFactory()).open(repositoryRoot);
       resolvedSubmissionCommitSha = await workspace.resolveRevision(submissionCommitSha);
     } catch {
       return { status: "submission_commit_unavailable" };

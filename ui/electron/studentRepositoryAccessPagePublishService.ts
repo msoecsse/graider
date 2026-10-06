@@ -10,7 +10,7 @@ import type {
 } from "./ipc.js";
 import {
   createRelativeGitPath,
-  getSystemGitWorkspaceFactory,
+  getProductionGitWorkspaceFactory,
   type GitWorkspaceWriterFactory
 } from "./gitWorkspaceReader.js";
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService.js";
@@ -43,7 +43,7 @@ const getConfiguredPagesBranch = (courseFolderPath: string): string | null => {
 export const publishStudentRepositoryAccessPage = async (
   request: StudentRepositoryAccessPageRequest,
   mappings: AssignmentRepositoryMappings,
-  factory: GitWorkspaceWriterFactory = getSystemGitWorkspaceFactory()
+  factory: GitWorkspaceWriterFactory = getProductionGitWorkspaceFactory()
 ): Promise<StudentRepositoryAccessPagePublishActionResult> => {
   const readiness = await getStudentRepositoryAccessPagePublishStatus(request, mappings, factory);
   const repositoryFolderPath = request.pagesRepositoryFolderPath;

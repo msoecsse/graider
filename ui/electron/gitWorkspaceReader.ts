@@ -90,26 +90,27 @@ export interface GitWorkspaceFactory {
   open(repositoryPath: string): Promise<GitWorkspace>;
 }
 
-interface SystemGitWorkspaceBackend {
-  createSystemGitWorkspaceFactory(): GitWorkspaceFactory;
+interface ProductionGitWorkspaceBackend {
+  createDugiteGitWorkspaceFactory(): GitWorkspaceFactory;
 }
 
 // Root infrastructure is bundled into the trusted Electron-main output alongside the
 // existing generated CJS backends; it is never imported by preload or renderer code.
-const loadSystemGitWorkspaceBackend = (): SystemGitWorkspaceBackend =>
+const loadProductionGitWorkspaceBackend = (): ProductionGitWorkspaceBackend =>
   require(
     path.join(
       __dirname,
       path.basename(__dirname) === "electron" ? "../dist-electron" : "",
-      "systemGitWorkspaceBackend.cjs"
+      "dugiteGitWorkspaceBackend.cjs"
     )
-  ) as SystemGitWorkspaceBackend;
+  ) as ProductionGitWorkspaceBackend;
 
-let systemGitWorkspaceFactory: GitWorkspaceFactory | undefined;
+let productionGitWorkspaceFactory: GitWorkspaceFactory | undefined;
 
-export const getSystemGitWorkspaceFactory = (): GitWorkspaceFactory => {
-  systemGitWorkspaceFactory ??= loadSystemGitWorkspaceBackend().createSystemGitWorkspaceFactory();
-  return systemGitWorkspaceFactory;
+export const getProductionGitWorkspaceFactory = (): GitWorkspaceFactory => {
+  productionGitWorkspaceFactory ??=
+    loadProductionGitWorkspaceBackend().createDugiteGitWorkspaceFactory();
+  return productionGitWorkspaceFactory;
 };
 
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[A-Za-z]:\//u;

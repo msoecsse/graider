@@ -461,6 +461,15 @@ Windows x64 against the dedicated private sandbox. Each job used a unique non-de
 performed clone, fetch, non-force push, ref verification, and `finally` remote deletion; both
 generated proof branches were cleaned. Phase 1.2B is complete.
 
-Production still constructs `SystemGitWorkspace`; its availability behavior, diagnostics, semantic
-contract, and sole-production-executor architecture test are unchanged. Production integration and
-cutover remain in progress in Phase 1.2C.
+### Phase 1.2C transition state
+
+C-1 proved the `SystemGitWorkspaceFactory` executor seam with Dugite. C-2A now composes that
+proven runner in `src/git/dugite-git-runners.ts` and routes direct Electron-main workspace services
+(local HEAD/history, Course Publish, and Student Access Pages readiness/publication) through the
+generated Dugite backend. The semantic workspace contract and architecture boundary remain
+unchanged.
+
+This is deliberately not the production cutover: template sync still defaults to
+`createSystemGitWorkspaceFactory`, and the bundled `graider assignment download-repositories` path
+still uses the system-Git repository-download factory. Those paths are reserved for C-2B, so Phase
+1.2 is not complete.

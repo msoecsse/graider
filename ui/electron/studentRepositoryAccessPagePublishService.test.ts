@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { getSystemGitWorkspaceFactory, type GitWorkspaceWriterFactory } from "./gitWorkspaceReader";
+import {
+  getProductionGitWorkspaceFactory,
+  type GitWorkspaceWriterFactory
+} from "./gitWorkspaceReader";
 import type { StudentRepositoryAccessPageRequest } from "./ipc";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService";
 
@@ -119,7 +122,7 @@ describe("studentRepositoryAccessPagePublishService", () => {
   it("rechecks the upstream immediately before staging", async () => {
     const root = createFixture();
     const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
-    const backend = getSystemGitWorkspaceFactory();
+    const backend = getProductionGitWorkspaceFactory();
     let openCount = 0;
     const factory: GitWorkspaceWriterFactory = {
       inspect: (repositoryPath) => backend.inspect(repositoryPath),
@@ -142,7 +145,7 @@ describe("studentRepositoryAccessPagePublishService", () => {
   it("rechecks behind state immediately before staging", async () => {
     const root = createFixture();
     const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
-    const backend = getSystemGitWorkspaceFactory();
+    const backend = getProductionGitWorkspaceFactory();
     let openCount = 0;
     const factory: GitWorkspaceWriterFactory = {
       inspect: (repositoryPath) => backend.inspect(repositoryPath),

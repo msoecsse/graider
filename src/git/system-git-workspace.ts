@@ -66,9 +66,10 @@ const RENAME_RECORD_PATTERN = /^2 ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ 
 const CONFLICT_RECORD_PATTERN =
   /^u ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ (.*)$/su;
 
-class SystemGitFailure extends Error {
+export class SystemGitFailure extends Error {
   readonly code: unknown;
   readonly stderr: string;
+  readonly stdout: string;
   readonly authenticationRejected: boolean;
   readonly explicitAuthentication: boolean;
 
@@ -90,6 +91,7 @@ class SystemGitFailure extends Error {
     );
     this.explicitAuthentication = explicitAuthentication;
     this.stderr = redact(rawStderr, secrets);
+    this.stdout = redact(typeof details.stdout === "string" ? details.stdout : "", secrets);
     const sanitizedCause = new Error(redact(rawMessage, secrets));
     sanitizedCause.name =
       typeof (error as { readonly name?: unknown }).name === "string"

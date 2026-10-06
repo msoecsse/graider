@@ -1,5 +1,5 @@
 import {
-  getSystemGitWorkspaceFactory,
+  getProductionGitWorkspaceFactory,
   type GitWorkspaceReaderFactory
 } from "./gitWorkspaceReader.js";
 
@@ -13,7 +13,7 @@ export const createLocalRepositoryHeadReader =
   (factory?: GitWorkspaceReaderFactory) =>
   async (repositoryRoot: string): Promise<LocalRepositoryHeadResult> => {
     try {
-      const workspace = await (factory ?? getSystemGitWorkspaceFactory()).open(repositoryRoot);
+      const workspace = await (factory ?? getProductionGitWorkspaceFactory()).open(repositoryRoot);
       const submissionCommitSha = await workspace.resolveHead();
       return COMMIT_SHA_PATTERN.test(submissionCommitSha)
         ? { status: "success", submissionCommitSha }

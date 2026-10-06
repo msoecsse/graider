@@ -8,7 +8,7 @@ import type {
 } from "./ipc.js";
 import {
   createRelativeGitPath,
-  getSystemGitWorkspaceFactory,
+  getProductionGitWorkspaceFactory,
   type GitRepositoryInspection,
   type GitRepositoryState,
   type GitWorkspaceInspectionFactory,
@@ -45,7 +45,7 @@ const statusResult = (
 
 export const getCoursePublishStatus = async (
   courseFolderPath: string,
-  factory: GitWorkspaceInspectionFactory = getSystemGitWorkspaceFactory()
+  factory: GitWorkspaceInspectionFactory = getProductionGitWorkspaceFactory()
 ): Promise<CoursePublishStatusResult> => {
   const root = path.resolve(courseFolderPath);
   if (!fs.existsSync(root))
@@ -151,7 +151,7 @@ export const getCoursePublishStatus = async (
 
 export const publishCourseChanges = async (
   courseFolderPath: string,
-  factory: GitWorkspaceWriterFactory = getSystemGitWorkspaceFactory()
+  factory: GitWorkspaceWriterFactory = getProductionGitWorkspaceFactory()
 ): Promise<CoursePublishActionResult> => {
   const status = await getCoursePublishStatus(courseFolderPath, factory);
   if (status.status === "up_to_date" || status.status === "unrelated_changes")
