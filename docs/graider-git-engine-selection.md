@@ -497,5 +497,12 @@ CLI `--help` exited 0 with normal Graider output and empty `PATH`; no Git overri
 placement workaround was used. Existing deterministic B-1/B-2 assertions remained green; live
 private mode was not rerun.
 
-The native Windows x64 C-2B-2B packaged CLI proof is pending the push-triggered workflow. Historical
-Windows results above do not establish acceptance for this new layout.
+On 2026-10-08 native Windows x64
+[workflow run 37829428444](https://github.com/msoecsse/graider/actions/runs/37829428444), for commit
+`b7ee01d92ed2ea06104734061da4df8c5a81fb76`, completed successfully. It reported
+`PACKAGED_DUGITE_PROOF_OK`, `cliDugiteResolution: "ok"`, and `cliHelpEmptyPath: "ok"`. The CLI
+metadata and wrapper paths matched the macOS unpacked paths above; both require roots reached
+`app.asar.unpacked/node_modules/dugite/git/cmd/git.exe` (Git 2.53.0.windows.4). The independent
+`PACKAGED_DUGITE_PE_X64_OK` inspection confirmed machine type `0x8664`. This establishes native
+macOS arm64 and Windows x64 packaged CLI acceptance for C-2B-2B. The private live workflow was not
+rerun.
