@@ -52,6 +52,7 @@ import {
 } from "../../repository-mappings/repository-mappings-builder.js";
 import {
   downloadAssignmentRepositories,
+  type RepositoryDownloadDependencies,
   type RepositoryDownloadResult
 } from "../../repository-download/repository-download.js";
 
@@ -152,6 +153,8 @@ export interface AssignmentDownloadRepositoriesCommandRequest {
   readonly cwd: string;
   readonly assignmentFile: string;
   readonly options: AssignmentDownloadRepositoriesCommandOptions;
+  readonly env?: Record<string, string | undefined>;
+  readonly dependencies?: Partial<RepositoryDownloadDependencies>;
 }
 
 const createJsonRequiredResult = (): AssignmentDetailResult =>
@@ -355,12 +358,16 @@ export const runAssignmentRepositoryMappingsCommand = ({
 export const runAssignmentDownloadRepositoriesCommand = async ({
   cwd,
   assignmentFile,
-  options
+  options,
+  env = process.env,
+  dependencies
 }: AssignmentDownloadRepositoriesCommandRequest): Promise<RepositoryDownloadResult> =>
   await downloadAssignmentRepositories({
     cwd,
     assignmentFile,
-    destination: options.destination ?? ""
+    destination: options.destination ?? "",
+    token: readGitHubToken(env) ?? null,
+    ...(dependencies === undefined ? {} : { dependencies })
   });
 
 export const runAssignmentApplyCommand = ({
@@ -524,7 +531,8 @@ export const registerAssignmentCommand = (program: Command): void => {
         const result = await runAssignmentDownloadRepositoriesCommand({
           cwd: process.cwd(),
           assignmentFile,
-          options
+          options,
+          env: process.env
         });
         console.log(formatAssignmentDownloadRepositoriesResultAsJson(result));
         process.exitCode = result.exitCode;

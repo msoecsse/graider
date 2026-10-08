@@ -6,6 +6,7 @@ import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
 import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
+import { runAssignmentRepositoryDownload } from "./assignmentRepositoryDownloadRunner.js";
 import { prepareGradingWorkspace } from "./gradingWorkspaceService.js";
 import { getAssignmentGradingLifecycle } from "./assignmentGradingLifecycleService.js";
 import { loadGradingStudentSource } from "./gradingStudentSourceService.js";
@@ -1319,24 +1320,8 @@ export const registerIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.downloadAssignmentRepositories, async (_event, request: unknown) => {
     if (!isAssignmentRepositoryDownloadRequest(request))
       throw new Error("Assignment download request is required.");
-    const result = await processRunner({
-      command: "graider",
-      args: [
-        "assignment",
-        "download-repositories",
-        request.assignmentFile,
-        "--destination",
-        request.destination,
-        "--json"
-      ],
-      cwd: request.courseFolderPath,
-      env: process.env
-    });
-    if (result.error !== null) throw new Error("Repository download command could not be started.");
+    const parsed = await runAssignmentRepositoryDownload(request, { runner: processRunner });
     try {
-      const parsed = JSON.parse(result.stdout) as {
-        targets?: { status?: string; localPath?: string; studentIds?: string[] }[];
-      };
       const match = request.assignmentFile
         .replaceAll("\\", "/")
         .match(

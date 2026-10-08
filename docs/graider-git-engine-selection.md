@@ -5,6 +5,11 @@ complete, production cutover remains incomplete
 
 **Decision date:** 2026-10-04
 
+Repository download now uses explicit operation-scoped GitHub authentication. Electron forwards
+the resolved environment token or `gh auth token` fallback safely to the bundled CLI through
+`GRAIDER_GITHUB_TOKEN`. Repository download still uses system Git. C-2B-2B will replace that final
+transport and solve packaged CLI/Dugite resolution.
+
 **Selected candidate:** Dugite 3.2.3 with dugite-native 2.53.0-4 / Git 2.53.0
 
 **Evidence legend:**

@@ -3,11 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
-  downloadAssignmentRepositories,
+  downloadAssignmentRepositories as download,
   type RepositoryDownloadDependencies
 } from "../../../src/repository-download/repository-download.js";
 import {
   GitError,
+  type GitAuthenticationContext,
   type CloneRequest,
   type GitWorkspaceFactory,
   type GitWorkspaceReader
@@ -15,6 +16,8 @@ import {
 import { renderManifestV2Yaml } from "../../../src/manifest/manifest-v2-renderer.js";
 
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
+const downloadAssignmentRepositories = (request: Parameters<typeof download>[0]) =>
+  download({ token: "unit-download-token", ...request });
 const copyFixture = (): string => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "graider-repository-download-"));
   fs.cpSync(path.join("tests", "fixtures", "grade", "active-assignment"), cwd, {
@@ -51,6 +54,40 @@ const createGitFactory = (
 });
 
 describe("downloadAssignmentRepositories", () => {
+  it("does not invoke Git when authentication is unavailable with an injected factory", async () => {
+    const verifyAvailable = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    const clone = vi.fn<(request: CloneRequest) => Promise<GitWorkspaceReader>>();
+    const git = createGitFactory({ verifyAvailable, clone });
+    const result = await download({
+      cwd: copyFixture(),
+      assignmentFile: ASSIGNMENT_FILE,
+      destination: "/downloads/lab04",
+      dependencies: createDependencies(git)
+    });
+    expect(result).toMatchObject({ status: "failure", exitCode: 1, targets: [] });
+    expect(result.diagnostics[0]?.code).toBe("github_auth_missing");
+    expect(verifyAvailable).not.toHaveBeenCalled();
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it("keeps credential-bearing clone errors out of results and diagnostics", async () => {
+    const token = "repository-download-distinctive-fake-secret";
+    const clone = vi
+      .fn<(request: CloneRequest) => Promise<GitWorkspaceReader>>()
+      .mockRejectedValue(new Error(token));
+    const git = createGitFactory({ clone });
+    const result = await download({
+      cwd: copyFixture(),
+      assignmentFile: ASSIGNMENT_FILE,
+      destination: "/downloads/lab04",
+      token,
+      dependencies: createDependencies(git)
+    });
+    expect(result.status).toBe("failure");
+    expect(JSON.stringify(result)).not.toContain(token);
+    expect(JSON.stringify(result.diagnostics)).not.toContain(token);
+    expect(JSON.stringify(clone.mock.calls)).not.toContain(token);
+  });
   it("clones one target for each individual manifest repository with safe target rows", async () => {
     const cwd = copyFixture();
     const clone = vi.fn().mockResolvedValue({ root: "/downloaded" });
@@ -80,22 +117,26 @@ describe("downloadAssignmentRepositories", () => {
       {
         remote: "https://github.com/example-org/27s1-se2030-lab04-seanjones",
         destination: "/downloads/lab04/27s1-se2030-lab04-seanjones",
-        checkout: "default"
+        checkout: "default",
+        authentication: expect.any(Object) as GitAuthenticationContext
       },
       {
         remote: "https://github.com/example-org/27s1-se2030-lab04-janesmith",
         destination: "/downloads/lab04/27s1-se2030-lab04-janesmith",
-        checkout: "default"
+        checkout: "default",
+        authentication: expect.any(Object) as GitAuthenticationContext
       },
       {
         remote: "https://github.com/example-org/27s1-se2030-lab04-kimstudent",
         destination: "/downloads/lab04/27s1-se2030-lab04-kimstudent",
-        checkout: "default"
+        checkout: "default",
+        authentication: expect.any(Object) as GitAuthenticationContext
       },
       {
         remote: "https://github.com/example-org/27s1-se2030-lab04-leehold",
         destination: "/downloads/lab04/27s1-se2030-lab04-leehold",
-        checkout: "default"
+        checkout: "default",
+        authentication: expect.any(Object) as GitAuthenticationContext
       }
     ]);
     expect(result.targets[0]).toMatchObject({
@@ -190,7 +231,8 @@ describe("downloadAssignmentRepositories", () => {
     expect(clone).toHaveBeenNthCalledWith(2, {
       remote: "https://github.com/example-org/27s1-se2030-lab04-team-2",
       destination: "/downloads/lab04/27s1-se2030-lab04-team-2",
-      checkout: "default"
+      checkout: "default",
+      authentication: expect.any(Object) as GitAuthenticationContext
     });
   });
 

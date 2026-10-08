@@ -1,10 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createTrustedGitRemote, type GitWorkspaceFactory } from "../git/git-workspace.js";
+import { randomUUID } from "node:crypto";
+import {
+  createGitAuthenticationContext,
+  createTrustedGitRemote,
+  type GitWorkspaceFactory
+} from "../git/git-workspace.js";
+import type { GitCredentialResolver } from "../git/git-credential-resolver.js";
 import { createSystemGitWorkspaceFactory } from "../git/system-git-workspace-context.js";
 import { buildAssignmentRepositoryMappings } from "../repository-mappings/repository-mappings-builder.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
-import { createConfigDiagnostic } from "../diagnostics/error-catalog.js";
+import { createConfigDiagnostic, DiagnosticCode } from "../diagnostics/error-catalog.js";
 
 export interface RepositoryDownloadTargetResult {
   readonly targetId: string;
@@ -38,14 +44,15 @@ export interface RepositoryDownloadDependencies {
   readonly existsSync: (value: string) => boolean;
   readonly statSync: (value: string) => fs.Stats;
   readonly mkdirSync: (value: string, options: { recursive: true }) => void;
-  readonly git: GitWorkspaceFactory;
+  readonly git?: GitWorkspaceFactory;
+  readonly createGitWorkspaceFactory?: (resolver: GitCredentialResolver) => GitWorkspaceFactory;
 }
 
 const defaultDependencies: RepositoryDownloadDependencies = {
   existsSync: fs.existsSync,
   statSync: fs.statSync,
   mkdirSync: fs.mkdirSync,
-  git: createSystemGitWorkspaceFactory()
+  createGitWorkspaceFactory: createSystemGitWorkspaceFactory
 };
 
 const safeTargetPath = (destination: string, repositoryName: string): string | null => {
@@ -68,13 +75,16 @@ export const downloadAssignmentRepositories = async ({
   cwd,
   assignmentFile,
   destination,
-  dependencies = defaultDependencies
+  token = null,
+  dependencies: overrides = {}
 }: {
   readonly cwd: string;
   readonly assignmentFile: string;
   readonly destination: string;
-  readonly dependencies?: RepositoryDownloadDependencies;
+  readonly token?: string | null;
+  readonly dependencies?: Partial<RepositoryDownloadDependencies>;
 }): Promise<RepositoryDownloadResult> => {
+  const dependencies = { ...defaultDependencies, ...overrides };
   const mappings = buildAssignmentRepositoryMappings({ cwd, assignmentFile });
   const base = {
     schemaVersion: 1 as const,
@@ -95,6 +105,36 @@ export const downloadAssignmentRepositories = async ({
       diagnostics: mappings.diagnostics
     };
   }
+  if (token === null && mappings.targets.length > 0) {
+    return {
+      ...base,
+      status: "failure",
+      exitCode: 1,
+      clonedCount: 0,
+      failedCount: 0,
+      targets: [],
+      diagnostics: [
+        diagnostic(
+          DiagnosticCode.GithubAuthMissing,
+          "GitHub authentication is required to download repositories. Set GRAIDER_GITHUB_TOKEN or GITHUB_TOKEN.",
+          {}
+        )
+      ]
+    };
+  }
+  const authentication = createGitAuthenticationContext(randomUUID());
+  if (authentication === null) throw new Error("Unable to create Git authentication context.");
+  const credentialResolver: GitCredentialResolver = {
+    resolve: (context) =>
+      Promise.resolve(
+        context === authentication && token !== null
+          ? { kind: "github_token", host: "github.com", token }
+          : null
+      )
+  };
+  const git =
+    dependencies.git ??
+    (dependencies.createGitWorkspaceFactory ?? createSystemGitWorkspaceFactory)(credentialResolver);
   try {
     if (dependencies.existsSync(destination) && !dependencies.statSync(destination).isDirectory()) {
       throw new Error("destination_not_directory");
@@ -118,7 +158,7 @@ export const downloadAssignmentRepositories = async ({
     };
   }
   try {
-    await dependencies.git.verifyAvailable();
+    await git.verifyAvailable();
   } catch {
     return {
       ...base,
@@ -197,7 +237,7 @@ export const downloadAssignmentRepositories = async ({
     try {
       const remote = createTrustedGitRemote(cloneUrl);
       if (remote === null) throw new Error("invalid_clone_remote");
-      await dependencies.git.clone({ remote, destination: localPath, checkout: "default" });
+      await git.clone({ remote, destination: localPath, checkout: "default", authentication });
       results.push({ ...baseTarget, status: "cloned", diagnostics: [] });
     } catch {
       results.push({
