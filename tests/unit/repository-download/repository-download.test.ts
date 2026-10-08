@@ -11,9 +11,20 @@ import {
   type GitAuthenticationContext,
   type CloneRequest,
   type GitWorkspaceFactory,
-  type GitWorkspaceReader
+  type GitWorkspaceReader,
+  type GitWorkspacePreparer
 } from "../../../src/git/git-workspace.js";
+import { SystemGitWorkspaceFactory } from "../../../src/git/system-git-workspace.js";
+import * as dugiteContext from "../../../src/git/dugite-git-workspace-context.js";
 import { renderManifestV2Yaml } from "../../../src/manifest/manifest-v2-renderer.js";
+
+vi.mock("../../../src/git/dugite-git-workspace-context.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof dugiteContext>();
+  return {
+    ...actual,
+    createDugiteGitWorkspaceFactory: vi.fn(actual.createDugiteGitWorkspaceFactory)
+  };
+});
 
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
 const downloadAssignmentRepositories = (request: Parameters<typeof download>[0]) =>
@@ -54,6 +65,31 @@ const createGitFactory = (
 });
 
 describe("downloadAssignmentRepositories", () => {
+  it("composes the Dugite factory by default with the download credential resolver", async () => {
+    const git = new SystemGitWorkspaceFactory();
+    vi.spyOn(git, "verifyAvailable").mockResolvedValue(undefined);
+    const clone = vi
+      .spyOn(git, "clone")
+      .mockResolvedValue({ root: "/downloaded" } as GitWorkspacePreparer);
+    const factory = vi.mocked(dugiteContext.createDugiteGitWorkspaceFactory).mockReturnValue(git);
+    try {
+      const { git: injectedGit, ...filesystem } = createDependencies(git);
+      expect(injectedGit).toBe(git);
+      const result = await downloadAssignmentRepositories({
+        cwd: copyFixture(),
+        assignmentFile: ASSIGNMENT_FILE,
+        destination: "/downloads/lab04",
+        dependencies: filesystem
+      });
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(typeof factory.mock.calls[0]?.[0]?.resolve).toBe("function");
+      expect(result.status).toBe("success");
+      expect(clone).toHaveBeenCalledTimes(4);
+    } finally {
+      factory.mockRestore();
+    }
+  });
+
   it("does not invoke Git when authentication is unavailable with an injected factory", async () => {
     const verifyAvailable = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     const clone = vi.fn<(request: CloneRequest) => Promise<GitWorkspaceReader>>();

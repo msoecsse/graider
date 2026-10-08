@@ -8,5 +8,6 @@ export default {
   banner: {
     js: 'import { createRequire } from "node:module";\nconst require = createRequire(import.meta.url);'
   },
+  external: ["dugite"],
   noExternal: ["@octokit/rest", "commander", "yaml", "zod"]
 };

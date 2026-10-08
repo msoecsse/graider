@@ -1,14 +1,15 @@
 # Graider bundled Git engine selection
 
 **Status:** Selected; Phase 1.2B packaged macOS arm64 and Windows x64 private-transport proofs are
-complete, production cutover remains incomplete
+complete; all production workflows use bundled Git, C-3 infrastructure cleanup remains
 
 **Decision date:** 2026-10-04
 
 Repository download now uses explicit operation-scoped GitHub authentication. Electron forwards
 the resolved environment token or `gh auth token` fallback safely to the bundled CLI through
-`GRAIDER_GITHUB_TOKEN`. Repository download still uses system Git. C-2B-2B will replace that final
-transport and solve packaged CLI/Dugite resolution.
+`GRAIDER_GITHUB_TOKEN`. C-2B-2B moves repository download to the Dugite factory without changing
+that authentication composition. The bundled CLI keeps Dugite external and resolves it from the
+complete unpacked runtime package.
 
 **Selected candidate:** Dugite 3.2.3 with dugite-native 2.53.0-4 / Git 2.53.0
 
@@ -80,11 +81,11 @@ the executable reports Git 2.53.0. All candidate operations passed an empty `PAT
 successfully. The spawned executable's real path matched the resolved packaged binary. This is a
 bundled Git executable, not a faculty/system-installed Git executable.
 
-The root package pins Dugite as a `devDependency` and allows its install script for the Phase 1.2A
-spike. Phase 1.2B-1 also pins the same version in the Electron application's runtime dependency
-graph solely so the packaged proof can load the real application dependency. Production remains on
-`SystemGitWorkspace`. Eliminated candidates were not added to the repository; the isomorphic-git
-probe used an isolated temporary install.
+The root CLI and Electron UI each pin Dugite 3.2.3 as a runtime dependency and allow its install
+script. All current production Git workflows compose Dugite runners beneath the shared semantic
+workspace implementation. The system runners and factory remain transitional infrastructure until
+C-3. Eliminated candidates were not added to the repository; the isomorphic-git probe used an
+isolated temporary install.
 
 ## 4. Executable semantic evidence
 
@@ -295,12 +296,12 @@ module and rewrites any `/app.asar/` segment to `/app.asar.unpacked/`. The test 
 wrapper under a simulated `app.asar` path, places the native payload under the corresponding
 `app.asar.unpacked` path, resolves that exact binary, and executes it successfully.
 
-The current Electron Builder configuration will **not** package Dugite correctly without Phase
-1.2B changes:
+At the Phase 1.2A spike, Electron Builder still needed the following Phase 1.2B packaging
+changes (completed evidence and the C-2B-2B full-package layout are recorded below):
 
-1. Dugite currently exists only in the root proof `devDependencies`; the packaged Electron project
+1. Dugite existed only in the root proof `devDependencies`; the packaged Electron project
    is `ui`, whose runtime dependency graph does not include it.
-2. Current `asarUnpack` includes only `dist-graider-cli/**/*`; arbitrary Dugite executables are not
+2. The spike-time `asarUnpack` included only `dist-graider-cli/**/*`; arbitrary Dugite executables are not
    covered.
 3. Add Dugite to `ui/package.json` runtime dependencies (and retain whatever root dependency is
    needed to build/test shared source), leave the JS wrapper resolvable from the packaged backend,
@@ -353,29 +354,32 @@ separate Phase 1.2C task.
 independent Phase 1.2A spike. There is no workspace restructuring or dependency-graph
 deduplication.
 
-Electron Builder retains `dist-graider-cli/**/*` in `asarUnpack` and additionally unpacks
-`node_modules/dugite/git/**/*`. In the native macOS arm64 artifact the JS entry point, package
-metadata, and Dugite MIT `LICENSE` resolve beneath:
+Electron Builder retains `dist-graider-cli/**/*` in `asarUnpack` and unpacks the entire
+`node_modules/dugite/**/*` package. The bundled CLI explicitly externalizes `dugite`. Its physical
+module resolution therefore reaches this single runtime installation:
 
 ```text
-Graider.app/Contents/Resources/app.asar/node_modules/dugite/
+app.asar.unpacked/
+  dist-graider-cli/index.js
+  node_modules/dugite/
+    package.json
+    build/
+    LICENSE
+    git/
 ```
 
-The selected executable resolves to:
-
-```text
-Graider.app/Contents/Resources/app.asar.unpacked/node_modules/dugite/git/bin/git
-```
-
-The unpacked payload also contains `git-lfs`, `git-credential-manager`, the Git remote helpers, and
-GCM's `NOTICE`. The proof canonicalizes the payload and executable paths and rejects resolution
-outside that exact unpacked tree.
+Dugite 3.2.3 computes its embedded Git directory relative to its own module and rewrites a logical
+`app.asar` path to `app.asar.unpacked`. Both main-process and unpacked-CLI imports resolve the same
+canonical native Git executable under `app.asar.unpacked/node_modules/dugite/git`.
 
 ### Reusable packaged-runtime proof
 
 `ui/scripts/run-packaged-dugite-proof.cjs` locates the normal packaged application executable and
 launches it with `ELECTRON_RUN_AS_NODE=1`. The external proof script then uses
-`createRequire(<resources>/app.asar/package.json)`; it does not load Dugite from either root or UI
+`createRequire(<resources>/app.asar/package.json)` and a require rooted at the actual unpacked
+`dist-graider-cli/index.js`. It checks the physical wrapper and metadata, version 3.2.3, and the
+same canonical Git executable. It also starts that CLI with `--help` through the packaged Electron
+executable, empty `PATH`, and cleared Git overrides. It does not load Dugite from either root or UI
 development `node_modules`. Every candidate operation starts from `PATH=""`, removes inherited
 `LOCAL_GIT_DIRECTORY` and `GIT_EXEC_PATH`, invokes Dugite's packaged API, and verifies the spawned
 file is the same canonical packaged executable returned by `resolveGitBinary()`.
@@ -474,7 +478,24 @@ HEAD/history, Course Publish, and Student Access Pages readiness/publication). C
 uses it for production template sync. The semantic workspace contract and architecture boundary
 remain unchanged.
 
-Repository download and the bundled `graider assignment download-repositories` CLI still use the
-system-Git repository-download factory. They are the remaining production system-Git consumer and
-require the separate C-2B-2 bundled-CLI packaging/module-resolution decision. Phase 1.2 is not yet
-complete.
+C-2B-2B moves repository download, the last production system-Git workflow consumer, to
+`createDugiteGitWorkspaceFactory`. Token lookup/priority, opaque authentication context,
+context-specific credential resolver, authenticated clone requests, missing-token rejection,
+Electron forwarding, and diagnostic redaction are unchanged.
+
+All current production Git workflows now use bundled Git. The system factory, runners,
+`systemGitWorkspaceBackend.cjs` generation, and architecture-boundary exception remain only as
+transitional/dead fallback infrastructure pending C-3. Phase 1.2 is not formally complete until
+C-3 removes the prerequisite/legacy infrastructure and closes the architecture boundary.
+
+On 2026-10-08 the native macOS arm64 C-2B-2B package and verification commands exited 0 with
+`PACKAGED_DUGITE_PROOF_OK`. The unpacked CLI resolved metadata at
+`app.asar.unpacked/node_modules/dugite/package.json` and the wrapper at
+`app.asar.unpacked/node_modules/dugite/build/lib/index.js`. Both CLI and main-process resolution
+reached `app.asar.unpacked/node_modules/dugite/git/bin/git` (Git 2.53.0, Mach-O arm64). Packaged
+CLI `--help` exited 0 with normal Graider output and empty `PATH`; no Git override or module
+placement workaround was used. Existing deterministic B-1/B-2 assertions remained green; live
+private mode was not rerun.
+
+The native Windows x64 C-2B-2B packaged CLI proof is pending the push-triggered workflow. Historical
+Windows results above do not establish acceptance for this new layout.

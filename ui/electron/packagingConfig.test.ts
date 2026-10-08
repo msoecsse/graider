@@ -34,7 +34,18 @@ describe("packaging configuration", () => {
     expect(packagingConfigSource).toContain('"dist-graider-cli/**/*"');
     expect(packagingConfigSource).toContain('"package.json"');
     expect(packagingConfigSource).toContain('"dist-graider-cli/**/*"');
-    expect(packagingConfigSource).toContain('"node_modules/dugite/git/**/*"');
+    expect(packagingConfigSource).toContain('"node_modules/dugite/**/*"');
+  });
+
+  it("explicitly keeps Dugite external and the CLI and complete runtime package unpacked", async () => {
+    const cliConfig = (
+      await import(path.join(process.cwd(), "scripts/tsup.graider-cli.config.mjs"))
+    ).default;
+    const packagingConfig = nodeRequire(path.join(process.cwd(), "electron-builder.config.cjs"));
+    expect(cliConfig.external).toEqual(["dugite"]);
+    expect(cliConfig.noExternal).not.toContain("dugite");
+    expect(packagingConfig.asarUnpack).toContain("dist-graider-cli/**/*");
+    expect(packagingConfig.asarUnpack).toContain("node_modules/dugite/**/*");
   });
 
   it("builds the bundled CLI before packaging app artifacts", () => {

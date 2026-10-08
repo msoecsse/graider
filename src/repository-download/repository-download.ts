@@ -7,7 +7,7 @@ import {
   type GitWorkspaceFactory
 } from "../git/git-workspace.js";
 import type { GitCredentialResolver } from "../git/git-credential-resolver.js";
-import { createSystemGitWorkspaceFactory } from "../git/system-git-workspace-context.js";
+import { createDugiteGitWorkspaceFactory } from "../git/dugite-git-workspace-context.js";
 import { buildAssignmentRepositoryMappings } from "../repository-mappings/repository-mappings-builder.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { createConfigDiagnostic, DiagnosticCode } from "../diagnostics/error-catalog.js";
@@ -52,7 +52,7 @@ const defaultDependencies: RepositoryDownloadDependencies = {
   existsSync: fs.existsSync,
   statSync: fs.statSync,
   mkdirSync: fs.mkdirSync,
-  createGitWorkspaceFactory: createSystemGitWorkspaceFactory
+  createGitWorkspaceFactory: createDugiteGitWorkspaceFactory
 };
 
 const safeTargetPath = (destination: string, repositoryName: string): string | null => {
@@ -134,7 +134,7 @@ export const downloadAssignmentRepositories = async ({
   };
   const git =
     dependencies.git ??
-    (dependencies.createGitWorkspaceFactory ?? createSystemGitWorkspaceFactory)(credentialResolver);
+    (dependencies.createGitWorkspaceFactory ?? createDugiteGitWorkspaceFactory)(credentialResolver);
   try {
     if (dependencies.existsSync(destination) && !dependencies.statSync(destination).isDirectory()) {
       throw new Error("destination_not_directory");

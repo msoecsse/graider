@@ -1,5 +1,6 @@
 "use strict";
 
+const { spawnSync } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 const { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } = require("node:fs/promises");
 const { existsSync, readFileSync } = require("node:fs");
@@ -59,14 +60,16 @@ const dugiteEntryPath = packagedRequire.resolve("dugite");
 const dugitePackage = JSON.parse(readFileSync(dugitePackagePath, "utf8"));
 const dugite = packagedRequire("dugite");
 
-const normalizedAsarPrefix = `${normalize(appAsar)}${sep}`;
-assert(
-  normalize(dugitePackagePath).startsWith(normalizedAsarPrefix),
-  "Dugite metadata is not in app.asar."
+const packagedDugiteRoots = [appAsar, appAsarUnpacked].map(
+  (root) => `${normalize(join(root, "node_modules", "dugite"))}${sep}`
 );
 assert(
-  normalize(dugiteEntryPath).startsWith(normalizedAsarPrefix),
-  "Dugite wrapper is not in app.asar."
+  packagedDugiteRoots.some((prefix) => normalize(dugitePackagePath).startsWith(prefix)),
+  "Dugite metadata did not resolve from the packaged runtime."
+);
+assert(
+  packagedDugiteRoots.some((prefix) => normalize(dugiteEntryPath).startsWith(prefix)),
+  "Dugite wrapper did not resolve from the packaged runtime."
 );
 assert(dugitePackage.version === EXPECTED_VERSION, "The packaged Dugite version is not 3.2.3.");
 assert(
@@ -157,6 +160,45 @@ const main = async () => {
       ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
       : normalizedLeft === normalizedRight;
   };
+
+  const cliPath = join(appAsarUnpacked, "dist-graider-cli", "index.js");
+  assert(existsSync(cliPath), "The unpacked bundled CLI is missing.");
+  const cliRequire = createRequire(cliPath);
+  const cliDugitePackagePath = cliRequire.resolve("dugite/package.json");
+  const cliDugiteEntryPath = cliRequire.resolve("dugite");
+  const cliDugitePackage = cliRequire("dugite/package.json");
+  const cliDugite = cliRequire("dugite");
+  assert(cliDugitePackage.version === EXPECTED_VERSION, "CLI Dugite version is not 3.2.3.");
+  const canonicalDugiteRoot = await realpath(join(appAsarUnpacked, "node_modules", "dugite"));
+  for (const modulePath of [cliDugitePackagePath, cliDugiteEntryPath]) {
+    assert(
+      normalize(modulePath).startsWith(`${normalize(canonicalDugiteRoot)}${sep}`) &&
+        normalize(await realpath(modulePath)).startsWith(`${normalize(canonicalDugiteRoot)}${sep}`),
+      "CLI Dugite module is not physically available in the unpacked runtime package."
+    );
+    assert(readFileSync(modulePath).length > 0, "CLI Dugite module bytes are missing.");
+  }
+  assert(
+    samePath(await realpath(cliDugite.resolveGitBinary()), canonicalGitBinary),
+    "CLI Dugite resolved a different native Git executable."
+  );
+  const cliHelp = spawnSync(process.execPath, [cliPath, "--help"], {
+    cwd: appAsarUnpacked,
+    env: { ...bundledOnlyEnvironment(), ELECTRON_RUN_AS_NODE: "1" },
+    shell: false,
+    encoding: "utf8",
+    maxBuffer: MAX_OUTPUT_BYTES
+  });
+  assert(
+    cliHelp.error == null && cliHelp.status === 0,
+    "Packaged CLI --help failed with empty PATH."
+  );
+  assert(
+    cliHelp.stdout.includes("Usage: graider") && cliHelp.stdout.includes("assignment"),
+    "Packaged CLI did not print normal Graider help."
+  );
+  assert(cliHelp.stderr === "", "Packaged CLI --help produced unexpected diagnostics.");
+  const safeRelativePath = (path) => relative(resourcesDirectory, path).split(sep).join("/");
 
   const assertSpawnedPackagedGit = async (spawnedFile) => {
     assert(spawnedFile !== "", "Dugite did not report the spawned Git executable.");
@@ -700,7 +742,11 @@ const main = async () => {
         platform: process.platform,
         architecture: process.arch,
         gitVersion: versionOutput,
-        gitPath: safeRelativeGitPath
+        gitPath: safeRelativeGitPath,
+        cliDugitePackagePath: safeRelativePath(cliDugitePackagePath),
+        cliDugiteEntryPath: safeRelativePath(cliDugiteEntryPath),
+        cliDugiteResolution: "ok",
+        cliHelpEmptyPath: "ok"
       })}\n`
     );
   } finally {

@@ -27,5 +27,5 @@ module.exports = {
     sign: false
   },
   asar: true,
-  asarUnpack: ["dist-graider-cli/**/*", "node_modules/dugite/git/**/*"]
+  asarUnpack: ["dist-graider-cli/**/*", "node_modules/dugite/**/*"]
 };
