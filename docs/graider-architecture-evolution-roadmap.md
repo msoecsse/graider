@@ -83,9 +83,9 @@ Do not bind domain code to a specific implementation.
 
 Phase 1.1B completed the system-Git-backed abstraction and its production
 execution boundary. Phase 1.2 embedded/bundled Git-engine proof and selection
-is the next architectural task.
+is complete.
 
-## Slice 1.2 — Embedded/bundled Git engine proof
+## Slice 1.2 — Embedded/bundled Git engine proof — Complete
 
 Select and validate the implementation that eliminates the system-Git prerequisite.
 
@@ -106,6 +106,10 @@ shell/system-Git dependency, cutover of all production consumers, and removal of
 execution.
 
 ## Slice 1.3 — GitHub host abstraction cleanup — Next Phase 1 task
+
+Phase 1.3A — GitHub host boundary inventory/guard is complete. See
+[the boundary inventory](graider-github-host-abstraction.md). Phase 1.3 remains open;
+production client composition cleanup is the next slice.
 
 Separate GitHub API behavior from local Git transport.
 
