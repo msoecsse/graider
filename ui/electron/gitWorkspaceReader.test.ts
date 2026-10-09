@@ -17,10 +17,7 @@ afterEach(() => {
 });
 
 describe("production Git workspace loader", () => {
-  it("loads both generated backends and opens a repository through the default Dugite factory", async () => {
-    const systemBackend = require("../dist-electron/systemGitWorkspaceBackend.cjs") as {
-      createSystemGitWorkspaceFactory(): { verifyAvailable(): Promise<void> };
-    };
+  it("loads the generated Dugite backend and opens a repository through the default Dugite factory", async () => {
     const dugiteBackend = require("../dist-electron/dugiteGitWorkspaceBackend.cjs") as {
       createDugiteGitWorkspaceFactory(): {
         verifyAvailable(): Promise<void>;
@@ -36,9 +33,6 @@ describe("production Git workspace loader", () => {
     git(root, ["commit", "-m", "Initial"]);
     const head = git(root, ["rev-parse", "HEAD"]);
 
-    await expect(
-      systemBackend.createSystemGitWorkspaceFactory().verifyAvailable()
-    ).resolves.toBeUndefined();
     await expect(
       dugiteBackend.createDugiteGitWorkspaceFactory().verifyAvailable()
     ).resolves.toBeUndefined();

@@ -18,9 +18,9 @@ import {
   type GitAuthenticationContext
 } from "../../../src/git/git-workspace.js";
 import {
-  SystemGitWorkspaceFactory,
-  type SystemGitExecutionRequest
-} from "../../../src/git/system-git-workspace.js";
+  GitCommandWorkspaceFactory,
+  type GitCommandExecutionRequest
+} from "../../../src/git/git-command-workspace.js";
 
 const executeFile = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -72,8 +72,8 @@ const runtimeConfig = (env: NodeJS.ProcessEnv): ReadonlyMap<string, string> => {
 
 const createFakeCloneRunner =
   (
-    requests: SystemGitExecutionRequest[]
-  ): ((request: SystemGitExecutionRequest) => Promise<string>) =>
+    requests: GitCommandExecutionRequest[]
+  ): ((request: GitCommandExecutionRequest) => Promise<string>) =>
   async (request) => {
     requests.push(request);
     if (request.args[0] === "clone") {
@@ -117,14 +117,15 @@ describe("Git authentication context contract", () => {
   });
 });
 
-describe("System Git authenticated execution contract", () => {
+describe("Command workspace authenticated execution contract", () => {
   it("supplies GitHub no-checkout clone credentials only through a fresh process environment", async () => {
     const parent = await createTemporaryDirectory("graider-auth-clone-");
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const context = authenticationContext("clone-context");
     const originalRuntimeCount = process.env.GIT_CONFIG_COUNT;
     const originalTerminalPrompt = process.env.GIT_TERMINAL_PROMPT;
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit: createFakeCloneRunner(requests),
       credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
     });
@@ -166,9 +167,9 @@ describe("System Git authenticated execution contract", () => {
 
   it("uses the same protected environment path for authenticated push", async () => {
     const root = await createTemporaryDirectory("graider-auth-push-");
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const context = authenticationContext("push-context");
-    const runGit = (request: SystemGitExecutionRequest): Promise<string> => {
+    const runGit = (request: GitCommandExecutionRequest): Promise<string> => {
       requests.push(request);
       if (request.args.join(" ") === "rev-parse --show-toplevel")
         return Promise.resolve(`${root}\n`);
@@ -182,7 +183,8 @@ describe("System Git authenticated execution contract", () => {
       if (request.args.join(" ") === "push") return Promise.resolve("");
       return Promise.reject(new Error(`Unexpected Git test operation: ${request.args.join(" ")}`));
     };
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit,
       credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
     });
@@ -205,9 +207,9 @@ describe("System Git authenticated execution contract", () => {
 
   it("uses the protected environment for an authenticated explicit branch push", async () => {
     const root = await createTemporaryDirectory("graider-auth-explicit-push-");
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const context = authenticationContext("explicit-push-context");
-    const runGit = (request: SystemGitExecutionRequest): Promise<string> => {
+    const runGit = (request: GitCommandExecutionRequest): Promise<string> => {
       requests.push(request);
       if (request.args.join(" ") === "rev-parse --show-toplevel")
         return Promise.resolve(`${root}\n`);
@@ -218,7 +220,8 @@ describe("System Git authenticated execution contract", () => {
       if (request.args[0] === "push") return Promise.resolve("");
       return Promise.reject(new Error(`Unexpected Git test operation: ${request.args.join(" ")}`));
     };
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit,
       credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
     });
@@ -240,9 +243,9 @@ describe("System Git authenticated execution contract", () => {
 
   it("uses the protected environment for authenticated remote branch deletion", async () => {
     const root = await createTemporaryDirectory("graider-auth-delete-branch-");
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const context = authenticationContext("delete-branch-context");
-    const runGit = (request: SystemGitExecutionRequest): Promise<string> => {
+    const runGit = (request: GitCommandExecutionRequest): Promise<string> => {
       requests.push(request);
       if (request.args.join(" ") === "rev-parse --show-toplevel")
         return Promise.resolve(`${root}\n`);
@@ -253,7 +256,8 @@ describe("System Git authenticated execution contract", () => {
       if (request.args[0] === "push") return Promise.resolve("");
       return Promise.reject(new Error(`Unexpected Git test operation: ${request.args.join(" ")}`));
     };
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit,
       credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
     });
@@ -280,10 +284,11 @@ describe("System Git authenticated execution contract", () => {
 
   it("isolates authenticated, ambient, and differently authenticated operations", async () => {
     const parent = await createTemporaryDirectory("graider-auth-isolation-");
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const contextA = authenticationContext("context-a");
     const contextB = authenticationContext("context-b");
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit: createFakeCloneRunner(requests),
       credentialResolver: createResolver({
         [contextA.id]: githubCredential(TOKEN_A),
@@ -320,10 +325,11 @@ describe("System Git authenticated execution contract", () => {
 
   it("keeps concurrent authentication contexts isolated", async () => {
     const parent = await createTemporaryDirectory("graider-auth-concurrent-");
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const contextA = authenticationContext("concurrent-a");
     const contextB = authenticationContext("concurrent-b");
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit: createFakeCloneRunner(requests),
       credentialResolver: createResolver({
         [contextA.id]: githubCredential(TOKEN_A),
@@ -358,9 +364,10 @@ describe("System Git authenticated execution contract", () => {
 
   it("rejects an authenticated non-GitHub remote before invoking child Git", async () => {
     const parent = await createTemporaryDirectory("graider-auth-host-");
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const context = authenticationContext("host-context");
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit: createFakeCloneRunner(requests),
       credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
     });
@@ -379,9 +386,10 @@ describe("System Git authenticated execution contract", () => {
 
   it("rejects authenticated local remotes before invoking child Git", async () => {
     const parent = await createTemporaryDirectory("graider-auth-local-host-");
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const context = authenticationContext("local-host-context");
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit: createFakeCloneRunner(requests),
       credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
     });
@@ -400,9 +408,9 @@ describe("System Git authenticated execution contract", () => {
 
   it("rejects an authenticated push whose effective push URL is not GitHub HTTPS", async () => {
     const root = await createTemporaryDirectory("graider-auth-push-host-");
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const context = authenticationContext("push-host-context");
-    const runGit = (request: SystemGitExecutionRequest): Promise<string> => {
+    const runGit = (request: GitCommandExecutionRequest): Promise<string> => {
       requests.push(request);
       if (request.args.join(" ") === "rev-parse --show-toplevel")
         return Promise.resolve(`${root}\n`);
@@ -416,7 +424,8 @@ describe("System Git authenticated execution contract", () => {
       if (request.args.join(" ") === "push") return Promise.resolve("");
       return Promise.reject(new Error(`Unexpected Git test operation: ${request.args.join(" ")}`));
     };
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit,
       credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
     });
@@ -433,8 +442,9 @@ describe("System Git authenticated execution contract", () => {
 
   it("classifies an unknown authentication context without invoking child Git", async () => {
     const parent = await createTemporaryDirectory("graider-auth-missing-");
-    const requests: SystemGitExecutionRequest[] = [];
-    const factory = new SystemGitWorkspaceFactory({
+    const requests: GitCommandExecutionRequest[] = [];
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit: createFakeCloneRunner(requests),
       credentialResolver: createResolver({})
     });
@@ -454,7 +464,7 @@ describe("System Git authenticated execution contract", () => {
     const parent = await createTemporaryDirectory("graider-auth-redaction-");
     const context = authenticationContext("redaction-context");
     const encoded = encodedCredential(TOKEN_A);
-    const runner = (request: SystemGitExecutionRequest): Promise<string> => {
+    const runner = (request: GitCommandExecutionRequest): Promise<string> => {
       const error = Object.assign(new Error(`git clone failed with ${TOKEN_A} and ${encoded}`), {
         stderr: `remote: Invalid username or token ${TOKEN_A} ${encoded}`,
         command: `git -c http.extraHeader=AUTHORIZATION: basic ${encoded}`
@@ -462,7 +472,8 @@ describe("System Git authenticated execution contract", () => {
       expect(request.env?.GIT_CONFIG_VALUE_1).toContain(encoded);
       return Promise.reject(error);
     };
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit: runner,
       credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
     });
@@ -500,7 +511,7 @@ describe("System Git authenticated execution contract", () => {
     await mkdir(source);
     await executeFile("git", ["-C", source, "init"]);
     const context = authenticationContext("config-context");
-    const runner = async (request: SystemGitExecutionRequest): Promise<string> => {
+    const runner = async (request: GitCommandExecutionRequest): Promise<string> => {
       if (request.args[0] === "clone") {
         const result = await executeFile(
           "git",
@@ -526,7 +537,8 @@ describe("System Git authenticated execution contract", () => {
         )
       ).stdout;
     };
-    const factory = new SystemGitWorkspaceFactory({
+    const factory = new GitCommandWorkspaceFactory({
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation.")),
       runGit: runner,
       credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) })
     });

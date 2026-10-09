@@ -16,10 +16,10 @@ import {
 } from "../../../src/git/git-workspace.js";
 import type { GitCredentialResolver } from "../../../src/git/git-credential-resolver.js";
 import {
-  SystemGitWorkspaceFactory,
-  type SystemGitExecutionRequest,
-  type SystemGitRunner
-} from "../../../src/git/system-git-workspace.js";
+  GitCommandWorkspaceFactory,
+  type GitCommandExecutionRequest,
+  type GitCommandRunner
+} from "../../../src/git/git-command-workspace.js";
 import { createDugiteGitRunners } from "../../support/git/dugite-git-runners.js";
 
 const executeFile = promisify(execFile);
@@ -74,7 +74,7 @@ afterEach(async () => {
   );
 });
 
-describe("Dugite SystemGitWorkspace transport conformance", () => {
+describe("Dugite command workspace transport conformance", () => {
   it("uses embedded Git with no PATH lookup across creation, inspection, mutation, and push", async () => {
     const root = await createRoot();
     const source = await createRepository(root, "source with spaces");
@@ -87,7 +87,7 @@ describe("Dugite SystemGitWorkspace transport conformance", () => {
     const runners = createDugiteGitRunners({
       onSpawn: (child) => spawnedFiles.push(child.spawnfile)
     });
-    const factory = new SystemGitWorkspaceFactory(runners);
+    const factory = new GitCommandWorkspaceFactory(runners);
     const trustedRemote = required(createTrustedGitRemote(remote), "remote");
     const normalClone = join(root, "normal clone with spaces");
     const noCheckoutClone = join(root, "no checkout clone with spaces");
@@ -168,7 +168,7 @@ describe("Dugite SystemGitWorkspace transport conformance", () => {
     await git(template.repository, ["commit", "-am", "Binary target"]);
     const binaryTarget = (await git(template.repository, ["rev-parse", "HEAD"])).trim();
     const runners = createDugiteGitRunners();
-    const factory = new SystemGitWorkspaceFactory(runners);
+    const factory = new GitCommandWorkspaceFactory(runners);
     const templateWorkspace = await factory.open(template.repository);
     const studentWorkspace = await factory.open(student);
     const binaryPatch = await templateWorkspace.diff({
@@ -203,7 +203,7 @@ describe("Dugite SystemGitWorkspace transport conformance", () => {
     const root = await createRoot();
     const repository = await createRepository(root, "error repository with spaces");
     const runners = createDugiteGitRunners();
-    const factory = new SystemGitWorkspaceFactory(runners);
+    const factory = new GitCommandWorkspaceFactory(runners);
     const workspace = await factory.open(repository.repository);
     const missing = exactCommit("0".repeat(OBJECT_ID_LENGTH));
 
@@ -228,13 +228,13 @@ describe("Dugite SystemGitWorkspace transport conformance", () => {
         return Promise.resolve({ kind: "github_token", host: "github.com", token });
       }
     };
-    const requests: SystemGitExecutionRequest[] = [];
+    const requests: GitCommandExecutionRequest[] = [];
     const spawnedArguments: (readonly string[])[] = [];
     const authenticatedDugite = createDugiteGitRunners({
       onSpawn: (child) => spawnedArguments.push(child.spawnargs),
       onRequest: (request) => requests.push(request)
     });
-    const authRunner: SystemGitRunner = async (request) => {
+    const authRunner: GitCommandRunner = async (request) => {
       if (request.args[0] !== "clone") return await authenticatedDugite.runGit(request);
       requests.push(request);
       await authenticatedDugite.runGit({
@@ -247,7 +247,7 @@ describe("Dugite SystemGitWorkspace transport conformance", () => {
       });
     };
     const parentEnvironment = { ...process.env };
-    const authenticatedFactory = new SystemGitWorkspaceFactory({
+    const authenticatedFactory = new GitCommandWorkspaceFactory({
       runGit: authRunner,
       runGitBinary: authenticatedDugite.runGitBinary,
       credentialResolver

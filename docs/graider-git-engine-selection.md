@@ -506,3 +506,29 @@ metadata and wrapper paths matched the macOS unpacked paths above; both require 
 `PACKAGED_DUGITE_PE_X64_OK` inspection confirmed machine type `0x8664`. This establishes native
 macOS arm64 and Windows x64 packaged CLI acceptance for C-2B-2B. The private live workflow was not
 rerun.
+
+### Phase 1.2C-3A infrastructure cleanup
+
+The shared semantic implementation is now `src/git/git-command-workspace.ts`, with
+`GitCommandWorkspaceFactory` and neutral `GitCommand*` execution contracts. Both text and
+binary command runners are mandatory constructor options; there is no default transport.
+Production composition supplies `createDugiteGitRunners()` through the existing Dugite factory.
+
+The system-Git text and binary runners, factory context, generated backend, and architecture
+exception have been removed. Production source no longer launches Git from PATH; only the
+Electron generic command runner imports `node:child_process`, and it still rejects direct Git
+requests. The comprehensive semantic suite now runs against the production Dugite composition.
+The public workspace/domain contracts and generic `engine_unavailable` error kind are unchanged.
+
+C-3B still needs final runtime, diagnostic, documentation, and acceptance cleanup before
+Phase 1.2 is formally marked complete. Historical evidence above remains unchanged.
+
+On 2026-10-08 C-3A local validation exited 0: the focused semantic/transport/authentication/
+architecture/repository-download/template-sync run passed 192 tests; the production Electron
+loader passed; root tests passed 1,258 with one skipped; UI tests passed 1,144 with 25 skipped.
+Root/UI typechecks and builds, root lint/format checks, and generated-backend validation passed.
+Only the obsolete generated system backend was removed; subsequent builds did not recreate it.
+
+Native macOS arm64 packaging and deterministic verification exited 0 with
+`PACKAGED_DUGITE_PROOF_OK`, Git 2.53.0, `cliDugiteResolution: "ok"`, and
+`cliHelpEmptyPath: "ok"`. The private live workflow was not rerun.

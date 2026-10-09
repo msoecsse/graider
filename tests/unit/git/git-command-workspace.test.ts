@@ -14,7 +14,9 @@ import {
   type ExactCommitRevision,
   type RelativeGitPath
 } from "../../../src/git/git-workspace.js";
-import { SystemGitWorkspaceFactory } from "../../../src/git/system-git-workspace.js";
+import { GitCommandWorkspaceFactory } from "../../../src/git/git-command-workspace.js";
+
+import { createDugiteGitWorkspaceFactory } from "../../../src/git/dugite-git-workspace-context.js";
 
 const executeFile = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -67,7 +69,7 @@ const createBareRemoteFixture = async (branch: string) => {
   const trustedRemote = createTrustedGitRemote(remote);
   if (trustedRemote === null) throw new Error("The test remote must be trusted.");
   const destination = join(fixture.parent, "prepared clone with spaces");
-  const workspace = await new SystemGitWorkspaceFactory().clone({
+  const workspace = await createDugiteGitWorkspaceFactory().clone({
     remote: trustedRemote,
     destination,
     checkout: "none"
@@ -83,9 +85,9 @@ afterEach(async () => {
   );
 });
 
-describe("SystemGitWorkspaceFactory reader contract", () => {
-  it("reports system Git availability without exposing a version string", async () => {
-    await new SystemGitWorkspaceFactory().verifyAvailable();
+describe("GitCommandWorkspaceFactory reader contract", () => {
+  it("reports selected Git engine availability without exposing a version string", async () => {
+    await createDugiteGitWorkspaceFactory().verifyAvailable();
   });
 
   it("maps an unavailable engine to a semantic availability error", async () => {
@@ -93,7 +95,10 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
       const error = Object.assign(new Error("missing executable"), { code: "ENOENT" });
       return Promise.reject(error);
     };
-    const factory = new SystemGitWorkspaceFactory({ runGit: unavailableEngine });
+    const factory = new GitCommandWorkspaceFactory({
+      runGit: unavailableEngine,
+      runGitBinary: () => Promise.reject(new Error("Unexpected binary operation."))
+    });
 
     await expect(factory.verifyAvailable()).rejects.toMatchObject({
       kind: "engine_unavailable",
@@ -107,7 +112,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
     const remote = createTrustedGitRemote(fixture.repository);
     if (remote === null) throw new Error("The test remote must be trusted.");
 
-    const workspace = await new SystemGitWorkspaceFactory().clone({
+    const workspace = await createDugiteGitWorkspaceFactory().clone({
       remote,
       destination,
       checkout: "default"
@@ -124,7 +129,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
     const remote = createTrustedGitRemote(fixture.repository);
     if (remote === null) throw new Error("The test remote must be trusted.");
 
-    const workspace = await new SystemGitWorkspaceFactory().clone({
+    const workspace = await createDugiteGitWorkspaceFactory().clone({
       remote,
       destination,
       checkout: "none"
@@ -149,7 +154,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
     if (remote === null) throw new Error("The test remote must be trusted.");
 
     await expect(
-      new SystemGitWorkspaceFactory().clone({ remote, destination, checkout: "default" })
+      createDugiteGitWorkspaceFactory().clone({ remote, destination, checkout: "default" })
     ).rejects.toMatchObject({ kind: "operation_rejected", operation: "clone" });
     await expect(readFile(join(destination, "preserved.txt"), "utf8")).resolves.toBe("preserved\n");
   });
@@ -161,7 +166,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
     if (remote === null) throw new Error("The test remote must be trusted.");
 
     await expect(
-      new SystemGitWorkspaceFactory().clone({
+      createDugiteGitWorkspaceFactory().clone({
         remote,
         destination: join(parent, "destination"),
         checkout: "default"
@@ -181,7 +186,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
     const fixture = await createRepository("repository with spaces");
     const interior = join(fixture.repository, "nested", "directory");
     await mkdir(interior, { recursive: true });
-    const factory = new SystemGitWorkspaceFactory();
+    const factory = createDugiteGitWorkspaceFactory();
     const canonicalRoot = await realpath(fixture.repository);
 
     await expect(factory.inspect(interior)).resolves.toEqual({
@@ -195,7 +200,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
     const parent = await mkdtemp(join(tmpdir(), "graider-git-workspace-non-repository-"));
     temporaryDirectories.push(parent);
     const missing = join(parent, "private missing path");
-    const factory = new SystemGitWorkspaceFactory();
+    const factory = createDugiteGitWorkspaceFactory();
 
     await expect(factory.inspect(parent)).resolves.toEqual({ kind: "not_repository" });
     const unavailable = await factory.inspect(missing);
@@ -212,7 +217,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
 
   it("resolves attached and detached HEAD to canonical object IDs", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.resolveHead()).resolves.toBe(fixture.second);
     await git(fixture.repository, "checkout", "--detach", fixture.first);
@@ -223,7 +228,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
     const parent = await mkdtemp(join(tmpdir(), "graider-git-workspace-unborn-"));
     temporaryDirectories.push(parent);
     await git(parent, "init");
-    const workspace = await new SystemGitWorkspaceFactory().open(parent);
+    const workspace = await createDugiteGitWorkspaceFactory().open(parent);
 
     await expect(workspace.resolveHead()).rejects.toMatchObject({
       kind: "revision_unavailable",
@@ -233,7 +238,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
 
   it("resolves exact commits and rejects missing commits semantically", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     const exact = exactCommit(fixture.first);
     const missing = exactCommit("f".repeat(SHA_1_LENGTH));
 
@@ -253,7 +258,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
 
   it("returns bounded structured history newest-to-oldest from the exact anchor", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     const anchor = await workspace.resolveRevision(exactCommit(fixture.second));
 
     const commits = await workspace.listCommits({ anchor, maximumCount: HISTORY_LIMIT });
@@ -266,7 +271,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
 
   it("rejects invalid history bounds with a safe semantic error", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     const anchor = await workspace.resolveRevision(exactCommit(fixture.second));
 
     await expect(workspace.listCommits({ anchor, maximumCount: 0 })).rejects.toEqual(
@@ -276,7 +281,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
 
   it("does not expose raw Git stderr or private paths in enumerable errors", async () => {
     const privatePath = join(tmpdir(), "faculty-private-course-path");
-    const factory = new SystemGitWorkspaceFactory();
+    const factory = createDugiteGitWorkspaceFactory();
 
     await expect(factory.open(privatePath)).rejects.toSatisfy((error: unknown) => {
       expect(error).toBeInstanceOf(GitError);
@@ -288,7 +293,7 @@ describe("SystemGitWorkspaceFactory reader contract", () => {
   });
 });
 
-describe("SystemGitWorkspace template tree and history contract", () => {
+describe("GitCommandWorkspace template tree and history contract", () => {
   const origin = createRemoteName("origin");
   if (origin === null) throw new Error("The origin remote must be trusted.");
 
@@ -301,9 +306,9 @@ describe("SystemGitWorkspace template tree and history contract", () => {
     await git(fixture.repository, "add", ".");
     await git(fixture.repository, "commit", "-m", "Tree fixtures");
     const commit = await (
-      await new SystemGitWorkspaceFactory().open(fixture.repository)
+      await createDugiteGitWorkspaceFactory().open(fixture.repository)
     ).resolveHead();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     const tree = await workspace.resolveTree(commit);
     const entries = await workspace.listTree(commit);
@@ -327,7 +332,7 @@ describe("SystemGitWorkspace template tree and history contract", () => {
     await writeFile(join(fixture.repository, unusualPath), "unusual\n");
     await git(fixture.repository, "add", ".");
     await git(fixture.repository, "commit", "-m", "Unusual path");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     const entries = await workspace.listTree(await workspace.resolveHead());
 
@@ -347,7 +352,7 @@ describe("SystemGitWorkspace template tree and history contract", () => {
     await git(fixture.repository, "commit", "-m", "Main");
     const main = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
     await git(fixture.repository, "merge", "--no-ff", "feature", "-m", "Merge feature");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     const merge = await workspace.resolveHead();
 
     const history = await workspace.listFirstParentCommitTrees(merge);
@@ -382,7 +387,7 @@ describe("SystemGitWorkspace template tree and history contract", () => {
   });
 });
 
-describe("SystemGitWorkspace binary revision diff contract", () => {
+describe("GitCommandWorkspace binary revision diff contract", () => {
   it("returns binary-safe patch bytes between exact commits and represents an empty diff", async () => {
     const fixture = await createRepository();
     await writeFile(join(fixture.repository, "binary.dat"), Buffer.from([0, 1, 2, 3, MAX_BYTE]));
@@ -395,7 +400,7 @@ describe("SystemGitWorkspace binary revision diff contract", () => {
     );
     await git(fixture.repository, "commit", "-am", "Change binary");
     const target = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     const baseCommit = await workspace.resolveRevision(exactCommit(base));
     const targetCommit = await workspace.resolveRevision(exactCommit(target));
 
@@ -408,7 +413,7 @@ describe("SystemGitWorkspace binary revision diff contract", () => {
   });
 });
 
-describe("SystemGitWorkspace three-way indexed patch contract", () => {
+describe("GitCommandWorkspace three-way indexed patch contract", () => {
   const createPatchFixture = async () => {
     const fixture = await createRepository("template source");
     await writeFile(join(fixture.repository, "deleted.txt"), "remove me\n");
@@ -433,8 +438,8 @@ describe("SystemGitWorkspace three-way indexed patch contract", () => {
     await git(fixture.repository, "add", ".");
     await git(fixture.repository, "commit", "-m", "Template target");
     const target = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
-    const templateWorkspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
-    const studentWorkspace = await new SystemGitWorkspaceFactory().open(fixture.student);
+    const templateWorkspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
+    const studentWorkspace = await createDugiteGitWorkspaceFactory().open(fixture.student);
     const patch = await templateWorkspace.diff({
       base: await templateWorkspace.resolveRevision(exactCommit(fixture.base)),
       target: await templateWorkspace.resolveRevision(exactCommit(target))
@@ -469,8 +474,8 @@ describe("SystemGitWorkspace three-way indexed patch contract", () => {
     await writeFile(join(fixture.repository, "submission.txt"), "template version\n");
     await git(fixture.repository, "commit", "-am", "Template edit");
     const target = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
-    const templateWorkspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
-    const studentWorkspace = await new SystemGitWorkspaceFactory().open(fixture.student);
+    const templateWorkspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
+    const studentWorkspace = await createDugiteGitWorkspaceFactory().open(fixture.student);
     const patch = await templateWorkspace.diff({
       base: await templateWorkspace.resolveRevision(exactCommit(fixture.base)),
       target: await templateWorkspace.resolveRevision(exactCommit(target))
@@ -497,8 +502,8 @@ describe("SystemGitWorkspace three-way indexed patch contract", () => {
     await writeFile(join(fixture.repository, "asset.bin"), targetBytes);
     await git(fixture.repository, "commit", "-am", "Binary target");
     const binaryTarget = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
-    const templateWorkspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
-    const studentWorkspace = await new SystemGitWorkspaceFactory().open(fixture.student);
+    const templateWorkspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
+    const studentWorkspace = await createDugiteGitWorkspaceFactory().open(fixture.student);
     const patch = await templateWorkspace.diff({
       base: await templateWorkspace.resolveRevision(exactCommit(binaryBase)),
       target: await templateWorkspace.resolveRevision(exactCommit(binaryTarget))
@@ -511,7 +516,7 @@ describe("SystemGitWorkspace three-way indexed patch contract", () => {
   });
 });
 
-describe("SystemGitWorkspace structured inspection contract", () => {
+describe("GitCommandWorkspace structured inspection contract", () => {
   const createTrackedRepository = async (name = "repository") => {
     const fixture = await createRepository(name);
     const remote = join(fixture.parent, "upstream.git");
@@ -523,7 +528,7 @@ describe("SystemGitWorkspace structured inspection contract", () => {
 
   it("reports clean attached HEAD and a current configured upstream", async () => {
     const fixture = await createTrackedRepository("repository with spaces");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.inspect()).resolves.toMatchObject({
       kind: "repository",
@@ -559,7 +564,9 @@ describe("SystemGitWorkspace structured inspection contract", () => {
     await rm(join(fixture.repository, "delete.txt"));
     await git(fixture.repository, "mv", "rename source.txt", "rename destination.txt");
 
-    const state = await (await new SystemGitWorkspaceFactory().open(fixture.repository)).inspect();
+    const state = await (
+      await createDugiteGitWorkspaceFactory().open(fixture.repository)
+    ).inspect();
 
     expect(state.workingTree.trackedChanges).toEqual(
       expect.arrayContaining([
@@ -590,7 +597,9 @@ describe("SystemGitWorkspace structured inspection contract", () => {
     await git(fixture.repository, "commit", "-am", "Main change");
     await expect(git(fixture.repository, "merge", "other")).rejects.toBeDefined();
 
-    const state = await (await new SystemGitWorkspaceFactory().open(fixture.repository)).inspect();
+    const state = await (
+      await createDugiteGitWorkspaceFactory().open(fixture.repository)
+    ).inspect();
 
     expect(state.workingTree.conflicts).toEqual([
       expect.objectContaining({ path: "submission.txt" })
@@ -607,7 +616,7 @@ describe("SystemGitWorkspace structured inspection contract", () => {
     if (selected === null) throw new Error("The test path must be trusted.");
 
     const state = await (
-      await new SystemGitWorkspaceFactory().open(fixture.repository)
+      await createDugiteGitWorkspaceFactory().open(fixture.repository)
     ).inspect({ paths: [selected] });
 
     expect(state.workingTree.trackedChanges).toEqual([
@@ -630,13 +639,15 @@ describe("SystemGitWorkspace structured inspection contract", () => {
 
   it("reports missing, ahead, behind, and diverged upstream relations without fetching", async () => {
     const missingFixture = await createRepository("missing upstream");
-    const missingWorkspace = await new SystemGitWorkspaceFactory().open(missingFixture.repository);
+    const missingWorkspace = await createDugiteGitWorkspaceFactory().open(
+      missingFixture.repository
+    );
     await expect(missingWorkspace.inspect()).resolves.toMatchObject({
       upstream: { kind: "missing" }
     });
 
     const fixture = await createTrackedRepository("local repository");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     await git(fixture.repository, "commit", "--allow-empty", "-m", "Local ahead");
     await expect(workspace.inspect()).resolves.toMatchObject({
       upstream: { relation: "ahead", ahead: 1, behind: 0 }
@@ -665,7 +676,7 @@ describe("SystemGitWorkspace structured inspection contract", () => {
 
   it("reports detached and unborn HEAD states", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     await git(fixture.repository, "checkout", "--detach", fixture.first);
     await expect(workspace.inspect()).resolves.toMatchObject({
       head: { kind: "detached", commit: fixture.first }
@@ -674,7 +685,7 @@ describe("SystemGitWorkspace structured inspection contract", () => {
     const unbornRoot = await mkdtemp(join(tmpdir(), "graider-git-unborn-"));
     temporaryDirectories.push(unbornRoot);
     await git(unbornRoot, "init");
-    const unborn = await new SystemGitWorkspaceFactory().open(unbornRoot);
+    const unborn = await createDugiteGitWorkspaceFactory().open(unbornRoot);
     await expect(unborn.inspect()).resolves.toMatchObject({
       head: { kind: "unborn" },
       upstream: { kind: "missing" }
@@ -683,7 +694,7 @@ describe("SystemGitWorkspace structured inspection contract", () => {
 
   it("resolves a trusted remote URL and represents a missing remote as null", async () => {
     const fixture = await createTrackedRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     const origin = createRemoteName("origin");
     const missing = createRemoteName("missing");
     if (origin === null || missing === null) throw new Error("The test remotes must be trusted.");
@@ -694,7 +705,7 @@ describe("SystemGitWorkspace structured inspection contract", () => {
   });
 });
 
-describe("SystemGitWorkspace template preparation contract", () => {
+describe("GitCommandWorkspace template preparation contract", () => {
   const origin = createRemoteName("origin");
   if (origin === null) throw new Error("The origin remote must be trusted.");
 
@@ -777,7 +788,7 @@ describe("SystemGitWorkspace template preparation contract", () => {
   it("does not force checkout over conflicting working-tree changes", async () => {
     const fixture = await createRepository();
     await writeFile(join(fixture.repository, "submission.txt"), "local change\n");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.checkoutDetached(exactCommit(fixture.first))).rejects.toMatchObject({
       kind: "operation_rejected",
@@ -893,7 +904,7 @@ describe("SystemGitWorkspace template preparation contract", () => {
   });
 });
 
-describe("SystemGitWorkspace exact-path staging contract", () => {
+describe("GitCommandWorkspace exact-path staging contract", () => {
   const trustedPath = (value: string) => {
     const relativePath = createRelativeGitPath(value);
     if (relativePath === null) throw new Error("The test path must be trusted.");
@@ -904,7 +915,7 @@ describe("SystemGitWorkspace exact-path staging contract", () => {
     const fixture = await createRepository();
     await writeFile(join(fixture.repository, "submission.txt"), "changed\n");
     await writeFile(join(fixture.repository, "unrelated.txt"), "unrelated\n");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await workspace.stage([trustedPath("submission.txt")]);
 
@@ -916,7 +927,7 @@ describe("SystemGitWorkspace exact-path staging contract", () => {
   it("stages a tracked deletion by exact path", async () => {
     const fixture = await createRepository();
     await rm(join(fixture.repository, "submission.txt"));
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await workspace.stage([trustedPath("submission.txt")]);
 
@@ -931,7 +942,7 @@ describe("SystemGitWorkspace exact-path staging contract", () => {
   it("stages a repository-relative path containing spaces", async () => {
     const fixture = await createRepository();
     await writeFile(join(fixture.repository, "page with spaces.html"), "page\n");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await workspace.stage([trustedPath("page with spaces.html")]);
 
@@ -946,7 +957,7 @@ describe("SystemGitWorkspace exact-path staging contract", () => {
     const fixture = await createRepository();
     await writeFile(join(fixture.repository, "submission.txt"), "changed\n");
     await writeFile(join(fixture.repository, "unrelated.txt"), "unrelated\n");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.stage([])).rejects.toMatchObject({
       kind: "operation_rejected",
@@ -964,7 +975,7 @@ describe("SystemGitWorkspace exact-path staging contract", () => {
 
   it("defensively rejects an invalid branded path before Git execution", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(
       workspace.stage(["../private-course/secret.txt" as RelativeGitPath])
@@ -972,7 +983,7 @@ describe("SystemGitWorkspace exact-path staging contract", () => {
   });
 });
 
-describe("SystemGitWorkspace commit contract", () => {
+describe("GitCommandWorkspace commit contract", () => {
   const trustedPath = (value: string) => {
     const relativePath = createRelativeGitPath(value);
     if (relativePath === null) throw new Error("The test path must be trusted.");
@@ -982,7 +993,7 @@ describe("SystemGitWorkspace commit contract", () => {
   it("commits staged changes and returns the new HEAD object ID", async () => {
     const fixture = await createRepository();
     await writeFile(join(fixture.repository, "submission.txt"), "published\n");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     await workspace.stage([trustedPath("submission.txt")]);
 
     const commit = await workspace.commit({ message: "Publish course changes" });
@@ -995,7 +1006,7 @@ describe("SystemGitWorkspace commit contract", () => {
 
   it("fails semantically without staged changes and creates no commit", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.commit({ message: "Nothing to commit" })).rejects.toMatchObject({
       kind: "operation_rejected",
@@ -1006,7 +1017,7 @@ describe("SystemGitWorkspace commit contract", () => {
 
   it("creates and returns an allow-empty commit only when explicitly requested", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     const commit = await workspace.commit({ message: "Apply template update", allowEmpty: true });
 
@@ -1022,7 +1033,7 @@ describe("SystemGitWorkspace commit contract", () => {
     await git(fixture.repository, "config", "user.name", "Configured Faculty");
     await git(fixture.repository, "config", "user.email", "configured@example.test");
     await writeFile(join(fixture.repository, "submission.txt"), "authored\n");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     await workspace.stage([trustedPath("submission.txt")]);
 
     await workspace.commit({ message: "Configured identity" });
@@ -1035,7 +1046,7 @@ describe("SystemGitWorkspace commit contract", () => {
   it("commits punctuation and spaces literally without shell interpretation", async () => {
     const fixture = await createRepository();
     await writeFile(join(fixture.repository, "submission.txt"), "literal\n");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     await workspace.stage([trustedPath("submission.txt")]);
     const message = "Publish: faculty's page; $(touch should-not-run) & finish";
 
@@ -1049,7 +1060,7 @@ describe("SystemGitWorkspace commit contract", () => {
 
   it("rejects an empty commit message", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.commit({ message: "   " })).rejects.toMatchObject({
       kind: "operation_rejected",
@@ -1058,7 +1069,7 @@ describe("SystemGitWorkspace commit contract", () => {
   });
 });
 
-describe("SystemGitWorkspace upstream push contract", () => {
+describe("GitCommandWorkspace upstream push contract", () => {
   const createUpstreamRepository = async () => {
     const fixture = await createRepository("faculty repository");
     const remote = join(fixture.parent, "private upstream.git");
@@ -1072,7 +1083,7 @@ describe("SystemGitWorkspace upstream push contract", () => {
     const fixture = await createUpstreamRepository();
     await git(fixture.repository, "commit", "--allow-empty", "-m", "Local publication");
     const localHead = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.pushUpstream()).resolves.toEqual({ kind: "pushed" });
 
@@ -1090,7 +1101,7 @@ describe("SystemGitWorkspace upstream push contract", () => {
     const remoteHead = (await git(fixture.remote, "rev-parse", "HEAD")).trim();
     await git(fixture.repository, "commit", "--allow-empty", "-m", "Local publication");
     const localHead = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.pushUpstream()).rejects.toMatchObject({
       kind: "remote_unavailable",
@@ -1103,7 +1114,7 @@ describe("SystemGitWorkspace upstream push contract", () => {
 
   it("fails semantically when the current branch has no upstream", async () => {
     const fixture = await createRepository();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.pushUpstream()).rejects.toMatchObject({
       kind: "remote_unavailable",
@@ -1121,7 +1132,7 @@ describe("SystemGitWorkspace upstream push contract", () => {
     await git(secondClone, "commit", "--allow-empty", "-m", "Remote publication");
     await git(secondClone, "push");
     await git(fixture.repository, "commit", "--allow-empty", "-m", "Local publication");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
 
     await expect(workspace.pushUpstream()).rejects.toSatisfy((error: unknown) => {
       expect(error).toBeInstanceOf(GitError);
@@ -1133,7 +1144,7 @@ describe("SystemGitWorkspace upstream push contract", () => {
   });
 });
 
-describe("SystemGitWorkspace explicit branch push contract", () => {
+describe("GitCommandWorkspace explicit branch push contract", () => {
   it("pushes current HEAD non-forcibly to the requested remote branch without requiring upstream", async () => {
     const fixture = await createRepository("explicit push repository");
     const remote = join(fixture.parent, "explicit remote.git");
@@ -1141,7 +1152,7 @@ describe("SystemGitWorkspace explicit branch push contract", () => {
     await git(fixture.repository, "remote", "add", "origin", remote);
     await git(fixture.repository, "commit", "--allow-empty", "-m", "Template update");
     const head = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     const origin = createRemoteName("origin");
     const branch = createBranchName("release/course");
     if (origin === null || branch === null) throw new Error("The push target must be trusted.");
@@ -1173,7 +1184,7 @@ describe("SystemGitWorkspace explicit branch push contract", () => {
     const remoteHead = (await git(remote, "rev-parse", "refs/heads/main")).trim();
     await git(fixture.repository, "commit", "--allow-empty", "-m", "Local advance");
     const localHead = (await git(fixture.repository, "rev-parse", "HEAD")).trim();
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     const origin = createRemoteName("origin");
     const main = createBranchName("main");
     if (origin === null || main === null) throw new Error("The push target must be trusted.");
@@ -1187,7 +1198,7 @@ describe("SystemGitWorkspace explicit branch push contract", () => {
   });
 });
 
-describe("SystemGitWorkspace disposable-attempt restoration contract", () => {
+describe("GitCommandWorkspace disposable-attempt restoration contract", () => {
   it("restores exact HEAD, discards index/worktree changes, removes untracked content, and preserves siblings", async () => {
     const fixture = await createRepository("disposable repository");
     const outside = join(fixture.parent, "outside sibling.txt");
@@ -1199,7 +1210,7 @@ describe("SystemGitWorkspace disposable-attempt restoration contract", () => {
     await writeFile(join(fixture.repository, "untracked.txt"), "untracked\n");
     await mkdir(join(fixture.repository, "untracked directory"));
     await writeFile(join(fixture.repository, "untracked directory", "nested.txt"), "nested\n");
-    const workspace = await new SystemGitWorkspaceFactory().open(fixture.repository);
+    const workspace = await createDugiteGitWorkspaceFactory().open(fixture.repository);
     const expectedHead = await workspace.resolveRevision(exactCommit(fixture.second));
 
     await workspace.restoreDisposableAttempt({ expectedHead, removeUntracked: true });
@@ -1223,7 +1234,7 @@ describe("SystemGitWorkspace disposable-attempt restoration contract", () => {
   });
 });
 
-describe("SystemGitWorkspace managed branch deletion contract", () => {
+describe("GitCommandWorkspace managed branch deletion contract", () => {
   const origin = createRemoteName("origin");
   if (origin === null) throw new Error("The origin remote must be trusted.");
 

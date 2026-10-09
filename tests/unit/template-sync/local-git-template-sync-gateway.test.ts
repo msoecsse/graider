@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { SystemGitWorkspaceFactory } from "../../../src/git/system-git-workspace.js";
+import { createDugiteGitWorkspaceFactory } from "../../../src/git/dugite-git-workspace-context.js";
 import { LocalGitTemplateSyncGateway } from "../../../src/template-sync/local-git-template-sync-gateway.js";
 import { getTemplateSyncFailure } from "../../../src/template-sync/template-sync-failure.js";
 
@@ -72,7 +72,7 @@ const gatewayFor = async (fixture: {
   readonly templateDirectory: string;
   readonly studentDirectory: string;
 }): Promise<LocalGitTemplateSyncGateway> => {
-  const factory = new SystemGitWorkspaceFactory();
+  const factory = createDugiteGitWorkspaceFactory();
   return new LocalGitTemplateSyncGateway({
     templateWorkspace: await factory.open(fixture.templateDirectory),
     studentWorkspace: await factory.open(fixture.studentDirectory)

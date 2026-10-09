@@ -3,9 +3,6 @@ import { build } from "tsup";
 
 await build({
   entry: {
-    systemGitWorkspaceBackend: fileURLToPath(
-      new URL("../../src/git/system-git-workspace-context.ts", import.meta.url)
-    ),
     dugiteGitWorkspaceBackend: fileURLToPath(
       new URL("../../src/git/dugite-git-workspace-context.ts", import.meta.url)
     ),

@@ -12,6 +12,7 @@ on:
       - "tests/spikes/git-engine/**"
       - "src/repository-download/**"
       - "src/git/dugite-git-*.ts"
+      - "src/git/git-command-workspace.ts"
       - "ui/scripts/tsup.graider-cli.config.mjs"
       - "ui/package.json"
       - "ui/package-lock.json"

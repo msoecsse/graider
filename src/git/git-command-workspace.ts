@@ -1,7 +1,5 @@
-import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import { promisify } from "node:util";
 import {
   GitError,
   createBranchName,
@@ -44,9 +42,6 @@ import {
 } from "./git-workspace.js";
 import type { GitCredentialResolver, GitResolvedCredential } from "./git-credential-resolver.js";
 
-const executeFile = promisify(execFile);
-const MAX_GIT_OUTPUT_BYTES = 10_485_760;
-const MAX_GIT_BINARY_OUTPUT_BYTES = MAX_GIT_OUTPUT_BYTES;
 const MAX_COMMIT_HISTORY_COUNT = 100;
 const GITHUB_HTTPS_HOST = "github.com";
 const GITHUB_TOKEN_USERNAME = "x-access-token";
@@ -66,7 +61,7 @@ const RENAME_RECORD_PATTERN = /^2 ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ 
 const CONFLICT_RECORD_PATTERN =
   /^u ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ (.*)$/su;
 
-export class SystemGitFailure extends Error {
+export class GitCommandFailure extends Error {
   readonly code: unknown;
   readonly stderr: string;
   readonly stdout: string;
@@ -74,8 +69,8 @@ export class SystemGitFailure extends Error {
   readonly explicitAuthentication: boolean;
 
   constructor(error: unknown, secrets: readonly string[] = [], explicitAuthentication = false) {
-    super("System Git command failed.");
-    this.name = "SystemGitFailure";
+    super("Git command failed.");
+    this.name = "GitCommandFailure";
     const details = error as {
       readonly code?: unknown;
       readonly command?: unknown;
@@ -118,26 +113,26 @@ export class SystemGitFailure extends Error {
   }
 }
 
-export interface SystemGitExecutionRequest {
+export interface GitCommandExecutionRequest {
   readonly cwd: string;
   readonly args: readonly string[];
   readonly env?: NodeJS.ProcessEnv;
 }
 
-export type SystemGitRunner = (request: SystemGitExecutionRequest) => Promise<string>;
+export type GitCommandRunner = (request: GitCommandExecutionRequest) => Promise<string>;
 
-export interface SystemGitBinaryExecutionRequest extends SystemGitExecutionRequest {
+export interface GitCommandBinaryExecutionRequest extends GitCommandExecutionRequest {
   readonly input?: Uint8Array;
 }
 
-export interface SystemGitBinaryExecutionResult {
+export interface GitCommandBinaryExecutionResult {
   readonly stdout: Uint8Array;
   readonly stderr: Uint8Array;
 }
 
-export type SystemGitBinaryRunner = (
-  request: SystemGitBinaryExecutionRequest
-) => Promise<SystemGitBinaryExecutionResult>;
+export type GitCommandBinaryRunner = (
+  request: GitCommandBinaryExecutionRequest
+) => Promise<GitCommandBinaryExecutionResult>;
 
 const redact = (value: string, secrets: readonly string[]): string =>
   secrets.reduce(
@@ -146,106 +141,14 @@ const redact = (value: string, secrets: readonly string[]): string =>
     value
   );
 
-const runSystemGit: SystemGitRunner = async ({ cwd, args, env }): Promise<string> => {
-  try {
-    const result = await executeFile(
-      "git",
-      ["-c", "color.ui=false", "-c", "core.quotepath=false", ...args],
-      {
-        cwd,
-        encoding: "utf8",
-        ...(env === undefined ? {} : { env }),
-        maxBuffer: MAX_GIT_OUTPUT_BYTES,
-        shell: false,
-        windowsHide: true
-      }
-    );
-    return result.stdout;
-  } catch (error) {
-    throw new SystemGitFailure(error);
-  }
-};
-
-const runSystemGitBinary: SystemGitBinaryRunner = async ({
-  cwd,
-  args,
-  env,
-  input
-}): Promise<SystemGitBinaryExecutionResult> =>
-  await new Promise<SystemGitBinaryExecutionResult>((resolve, reject) => {
-    const child = spawn("git", ["-c", "color.ui=false", "-c", "core.quotepath=false", ...args], {
-      cwd,
-      ...(env === undefined ? {} : { env }),
-      shell: false,
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let settled = false;
-    const fail = (error: unknown): void => {
-      if (!settled) {
-        settled = true;
-        reject(error instanceof Error ? error : new Error("System Git command failed."));
-      }
-    };
-    const append = (chunks: Buffer[], chunk: Buffer, stream: "stdout" | "stderr"): void => {
-      if (stream === "stdout") stdoutBytes += chunk.length;
-      else stderrBytes += chunk.length;
-      if (stdoutBytes > MAX_GIT_BINARY_OUTPUT_BYTES || stderrBytes > MAX_GIT_BINARY_OUTPUT_BYTES) {
-        child.kill();
-        fail(
-          new SystemGitFailure({
-            code: "OUTPUT_LIMIT",
-            message: "System Git output exceeded the configured limit."
-          })
-        );
-      } else chunks.push(chunk);
-    };
-    child.stdout.on("data", (chunk: Buffer) => {
-      append(stdout, chunk, "stdout");
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      append(stderr, chunk, "stderr");
-    });
-    child.on("error", (error) => {
-      fail(new SystemGitFailure(error));
-    });
-    child.on("close", (code) => {
-      if (!settled) {
-        const stdoutBuffer = Buffer.concat(stdout);
-        const stderrBuffer = Buffer.concat(stderr);
-        if (code === 0) {
-          settled = true;
-          resolve({ stdout: stdoutBuffer, stderr: stderrBuffer });
-        } else {
-          fail(
-            new SystemGitFailure({
-              code,
-              message: "System Git command failed.",
-              stderr: stderrBuffer.toString("utf8"),
-              stdout: stdoutBuffer.toString("utf8")
-            })
-          );
-        }
-      }
-    });
-    child.stdin.on("error", (error) => {
-      fail(new SystemGitFailure(error));
-    });
-    child.stdin.end(input);
-  });
-
 interface AuthenticatedExecution {
   readonly authentication?: GitAuthenticationContext;
   readonly remote?: string;
 }
 
-export interface SystemGitWorkspaceFactoryOptions {
-  readonly runGit?: SystemGitRunner;
-  readonly runGitBinary?: SystemGitBinaryRunner;
+export interface GitCommandWorkspaceFactoryOptions {
+  readonly runGit: GitCommandRunner;
+  readonly runGitBinary: GitCommandBinaryRunner;
   readonly credentialResolver?: GitCredentialResolver;
 }
 
@@ -306,11 +209,11 @@ const authenticatedEnvironment = (
   };
 };
 
-class SystemGitOperationExecutor {
+class GitCommandOperationExecutor {
   constructor(
-    private readonly runner: SystemGitRunner,
-    private readonly credentialResolver?: GitCredentialResolver,
-    private readonly binaryRunner: SystemGitBinaryRunner = runSystemGitBinary
+    private readonly runner: GitCommandRunner,
+    private readonly credentialResolver: GitCredentialResolver | undefined,
+    private readonly binaryRunner: GitCommandBinaryRunner
   ) {}
 
   async run(
@@ -345,7 +248,7 @@ class SystemGitOperationExecutor {
     try {
       return await this.runner({ cwd, args, env });
     } catch (error) {
-      throw new SystemGitFailure(error, secrets, true);
+      throw new GitCommandFailure(error, secrets, true);
     }
   }
 
@@ -355,7 +258,7 @@ class SystemGitOperationExecutor {
     operation: GitOperationName,
     input?: Uint8Array,
     execution: AuthenticatedExecution = {}
-  ): Promise<SystemGitBinaryExecutionResult> {
+  ): Promise<GitCommandBinaryExecutionResult> {
     if (execution.authentication === undefined)
       return await this.binaryRunner({ cwd, args, ...(input === undefined ? {} : { input }) });
 
@@ -388,7 +291,7 @@ class SystemGitOperationExecutor {
         ...(input === undefined ? {} : { input })
       });
     } catch (error) {
-      throw new SystemGitFailure(error, secrets, true);
+      throw new GitCommandFailure(error, secrets, true);
     }
   }
 }
@@ -404,7 +307,7 @@ const errorForFailure = (
     | "unknown_engine_failure"
 ): GitError => {
   if (
-    (failure instanceof SystemGitFailure && failure.code === "ENOENT") ||
+    (failure instanceof GitCommandFailure && failure.code === "ENOENT") ||
     (typeof failure === "object" &&
       failure !== null &&
       (failure as { readonly code?: unknown }).code === "ENOENT")
@@ -412,7 +315,7 @@ const errorForFailure = (
     return new GitError("engine_unavailable", operation, failure);
   }
   if (
-    failure instanceof SystemGitFailure &&
+    failure instanceof GitCommandFailure &&
     failure.explicitAuthentication &&
     failure.authenticationRejected
   ) {
@@ -621,12 +524,12 @@ const relationForCounts = (
   return "current";
 };
 
-class SystemGitWorkspace implements GitWorkspacePreparer {
+class GitCommandWorkspace implements GitWorkspacePreparer {
   readonly root: string;
 
   constructor(
     root: string,
-    private readonly executor: SystemGitOperationExecutor
+    private readonly executor: GitCommandOperationExecutor
   ) {
     this.root = root;
   }
@@ -828,7 +731,7 @@ class SystemGitWorkspace implements GitWorkspacePreparer {
         .split(/\r?\n/u)
         .filter((value) => value.length > 0);
     } catch (error) {
-      if (!(error instanceof SystemGitFailure && error.code === 1)) throw error;
+      if (!(error instanceof GitCommandFailure && error.code === 1)) throw error;
     }
     if (pushRemotes.length > 0) {
       if (pushRemotes.some((remote) => !isTrustedGitHubHttpsRemote(remote, GITHUB_HTTPS_HOST))) {
@@ -869,7 +772,7 @@ class SystemGitWorkspace implements GitWorkspacePreparer {
       ).trim();
       return value === "" ? null : value;
     } catch (error) {
-      if (error instanceof SystemGitFailure && error.code === 1) return null;
+      if (error instanceof GitCommandFailure && error.code === 1) return null;
       throw errorForFailure(error, "remote_url", "remote_unavailable");
     }
   }
@@ -888,7 +791,7 @@ class SystemGitWorkspace implements GitWorkspacePreparer {
         )
       ).trim();
     } catch (error) {
-      if (error instanceof SystemGitFailure && error.code === 1) return null;
+      if (error instanceof GitCommandFailure && error.code === 1) return null;
       throw errorForFailure(error, "remote_default_branch", "remote_unavailable");
     }
     const prefix = `refs/remotes/${remote}/`;
@@ -903,7 +806,7 @@ class SystemGitWorkspace implements GitWorkspacePreparer {
       );
       return branch;
     } catch (error) {
-      if (error instanceof SystemGitFailure && error.code === 1) return null;
+      if (error instanceof GitCommandFailure && error.code === 1) return null;
       throw errorForFailure(error, "remote_default_branch", "remote_unavailable");
     }
   }
@@ -937,7 +840,7 @@ class SystemGitWorkspace implements GitWorkspacePreparer {
         "branch"
       );
     } catch (error) {
-      if (error instanceof SystemGitFailure && error.code === 1)
+      if (error instanceof GitCommandFailure && error.code === 1)
         throw new GitError("revision_unavailable", "branch", error);
       throw errorForFailure(error, "branch", "revision_unavailable");
     }
@@ -1035,7 +938,7 @@ class SystemGitWorkspace implements GitWorkspacePreparer {
           )
         ).trim();
       } catch (error) {
-        if (!(error instanceof SystemGitFailure && error.code === 1)) throw error;
+        if (!(error instanceof GitCommandFailure && error.code === 1)) throw error;
       }
       if (currentBranch === request.branch) throw new GitError("operation_rejected", "branch");
       await this.executor.run(this.root, ["branch", "-D", "--", request.branch], "branch");
@@ -1197,14 +1100,14 @@ class SystemGitWorkspace implements GitWorkspacePreparer {
   }
 }
 
-export class SystemGitWorkspaceFactory implements GitWorkspacePreparationFactory {
-  private readonly executor: SystemGitOperationExecutor;
+export class GitCommandWorkspaceFactory implements GitWorkspacePreparationFactory {
+  private readonly executor: GitCommandOperationExecutor;
 
-  constructor(options: SystemGitWorkspaceFactoryOptions = {}) {
-    this.executor = new SystemGitOperationExecutor(
-      options.runGit ?? runSystemGit,
+  constructor(options: GitCommandWorkspaceFactoryOptions) {
+    this.executor = new GitCommandOperationExecutor(
+      options.runGit,
       options.credentialResolver,
-      options.runGitBinary ?? runSystemGitBinary
+      options.runGitBinary
     );
   }
 
@@ -1271,11 +1174,11 @@ export class SystemGitWorkspaceFactory implements GitWorkspacePreparationFactory
         await this.executor.run(path, ["rev-parse", "--show-toplevel"], "open")
       ).trim();
       if (discoveredRoot === "") throw new GitError("unknown_engine_failure", "open");
-      return new SystemGitWorkspace(await realpath(discoveredRoot), this.executor);
+      return new GitCommandWorkspace(await realpath(discoveredRoot), this.executor);
     } catch (error) {
       if (error instanceof GitError) throw error;
       if (
-        error instanceof SystemGitFailure &&
+        error instanceof GitCommandFailure &&
         /not a git repository|must be run in a work tree/iu.test(error.stderr)
       ) {
         throw new GitError("not_repository", "open", error);

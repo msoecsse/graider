@@ -6,14 +6,11 @@ import { describe, expect, it } from "vitest";
 const currentFile = fileURLToPath(import.meta.url);
 const PROJECT_ROOT = path.resolve(path.dirname(currentFile), "..", "..");
 const PRODUCTION_SOURCE_ROOTS = ["src", path.join("ui", "electron")] as const;
-const APPROVED_CHILD_PROCESS_IMPORTS = new Set([
-  "src/git/system-git-workspace.ts",
-  "ui/electron/commandRunner.ts"
-]);
-const SYSTEM_GIT_WORKSPACE = "src/git/system-git-workspace.ts";
+const APPROVED_CHILD_PROCESS_IMPORTS = new Set(["ui/electron/commandRunner.ts"]);
 const CHILD_PROCESS_MODULE_PATTERN =
   /(?:from\s*["'](?:node:)?child_process["']|require\(\s*["'](?:node:)?child_process["']\s*\))/u;
-const DIRECT_GIT_PROCESS_REQUEST_PATTERN = /command\s*:\s*["']git(?:\.exe)?["']/iu;
+const DIRECT_GIT_PROCESS_REQUEST_PATTERN =
+  /(?:command\s*:\s*["']git(?:\.exe)?["']|(?:execFile(?:Sync)?|executeFile|spawn(?:Sync)?)\s*\(\s*["']git(?:\.exe)?["'])/iu;
 
 const toRelativePath = (sourcePath: string): string =>
   path.relative(PROJECT_ROOT, sourcePath).split(path.sep).join("/");
@@ -45,12 +42,11 @@ const findChildProcessImportViolations = (sourceFiles: readonly string[]): reado
 
 const findDirectGitProcessRequestViolations = (sourceFiles: readonly string[]): readonly string[] =>
   sourceFiles
-    .filter((sourcePath) => toRelativePath(sourcePath) !== SYSTEM_GIT_WORKSPACE)
     .filter((sourcePath) => requestsGitThroughProcessRunner(fs.readFileSync(sourcePath, "utf8")))
     .map(toRelativePath);
 
 describe("local Git execution boundary", () => {
-  it("keeps local Git mechanics in the system Git workspace engine", () => {
+  it("routes production Git through the semantic command workspace and Dugite", () => {
     const sourceFiles = PRODUCTION_SOURCE_ROOTS.flatMap((sourceRoot) =>
       readProductionTypeScriptFiles(path.join(PROJECT_ROOT, sourceRoot))
     );
@@ -59,19 +55,22 @@ describe("local Git execution boundary", () => {
     expect(findDirectGitProcessRequestViolations(sourceFiles)).toEqual([]);
   });
 
+  it("contains no production implementation that launches Git from PATH", () => {
+    const sourceFiles = PRODUCTION_SOURCE_ROOTS.flatMap((sourceRoot) =>
+      readProductionTypeScriptFiles(path.join(PROJECT_ROOT, sourceRoot))
+    );
+    expect(findDirectGitProcessRequestViolations(sourceFiles)).toEqual([]);
+  });
+
   it("recognizes approved and forbidden child-process imports", () => {
     expect(importsChildProcess('import { spawn } from "node:child_process";')).toBe(true);
     expect(importsChildProcess('const childProcess = require("child_process");')).toBe(true);
     expect(importsChildProcess('import path from "node:path";')).toBe(false);
 
-    const systemGitWorkspacePath = path.join(PROJECT_ROOT, "src/git/system-git-workspace.ts");
     const commandRunnerPath = path.join(PROJECT_ROOT, "ui/electron/commandRunner.ts");
 
-    expect(importsChildProcess(fs.readFileSync(systemGitWorkspacePath, "utf8"))).toBe(true);
     expect(importsChildProcess(fs.readFileSync(commandRunnerPath, "utf8"))).toBe(true);
-    expect(findChildProcessImportViolations([systemGitWorkspacePath, commandRunnerPath])).toEqual(
-      []
-    );
+    expect(findChildProcessImportViolations([commandRunnerPath])).toEqual([]);
     expect(
       APPROVED_CHILD_PROCESS_IMPORTS.has("src/repository-download/repository-download.ts")
     ).toBe(false);
@@ -80,6 +79,13 @@ describe("local Git execution boundary", () => {
   it("recognizes explicit direct-Git process requests without flagging other commands", () => {
     expect(requestsGitThroughProcessRunner('run({ command: "git", args: [] });')).toBe(true);
     expect(requestsGitThroughProcessRunner("run({ command: 'git.exe', args: [] });")).toBe(true);
+    for (const call of ["execFile", "execFileSync", "executeFile", "spawn", "spawnSync"]) {
+      expect(requestsGitThroughProcessRunner(`${call}("git", []);`)).toBe(true);
+      expect(requestsGitThroughProcessRunner(`${call}('git.exe', []);`)).toBe(true);
+    }
     expect(requestsGitThroughProcessRunner('run({ command: "graider", args: [] });')).toBe(false);
+    expect(
+      requestsGitThroughProcessRunner('const remote = "https://github.com/org/git.git";')
+    ).toBe(false);
   });
 });

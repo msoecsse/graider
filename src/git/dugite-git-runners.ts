@@ -1,13 +1,13 @@
 import { exec as executeDugite } from "dugite";
 
 import {
-  SystemGitFailure,
-  type SystemGitBinaryExecutionRequest,
-  type SystemGitBinaryExecutionResult,
-  type SystemGitBinaryRunner,
-  type SystemGitExecutionRequest,
-  type SystemGitRunner
-} from "./system-git-workspace.js";
+  GitCommandFailure,
+  type GitCommandBinaryExecutionRequest,
+  type GitCommandBinaryExecutionResult,
+  type GitCommandBinaryRunner,
+  type GitCommandExecutionRequest,
+  type GitCommandRunner
+} from "./git-command-workspace.js";
 
 const MAX_GIT_OUTPUT_BYTES = 10_485_760;
 
@@ -19,21 +19,21 @@ export interface DugiteGitRunnersOptions {
   }) => void;
   /** Test observation only. */
   readonly onRequest?: (
-    request: SystemGitExecutionRequest | SystemGitBinaryExecutionRequest
+    request: GitCommandExecutionRequest | GitCommandBinaryExecutionRequest
   ) => void;
 }
 
 export interface DugiteGitRunners {
-  readonly runGit: SystemGitRunner;
-  readonly runGitBinary: SystemGitBinaryRunner;
+  readonly runGit: GitCommandRunner;
+  readonly runGitBinary: GitCommandBinaryRunner;
 }
 
 const execute = async (
-  request: SystemGitExecutionRequest | SystemGitBinaryExecutionRequest,
+  request: GitCommandExecutionRequest | GitCommandBinaryExecutionRequest,
   options: DugiteGitRunnersOptions
 ): Promise<{ readonly stdout: Buffer; readonly stderr: Buffer }> => {
   options.onRequest?.(request);
-  const input = (request as SystemGitBinaryExecutionRequest).input;
+  const input = (request as GitCommandBinaryExecutionRequest).input;
   try {
     const result = await executeDugite(
       ["-c", "color.ui=false", "-c", "core.quotepath=false", ...request.args],
@@ -47,7 +47,7 @@ const execute = async (
       }
     );
     if (result.exitCode !== 0)
-      throw new SystemGitFailure({
+      throw new GitCommandFailure({
         code: result.exitCode,
         message: "Dugite Git command failed.",
         stderr: result.stderr.toString("utf8"),
@@ -55,7 +55,7 @@ const execute = async (
       });
     return { stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
-    throw error instanceof SystemGitFailure ? error : new SystemGitFailure(error);
+    throw error instanceof GitCommandFailure ? error : new GitCommandFailure(error);
   }
 };
 
@@ -64,7 +64,7 @@ export const createDugiteGitRunners = (
 ): DugiteGitRunners => ({
   runGit: async (request): Promise<string> =>
     (await execute(request, options)).stdout.toString("utf8"),
-  runGitBinary: async (request): Promise<SystemGitBinaryExecutionResult> => {
+  runGitBinary: async (request): Promise<GitCommandBinaryExecutionResult> => {
     const result = await execute(request, options);
     return {
       stdout: new Uint8Array(result.stdout),

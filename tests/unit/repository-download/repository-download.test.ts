@@ -14,7 +14,7 @@ import {
   type GitWorkspaceReader,
   type GitWorkspacePreparer
 } from "../../../src/git/git-workspace.js";
-import { SystemGitWorkspaceFactory } from "../../../src/git/system-git-workspace.js";
+import { createDugiteGitWorkspaceFactory } from "../../../src/git/dugite-git-workspace-context.js";
 import * as dugiteContext from "../../../src/git/dugite-git-workspace-context.js";
 import { renderManifestV2Yaml } from "../../../src/manifest/manifest-v2-renderer.js";
 
@@ -66,12 +66,13 @@ const createGitFactory = (
 
 describe("downloadAssignmentRepositories", () => {
   it("composes the Dugite factory by default with the download credential resolver", async () => {
-    const git = new SystemGitWorkspaceFactory();
+    const git = createDugiteGitWorkspaceFactory();
     vi.spyOn(git, "verifyAvailable").mockResolvedValue(undefined);
     const clone = vi
       .spyOn(git, "clone")
       .mockResolvedValue({ root: "/downloaded" } as GitWorkspacePreparer);
     const factory = vi.mocked(dugiteContext.createDugiteGitWorkspaceFactory).mockReturnValue(git);
+    factory.mockClear();
     try {
       const { git: injectedGit, ...filesystem } = createDependencies(git);
       expect(injectedGit).toBe(git);
