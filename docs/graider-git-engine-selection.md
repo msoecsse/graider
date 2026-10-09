@@ -1,7 +1,7 @@
 # Graider bundled Git engine selection
 
-**Status:** Selected; Phase 1.2B packaged macOS arm64 and Windows x64 private-transport proofs are
-complete; all production workflows use bundled Git, C-3 infrastructure cleanup remains
+**Status:** Complete — Dugite 3.2.3 selected, packaged and validated on macOS arm64 and Windows x64,
+production cutover complete, system-Git execution removed
 
 **Decision date:** 2026-10-04
 
@@ -539,5 +539,16 @@ completed successfully on 2026-10-09 UTC for implementation commit
 `PACKAGED_DUGITE_PROOF_OK` with Git 2.53.0.windows.4, `cliDugiteResolution: "ok"`,
 and `cliHelpEmptyPath: "ok"`; the independent `PACKAGED_DUGITE_PE_X64_OK` check confirmed
 machine type `0x8664`. C-3A deterministic native macOS arm64 and Windows x64 acceptance is
-complete. The private live workflow was not rerun. C-3B remains outstanding, and Phase 1.2
-is not formally marked complete.
+complete. The private live workflow was not rerun. At C-3A close, C-3B remained outstanding and
+Phase 1.2 had not yet been formally marked complete.
+
+### Phase 1.2C-3B closure
+
+Phase 1.2 is complete. All production Git workflows use Dugite 3.2.3 through a shared,
+transport-neutral command workspace with mandatory text and binary command runners. No production
+system-Git fallback or faculty-installed Git prerequisite remains. `engine_unavailable` remains the
+bundled-engine failure kind; repository download retains `repository_download_git_unavailable` and
+guides recovery toward rebuilding or reinstalling Graider. Deterministic packaged acceptance is
+complete on macOS arm64 and Windows x64, and private GitHub clone/fetch/push/delete proof was
+previously completed on both platforms. Historical evidence and transition notes above describe
+their original state and are retained as such.

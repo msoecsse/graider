@@ -6,8 +6,8 @@ Graider is a Node.js CLI built with TypeScript and npm.
 
 - Node.js: current project runtime is Node.js 24, matching `package.json`.
 - Package manager: npm. Use `npm ci` in CI and `npm install` only for local dependency updates.
-- Git: required for normal repository checkout workflows, but Graider does not shell out to Git for MVP command behavior.
-- GitHub CLI: not required. Graider reads GitHub credentials from environment variables only.
+- Git: Graider uses Dugite 3.2.3 with its bundled native Git distribution. Normal repository operations do not require `git` on `PATH`, and production code does not execute system Git. Development and test fixture utilities may still use the host Git installation.
+- GitHub authentication: transitional. Depending on the CLI or Electron path, token resolution may use `GRAIDER_GITHUB_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`. First-class OAuth is planned for Phase 2.
 
 After `npm run build`, the CLI entrypoint is:
 
@@ -58,14 +58,15 @@ Normal CI does not run live GitHub tests and does not require a GitHub token.
 
 ## GitHub Tokens
 
-Commands that use the real Octokit client read tokens from environment variables in this order:
+Commands that use the real Octokit client can resolve tokens from these existing sources, depending on the CLI or Electron path:
 
 ```text
 GRAIDER_GITHUB_TOKEN
 GITHUB_TOKEN
+gh auth token
 ```
 
-Tokens are not read from command-line arguments, config files, GitHub CLI state, or global machine state.
+Authentication remains transitional until Phase 2. Tokens are not read from command-line arguments or config files.
 
 ## Live GitHub Tests
 

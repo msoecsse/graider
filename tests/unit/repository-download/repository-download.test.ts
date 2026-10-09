@@ -275,6 +275,8 @@ describe("downloadAssignmentRepositories", () => {
 
   it("fails before target validation when the Git engine is unavailable", async () => {
     const cwd = copyFixture();
+    const internalError =
+      "/private/app.asar.unpacked/node_modules/dugite/git/bin/git: spawn failed";
     const clone = vi.fn();
     const result = await downloadAssignmentRepositories({
       cwd,
@@ -284,7 +286,9 @@ describe("downloadAssignmentRepositories", () => {
         createGitFactory({
           verifyAvailable: vi
             .fn()
-            .mockRejectedValue(new GitError("engine_unavailable", "verify_available")),
+            .mockRejectedValue(
+              new GitError("engine_unavailable", "verify_available", internalError)
+            ),
           clone
         })
       )
@@ -300,6 +304,10 @@ describe("downloadAssignmentRepositories", () => {
     expect(result.diagnostics.map((entry) => entry.code)).toEqual([
       "repository_download_git_unavailable"
     ]);
+    expect(result.diagnostics[0]?.message).toBe("Graider's bundled Git engine is unavailable.");
+    expect(result.diagnostics[0]?.message).not.toMatch(/install Git/i);
+    expect(JSON.stringify(result)).not.toContain("/private/app.asar.unpacked");
+    expect(JSON.stringify(result)).not.toContain(internalError);
     expect(clone).not.toHaveBeenCalled();
   });
 

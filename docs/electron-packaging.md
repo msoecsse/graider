@@ -142,11 +142,20 @@ notarization yet.
 The packaged app uses the bundled Graider CLI and does not require faculty to
 install, link, or put `graider` on `PATH`.
 
-The app still shells out to local tools from the Electron main process when
-those tools are part of authentication or the local course workflow:
+Graider's own Git operations use packaged Dugite, so faculty do not need a
+system Git installation for repository operations in Graider. External or
+manual workflows outside Graider are outside this guarantee. The Electron main
+process may invoke a local tool for authentication:
 
 - GitHub CLI (`gh`) when relying on `gh auth token`
-- Git, if your course workflow needs it outside Graider
+
+The packaged layout includes the bundled CLI and Git engine:
+
+```text
+app.asar.unpacked/
+  dist-graider-cli/
+  node_modules/dugite/
+```
 
 Development mode may still use the workspace or PATH `graider` command. For
 local CLI testing from this repository:

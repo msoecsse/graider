@@ -170,7 +170,7 @@ export const downloadAssignmentRepositories = async ({
       diagnostics: [
         diagnostic(
           "repository_download_git_unavailable",
-          "Git is required to download repositories but was not available.",
+          "Graider's bundled Git engine is unavailable.",
           {}
         )
       ]

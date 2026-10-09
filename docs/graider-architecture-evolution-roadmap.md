@@ -100,12 +100,12 @@ Acceptance must include:
 
 This deserves an explicit technical spike before widespread refactoring.
 
-Engine selection and packaged cross-platform/private transport proof are complete: native macOS
-arm64 and Windows x64 packaged jobs passed the explicitly gated private GitHub clone, fetch, push,
-verification, and delete proof. Production integration and cutover from `SystemGitWorkspace` remain
-in progress in Phase 1.2C; Phase 1.2 is not complete.
+Phase 1.2 is complete. Dugite 3.2.3 is selected and bundled in accepted macOS arm64 and Windows x64
+packages. Acceptance includes private GitHub clone/fetch/push/delete, paths with spaces, no
+shell/system-Git dependency, cutover of all production consumers, and removal of system-Git
+execution.
 
-## Slice 1.3 — GitHub host abstraction cleanup
+## Slice 1.3 — GitHub host abstraction cleanup — Next Phase 1 task
 
 Separate GitHub API behavior from local Git transport.
 
