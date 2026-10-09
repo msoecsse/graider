@@ -532,3 +532,12 @@ Only the obsolete generated system backend was removed; subsequent builds did no
 Native macOS arm64 packaging and deterministic verification exited 0 with
 `PACKAGED_DUGITE_PROOF_OK`, Git 2.53.0, `cliDugiteResolution: "ok"`, and
 `cliHelpEmptyPath: "ok"`. The private live workflow was not rerun.
+
+Native Windows x64 [workflow run 37868775608](https://github.com/msoecsse/graider/actions/runs/37868775608)
+completed successfully on 2026-10-09 UTC for implementation commit
+`d37305c7504b6f8e114ec6d0fe770356f438fd30`. Its logs reported
+`PACKAGED_DUGITE_PROOF_OK` with Git 2.53.0.windows.4, `cliDugiteResolution: "ok"`,
+and `cliHelpEmptyPath: "ok"`; the independent `PACKAGED_DUGITE_PE_X64_OK` check confirmed
+machine type `0x8664`. C-3A deterministic native macOS arm64 and Windows x64 acceptance is
+complete. The private live workflow was not rerun. C-3B remains outstanding, and Phase 1.2
+is not formally marked complete.
