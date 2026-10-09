@@ -14,7 +14,7 @@ import {
 import { type Clock, systemClock } from "../../core/clock.js";
 import { publishStudentReports as publishReportsToStudentRepositories } from "../../execution/report-publisher.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-composition.js";
 import {
   GITHUB_TOKEN_REQUIRED_CODE,
   createConfigDiagnostic

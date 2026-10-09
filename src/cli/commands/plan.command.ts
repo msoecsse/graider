@@ -8,7 +8,7 @@ import {
 } from "../../core/command-context.js";
 import { createCommandResult, type CommandResult } from "../../core/command-result.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-composition.js";
 import { validateGitHubReadiness } from "../../github/github-readiness-validation.js";
 import { buildPlan } from "../../planning/plan-builder.js";
 import { createPlanPath } from "../../planning/plan-paths.js";

@@ -27,7 +27,7 @@ import {
   type GradeExecutionResult
 } from "../../execution/grade-executor.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-composition.js";
 import type { RetryOptions } from "../../github/github-retry.js";
 import { createManifestPath } from "../../manifest/manifest-paths.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";

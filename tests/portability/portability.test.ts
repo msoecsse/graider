@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runValidateCommand } from "../../src/cli/commands/validate.command.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
-import { readGitHubToken } from "../../src/github/github-client-factory.js";
+import { readGitHubToken } from "../../src/github/github-client-composition.js";
 
 const FIXTURE_ROOT = path.resolve("tests/fixtures/plan/active-assignment");
 const ROOT_ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";

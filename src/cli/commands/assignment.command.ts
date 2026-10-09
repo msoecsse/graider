@@ -39,7 +39,7 @@ import type { GitHubClient } from "../../github/github-client.js";
 import {
   readGitHubToken,
   resolveProductionGitHubClient
-} from "../../github/github-client-factory.js";
+} from "../../github/github-client-composition.js";
 import type { RetryOptions } from "../../github/github-retry.js";
 import type { ApplyRepositoryProgressObserver } from "../../execution/apply-progress.js";
 import { APPLY_PROGRESS_PREFIX, runApplyCommand } from "./apply.command.js";
@@ -207,15 +207,9 @@ const createStudentFilterEmptyResult = (): AssignmentGradeStatusResult =>
 
 const resolveGitHubClient = (
   githubClient: GitHubClient | undefined,
-  token: string | undefined
+  env: Record<string, string | undefined>
 ): GitHubClient | undefined => {
-  if (githubClient !== undefined) {
-    return githubClient;
-  }
-
-  const resolution = resolveProductionGitHubClient({
-    ...(token === undefined ? {} : { token })
-  });
+  const resolution = resolveProductionGitHubClient({ githubClient, env });
 
   return resolution.status === "available" ? resolution.githubClient : undefined;
 };
@@ -264,8 +258,7 @@ export const runAssignmentDetailCommand = ({
     return Promise.resolve(createJsonRequiredResult());
   }
 
-  const token = readGitHubToken(env);
-  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
+  const resolvedGitHubClient = resolveGitHubClient(githubClient, env);
 
   return buildAssignmentDetail({
     cwd,
@@ -285,8 +278,7 @@ export const runAssignmentApplyPreviewCommand = ({
     return Promise.resolve(createApplyPreviewJsonRequiredResult());
   }
 
-  const token = readGitHubToken(env);
-  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
+  const resolvedGitHubClient = resolveGitHubClient(githubClient, env);
 
   return buildAssignmentApplyPreview({
     cwd,
@@ -306,8 +298,7 @@ export const runAssignmentGradePreviewCommand = ({
     return Promise.resolve(createGradePreviewJsonRequiredResult());
   }
 
-  const token = readGitHubToken(env);
-  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
+  const resolvedGitHubClient = resolveGitHubClient(githubClient, env);
 
   return buildAssignmentGradePreview({
     cwd,
@@ -333,8 +324,7 @@ export const runAssignmentGradeStatusCommand = ({
     return Promise.resolve(filterResult.result);
   }
 
-  const token = readGitHubToken(env);
-  const resolvedGitHubClient = resolveGitHubClient(githubClient, token);
+  const resolvedGitHubClient = resolveGitHubClient(githubClient, env);
 
   return buildAssignmentGradeStatus({
     cwd,

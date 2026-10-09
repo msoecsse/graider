@@ -6,7 +6,7 @@ import {
   OctokitGitHubClient,
   type OctokitRestClientLike
 } from "../../../src/github/octokit-github-client.js";
-import { createGitHubClient, readGitHubToken } from "../../../src/github/github-client-factory.js";
+import { createGitHubClient } from "../../../src/github/github-client-factory.js";
 import { DiagnosticCode } from "../../../src/diagnostics/error-catalog.js";
 
 enum OctokitTestNumber {
@@ -560,19 +560,12 @@ describe("OctokitGitHubClient", () => {
     await expectGitHubError(() => client.getAuthenticatedUser(), DiagnosticCode.GithubAuthMissing);
   });
 
-  it("factory reads GRAIDER_GITHUB_TOKEN before GITHUB_TOKEN", () => {
-    const token = readGitHubToken({
-      GRAIDER_GITHUB_TOKEN: "graider-token",
-      GITHUB_TOKEN: "github-token"
-    });
-
-    expect(token).toBe("graider-token");
+  it("factory constructs the concrete adapter from an explicit token", () => {
     expect(createGitHubClient({ token: TOKEN })).toBeInstanceOf(OctokitGitHubClient);
   });
 
-  it("rejects missing and whitespace-only production tokens", () => {
-    expect(readGitHubToken({ GRAIDER_GITHUB_TOKEN: "  ", GITHUB_TOKEN: "\t" })).toBeUndefined();
-    expect(() => createGitHubClient({ env: {} })).toThrow("GitHub token is required");
+  it.each(["", " \t"])("factory rejects an empty explicit token: %j", (token) => {
+    expect(() => createGitHubClient({ token })).toThrow("GitHub token is required");
   });
 
   it("invalid token maps to github_auth_failed", async () => {

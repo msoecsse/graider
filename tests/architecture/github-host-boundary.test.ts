@@ -7,6 +7,15 @@ import { describe, expect, it } from "vitest";
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ADAPTER = "src/github/octokit-github-client.ts";
 const FACTORY = "src/github/github-client-factory.ts";
+const COMPOSITION = "src/github/github-client-composition.ts";
+// Temporary 1.3B-2 exceptions: generated backend composition only.
+const DEFERRED_FACTORY_CONSUMERS = [
+  "src/template-sync/assignment-template-sync-context.ts",
+  "src/grading/grading-student-evidence-context.ts",
+  "src/grading/grading-student-workflow-repair-context.ts",
+  "src/grading/template-managed-workflow-replacement-context.ts",
+  "src/grading/grading-student-report-publication-context.ts"
+] as const;
 const FEATURE = "src/grading/example.ts";
 const PRODUCTION_SOURCE_ROOTS = ["src", "ui/electron"] as const;
 
@@ -38,6 +47,14 @@ const findBoundaryViolations = (sourcePath: string, source: string): readonly st
           (parent.expression.kind === ts.SyntaxKind.ImportKeyword ||
             (ts.isIdentifier(parent.expression) && parent.expression.text === "require"))) ||
         (ts.isLiteralTypeNode(parent) && ts.isImportTypeNode(parent.parent));
+      if (
+        isModule &&
+        /(?:^|\/)github-client-factory(?:\.[cm]?[jt]s)?$/u.test(node.text) &&
+        sourcePath !== COMPOSITION &&
+        !DEFERRED_FACTORY_CONSUMERS.some((allowed) => allowed === sourcePath)
+      ) {
+        violations.add(`${sourcePath}: GitHub client factory`);
+      }
       if (isModule && node.text === "@octokit/rest" && sourcePath !== ADAPTER) {
         violations.add(`${sourcePath}: Octokit package`);
       }
@@ -75,6 +92,30 @@ describe("GitHub host boundary", () => {
       return findBoundaryViolations(relativePath, fs.readFileSync(file, "utf8"));
     });
     expect(violations).toEqual([]);
+  });
+
+  it("permits factory imports only in composition and the five deferred contexts", () => {
+    for (const source of [
+      'import { createGitHubClient as Client } from "../github/github-client-factory.js";',
+      'import type { GitHubClientFactoryOptions } from "../github/github-client-factory.js";',
+      'export * from "../github/github-client-factory.js";',
+      'const client = import("../github/github-client-factory.js");',
+      'const client = require("../github/github-client-factory.js");',
+      'type Client = import("../github/github-client-factory.js").GitHubClientFactoryOptions;'
+    ]) {
+      for (const consumer of [
+        FEATURE,
+        "ui/electron/example.ts",
+        "src/cli/commands/assignment.command.ts"
+      ]) {
+        expect(findBoundaryViolations(consumer, source)).toContain(
+          `${consumer}: GitHub client factory`
+        );
+      }
+      for (const consumer of [COMPOSITION, ...DEFERRED_FACTORY_CONSUMERS]) {
+        expect(findBoundaryViolations(consumer, source)).toEqual([]);
+      }
+    }
   });
 
   it("permits the Octokit package only in the adapter", () => {

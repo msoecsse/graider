@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { createGitHubClient, readGitHubToken } from "../../src/github/github-client-factory.js";
+import { createGitHubClient } from "../../src/github/github-client-factory.js";
+import { readGitHubToken } from "../../src/github/github-client-composition.js";
 import type { GitHubClient } from "../../src/github/github-client.js";
 
 const LIVE_TESTS_ENABLED = "true";
@@ -46,7 +47,9 @@ describeLive("OctokitGitHubClient live sandbox tests", () => {
   const sandboxRepoPrefix = process.env.GRAIDER_LIVE_SANDBOX_REPO_PREFIX ?? "";
 
   beforeAll(() => {
-    client = createGitHubClient();
+    const token = readGitHubToken();
+    if (token === undefined) throw new Error("A GitHub token is required for live tests.");
+    client = createGitHubClient({ token });
   });
 
   it("TC-LIVE-001 validates a real template repository", async () => {

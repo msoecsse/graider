@@ -1,4 +1,4 @@
-import { readGitHubToken } from "../github/github-client-factory.js";
+import { readGitHubToken } from "../github/github-client-composition.js";
 import {
   runProductionAssignmentTemplateSync,
   type ProductionAssignmentTemplateSyncBridgeInput

@@ -15,7 +15,7 @@ import {
 import { executeApplyPlan } from "../../execution/apply-executor.js";
 import { evaluateMutationGuard } from "../../execution/mutation-guard.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-composition.js";
 import { validateGitHubReadiness } from "../../github/github-readiness-validation.js";
 import type { GitHubRetryEvent, RetryOptions } from "../../github/github-retry.js";
 import { loadManifest } from "../../manifest/manifest-loader.js";

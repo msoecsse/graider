@@ -7,7 +7,7 @@ import {
   createConfigDiagnostic
 } from "../../diagnostics/error-catalog.js";
 import type { GitHubClient } from "../../github/github-client.js";
-import { resolveProductionGitHubClient } from "../../github/github-client-factory.js";
+import { resolveProductionGitHubClient } from "../../github/github-client-composition.js";
 
 const COMMAND_NAME = "dashboard";
 const JSON_INDENT_SPACES = 2;
