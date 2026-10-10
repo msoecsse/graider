@@ -1,6 +1,9 @@
 import type { GitHubClient, GitHubClientMethodName } from "./github-client.js";
 import { GitHubClientError, type GitHubErrorKind } from "./github-errors.js";
 import type {
+  ConditionalWriteRepositoryFileInput,
+  ConditionalWriteRepositoryFileResult,
+  GitHubRepositoryFileReadResult,
   AddCollaboratorInput,
   AddTeamPermissionInput,
   CreateFromTemplateInput,
@@ -113,6 +116,7 @@ export interface FakeRepositoryFileRecord {
   content: string;
   message: string;
   commitSha: string;
+  readonly blobSha?: string;
   branch?: string;
 }
 
@@ -577,6 +581,60 @@ export class FakeGitHubClient implements GitHubClient {
       }
 
       this.mutations.enabledActions.push({ owner, repo });
+    });
+  }
+
+  readRepositoryFile(
+    owner: string,
+    repo: string,
+    filePath: string,
+    ref: string
+  ): Promise<GitHubRepositoryFileReadResult> {
+    return this.run("readRepositoryFile", () => {
+      this.fileReads.push({ owner, repo, path: filePath, ref });
+      const file = this.repositoryFiles.find(
+        (candidate) =>
+          repositoryKey(candidate.owner, candidate.repo) === repositoryKey(owner, repo) &&
+          candidate.path === filePath &&
+          (candidate.branch === ref || candidate.branch === undefined)
+      );
+      return file === undefined
+        ? { status: "missing" }
+        : {
+            status: "found",
+            file: { content: file.content, blobSha: file.blobSha ?? file.commitSha }
+          };
+    });
+  }
+
+  conditionalWriteRepositoryFile(
+    input: ConditionalWriteRepositoryFileInput
+  ): Promise<ConditionalWriteRepositoryFileResult> {
+    return this.run("conditionalWriteRepositoryFile", () => {
+      const index = this.repositoryFiles.findIndex(
+        (file) =>
+          repositoryKey(file.owner, file.repo) === repositoryKey(input.owner, input.repo) &&
+          file.path === input.path &&
+          (file.branch === input.branch || file.branch === undefined)
+      );
+      const current = this.repositoryFiles[index];
+      const currentBlobSha = current === undefined ? null : (current.blobSha ?? current.commitSha);
+      if (currentBlobSha !== input.expectedBlobSha) return { status: "conflict" };
+      const commitSha = this.consumeCommitSha();
+      const record: FakeRepositoryFileRecord = {
+        owner: input.owner,
+        repo: input.repo,
+        path: input.path,
+        branch: input.branch,
+        content: input.content,
+        message: input.message,
+        commitSha,
+        blobSha: `fake-blob-${commitSha}`
+      };
+      if (index < 0) this.repositoryFiles.push(record);
+      else this.repositoryFiles[index] = record;
+      this.mutations.fileWrites.push(record);
+      return { status: "written", path: input.path, commitSha, commitUrl: null };
     });
   }
 

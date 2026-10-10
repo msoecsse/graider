@@ -1,4 +1,7 @@
 import type {
+  ConditionalWriteRepositoryFileInput,
+  ConditionalWriteRepositoryFileResult,
+  GitHubRepositoryFileReadResult,
   AddCollaboratorInput,
   AddTeamPermissionInput,
   CreateFromTemplateInput,
@@ -69,6 +72,18 @@ export interface GitHubClient {
   getActionsState(owner: string, repo: string): Promise<GitHubActionsState>;
 
   enableActions(owner: string, repo: string): Promise<void>;
+
+  readRepositoryFile(
+    owner: string,
+    repo: string,
+    filePath: string,
+    ref: string
+  ): Promise<GitHubRepositoryFileReadResult>;
+
+  /** Compare-and-write using caller state; never refreshes the expected blob SHA. */
+  conditionalWriteRepositoryFile(
+    input: ConditionalWriteRepositoryFileInput
+  ): Promise<ConditionalWriteRepositoryFileResult>;
 
   getRepositoryFileContent(
     owner: string,

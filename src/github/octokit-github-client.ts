@@ -7,6 +7,9 @@ import { GitHubClient } from "./github-client.js";
 import { GitHubClientError } from "./github-errors.js";
 import { withGitHubRetry } from "./github-retry.js";
 import {
+  ConditionalWriteRepositoryFileInput,
+  ConditionalWriteRepositoryFileResult,
+  GitHubRepositoryFileReadResult,
   AddCollaboratorInput,
   AddTeamPermissionInput,
   CreateFromTemplateInput,
@@ -45,6 +48,8 @@ const HTTP_STATUS_CREATED = 201;
 const HTTP_STATUS_FOUND = 302;
 const HTTP_STATUS_FORBIDDEN = 403;
 const HTTP_STATUS_NOT_FOUND = 404;
+const HTTP_STATUS_CONFLICT = 409;
+const HTTP_STATUS_UNPROCESSABLE_ENTITY = 422;
 const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
 const HTTP_STATUS_SERVER_ERROR_MIN = 500;
 const DEFAULT_BRANCH_FALLBACK = "main";
@@ -421,6 +426,76 @@ export class OctokitGitHubClient implements GitHubClient {
         repo
       })
     );
+  }
+
+  async readRepositoryFile(
+    owner: string,
+    repo: string,
+    filePath: string,
+    ref: string
+  ): Promise<GitHubRepositoryFileReadResult> {
+    this.ensureAuthenticated();
+    try {
+      const { data } = await this.octokit.rest.repos.getContent({
+        owner,
+        repo,
+        path: filePath,
+        ref
+      });
+      if (Array.isArray(data)) return { status: "unsupported" };
+      const record = asRecord(data);
+      const content = asString(record.content);
+      const blobSha = asString(record.sha);
+      if (
+        content === undefined ||
+        blobSha === undefined ||
+        (record.encoding !== undefined && record.encoding !== BASE64_ENCODING)
+      ) {
+        return { status: "unsupported" };
+      }
+      return {
+        status: "found",
+        file: {
+          content: Buffer.from(content, BASE64_ENCODING).toString(UTF8_ENCODING),
+          blobSha
+        }
+      };
+    } catch (error) {
+      if (getErrorStatus(error) === HTTP_STATUS_NOT_FOUND) return { status: "missing" };
+      throw normalizeOctokitError(error);
+    }
+  }
+
+  async conditionalWriteRepositoryFile(
+    input: ConditionalWriteRepositoryFileInput
+  ): Promise<ConditionalWriteRepositoryFileResult> {
+    this.ensureAuthenticated();
+    // Caller state is authoritative. This operation must never preflight or retry an upsert.
+    try {
+      const { data } = await this.octokit.rest.repos.createOrUpdateFileContents({
+        owner: input.owner,
+        repo: input.repo,
+        path: input.path,
+        branch: input.branch,
+        message: input.message,
+        content: Buffer.from(input.content, UTF8_ENCODING).toString(BASE64_ENCODING),
+        ...(input.expectedBlobSha === null ? {} : { sha: input.expectedBlobSha })
+      });
+      const record = asRecord(data);
+      const commit = asRecord(record.commit);
+      return {
+        status: "written",
+        path: asString(asRecord(record.content).path) ?? input.path,
+        commitSha: asString(commit.sha) ?? UNKNOWN_COMMIT_SHA,
+        commitUrl: safeCommitUrl(commit.html_url)
+      };
+    } catch (error) {
+      const status = error instanceof GitHubClientError ? error.statusCode : getErrorStatus(error);
+      if (status === HTTP_STATUS_CONFLICT || status === HTTP_STATUS_UNPROCESSABLE_ENTITY) {
+        return { status: "conflict" };
+      }
+      throw normalizeOctokitError(error);
+    }
   }
 
   async getRepositoryFileContent(
@@ -1396,4 +1471,14 @@ function mapPullRequest(value: unknown): GitHubPullRequest {
     state: record.state === "open" ? "open" : "closed",
     merged: asBoolean(record.merged) ?? false
   };
+}
+
+function safeCommitUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.username === "" && url.password === "" ? value : null;
+  } catch {
+    return null;
+  }
 }

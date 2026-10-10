@@ -488,3 +488,118 @@ describe("FakeGitHubClient", () => {
     );
   });
 });
+
+describe("fake repository file compare-and-write", () => {
+  const input = {
+    owner: OWNER,
+    repo: REPOSITORY_NAME,
+    path: FILE_PATH,
+    content: "Updated",
+    message: "Update",
+    branch: "main",
+    expectedBlobSha: "old-blob"
+  };
+  const seeded = { ...input, content: FILE_CONTENT, commitSha: "old-commit", blobSha: "old-blob" };
+
+  it("reads explicit blob metadata and legacy commit identity with existing ref matching", async () => {
+    const client = new FakeGitHubClient({
+      repositoryFiles: [
+        seeded,
+        {
+          owner: OWNER,
+          repo: REPOSITORY_NAME,
+          path: "legacy",
+          content: FILE_CONTENT,
+          message: "Seed",
+          commitSha: "old-commit"
+        }
+      ]
+    });
+    await expect(
+      client.readRepositoryFile(OWNER.toUpperCase(), REPOSITORY_NAME, FILE_PATH, "main")
+    ).resolves.toEqual({ status: "found", file: { content: FILE_CONTENT, blobSha: "old-blob" } });
+    await expect(
+      client.readRepositoryFile(OWNER, REPOSITORY_NAME, "legacy", "other")
+    ).resolves.toEqual({ status: "found", file: { content: FILE_CONTENT, blobSha: "old-commit" } });
+    await expect(
+      client.readRepositoryFile(OWNER, REPOSITORY_NAME, FILE_PATH, "other")
+    ).resolves.toEqual({ status: "missing" });
+    await expect(
+      client.readRepositoryFile(OWNER, REPOSITORY_NAME, "absent", "main")
+    ).resolves.toEqual({ status: "missing" });
+  });
+
+  it("updates exact expected blob and changes subsequent read identity", async () => {
+    const client = new FakeGitHubClient({ repositoryFiles: [seeded] });
+    const result = await client.conditionalWriteRepositoryFile(input);
+    expect(result).toEqual({
+      status: "written",
+      path: FILE_PATH,
+      commitSha: GENERATED_COMMIT_SHA,
+      commitUrl: null
+    });
+    expect(client.mutations.fileWrites).toHaveLength(1);
+    const read = await client.readRepositoryFile(OWNER, REPOSITORY_NAME, FILE_PATH, "main");
+    expect(read).toEqual({
+      status: "found",
+      file: { content: "Updated", blobSha: "fake-blob-fake-commit-1" }
+    });
+    await expect(client.conditionalWriteRepositoryFile(input)).resolves.toEqual({
+      status: "conflict"
+    });
+    expect(client.mutations.fileWrites).toHaveLength(1);
+  });
+
+  it.each(["stale-blob", null])(
+    "rejects expectation %s without mutation or consuming commit identity",
+    async (expectedBlobSha) => {
+      const client = new FakeGitHubClient({ repositoryFiles: [seeded] });
+      await expect(
+        client.conditionalWriteRepositoryFile({ ...input, expectedBlobSha })
+      ).resolves.toEqual({ status: "conflict" });
+      expect(client.mutations.fileWrites).toEqual([]);
+      await expect(
+        client.readRepositoryFile(OWNER, REPOSITORY_NAME, FILE_PATH, "main")
+      ).resolves.toEqual({ status: "found", file: { content: FILE_CONTENT, blobSha: "old-blob" } });
+      await expect(client.conditionalWriteRepositoryFile(input)).resolves.toMatchObject({
+        commitSha: GENERATED_COMMIT_SHA
+      });
+    }
+  );
+
+  it("rejects an expected existing file when missing, creates expected absent, then rejects create race", async () => {
+    const client = new FakeGitHubClient();
+    await expect(client.conditionalWriteRepositoryFile(input)).resolves.toEqual({
+      status: "conflict"
+    });
+    expect(client.mutations.fileWrites).toEqual([]);
+    await expect(
+      client.conditionalWriteRepositoryFile({ ...input, expectedBlobSha: null })
+    ).resolves.toMatchObject({ status: "written", commitSha: GENERATED_COMMIT_SHA });
+    await expect(
+      client.conditionalWriteRepositoryFile({ ...input, expectedBlobSha: null })
+    ).resolves.toEqual({ status: "conflict" });
+    expect(client.mutations.fileWrites).toHaveLength(1);
+  });
+
+  it("updates an unscoped seeded file using its legacy blob identity", async () => {
+    const client = new FakeGitHubClient({
+      repositoryFiles: [
+        {
+          owner: OWNER,
+          repo: REPOSITORY_NAME,
+          path: FILE_PATH,
+          content: FILE_CONTENT,
+          message: "Seed",
+          commitSha: "old-commit"
+        }
+      ]
+    });
+    await expect(
+      client.conditionalWriteRepositoryFile({ ...input, expectedBlobSha: "old-commit" })
+    ).resolves.toMatchObject({ status: "written" });
+    await expect(
+      client.readRepositoryFile(OWNER, REPOSITORY_NAME, FILE_PATH, "main")
+    ).resolves.toMatchObject({ file: { content: "Updated" } });
+  });
+});

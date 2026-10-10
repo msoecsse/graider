@@ -1,4 +1,4 @@
-# GitHub host boundary — Phase 1.3A
+# GitHub host boundary — Phase 1.3 Complete
 
 ## Current boundary
 
@@ -44,10 +44,10 @@ dynamic imports, require calls, concrete references and construction. Comments a
 ordinary strings do not count as dependencies.
 
 Current production searches find no Octokit leakage outside those approved files.
-This guard freezes concrete implementation ownership; client/token composition
-is still distributed. GitHub interfaces, models, errors and retry imports remain
-permitted. `GitHubClient` remains GitHub-specific, with a minimal branch lookup added in
-1.3C-1 and no split. No generic RemoteHost, RemoteProvider, GitProvider or GitLabProvider is
+The guard protects concrete implementation ownership and centralized production
+client composition through trusted seams. GitHub interfaces, models, errors and retry imports remain
+permitted. `GitHubClient` remains GitHub-specific, with branch lookup added in
+1.3C-1 and metadata read/conditional write added in 1.3C-2. No generic RemoteHost, RemoteProvider, GitProvider or GitLabProvider is
 introduced; GitLab remains deferred.
 
 ## Current GitHubClient capabilities
@@ -58,7 +58,7 @@ introduced; GitLab remains deferred.
 | Repository metadata/lifecycle | `getRepository`, `getRepositoryBranch`, `getTemplateRepository`, `getDefaultBranchCommitSha`, `createRepository`, `createRepositoryFromTemplate`, `archiveRepository`                             |
 | Permissions                   | `getCollaboratorPermission`, `addCollaborator`, `removeCollaborator`, `getTeam`, `getTeamPermission`, `addTeamPermission`                                                                         |
 | Actions                       | `getActionsState`, `enableActions`, `getWorkflow`, `dispatchWorkflow`, `listWorkflowRuns`, `listWorkflowRunsForCommit`, `listWorkflowRunArtifacts`, `downloadArtifactArchive`, `downloadArtifact` |
-| Repository content            | `getRepositoryFileContent`, `writeRepositoryFile`                                                                                                                                                 |
+| Repository content            | `getRepositoryFileContent`, `readRepositoryFile`, `writeRepositoryFile`, `conditionalWriteRepositoryFile`                                                                                         |
 | Collaboration                 | `findPullRequest`, `createPullRequest`                                                                                                                                                            |
 | Branch management             | `deleteRepositoryBranch` (managed remote branch deletion with default-branch protection)                                                                                                          |
 
@@ -106,13 +106,37 @@ explicit branch lookup with a commit SHA; Octokit maps 404 to null, and the fake
 uses explicit branch state. Blank branch input uses `getRepository().defaultBranch`.
 Safe faculty diagnostics and the renderer/preload IPC result shape are preserved.
 
-No direct REST ownership remains in
-`ui/electron/templateRepositoryValidationService.ts`. The architecture guard now
-checks executable GitHub REST transport patterns and explicitly allows only the
-adapter and the temporary `ui/electron/templateWorkflowService.ts` exception.
-Template workflow read/write is the sole known direct REST feature; it remains
-unchanged for 1.3C-2, the next and final Phase 1 slice. Phase 1.3 and Phase 1 remain
-open.
+Repository validation owns no REST transport. The architecture guard now permits
+production GitHub REST only in the approved adapter, with no feature exception.
+
+## Phase 1.3C-2 completion and Phase 1 closure
+
+Template workflow read, preview, and save use `GitHubClient` through the trusted
+Electron provider. Each valid public operation resolves credentials once and
+constructs one client; save reuses it for repository access, file read, comparison,
+and conditional write. Local validation still precedes authentication.
+Renderer/preload/IPC DTOs and transitional authentication text remain unchanged.
+
+`readRepositoryFile()` returns typed found/missing/unsupported state and decoded
+content with a `blobSha`. `conditionalWriteRepositoryFile()` sends the caller's
+expected blob SHA unchanged, or omits it for expected absence, with no SHA
+preflight or upsert retry. HTTP 409/422 become typed conflicts in the adapter.
+This preserves stale-update and create-race protection after preview.
+The fake models the same compare-and-write behavior without mutating on conflict.
+Existing content-only reads and generic upsert writes retain their semantics.
+
+Phase 1.3 is complete. Octokit and REST transport are confined to the approved
+adapter/factory boundary (REST and the Octokit package belong only to the adapter).
+CLI client composition and generated backend composition are centralized;
+feature contexts receive clients. Credentials are composed through trusted seams,
+and local Git transport credentials remain separate from API-client composition.
+No feature-level direct REST remains, and architecture tests protect the boundary.
+Future GitHub capabilities stay deferred until their roadmap phase needs them.
+
+Phase 1 is complete. The next work is Phase 2 — First-Class Authentication,
+slice 2.1 — Browser-based GitHub sign-in. It has not begun. Environment-token
+fallback and `gh auth token` remain in place; OAuth, secure storage, and account
+switching are deferred to Phase 2.
 
 ## Client construction inventory
 
@@ -189,13 +213,13 @@ credentials through renderer DTOs, preload or public IPC. Existing Electron
 authorization and projection boundaries stay intact.
 
 The baseline direct-fetch services had API ownership leaks without Octokit
-imports. After 1.3C-1, only template workflow read/write retains direct REST and
-its existing API version. Validation uses the adapter's authoritative API-version
-policy; all GitHub API behavior is not yet centralized.
+imports. Both repository validation and template workflow read/write now use
+GitHubClient. The adapter owns the authoritative API-version policy and all
+production GitHub REST transport.
 
 ## Future capability gaps
 
-Inventory against the roadmap, not APIs to implement in 1.3A:
+Capabilities remain intentionally deferred until required by their roadmap phase:
 
 - Required immutable authenticated-user identity.
 - Immutable repository identity as canonical course identity, including lookup by
@@ -207,14 +231,14 @@ Inventory against the roadmap, not APIs to implement in 1.3A:
 - Branch-rule management and repository topics.
 - Release metadata for Phase 3.
 
-## Planned Phase 1.3 sequence
+## Completed Phase 1.3 sequence
 
-### 1.3A — Freeze/inventory boundary
+### 1.3A — Freeze/inventory boundary — Complete
 
 Architecture guard and this inventory only. No production API behavior changes.
-Phase 1.2 is complete; Phase 1.3 remains open.
+Phase 1.2 and Phase 1.3 are complete.
 
-### 1.3B — Centralize production composition
+### 1.3B — Centralize production composition — Complete
 
 Centralize production GitHubClient creation/resolution behind one trusted
 GitHub-specific composition seam. Feature/domain contexts receive a GitHubClient
@@ -222,14 +246,12 @@ or narrow provider rather than constructing clients from raw tokens. Account for
 CLI and generated backend composition while preserving Electron trust boundaries
 and separate operation-scoped Git authentication.
 
-### 1.3C — Capability ownership and Phase 1 closure
+### 1.3C — Capability ownership and Phase 1 closure — Complete
 
-Clean up capability ownership (including direct REST fetch), add only host
-operations needed by upcoming phases, enforce architecture boundaries, and close
-Phase 1 after acceptance.
+Repository validation and workflow read/write now use the protected GitHub host
+boundary. Only the capabilities needed by these consumers were added.
 
-1.3A, 1.3B-1, 1.3B-2, and 1.3C-1 are complete. 1.3C-2 is the next and final
-Phase 1 slice. 1.3C, Phase 1.3, and Phase 1 closure remain open. Preserve `GRAIDER_GITHUB_TOKEN`,
-`GITHUB_TOKEN`, `gh auth token`, faculty authentication, token priority, API
-versions, retry, diagnostics and all repository/Actions behavior. Phase 2 OAuth,
-session implementation and secure storage remain undecided and unimplemented.
+1.3A, 1.3B-1, 1.3B-2, 1.3C-1, and 1.3C-2 are complete. Phase 1.3 and Phase 1
+are closed. `GRAIDER_GITHUB_TOKEN`, `GITHUB_TOKEN`, `gh auth token`, faculty
+authentication, token priority, existing upsert retry, diagnostics, and repository/
+Actions behavior are preserved. Phase 2 / 2.1 is next and has not begun.

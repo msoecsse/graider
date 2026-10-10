@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import type { GitHubClient } from "./githubClientProvider.js";
+type GitHubRepositoryFileReadResult = Awaited<ReturnType<GitHubClient["readRepositoryFile"]>>;
 import type { ProcessRunner } from "./commandRunner";
-import type { TemplateWorkflowRequest } from "./ipc";
+import type { TemplateWorkflowRequest, TemplateWorkflowSaveRequest } from "./ipc";
 import {
   getTemplateWorkflow,
   previewTemplateWorkflowSave,
@@ -13,199 +15,405 @@ const request: TemplateWorkflowRequest = {
   workflowPath: ".github/workflows/grade.yml",
   gradingEnabled: true
 };
-
+const draft: TemplateWorkflowSaveRequest = {
+  ...request,
+  assignmentSlug: "lab02",
+  content: "name: Updated\n",
+  loadedSha: "old-sha",
+  confirmed: true
+};
+const token = "secret-token";
+const conflictMessage =
+  "The workflow changed in the template repository after it was loaded. Reload the workflow before saving.";
+const authMessage = "GitHub authentication is required. Run gh auth login, then refresh.";
 const runner: ProcessRunner = vi.fn();
-
-const response = (status: number, body: unknown) => ({
-  ok: status >= 200 && status < 300,
-  status,
-  json: async () => body
+const found = (blobSha = "old-sha", content = "name: Grade\n"): GitHubRepositoryFileReadResult => ({
+  status: "found",
+  file: { content, blobSha }
 });
+const setup = () => {
+  const getRepository = vi.fn<GitHubClient["getRepository"]>().mockResolvedValue({
+    owner: "graider-sandbox",
+    name: "lab02-template",
+    fullName: request.templateRepository!,
+    id: 1,
+    private: true,
+    archived: false,
+    defaultBranch: "main",
+    htmlUrl: "https://github.com/graider-sandbox/lab02-template"
+  });
+  const read = vi.fn<GitHubClient["readRepositoryFile"]>().mockResolvedValue(found());
+  const write = vi.fn<GitHubClient["conditionalWriteRepositoryFile"]>().mockResolvedValue({
+    status: "written",
+    path: request.workflowPath!,
+    commitSha: "commit-sha",
+    commitUrl: "https://github.com/graider-sandbox/lab02-template/commit/commit-sha"
+  });
+  const upsert = vi.fn<GitHubClient["writeRepositoryFile"]>();
+  const methods: Pick<
+    GitHubClient,
+    | "getRepository"
+    | "readRepositoryFile"
+    | "conditionalWriteRepositoryFile"
+    | "writeRepositoryFile"
+  > = {
+    getRepository,
+    readRepositoryFile: read,
+    conditionalWriteRepositoryFile: write,
+    writeRepositoryFile: upsert
+  };
+  const client = methods as GitHubClient;
+  const resolveToken = vi.fn(async () => ({ status: "success" as const, token }));
+  const provideClient = vi.fn(() => client);
+  return {
+    client,
+    getRepository,
+    read,
+    write,
+    upsert,
+    resolveToken,
+    provideClient,
+    options: { runner, resolveToken, provideClient }
+  };
+};
+const safeError = (kind: string) =>
+  Object.assign(new Error(`${token} raw API body https://api.github.com/internal`), {
+    name: "GitHubClientError",
+    kind
+  });
+const expectSafe = (result: unknown) => {
+  expect(JSON.stringify(result)).not.toContain(token);
+  expect(JSON.stringify(result)).not.toContain("https://api.github.com");
+  expect(JSON.stringify(result)).not.toContain("raw API body");
+};
 
 describe("template workflow service", () => {
-  it("fetches the configured branch and returns decoded workflow text without a token", async () => {
-    const fetchImplementation = vi
-      .fn()
-      .mockResolvedValueOnce(response(200, {}))
-      .mockResolvedValueOnce(
-        response(200, {
-          content: Buffer.from("name: Grade\n").toString("base64"),
-          encoding: "base64",
-          sha: "workflow-sha"
-        })
-      );
-
-    const result = await getTemplateWorkflow(request, {
-      runner,
-      resolveToken: async () => ({ status: "success", token: "secret-token" }),
-      fetchImplementation
+  it("uses the exact provider client and resolved token to read configured content and blob SHA", async () => {
+    const context = setup();
+    const result = await getTemplateWorkflow(request, context.options);
+    expect(result).toEqual({
+      status: "success",
+      repository: request.templateRepository,
+      branch: "main",
+      path: request.workflowPath,
+      content: "name: Grade\n",
+      sha: "old-sha",
+      diagnostics: []
     });
-
-    expect(result).toMatchObject({ status: "success", content: "name: Grade\n", branch: "main" });
-    expect(fetchImplementation.mock.calls[1]?.[0]).toContain("ref=main");
-    expect(JSON.stringify(result)).not.toContain("secret-token");
+    expect(context.resolveToken).toHaveBeenCalledTimes(1);
+    expect(context.provideClient).toHaveBeenCalledExactlyOnceWith(token);
+    expect(context.getRepository).toHaveBeenCalledExactlyOnceWith(
+      "graider-sandbox",
+      "lab02-template"
+    );
+    expect(context.read).toHaveBeenCalledExactlyOnceWith(
+      "graider-sandbox",
+      "lab02-template",
+      request.workflowPath,
+      "main"
+    );
+    expect(context.write).not.toHaveBeenCalled();
+    expectSafe(result);
   });
 
-  it("uses the default workflow path and returns missing only after repository access succeeds", async () => {
-    const fetchImplementation = vi
-      .fn()
-      .mockResolvedValueOnce(response(200, {}))
-      .mockResolvedValueOnce(response(404, {}));
+  it("retains default path, branch trimming, and missing diagnostic", async () => {
+    const context = setup();
+    context.read.mockResolvedValue({ status: "missing" });
     const result = await getTemplateWorkflow(
-      { ...request, workflowPath: null },
-      {
-        runner,
-        resolveToken: async () => ({ status: "success", token: "secret-token" }),
-        fetchImplementation
+      { ...request, workflowPath: null, templateBranch: " main " },
+      context.options
+    );
+    expect(result).toMatchObject({
+      status: "missing",
+      path: ".github/workflows/grade.yml",
+      diagnostics: [
+        {
+          message:
+            "No .github/workflows/grade.yml was found in the template repository on this branch."
+        }
+      ]
+    });
+    expect(context.read).toHaveBeenCalledExactlyOnceWith(
+      "graider-sandbox",
+      "lab02-template",
+      ".github/workflows/grade.yml",
+      "main"
+    );
+    expectSafe(result);
+  });
+
+  it.each([{ gradingEnabled: false }, { templateRepository: "invalid" }, { templateBranch: " " }])(
+    "validates %j locally for every public operation before auth/client work",
+    async (invalid) => {
+      const context = setup();
+      const results = [
+        await getTemplateWorkflow({ ...request, ...invalid }, context.options),
+        await previewTemplateWorkflowSave({ ...draft, ...invalid }, context.options),
+        await saveTemplateWorkflow({ ...draft, ...invalid }, context.options)
+      ];
+      for (const result of results) {
+        expect(result.status).toBe("not_configured");
+        expectSafe(result);
       }
-    );
+      expect(context.resolveToken).not.toHaveBeenCalled();
+      expect(context.provideClient).not.toHaveBeenCalled();
+    }
+  );
 
-    expect(result.status).toBe("missing");
-    expect(result.path).toBe(".github/workflows/grade.yml");
+  it("rejects blank drafts before authentication for preview and save", async () => {
+    const context = setup();
+    for (const operation of [previewTemplateWorkflowSave, saveTemplateWorkflow]) {
+      const result = await operation({ ...draft, content: " \n" }, context.options);
+      expect(result).toMatchObject({
+        status: "error",
+        diagnostics: [{ message: "Workflow content cannot be blank." }]
+      });
+      expectSafe(result);
+    }
+    expect(context.resolveToken).not.toHaveBeenCalled();
+    expect(context.provideClient).not.toHaveBeenCalled();
   });
 
-  it("does not fetch when grading or template configuration is unavailable", async () => {
-    const fetchImplementation = vi.fn();
-    const disabled = await getTemplateWorkflow(
-      { ...request, gradingEnabled: false },
-      { runner, fetchImplementation }
-    );
-    const invalid = await getTemplateWorkflow(
-      { ...request, templateRepository: "not-a-repository" },
-      { runner, fetchImplementation }
-    );
-
-    expect(disabled.status).toBe("not_configured");
-    expect(invalid.status).toBe("not_configured");
-    expect(fetchImplementation).not.toHaveBeenCalled();
-  });
-
-  it("returns auth and inaccessible repository diagnostics without mutation", async () => {
-    const authRequired = await getTemplateWorkflow(request, {
-      runner,
-      resolveToken: async () => ({
-        status: "failure",
+  it("projects authentication acquisition failure without constructing a client", async () => {
+    const context = setup();
+    const options = {
+      ...context.options,
+      resolveToken: vi.fn(async () => ({
+        status: "failure" as const,
         error: {
           code: "github_token_unavailable",
-          message: "secret-token",
+          message: token,
           exitCode: null,
           stderrSnippet: null,
           stdoutSnippet: null
         }
-      })
-    });
-    const inaccessible = await getTemplateWorkflow(request, {
-      runner,
-      resolveToken: async () => ({ status: "success", token: "secret-token" }),
-      fetchImplementation: vi.fn().mockResolvedValue(response(404, {}))
-    });
-
-    expect(authRequired.status).toBe("auth_required");
-    expect(inaccessible.status).toBe("error");
-    expect(JSON.stringify(authRequired)).not.toContain("secret-token");
+      }))
+    };
+    for (const operation of [
+      getTemplateWorkflow,
+      previewTemplateWorkflowSave,
+      saveTemplateWorkflow
+    ]) {
+      const result = await operation(draft, options);
+      expect(result).toMatchObject({
+        status: "auth_required",
+        diagnostics: [{ message: authMessage }]
+      });
+      expectSafe(result);
+    }
+    expect(options.resolveToken).toHaveBeenCalledTimes(3);
+    expect(context.provideClient).not.toHaveBeenCalled();
   });
 
-  it("previews and pushes an existing workflow with SHA and base64 content", async () => {
-    const saveRequest = {
-      ...request,
-      assignmentSlug: "lab02",
-      content: "name: Updated\n",
-      loadedSha: "workflow-sha",
-      confirmed: false
-    };
-    const fetchImplementation = vi
-      .fn()
-      .mockResolvedValueOnce(response(200, {}))
-      .mockResolvedValueOnce(
-        response(200, {
-          content: Buffer.from("name: Grade\n").toString("base64"),
-          encoding: "base64",
-          sha: "workflow-sha"
-        })
-      )
-      .mockResolvedValueOnce(response(200, {}))
-      .mockResolvedValueOnce(
-        response(200, {
-          content: Buffer.from("name: Grade\n").toString("base64"),
-          encoding: "base64",
-          sha: "workflow-sha"
-        })
-      )
-      .mockResolvedValueOnce(
-        response(200, { commit: { sha: "commit-sha", html_url: "https://github.com/commit-sha" } })
-      );
-    const options = {
-      runner,
-      resolveToken: async () => ({ status: "success" as const, token: "secret-token" }),
-      fetchImplementation
-    };
-
-    expect((await previewTemplateWorkflowSave(saveRequest, options)).status).toBe("ready");
-    const result = await saveTemplateWorkflow({ ...saveRequest, confirmed: true }, options);
+  it("retains inaccessible repository distinction and skips file read", async () => {
+    const context = setup();
+    context.getRepository.mockResolvedValue(null);
+    const result = await getTemplateWorkflow(request, context.options);
     expect(result).toMatchObject({
+      status: "error",
+      diagnostics: [{ message: "The template repository could not be accessed." }]
+    });
+    expect(context.read).not.toHaveBeenCalled();
+    expectSafe(result);
+  });
+
+  it("projects unsupported file response", async () => {
+    const context = setup();
+    context.read.mockResolvedValue({ status: "unsupported" });
+    const result = await getTemplateWorkflow(request, context.options);
+    expect(result).toMatchObject({
+      status: "error",
+      diagnostics: [{ message: "GitHub returned workflow content in an unsupported format." }]
+    });
+    expectSafe(result);
+  });
+
+  it.each([
+    "auth_missing",
+    "auth_failed",
+    "permission_denied",
+    "rate_limited",
+    "api_error",
+    "network_error",
+    "timeout",
+    "unknown"
+  ])(
+    "safely projects repository, file and write %s failures across constructor boundaries",
+    async (kind) => {
+      const auth = ["auth_missing", "auth_failed", "permission_denied"].includes(kind);
+      const network = ["network_error", "timeout", "unknown"].includes(kind);
+      for (const stage of ["repository", "file", "write"] as const) {
+        const context = setup();
+        const failure = safeError(kind);
+        if (stage === "repository") context.getRepository.mockRejectedValue(failure);
+        if (stage === "file") context.read.mockRejectedValue(failure);
+        if (stage === "write") context.write.mockRejectedValue(failure);
+        const result = await saveTemplateWorkflow(draft, context.options);
+        const message = network
+          ? `Unable to reach GitHub to ${stage === "write" ? "push" : "fetch"} the grade workflow.`
+          : stage === "repository"
+            ? "The template repository could not be accessed."
+            : stage === "file"
+              ? "Unable to fetch the grade workflow file."
+              : "Unable to push the grade workflow.";
+        expect(result).toMatchObject({
+          status: auth ? "auth_required" : "error",
+          diagnostics: [{ message }],
+          commitSha: null,
+          commitUrl: null
+        });
+        expectSafe(result);
+      }
+    }
+  );
+
+  it("projects provider construction failures safely", async () => {
+    const context = setup();
+    context.provideClient.mockImplementation(() => {
+      throw new Error(token);
+    });
+    const result = await getTemplateWorkflow(request, context.options);
+    expect(result).toMatchObject({
+      status: "error",
+      diagnostics: [{ message: "Unable to reach GitHub to fetch the grade workflow." }]
+    });
+    expectSafe(result);
+  });
+
+  it.each([previewTemplateWorkflowSave, saveTemplateWorkflow])(
+    "uses one token and client for preview/save",
+    async (operation) => {
+      const context = setup();
+      const result = await operation(draft, context.options);
+      expect(result.status).toBe(operation === saveTemplateWorkflow ? "success" : "ready");
+      expect(context.resolveToken).toHaveBeenCalledTimes(1);
+      expect(context.provideClient).toHaveBeenCalledExactlyOnceWith(token);
+      expect(context.read).toHaveBeenCalledTimes(1);
+      expect(context.upsert).not.toHaveBeenCalled();
+      expectSafe(result);
+    }
+  );
+
+  it("saves update using original expected SHA and domain commit metadata", async () => {
+    const context = setup();
+    const result = await saveTemplateWorkflow(draft, context.options);
+    expect(context.write).toHaveBeenCalledExactlyOnceWith({
+      owner: "graider-sandbox",
+      repo: "lab02-template",
+      path: request.workflowPath,
+      branch: "main",
+      content: draft.content,
+      message: "Update grading workflow for lab02",
+      expectedBlobSha: "old-sha"
+    });
+    expect(result).toEqual({
       status: "success",
       operation: "update",
-      commitSha: "commit-sha"
+      repository: request.templateRepository,
+      branch: "main",
+      path: request.workflowPath,
+      commitMessage: "Update grading workflow for lab02",
+      commitSha: "commit-sha",
+      commitUrl: "https://github.com/graider-sandbox/lab02-template/commit/commit-sha",
+      diagnostics: []
     });
-    const put = fetchImplementation.mock.calls.at(-1);
-    expect(put?.[1].method).toBe("PUT");
-    expect(put?.[1].body).toContain(Buffer.from("name: Updated\n").toString("base64"));
-    expect(put?.[1].body).toContain("workflow-sha");
+    expectSafe(result);
   });
 
-  it("handles create, no changes, and remote conflicts without pushing during preview", async () => {
-    const saveRequest = {
-      ...request,
-      assignmentSlug: "lab02",
-      content: "name: Grade\n",
-      loadedSha: null,
-      confirmed: false
-    };
-    const missingFetch = vi
-      .fn()
-      .mockResolvedValueOnce(response(200, {}))
-      .mockResolvedValueOnce(response(404, {}));
-    const options = {
-      runner,
-      resolveToken: async () => ({ status: "success" as const, token: "secret-token" }),
-      fetchImplementation: missingFetch
-    };
-    expect((await previewTemplateWorkflowSave(saveRequest, options)).operation).toBe("create");
-    expect(missingFetch).toHaveBeenCalledTimes(2);
+  it("saves expected absent create and preserves null domain commit URL", async () => {
+    const context = setup();
+    context.read.mockResolvedValue({ status: "missing" });
+    context.write.mockResolvedValue({
+      status: "written",
+      path: request.workflowPath!,
+      commitSha: "commit-sha",
+      commitUrl: null
+    });
+    const result = await saveTemplateWorkflow({ ...draft, loadedSha: null }, context.options);
+    expect(result).toMatchObject({ status: "success", operation: "create", commitUrl: null });
+    expect(context.write.mock.calls[0]?.[0].expectedBlobSha).toBeNull();
+    expectSafe(result);
+  });
 
-    const noChanges = await previewTemplateWorkflowSave(
-      { ...saveRequest, loadedSha: "sha" },
-      {
-        ...options,
-        fetchImplementation: vi
-          .fn()
-          .mockResolvedValueOnce(response(200, {}))
-          .mockResolvedValueOnce(
-            response(200, {
-              content: Buffer.from("name: Grade\n").toString("base64"),
-              encoding: "base64",
-              sha: "sha"
-            })
-          )
-      }
-    );
-    expect(noChanges.status).toBe("no_changes");
-    const conflict = await previewTemplateWorkflowSave(
-      { ...saveRequest, loadedSha: "old-sha" },
-      {
-        ...options,
-        fetchImplementation: vi
-          .fn()
-          .mockResolvedValueOnce(response(200, {}))
-          .mockResolvedValueOnce(
-            response(200, {
-              content: Buffer.from("other").toString("base64"),
-              encoding: "base64",
-              sha: "new-sha"
-            })
-          )
-      }
-    );
-    expect(conflict.status).toBe("conflict");
+  it.each([
+    {
+      title: "update stale before preview",
+      loadedSha: "old-sha",
+      remote: found("new-sha"),
+      operation: "update"
+    },
+    { title: "create stale before preview", loadedSha: null, remote: found(), operation: "update" },
+    {
+      title: "loaded file deleted before preview",
+      loadedSha: "old-sha",
+      remote: { status: "missing" } as GitHubRepositoryFileReadResult,
+      operation: "create"
+    }
+  ])("rejects $title without conditional write", async ({ loadedSha, remote, operation }) => {
+    const context = setup();
+    context.read.mockResolvedValue(remote);
+    const result = await saveTemplateWorkflow({ ...draft, loadedSha }, context.options);
+    expect(result).toMatchObject({
+      status: "conflict",
+      operation,
+      diagnostics: [{ message: conflictMessage }],
+      commitSha: null,
+      commitUrl: null
+    });
+    expect(context.write).not.toHaveBeenCalled();
+    expectSafe(result);
+  });
+
+  it.each([
+    {
+      title: "update race after preview",
+      loadedSha: "old-sha",
+      remote: found(),
+      operation: "update"
+    },
+    {
+      title: "create race after preview",
+      loadedSha: null,
+      remote: { status: "missing" } as GitHubRepositoryFileReadResult,
+      operation: "create"
+    }
+  ])("preserves $title via conditional host conflict", async ({ loadedSha, remote, operation }) => {
+    const context = setup();
+    context.read.mockResolvedValue(remote);
+    context.write.mockResolvedValue({ status: "conflict" });
+    const result = await saveTemplateWorkflow({ ...draft, loadedSha }, context.options);
+    expect(result).toMatchObject({
+      status: "conflict",
+      operation,
+      diagnostics: [{ message: conflictMessage }],
+      commitSha: null,
+      commitUrl: null
+    });
+    expect(context.write).toHaveBeenCalledTimes(1);
+    expect(context.write.mock.calls[0]?.[0].expectedBlobSha).toBe(loadedSha);
+    expect(context.read).toHaveBeenCalledTimes(1);
+    expectSafe(result);
+  });
+
+  it("retains no_changes precedence over stale SHA and never writes", async () => {
+    const context = setup();
+    context.read.mockResolvedValue(found("new-sha", draft.content));
+    const result = await saveTemplateWorkflow(draft, context.options);
+    expect(result).toMatchObject({
+      status: "no_changes",
+      operation: "update",
+      diagnostics: [{ message: "No workflow changes to save." }]
+    });
+    expect(context.write).not.toHaveBeenCalled();
+    expectSafe(result);
+  });
+
+  it("does not write unconfirmed saves or public previews", async () => {
+    const context = setup();
+    expect(
+      (await saveTemplateWorkflow({ ...draft, confirmed: false }, context.options)).status
+    ).toBe("ready");
+    expect((await previewTemplateWorkflowSave(draft, context.options)).status).toBe("ready");
+    expect(context.write).not.toHaveBeenCalled();
   });
 });

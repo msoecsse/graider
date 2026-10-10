@@ -205,3 +205,33 @@ export interface WriteRepositoryFileInput {
   message: string;
   branch?: string;
 }
+
+export interface GitHubRepositoryFile {
+  readonly content: string;
+  readonly blobSha: string;
+}
+
+export type GitHubRepositoryFileReadResult =
+  | { readonly status: "found"; readonly file: GitHubRepositoryFile }
+  | { readonly status: "missing" }
+  | { readonly status: "unsupported" };
+
+export interface ConditionalWriteRepositoryFileInput {
+  readonly owner: string;
+  readonly repo: string;
+  readonly path: string;
+  readonly content: string;
+  readonly message: string;
+  readonly branch: string;
+  /** null expects absence; a string expects this exact blob identity. */
+  readonly expectedBlobSha: string | null;
+}
+
+export type ConditionalWriteRepositoryFileResult =
+  | {
+      readonly status: "written";
+      readonly path: string;
+      readonly commitSha: string;
+      readonly commitUrl: string | null;
+    }
+  | { readonly status: "conflict" };

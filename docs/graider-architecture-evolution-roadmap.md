@@ -59,7 +59,7 @@ This becomes the executable permission contract for later slices.
 
 ---
 
-# Phase 1 — Foundational Remote and Packaging Abstractions
+# Phase 1 — Foundational Remote and Packaging Abstractions — Complete
 
 These are prerequisites for seamless new-machine operation.
 
@@ -105,35 +105,35 @@ packages. Acceptance includes private GitHub clone/fetch/push/delete, paths with
 shell/system-Git dependency, cutover of all production consumers, and removal of system-Git
 execution.
 
-## Slice 1.3 — GitHub host abstraction cleanup — Next Phase 1 task
+## Slice 1.3 — GitHub host abstraction cleanup — Complete
 
-Phase 1.3A — GitHub host boundary inventory/guard is complete. See
-[the boundary inventory](graider-github-host-abstraction.md). Phase 1.3 remains open;
-1.3B-1 — CLI client composition seam and explicit-token resolution fix is complete.
-1.3B-2 — generated backend client composition is complete. Electron trusted
-composition provides clients, with template-sync transport credentials kept separate.
-1.3C-1 — template repository validation through GitHubClient is complete. The
-minimal explicit branch lookup supplies branch identity and commit SHA; validation
-no longer owns REST transport or headers and retains safe diagnostics/default-branch
-behavior. The architecture guard allows only the adapter and the temporary
-workflow-service exception for direct GitHub REST transport.
-1.3C-2 — template workflow read/write is next, the final Phase 1 slice and sole
-known remaining direct REST feature. Phase 1.3 and Phase 1 are not complete.
+Phase 1.3 — GitHub host abstraction cleanup — Complete. The host boundary,
+CLI composition, generated backend composition, repository validation, and
+workflow read/write migrations (1.3A through 1.3C-2) are complete. See
+[the GitHub host boundary](graider-github-host-abstraction.md).
 
-Separate GitHub API behavior from local Git transport.
+Template workflow editing uses metadata-bearing file reads and an explicit
+conditional write. Caller blob SHA/expected absence remains authoritative;
+HTTP 409/422 project as conflicts without refreshing the expected SHA.
+Generic upsert semantics and renderer/preload/IPC DTOs are unchanged. No direct
+REST feature exception remains, and architecture tests enforce centralized
+GitHub API ownership. Future capabilities remain deferred until needed.
 
-Centralize:
+Phase 1 acceptance is complete:
 
-- authentication;
-- repository metadata;
-- immutable IDs;
-- organization/team operations;
-- permission operations;
-- branch rules;
-- Actions;
-- release metadata.
+- Semantic local Git workspace established.
+- Dugite 3.2.3 packaged; macOS arm64 and Windows x64 validated.
+- Private GitHub Git transport validated; no system-Git prerequisite.
+- All production Git operations use the bundled engine.
+- GitHub API boundary and production client composition centralized.
+- Octokit/REST transport confined to the approved adapter/factory boundary.
+- Git transport credentials remain separate from API-client composition.
+- Architecture tests protect both local Git and GitHub host boundaries.
 
-Do not implement GitLab.
+Next: Phase 2 — First-Class Authentication, slice 2.1 — Browser-based GitHub
+sign-in. Phase 2 has not begun; OAuth, secure credential storage, account
+switching, and removal of `gh auth token` or environment-token fallback remain
+future work.
 
 ---
 

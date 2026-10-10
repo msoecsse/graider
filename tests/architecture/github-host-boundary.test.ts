@@ -8,8 +8,6 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const ADAPTER = "src/github/octokit-github-client.ts";
 const FACTORY = "src/github/github-client-factory.ts";
 const COMPOSITION = "src/github/github-client-composition.ts";
-// Temporary direct REST exception: migrate workflow read/write in slice 1.3C-2.
-const DEFERRED_REST_SERVICE = "ui/electron/templateWorkflowService.ts";
 const FEATURE = "src/grading/example.ts";
 const PRODUCTION_SOURCE_ROOTS = ["src", "ui/electron"] as const;
 
@@ -122,7 +120,6 @@ const findBoundaryViolations = (sourcePath: string, source: string): readonly st
   visit(file);
   if (
     sourcePath !== ADAPTER &&
-    sourcePath !== DEFERRED_REST_SERVICE &&
     ((restSignals.hasApiRoot && restSignals.hasTransportCall) ||
       (restSignals.hasApiVersionHeader &&
         (restSignals.hasTransportCall || restSignals.hasBearerHeader)))
@@ -143,7 +140,7 @@ describe("GitHub host boundary", () => {
     expect(violations).toEqual([]);
   });
 
-  it("rejects direct GitHub REST transport outside the adapter and the temporary 1.3C-2 workflow exception", () => {
+  it("rejects direct GitHub REST transport outside the adapter", () => {
     for (const source of [
       'const root = "https://api.github.com"; fetch(`${root}/repos/org/repo`);',
       'globalThis.fetch("https://api.github.com/repos/org/repo");',
@@ -155,6 +152,7 @@ describe("GitHub host boundary", () => {
       for (const consumer of [
         FEATURE,
         "ui/electron/templateRepositoryValidationService.ts",
+        "ui/electron/templateWorkflowService.ts",
         FACTORY,
         COMPOSITION
       ]) {
@@ -163,7 +161,6 @@ describe("GitHub host boundary", () => {
         );
       }
       expect(findBoundaryViolations(ADAPTER, source)).toEqual([]);
-      expect(findBoundaryViolations("ui/electron/templateWorkflowService.ts", source)).toEqual([]);
     }
   });
 

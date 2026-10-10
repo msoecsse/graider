@@ -20,6 +20,7 @@ enum OctokitTestNumber {
   EmptyBufferLength = 0,
   CreatedStatus = 201,
   NotFoundStatus = 404,
+  ConflictStatus = 409,
   UnprocessableEntityStatus = 422,
   TooManyRequestsStatus = 429,
   UnauthorizedStatus = 401,
@@ -1240,6 +1241,179 @@ describe("OctokitGitHubClient", () => {
           [GRADING_RESULTS_PATH]: GRADING_RESULTS_TEXT
         }
       });
+    }
+  );
+});
+
+describe("repository file compare-and-write", () => {
+  const input = {
+    owner: OWNER,
+    repo: REPO,
+    path: CONTENT_PATH,
+    content: FILE_CONTENT,
+    message: "Update report",
+    branch: BRANCH,
+    expectedBlobSha: EXISTING_SHA
+  };
+
+  it.each(["base64", undefined])(
+    "reads UTF-8 content and blob identity with encoding %s",
+    async (encoding) => {
+      const octokit = createMockOctokit();
+      const getContent = vi.fn().mockResolvedValue({
+        data: {
+          content: Buffer.from("Grading ✓\n").toString("base64"),
+          sha: EXISTING_SHA,
+          encoding
+        }
+      });
+      octokit.rest.repos.getContent = getContent;
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+      await expect(client.readRepositoryFile(OWNER, REPO, CONTENT_PATH, BRANCH)).resolves.toEqual({
+        status: "found",
+        file: { content: "Grading ✓\n", blobSha: EXISTING_SHA }
+      });
+      expect(getContent).toHaveBeenCalledExactlyOnceWith({
+        owner: OWNER,
+        repo: REPO,
+        path: CONTENT_PATH,
+        ref: BRANCH
+      });
+    }
+  );
+
+  it("maps missing metadata read to missing", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.getContent = () =>
+      rejectedResponse(createRequestError({ status: OctokitTestNumber.NotFoundStatus }));
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(client.readRepositoryFile(OWNER, REPO, CONTENT_PATH, BRANCH)).resolves.toEqual({
+      status: "missing"
+    });
+  });
+
+  it.each([
+    [],
+    {},
+    { content: "" },
+    { sha: EXISTING_SHA },
+    { content: "", sha: EXISTING_SHA, encoding: "utf8" },
+    { content: null, sha: EXISTING_SHA },
+    { content: "", sha: null }
+  ])("rejects unsupported file response %j", async (data) => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.getContent = () => resolvedResponse(data);
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(client.readRepositoryFile(OWNER, REPO, CONTENT_PATH, BRANCH)).resolves.toEqual({
+      status: "unsupported"
+    });
+  });
+
+  it.each([
+    [OctokitTestNumber.UnauthorizedStatus, "auth_failed"],
+    [OctokitTestNumber.ForbiddenStatus, "permission_denied"],
+    [OctokitTestNumber.ServerErrorStatus, "api_error"]
+  ] as const)("normalizes metadata read and conditional write status %s", async (status, kind) => {
+    const octokit = createMockOctokit();
+    const failure = () => rejectedResponse(createRequestError({ status }));
+    octokit.rest.repos.getContent = failure;
+    const write = vi.fn(failure);
+    octokit.rest.repos.createOrUpdateFileContents = write;
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(
+      client.readRepositoryFile(OWNER, REPO, CONTENT_PATH, BRANCH)
+    ).rejects.toMatchObject({ name: "GitHubClientError", kind });
+    await expect(client.conditionalWriteRepositoryFile(input)).rejects.toMatchObject({
+      name: "GitHubClientError",
+      kind
+    });
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes network errors for both capabilities", async () => {
+    const octokit = createMockOctokit();
+    const failure = () => Promise.reject(new Error("fetch failed"));
+    octokit.rest.repos.getContent = failure;
+    octokit.rest.repos.createOrUpdateFileContents = failure;
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await expect(
+      client.readRepositoryFile(OWNER, REPO, CONTENT_PATH, BRANCH)
+    ).rejects.toMatchObject({ kind: "network_error" });
+    await expect(client.conditionalWriteRepositoryFile(input)).rejects.toMatchObject({
+      kind: "network_error"
+    });
+  });
+
+  it.each([EXISTING_SHA, null])(
+    "writes caller expectation %s without any SHA preflight",
+    async (expectedBlobSha) => {
+      const octokit = createMockOctokit();
+      const read = vi.fn(() => resolvedResponse({ sha: "newer-sha" }));
+      const commitUrl = `https://github.com/${OWNER}/${REPO}/commit/${CREATED_SHA}`;
+      const write = vi.fn(() =>
+        resolvedResponse({
+          content: { path: CONTENT_PATH },
+          commit: { sha: CREATED_SHA, html_url: commitUrl }
+        })
+      );
+      octokit.rest.repos.getContent = read;
+      octokit.rest.repos.createOrUpdateFileContents = write;
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+      const metadataRead = vi.spyOn(client, "readRepositoryFile");
+      const contentRead = vi.spyOn(client, "getRepositoryFileContent");
+      await expect(
+        client.conditionalWriteRepositoryFile({ ...input, expectedBlobSha })
+      ).resolves.toEqual({
+        status: "written",
+        path: CONTENT_PATH,
+        commitSha: CREATED_SHA,
+        commitUrl
+      });
+      expect(write).toHaveBeenCalledExactlyOnceWith({
+        owner: OWNER,
+        repo: REPO,
+        path: CONTENT_PATH,
+        branch: BRANCH,
+        content: Buffer.from(FILE_CONTENT).toString("base64"),
+        message: input.message,
+        ...(expectedBlobSha === null ? {} : { sha: expectedBlobSha })
+      });
+      expect(read).not.toHaveBeenCalled();
+      expect(metadataRead).not.toHaveBeenCalled();
+      expect(contentRead).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([undefined, null, 1, "not a URL", "javascript:alert(1)"])(
+    "maps invalid commit URL %s to null",
+    async (html_url) => {
+      const octokit = createMockOctokit();
+      octokit.rest.repos.createOrUpdateFileContents = () =>
+        resolvedResponse({ commit: { sha: CREATED_SHA, html_url } });
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+      await expect(client.conditionalWriteRepositoryFile(input)).resolves.toEqual({
+        status: "written",
+        path: CONTENT_PATH,
+        commitSha: CREATED_SHA,
+        commitUrl: null
+      });
+    }
+  );
+
+  it.each([OctokitTestNumber.ConflictStatus, OctokitTestNumber.UnprocessableEntityStatus])(
+    "maps status %s to conflict with exactly one write and no read",
+    async (status) => {
+      const octokit = createMockOctokit();
+      const read = vi.fn();
+      const write = vi.fn(() => rejectedResponse(createRequestError({ status })));
+      octokit.rest.repos.getContent = read;
+      octokit.rest.repos.createOrUpdateFileContents = write;
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+      await expect(client.conditionalWriteRepositoryFile(input)).resolves.toEqual({
+        status: "conflict"
+      });
+      expect(read).not.toHaveBeenCalled();
+      expect(write).toHaveBeenCalledTimes(1);
     }
   );
 });
