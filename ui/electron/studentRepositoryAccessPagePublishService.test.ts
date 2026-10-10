@@ -1,8 +1,9 @@
+import { localPublicationOptions } from "./gitPublicationFixtures";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   getProductionGitWorkspaceFactory,
@@ -77,7 +78,11 @@ describe("studentRepositoryAccessPagePublishService", () => {
     const root = createFixture();
     fs.writeFileSync(path.join(pagesRoot(root), "unrelated.txt"), "do not publish\n", "utf8");
 
-    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+    const result = await publishStudentRepositoryAccessPage(
+      request(root),
+      mappings,
+      localPublicationOptions()
+    );
 
     expect(result.status).toBe("success");
     expect(result.commitMessage).toBe("Publish student access page for lab02");
@@ -89,7 +94,11 @@ describe("studentRepositoryAccessPagePublishService", () => {
     const root = createFixture();
     fs.unlinkSync(path.join(pagesRoot(root), outputPath));
 
-    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+    const result = await publishStudentRepositoryAccessPage(
+      request(root),
+      mappings,
+      localPublicationOptions()
+    );
 
     expect(result.status).toBe("failure");
     expect(result.diagnostics[0]?.message).toMatch(/Generate/u);
@@ -99,7 +108,11 @@ describe("studentRepositoryAccessPagePublishService", () => {
     const root = createFixture(false);
     const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
 
-    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+    const result = await publishStudentRepositoryAccessPage(
+      request(root),
+      mappings,
+      localPublicationOptions()
+    );
 
     expect(result.status).toBe("failure");
     expect(result.diagnostics[0]?.message).toMatch(/upstream/u);
@@ -111,7 +124,11 @@ describe("studentRepositoryAccessPagePublishService", () => {
     const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
     advanceUpstream(root);
 
-    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+    const result = await publishStudentRepositoryAccessPage(
+      request(root),
+      mappings,
+      localPublicationOptions()
+    );
 
     expect(result.status).toBe("failure");
     expect(result.diagnostics[0]?.message).toMatch(/pulled.*rebased.*synchronized/u);
@@ -133,7 +150,11 @@ describe("studentRepositoryAccessPagePublishService", () => {
       }
     };
 
-    const result = await publishStudentRepositoryAccessPage(request(root), mappings, factory);
+    const result = await publishStudentRepositoryAccessPage(
+      request(root),
+      mappings,
+      localPublicationOptions(factory)
+    );
 
     expect(result.diagnostics).toEqual([
       { message: "This Pages repository branch does not have an upstream branch configured." }
@@ -156,7 +177,11 @@ describe("studentRepositoryAccessPagePublishService", () => {
       }
     };
 
-    const result = await publishStudentRepositoryAccessPage(request(root), mappings, factory);
+    const result = await publishStudentRepositoryAccessPage(
+      request(root),
+      mappings,
+      localPublicationOptions(factory)
+    );
 
     expect(result.diagnostics[0]?.message).toMatch(/pulled.*rebased.*synchronized/u);
     expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(headBefore);
@@ -172,7 +197,11 @@ describe("studentRepositoryAccessPagePublishService", () => {
     );
     const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
 
-    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+    const result = await publishStudentRepositoryAccessPage(
+      request(root),
+      mappings,
+      localPublicationOptions()
+    );
 
     expect(result.diagnostics[0]?.message).toMatch(/branch does not match/u);
     expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(headBefore);
@@ -187,7 +216,11 @@ describe("studentRepositoryAccessPagePublishService", () => {
     );
     const headBefore = git(pagesRoot(root), ["rev-parse", "HEAD"]);
 
-    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+    const result = await publishStudentRepositoryAccessPage(
+      request(root),
+      mappings,
+      localPublicationOptions()
+    );
 
     expect(result.diagnostics[0]?.message).toMatch(/remote does not match/u);
     expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(headBefore);
@@ -198,7 +231,11 @@ describe("studentRepositoryAccessPagePublishService", () => {
     const privateRemotePath = path.join(root, "missing", "csc1120", "csc1120pages");
     git(pagesRoot(root), ["remote", "set-url", "origin", privateRemotePath]);
 
-    const result = await publishStudentRepositoryAccessPage(request(root), mappings);
+    const result = await publishStudentRepositoryAccessPage(
+      request(root),
+      mappings,
+      localPublicationOptions()
+    );
 
     expect(result.status).toBe("failure");
     expect(result.diagnostics).toEqual([
@@ -206,5 +243,77 @@ describe("studentRepositoryAccessPagePublishService", () => {
     ]);
     expect(result.diagnostics[0]?.message).not.toContain("fatal:");
     expect(result.diagnostics[0]?.message).not.toContain(privateRemotePath);
+  });
+});
+
+describe("studentRepositoryAccessPagePublishService authenticated push regression", () => {
+  it("pushes with the exact context paired with its authenticated factory", async () => {
+    const root = createFixture();
+
+    const backend = getProductionGitWorkspaceFactory();
+    const authentication = { id: "publication-operation" };
+    const push = vi.fn().mockResolvedValue({ kind: "pushed" });
+    const createAuthenticatedWorkspace = vi.fn().mockReturnValue({
+      authentication,
+      factory: {
+        inspect: (repositoryPath: string) => backend.inspect(repositoryPath),
+        open: async (repositoryPath: string) => {
+          const workspace = await backend.open(repositoryPath);
+          return {
+            root: workspace.root,
+            inspect: () => workspace.inspect(),
+            remoteUrl: () => workspace.remoteUrl("origin"),
+            stage: workspace.stage.bind(workspace),
+            commit: workspace.commit.bind(workspace),
+            pushUpstream: push
+          };
+        }
+      }
+    });
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings, {
+      factory: getProductionGitWorkspaceFactory(),
+      runner: vi.fn(),
+      resolveToken: vi.fn().mockResolvedValue({ status: "success", token: "regression-secret" }),
+      createAuthenticatedWorkspace
+    });
+    expect(result.status).toBe("success");
+    expect(createAuthenticatedWorkspace).toHaveBeenCalledWith("regression-secret");
+    expect(push).toHaveBeenCalledWith({ authentication });
+    expect(push.mock.calls[0]?.[0].authentication).toBe(authentication);
+    expect(JSON.stringify(result)).not.toContain("regression-secret");
+  });
+});
+
+describe("studentRepositoryAccessPagePublishService authentication readiness", () => {
+  it("fails before staging or committing when authentication is unavailable", async () => {
+    const root = createFixture();
+
+    const repository = pagesRoot(root);
+    const head = git(repository, ["rev-parse", "HEAD"]);
+    const options = localPublicationOptions();
+    options.resolveToken.mockResolvedValue({
+      status: "failure",
+      error: { message: "secret-error" }
+    });
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings, options);
+    expect(result.status).toBe("failure");
+    expect(result.diagnostics[0]?.message).toMatch(/GitHub authentication is required/u);
+    expect(options.createAuthenticatedWorkspace).not.toHaveBeenCalled();
+    expect(git(repository, ["rev-parse", "HEAD"])).toBe(head);
+    expect(git(repository, ["diff", "--cached", "--name-only"])).toBe("");
+    expect(JSON.stringify(result)).not.toContain("secret-error");
+  });
+
+  it("does not resolve authentication when everything is already published", async () => {
+    const root = createFixture();
+    const repository = pagesRoot(root);
+    git(repository, ["add", "."]);
+    git(repository, ["commit", "-m", "Generated page"]);
+    git(repository, ["push"]);
+    const options = localPublicationOptions();
+    const result = await publishStudentRepositoryAccessPage(request(root), mappings, options);
+    expect(result.status).toBe("up_to_date");
+    expect(options.resolveToken).not.toHaveBeenCalled();
+    expect(options.createAuthenticatedWorkspace).not.toHaveBeenCalled();
   });
 });

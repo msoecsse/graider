@@ -5,7 +5,6 @@ import type {
   CourseSetupDiagnostic
 } from "./ipc.js";
 import { publishSuccessfulCourseMutation } from "./courseMutationPublicationService.js";
-import { publishCourseChanges } from "./coursePublishService.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -116,7 +115,8 @@ const loadBackend = (): GradingCommentLibraryBackend =>
   require(path.join(__dirname, "gradingCommentLibraryBackend.cjs")) as GradingCommentLibraryBackend;
 
 export const createGradingCommentLibraryService = (
-  dependencies: Partial<GradingCommentLibraryDependencies> = {}
+  dependencies: Partial<GradingCommentLibraryDependencies> &
+    Pick<GradingCommentLibraryDependencies, "publishCourseChanges">
 ): {
   readonly load: (request: GradingCommentLibraryServiceRequest) => GradingCommentLibraryLoadResult;
   readonly create: (
@@ -131,7 +131,7 @@ export const createGradingCommentLibraryService = (
 } => {
   const resolveFacultyScope = dependencies.resolveFacultyScope ?? resolveCurrentFacultyScope;
   const getBackend = dependencies.loadBackend ?? loadBackend;
-  const publish = dependencies.publishCourseChanges ?? publishCourseChanges;
+  const publish = dependencies.publishCourseChanges;
   const authorize = (
     request: GradingCommentLibraryServiceRequest
   ): GradingCommentLibraryAccessFailure | undefined => {
@@ -188,11 +188,23 @@ export const createGradingCommentLibraryService = (
   };
 };
 
-export const loadGradingCommentLibrary = (request: GradingCommentLibraryServiceRequest) =>
-  createGradingCommentLibraryService().load(request);
-export const createGradingLibraryComment = (request: CreateGradingLibraryCommentServiceRequest) =>
-  createGradingCommentLibraryService().create(request);
-export const editGradingLibraryComment = (request: EditGradingLibraryCommentServiceRequest) =>
-  createGradingCommentLibraryService().edit(request);
-export const deleteGradingLibraryComment = (request: DeleteGradingLibraryCommentServiceRequest) =>
-  createGradingCommentLibraryService().delete(request);
+export const loadGradingCommentLibrary = (request: GradingCommentLibraryServiceRequest) => {
+  const scope = resolveCurrentFacultyScope(request);
+  if (scope.status !== "success") return { status: scope.status };
+  if (scope.sections.length === 0) return { status: "no_assigned_sections" as const };
+  return loadBackend().loadGradingCommentLibraryContext({
+    courseFolderPath: request.courseFolderPath
+  });
+};
+export const createGradingLibraryComment = (
+  request: CreateGradingLibraryCommentServiceRequest,
+  publish: GradingCommentLibraryDependencies["publishCourseChanges"]
+) => createGradingCommentLibraryService({ publishCourseChanges: publish }).create(request);
+export const editGradingLibraryComment = (
+  request: EditGradingLibraryCommentServiceRequest,
+  publish: GradingCommentLibraryDependencies["publishCourseChanges"]
+) => createGradingCommentLibraryService({ publishCourseChanges: publish }).edit(request);
+export const deleteGradingLibraryComment = (
+  request: DeleteGradingLibraryCommentServiceRequest,
+  publish: GradingCommentLibraryDependencies["publishCourseChanges"]
+) => createGradingCommentLibraryService({ publishCourseChanges: publish }).delete(request);

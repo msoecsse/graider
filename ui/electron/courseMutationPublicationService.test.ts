@@ -57,10 +57,11 @@ describe("publishSuccessfulCourseMutation", () => {
 
   it("reports a thrown publication error without replacing local success", async () => {
     const result = await publishSuccessfulCourseMutation("/course", localSuccess, async () => {
-      throw new Error("Network unavailable");
+      throw new Error("Network unavailable: secret-token");
     });
 
     expect(result).toMatchObject({ status: "success", publication: { status: "failure" } });
+    expect(JSON.stringify(result)).not.toContain("secret-token");
     expect(result.diagnostics.map((item) => item.message).join(" ")).toMatch(
       /saved locally, but could not be published/u
     );

@@ -1,3 +1,7 @@
+import {
+  authenticateGitPublication,
+  type GitPublicationOptions
+} from "./gitPublicationAuthentication.js";
 import fs from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
@@ -43,8 +47,9 @@ const getConfiguredPagesBranch = (courseFolderPath: string): string | null => {
 export const publishStudentRepositoryAccessPage = async (
   request: StudentRepositoryAccessPageRequest,
   mappings: AssignmentRepositoryMappings,
-  factory: GitWorkspaceWriterFactory = getProductionGitWorkspaceFactory()
+  options: GitPublicationOptions
 ): Promise<StudentRepositoryAccessPagePublishActionResult> => {
+  const factory = options.factory ?? getProductionGitWorkspaceFactory();
   const readiness = await getStudentRepositoryAccessPagePublishStatus(request, mappings, factory);
   const repositoryFolderPath = request.pagesRepositoryFolderPath;
   if (repositoryFolderPath === null || repositoryFolderPath === undefined)
@@ -98,9 +103,12 @@ export const publishStudentRepositoryAccessPage = async (
   const commitMessage = `Publish student access page for ${readiness.assignmentSlug ?? "assignment"}`;
   const outputPath = createRelativeGitPath(readiness.outputPath);
   if (outputPath === null) return failure("Unable to stage the generated student access page.");
+  const authenticated = await authenticateGitPublication(options);
+  if (authenticated === null)
+    return failure("GitHub authentication is required to publish the student access page.");
   let workspace: Awaited<ReturnType<GitWorkspaceWriterFactory["open"]>>;
   try {
-    workspace = await factory.open(repositoryRoot);
+    workspace = await authenticated.factory.open(repositoryRoot);
     const currentState = await workspace.inspect();
     if (currentState.head.kind !== "attached" || currentState.upstream.kind === "missing")
       return failure("This Pages repository branch does not have an upstream branch configured.");
@@ -130,7 +138,7 @@ export const publishStudentRepositoryAccessPage = async (
     }
   }
   try {
-    await workspace.pushUpstream();
+    await workspace.pushUpstream({ authentication: authenticated.authentication });
   } catch {
     return failure("Unable to push the student access page to the configured upstream branch.");
   }

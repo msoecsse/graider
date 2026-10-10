@@ -1,3 +1,4 @@
+import { localPublicationOptions } from "./gitPublicationFixtures";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -104,6 +105,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     initializePagesRepository(root);
 
     const result = await applyAssignmentWithStudentRepositoryAccessPage(request(root), {
+      ...localPublicationOptions(),
       runner: runner(),
       env: {},
       pagesRepositoryFolderPath: pagesRoot(root)
@@ -122,6 +124,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     initializePagesRepository(root);
 
     const result = await applyAssignmentWithStudentRepositoryAccessPage(request(root), {
+      ...localPublicationOptions(),
       runner: runner(),
       env: {},
       pagesRepositoryFolderPath: pagesRoot(root)
@@ -138,7 +141,12 @@ describe("assignmentApplyWithAccessPageService", () => {
     const root = createRoot();
     writeFixture(root);
     initializePagesRepository(root);
-    const options = { runner: runner(), env: {}, pagesRepositoryFolderPath: pagesRoot(root) };
+    const options = {
+      ...localPublicationOptions(),
+      runner: runner(),
+      env: {},
+      pagesRepositoryFolderPath: pagesRoot(root)
+    };
 
     await applyAssignmentWithStudentRepositoryAccessPage(request(root), options);
     const firstHead = git(pagesRoot(root), ["rev-parse", "HEAD"]);
@@ -155,6 +163,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     fs.writeFileSync(path.join(pagesRoot(root), "unrelated.txt"), "leave me alone", "utf8");
 
     const result = await applyAssignmentWithStudentRepositoryAccessPage(request(root), {
+      ...localPublicationOptions(),
       runner: runner(),
       env: {},
       pagesRepositoryFolderPath: pagesRoot(root)
@@ -173,6 +182,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     writeFixture(root, false);
 
     const result = await applyAssignmentWithStudentRepositoryAccessPage(request(root), {
+      ...localPublicationOptions(),
       runner: runner(),
       env: {},
       pagesRepositoryFolderPath: path.join(root, "pages")
@@ -196,6 +206,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     ]);
 
     const result = await applyAssignmentWithStudentRepositoryAccessPage(request(root), {
+      ...localPublicationOptions(),
       runner: runner(),
       env: {},
       pagesRepositoryFolderPath: pagesRoot(root)

@@ -3,7 +3,6 @@ import type {
   CoursePublishActionResult,
   CourseSetupDiagnostic
 } from "./ipc.js";
-import { publishCourseChanges } from "./coursePublishService.js";
 
 type CourseMutationResult = {
   readonly status: string;
@@ -19,29 +18,25 @@ const publicationResult = (result: CoursePublishActionResult): CourseMutationPub
   diagnostics: result.diagnostics
 });
 
-const failedPublication = (error: unknown): CourseMutationPublicationResult => ({
+const failedPublication = (_error: unknown): CourseMutationPublicationResult => ({
   status: "failure",
-  diagnostics: [
-    diagnostic(
-      `Unable to publish course changes: ${error instanceof Error ? error.message : "unknown error"}`
-    )
-  ]
+  diagnostics: [diagnostic("Unable to publish course changes.")]
 });
 
 export function publishSuccessfulCourseMutation<T extends SuccessfulCourseMutationResult>(
   courseFolderPath: string,
   result: T,
-  publish?: (path: string) => Promise<CoursePublishActionResult>
+  publish: (path: string) => Promise<CoursePublishActionResult>
 ): Promise<T & { readonly publication: CourseMutationPublicationResult }>;
 export function publishSuccessfulCourseMutation<T extends CourseMutationResult>(
   courseFolderPath: string,
   result: T,
-  publish?: (path: string) => Promise<CoursePublishActionResult>
+  publish: (path: string) => Promise<CoursePublishActionResult>
 ): Promise<T & { readonly publication?: CourseMutationPublicationResult }>;
 export async function publishSuccessfulCourseMutation<T extends CourseMutationResult>(
   courseFolderPath: string,
   result: T,
-  publish: (path: string) => Promise<CoursePublishActionResult> = publishCourseChanges
+  publish: (path: string) => Promise<CoursePublishActionResult>
 ): Promise<T & { readonly publication?: CourseMutationPublicationResult }> {
   if (result.status !== "success") return result;
   const publication = await publish(courseFolderPath)

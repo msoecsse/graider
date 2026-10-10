@@ -1,3 +1,4 @@
+import { localPublicationOptions } from "./gitPublicationFixtures";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -125,6 +126,7 @@ const runner = (): ProcessRunner =>
   });
 
 const options = (root: string) => ({
+  ...localPublicationOptions(),
   runner: runner(),
   pagesRepositoryFolderPath: pagesRoot(root),
   saveDependencies: {

@@ -1,3 +1,4 @@
+import ts from "typescript";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -88,4 +89,36 @@ describe("local Git execution boundary", () => {
       requestsGitThroughProcessRunner('const remote = "https://github.com/org/git.git";')
     ).toBe(false);
   });
+});
+
+it("requires an explicit authentication request in the Electron publication writer", () => {
+  const filename = path.join(PROJECT_ROOT, "ui/electron/gitWorkspaceReader.ts");
+  const source = ts.createSourceFile(
+    filename,
+    fs.readFileSync(filename, "utf8"),
+    ts.ScriptTarget.Latest,
+    true
+  );
+  const writer = source.statements.find(
+    (statement) =>
+      ts.isInterfaceDeclaration(statement) && statement.name.text === "GitWorkspaceWriter"
+  );
+  if (writer === undefined || !ts.isInterfaceDeclaration(writer))
+    throw new Error("Missing writer contract.");
+  const push = writer.members.find(
+    (member) => ts.isMethodSignature(member) && member.name.getText(source) === "pushUpstream"
+  );
+  if (push === undefined || !ts.isMethodSignature(push)) throw new Error("Missing push contract.");
+  expect(push.parameters).toHaveLength(1);
+  const request = push.parameters[0];
+  expect(request?.questionToken).toBeUndefined();
+  expect(request?.initializer).toBeUndefined();
+  if (request?.type === undefined || !ts.isTypeLiteralNode(request.type))
+    throw new Error("Missing request type.");
+  const authentication = request.type.members[0];
+  if (authentication === undefined || !ts.isPropertySignature(authentication))
+    throw new Error("Missing authentication.");
+  expect(authentication.name.getText(source)).toBe("authentication");
+  expect(authentication.questionToken).toBeUndefined();
+  expect(authentication.type?.getText(source)).toBe("GitAuthenticationContextRef");
 });

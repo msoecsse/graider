@@ -1,3 +1,4 @@
+import { publishCourseChanges } from "../../../ui/electron/coursePublishService.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -179,7 +180,8 @@ describe("grading comment library production service", () => {
     initializeGitCourse(courseFolderPath);
     const service = createGradingCommentLibraryService({
       resolveFacultyScope: () => authorizedScope,
-      loadBackend: () => backend
+      loadBackend: () => backend,
+      publishCourseChanges: (root) => publishCourseChanges(root, { runner: vi.fn() })
     });
 
     const result = await service.create({

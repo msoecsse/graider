@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getProductionGitWorkspaceFactory } from "./gitWorkspaceReader.js";
+import {
+  createAuthenticatedProductionGitWorkspace,
+  getProductionGitWorkspaceFactory
+} from "./gitWorkspaceReader.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -40,4 +43,18 @@ describe("production Git workspace loader", () => {
     const workspace = await getProductionGitWorkspaceFactory().open(root);
     await expect(workspace.resolveHead()).resolves.toBe(head);
   });
+});
+
+it("loads operation-scoped authenticated composition from the existing backend", async () => {
+  const first = createAuthenticatedProductionGitWorkspace("  backend-fixture-token  ");
+  const second = createAuthenticatedProductionGitWorkspace("backend-fixture-token");
+  expect(first.authentication.id).not.toBe(second.authentication.id);
+  expect(first.factory).not.toBe(second.factory);
+  expect(Object.keys(first).sort()).toEqual(["authentication", "factory"]);
+  expect(JSON.stringify(first.authentication)).not.toContain("backend-fixture-token");
+  expect(() => createAuthenticatedProductionGitWorkspace(" ")).toThrow(/authentication/u);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-authenticated-loader-"));
+  temporaryDirectories.push(root);
+  git(root, ["init"]);
+  await expect(first.factory.inspect(root)).resolves.toMatchObject({ kind: "repository" });
 });

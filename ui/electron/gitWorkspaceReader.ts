@@ -62,7 +62,9 @@ export interface GitWorkspaceInspector {
 export interface GitWorkspaceWriter extends GitWorkspaceInspector {
   stage(paths: readonly RelativeGitPath[]): Promise<void>;
   commit(request: { readonly message: string }): Promise<string>;
-  pushUpstream(): Promise<{ readonly kind: "pushed" }>;
+  pushUpstream(request: {
+    readonly authentication: GitAuthenticationContextRef;
+  }): Promise<{ readonly kind: "pushed" }>;
 }
 
 export type GitRepositoryInspection =
@@ -90,7 +92,17 @@ export interface GitWorkspaceFactory {
   open(repositoryPath: string): Promise<GitWorkspace>;
 }
 
+export interface GitAuthenticationContextRef {
+  readonly id: string;
+}
+
+export interface AuthenticatedGitWorkspaceContext {
+  readonly factory: GitWorkspaceWriterFactory;
+  readonly authentication: GitAuthenticationContextRef;
+}
+
 interface ProductionGitWorkspaceBackend {
+  createAuthenticatedDugiteGitWorkspace(token: string): AuthenticatedGitWorkspaceContext;
   createDugiteGitWorkspaceFactory(): GitWorkspaceFactory;
 }
 
@@ -127,3 +139,8 @@ export const createRelativeGitPath = (value: string): RelativeGitPath | null => 
     ? (normalized as RelativeGitPath)
     : null;
 };
+
+export const createAuthenticatedProductionGitWorkspace = (
+  token: string
+): AuthenticatedGitWorkspaceContext =>
+  loadProductionGitWorkspaceBackend().createAuthenticatedDugiteGitWorkspace(token);

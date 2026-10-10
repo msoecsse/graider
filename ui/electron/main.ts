@@ -495,6 +495,9 @@ export const registerIpcHandlers = (): void => {
     );
   };
 
+  const publishAuthenticatedCourseChanges = (courseFolderPath: string) =>
+    publishCourseChanges(courseFolderPath, { runner: processRunner, env: process.env });
+
   ipcMain.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
   ipcMain.handle(IPC_CHANNELS.getLocalSettings, () =>
     loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
@@ -511,7 +514,7 @@ export const registerIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.publishCourseChanges, async (_event, courseFolderId: unknown) => {
     const courseFolderPath = getRegisteredCourseFolderPath(courseFolderId);
     if (courseFolderPath === null) throw new Error("A registered course folder is required.");
-    return await publishCourseChanges(courseFolderPath);
+    return await publishAuthenticatedCourseChanges(courseFolderPath);
   });
 
   ipcMain.handle(
@@ -693,7 +696,8 @@ export const registerIpcHandlers = (): void => {
     if (request.templateRepository.trim() === "")
       return await publishSuccessfulCourseMutation(
         request.courseFolderPath,
-        saveAssignmentSetup(request)
+        saveAssignmentSetup(request),
+        publishAuthenticatedCourseChanges
       );
     const validation = await validateTemplateRepository(
       request.templateRepository,
@@ -708,7 +712,8 @@ export const registerIpcHandlers = (): void => {
         ...request,
         templateRepository: validation.repository ?? request.templateRepository,
         templateBranch: validation.branch ?? request.templateBranch
-      })
+      }),
+      publishAuthenticatedCourseChanges
     );
   });
   ipcMain.handle(IPC_CHANNELS.getAssignmentForEdit, (_event, request: unknown) => {
@@ -780,12 +785,14 @@ export const registerIpcHandlers = (): void => {
           ...request,
           templateRepository: validation.repository ?? request.templateRepository,
           templateBranch: validation.branch ?? request.templateBranch
-        })
+        }),
+        publishAuthenticatedCourseChanges
       );
     }
     return await publishSuccessfulCourseMutation(
       request.courseFolderPath,
-      saveAssignmentEdit(request)
+      saveAssignmentEdit(request),
+      publishAuthenticatedCourseChanges
     );
   });
   ipcMain.handle(IPC_CHANNELS.deleteAssignment, async (_event, request: unknown) => {
@@ -793,7 +800,8 @@ export const registerIpcHandlers = (): void => {
       throw new Error("Invalid assignment delete request.");
     return await publishSuccessfulCourseMutation(
       request.courseFolderPath,
-      deleteAssignment(request)
+      deleteAssignment(request),
+      publishAuthenticatedCourseChanges
     );
   });
   ipcMain.handle(IPC_CHANNELS.getAssignmentGroupConfig, (_event, request: unknown) => {
@@ -806,7 +814,8 @@ export const registerIpcHandlers = (): void => {
       throw new Error("Invalid assignment group settings request.");
     return await publishSuccessfulCourseMutation(
       request.courseFolderPath,
-      saveAssignmentGroupConfig(request)
+      saveAssignmentGroupConfig(request),
+      publishAuthenticatedCourseChanges
     );
   });
   ipcMain.handle(
@@ -870,7 +879,10 @@ export const registerIpcHandlers = (): void => {
         ...accessRequest,
         runner: processRunner
       });
-      return await publishStudentRepositoryAccessPage(accessRequest, mappings);
+      return await publishStudentRepositoryAccessPage(accessRequest, mappings, {
+        runner: processRunner,
+        env: process.env
+      });
     }
   );
 
@@ -910,11 +922,13 @@ export const registerIpcHandlers = (): void => {
       request.courseFolderPath,
       await saveRosterWithStudentRepositoryAccessPageRefresh(request, {
         runner: processRunner,
+        env: process.env,
         pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId),
         saveDependencies: createRosterSaveDependencies(
           getLocalSettingsPath(app.getPath("userData"))
         )
-      })
+      }),
+      publishAuthenticatedCourseChanges
     );
   });
   ipcMain.handle(IPC_CHANNELS.removeRoster, async (_event, request: unknown) => {
@@ -925,8 +939,10 @@ export const registerIpcHandlers = (): void => {
       request.courseFolderPath,
       await removeRosterWithStudentRepositoryAccessPageRefresh(request, {
         runner: processRunner,
+        env: process.env,
         pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
-      })
+      }),
+      publishAuthenticatedCourseChanges
     );
   });
   ipcMain.handle(IPC_CHANNELS.removeSection, async (_event, request: unknown) => {
@@ -937,8 +953,10 @@ export const registerIpcHandlers = (): void => {
       request.courseFolderPath,
       await removeSectionWithStudentRepositoryAccessPageRefresh(request, {
         runner: processRunner,
+        env: process.env,
         pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(request.courseFolderId)
-      })
+      }),
+      publishAuthenticatedCourseChanges
     );
   });
 
@@ -1215,37 +1233,46 @@ export const registerIpcHandlers = (): void => {
       throw new Error("A registered course and valid reusable comment are required.");
     const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
     if (courseFolderPath === null) throw new Error("A registered course folder is required.");
-    return createGradingLibraryComment({
-      courseFolderPath,
-      termCode: request.termCode,
-      userDataPath: app.getPath("userData"),
-      comment: request.comment
-    });
+    return createGradingLibraryComment(
+      {
+        courseFolderPath,
+        termCode: request.termCode,
+        userDataPath: app.getPath("userData"),
+        comment: request.comment
+      },
+      publishAuthenticatedCourseChanges
+    );
   });
   ipcMain.handle(IPC_CHANNELS.editGradingLibraryComment, (_event, request: unknown) => {
     if (!isEditGradingLibraryCommentRequest(request))
       throw new Error("A registered course and valid reusable comment are required.");
     const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
     if (courseFolderPath === null) throw new Error("A registered course folder is required.");
-    return editGradingLibraryComment({
-      courseFolderPath,
-      termCode: request.termCode,
-      userDataPath: app.getPath("userData"),
-      commentId: request.commentId,
-      replacement: request.replacement
-    });
+    return editGradingLibraryComment(
+      {
+        courseFolderPath,
+        termCode: request.termCode,
+        userDataPath: app.getPath("userData"),
+        commentId: request.commentId,
+        replacement: request.replacement
+      },
+      publishAuthenticatedCourseChanges
+    );
   });
   ipcMain.handle(IPC_CHANNELS.deleteGradingLibraryComment, (_event, request: unknown) => {
     if (!isDeleteGradingLibraryCommentRequest(request))
       throw new Error("A registered course and reusable comment ID are required.");
     const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
     if (courseFolderPath === null) throw new Error("A registered course folder is required.");
-    return deleteGradingLibraryComment({
-      courseFolderPath,
-      termCode: request.termCode,
-      userDataPath: app.getPath("userData"),
-      commentId: request.commentId
-    });
+    return deleteGradingLibraryComment(
+      {
+        courseFolderPath,
+        termCode: request.termCode,
+        userDataPath: app.getPath("userData"),
+        commentId: request.commentId
+      },
+      publishAuthenticatedCourseChanges
+    );
   });
 
   registerAssignmentTemplateSyncIpc(

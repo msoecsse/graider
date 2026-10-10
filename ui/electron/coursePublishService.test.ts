@@ -1,3 +1,4 @@
+import { localPublicationOptions } from "./gitPublicationFixtures";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -7,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { publishSuccessfulCourseMutation } from "./courseMutationPublicationService";
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService";
 import {
+  getProductionGitWorkspaceFactory,
   createRelativeGitPath,
   type GitRepositoryState,
   type GitWorkspaceInspectionFactory,
@@ -73,7 +75,7 @@ describe("coursePublishService", () => {
     fs.writeFileSync(path.join(root, "notes.txt"), "unrelated\n", "utf8");
 
     const status = await getCoursePublishStatus(root);
-    const result = await publishCourseChanges(root);
+    const result = await publishCourseChanges(root, localPublicationOptions());
 
     expect(status.allowedChangedFiles).toContain("terms/27s1/rosters/section-001.csv");
     expect(result.status).toBe("success");
@@ -109,10 +111,10 @@ describe("coursePublishService", () => {
         "terms/27s1/section-001.source.json"
       ])
     );
-    expect((await publishCourseChanges(root)).status).toBe("success");
+    expect((await publishCourseChanges(root, localPublicationOptions())).status).toBe("success");
 
     fs.rmSync(sidecar);
-    expect((await publishCourseChanges(root)).status).toBe("success");
+    expect((await publishCourseChanges(root, localPublicationOptions())).status).toBe("success");
     expect(git(root, ["show", "--format=", "--name-status", "HEAD"])).toBe(
       "D\tterms/27s1/rosters/section-001.source.json"
     );
@@ -125,7 +127,7 @@ describe("coursePublishService", () => {
     fs.writeFileSync(groups, "group_id,student_id\nteam-1,ada\n", "utf8");
     fs.writeFileSync(path.join(root, "notes.txt"), "unrelated\n", "utf8");
 
-    const result = await publishCourseChanges(root);
+    const result = await publishCourseChanges(root, localPublicationOptions());
 
     expect(result.status).toBe("success");
     expect(git(root, ["show", "--format=", "--name-only", "HEAD"])).toBe(
@@ -149,7 +151,7 @@ describe("coursePublishService", () => {
     }
 
     const status = await getCoursePublishStatus(root);
-    const result = await publishCourseChanges(root);
+    const result = await publishCourseChanges(root, localPublicationOptions());
 
     expect(status.allowedChangedFiles).toEqual([".graider/grading/comments.json"]);
     expect(status.unrelatedChangedFiles).toEqual(
@@ -170,10 +172,10 @@ describe("coursePublishService", () => {
   it("publishes tracked comment-library edits including an entry deletion rewrite", async () => {
     const root = fixture();
     const libraryPath = writeCommentLibrary(root, "Original");
-    expect((await publishCourseChanges(root)).status).toBe("success");
+    expect((await publishCourseChanges(root, localPublicationOptions())).status).toBe("success");
 
     writeCommentLibrary(root, "Edited");
-    expect((await publishCourseChanges(root)).status).toBe("success");
+    expect((await publishCourseChanges(root, localPublicationOptions())).status).toBe("success");
     expect(git(root, ["show", "--format=", "--name-only", "HEAD"])).toBe(
       ".graider/grading/comments.json"
     );
@@ -183,7 +185,7 @@ describe("coursePublishService", () => {
       `${JSON.stringify({ schemaVersion: 1, comments: [] }, null, 2)}\n`,
       "utf8"
     );
-    expect((await publishCourseChanges(root)).status).toBe("success");
+    expect((await publishCourseChanges(root, localPublicationOptions())).status).toBe("success");
     expect(git(root, ["show", "HEAD:.graider/grading/comments.json"])).toContain('"comments": []');
   });
 
@@ -196,7 +198,7 @@ describe("coursePublishService", () => {
     git(root, ["push"]);
     fs.rmSync(roster);
 
-    const result = await publishCourseChanges(root);
+    const result = await publishCourseChanges(root, localPublicationOptions());
 
     expect(result.status).toBe("success");
     expect(git(root, ["show", "--format=", "--name-status", "HEAD"])).toBe(
@@ -232,7 +234,9 @@ describe("coursePublishService", () => {
       sectionId: "001",
       confirmed: true
     });
-    const result = await publishSuccessfulCourseMutation(root, localResult, publishCourseChanges);
+    const result = await publishSuccessfulCourseMutation(root, localResult, (folder) =>
+      publishCourseChanges(folder, localPublicationOptions())
+    );
     const publishedFiles = git(root, ["show", "--format=", "--name-status", "HEAD"]);
 
     expect(result).toMatchObject({ status: "success", publication: { status: "success" } });
@@ -247,7 +251,7 @@ describe("coursePublishService", () => {
     fs.writeFileSync(path.join(root, "notes.txt"), "unrelated\n", "utf8");
 
     const status = await getCoursePublishStatus(root);
-    const result = await publishCourseChanges(root);
+    const result = await publishCourseChanges(root, localPublicationOptions());
 
     expect(status.status).toBe("unrelated_changes");
     expect(result.status).toBe("up_to_date");
@@ -259,7 +263,7 @@ describe("coursePublishService", () => {
     const libraryPath = writeCommentLibrary(root, "Saved locally");
     const before = git(root, ["rev-parse", "HEAD"]);
 
-    const result = await publishCourseChanges(root);
+    const result = await publishCourseChanges(root, localPublicationOptions());
 
     expect(result.status).toBe("failure");
     expect(result.diagnostics[0]?.message).toMatch(/upstream/u);
@@ -274,7 +278,7 @@ describe("coursePublishService", () => {
     git(root, ["add", "notes.txt"]);
     const before = git(root, ["rev-parse", "HEAD"]);
 
-    const result = await publishCourseChanges(root);
+    const result = await publishCourseChanges(root, localPublicationOptions());
 
     expect(result.status).toBe("failure");
     expect(result.diagnostics[0]?.message).toMatch(/already staged/u);
@@ -297,7 +301,7 @@ describe("coursePublishService", () => {
 
     const staleLibraryPath = writeCommentLibrary(staleFaculty, "Faculty B comment");
     const before = git(staleFaculty, ["rev-parse", "HEAD"]);
-    const result = await publishCourseChanges(staleFaculty);
+    const result = await publishCourseChanges(staleFaculty, localPublicationOptions());
     const status = await getCoursePublishStatus(staleFaculty);
 
     expect(result.status).toBe("failure");
@@ -321,7 +325,7 @@ describe("coursePublishService", () => {
     git(root, ["commit", "-m", "Local unpublished change"]);
 
     const before = await getCoursePublishStatus(root);
-    const result = await publishCourseChanges(root);
+    const result = await publishCourseChanges(root, localPublicationOptions());
     const after = await getCoursePublishStatus(root);
 
     expect(before.status).toBe("unpushed");
@@ -501,7 +505,9 @@ describe("course publish semantic status projection", () => {
       })
     };
 
-    const result = await publishCourseChanges(root, writerFactory);
+    const options = localPublicationOptions(writerFactory);
+    const result = await publishCourseChanges(root, options);
+    expect(options.resolveToken).not.toHaveBeenCalled();
 
     expect(result).toMatchObject({
       status: "failure",
@@ -515,5 +521,75 @@ describe("course publish semantic status projection", () => {
     expect(stage).not.toHaveBeenCalled();
     expect(commit).not.toHaveBeenCalled();
     expect(pushUpstream).not.toHaveBeenCalled();
+  });
+});
+
+describe("coursePublishService authenticated push regression", () => {
+  it("pushes with the exact context paired with its authenticated factory", async () => {
+    const root = fixture();
+    writeCommentLibrary(root, "Authentication regression");
+    const backend = getProductionGitWorkspaceFactory();
+    const authentication = { id: "publication-operation" };
+    const push = vi.fn().mockResolvedValue({ kind: "pushed" });
+    const createAuthenticatedWorkspace = vi.fn().mockReturnValue({
+      authentication,
+      factory: {
+        inspect: (repositoryPath: string) => backend.inspect(repositoryPath),
+        open: async (repositoryPath: string) => {
+          const workspace = await backend.open(repositoryPath);
+          return {
+            root: workspace.root,
+            inspect: () => workspace.inspect(),
+            remoteUrl: () => workspace.remoteUrl("origin"),
+            stage: workspace.stage.bind(workspace),
+            commit: workspace.commit.bind(workspace),
+            pushUpstream: push
+          };
+        }
+      }
+    });
+    const result = await publishCourseChanges(root, {
+      factory: getProductionGitWorkspaceFactory(),
+      runner: vi.fn(),
+      resolveToken: vi.fn().mockResolvedValue({ status: "success", token: "regression-secret" }),
+      createAuthenticatedWorkspace
+    });
+    expect(result.status).toBe("success");
+    expect(createAuthenticatedWorkspace).toHaveBeenCalledWith("regression-secret");
+    expect(push).toHaveBeenCalledWith({ authentication });
+    expect(push.mock.calls[0]?.[0].authentication).toBe(authentication);
+    expect(JSON.stringify(result)).not.toContain("regression-secret");
+  });
+});
+
+describe("coursePublishService authentication readiness", () => {
+  it("fails before staging or committing when authentication is unavailable", async () => {
+    const root = fixture();
+    writeCommentLibrary(root, "Saved locally");
+    const repository = root;
+    const head = git(repository, ["rev-parse", "HEAD"]);
+    const options = localPublicationOptions();
+    options.resolveToken.mockResolvedValue({
+      status: "failure",
+      error: { message: "secret-error" }
+    });
+    const result = await publishCourseChanges(root, options);
+    expect(result.status).toBe("failure");
+    expect(result.diagnostics[0]?.message).toMatch(/GitHub authentication is required/u);
+    expect(options.createAuthenticatedWorkspace).not.toHaveBeenCalled();
+    expect(git(repository, ["rev-parse", "HEAD"])).toBe(head);
+    expect(git(repository, ["diff", "--cached", "--name-only"])).toBe("");
+    expect(JSON.stringify(result)).not.toContain("secret-error");
+  });
+
+  it("does not resolve authentication when everything is already published", async () => {
+    const root = fixture();
+    const repository = root;
+
+    const options = localPublicationOptions();
+    const result = await publishCourseChanges(root, options);
+    expect(result.status).toBe("up_to_date");
+    expect(options.resolveToken).not.toHaveBeenCalled();
+    expect(options.createAuthenticatedWorkspace).not.toHaveBeenCalled();
   });
 });

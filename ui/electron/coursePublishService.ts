@@ -1,3 +1,7 @@
+import {
+  authenticateGitPublication,
+  type GitPublicationOptions
+} from "./gitPublicationAuthentication.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -151,16 +155,48 @@ export const getCoursePublishStatus = async (
 
 export const publishCourseChanges = async (
   courseFolderPath: string,
-  factory: GitWorkspaceWriterFactory = getProductionGitWorkspaceFactory()
+  options: GitPublicationOptions
 ): Promise<CoursePublishActionResult> => {
+  const factory = options.factory ?? getProductionGitWorkspaceFactory();
   const status = await getCoursePublishStatus(courseFolderPath, factory);
   if (status.status === "up_to_date" || status.status === "unrelated_changes")
     return { status: "up_to_date", diagnostics: status.diagnostics, commitMessage: null };
   if (status.status !== "changes_pending" && status.status !== "unpushed")
     return { status: "failure", diagnostics: status.diagnostics, commitMessage: null };
+  if (status.status === "changes_pending") {
+    try {
+      const localState = await (await factory.open(status.courseFolderPath)).inspect();
+      if (
+        inspectChangedFiles(localState.workingTree.stagedChanges.map((change) => change.path))
+          .unrelated.length > 0
+      )
+        return {
+          status: "failure",
+          diagnostics: [
+            diagnostic(
+              "Unrelated files are already staged. Unstage them before publishing course changes."
+            )
+          ],
+          commitMessage: null
+        };
+    } catch {
+      return {
+        status: "failure",
+        diagnostics: [diagnostic("Unable to inspect staged course changes.")],
+        commitMessage: null
+      };
+    }
+  }
+  const authenticated = await authenticateGitPublication(options);
+  if (authenticated === null)
+    return {
+      status: "failure",
+      diagnostics: [diagnostic("GitHub authentication is required to publish course changes.")],
+      commitMessage: null
+    };
   let workspace: Awaited<ReturnType<GitWorkspaceWriterFactory["open"]>>;
   try {
-    workspace = await factory.open(status.courseFolderPath);
+    workspace = await authenticated.factory.open(status.courseFolderPath);
   } catch {
     return {
       status: "failure",
@@ -219,7 +255,7 @@ export const publishCourseChanges = async (
     }
   }
   try {
-    await workspace.pushUpstream();
+    await workspace.pushUpstream({ authentication: authenticated.authentication });
   } catch {
     return {
       status: "failure",

@@ -1,3 +1,4 @@
+import type { GitPublicationOptions } from "./gitPublicationAuthentication.js";
 import { applyAssignment } from "./assignmentApplyRunner.js";
 import type { AssignmentApplyRepositoryProgress } from "./assignmentApplyRunner.js";
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
@@ -10,7 +11,7 @@ import type {
 import { generateStudentRepositoryAccessPage } from "./studentRepositoryAccessPageService.js";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService.js";
 
-interface AssignmentApplyWithAccessPageOptions {
+interface AssignmentApplyWithAccessPageOptions extends GitPublicationOptions {
   readonly runner: ProcessRunner;
   readonly env?: NodeJS.ProcessEnv;
   readonly pagesRepositoryFolderPath: string | null;
@@ -61,7 +62,7 @@ export const applyAssignmentWithStudentRepositoryAccessPage = async (
   if (accessPage.status === "failure")
     return { ...result, status: "failure", error: pageGenerationError(accessPage.diagnostics) };
 
-  const publication = await publishStudentRepositoryAccessPage(accessRequest, mappings);
+  const publication = await publishStudentRepositoryAccessPage(accessRequest, mappings, options);
   return publication.status === "failure"
     ? { ...result, status: "failure", error: pagePublicationError(publication.diagnostics) }
     : result;

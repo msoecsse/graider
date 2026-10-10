@@ -137,6 +137,18 @@ future work.
 
 ---
 
+## Resolved post-Phase-1 publication regression
+
+Discovered immediately after Phase 1 closure: assignment creation successfully saved
+`assignment.yml`, but automatic Course Publish hung during an unauthenticated bundled-Git
+push after committing locally. Student Access Pages contained the same latent defect.
+Both publication paths now resolve trusted GitHub credentials before staging/committing
+and use a fresh, uncached operation-scoped authenticated Dugite factory/context pair for
+push. Missing authentication returns a safe failure, preserving saved files for retry;
+manual Course Publish also pushes existing ahead commits without recreating assignments.
+The Electron publication writer requires explicit push authentication. Transitional token
+precedence and the rest of Phase 1 architecture remain unchanged; Phase 2 has not begun.
+
 # Phase 2 — First-Class Authentication
 
 ## Slice 2.1 — Browser-based GitHub sign-in

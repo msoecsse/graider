@@ -1,3 +1,4 @@
+import type { GitPublicationOptions } from "./gitPublicationAuthentication.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -24,8 +25,9 @@ import {
 import { generateStudentRepositoryAccessPage } from "./studentRepositoryAccessPageService.js";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService.js";
 
-interface RosterAccessPageOptions {
+interface RosterAccessPageOptions extends GitPublicationOptions {
   readonly runner: ProcessRunner;
+  readonly env?: NodeJS.ProcessEnv;
   readonly pagesRepositoryFolderPath: string | null;
   readonly saveDependencies?: RosterSaveDependencies;
 }
@@ -101,7 +103,7 @@ const refreshStudentRepositoryPages = async (
       );
       continue;
     }
-    const published = await publishStudentRepositoryAccessPage(accessRequest, mappings);
+    const published = await publishStudentRepositoryAccessPage(accessRequest, mappings, options);
     if (published.status === "failure") {
       diagnostics.push(
         ...published.diagnostics.map((item) =>
