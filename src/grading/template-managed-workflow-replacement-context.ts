@@ -1,10 +1,7 @@
 import { loadGraiderConfig } from "../config/config-loader.js";
 import type { ConfigLoadResult } from "../config/config-models.js";
 import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
-import {
-  createGitHubClient,
-  type GitHubClientFactoryOptions
-} from "../github/github-client-factory.js";
+import type { GitHubClient } from "../github/github-client.js";
 import {
   isManualManagedGradingWorkflowEligible,
   manuallyInstallManagedGradingWorkflow,
@@ -45,16 +42,12 @@ interface Dependencies {
     readonly cwd: string;
     readonly assignmentFile: string;
   }) => ConfigLoadResult;
-  readonly createClient: (
-    options: GitHubClientFactoryOptions
-  ) => ReturnType<typeof createGitHubClient>;
   readonly preview: typeof previewManualManagedGradingWorkflowInstallation;
   readonly install: typeof manuallyInstallManagedGradingWorkflow;
 }
 
 const dependencies: Dependencies = {
   loadConfig: loadGraiderConfig,
-  createClient: createGitHubClient,
   preview: previewManualManagedGradingWorkflowInstallation,
   install: manuallyInstallManagedGradingWorkflow
 };
@@ -100,11 +93,10 @@ export const prepareTemplateManagedWorkflowReplacement = (
 
 export const previewPreparedTemplateManagedWorkflowReplacement = async (
   prepared: PreparedTemplateManagedWorkflowReplacement,
-  token: string,
+  githubClient: GitHubClient,
   overrides: Partial<Dependencies> = {}
 ): Promise<TemplateManagedWorkflowReplacementResult> => {
   const resolved = { ...dependencies, ...overrides };
-  const githubClient = resolved.createClient({ token });
   try {
     const repository = await githubClient.getRepository(prepared.owner, prepared.name);
     if (
@@ -132,13 +124,12 @@ export const previewPreparedTemplateManagedWorkflowReplacement = async (
 
 export const installPreparedTemplateManagedWorkflowReplacement = async (
   prepared: PreparedTemplateManagedWorkflowReplacement,
-  token: string,
+  githubClient: GitHubClient,
   confirmed: boolean,
   overrides: Partial<Dependencies> = {},
   expectedContentFingerprint?: string
 ): Promise<TemplateManagedWorkflowReplacementResult> => {
   const resolved = { ...dependencies, ...overrides };
-  const githubClient = resolved.createClient({ token });
   try {
     const repository = await githubClient.getRepository(prepared.owner, prepared.name);
     if (

@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { GitHubClient } from "./githubClientProvider.js";
+import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import {
   resolveCurrentFacultyScope,
@@ -118,7 +120,7 @@ interface PublicationBackend {
   }): PrepareResult;
   retrieveManagedEvidenceForGradingStudentReport(
     prepared: PreparedContext,
-    token: string
+    githubClient: GitHubClient
   ): Promise<EvidenceResult>;
   renderPreparedGradingStudentReport(
     prepared: PreparedContext,
@@ -136,7 +138,7 @@ interface PublicationBackend {
   publishRenderedGradingStudentReport(
     prepared: PreparedContext,
     html: string,
-    token: string,
+    githubClient: GitHubClient,
     beforePublish: () => Promise<boolean>
   ): Promise<
     | { readonly status: "published"; readonly writePerformed: boolean }
@@ -210,6 +212,7 @@ export interface GradingStudentReportPublicationDependencies {
     repositoryRoot: string,
     submissionCommitSha: string
   ) => Promise<LocalRepositoryCommitHistoryResult>;
+  readonly provideClient: GithubClientProvider;
   readonly resolveToken: () => Promise<GithubTokenResolution>;
   readonly loadBackend: () => PublicationBackend;
 }
@@ -310,12 +313,13 @@ export const createGradingStudentReportPublicationService = (
       return { status: "github_auth_unavailable" };
     }
     if (token.status === "failure") return { status: "github_auth_unavailable" };
+    const githubClient = (overrides.provideClient ?? provideGithubClient)(token.token);
 
     if (prepared.managedEvidenceEligible) {
       try {
         const evidence = await backend.retrieveManagedEvidenceForGradingStudentReport(
           prepared,
-          token.token
+          githubClient
         );
         if (
           evidence.status === "success" &&
@@ -348,7 +352,7 @@ export const createGradingStudentReportPublicationService = (
       const published = await backend.publishRenderedGradingStudentReport(
         prepared,
         rendered.html,
-        token.token,
+        githubClient,
         async () => {
           const head = await readHead(localRepository.localPath);
           if (head.status !== "success") {

@@ -3,6 +3,24 @@ import { build } from "tsup";
 
 await build({
   entry: {
+    githubClientCompositionBackend: fileURLToPath(
+      new URL("../../src/github/github-client-composition.ts", import.meta.url)
+    )
+  },
+  outDir: fileURLToPath(new URL("../dist-electron", import.meta.url)),
+  format: ["cjs"],
+  outExtension: () => ({ js: ".cjs" }),
+  target: "node24",
+  clean: false,
+  dts: {
+    compilerOptions: { rootDir: fileURLToPath(new URL("../../", import.meta.url)) }
+  },
+  tsconfig: fileURLToPath(new URL("../../tsconfig.json", import.meta.url)),
+  noExternal: ["@octokit/rest"]
+});
+
+await build({
+  entry: {
     dugiteGitWorkspaceBackend: fileURLToPath(
       new URL("../../src/git/dugite-git-workspace-context.ts", import.meta.url)
     ),

@@ -15,7 +15,6 @@ import {
   resolveGraiderGeneratedStudentReportDestination
 } from "../reporting/student-report-publisher.js";
 import type { GitHubClient } from "../github/github-client.js";
-import { createGitHubClient } from "../github/github-client-factory.js";
 import { GitHubClientError } from "../github/github-errors.js";
 import { isManagedGradingWorkflowEligible } from "../workflows/managed-workflow-deployment.js";
 import { retrievePreparedGradingStudentEvidence } from "./grading-student-evidence-context.js";
@@ -378,9 +377,9 @@ export const renderPreparedGradingStudentReport = (
 
 export const retrieveManagedEvidenceForGradingStudentReport = async (
   prepared: PreparedGradingStudentReportPublicationContext,
-  resolvedGithubToken: string
+  githubClient: GitHubClient
 ): Promise<GradingEvidenceRetrievalResult> =>
-  await retrievePreparedGradingStudentEvidence(prepared, resolvedGithubToken);
+  await retrievePreparedGradingStudentEvidence(prepared, githubClient);
 
 export type RevalidatePreparedGradingStudentReportPublicationResult =
   | { readonly status: "success" }
@@ -468,14 +467,6 @@ type GradingReportPublicationGitHubClient = Pick<
   "getRepository" | "getRepositoryFileContent" | "writeRepositoryFile"
 >;
 
-export interface GradingStudentReportRemotePublicationDependencies {
-  readonly createClient: (token: string) => GradingReportPublicationGitHubClient;
-}
-
-const remoteDependencies: GradingStudentReportRemotePublicationDependencies = {
-  createClient: (token) => createGitHubClient({ token })
-};
-
 export type PublishRenderedGradingStudentReportResult =
   | { readonly status: "published"; readonly writePerformed: boolean }
   | { readonly status: "stale" }
@@ -489,14 +480,10 @@ export type PublishRenderedGradingStudentReportResult =
 export const publishRenderedGradingStudentReport = async (
   prepared: PreparedGradingStudentReportPublicationContext,
   html: string,
-  resolvedGithubToken: string,
-  beforePublish: () => Promise<boolean>,
-  overrides: Partial<GradingStudentReportRemotePublicationDependencies> = {}
+  githubClient: GradingReportPublicationGitHubClient,
+  beforePublish: () => Promise<boolean>
 ): Promise<PublishRenderedGradingStudentReportResult> => {
   try {
-    const githubClient = (overrides.createClient ?? remoteDependencies.createClient)(
-      resolvedGithubToken
-    );
     const repository = await githubClient.getRepository(
       prepared.repository.owner,
       prepared.repository.repo

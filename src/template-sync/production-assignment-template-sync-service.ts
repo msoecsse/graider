@@ -1,4 +1,3 @@
-import { readGitHubToken } from "../github/github-client-composition.js";
 import {
   runProductionAssignmentTemplateSync,
   type ProductionAssignmentTemplateSyncBridgeInput
@@ -15,10 +14,9 @@ export interface ProductionAssignmentTemplateSyncServiceInput extends Omit<
 > {
   configuredOrganization: string;
   configuredTemplateRepository: string;
-  env?: Record<string, string | undefined>;
   bridge?: typeof runProductionAssignmentTemplateSync;
-  /** Internal pre-resolved token used when composition also needs a GitHub client. */
-  resolvedToken?: string;
+  /** Explicit operation-scoped Git transport credential from trusted composition. */
+  resolvedToken: string;
 }
 
 export const runProductionAssignmentTemplateSyncService = async (
@@ -28,11 +26,8 @@ export const runProductionAssignmentTemplateSyncService = async (
     Awaited<ReturnType<typeof runProductionAssignmentTemplateSync>>
   >
 > => {
-  const injectedToken = input.resolvedToken?.trim();
-  const environmentToken = readGitHubToken(input.env);
-  const token =
-    injectedToken !== undefined && injectedToken.length > 0 ? injectedToken : environmentToken;
-  if (token === undefined || token.length === 0)
+  const token = input.resolvedToken.trim();
+  if (token.length === 0)
     return {
       status: "failure",
       code: "github_token_required",

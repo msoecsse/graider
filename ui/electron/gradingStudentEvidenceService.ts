@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { GitHubClient } from "./githubClientProvider.js";
+import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import {
   resolveCurrentFacultyScope,
@@ -130,7 +132,7 @@ interface EvidenceBackend {
   }): PrepareResult;
   retrievePreparedGradingStudentEvidence(
     prepared: PreparedContext,
-    resolvedGithubToken: string
+    githubClient: GitHubClient
   ): Promise<RetrievalResult>;
 }
 
@@ -182,6 +184,7 @@ export interface GradingStudentEvidenceDependencies {
   readonly resolveFacultyScope: (request: FacultyScopeServiceRequest) => FacultyScopeServiceResult;
   readonly resolveRepository: (request: GradingStudentEvidenceRequest) => LocalRepositoryResolution;
   readonly readHead: (repositoryRoot: string) => Promise<LocalRepositoryHeadResult>;
+  readonly provideClient: GithubClientProvider;
   readonly resolveToken: () => Promise<GithubTokenResolution>;
   readonly loadBackend: () => EvidenceBackend;
 }
@@ -250,7 +253,11 @@ export const createGradingStudentEvidenceService = (
     if (token.status === "failure") return { status: "github_auth_unavailable" };
     let retrieved: RetrievalResult;
     try {
-      retrieved = await backend.retrievePreparedGradingStudentEvidence(prepared.value, token.token);
+      const githubClient = (overrides.provideClient ?? provideGithubClient)(token.token);
+      retrieved = await backend.retrievePreparedGradingStudentEvidence(
+        prepared.value,
+        githubClient
+      );
     } catch {
       return {
         status: "evidence_error",

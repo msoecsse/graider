@@ -1,8 +1,12 @@
+import type { GitHubClient } from "./githubClientProvider.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   createGradingStudentReportPublicationService,
   type PublishGradingStudentReportRequest
 } from "./gradingStudentReportPublicationService.js";
+
+const client = {} as GitHubClient;
+const provideClient = vi.fn(() => client);
 
 const SHA = "a".repeat(40);
 const request: PublishGradingStudentReportRequest = {
@@ -50,7 +54,7 @@ const backend = () => ({
     async (
       _prepared: unknown,
       _html: string,
-      _token: string,
+      _client: GitHubClient,
       beforePublish: () => Promise<boolean>
     ) =>
       (await beforePublish())
@@ -69,6 +73,7 @@ const dependencies = () => {
   return {
     publicationBackend,
     values: {
+      provideClient,
       resolveFacultyScope: vi.fn().mockReturnValue(authorized),
       resolveRepository: vi
         .fn()
@@ -110,10 +115,17 @@ describe("grading student report publication Electron service", () => {
           currentSubmissionCommitSha: SHA
         }
       );
+      expect(values.provideClient).toHaveBeenCalledExactlyOnceWith("private-token");
+      expect(
+        publicationBackend.retrieveManagedEvidenceForGradingStudentReport.mock.calls[0]?.[1]
+      ).toBe(client);
+      expect(publicationBackend.publishRenderedGradingStudentReport.mock.calls[0]?.[2]).toBe(
+        client
+      );
       expect(values.readHistory).toHaveBeenCalledWith("/trusted/local/ada", SHA);
       expect(
         publicationBackend.retrieveManagedEvidenceForGradingStudentReport
-      ).toHaveBeenCalledWith(prepared, "private-token");
+      ).toHaveBeenCalledWith(prepared, client);
       expect(publicationBackend.renderPreparedGradingStudentReport).toHaveBeenCalledWith(
         prepared,
         expect.objectContaining({ evidence: expect.anything(), commitHistory: expect.anything() })
@@ -121,7 +133,7 @@ describe("grading student report publication Electron service", () => {
       expect(publicationBackend.publishRenderedGradingStudentReport).toHaveBeenCalledWith(
         prepared,
         "<!doctype html><p>trusted report</p>",
-        "private-token",
+        client,
         expect.any(Function)
       );
       expect(publicationBackend.markPreparedGradingStudentReportPublished).toHaveBeenCalled();
@@ -386,5 +398,17 @@ describe("grading student report publication Electron service", () => {
       status: "report_write_permission_unavailable"
     });
     expect(publicationBackend.markPreparedGradingStudentReportPublished).not.toHaveBeenCalled();
+  });
+  it("does not compose or execute remote operations after authentication failure", async () => {
+    const { values, publicationBackend } = dependencies();
+    values.resolveToken.mockResolvedValue({ status: "failure" });
+    await expect(createGradingStudentReportPublicationService(values)(request)).resolves.toEqual({
+      status: "github_auth_unavailable"
+    });
+    expect(values.provideClient).not.toHaveBeenCalled();
+    expect(
+      publicationBackend.retrieveManagedEvidenceForGradingStudentReport
+    ).not.toHaveBeenCalled();
+    expect(publicationBackend.publishRenderedGradingStudentReport).not.toHaveBeenCalled();
   });
 });

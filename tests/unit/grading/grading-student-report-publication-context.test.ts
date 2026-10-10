@@ -1,3 +1,5 @@
+import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
+import * as evidenceContext from "../../../src/grading/grading-student-evidence-context.js";
 import { describe, expect, it, vi } from "vitest";
 import type { ConfigLoadResult } from "../../../src/config/config-models.js";
 import {
@@ -10,6 +12,7 @@ import {
   publishRenderedGradingStudentReport,
   prepareGradingStudentReportPublicationContext,
   renderPreparedGradingStudentReport,
+  retrieveManagedEvidenceForGradingStudentReport,
   revalidatePreparedGradingStudentReportPublication,
   type GradingStudentReportPublicationContextDependencies
 } from "../../../src/grading/grading-student-report-publication-context.js";
@@ -290,25 +293,33 @@ describe("grading student report publication context", () => {
     expect(saveState).not.toHaveBeenCalled();
   });
 
-  it("creates the production client internally and publishes only the trusted repository/path", async () => {
+  it("forwards the exact supplied client to managed evidence retrieval", async () => {
+    const prepared = prepare();
+    const client = new FakeGitHubClient();
+    const retrieve = vi
+      .spyOn(evidenceContext, "retrievePreparedGradingStudentEvidence")
+      .mockResolvedValue({ status: "not_applicable", reason: "managed_preset_not_enabled" });
+    await expect(retrieveManagedEvidenceForGradingStudentReport(prepared, client)).resolves.toEqual(
+      { status: "not_applicable", reason: "managed_preset_not_enabled" }
+    );
+    expect(retrieve).toHaveBeenCalledExactlyOnceWith(prepared, client);
+    expect(retrieve.mock.calls[0]?.[1]).toBe(client);
+  });
+
+  it("uses the supplied client and publishes only the trusted repository/path", async () => {
     const prepared = prepare();
     const writeRepositoryFile = vi.fn().mockResolvedValue({ path: prepared.reportPath });
-    const createClient = vi.fn().mockReturnValue({
+    const client = {
       getRepository: vi.fn().mockResolvedValue({ defaultBranch: "main" }),
       getRepositoryFileContent: vi.fn().mockResolvedValue(null),
       writeRepositoryFile
-    });
+    };
 
     await expect(
-      publishRenderedGradingStudentReport(
-        prepared,
-        "<!doctype html><p>trusted</p>",
-        "private-token",
-        () => Promise.resolve(true),
-        { createClient }
+      publishRenderedGradingStudentReport(prepared, "<!doctype html><p>trusted</p>", client, () =>
+        Promise.resolve(true)
       )
     ).resolves.toEqual({ status: "published", writePerformed: true });
-    expect(createClient).toHaveBeenCalledWith("private-token");
     expect(writeRepositoryFile).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: "trusted-org",

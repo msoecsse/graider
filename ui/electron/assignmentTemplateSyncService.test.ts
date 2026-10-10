@@ -1,8 +1,13 @@
+import type { GitHubClient } from "./githubClientProvider.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   createAssignmentTemplateSyncService,
-  type AssignmentTemplateSyncService
+  type AssignmentTemplateSyncBackend
 } from "./assignmentTemplateSyncService.js";
+
+const client = {} as GitHubClient;
+const provideClient = vi.fn(() => client);
+const credentials = { githubClient: client, transportToken: "secret-token" };
 
 const request = {
   courseFolderId: "course",
@@ -12,7 +17,7 @@ const request = {
 
 describe("assignment template-sync Electron service", () => {
   it("lazily loads its main-process backend and passes only assignment identity for prepare", async () => {
-    const backend: AssignmentTemplateSyncService = {
+    const backend: AssignmentTemplateSyncBackend = {
       prepare: vi.fn(async () => ({
         available: true,
         repositoryCount: 2,
@@ -23,7 +28,7 @@ describe("assignment template-sync Electron service", () => {
     };
     const load = vi.fn(() => backend);
     const resolveToken = vi.fn(async () => ({ status: "success" as const, token: "secret-token" }));
-    const service = createAssignmentTemplateSyncService(load, resolveToken);
+    const service = createAssignmentTemplateSyncService(load, resolveToken, provideClient);
     expect(load).not.toHaveBeenCalled();
     expect(await service.prepare(request)).toMatchObject({ available: true, repositoryCount: 2 });
     expect(backend.prepare).toHaveBeenCalledExactlyOnceWith(request);
@@ -32,15 +37,14 @@ describe("assignment template-sync Electron service", () => {
     const result = await service.execute(execution);
     expect(result).toEqual({ status: "success", outcomes: [] });
     expect(resolveToken).toHaveBeenCalledTimes(1);
-    expect(backend.execute).toHaveBeenCalledExactlyOnceWith({
-      ...execution,
-      resolvedGithubToken: "secret-token"
-    });
+    expect(provideClient).toHaveBeenCalledExactlyOnceWith("secret-token");
+    expect(backend.execute).toHaveBeenCalledExactlyOnceWith(execution, credentials);
+    expect(vi.mocked(backend.execute).mock.calls[0]?.[1]?.githubClient).toBe(client);
     expect(JSON.stringify(result)).not.toContain("secret-token");
   });
 
   it("preserves confirmation and github_token_required without exposing authentication data", async () => {
-    const backend: AssignmentTemplateSyncService = {
+    const backend: AssignmentTemplateSyncBackend = {
       prepare: vi.fn(),
       execute: vi.fn(async () => ({
         status: "failure" as const,
@@ -58,7 +62,7 @@ describe("assignment template-sync Electron service", () => {
         stdoutSnippet: null
       }
     }));
-    const service = createAssignmentTemplateSyncService(() => backend, resolveToken);
+    const service = createAssignmentTemplateSyncService(() => backend, resolveToken, provideClient);
 
     expect(await service.execute({ ...request, confirmed: false })).toMatchObject({
       blocker: { code: "confirmation_required" }
@@ -71,13 +75,14 @@ describe("assignment template-sync Electron service", () => {
       blocker: { code: "github_token_required" }
     });
     expect(backend.execute).toHaveBeenCalledTimes(1);
+    expect(provideClient).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).not.toMatch(/secret-token|credential-value|stderr|stdout/iu);
   });
 
   it("forwards optional repository progress without changing execution requests", async () => {
-    const backend: AssignmentTemplateSyncService = {
+    const backend: AssignmentTemplateSyncBackend = {
       prepare: vi.fn(),
-      execute: vi.fn(async (_request, onProgress) => {
+      execute: vi.fn(async (_request, _credentials, onProgress) => {
         onProgress?.({ current: 1, total: 1, studentId: "ada", repository: "course/lab-ada" });
         return { status: "success" as const, outcomes: [] };
       })
@@ -85,7 +90,8 @@ describe("assignment template-sync Electron service", () => {
     const progress = vi.fn();
     const service = createAssignmentTemplateSyncService(
       () => backend,
-      async () => ({ status: "success", token: "secret-token" })
+      async () => ({ status: "success", token: "secret-token" }),
+      provideClient
     );
 
     await service.execute({ ...request, confirmed: true }, progress);
@@ -97,7 +103,8 @@ describe("assignment template-sync Electron service", () => {
       repository: "course/lab-ada"
     });
     expect(backend.execute).toHaveBeenCalledWith(
-      { ...request, confirmed: true, resolvedGithubToken: "secret-token" },
+      { ...request, confirmed: true },
+      credentials,
       progress
     );
   });

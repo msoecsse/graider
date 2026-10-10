@@ -110,8 +110,9 @@ execution.
 Phase 1.3A — GitHub host boundary inventory/guard is complete. See
 [the boundary inventory](graider-github-host-abstraction.md). Phase 1.3 remains open;
 1.3B-1 — CLI client composition seam and explicit-token resolution fix is complete.
-1.3B-2 — generated backend composition is next; direct REST ownership remains
-for 1.3C. Phase 1.3 is not complete.
+1.3B-2 — generated backend client composition is complete. Electron trusted
+composition provides clients, with template-sync transport credentials kept separate.
+1.3C — direct REST ownership is next. Phase 1.3 and Phase 1 are not complete.
 
 Separate GitHub API behavior from local Git transport.
 

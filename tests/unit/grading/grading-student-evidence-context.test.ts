@@ -1,8 +1,10 @@
+import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
 import { describe, expect, it, vi } from "vitest";
 import type { LoadedGraiderConfig } from "../../../src/config/config-models.js";
 import {
   prepareGradingStudentEvidenceContext,
-  retrievePreparedGradingStudentEvidence
+  retrievePreparedGradingStudentEvidence,
+  type GradingStudentEvidenceContextDependencies
 } from "../../../src/grading/grading-student-evidence-context.js";
 import type { Manifest } from "../../../src/manifest/manifest-models.js";
 
@@ -299,20 +301,20 @@ describe("grading student evidence context", () => {
     ).toEqual({ status: "repository_unavailable" });
   });
 
-  it("creates the GitHub client only at retrieval and passes trusted prepared values to Slice 39", async () => {
-    const createClient = vi.fn().mockReturnValue({ client: true });
-    const retrieve = vi.fn().mockResolvedValue({ status: "not_applicable" });
+  it("uses the supplied GitHub client at retrieval and passes trusted prepared values to Slice 39", async () => {
+    const client = new FakeGitHubClient();
+    const retrieve = vi
+      .fn<GradingStudentEvidenceContextDependencies["retrieve"]>()
+      .mockResolvedValue({ status: "not_applicable", reason: "managed_preset_not_enabled" });
     const prepared = prepareGradingStudentEvidenceContext(request, deps());
     expect(prepared.status).toBe("success");
     if (prepared.status !== "success") return;
-    expect(createClient).not.toHaveBeenCalled();
-    await retrievePreparedGradingStudentEvidence(prepared.value, "secret", {
-      createClient: createClient as never,
+    await retrievePreparedGradingStudentEvidence(prepared.value, client, {
       retrieve
     });
-    expect(createClient).toHaveBeenCalledWith({ token: "secret" });
+    expect(retrieve.mock.calls[0]?.[0].githubClient).toBe(client);
     expect(retrieve).toHaveBeenCalledWith({
-      githubClient: { client: true },
+      githubClient: client,
       repository: { owner: "manifest-org", repo: "lab1-ada" },
       grading,
       submissionCommitSha: SHA

@@ -80,10 +80,21 @@ through composition and separately reads a transport token for the operation-sco
 `GitCredentialResolver` used by repository download. Injection bypasses acquisition;
 custom command environments are honored. Faculty diagnostics are unchanged.
 
-The five generated contexts below retain explicit-token factory construction for
-1.3B-2. Their existing token-helper import follows its move to composition; this
-is not a backend client migration. Direct REST services
-`ui/electron/templateRepositoryValidationService.ts` and
+## Phase 1.3B-2 completion
+
+The five generated backends now receive clients rather than constructing them.
+`githubClientCompositionBackend.cjs` bundles the approved composition seam;
+`ui/electron/githubClientProvider.ts` owns trusted main-process explicit-token
+composition with `env: {}` after the unchanged `resolveGithubToken()` acquisition.
+Bulk workflow repair reuses one client across repositories, and report publication
+reuses one client for evidence retrieval and publication.
+
+Template sync receives a separate API client and explicit Git transport credential.
+Its service no longer reads environment credentials or decides token priority.
+Clients and transport tokens stay in the main process; renderer/preload IPC DTOs
+are unchanged. Only composition may import the adapter factory.
+
+Direct REST services `ui/electron/templateRepositoryValidationService.ts` and
 `ui/electron/templateWorkflowService.ts` remain deferred to 1.3C. Electron's
 `ui/electron/tokenResolver.ts` retains its `gh auth token` fallback. The following
 inventory records the 1.3A baseline rather than replacing that inventory.
@@ -201,7 +212,7 @@ Clean up capability ownership (including direct REST fetch), add only host
 operations needed by upcoming phases, enforce architecture boundaries, and close
 Phase 1 after acceptance.
 
-1.3B-1 is complete; 1.3B-2 is next. 1.3C and Phase 1.3 closure remain open. Preserve `GRAIDER_GITHUB_TOKEN`,
+1.3A, 1.3B-1, and 1.3B-2 are complete; 1.3C is next. 1.3C and Phase 1.3 closure remain open. Preserve `GRAIDER_GITHUB_TOKEN`,
 `GITHUB_TOKEN`, `gh auth token`, faculty authentication, token priority, API
 versions, retry, diagnostics and all repository/Actions behavior. Phase 2 OAuth,
 session implementation and secure storage remain undecided and unimplemented.

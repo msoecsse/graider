@@ -1,5 +1,9 @@
+import type { GitHubClient } from "./githubClientProvider.js";
 import { describe, expect, it, vi } from "vitest";
 import { repairGradingWorkflowsForAssignment } from "./gradingBulkWorkflowRepairService.js";
+
+const client = {} as GitHubClient;
+const provideClient = vi.fn(() => client);
 
 const request = {
   courseFolderId: "course",
@@ -42,6 +46,7 @@ describe("bulk grading workflow repair", () => {
       }
     });
     await repairGradingWorkflowsForAssignment(request, {
+      provideClient,
       resolveFacultyScope: () => ({ ...scope, students: [scope.students[0]!] }),
       resolveToken: async () => ({ status: "success", token: "token" }),
       loadBackend: () => ({
@@ -53,7 +58,7 @@ describe("bulk grading workflow repair", () => {
     expect(readLocalHead).not.toHaveBeenCalled();
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({ submissionCommitSha: "0123456789abcdef0123456789abcdef01234567" }),
-      "token",
+      client,
       true
     );
   });
@@ -63,7 +68,7 @@ describe("bulk grading workflow repair", () => {
     await expect(
       repairGradingWorkflowsForAssignment(
         { ...request, confirmed: false },
-        { resolveFacultyScope: () => scope, loadBackend }
+        { provideClient, resolveFacultyScope: () => scope, loadBackend }
       )
     ).resolves.toMatchObject({ status: "unconfirmed" });
     expect(loadBackend).not.toHaveBeenCalled();
@@ -85,6 +90,7 @@ describe("bulk grading workflow repair", () => {
         }
       });
     const result = await repairGradingWorkflowsForAssignment(request, {
+      provideClient,
       resolveFacultyScope: () => scope,
       resolveToken: async () => ({ status: "success", token: "token" }),
       loadBackend: () => ({
@@ -94,6 +100,8 @@ describe("bulk grading workflow repair", () => {
     });
     expect(prepare).toHaveBeenCalledTimes(3);
     expect(execute).toHaveBeenCalledTimes(2);
+    expect(provideClient).toHaveBeenCalledExactlyOnceWith("token");
+    for (const call of execute.mock.calls) expect(call[1]).toBe(client);
     expect(result).toMatchObject({
       status: "success",
       counts: { total: 2, succeeded: 1, failed: 1, alreadyCurrent: 1, dispatched: 1 }
@@ -124,6 +132,7 @@ describe("bulk grading workflow repair", () => {
     await repairGradingWorkflowsForAssignment(
       { ...request, confirmed: true },
       {
+        provideClient,
         resolveFacultyScope: () => ({ ...scope, students: [scope.students[0]!] }),
         resolveToken: async () => ({ status: "success", token: "token" }),
         loadBackend: () => ({
@@ -139,8 +148,31 @@ describe("bulk grading workflow repair", () => {
     );
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({ submissionCommitSha: localSha }),
-      "token",
+      client,
       true
     );
+  });
+  it("does not construct a client or load remote execution after auth failure", async () => {
+    const provideClient = vi.fn();
+    const loadBackend = vi.fn();
+    await expect(
+      repairGradingWorkflowsForAssignment(request, {
+        resolveFacultyScope: () => scope,
+        provideClient,
+        loadBackend,
+        resolveToken: async () => ({
+          status: "failure",
+          error: {
+            code: "github_token_unavailable",
+            message: "Sign in.",
+            exitCode: null,
+            stderrSnippet: null,
+            stdoutSnippet: null
+          }
+        })
+      })
+    ).resolves.toEqual({ status: "github_auth_unavailable" });
+    expect(provideClient).not.toHaveBeenCalled();
+    expect(loadBackend).not.toHaveBeenCalled();
   });
 });

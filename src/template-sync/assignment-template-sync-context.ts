@@ -3,15 +3,13 @@ import { loadGraiderConfig } from "../config/config-loader.js";
 import { parseTemplateRepository } from "../config/github-config-validation.js";
 import { resolveAssignmentPath, toRepositoryRelativePath } from "../core/paths.js";
 import { evaluateMutationGuard } from "../execution/mutation-guard.js";
-import { createGitHubClient } from "../github/github-client-factory.js";
-import { readGitHubToken } from "../github/github-client-composition.js";
 import { loadManifest } from "../manifest/manifest-loader.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
 import { writeManifest } from "../manifest/manifest-renderer.js";
 import { isApplicableRepository } from "./assignment-template-sync.js";
 import { runProductionAssignmentTemplateSyncService } from "./production-assignment-template-sync-service.js";
 import type {
-  AssignmentTemplateSyncService,
+  AssignmentTemplateSyncBackend,
   AssignmentTemplateSyncRequest,
   TemplateSyncBlocker,
   AssignmentTemplateSyncAvailability,
@@ -22,8 +20,6 @@ export interface AssignmentTemplateSyncContextDependencies {
   loadConfig: typeof loadGraiderConfig;
   loadManifest: typeof loadManifest;
   writeManifest: typeof writeManifest;
-  createClient: typeof createGitHubClient;
-  resolveToken: (request: AssignmentTemplateSyncRequest) => string | undefined;
   runSync: typeof runProductionAssignmentTemplateSyncService;
 }
 
@@ -31,13 +27,6 @@ const defaults: AssignmentTemplateSyncContextDependencies = {
   loadConfig: loadGraiderConfig,
   loadManifest,
   writeManifest,
-  createClient: createGitHubClient,
-  resolveToken: (request) => {
-    const injected = (
-      request as AssignmentTemplateSyncRequest & { readonly resolvedGithubToken?: string }
-    ).resolvedGithubToken?.trim();
-    return injected === undefined || injected.length === 0 ? readGitHubToken() : injected;
-  },
   runSync: runProductionAssignmentTemplateSyncService
 };
 
@@ -52,7 +41,7 @@ const unavailable = (code: string, message: string): AssignmentTemplateSyncAvail
 /** Internal main-process backend; all public data is explicitly projected. */
 export const createAssignmentTemplateSyncContextService = (
   overrides: Partial<AssignmentTemplateSyncContextDependencies> = {}
-): AssignmentTemplateSyncService => {
+): AssignmentTemplateSyncBackend => {
   const dependencies = { ...defaults, ...overrides };
   const loadContext = (request: AssignmentTemplateSyncRequest) => {
     // Same course-folder + canonical relative assignment path used by Assignment Edit.
@@ -208,7 +197,7 @@ export const createAssignmentTemplateSyncContextService = (
         );
       }
     },
-    async execute(request, onProgress) {
+    async execute(request, credentials, onProgress) {
       const options = { yes: request.confirmed, json: false, verbose: false };
       const guard = evaluateMutationGuard({ options });
       if (!guard.allowed)
@@ -228,26 +217,20 @@ export const createAssignmentTemplateSyncContextService = (
             outcomes: [],
             ...(preview.blocker === undefined ? {} : { blocker: preview.blocker })
           };
-        let token: string | undefined;
-        let client: ReturnType<typeof createGitHubClient>;
-        try {
-          token = dependencies.resolveToken(request);
-          if (token === undefined) throw new Error("GitHub token is required.");
-          client = dependencies.createClient({ token });
-        } catch {
+        if (credentials === undefined || credentials.transportToken.trim().length === 0)
           return {
             status: "failure",
             outcomes: [],
             blocker: {
               code: "github_token_required",
-              message: "Configure a token or sign in with GitHub CLI before updating repositories."
+              message: "GitHub authentication is required before updating repositories."
             }
           };
-        }
+        const { githubClient: client, transportToken } = credentials;
         const response = await dependencies.runSync({
           configuredOrganization: context.config.course.github.organization,
           configuredTemplateRepository: context.templateConfig.repository,
-          resolvedToken: token,
+          resolvedToken: transportToken,
           manifest: context.manifest,
           ...(request.studentId === undefined ? {} : { studentId: request.studentId }),
           options,

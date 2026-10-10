@@ -4,10 +4,7 @@ import {
   getEffectiveAssignmentGrading,
   type EffectiveAssignmentGrading
 } from "../config/effective-grading.js";
-import {
-  createGitHubClient,
-  type GitHubClientFactoryOptions
-} from "../github/github-client-factory.js";
+import type { GitHubClient } from "../github/github-client.js";
 import { loadManifest, type ManifestLoadResult } from "../manifest/manifest-loader.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
 import {
@@ -78,9 +75,6 @@ export interface GradingStudentWorkflowRepairContextDependencies extends Grading
     readonly assignmentFile: string;
   }) => ConfigLoadResult;
   readonly loadAssignmentManifest: (manifestPath: string) => ManifestLoadResult;
-  readonly createClient: (
-    options: GitHubClientFactoryOptions
-  ) => ReturnType<typeof createGitHubClient>;
   readonly repair: typeof manuallyInstallAndDispatchManagedGradingWorkflow;
   readonly install: typeof manuallyInstallManagedGradingWorkflow;
 }
@@ -88,7 +82,6 @@ export interface GradingStudentWorkflowRepairContextDependencies extends Grading
 const dependencies: GradingStudentWorkflowRepairContextDependencies = {
   loadConfig: loadGraiderConfig,
   loadAssignmentManifest: (manifestPath) => loadManifest(manifestPath, { required: true }),
-  createClient: createGitHubClient,
   repair: manuallyInstallAndDispatchManagedGradingWorkflow,
   install: manuallyInstallManagedGradingWorkflow,
   loadState: loadGradingState
@@ -168,13 +161,12 @@ export const prepareGradingStudentWorkflowRepairContext = (
 
 export const executePreparedGradingStudentWorkflowRepair = async (
   prepared: PreparedGradingStudentWorkflowRepairContext,
-  resolvedGithubToken: string,
+  githubClient: GitHubClient,
   confirmed: boolean,
   overrides: Partial<GradingStudentWorkflowRepairContextDependencies> = {},
   runAfterReplacement = true
 ): Promise<ExecutePreparedGradingStudentWorkflowRepairResult> => {
   const resolved = { ...dependencies, ...overrides };
-  const githubClient = resolved.createClient({ token: resolvedGithubToken });
   try {
     const repository = await githubClient.getRepository(
       prepared.repository.owner,

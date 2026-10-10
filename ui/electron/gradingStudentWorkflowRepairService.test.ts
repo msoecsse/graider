@@ -1,5 +1,9 @@
+import type { GitHubClient } from "./githubClientProvider.js";
 import { describe, expect, it, vi } from "vitest";
 import { createGradingStudentWorkflowRepairService } from "./gradingStudentWorkflowRepairService.js";
+
+const client = {} as GitHubClient;
+const provideClient = vi.fn(() => client);
 
 const request = {
   courseFolderId: "course",
@@ -33,6 +37,7 @@ describe("grading student workflow repair Electron service", () => {
     const prepare = vi.fn();
     const execute = vi.fn();
     const service = createGradingStudentWorkflowRepairService({
+      provideClient,
       resolveFacultyScope: () => ({ ...authorized, students: [] }),
       resolveToken: vi.fn(),
       loadBackend: () => ({
@@ -55,6 +60,7 @@ describe("grading student workflow repair Electron service", () => {
       const resolveToken = vi.fn();
       const execute = vi.fn();
       const service = createGradingStudentWorkflowRepairService({
+        provideClient,
         resolveFacultyScope: () => authorized,
         resolveToken,
         loadBackend: () => ({
@@ -72,6 +78,7 @@ describe("grading student workflow repair Electron service", () => {
   it("passes trusted prepared context, token, and confirmation to the backend", async () => {
     const execute = vi.fn().mockResolvedValue(ready);
     const service = createGradingStudentWorkflowRepairService({
+      provideClient,
       resolveFacultyScope: () => authorized,
       resolveToken: () => Promise.resolve({ status: "success", token: "secret" }),
       loadBackend: () => ({
@@ -81,7 +88,9 @@ describe("grading student workflow repair Electron service", () => {
     });
 
     await expect(service({ ...request, confirmed: false })).resolves.toEqual(ready);
-    expect(execute).toHaveBeenCalledWith(prepared, "secret", false);
+    expect(provideClient).toHaveBeenCalledExactlyOnceWith("secret");
+    expect(execute).toHaveBeenCalledWith(prepared, client, false);
+    expect(execute.mock.calls[0]?.[1]).toBe(client);
   });
 
   it("falls back to trusted local HEAD for replace and run before resolving GitHub authentication", async () => {
@@ -103,6 +112,7 @@ describe("grading student workflow repair Electron service", () => {
       submissionCommitSha: localSha
     }));
     const service = createGradingStudentWorkflowRepairService({
+      provideClient,
       resolveFacultyScope: () => authorized,
       resolveToken,
       loadBackend: () => ({
@@ -136,7 +146,7 @@ describe("grading student workflow repair Electron service", () => {
     expect(prepare.mock.invocationCallOrder[1]).toBeLessThan(
       resolveToken.mock.invocationCallOrder[0]
     );
-    expect(execute).toHaveBeenCalledWith(retriedPrepared, "secret", true);
+    expect(execute).toHaveBeenCalledWith(retriedPrepared, client, true);
   });
 
   it("keeps replacement-only independent of local HEAD and submission SHA", async () => {
@@ -148,6 +158,7 @@ describe("grading student workflow repair Electron service", () => {
     const readLocalHead = vi.fn();
     const execute = vi.fn().mockResolvedValue(ready);
     const service = createGradingStudentWorkflowRepairService({
+      provideClient,
       resolveFacultyScope: () => authorized,
       resolveToken: async () => ({ status: "success", token: "secret" }),
       loadBackend: () => ({
@@ -170,7 +181,7 @@ describe("grading student workflow repair Electron service", () => {
     expect(readLocalHead).not.toHaveBeenCalled();
     expect(execute).toHaveBeenCalledWith(
       { ...prepared, submissionCommitSha: undefined },
-      "secret",
+      client,
       true,
       {},
       false
@@ -183,6 +194,7 @@ describe("grading student workflow repair Electron service", () => {
       const resolveToken = vi.fn();
       const execute = vi.fn();
       const service = createGradingStudentWorkflowRepairService({
+        provideClient,
         resolveFacultyScope: () => authorized,
         resolveToken,
         loadBackend: () => ({
@@ -209,6 +221,7 @@ describe("grading student workflow repair Electron service", () => {
     const resolveToken = vi.fn();
     const execute = vi.fn();
     const service = createGradingStudentWorkflowRepairService({
+      provideClient,
       resolveFacultyScope: () => authorized,
       resolveToken,
       loadBackend: () => ({
@@ -227,6 +240,31 @@ describe("grading student workflow repair Electron service", () => {
       studentId: "ada"
     });
     expect(resolveToken).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it("does not construct or forward a client after authentication failure", async () => {
+    const provideClient = vi.fn();
+    const execute = vi.fn();
+    const service = createGradingStudentWorkflowRepairService({
+      resolveFacultyScope: () => authorized,
+      provideClient,
+      resolveToken: async () => ({
+        status: "failure",
+        error: {
+          code: "github_token_unavailable",
+          message: "Sign in.",
+          exitCode: null,
+          stderrSnippet: null,
+          stdoutSnippet: null
+        }
+      }),
+      loadBackend: () => ({
+        prepareGradingStudentWorkflowRepairContext: () => ({ status: "success", value: prepared }),
+        executePreparedGradingStudentWorkflowRepair: execute
+      })
+    });
+    await expect(service(request)).resolves.toMatchObject({ status: "github_auth_unavailable" });
+    expect(provideClient).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,8 @@ import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
 import type { GitHubRepository } from "../../../src/github/github-models.js";
 import {
   executePreparedGradingStudentWorkflowRepair,
-  prepareGradingStudentWorkflowRepairContext
+  prepareGradingStudentWorkflowRepairContext,
+  type GradingStudentWorkflowRepairContextDependencies
 } from "../../../src/grading/grading-student-workflow-repair-context.js";
 import type { Manifest } from "../../../src/manifest/manifest-models.js";
 
@@ -139,14 +140,15 @@ describe("grading student workflow repair context", () => {
     ).toEqual({ status: "success", value: preparedLegacy });
 
     const client = new FakeGitHubClient({ repositories: [repository] });
-    const repair = vi.fn().mockResolvedValue({
-      repository,
-      workflow: { status: "created" },
-      dispatch: { status: "dispatched" },
-      diagnostics: []
-    });
-    await executePreparedGradingStudentWorkflowRepair(preparedLegacy, "token", true, {
-      createClient: () => client,
+    const repair = vi
+      .fn<GradingStudentWorkflowRepairContextDependencies["repair"]>()
+      .mockResolvedValue({
+        repository,
+        workflow: { status: "created" },
+        dispatch: { status: "dispatched" },
+        diagnostics: []
+      });
+    await executePreparedGradingStudentWorkflowRepair(preparedLegacy, client, true, {
       repair
     });
     expect(repair).toHaveBeenCalledWith(
@@ -171,16 +173,18 @@ describe("grading student workflow repair context", () => {
 
   it("uses observed repository identity/default branch and invokes the core operation only when confirmed", async () => {
     const client = new FakeGitHubClient({ repositories: [repository] });
-    const repair = vi.fn().mockResolvedValue({
-      repository: { ...repository, name: repository.name },
-      workflow: { status: "already_current" },
-      dispatch: { status: "dispatched" },
-      diagnostics: []
-    });
-    const overrides = { createClient: () => client, repair };
+    const repair = vi
+      .fn<GradingStudentWorkflowRepairContextDependencies["repair"]>()
+      .mockResolvedValue({
+        repository: { ...repository, name: repository.name },
+        workflow: { status: "already_current" },
+        dispatch: { status: "dispatched" },
+        diagnostics: []
+      });
+    const overrides = { repair };
 
     await expect(
-      executePreparedGradingStudentWorkflowRepair(prepared, "token", false, overrides)
+      executePreparedGradingStudentWorkflowRepair(prepared, client, false, overrides)
     ).resolves.toEqual({
       status: "ready",
       studentId: "ada",
@@ -188,7 +192,8 @@ describe("grading student workflow repair context", () => {
     });
     expect(repair).not.toHaveBeenCalled();
 
-    await executePreparedGradingStudentWorkflowRepair(prepared, "token", true, overrides);
+    await executePreparedGradingStudentWorkflowRepair(prepared, client, true, overrides);
+    expect(repair.mock.calls[0]?.[0].githubClient).toBe(client);
     expect(repair).toHaveBeenCalledWith({
       githubClient: client,
       repository: {
@@ -209,25 +214,22 @@ describe("grading student workflow repair context", () => {
       grading: prepared.grading
     };
     const client = new FakeGitHubClient({ repositories: [repository] });
-    const install = vi.fn().mockResolvedValue({
-      repository,
-      workflow: { status: "created" },
-      diagnostics: []
-    });
+    const install = vi
+      .fn<GradingStudentWorkflowRepairContextDependencies["install"]>()
+      .mockResolvedValue({
+        repository,
+        workflow: { status: "created" },
+        diagnostics: []
+      });
 
     await expect(
-      executePreparedGradingStudentWorkflowRepair(
-        replacementOnly,
-        "token",
-        true,
-        { createClient: () => client, install },
-        false
-      )
+      executePreparedGradingStudentWorkflowRepair(replacementOnly, client, true, { install }, false)
     ).resolves.toMatchObject({
       status: "success",
       result: { workflow: { status: "created" }, dispatch: { status: "not_attempted" } }
     });
     expect(install).toHaveBeenCalledOnce();
+    expect(install.mock.calls[0]?.[0].githubClient).toBe(client);
     expect(client.mutations.workflowDispatches).toEqual([]);
   });
 });

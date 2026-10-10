@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
 import type { Manifest } from "../../../src/manifest/manifest-models.js";
 import type { AssignmentTemplateSyncResult } from "../../../src/template-sync/assignment-template-sync.js";
@@ -28,11 +28,11 @@ const completedResult = (): AssignmentTemplateSyncResult => ({
 
 const base = (
   bridge: Bridge,
-  env?: Record<string, string>
+  resolvedToken = "transport-secret"
 ): ProductionAssignmentTemplateSyncServiceInput => ({
   configuredOrganization: "course",
   configuredTemplateRepository: "course/template",
-  ...(env === undefined ? {} : { env }),
+  resolvedToken,
   bridge,
   manifest,
   options: { yes: true, json: false, verbose: false },
@@ -42,20 +42,20 @@ const base = (
 });
 
 describe("production assignment template-sync service", () => {
-  it("uses Graider token precedence and never returns it", async () => {
+  it("uses the explicit transport token and never returns it", async () => {
     const calls: Parameters<Bridge>[0][] = [];
     const bridge: Bridge = (input) => {
       calls.push(input);
       return Promise.resolve(completedResult());
     };
     const result = await runProductionAssignmentTemplateSyncService(
-      base(bridge, { GRAIDER_GITHUB_TOKEN: "graider", GITHUB_TOKEN: "github" })
+      base(bridge, "transport-secret")
     );
     const [call] = calls;
     if (call === undefined) throw new Error("Expected bridge invocation.");
-    expect(call.token).toBe("graider");
+    expect(call.token).toBe("transport-secret");
     expect(call.templateCloneUrl).toBe("https://github.com/course/template.git");
-    expect(JSON.stringify(result)).not.toContain("graider");
+    expect(JSON.stringify(result)).not.toContain("transport-secret");
   });
 
   it("uses a token resolved by the trusted production caller and never returns it", async () => {
@@ -65,7 +65,7 @@ describe("production assignment template-sync service", () => {
       return Promise.resolve(completedResult());
     };
     const result = await runProductionAssignmentTemplateSyncService({
-      ...base(bridge, { GRAIDER_GITHUB_TOKEN: " ", GITHUB_TOKEN: "" }),
+      ...base(bridge),
       resolvedToken: " cli-secret "
     });
     expect(calls).toHaveLength(1);
@@ -75,24 +75,37 @@ describe("production assignment template-sync service", () => {
 
   it("preserves github_token_required when no authentication source is available", async () => {
     const bridge: Bridge = () => Promise.resolve(completedResult());
-    const result = await runProductionAssignmentTemplateSyncService(base(bridge, {}));
+    const result = await runProductionAssignmentTemplateSyncService(base(bridge, ""));
 
     expect(result).toMatchObject({ status: "failure", code: "github_token_required" });
   });
 
-  it("uses environment fallback and blocks invalid prerequisites", async () => {
+  it("blocks invalid explicit transport credentials and prerequisites", async () => {
     const bridge: Bridge = () => Promise.resolve(completedResult());
     await expect(
-      runProductionAssignmentTemplateSyncService(base(bridge, { GITHUB_TOKEN: "fallback" }))
+      runProductionAssignmentTemplateSyncService(base(bridge, "explicit"))
     ).resolves.toMatchObject({ status: "success" });
     await expect(
-      runProductionAssignmentTemplateSyncService(base(bridge, { GITHUB_TOKEN: " " }))
+      runProductionAssignmentTemplateSyncService(base(bridge, " "))
     ).resolves.toMatchObject({ status: "failure" });
     await expect(
       runProductionAssignmentTemplateSyncService({
-        ...base(bridge, { GITHUB_TOKEN: "x" }),
+        ...base(bridge, "x"),
         configuredTemplateRepository: "bad"
       })
     ).resolves.toMatchObject({ status: "failure" });
+  });
+  it("never falls back to ambient credentials for an empty transport token", async () => {
+    vi.stubEnv("GRAIDER_GITHUB_TOKEN", "ambient-graider");
+    vi.stubEnv("GITHUB_TOKEN", "ambient-github");
+    try {
+      const bridge = vi.fn<Bridge>();
+      await expect(
+        runProductionAssignmentTemplateSyncService(base(bridge, " "))
+      ).resolves.toMatchObject({ status: "failure", code: "github_token_required" });
+      expect(bridge).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

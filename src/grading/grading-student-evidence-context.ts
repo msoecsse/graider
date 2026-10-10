@@ -4,10 +4,7 @@ import {
   getEffectiveAssignmentGrading,
   type EffectiveAssignmentGrading
 } from "../config/effective-grading.js";
-import {
-  createGitHubClient,
-  type GitHubClientFactoryOptions
-} from "../github/github-client-factory.js";
+import type { GitHubClient } from "../github/github-client.js";
 import { loadManifest, type ManifestLoadResult } from "../manifest/manifest-loader.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
 import {
@@ -58,9 +55,6 @@ export interface GradingStudentEvidenceContextDependencies extends GradingSubmis
     readonly assignmentFile: string;
   }) => ConfigLoadResult;
   readonly loadAssignmentManifest: (manifestPath: string) => ManifestLoadResult;
-  readonly createClient: (
-    options: GitHubClientFactoryOptions
-  ) => ReturnType<typeof createGitHubClient>;
   readonly retrieve: typeof retrieveGradingEvidence;
 }
 
@@ -68,7 +62,6 @@ const dependencies: GradingStudentEvidenceContextDependencies = {
   loadConfig: loadGraiderConfig,
   loadState: loadGradingState,
   loadAssignmentManifest: (manifestPath) => loadManifest(manifestPath, { required: true }),
-  createClient: createGitHubClient,
   retrieve: retrieveGradingEvidence
 };
 
@@ -147,12 +140,12 @@ export const prepareGradingStudentEvidenceContext = (
 
 export const retrievePreparedGradingStudentEvidence = async (
   prepared: PreparedGradingStudentEvidenceContext,
-  resolvedGithubToken: string,
+  githubClient: GitHubClient,
   overrides: Partial<GradingStudentEvidenceContextDependencies> = {}
 ): Promise<GradingEvidenceRetrievalResult> => {
   const resolved = { ...dependencies, ...overrides };
   return await resolved.retrieve({
-    githubClient: resolved.createClient({ token: resolvedGithubToken }),
+    githubClient,
     repository: prepared.repository,
     grading: prepared.grading,
     submissionCommitSha: prepared.submissionCommitSha

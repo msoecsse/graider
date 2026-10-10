@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { GitHubClient } from "./githubClientProvider.js";
+import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { resolveGithubToken, type GithubTokenResolution } from "./tokenResolver.js";
 
@@ -35,11 +37,11 @@ interface Backend {
   }): { readonly status: string; readonly value?: unknown };
   previewPreparedTemplateManagedWorkflowReplacement(
     prepared: unknown,
-    token: string
+    githubClient: GitHubClient
   ): Promise<TemplateManagedWorkflowReplacementResult>;
   installPreparedTemplateManagedWorkflowReplacement(
     prepared: unknown,
-    token: string,
+    githubClient: GitHubClient,
     confirmed: boolean,
     overrides?: unknown,
     expectedContentFingerprint?: string
@@ -56,6 +58,7 @@ const loadBackend = (): Backend =>
 export const replaceTemplateManagedWorkflow = async (
   request: TemplateManagedWorkflowReplacementRequest,
   overrides: {
+    readonly provideClient?: GithubClientProvider;
     readonly resolveToken?: () => Promise<GithubTokenResolution>;
     readonly loadBackend?: () => Backend;
   } = {}
@@ -73,13 +76,14 @@ export const replaceTemplateManagedWorkflow = async (
     (async () => await resolveGithubToken({ runner: createNodeProcessRunner() }))
   )();
   if (token.status === "failure") return { status: "github_auth_unavailable" };
+  const githubClient = (overrides.provideClient ?? provideGithubClient)(token.token);
   return request.confirmed
     ? await backend.installPreparedTemplateManagedWorkflowReplacement(
         prepared.value,
-        token.token,
+        githubClient,
         true,
         {},
         request.previewFingerprint
       )
-    : await backend.previewPreparedTemplateManagedWorkflowReplacement(prepared.value, token.token);
+    : await backend.previewPreparedTemplateManagedWorkflowReplacement(prepared.value, githubClient);
 };

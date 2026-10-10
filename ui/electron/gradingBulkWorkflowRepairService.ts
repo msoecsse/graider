@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { GitHubClient } from "./githubClientProvider.js";
+import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -57,7 +59,7 @@ interface Backend {
   }): PrepareResult;
   executePreparedGradingStudentWorkflowRepair(
     prepared: PreparedContext,
-    token: string,
+    githubClient: GitHubClient,
     confirmed: boolean
   ): Promise<ExecuteResult>;
 }
@@ -95,6 +97,7 @@ export const repairGradingWorkflowsForAssignment = async (
     readonly resolveFacultyScope?: (
       request: FacultyScopeServiceRequest
     ) => FacultyScopeServiceResult;
+    readonly provideClient?: GithubClientProvider;
     readonly resolveToken?: () => Promise<GithubTokenResolution>;
     readonly loadBackend?: () => Backend;
     readonly resolveLocalRepository?: (
@@ -118,58 +121,52 @@ export const repairGradingWorkflowsForAssignment = async (
     (async () => await resolveGithubToken({ runner: createNodeProcessRunner() }))
   )();
   if (token.status === "failure") return { status: "github_auth_unavailable" };
+  const githubClient = (dependencies.provideClient ?? provideGithubClient)(token.token);
   const backend = (dependencies.loadBackend ?? loadBackend)();
   const resolveLocalRepository =
     dependencies.resolveLocalRepository ?? resolveLocalStudentRepository;
   const readLocalHead = dependencies.readLocalHead ?? readLocalRepositoryHead;
   const byRepository = new Map<string, { prepared: PreparedContext; studentIds: string[] }>();
   const results: RepositoryResult[] = [];
+  const prepareStudent = async (studentId: string): Promise<PrepareResult> => {
+    const prepared = backend.prepareGradingStudentWorkflowRepairContext({ ...request, studentId });
+    if (prepared.status !== "submission_commit_unavailable") return prepared;
+    const localRepository = resolveLocalRepository(
+      getLocalRepositoryLocatorPath(request.userDataPath),
+      {
+        courseFolderId: request.courseFolderId,
+        termCode: request.termCode,
+        assignmentSlug: request.assignmentSlug,
+        studentId
+      }
+    );
+    if (localRepository.status !== "success") return { status: localRepository.status, studentId };
+    const head = await readLocalHead(localRepository.localPath);
+    return head.status === "success"
+      ? backend.prepareGradingStudentWorkflowRepairContext({
+          ...request,
+          studentId,
+          currentSubmissionCommitSha: head.submissionCommitSha
+        })
+      : { status: head.status, studentId };
+  };
   for (const studentId of studentIds) {
-    let prepared = backend.prepareGradingStudentWorkflowRepairContext({ ...request, studentId });
-    if (prepared.status === "submission_commit_unavailable") {
-      const localRepository = resolveLocalRepository(
-        getLocalRepositoryLocatorPath(request.userDataPath),
-        {
-          courseFolderId: request.courseFolderId,
-          termCode: request.termCode,
-          assignmentSlug: request.assignmentSlug,
-          studentId
-        }
-      );
-      if (localRepository.status !== "success") {
-        results.push({
-          studentIds: [studentId],
-          status: "failed",
-          message: localRepository.status
-        });
-        continue;
-      }
-      const head = await readLocalHead(localRepository.localPath);
-      if (head.status !== "success") {
-        results.push({ studentIds: [studentId], status: "failed", message: head.status });
-        continue;
-      }
-      prepared = backend.prepareGradingStudentWorkflowRepairContext({
-        ...request,
-        studentId,
-        currentSubmissionCommitSha: head.submissionCommitSha
-      });
-    }
+    const prepared = await prepareStudent(studentId);
     if (prepared.status !== "success" || prepared.value === undefined) {
       results.push({ studentIds: [studentId], status: "failed", message: prepared.status });
-      continue;
+    } else {
+      const value = prepared.value;
+      const repository = `${value.repository.owner}/${value.repository.name}`;
+      const target = byRepository.get(repository);
+      if (target === undefined)
+        byRepository.set(repository, { prepared: value, studentIds: [studentId] });
+      else target.studentIds.push(studentId);
     }
-    const value = prepared.value;
-    const repository = `${value.repository.owner}/${value.repository.name}`;
-    const target = byRepository.get(repository);
-    if (target === undefined)
-      byRepository.set(repository, { prepared: value, studentIds: [studentId] });
-    else target.studentIds.push(studentId);
   }
   for (const [repository, target] of byRepository) {
     const outcome = await backend.executePreparedGradingStudentWorkflowRepair(
       target.prepared,
-      token.token,
+      githubClient,
       true
     );
     if (outcome.status !== "success" || outcome.result === undefined) {
@@ -179,20 +176,20 @@ export const repairGradingWorkflowsForAssignment = async (
         status: "failed",
         message: outcome.status
       });
-      continue;
+    } else {
+      const operation = outcome.result;
+      const dispatchStatus = operation.dispatch.status;
+      results.push({
+        studentIds: target.studentIds,
+        repository,
+        status: dispatchStatus === "dispatched" ? "success" : "failed",
+        workflowStatus: operation.workflow.status,
+        dispatchStatus,
+        ...(operation.diagnostics[0]?.message === undefined
+          ? {}
+          : { message: operation.diagnostics[0].message })
+      });
     }
-    const operation = outcome.result;
-    const dispatchStatus = operation.dispatch.status;
-    results.push({
-      studentIds: target.studentIds,
-      repository,
-      status: dispatchStatus === "dispatched" ? "success" : "failed",
-      workflowStatus: operation.workflow.status,
-      dispatchStatus,
-      ...(operation.diagnostics[0]?.message === undefined
-        ? {}
-        : { message: operation.diagnostics[0].message })
-    });
   }
   const succeeded = results.filter((result) => result.status === "success").length;
   const createdOrReplaced = results.filter(

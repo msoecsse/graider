@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { GitHubClient } from "./githubClientProvider.js";
+import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import type { AssignmentDetailRequest } from "./ipc.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
 import { resolveGithubToken, type GithubTokenResolution } from "./tokenResolver.js";
@@ -76,9 +78,18 @@ export interface AssignmentTemplateSyncService {
   ): Promise<AssignmentTemplateSyncExecutionResult>;
 }
 
-interface AssignmentTemplateSyncBackend extends Omit<AssignmentTemplateSyncService, "execute"> {
+export interface AssignmentTemplateSyncCredentials {
+  readonly githubClient: GitHubClient;
+  readonly transportToken: string;
+}
+
+export interface AssignmentTemplateSyncBackend extends Omit<
+  AssignmentTemplateSyncService,
+  "execute"
+> {
   execute(
-    request: AssignmentTemplateSyncExecuteRequest & { readonly resolvedGithubToken?: string },
+    request: AssignmentTemplateSyncExecuteRequest,
+    credentials?: AssignmentTemplateSyncCredentials,
     onProgress?: (progress: AssignmentTemplateSyncProgress) => void
   ): Promise<AssignmentTemplateSyncExecutionResult>;
 }
@@ -96,11 +107,12 @@ const loadBackend = (): AssignmentTemplateSyncBackend =>
 export const createAssignmentTemplateSyncService = (
   backend: () => AssignmentTemplateSyncBackend = loadBackend,
   resolveToken: ResolveGithubToken = async () =>
-    await resolveGithubToken({ runner: createNodeProcessRunner() })
+    await resolveGithubToken({ runner: createNodeProcessRunner() }),
+  provideClient: GithubClientProvider = provideGithubClient
 ): AssignmentTemplateSyncService => ({
   prepare: async (request) => backend().prepare(request),
   execute: async (request, onProgress) => {
-    if (!request.confirmed) return await backend().execute(request, onProgress);
+    if (!request.confirmed) return await backend().execute(request, undefined, onProgress);
 
     const tokenResolution = await resolveToken();
     if (tokenResolution.status === "failure") {
@@ -114,13 +126,21 @@ export const createAssignmentTemplateSyncService = (
       };
     }
 
-    const executionRequest = {
-      ...request,
-      resolvedGithubToken: tokenResolution.token
-    };
-    return onProgress === undefined
-      ? await backend().execute(executionRequest)
-      : await backend().execute(executionRequest, onProgress);
+    try {
+      const credentials = {
+        githubClient: provideClient(tokenResolution.token),
+        transportToken: tokenResolution.token
+      };
+      return onProgress === undefined
+        ? await backend().execute(request, credentials)
+        : await backend().execute(request, credentials, onProgress);
+    } catch {
+      return {
+        status: "failure",
+        outcomes: [],
+        blocker: { code: "template_sync_failed", message: "Unable to start template sync." }
+      };
+    }
   }
 });
 

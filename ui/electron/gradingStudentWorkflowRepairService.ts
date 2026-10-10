@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { GitHubClient } from "./githubClientProvider.js";
+import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -93,7 +95,7 @@ interface WorkflowRepairBackend {
   }): PrepareResult;
   executePreparedGradingStudentWorkflowRepair(
     prepared: PreparedContext,
-    token: string,
+    githubClient: GitHubClient,
     confirmed: boolean,
     overrides?: unknown,
     runAfterReplacement?: boolean
@@ -109,6 +111,7 @@ interface WorkflowRepairBackend {
 
 export interface GradingStudentWorkflowRepairDependencies {
   readonly resolveFacultyScope: (request: FacultyScopeServiceRequest) => FacultyScopeServiceResult;
+  readonly provideClient: GithubClientProvider;
   readonly resolveToken: () => Promise<GithubTokenResolution>;
   readonly loadBackend: () => WorkflowRepairBackend;
   readonly resolveLocalRepository: (
@@ -193,17 +196,18 @@ export const createGradingStudentWorkflowRepairService = (
     const token = await resolveToken();
     if (token.status === "failure")
       return { status: "github_auth_unavailable", studentId: request.studentId };
+    const githubClient = (overrides.provideClient ?? provideGithubClient)(token.token);
     return request.runAfterReplacement === false
       ? await backend.executePreparedGradingStudentWorkflowRepair(
           prepared.value,
-          token.token,
+          githubClient,
           request.confirmed,
           {},
           false
         )
       : await backend.executePreparedGradingStudentWorkflowRepair(
           prepared.value,
-          token.token,
+          githubClient,
           request.confirmed
         );
   };

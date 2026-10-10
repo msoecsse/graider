@@ -8,6 +8,8 @@ import {
   type AssignmentTemplateSyncContextDependencies
 } from "../../../src/template-sync/assignment-template-sync-context.js";
 
+const credentials = { githubClient: new FakeGitHubClient(), transportToken: "resolved-token" };
+
 const request = {
   courseFolderId: "course",
   courseFolderPath: path.resolve("tests/fixtures/grade/active-assignment"),
@@ -29,10 +31,6 @@ const setup = () => {
     loadConfig: vi.fn(() => config),
     loadManifest: vi.fn(() => manifest),
     writeManifest: vi.fn(() => ({ status: "success" as const })),
-    createClient: vi.fn(() => new FakeGitHubClient()),
-    resolveToken: vi.fn<AssignmentTemplateSyncContextDependencies["resolveToken"]>(
-      () => "resolved-token"
-    ),
     runSync: vi.fn<AssignmentTemplateSyncContextDependencies["runSync"]>(() =>
       Promise.resolve({
         status: "success" as const,
@@ -62,7 +60,7 @@ describe("assignment template-sync main-process context", () => {
       repositoryCount: 1,
       selectedRepository: { studentId: "jones" }
     });
-    await service.execute({ ...request, studentId: "jones", confirmed: true });
+    await service.execute({ ...request, studentId: "jones", confirmed: true }, credentials);
     const [runSyncCall] = dependencies.runSync.mock.calls;
     if (runSyncCall === undefined) throw new Error("Expected selected template-sync invocation.");
     expect(runSyncCall[0]).toMatchObject({ studentId: "jones" });
@@ -72,12 +70,11 @@ describe("assignment template-sync main-process context", () => {
     const { dependencies, service } = setup();
 
     await expect(
-      service.execute({ ...request, studentId: "unknown", confirmed: true })
+      service.execute({ ...request, studentId: "unknown", confirmed: true }, credentials)
     ).resolves.toMatchObject({
       outcomes: [],
       blocker: { code: "student_repository_unavailable" }
     });
-    expect(dependencies.resolveToken).not.toHaveBeenCalled();
     expect(dependencies.runSync).not.toHaveBeenCalled();
   });
 
@@ -99,8 +96,6 @@ describe("assignment template-sync main-process context", () => {
       path.join(request.courseFolderPath, "terms/27s1/manifests/lab04/manifest.yml"),
       { required: true }
     );
-    expect(dependencies.createClient).not.toHaveBeenCalled();
-    expect(dependencies.resolveToken).not.toHaveBeenCalled();
     expect(dependencies.runSync).not.toHaveBeenCalled();
     expect(dependencies.writeManifest).not.toHaveBeenCalled();
   });
@@ -140,33 +135,28 @@ describe("assignment template-sync main-process context", () => {
 
   it("enforces confirmation before context/dependency creation", async () => {
     const { dependencies, service } = setup();
-    expect(await service.execute({ ...request, confirmed: false })).toMatchObject({
+    expect(await service.execute({ ...request, confirmed: false }, credentials)).toMatchObject({
       status: "failure",
       blocker: { code: "confirmation_required" }
     });
     expect(dependencies.loadConfig).not.toHaveBeenCalled();
-    expect(dependencies.createClient).not.toHaveBeenCalled();
-    expect(dependencies.resolveToken).not.toHaveBeenCalled();
     expect(dependencies.runSync).not.toHaveBeenCalled();
   });
 
   it("composes production inputs once and projects public results without internals", async () => {
     const { dependencies, service } = setup();
-    const result = await service.execute({ ...request, confirmed: true });
+    const result = await service.execute({ ...request, confirmed: true }, credentials);
     expect(dependencies.runSync).toHaveBeenCalledTimes(1);
-    expect(dependencies.createClient).toHaveBeenCalledTimes(1);
-    expect(dependencies.resolveToken).toHaveBeenCalledTimes(1);
     const [runSyncCall] = dependencies.runSync.mock.calls;
     if (runSyncCall === undefined) throw new Error("Expected template-sync invocation.");
     const [input] = runSyncCall;
-    const [createClientResult] = dependencies.createClient.mock.results;
-    if (createClientResult?.type !== "return") throw new Error("Expected GitHub client creation.");
+    expect(input.workspace.githubClient).toBe(credentials.githubClient);
     expect(input).toMatchObject({
       configuredOrganization: "example-org",
       configuredTemplateRepository: "example-org/lab04-template",
       resolvedToken: "resolved-token",
       options: { yes: true },
-      workspace: { githubClient: createClientResult.value }
+      workspace: { githubClient: credentials.githubClient }
     });
     const [firstRepository] = input.manifest.repositories;
     if (firstRepository === undefined) throw new Error("Expected manifest repository.");
@@ -243,7 +233,7 @@ describe("assignment template-sync main-process context", () => {
         ]
       }
     });
-    const result = await service.execute({ ...request, confirmed: true });
+    const result = await service.execute({ ...request, confirmed: true }, credentials);
     expect(result.status).toBe("partial_success");
     expect(result.outcomes).toMatchObject([
       {
@@ -264,32 +254,16 @@ describe("assignment template-sync main-process context", () => {
     );
   });
 
-  it("returns a safe blocker for factory or service errors", async () => {
+  it("requires explicit trusted credentials and maps service failures safely", async () => {
     const { dependencies, service } = setup();
-    dependencies.createClient.mockImplementationOnce(() => {
-      throw new Error("secret");
-    });
     expect(await service.execute({ ...request, confirmed: true })).toMatchObject({
       blocker: { code: "github_token_required" }
     });
     expect(dependencies.runSync).not.toHaveBeenCalled();
     dependencies.runSync.mockRejectedValueOnce(new Error("secret /tmp/workspace"));
-    const result = await service.execute({ ...request, confirmed: true });
+    const result = await service.execute({ ...request, confirmed: true }, credentials);
     expect(result.status).toBe("failure");
     expect(JSON.stringify(result)).not.toMatch(/secret|workspace/);
-  });
-
-  it("preserves github_token_required when every shared token source fails", async () => {
-    const { dependencies } = setup();
-    dependencies.resolveToken.mockReturnValueOnce(undefined);
-    const service = createAssignmentTemplateSyncContextService(dependencies);
-
-    expect(await service.execute({ ...request, confirmed: true })).toMatchObject({
-      status: "failure",
-      blocker: { code: "github_token_required" }
-    });
-    expect(dependencies.createClient).not.toHaveBeenCalled();
-    expect(dependencies.runSync).not.toHaveBeenCalled();
   });
 
   it("blocks mismatched and unsupported manifests before production execution", async () => {
@@ -300,7 +274,7 @@ describe("assignment template-sync main-process context", () => {
     });
     manifest.manifest.schemaVersion = 1;
     manifest.manifest.assignment.assignmentSlug = "another";
-    expect(await service.execute({ ...request, confirmed: true })).toMatchObject({
+    expect(await service.execute({ ...request, confirmed: true }, credentials)).toMatchObject({
       blocker: { code: "manifest_mismatch" }
     });
     expect(dependencies.runSync).not.toHaveBeenCalled();

@@ -1,7 +1,11 @@
+import type { GitHubClient } from "./githubClientProvider.js";
 import { describe, expect, it, vi } from "vitest";
-import { createGradingStudentEvidenceService } from "../../../ui/electron/gradingStudentEvidenceService.js";
+import { createGradingStudentEvidenceService } from "./gradingStudentEvidenceService.js";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
+const client = {} as GitHubClient;
+const provideClient = vi.fn(() => client);
+
 const request = {
   courseFolderId: "course",
   courseFolderPath: "/trusted/course",
@@ -53,7 +57,7 @@ describe("grading student evidence Electron service", () => {
       order.push("prepare");
       return { status: "success" as const, value: prepared };
     });
-    const retrieve = vi.fn(() => {
+    const retrieve = vi.fn((_prepared: unknown, _client: GitHubClient) => {
       order.push("retrieve");
       return Promise.resolve({
         status: "success" as const,
@@ -61,6 +65,7 @@ describe("grading student evidence Electron service", () => {
       });
     });
     const service = createGradingStudentEvidenceService({
+      provideClient,
       resolveFacultyScope: () => {
         order.push("authorize");
         return authorized;
@@ -98,7 +103,9 @@ describe("grading student evidence Electron service", () => {
       studentId: "ada",
       currentSubmissionCommitSha: SHA
     });
-    expect(retrieve).toHaveBeenCalledWith(prepared, "secret");
+    expect(provideClient).toHaveBeenCalledExactlyOnceWith("secret");
+    expect(retrieve).toHaveBeenCalledWith(prepared, client);
+    expect(retrieve.mock.calls[0]?.[1]).toBe(client);
   });
 
   it("allows assigned co-faculty and blocks inaccessible students before all repository/Actions work", async () => {
@@ -106,6 +113,7 @@ describe("grading student evidence Electron service", () => {
     const resolveToken = vi.fn();
     const loadBackend = vi.fn();
     const service = createGradingStudentEvidenceService({
+      provideClient,
       resolveFacultyScope: () => ({ ...authorized, students: [] }),
       resolveRepository,
       readHead: vi.fn(),
@@ -128,6 +136,7 @@ describe("grading student evidence Electron service", () => {
       retrievePreparedGradingStudentEvidence: vi.fn()
     };
     const service = createGradingStudentEvidenceService({
+      provideClient,
       resolveFacultyScope: () => authorized,
       resolveRepository: () => ({ status: "success", localPath: "/trusted/local" }),
       readHead: () => Promise.resolve({ status: "success", submissionCommitSha: SHA }),
@@ -139,6 +148,7 @@ describe("grading student evidence Electron service", () => {
     expect(backend.retrievePreparedGradingStudentEvidence).not.toHaveBeenCalled();
 
     const changed = createGradingStudentEvidenceService({
+      provideClient,
       resolveFacultyScope: () => authorized,
       resolveRepository: () => ({ status: "success", localPath: "/trusted/local" }),
       readHead: () => Promise.resolve({ status: "success", submissionCommitSha: SHA }),
@@ -165,6 +175,7 @@ describe("grading student evidence Electron service", () => {
     });
     const readHead = vi.fn();
     const service = createGradingStudentEvidenceService({
+      provideClient,
       resolveFacultyScope: () => authorized,
       resolveRepository: () => ({ status: "repository_not_recorded" }),
       readHead,
@@ -190,12 +201,16 @@ describe("grading student evidence Electron service", () => {
 
   it("maps token and Slice 39 failures without exposing raw details", async () => {
     const base = {
+      provideClient,
       resolveFacultyScope: () => authorized,
       resolveRepository: () => ({ status: "success" as const, localPath: "/trusted/local" }),
       readHead: () => Promise.resolve({ status: "success" as const, submissionCommitSha: SHA })
     };
+    const failedProvider = vi.fn();
+    const failedRetrieve = vi.fn();
     const noToken = createGradingStudentEvidenceService({
       ...base,
+      provideClient: failedProvider,
       resolveToken: () =>
         Promise.resolve({
           status: "failure",
@@ -209,10 +224,13 @@ describe("grading student evidence Electron service", () => {
         }),
       loadBackend: () => ({
         prepareGradingStudentEvidenceContext: () => ({ status: "success", value: prepared }),
-        retrievePreparedGradingStudentEvidence: vi.fn()
+        retrievePreparedGradingStudentEvidence: failedRetrieve
       })
     });
     await expect(noToken(request)).resolves.toEqual({ status: "github_auth_unavailable" });
+
+    expect(failedProvider).not.toHaveBeenCalled();
+    expect(failedRetrieve).not.toHaveBeenCalled();
 
     const denied = createGradingStudentEvidenceService({
       ...base,
@@ -235,6 +253,7 @@ describe("grading student evidence Electron service", () => {
 
   it("whitelists the renderer DTO and maps unexpected retrieval exceptions safely", async () => {
     const base = {
+      provideClient,
       resolveFacultyScope: () => authorized,
       resolveRepository: () => ({ status: "success" as const, localPath: "/trusted/local" }),
       readHead: () => Promise.resolve({ status: "success" as const, submissionCommitSha: SHA }),

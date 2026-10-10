@@ -8,14 +8,6 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const ADAPTER = "src/github/octokit-github-client.ts";
 const FACTORY = "src/github/github-client-factory.ts";
 const COMPOSITION = "src/github/github-client-composition.ts";
-// Temporary 1.3B-2 exceptions: generated backend composition only.
-const DEFERRED_FACTORY_CONSUMERS = [
-  "src/template-sync/assignment-template-sync-context.ts",
-  "src/grading/grading-student-evidence-context.ts",
-  "src/grading/grading-student-workflow-repair-context.ts",
-  "src/grading/template-managed-workflow-replacement-context.ts",
-  "src/grading/grading-student-report-publication-context.ts"
-] as const;
 const FEATURE = "src/grading/example.ts";
 const PRODUCTION_SOURCE_ROOTS = ["src", "ui/electron"] as const;
 
@@ -50,8 +42,7 @@ const findBoundaryViolations = (sourcePath: string, source: string): readonly st
       if (
         isModule &&
         /(?:^|\/)github-client-factory(?:\.[cm]?[jt]s)?$/u.test(node.text) &&
-        sourcePath !== COMPOSITION &&
-        !DEFERRED_FACTORY_CONSUMERS.some((allowed) => allowed === sourcePath)
+        sourcePath !== COMPOSITION
       ) {
         violations.add(`${sourcePath}: GitHub client factory`);
       }
@@ -94,7 +85,7 @@ describe("GitHub host boundary", () => {
     expect(violations).toEqual([]);
   });
 
-  it("permits factory imports only in composition and the five deferred contexts", () => {
+  it("permits factory imports only in trusted composition", () => {
     for (const source of [
       'import { createGitHubClient as Client } from "../github/github-client-factory.js";',
       'import type { GitHubClientFactoryOptions } from "../github/github-client-factory.js";',
@@ -105,6 +96,11 @@ describe("GitHub host boundary", () => {
     ]) {
       for (const consumer of [
         FEATURE,
+        "src/template-sync/assignment-template-sync-context.ts",
+        "src/grading/grading-student-evidence-context.ts",
+        "src/grading/grading-student-workflow-repair-context.ts",
+        "src/grading/template-managed-workflow-replacement-context.ts",
+        "src/grading/grading-student-report-publication-context.ts",
         "ui/electron/example.ts",
         "src/cli/commands/assignment.command.ts"
       ]) {
@@ -112,7 +108,7 @@ describe("GitHub host boundary", () => {
           `${consumer}: GitHub client factory`
         );
       }
-      for (const consumer of [COMPOSITION, ...DEFERRED_FACTORY_CONSUMERS]) {
+      for (const consumer of [COMPOSITION]) {
         expect(findBoundaryViolations(consumer, source)).toEqual([]);
       }
     }
