@@ -46,8 +46,8 @@ ordinary strings do not count as dependencies.
 Current production searches find no Octokit leakage outside those approved files.
 This guard freezes concrete implementation ownership; client/token composition
 is still distributed. GitHub interfaces, models, errors and retry imports remain
-permitted. `GitHubClient` remains GitHub-specific, with unchanged signatures and
-no split. No generic RemoteHost, RemoteProvider, GitProvider or GitLabProvider is
+permitted. `GitHubClient` remains GitHub-specific, with a minimal branch lookup added in
+1.3C-1 and no split. No generic RemoteHost, RemoteProvider, GitProvider or GitLabProvider is
 introduced; GitLab remains deferred.
 
 ## Current GitHubClient capabilities
@@ -55,7 +55,7 @@ introduced; GitLab remains deferred.
 | Group                         | Current methods                                                                                                                                                                                   |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Identity                      | `getAuthenticatedUser`, `getUser`                                                                                                                                                                 |
-| Repository metadata/lifecycle | `getRepository`, `getTemplateRepository`, `getDefaultBranchCommitSha`, `createRepository`, `createRepositoryFromTemplate`, `archiveRepository`                                                    |
+| Repository metadata/lifecycle | `getRepository`, `getRepositoryBranch`, `getTemplateRepository`, `getDefaultBranchCommitSha`, `createRepository`, `createRepositoryFromTemplate`, `archiveRepository`                             |
 | Permissions                   | `getCollaboratorPermission`, `addCollaborator`, `removeCollaborator`, `getTeam`, `getTeamPermission`, `addTeamPermission`                                                                         |
 | Actions                       | `getActionsState`, `enableActions`, `getWorkflow`, `dispatchWorkflow`, `listWorkflowRuns`, `listWorkflowRunsForCommit`, `listWorkflowRunArtifacts`, `downloadArtifactArchive`, `downloadArtifact` |
 | Repository content            | `getRepositoryFileContent`, `writeRepositoryFile`                                                                                                                                                 |
@@ -94,10 +94,25 @@ Its service no longer reads environment credentials or decides token priority.
 Clients and transport tokens stay in the main process; renderer/preload IPC DTOs
 are unchanged. Only composition may import the adapter factory.
 
-Direct REST services `ui/electron/templateRepositoryValidationService.ts` and
-`ui/electron/templateWorkflowService.ts` remain deferred to 1.3C. Electron's
-`ui/electron/tokenResolver.ts` retains its `gh auth token` fallback. The following
-inventory records the 1.3A baseline rather than replacing that inventory.
+Electron's `ui/electron/tokenResolver.ts` retains its `gh auth token` fallback.
+The following inventories record the 1.3A baseline rather than replacing it.
+
+## Phase 1.3C-1 completion
+
+Template repository validation now uses `GitHubClient` through the existing
+Electron provider after local syntax validation and token resolution. The minimal
+`GitHubRepositoryBranch` model and `getRepositoryBranch()` capability provide an
+explicit branch lookup with a commit SHA; Octokit maps 404 to null, and the fake
+uses explicit branch state. Blank branch input uses `getRepository().defaultBranch`.
+Safe faculty diagnostics and the renderer/preload IPC result shape are preserved.
+
+No direct REST ownership remains in
+`ui/electron/templateRepositoryValidationService.ts`. The architecture guard now
+checks executable GitHub REST transport patterns and explicitly allows only the
+adapter and the temporary `ui/electron/templateWorkflowService.ts` exception.
+Template workflow read/write is the sole known direct REST feature; it remains
+unchanged for 1.3C-2, the next and final Phase 1 slice. Phase 1.3 and Phase 1 remain
+open.
 
 ## Client construction inventory
 
@@ -173,9 +188,10 @@ different responsibilities. Never merge the resolver into GitHubClient or expose
 credentials through renderer DTOs, preload or public IPC. Existing Electron
 authorization and projection boundaries stay intact.
 
-The direct-fetch services are additional API ownership leaks, even though they
-have no Octokit imports. Their existing API versions are left unchanged; this
-slice does not claim all GitHub API behavior is centralized.
+The baseline direct-fetch services had API ownership leaks without Octokit
+imports. After 1.3C-1, only template workflow read/write retains direct REST and
+its existing API version. Validation uses the adapter's authoritative API-version
+policy; all GitHub API behavior is not yet centralized.
 
 ## Future capability gaps
 
@@ -212,7 +228,8 @@ Clean up capability ownership (including direct REST fetch), add only host
 operations needed by upcoming phases, enforce architecture boundaries, and close
 Phase 1 after acceptance.
 
-1.3A, 1.3B-1, and 1.3B-2 are complete; 1.3C is next. 1.3C and Phase 1.3 closure remain open. Preserve `GRAIDER_GITHUB_TOKEN`,
+1.3A, 1.3B-1, 1.3B-2, and 1.3C-1 are complete. 1.3C-2 is the next and final
+Phase 1 slice. 1.3C, Phase 1.3, and Phase 1 closure remain open. Preserve `GRAIDER_GITHUB_TOKEN`,
 `GITHUB_TOKEN`, `gh auth token`, faculty authentication, token priority, API
 versions, retry, diagnostics and all repository/Actions behavior. Phase 2 OAuth,
 session implementation and secure storage remain undecided and unimplemented.

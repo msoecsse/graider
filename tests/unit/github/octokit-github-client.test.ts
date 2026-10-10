@@ -383,6 +383,7 @@ const createMockOctokit = (): OctokitRestClientLike => ({
     },
     repos: {
       get: () => createRepositoryResponse(),
+      getBranch: () => resolvedResponse({ name: BRANCH, commit: { sha: EXISTING_SHA } }),
       createInOrg: () => createRepositoryResponse(),
       createUsingTemplate: () => createRepositoryResponse(),
       listBranches: () => resolvedResponse([{ name: BRANCH }]),
@@ -698,6 +699,65 @@ describe("OctokitGitHubClient", () => {
       diagnosticCode: DiagnosticCode.GithubNetworkError,
       retryable: true,
       message: "GitHub network request failed."
+    });
+  });
+
+  it("looks up one branch and maps its name and commit SHA", async () => {
+    const octokit = createMockOctokit();
+    const branch = "release/course";
+    octokit.rest.repos.getBranch = vi.fn(() =>
+      resolvedResponse({ name: branch, commit: { sha: EXISTING_SHA }, protected: true })
+    );
+    octokit.paginate = vi.fn();
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(client.getRepositoryBranch(OWNER, REPO, branch)).resolves.toEqual({
+      name: branch,
+      commitSha: EXISTING_SHA
+    });
+    expect(octokit.rest.repos.getBranch).toHaveBeenCalledExactlyOnceWith({
+      owner: OWNER,
+      repo: REPO,
+      branch
+    });
+    expect(octokit.paginate).not.toHaveBeenCalled();
+  });
+
+  it("returns null for a missing branch", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.getBranch = () =>
+      rejectedResponse(createRequestError({ status: OctokitTestNumber.NotFoundStatus }));
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(client.getRepositoryBranch(OWNER, REPO, BRANCH)).resolves.toBeNull();
+  });
+
+  it.each([
+    [OctokitTestNumber.UnauthorizedStatus, "auth_failed", DiagnosticCode.GithubAuthFailed],
+    [OctokitTestNumber.ForbiddenStatus, "permission_denied", DiagnosticCode.GithubPermissionDenied],
+    [OctokitTestNumber.ServerErrorStatus, "api_error", DiagnosticCode.GithubApiError]
+  ] as const)("normalizes branch lookup HTTP %s failures", async (status, kind, diagnosticCode) => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.getBranch = () => rejectedResponse(createRequestError({ status }));
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(client.getRepositoryBranch(OWNER, REPO, BRANCH)).rejects.toMatchObject({
+      name: "GitHubClientError",
+      kind,
+      diagnosticCode,
+      statusCode: status
+    });
+  });
+
+  it("normalizes branch lookup network failures", async () => {
+    const octokit = createMockOctokit();
+    octokit.rest.repos.getBranch = () => rejectedResponse(new TypeError("fetch failed"));
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+
+    await expect(client.getRepositoryBranch(OWNER, REPO, BRANCH)).rejects.toMatchObject({
+      name: "GitHubClientError",
+      kind: "network_error",
+      diagnosticCode: DiagnosticCode.GithubNetworkError
     });
   });
 

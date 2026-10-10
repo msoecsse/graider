@@ -14,6 +14,11 @@ export interface GitHubRepository {
   htmlUrl: string;
 }
 
+export interface GitHubRepositoryBranch {
+  readonly name: string;
+  readonly commitSha: string;
+}
+
 export interface GitHubTemplateRepository extends GitHubRepository {
   isTemplate: boolean;
   branches: string[];

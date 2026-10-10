@@ -14,6 +14,7 @@ import type {
   GitHubPermissionState,
   GitHubPullRequest,
   GitHubRepository,
+  GitHubRepositoryBranch,
   GitHubTeam,
   GitHubTemplateRepository,
   GitHubUser,
@@ -32,6 +33,12 @@ export interface GitHubClient {
   getAuthenticatedUser(): Promise<GitHubUser>;
 
   getRepository(owner: string, repo: string): Promise<GitHubRepository | null>;
+
+  getRepositoryBranch(
+    owner: string,
+    repo: string,
+    branch: string
+  ): Promise<GitHubRepositoryBranch | null>;
 
   getDefaultBranchCommitSha(owner: string, repo: string): Promise<string | undefined>;
 

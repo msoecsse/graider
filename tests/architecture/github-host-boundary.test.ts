@@ -8,6 +8,8 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const ADAPTER = "src/github/octokit-github-client.ts";
 const FACTORY = "src/github/github-client-factory.ts";
 const COMPOSITION = "src/github/github-client-composition.ts";
+// Temporary direct REST exception: migrate workflow read/write in slice 1.3C-2.
+const DEFERRED_REST_SERVICE = "ui/electron/templateWorkflowService.ts";
 const FEATURE = "src/grading/example.ts";
 const PRODUCTION_SOURCE_ROOTS = ["src", "ui/electron"] as const;
 
@@ -28,7 +30,54 @@ const findBoundaryViolations = (sourcePath: string, source: string): readonly st
   const violations = new Set<string>();
   const concreteAllowed = sourcePath === ADAPTER || sourcePath === FACTORY;
   const file = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, true);
+  const restSignals = {
+    hasApiRoot: false,
+    hasApiVersionHeader: false,
+    hasBearerHeader: false,
+    hasTransportCall: false
+  };
   const visit = (node: ts.Node): void => {
+    const literalText = ts.isStringLiteralLike(node)
+      ? node.text
+      : ts.isTemplateExpression(node)
+        ? node.head.text
+        : "";
+    if (/^https:\/\/api\.github\.com(?:\/|$)/u.test(literalText)) {
+      restSignals.hasApiRoot = true;
+    }
+    if (ts.isPropertyAssignment(node)) {
+      const header =
+        ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name)
+          ? node.name.text.toLowerCase()
+          : "";
+      if (header === "x-github-api-version") restSignals.hasApiVersionHeader = true;
+      if (
+        header === "authorization" &&
+        /^`?Bearer\s/u.test(node.initializer.getText(file).replace(/^["']/u, ""))
+      ) {
+        restSignals.hasBearerHeader = true;
+      }
+    }
+    if (ts.isCallExpression(node)) {
+      const expression = node.expression;
+      const name = ts.isIdentifier(expression)
+        ? expression.text
+        : ts.isPropertyAccessExpression(expression)
+          ? expression.name.text
+          : "";
+      if (/^(?:fetch(?:Implementation)?|request|axios|get|post|put|patch|delete)$/u.test(name)) {
+        restSignals.hasTransportCall = true;
+      }
+      const header = node.arguments[0];
+      if (
+        /^(?:set|append)$/u.test(name) &&
+        header !== undefined &&
+        ts.isStringLiteralLike(header) &&
+        header.text.toLowerCase() === "x-github-api-version"
+      ) {
+        restSignals.hasApiVersionHeader = true;
+      }
+    }
     if (ts.isStringLiteralLike(node)) {
       const parent = node.parent;
       const isModule =
@@ -71,6 +120,15 @@ const findBoundaryViolations = (sourcePath: string, source: string): readonly st
     ts.forEachChild(node, visit);
   };
   visit(file);
+  if (
+    sourcePath !== ADAPTER &&
+    sourcePath !== DEFERRED_REST_SERVICE &&
+    ((restSignals.hasApiRoot && restSignals.hasTransportCall) ||
+      (restSignals.hasApiVersionHeader &&
+        (restSignals.hasTransportCall || restSignals.hasBearerHeader)))
+  ) {
+    violations.add(`${sourcePath}: direct GitHub REST transport`);
+  }
   return [...violations];
 };
 
@@ -83,6 +141,43 @@ describe("GitHub host boundary", () => {
       return findBoundaryViolations(relativePath, fs.readFileSync(file, "utf8"));
     });
     expect(violations).toEqual([]);
+  });
+
+  it("rejects direct GitHub REST transport outside the adapter and the temporary 1.3C-2 workflow exception", () => {
+    for (const source of [
+      'const root = "https://api.github.com"; fetch(`${root}/repos/org/repo`);',
+      'globalThis.fetch("https://api.github.com/repos/org/repo");',
+      "fetch(`https://api.github.com/repos/${owner}/${repo}`);",
+      'const root = "https://api.github.com"; const headers = { Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "version" }; fetchImplementation(root, { headers });',
+      'const headers = { Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "version" }; request(url, { headers });',
+      'const headers = new Headers(); headers.set("X-GitHub-Api-Version", "version"); fetch(url, { headers });'
+    ]) {
+      for (const consumer of [
+        FEATURE,
+        "ui/electron/templateRepositoryValidationService.ts",
+        FACTORY,
+        COMPOSITION
+      ]) {
+        expect(findBoundaryViolations(consumer, source)).toContain(
+          `${consumer}: direct GitHub REST transport`
+        );
+      }
+      expect(findBoundaryViolations(ADAPTER, source)).toEqual([]);
+      expect(findBoundaryViolations("ui/electron/templateWorkflowService.ts", source)).toEqual([]);
+    }
+  });
+
+  it("allows repository identifiers, generic fetch, and REST examples in comments or strings", () => {
+    for (const source of [
+      'const repository = "https://github.com/owner/repo";',
+      'fetch("https://example.test/resource", { headers: { Authorization: `Bearer ${token}` } });',
+      '// fetch("https://api.github.com", { headers: { "X-GitHub-Api-Version": "version" } });',
+      'const example = \'fetch("https://api.github.com", { headers: { Authorization: "Bearer token" } })\';',
+      'const label = "https://api.github.com";',
+      'const label = "X-GitHub-Api-Version"; fetch("https://example.test/resource");'
+    ]) {
+      expect(findBoundaryViolations(FEATURE, source)).toEqual([]);
+    }
   });
 
   it("permits factory imports only in trusted composition", () => {

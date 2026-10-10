@@ -16,6 +16,7 @@ import type {
   GitHubPermission,
   GitHubPermissionState,
   GitHubRepository,
+  GitHubRepositoryBranch,
   GitHubTeam,
   GitHubTemplateRepository,
   GitHubUser,
@@ -100,6 +101,11 @@ export interface FakeActionsArtifactRecord {
   archiveBytes: Uint8Array;
 }
 
+export interface FakeRepositoryBranchRecord extends GitHubRepositoryBranch {
+  readonly owner: string;
+  readonly repo: string;
+}
+
 export interface FakeRepositoryFileRecord {
   owner: string;
   repo: string;
@@ -137,6 +143,7 @@ export interface FakeGitHubClientState {
   users?: GitHubUser[];
   teams?: GitHubTeam[];
   repositories?: GitHubRepository[];
+  repositoryBranches?: readonly FakeRepositoryBranchRecord[];
   templateRepositories?: GitHubTemplateRepository[];
   collaboratorPermissions?: FakeCollaboratorPermissionRecord[];
   teamPermissions?: FakeTeamPermissionRecord[];
@@ -244,6 +251,7 @@ export class FakeGitHubClient implements GitHubClient {
   private readonly users: GitHubUser[];
   private readonly teams: GitHubTeam[];
   private readonly repositories: GitHubRepository[];
+  private readonly repositoryBranches: readonly FakeRepositoryBranchRecord[];
   private readonly templateRepositories: GitHubTemplateRepository[];
   private readonly collaboratorPermissions: FakeCollaboratorPermissionRecord[];
   private readonly teamPermissions: FakeTeamPermissionRecord[];
@@ -263,6 +271,7 @@ export class FakeGitHubClient implements GitHubClient {
     this.users = [...(state.users ?? [])];
     this.teams = [...(state.teams ?? [])];
     this.repositories = [...(state.repositories ?? [])];
+    this.repositoryBranches = [...(state.repositoryBranches ?? [])];
     this.templateRepositories = [...(state.templateRepositories ?? [])];
     for (const repository of this.templateRepositories) {
       this.defaultBranchCommitShas.set(
@@ -331,6 +340,21 @@ export class FakeGitHubClient implements GitHubClient {
             repositoryKey(repository.owner, repository.name) === repositoryKey(owner, repo)
         ) ?? null
     );
+  }
+
+  getRepositoryBranch(
+    owner: string,
+    repo: string,
+    branch: string
+  ): Promise<GitHubRepositoryBranch | null> {
+    return this.run("getRepositoryBranch", () => {
+      const record = this.repositoryBranches.find(
+        (candidate) =>
+          repositoryKey(candidate.owner, candidate.repo) === repositoryKey(owner, repo) &&
+          candidate.name === branch
+      );
+      return record === undefined ? null : { name: record.name, commitSha: record.commitSha };
+    });
   }
 
   getDefaultBranchCommitSha(owner: string, repo: string): Promise<string | undefined> {

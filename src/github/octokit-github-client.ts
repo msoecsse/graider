@@ -23,6 +23,7 @@ import {
   GitHubPermissionState,
   GitHubPullRequest,
   GitHubRepository,
+  GitHubRepositoryBranch,
   GitHubTeam,
   GitHubTemplateRepository,
   GitHubUser,
@@ -133,6 +134,7 @@ export interface OctokitRestClientLike {
       createInOrg: OctokitMethodLike;
       createUsingTemplate: OctokitMethodLike;
       get: OctokitMethodLike;
+      getBranch: OctokitMethodLike;
       getCollaboratorPermissionLevel: OctokitMethodLike;
       getContent: OctokitMethodLike;
       listBranches: unknown;
@@ -205,6 +207,22 @@ export class OctokitGitHubClient implements GitHubClient {
     const data = await this.runNullable(() => this.octokit.rest.repos.get({ owner, repo }));
 
     return data === null ? null : mapRepository(data);
+  }
+
+  async getRepositoryBranch(
+    owner: string,
+    repo: string,
+    branch: string
+  ): Promise<GitHubRepositoryBranch | null> {
+    const data = await this.runNullable(() =>
+      this.octokit.rest.repos.getBranch({ owner, repo, branch })
+    );
+    if (data === null) return null;
+    const record = asRecord(data);
+    return {
+      name: asString(record.name) ?? branch,
+      commitSha: asString(asRecord(record.commit).sha) ?? UNKNOWN_COMMIT_SHA
+    };
   }
 
   async getTemplateRepository(

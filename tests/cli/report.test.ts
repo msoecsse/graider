@@ -306,6 +306,7 @@ const createUnusedOctokit = (): OctokitRestClientLike => {
       },
       repos: {
         get: unusedMethod,
+        getBranch: unusedMethod,
         createInOrg: unusedMethod,
         createUsingTemplate: unusedMethod,
         listBranches: unusedMethod,

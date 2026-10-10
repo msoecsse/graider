@@ -1,19 +1,7 @@
+import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import type { ProcessRunner } from "./commandRunner.js";
 import { normalizeTemplateRepository } from "./assignmentSetupService.js";
 import { resolveGithubToken, type GithubTokenResolution } from "./tokenResolver.js";
-
-const GITHUB_API_ROOT = "https://api.github.com";
-
-interface FetchResponse {
-  readonly ok: boolean;
-  readonly status: number;
-  json(): Promise<unknown>;
-}
-
-type FetchImplementation = (
-  input: string,
-  init: { readonly headers: Readonly<Record<string, string>> }
-) => Promise<FetchResponse>;
 
 export interface TemplateRepositoryValidationResult {
   readonly valid: boolean;
@@ -24,7 +12,7 @@ export interface TemplateRepositoryValidationResult {
 
 export interface TemplateRepositoryValidationOptions {
   readonly env?: NodeJS.ProcessEnv;
-  readonly fetchImplementation?: FetchImplementation;
+  readonly provideClient?: GithubClientProvider;
   readonly resolveToken?: () => Promise<GithubTokenResolution>;
   readonly runner: ProcessRunner;
 }
@@ -64,49 +52,26 @@ export const validateTemplateRepository = async (
       "GitHub authentication is required. Sign in with GitHub CLI or configure the supported token before saving this assignment."
     );
   const [owner, repo] = repository.split("/");
-  const headers = {
-    Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${tokenResult.token}`,
-    "X-GitHub-Api-Version": "2022-11-28"
-  };
-  const fetchImplementation =
-    options.fetchImplementation ?? (globalThis.fetch as FetchImplementation);
+  let selectedBranch: string | null = null;
   try {
-    const repositoryResponse = await fetchImplementation(
-      `${GITHUB_API_ROOT}/repos/${encodeURIComponent(owner ?? "")}/${encodeURIComponent(repo ?? "")}`,
-      { headers }
-    );
-    if (!repositoryResponse.ok)
+    const githubClient = (options.provideClient ?? provideGithubClient)(tokenResult.token);
+    const metadata = await githubClient.getRepository(owner ?? "", repo ?? "");
+    if (metadata === null)
       return invalid(
         repository,
         explicitBranch || null,
         `Template repository was not found or is not accessible: ${repository}`
       );
-    const metadata = await repositoryResponse.json();
-    const metadataRecord =
-      typeof metadata === "object" && metadata !== null
-        ? (metadata as Record<string, unknown>)
-        : null;
-    const defaultBranchValue = metadataRecord?.default_branch;
-    const defaultBranch = typeof defaultBranchValue === "string" ? defaultBranchValue : null;
-    const branch = explicitBranch || defaultBranch;
-    if (branch === null || branch.trim().length === 0)
+    const branch = explicitBranch || metadata.defaultBranch;
+    if (branch.trim().length === 0)
       return invalid(repository, null, "Template repository did not provide a default branch.");
-    const branchResponse = await fetchImplementation(
-      `${GITHUB_API_ROOT}/repos/${encodeURIComponent(owner ?? "")}/${encodeURIComponent(repo ?? "")}/branches/${encodeURIComponent(branch)}`,
-      { headers }
-    );
-    if (branchResponse.status === 404)
+    selectedBranch = branch;
+    const branchResult = await githubClient.getRepositoryBranch(owner ?? "", repo ?? "", branch);
+    if (branchResult === null)
       return invalid(
         repository,
         branch,
         `Template repository exists, but branch ${branch} was not found.`
-      );
-    if (!branchResponse.ok)
-      return invalid(
-        repository,
-        branch,
-        "Unable to validate the template branch. Check GitHub access and try again."
       );
     return {
       valid: true,
@@ -120,7 +85,26 @@ export const validateTemplateRepository = async (
         )
       ]
     };
-  } catch {
+  } catch (error) {
+    // Domain errors cross a generated CJS boundary, so inspect their public name/kind
+    // rather than depending on the identity of a bundled Error constructor.
+    if (
+      error instanceof Error &&
+      error.name === "GitHubClientError" &&
+      "kind" in error &&
+      (error.kind === "auth_missing" ||
+        error.kind === "auth_failed" ||
+        error.kind === "permission_denied" ||
+        error.kind === "rate_limited" ||
+        error.kind === "api_error")
+    )
+      return invalid(
+        repository,
+        selectedBranch ?? (explicitBranch || null),
+        selectedBranch === null
+          ? `Template repository was not found or is not accessible: ${repository}`
+          : "Unable to validate the template branch. Check GitHub access and try again."
+      );
     return invalid(
       repository,
       explicitBranch || null,

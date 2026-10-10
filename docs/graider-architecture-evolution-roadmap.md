@@ -112,7 +112,13 @@ Phase 1.3A — GitHub host boundary inventory/guard is complete. See
 1.3B-1 — CLI client composition seam and explicit-token resolution fix is complete.
 1.3B-2 — generated backend client composition is complete. Electron trusted
 composition provides clients, with template-sync transport credentials kept separate.
-1.3C — direct REST ownership is next. Phase 1.3 and Phase 1 are not complete.
+1.3C-1 — template repository validation through GitHubClient is complete. The
+minimal explicit branch lookup supplies branch identity and commit SHA; validation
+no longer owns REST transport or headers and retains safe diagnostics/default-branch
+behavior. The architecture guard allows only the adapter and the temporary
+workflow-service exception for direct GitHub REST transport.
+1.3C-2 — template workflow read/write is next, the final Phase 1 slice and sole
+known remaining direct REST feature. Phase 1.3 and Phase 1 are not complete.
 
 Separate GitHub API behavior from local Git transport.
 

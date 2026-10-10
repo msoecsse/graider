@@ -72,6 +72,54 @@ describe("FakeGitHubClient", () => {
     await expect(client.getRepository(OWNER, REPOSITORY_NAME)).resolves.toBeNull();
   });
 
+  it("returns configured branches by repository identity and case-sensitive branch name", async () => {
+    const branch = {
+      owner: OWNER,
+      repo: REPOSITORY_NAME,
+      name: "Release/course",
+      commitSha: "branch-sha"
+    };
+    const client = new FakeGitHubClient({ repositoryBranches: [branch] });
+
+    await expect(
+      client.getRepositoryBranch(OWNER.toUpperCase(), REPOSITORY_NAME.toUpperCase(), branch.name)
+    ).resolves.toEqual({ name: branch.name, commitSha: branch.commitSha });
+    await expect(
+      client.getRepositoryBranch("other-owner", REPOSITORY_NAME, branch.name)
+    ).resolves.toBeNull();
+    await expect(client.getRepositoryBranch(OWNER, "other-repo", branch.name)).resolves.toBeNull();
+    await expect(
+      client.getRepositoryBranch(OWNER, REPOSITORY_NAME, "release/course")
+    ).resolves.toBeNull();
+  });
+
+  it("does not derive branches from repository or template metadata", async () => {
+    const client = new FakeGitHubClient({
+      repositories: [repository],
+      templateRepositories: [templateRepository]
+    });
+
+    await expect(client.getRepositoryBranch(OWNER, REPOSITORY_NAME, "main")).resolves.toBeNull();
+    await expect(
+      client.getRepositoryBranch(OWNER, TEMPLATE_REPOSITORY_NAME, "main")
+    ).resolves.toBeNull();
+  });
+
+  it("supports configured and queued branch lookup failures deterministically", async () => {
+    const client = new FakeGitHubClient({
+      failures: [{ method: "getRepositoryBranch", kind: "permission_denied" }]
+    });
+
+    await expect(client.getRepositoryBranch(OWNER, REPOSITORY_NAME, "main")).rejects.toBeInstanceOf(
+      GitHubClientError
+    );
+    client.failNext("getRepositoryBranch", "network_error");
+    await expect(client.getRepositoryBranch(OWNER, REPOSITORY_NAME, "main")).rejects.toMatchObject({
+      kind: "network_error"
+    });
+    await expect(client.getRepositoryBranch(OWNER, REPOSITORY_NAME, "main")).resolves.toBeNull();
+  });
+
   it("TC-GITHUB-FAKE-003 simulates template repo", async () => {
     const client = new FakeGitHubClient({ templateRepositories: [templateRepository] });
 
