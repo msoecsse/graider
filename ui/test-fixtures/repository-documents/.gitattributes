@@ -1,0 +1,3 @@
+# Preserve document bytes, including PDF cross-reference record whitespace.
+*.pdf binary
+*.docx binary

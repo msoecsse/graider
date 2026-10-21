@@ -214,3 +214,26 @@ describe("grading workflow repair preload bridge", () => {
     );
   });
 });
+
+describe("repository document preload boundary", () => {
+  it("forwards only the document workflow through its dedicated channel", async () => {
+    const api = electron.exposedApi;
+    if (!api) throw new Error("Expected preload API.");
+    const request = {
+      courseFolderId: "course",
+      courseFolderPath: "/trusted/course",
+      termCode: "27s1",
+      assignmentSlug: "lab1",
+      studentId: "ada",
+      file: "nested/Notes.DOCX"
+    };
+    electron.invoke.mockResolvedValue({ status: "success", bytes: new Uint8Array([1]) });
+    await api.loadGradingStudentDocument(request);
+    expect(electron.invoke).toHaveBeenCalledWith(
+      "graider-ui:grading-student-document:load",
+      request
+    );
+    for (const name of ["readFile", "openPath", "filesystem", "fs"])
+      expect(api).not.toHaveProperty(name);
+  });
+});

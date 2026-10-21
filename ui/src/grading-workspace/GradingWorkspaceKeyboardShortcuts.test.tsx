@@ -29,6 +29,15 @@ vi.mock("./MonacoSourceViewer", () => ({
   )
 }));
 
+vi.mock("./RepositoryDocumentViewer", () => ({
+  RepositoryDocumentViewer: () => (
+    <div className="repository-document__find">
+      <input aria-label="Find in document" />
+      <button type="button">Next match</button>
+    </div>
+  )
+}));
+
 import { GradingWorkspacePage } from "./GradingWorkspacePage";
 
 const REQUEST: GradingWorkspacePrepareRequest = {
@@ -61,6 +70,7 @@ const mixedStudents: readonly WorkspaceStudent[] = [
 const source = (studentId: string) => ({
   status: "success",
   studentId,
+  documents: ["normal.pdf", "structured.docx"],
   combinedText: `class ${studentId} {}`,
   syntheticCombinedLines: [],
   sections: [
@@ -204,6 +214,21 @@ const setApis = ({
 };
 
 describe("GradingWorkspacePage keyboard shortcuts", () => {
+  it("keeps document find typing and Enter on find buttons out of grading shortcuts", async () => {
+    const markComplete = vi.fn();
+    setApis({ markComplete });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.change(screen.getByRole("combobox", { name: "View submission file" }), {
+      target: { value: "normal.pdf" }
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Find in document" }), { key: "j" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Next match" }), { key: "Enter" });
+    expect(markComplete).not.toHaveBeenCalled();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada");
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace"));
+  });
   it("moves to the next ungraded student with J and back with K", async () => {
     setApis({});
     render(<GradingWorkspacePage request={REQUEST} />);

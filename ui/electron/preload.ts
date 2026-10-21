@@ -12,6 +12,8 @@ import {
   type AssignmentDetailResult,
   type GradingWorkspacePrepareRequest,
   type GradingStudentSourceRequest,
+  type GradingStudentDocumentRequest,
+  type GradingStudentDocumentResult,
   type GradingStudentViewStateRequest,
   type SaveGradingStudentViewStateRequest,
   type GradingStudentViewStateResult,
@@ -258,6 +260,10 @@ const graiderUI: GraiderUIApi = {
     await invoke<AssignmentDetailResult>(IPC_CHANNELS.getAssignmentDetail, request),
   prepareGradingWorkspace: async (request: GradingWorkspacePrepareRequest): Promise<unknown> =>
     await invoke<unknown>(IPC_CHANNELS.prepareGradingWorkspace, request),
+  loadGradingStudentDocument: async (
+    request: GradingStudentDocumentRequest
+  ): Promise<GradingStudentDocumentResult> =>
+    await invoke<GradingStudentDocumentResult>(IPC_CHANNELS.loadGradingStudentDocument, request),
   loadGradingStudentSource: async (request: GradingStudentSourceRequest): Promise<unknown> =>
     await invoke<unknown>(IPC_CHANNELS.loadGradingStudentSource, request),
   loadGradingStudentViewState: async (

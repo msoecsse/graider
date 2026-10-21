@@ -481,6 +481,7 @@ const isGradingShortcutSuppressedTarget = (target: EventTarget | null): boolean 
   if (!(target instanceof Element)) return false;
   if (target.closest(".grading-source-editor") !== null) return false;
   if (target.closest(".grading-comment-formatting-controls") !== null) return true;
+  if (target.closest(".repository-document__find") !== null) return true;
   const tag = target.tagName;
   return (
     tag === "INPUT" ||
@@ -3131,6 +3132,7 @@ export const GradingWorkspacePage = ({
           hasNext={getStudentNavigationTarget(filteredStudents, "next") !== undefined}
         />
         <GradingSubmissionViewerPane
+          request={request}
           hasSelectedStudent={student !== undefined}
           viewStateWarning={
             student === undefined ? undefined : viewStateWarnings[student.studentId]

@@ -83,6 +83,38 @@ afterEach(() => {
   });
 });
 describe("grading student source service", () => {
+  it("keeps required binary documents out of Monaco while discovering required and optional documents throughout the repository", async () => {
+    const { course, userData, repository, request } = setup();
+    setRequiredFiles(course, '["src/A.java", "report.PDF", "notes.docx"]');
+    fs.writeFileSync(path.join(repository, "src/A.java"), "class Main {}");
+    fs.writeFileSync(path.join(repository, "report.PDF"), "%PDF-1.4");
+    fs.writeFileSync(path.join(repository, "notes.docx"), "PK");
+    fs.mkdirSync(path.join(repository, "extras"));
+    fs.writeFileSync(path.join(repository, "extras/optional.pdf"), "%PDF-1.4");
+    saveCurrentFacultyMsoeUsername(getLocalSettingsPath(userData), "jones");
+    recordLocalRepository(getLocalRepositoryLocatorPath(userData), {
+      ...request,
+      localPath: repository
+    });
+    expect(await createService()(request)).toMatchObject({
+      status: "success",
+      combinedText: "class Main {}",
+      sections: [{ file: "src/A.java" }],
+      documents: ["extras/optional.pdf", "notes.docx", "report.PDF"],
+      documentRevision: SUBMISSION_SHA
+    });
+    // The opt-in exclusion changes only the workspace viewer projection.
+    expect(
+      loadGradingStudentSourceContext({
+        ...request,
+        repositoryRoot: repository,
+        currentSubmissionCommitSha: SUBMISSION_SHA
+      })
+    ).toMatchObject({
+      status: "success",
+      sections: [{ file: "src/A.java" }, { file: "report.PDF" }, { file: "notes.docx" }]
+    });
+  });
   it("authorizes faculty, resolves the trusted locator, and returns ordered source sections", async () => {
     const { userData, repository, request } = setup();
     fs.writeFileSync(path.join(repository, "src/A.java"), "one\ntwo");

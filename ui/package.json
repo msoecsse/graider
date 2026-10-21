@@ -27,18 +27,24 @@
     "format:check": "prettier . --check"
   },
   "dependencies": {
+    "dompurify": "^3.4.17",
     "dugite": "3.2.3",
+    "image-size": "^2.0.4",
+    "mammoth": "^1.13.0",
     "monaco-editor": "^0.52.2",
     "react": "latest",
     "react-dom": "latest",
+    "react-pdf": "^11.0.0",
     "react-router-dom": "^6.30.6",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-react": "latest",
     "electron": "latest",
     "electron-builder": "^26.15.3",

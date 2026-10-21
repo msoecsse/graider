@@ -1,4 +1,6 @@
 import path from "node:path";
+import { DOCUMENT_EXTENSIONS } from "./repositoryDocumentPolicy.js";
+import { discoverRepositoryDocuments } from "./repositoryDocuments.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest
@@ -23,6 +25,7 @@ export interface GradingStudentSourceBackend {
     readonly studentId: string;
     readonly repositoryRoot: string;
     readonly currentSubmissionCommitSha: string;
+    readonly excludedSourceExtensions: readonly string[];
   }): GradingStudentSourceResult;
 }
 export interface GradingStudentSourceDependencies {
@@ -53,14 +56,36 @@ export const createGradingStudentSourceService = (
     if (repository.status !== "success") return repository;
     const head = await readHead(repository.localPath);
     if (head.status !== "success") return head;
-    return getBackend().loadGradingStudentSourceContext({
+    const source = getBackend().loadGradingStudentSourceContext({
       courseFolderPath: request.courseFolderPath,
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug,
       studentId: request.studentId,
       repositoryRoot: repository.localPath,
+      excludedSourceExtensions: DOCUMENT_EXTENSIONS,
       currentSubmissionCommitSha: head.submissionCommitSha
     });
+    if (
+      typeof source !== "object" ||
+      source === null ||
+      !("status" in source) ||
+      source.status !== "success"
+    )
+      return source;
+    try {
+      return {
+        ...source,
+        documents: await discoverRepositoryDocuments(repository.localPath),
+        documentRevision: head.submissionCommitSha
+      };
+    } catch {
+      return {
+        ...source,
+        documents: [],
+        documentDiscoveryError: "Repository documents could not be listed safely.",
+        documentRevision: head.submissionCommitSha
+      };
+    }
   };
 };
 

@@ -1,3 +1,7 @@
+import {
+  loadGradingStudentDocument,
+  isGradingStudentDocumentRequest
+} from "./gradingStudentDocumentService.js";
 import { pullLatestGradingStudentChanges } from "./gradingStudentRepositoryUpdateService.js";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { registerExternalNavigation } from "./externalNavigation.js";
@@ -1042,6 +1046,11 @@ export const registerIpcHandlers = (): void => {
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug
     });
+  });
+  ipcMain.handle(IPC_CHANNELS.loadGradingStudentDocument, (_event, request: unknown) => {
+    if (!isGradingStudentDocumentRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course and repository document are required.");
+    return loadGradingStudentDocument({ ...request, userDataPath: app.getPath("userData") });
   });
   ipcMain.handle(IPC_CHANNELS.loadGradingStudentSource, (_event, request: unknown) => {
     if (!isLoadGradingStudentSourceRequest(request) || !isRegisteredAssignmentSetupCourse(request))

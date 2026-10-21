@@ -1,3 +1,4 @@
+import { isRepositoryDocumentPath } from "../../electron/repositoryDocumentPolicy";
 export interface FoundSubmissionSourceSection {
   readonly status: "found";
   readonly file: string;
@@ -33,6 +34,9 @@ export interface SubmissionSourceModelDto {
 }
 
 export interface GradingStudentSourceDto extends SubmissionSourceModelDto {
+  readonly documents?: readonly string[];
+  readonly documentRevision?: string;
+  readonly documentDiscoveryError?: string;
   readonly status: "success";
   readonly studentId: string;
 }
@@ -291,6 +295,11 @@ export const isGradingStudentSourceDto = (value: unknown): value is GradingStude
   const result = value as Record<string, unknown>;
   return (
     result.status === "success" &&
+    (result.documents === undefined ||
+      (Array.isArray(result.documents) && result.documents.every(isRepositoryDocumentPath))) &&
+    (result.documentRevision === undefined || typeof result.documentRevision === "string") &&
+    (result.documentDiscoveryError === undefined ||
+      typeof result.documentDiscoveryError === "string") &&
     typeof result.studentId === "string" &&
     typeof result.combinedText === "string" &&
     Array.isArray(result.sections) &&

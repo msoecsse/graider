@@ -5,3 +5,69 @@
 @import "./assignment-detail.css";
 @import "./grading-workspace.css";
 @import "./shared-components.css";
+
+.repository-document__selector {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-block: 0.75rem;
+}
+
+.repository-document__selector select {
+  max-width: 100%;
+}
+
+.repository-document__find {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-block: 0.75rem;
+}
+
+.repository-document__pages {
+  overflow: auto;
+  max-height: 70vh;
+  background: #e6e6e6;
+  padding: 1rem;
+  overscroll-behavior: contain;
+}
+
+.repository-document__pdf-page {
+  margin: 0 auto 1rem;
+  width: fit-content;
+  min-width: 10rem;
+  background: white;
+}
+
+.repository-document__docx {
+  background: white;
+  color: #202020;
+  padding: 2rem;
+  max-width: 60rem;
+  margin: auto;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.repository-document__docx img {
+  max-width: 100%;
+  height: auto;
+}
+
+.repository-document__docx table {
+  border-collapse: collapse;
+}
+
+.repository-document__docx td,
+.repository-document__docx th {
+  border: 1px solid #999;
+  padding: 0.5rem;
+}
+
+.repository-document__docx p,
+.repository-document__docx h1,
+.repository-document__docx h2,
+.repository-document__docx h3 {
+  color: inherit;
+}

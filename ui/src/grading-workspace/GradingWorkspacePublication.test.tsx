@@ -28,6 +28,10 @@ vi.mock("./MonacoSourceViewer", () => ({
   )
 }));
 
+vi.mock("./PdfDocumentViewer", () => ({
+  PdfDocumentViewer: ({ bytes }: { readonly bytes: Uint8Array }) => <p>PDF revision {bytes[0]}</p>
+}));
+
 import { GradingWorkspacePage } from "./GradingWorkspacePage";
 
 const REQUEST: GradingWorkspacePrepareRequest = {
@@ -169,6 +173,43 @@ const assertNoDuplicateAccessibleNames = (): void => {
 };
 
 describe("explicit student repository updates", () => {
+  it("reopens document bytes after Pull latest changes while preserving grading status", async () => {
+    configureApis();
+    let revision = 1;
+    const loadSource = window.graiderUI.loadGradingStudentSource;
+    const loadDocument = vi.fn(async () => ({
+      status: "success",
+      bytes: new Uint8Array([revision])
+    }));
+    Object.assign(window.graiderUI, {
+      loadGradingStudentSource: vi.fn(async (identity) => ({
+        ...((await loadSource(identity)) as object),
+        documents: ["normal.pdf"],
+        documentRevision: String(revision)
+      })),
+      loadGradingStudentDocument: loadDocument,
+      pullLatestGradingStudentChanges: vi.fn(async () => {
+        revision += 1;
+        return { status: "success" };
+      })
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    const selector = await screen.findByRole("combobox", { name: "View submission file" });
+    fireEvent.change(selector, { target: { value: "normal.pdf" } });
+    expect(await screen.findByText("PDF revision 1")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "View submission file" })).toHaveValue("")
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "View submission file" }), {
+      target: { value: "normal.pdf" }
+    });
+    expect(await screen.findByText("PDF revision 2")).toBeVisible();
+    expect(loadDocument).toHaveBeenCalledTimes(2);
+    expect(
+      screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
+    ).toBeVisible();
+  });
   it("updates only the selected student, retains graded status and deductions, and does not rerun workflows", async () => {
     let updated = false;
     const repair = vi.fn().mockResolvedValue({ status: "grading_not_eligible", studentId: "ada" });

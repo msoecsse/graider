@@ -79,6 +79,7 @@ describe("UI security boundary", () => {
       "graider-ui:dashboard:refresh-all",
       "graider-ui:assignment-detail:get",
       "graider-ui:grading-workspace:prepare",
+      "graider-ui:grading-student-document:load",
       "graider-ui:grading-student-source:load",
       "graider-ui:grading-student-view-state:load",
       "graider-ui:grading-student-view-state:save",
@@ -130,6 +131,7 @@ describe("UI security boundary", () => {
     expect(preloadSource).toContain('exposeInMainWorld("graiderUI"');
     expect(preloadSource).toContain("prepareAssignmentTemplateSync:");
     expect(preloadSource).toContain("executeAssignmentTemplateSync:");
+    expect(preloadSource).toContain("loadGradingStudentDocument:");
     expect(preloadSource).toContain("loadGradingStudentViewState:");
     expect(preloadSource).toContain("getRosterSectionSummaries:");
     expect(preloadSource).toContain("saveGradingStudentViewState:");

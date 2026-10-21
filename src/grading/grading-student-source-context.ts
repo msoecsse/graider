@@ -9,6 +9,7 @@ export const loadGradingStudentSourceContext = (request: {
   readonly studentId: string;
   readonly repositoryRoot: string;
   readonly currentSubmissionCommitSha: string;
+  readonly excludedSourceExtensions?: readonly string[];
 }) => {
   const submission = resolveGradingSubmissionContext(request);
   if (submission.status !== "success") return submission;
@@ -19,7 +20,12 @@ export const loadGradingStudentSourceContext = (request: {
   if (config.status === "failure") return { status: "assignment_config_error" } as const;
   const source = buildSubmissionSourceModel({
     repositoryRoot: request.repositoryRoot,
-    requiredFiles: config.config.assignment.grading?.required_files ?? []
+    // Viewer-only exclusion: report generation and source-anchor models retain
+    // their existing contracts. Binary documents use the narrow document path.
+    requiredFiles: (config.config.assignment.grading?.required_files ?? []).filter(
+      (file) =>
+        !request.excludedSourceExtensions?.includes(file.split(".").pop()?.toLowerCase() ?? "")
+    )
   });
   return source.status === "failure"
     ? ({ status: "source_error", code: source.code } as const)

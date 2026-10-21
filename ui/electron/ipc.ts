@@ -61,6 +61,7 @@ export const IPC_CHANNELS = {
   refreshDashboard: "graider-ui:dashboard:refresh-all",
   getAssignmentDetail: "graider-ui:assignment-detail:get",
   prepareGradingWorkspace: "graider-ui:grading-workspace:prepare",
+  loadGradingStudentDocument: "graider-ui:grading-student-document:load",
   loadGradingStudentSource: "graider-ui:grading-student-source:load",
   loadGradingStudentViewState: "graider-ui:grading-student-view-state:load",
   saveGradingStudentViewState: "graider-ui:grading-student-view-state:save",
@@ -736,6 +737,12 @@ export interface GradingWorkspacePrepareRequest {
 export interface GradingStudentSourceRequest extends GradingWorkspacePrepareRequest {
   readonly studentId: string;
 }
+export interface GradingStudentDocumentRequest extends GradingStudentSourceRequest {
+  readonly file: string;
+}
+export type GradingStudentDocumentResult =
+  | { readonly status: "success"; readonly bytes: Uint8Array }
+  | { readonly status: "failure"; readonly message: string };
 export type GradingStudentViewStateRequest = GradingStudentSourceRequest;
 export type GradingEditorViewState = GradingEditorViewStateDto;
 export interface SaveGradingStudentViewStateRequest extends GradingStudentViewStateRequest {
@@ -1136,6 +1143,9 @@ export interface GraiderUIApi {
     request: AssignmentDetailRequest
   ) => Promise<AssignmentDetailResult>;
   readonly prepareGradingWorkspace: (request: GradingWorkspacePrepareRequest) => Promise<unknown>;
+  readonly loadGradingStudentDocument: (
+    request: GradingStudentDocumentRequest
+  ) => Promise<GradingStudentDocumentResult>;
   readonly loadGradingStudentSource: (request: GradingStudentSourceRequest) => Promise<unknown>;
   readonly loadGradingStudentViewState: (
     request: GradingStudentViewStateRequest

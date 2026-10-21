@@ -198,3 +198,9 @@ implemented through narrow main-process APIs.
 - [ ] Renderer tests mock `window.graiderUI`.
 - [ ] Accessibility and responsive behavior are covered where the UI changes.
 - [ ] Relevant Electron and command docs are updated.
+
+Repository document viewing uses a dedicated identity-and-relative-document IPC,
+with faculty scope, repository containment, format, and resource checks in main.
+The renderer receives validated PDF/DOCX bytes only. See
+[Repository document viewing](features/repository-documents.md) for the viewer,
+local resources, sanitization, and revision refresh contract.
