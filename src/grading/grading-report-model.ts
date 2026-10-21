@@ -1,3 +1,4 @@
+import type { DocumentContent, ReportDocument } from "../shared/document-content.js";
 import type { RawAssignmentConfig, RawCourseConfig } from "../config/config-models.js";
 import type { GradingEvidence } from "./grading-evidence-parser.js";
 import type { GradingState, GradingStateResult } from "./grading-state.js";
@@ -39,6 +40,7 @@ export interface BuildGradingReportModelInput {
   readonly gradingState: GradingState;
   readonly rubric: readonly RubricCategory[];
   readonly source: SubmissionSourceModel;
+  readonly documents?: readonly ReportDocument[];
   readonly evidence?: GradingReportEvidenceInput;
   readonly commitHistory?: GradingReportCommitHistoryInput;
 }
@@ -78,7 +80,17 @@ export interface GradingReportMissingSourceFile {
   readonly comments: readonly GradingReportComment[];
 }
 
-export type GradingReportSourceFile = GradingReportFoundSourceFile | GradingReportMissingSourceFile;
+export interface GradingReportDocumentFile {
+  readonly status: "document";
+  readonly fileIndex: number;
+  readonly file: string;
+  readonly comments: readonly GradingReportComment[];
+  readonly content: DocumentContent;
+}
+export type GradingReportSourceFile =
+  | GradingReportFoundSourceFile
+  | GradingReportMissingSourceFile
+  | GradingReportDocumentFile;
 
 export interface GradingReportModel {
   readonly course: GradingReportCourseIdentity;
@@ -174,7 +186,9 @@ export const buildGradingReportModel = (
   const sourceFiles: GradingReportSourceFile[] = input.source.sections.map((section, index) => {
     const fileIndex = index + 1;
     const lines =
-      section.status === "found" ? normalizedSourceLines(section.sourceText) : undefined;
+      section.status === "found" && !section.document
+        ? normalizedSourceLines(section.sourceText)
+        : undefined;
     const comments = indexedComments
       .filter(({ comment }) => comment.sourceLocation?.file === section.file)
       .map(({ comment, reportIndex }) => {
@@ -189,6 +203,17 @@ export const buildGradingReportModel = (
         return reportComment(comment, reportIndex, rubricNames, locationAvailable);
       });
 
+    if (section.status === "found" && section.document)
+      return {
+        status: "document",
+        fileIndex,
+        file: section.file,
+        comments,
+        content: input.documents?.find((document) => document.file === section.file)?.content ?? {
+          status: "unavailable",
+          message: "Document content is unavailable."
+        }
+      };
     return section.status === "found"
       ? { status: "found", fileIndex, file: section.file, lines: lines ?? [], comments }
       : { status: "missing", fileIndex, file: section.file, comments };

@@ -1,4 +1,4 @@
-# Repository document viewing (Slice 1)
+# Repository documents (Slices 1 and 2)
 
 The grading workspace's Source pane offers **View submission file** when the
 selected repository contains PDF or DOCX files. **Required source files** returns
@@ -17,9 +17,9 @@ without following symlinks. It excludes `.git`, `node_modules`, and `.graider`
 source lookup is not a repository-wide exclusion: documents there remain visible.
 Documents need not appear in `required_files`.
 
-For this workspace projection only, PDF/DOCX required files are omitted from the
-combined text sent to Monaco. Source anchor and report construction keep their
-existing contracts; this slice adds no document contents to reports.
+PDF/DOCX required files are omitted from the combined text sent to Monaco.
+Generated feedback reports automatically include required documents as described
+below; ordinary source anchors keep their existing contracts.
 
 `loadGradingStudentDocument` is the only new IPC operation. It accepts the existing
 strict course/term/assignment/student identity plus one repository-relative PDF or
@@ -114,5 +114,72 @@ discovery, refresh, real PDF/DOCX parsing, sanitization, resources, lazy renderi
 find/copy selection, viewer failures, switching, and keyboard behavior. Existing
 workspace publication/update tests cover preserved deductions and source anchors.
 
-Report inclusion, required-file automatic report inclusion, OCR, annotations,
-document comments, document editing, and cloud conversion remain deferred.
+## Required-document feedback reports (Slice 2)
+
+Only PDF/DOCX entries resolved by the existing `required_files` resolver become
+report content. Explicit paths resolve from the repository root; a bare filename
+matches exactly under `src`, excluding `src/test`. Matching is case-sensitive at
+the filename lookup boundary, with existing host-filesystem behavior for explicit
+paths. Extension classification is case-insensitive. Missing/ambiguous entries
+retain the existing single required-file unavailable section. Non-required
+repository documents remain viewable and do not enter the report.
+
+Report preparation asks `buildSubmissionSourceModel` to defer binary document
+reading, preserving resolved repository-relative names and required-file order.
+`gradingStudentReportPublicationService` sends only those names and its authorized
+repository root to `documentReportService`. Each sequential, terminable Node
+worker uses **the same** `readRepositoryDocument` path validation, bounded reads,
+and DOCX archive validation as the viewer. The worker uses the central 30-second
+timeout and existing byte/page/text/archive limits. A 256 MiB worker heap ceiling
+bounds parser object allocations; normalized structures have a depth limit of 64.
+Worker launch, timeout, crash, and parser failures become contained document
+notices and do not discard other report sections.
+
+PDF.js extracts each page's text layer in content-stream reading order, retaining
+meaningful line endings and normalizing whitespace. The viewer and report share
+PDF text-item interpretation; viewer search keeps its existing space-joining
+behavior. Reports render escaped text, never canvases, screenshots, PDF binaries,
+or OCR. Image-only PDFs show `No extractable text available for this PDF.` and
+remain viewable. Corrupt, encrypted, unsupported, and over-limit documents show a
+concise unavailable/limit notice.
+
+Mammoth converts DOCX with the same external-access/style-map restrictions as the
+viewer. Its report image callback never reads or decodes images. Bounded Mammoth
+HTML is transformed into `src/shared/document-content.d.ts`'s inert tree of text
+and allowlisted formatting elements. Attributes are discarded, active subtrees
+and images are dropped, and hyperlinks become their text. This preserves
+headings, paragraphs, emphasis, lists, tables, and meaningful line breaks. A
+second allowlist at the existing report renderer emits only fixed element names
+and HTML-escapes every text node. No raw converter HTML reaches the report.
+Student content cannot supply IDs, resource URLs, navigation, styles, or events;
+the report's restrictive CSP remains in place.
+
+Documents appear in required-file order beside source sections, labeled
+`Document: repository/relative/name.docx`, using the same numbered
+`source-file-N` section anchors. Documents have no synthetic source-line links;
+existing source-feedback navigation and scoring remain unchanged.
+
+No extraction cache exists: preview and publication read current local bytes on
+every generation. The publication service rechecks HEAD after asynchronous
+extraction and retains the existing prepublication and postpublication revision
+and grading-state checks. Pull latest changes therefore uses the current recorded
+revision, while comments, scores, and repeated publication keep their existing
+semantics.
+
+No new parser library was added. PDF.js (already present through React-PDF,
+Apache-2.0) is now explicitly declared as a UI dependency for the Node worker;
+Mammoth, Yauzl, and the existing fast-xml-parser are reused. Worker output is built
+as ESM so PDF.js and its local worker module load in Electron without a cloud
+service. Existing viewer conversion, images, lazy rendering, search, and selection
+continue through their existing paths.
+
+Regression coverage includes real document fixtures, required-file matching,
+structure/image exclusion, hostile HTML/text, malformed/encrypted/oversized
+content, page limits, worker timeouts/errors, revision races, preview, and
+republication. The local smoke test uses a real Git origin/clone and the Pull
+latest changes backend, then regenerates reports from changed PDF bytes.
+Electron inspection verifies readable document sections, image omission, no
+remote requests, and unique/unbroken anchors.
+
+OCR, annotations, document comments/editing, cloud conversion, and manual
+include/exclude controls remain deferred.

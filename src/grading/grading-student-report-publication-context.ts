@@ -1,3 +1,4 @@
+import type { ReportDocument } from "../shared/document-content.js";
 import { loadGraiderConfig } from "../config/config-loader.js";
 import type { ConfigLoadRequest, ConfigLoadResult } from "../config/config-models.js";
 import {
@@ -84,6 +85,7 @@ export interface PreparedGradingStudentReportPublicationContext {
     readonly name: string;
     readonly points: number;
   }[];
+  readonly requiredDocumentFiles: readonly string[];
   readonly source: Extract<SubmissionSourceResult, { readonly status: "success" }>["value"];
 }
 
@@ -270,7 +272,8 @@ export const prepareGradingStudentReportPublicationContext = (
 
   const source = resolved.buildSource({
     repositoryRoot: request.repositoryRoot,
-    requiredFiles: config.config.assignment.grading?.required_files ?? []
+    requiredFiles: config.config.assignment.grading?.required_files ?? [],
+    deferDocumentReading: true
   });
   if (source.status === "failure")
     return {
@@ -332,12 +335,16 @@ export const prepareGradingStudentReportPublicationContext = (
         title: config.config.assignment.assignment.title
       },
       rubric: config.config.assignment.grading?.rubric ?? [],
+      requiredDocumentFiles: source.value.sections
+        .filter((section) => section.status === "found" && section.document)
+        .map((section) => section.file),
       source: source.value
     }
   };
 };
 
 export interface RenderPreparedGradingStudentReportInput {
+  readonly documents?: readonly ReportDocument[];
   readonly evidence?: GradingEvidence;
   readonly commitHistory?: readonly GradingReportCommit[];
 }
@@ -356,6 +363,7 @@ export const renderPreparedGradingStudentReport = (
     gradingState: prepared.state,
     rubric: prepared.rubric,
     source: prepared.source,
+    documents: input.documents ?? [],
     ...(input.evidence === undefined
       ? {}
       : {

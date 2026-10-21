@@ -2,6 +2,7 @@
 
 These small synthetic files contain no student data or third-party content:
 
+- `encrypted.pdf`: synthetic Standard-security PDF requiring a password; no student data.
 - `normal.pdf`: one page with Helvetica text.
 - `multipage.pdf`: twelve text pages for scrolling and lazy rendering.
 - `image-only.pdf`: a single embedded raster square with no extractable text.

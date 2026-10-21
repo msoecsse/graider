@@ -1,3 +1,4 @@
+import type { DocumentNode } from "../shared/document-content.js";
 import type { GradingEvidenceOutcome, JunitFailure } from "./grading-evidence-parser.js";
 import { parseCommentContent, type CommentInlineNode } from "../shared/comment-content.js";
 import type {
@@ -183,13 +184,55 @@ const renderSourceLines = (source: Extract<GradingReportSourceFile, { status: "f
     })
     .join("\n");
 
+const DOCUMENT_TAGS = new Set([
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "p",
+  "br",
+  "strong",
+  "b",
+  "em",
+  "i",
+  "u",
+  "s",
+  "ul",
+  "ol",
+  "li",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "td",
+  "th",
+  "sup",
+  "sub",
+  "blockquote"
+]);
+const renderDocumentNodes = (nodes: readonly DocumentNode[]): string =>
+  nodes
+    .map((node) => {
+      if ("text" in node) return escapeHtml(node.text);
+      const children = renderDocumentNodes(node.children);
+      if (!DOCUMENT_TAGS.has(node.tag)) return children;
+      return node.tag === "br" ? "<br>" : `<${node.tag}>${children}</${node.tag}>`;
+    })
+    .join("");
+
 const renderSourceFile = (source: GradingReportSourceFile): string => `
 <article class="source-file" id="source-file-${formatNumber(source.fileIndex)}">
-<h3>${escapeHtml(source.file)}</h3>
+<h3>${source.status === "document" ? "Document: " : ""}${escapeHtml(source.file)}</h3>
 ${
-  source.status === "missing"
-    ? '<p class="unavailable">Required file unavailable.</p>'
-    : `<div class="source-scroll" role="region" aria-label="Source for ${escapeHtml(source.file)}" tabindex="0">
+  source.status === "document"
+    ? source.content.status === "content"
+      ? `<div class="document-content preserve-text">${renderDocumentNodes(source.content.nodes)}</div>`
+      : `<p class="unavailable">${escapeHtml(source.content.message)}</p>`
+    : source.status === "missing"
+      ? '<p class="unavailable">Required file unavailable.</p>'
+      : `<div class="source-scroll" role="region" aria-label="Source for ${escapeHtml(source.file)}" tabindex="0">
 <table class="source-code"><thead><tr><th scope="col">Line</th><th scope="col">Source</th></tr></thead><tbody>
 ${renderSourceLines(source)}
 </tbody></table>

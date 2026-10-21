@@ -1,4 +1,6 @@
 import path from "node:path";
+import { extractRequiredReportDocuments } from "./documentReportService.js";
+import type { ReportDocument } from "../../src/shared/document-content.js";
 import type { GitHubClient } from "./githubClientProvider.js";
 import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import { createNodeProcessRunner } from "./commandRunner.js";
@@ -34,6 +36,7 @@ export interface PublishGradingStudentReportRequest extends FacultyScopeServiceR
 }
 
 interface PreparedContext {
+  readonly requiredDocumentFiles?: readonly string[];
   readonly studentId: string;
   readonly submissionCommitSha: string;
   readonly previousSubmissionCommitShas?: readonly string[];
@@ -126,6 +129,7 @@ interface PublicationBackend {
   renderPreparedGradingStudentReport(
     prepared: PreparedContext,
     input: {
+      readonly documents?: readonly ReportDocument[];
       readonly evidence?: EvidenceValue["evidence"];
       readonly commitHistory?: readonly GradingCommitDto[];
     }
@@ -216,6 +220,7 @@ export interface GradingStudentReportPublicationDependencies {
   readonly provideClient: GithubClientProvider;
   readonly resolveToken: () => Promise<GithubTokenResolution>;
   readonly loadBackend: () => PublicationBackend;
+  readonly extractDocuments: typeof extractRequiredReportDocuments;
 }
 
 const loadBackend = (): PublicationBackend =>
@@ -294,6 +299,7 @@ export const createGradingStudentReportPublicationService = (
     const prepared = preparedResult.value;
     const warnings: GradingReportPublicationWarning[] = [];
     const reportInput: {
+      documents?: readonly ReportDocument[];
       evidence?: EvidenceValue["evidence"];
       commitHistory?: readonly GradingCommitDto[];
     } = {};
@@ -343,6 +349,21 @@ export const createGradingStudentReportPublicationService = (
 
     let rendered: ReturnType<PublicationBackend["renderPreparedGradingStudentReport"]>;
     try {
+      if (prepared.requiredDocumentFiles?.length) {
+        reportInput.documents = await (
+          overrides.extractDocuments ?? extractRequiredReportDocuments
+        )(localRepository.localPath, prepared.requiredDocumentFiles);
+        const currentHead = await readHead(localRepository.localPath);
+        if (
+          currentHead.status !== "success" ||
+          currentHead.submissionCommitSha !== prepared.submissionCommitSha
+        )
+          return {
+            status: "submission_changed",
+            studentId: prepared.studentId,
+            remoteReportPublished: false
+          };
+      }
       rendered = backend.renderPreparedGradingStudentReport(prepared, reportInput);
     } catch {
       return { status: "report_render_failed" };

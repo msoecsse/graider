@@ -1,6 +1,10 @@
 import { imageSize } from "image-size";
 import mammoth from "mammoth/mammoth.browser";
-import { DOCUMENT_LIMITS, DOCUMENT_TOO_LARGE } from "../../electron/repositoryDocumentPolicy";
+import {
+  DOCX_CONVERSION_OPTIONS,
+  DOCUMENT_LIMITS,
+  DOCUMENT_TOO_LARGE
+} from "../../electron/repositoryDocumentPolicy";
 
 const isAnimatedPng = (bytes: Uint8Array): boolean => {
   const PNG_SIGNATURE_BYTES = 8;
@@ -30,8 +34,7 @@ export const convertDocx = async (arrayBuffer: ArrayBuffer): Promise<string> => 
   const result = await mammoth.convertToHtml(
     { arrayBuffer },
     {
-      externalFileAccess: false,
-      includeEmbeddedStyleMap: false,
+      ...DOCX_CONVERSION_OPTIONS,
       convertImage: mammoth.images.imgElement(async (image) => {
         const supported = new Set(["image/png", "image/jpeg"]);
         if (!supported.has(image.contentType)) return { src: "" };

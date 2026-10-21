@@ -181,6 +181,7 @@ describe("grading student report publication context", () => {
     );
     expect(deps.buildSource).toHaveBeenCalledWith({
       repositoryRoot: "/trusted/local/ada",
+      deferDocumentReading: true,
       requiredFiles: ["src/Main.java"]
     });
     expect(prepared.value).toMatchObject({

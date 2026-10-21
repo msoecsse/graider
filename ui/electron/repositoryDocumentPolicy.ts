@@ -1,5 +1,7 @@
 // Shared policy: large enough for ordinary submissions, bounded for untrusted input.
 export const DOCUMENT_LIMITS = {
+  reportWorkerMemoryMb: 256,
+  contentDepth: 64,
   fileBytes: 64 * 1024 * 1024,
   docxExpandedBytes: 128 * 1024 * 1024,
   docxHtmlCharacters: 8 * 1024 * 1024,
@@ -40,3 +42,8 @@ export const isRepositoryDocumentPath = (file: unknown): file is string =>
     ) &&
   repositoryDocumentKind(file) !== undefined;
 export const DOCUMENT_TOO_LARGE = "This document is too large to display safely in Graider.";
+
+export const DOCX_CONVERSION_OPTIONS = {
+  externalFileAccess: false,
+  includeEmbeddedStyleMap: false
+} as const;

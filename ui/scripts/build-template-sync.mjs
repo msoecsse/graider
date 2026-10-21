@@ -91,3 +91,20 @@ await build({
   noExternal: ["@octokit/rest", "fast-xml-parser", "yauzl", "yaml", "zod"],
   external: ["dugite"]
 });
+
+// ESM preserves PDF.js's native module loading inside a terminable Node worker.
+await build({
+  entry: {
+    documentReportWorker: fileURLToPath(
+      new URL("../electron/documentReportWorker.ts", import.meta.url)
+    )
+  },
+  outDir: fileURLToPath(new URL("../dist-electron", import.meta.url)),
+  format: ["esm"],
+  outExtension: () => ({ js: ".mjs" }),
+  target: "node24",
+  clean: false,
+  dts: false,
+  noExternal: ["fast-xml-parser"],
+  external: ["mammoth", "pdfjs-dist", "yauzl"]
+});

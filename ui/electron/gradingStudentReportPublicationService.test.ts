@@ -24,6 +24,7 @@ const authorized = {
   errors: []
 };
 const prepared = {
+  requiredDocumentFiles: [] as string[],
   studentId: "ada",
   submissionCommitSha: SHA,
   reportPath: "grading/final.html",
@@ -90,6 +91,53 @@ const dependencies = () => {
 };
 
 describe("grading student report publication Electron service", () => {
+  it("extracts only backend-resolved required documents from the authorized repository for preview and republication", async () => {
+    const { values, publicationBackend } = dependencies();
+    publicationBackend.prepareGradingStudentReportPublicationContext.mockReturnValue({
+      status: "success",
+      value: { ...prepared, requiredDocumentFiles: ["reports/design.docx", "src/spec.pdf"] }
+    });
+    const documents = [
+      {
+        file: "reports/design.docx",
+        content: { status: "content" as const, nodes: [{ text: "Current revision" }] }
+      }
+    ];
+    const extractDocuments = vi.fn().mockResolvedValue(documents);
+    const service = createGradingStudentReportPublicationService({ ...values, extractDocuments });
+    expect((await service(request, "preview")).status).toBe("success");
+    expect(extractDocuments).toHaveBeenCalledWith("/trusted/local/ada", [
+      "reports/design.docx",
+      "src/spec.pdf"
+    ]);
+    expect(publicationBackend.renderPreparedGradingStudentReport).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ documents })
+    );
+    expect(publicationBackend.publishRenderedGradingStudentReport).not.toHaveBeenCalled();
+    expect((await service(request)).status).toBe("success");
+    expect(extractDocuments).toHaveBeenCalledTimes(2);
+    expect(publicationBackend.markPreparedGradingStudentReportPublished).toHaveBeenCalled();
+  });
+
+  it("rejects a revision change during document extraction before preview or publication", async () => {
+    const { values, publicationBackend } = dependencies();
+    publicationBackend.prepareGradingStudentReportPublicationContext.mockReturnValue({
+      status: "success",
+      value: { ...prepared, requiredDocumentFiles: ["design.pdf"] }
+    });
+    values.readHead
+      .mockResolvedValueOnce({ status: "success", submissionCommitSha: SHA })
+      .mockResolvedValue({ status: "success", submissionCommitSha: "changed" });
+    const service = createGradingStudentReportPublicationService({
+      ...values,
+      extractDocuments: vi.fn().mockResolvedValue([])
+    });
+    expect((await service(request, "preview")).status).toBe("submission_changed");
+    expect(publicationBackend.renderPreparedGradingStudentReport).not.toHaveBeenCalled();
+    expect(publicationBackend.publishRenderedGradingStudentReport).not.toHaveBeenCalled();
+  });
+
   it.each(["assigned faculty", "co-faculty"])(
     "publishes for %s using only trusted context, evidence, history, and repository",
     async () => {

@@ -50,6 +50,7 @@ describe("repository documents", () => {
     await fs.symlink(os.tmpdir(), path.join(root, "outside"));
     await fs.symlink(path.join(root, "normal.pdf"), path.join(root, "linked.pdf"));
     expect(await discoverRepositoryDocuments(root)).toEqual([
+      "encrypted.pdf",
       "image-only.pdf",
       "malformed.docx",
       "malformed.pdf",

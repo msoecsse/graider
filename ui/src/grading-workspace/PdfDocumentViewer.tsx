@@ -1,3 +1,4 @@
+import { pdfTextItems } from "../../electron/pdfDocumentText";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -200,7 +201,9 @@ export const PdfDocumentViewer = ({ bytes }: { readonly bytes: Uint8Array }): Re
         for (let pageNumber = 1; pageNumber <= pdf.numPages && !cancelled; pageNumber += 1) {
           const page = await pdf.getPage(pageNumber);
           const content = await page.getTextContent();
-          const value = content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
+          const value = pdfTextItems(content.items)
+            .map((item) => item.text)
+            .join(" ");
           characters += value.length;
           if (characters > DOCUMENT_LIMITS.pdfTextCharacters) throw new Error(DOCUMENT_TOO_LARGE);
           pages.push(value);

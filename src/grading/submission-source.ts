@@ -4,6 +4,7 @@ import path from "node:path";
 export interface SubmissionSourceRequest {
   readonly repositoryRoot: string;
   readonly requiredFiles: readonly string[];
+  readonly deferDocumentReading?: boolean;
 }
 
 export interface SourceLocation {
@@ -21,6 +22,7 @@ export interface FoundSourceSection {
   readonly status: "found";
   readonly file: string;
   readonly sourceText: string;
+  readonly document?: true;
   readonly sourceLineCount: number;
   readonly combinedStartLine: number;
   readonly combinedEndLine: number;
@@ -231,9 +233,11 @@ export const buildSubmissionSourceModel = (
     } catch {
       return failure("required_file_read_failed", "Unable to inspect required file.", requiredFile);
     }
+    const document =
+      request.deferDocumentReading === true && /\.(?:pdf|docx)$/iu.test(resolvedFile);
     let sourceText: string;
     try {
-      sourceText = fs.readFileSync(realFilePath, "utf8");
+      sourceText = document ? "" : fs.readFileSync(realFilePath, "utf8");
     } catch {
       return failure("required_file_read_failed", "Unable to read required file.", requiredFile);
     }
@@ -246,7 +250,8 @@ export const buildSubmissionSourceModel = (
     combinedLines.push(...lines);
     sections.push({
       status: "found",
-      file: resolvedFile,
+      file: document ? repositoryRelativePath(repositoryRoot, resolved.path) : resolvedFile,
+      ...(document ? { document: true as const } : {}),
       sourceText,
       sourceLineCount: lines.length,
       combinedStartLine,
