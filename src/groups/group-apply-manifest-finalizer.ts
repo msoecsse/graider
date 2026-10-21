@@ -41,6 +41,7 @@ export const buildGroupApplyManifestV2 = (
     };
   const observedResults = execution.targets.filter((result) => result.htmlUrl !== null);
   const targets = observedResults.map((result) => ({
+    lifecycleStatus: result.status === "updated" ? ("active" as const) : ("created" as const),
     targetId: result.target.targetId,
     mode: "group" as const,
     groupId: result.target.groupId,

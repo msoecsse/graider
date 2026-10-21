@@ -2,6 +2,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadGraiderConfig } from "../../../src/config/config-loader.js";
 import { executeGroupTargets } from "../../../src/groups/group-target-executor.js";
+import { GitHubClientError } from "../../../src/github/github-errors.js";
 import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
 import type { GroupApplyPreviewTarget } from "../../../src/groups/group-preview-planner.js";
 import { GRAIDER_MANAGED_WORKFLOW_PATH } from "../../../src/workflows/managed-workflow-policy.js";
@@ -27,6 +28,59 @@ const target = (
 });
 
 describe("group target executor", () => {
+  it("retains the original GitHub diagnostic when group creation really fails", async () => {
+    const loaded = loadGraiderConfig({
+      cwd: path.resolve("tests/fixtures/plan/active-assignment"),
+      assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
+    });
+    if (loaded.status === "failure") throw new Error("Fixture config must load.");
+    const config = { ...loaded.config, assignment: { ...loaded.config.assignment } };
+    delete config.assignment.template;
+    const githubClient = new FakeGitHubClient();
+    githubClient.createRepository = () =>
+      Promise.reject(
+        new GitHubClientError("permission_denied", "Cannot create group repository", {
+          statusCode: 403
+        })
+      );
+    const result = await executeGroupTargets({
+      config,
+      githubClient,
+      targets: [target("team-1", ["alpha"], ["alpha-gh"])]
+    });
+    expect(result.targets[0]?.status).toBe("failed");
+    expect(result.errors[0]).toMatchObject({
+      code: "github_permission_denied",
+      message: "Cannot create group repository",
+      context: { groupId: "team-1", statusCode: 403 }
+    });
+  });
+
+  it("reconciles a failed plain repository create response for a group", async () => {
+    const loaded = loadGraiderConfig({
+      cwd: path.resolve("tests/fixtures/plan/active-assignment"),
+      assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
+    });
+    if (loaded.status === "failure") throw new Error("Fixture config must load.");
+    const config = { ...loaded.config, assignment: { ...loaded.config.assignment } };
+    delete config.assignment.template;
+    const githubClient = new FakeGitHubClient();
+    const create = githubClient.createRepository.bind(githubClient);
+    githubClient.createRepository = async (input) => {
+      await create(input);
+      throw new GitHubClientError("api_error", "Transient create failure");
+    };
+    const result = await executeGroupTargets({
+      config,
+      githubClient,
+      targets: [target("team-1", ["alpha"], ["alpha-gh"])]
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.targets[0]?.status).toBe("created");
+    expect(githubClient.mutations.createdRepositoriesWithoutTemplate).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain("Transient create failure");
+  });
+
   it("reports each group target before its repository work and isolates observer failures", async () => {
     const loaded = loadGraiderConfig({
       cwd: path.resolve("tests/fixtures/plan/active-assignment"),

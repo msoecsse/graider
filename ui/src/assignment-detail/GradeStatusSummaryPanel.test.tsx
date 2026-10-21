@@ -1,5 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createGradeStatusSummary,
+  isNonTerminalGradeStatusRow
+} from "../grade-status/gradeStatusNormalization";
 import { GradeStatusSummaryPanel } from "./GradeStatusSummaryPanel";
 import type {
   GradeStatusRepositoryRow,
@@ -68,6 +72,41 @@ const createGradeStatus = (
 });
 
 describe("GradeStatusSummaryPanel", () => {
+  it("keeps unapplied students visible with an empty status and no polling or report readiness", () => {
+    const row = createRow({
+      status: null,
+      repository: null,
+      runId: null,
+      runUrl: null,
+      conclusion: null,
+      startedAt: null,
+      completedAt: null
+    });
+    const status = createGradeStatus([row]);
+    expect(isNonTerminalGradeStatusRow(row)).toBe(false);
+    expect(createGradeStatusSummary([row])).toMatchObject({
+      readyForReport: false,
+      missing: 0,
+      blocked: 0
+    });
+    render(
+      <GradeStatusSummaryPanel
+        status={status}
+        isLoading={false}
+        errorMessage={null}
+        onViewFullGradeStatus={vi.fn()}
+        canUpdateRepositories={false}
+        isTemplateSyncPending={false}
+        onUpdateRepository={vi.fn()}
+      />
+    );
+    expect(screen.getByText("s001")).toBeVisible();
+    expect(screen.queryByText("Blocked")).toBeNull();
+    expect(screen.queryByText("Missing")).toBeNull();
+    const cells = screen.getAllByRole("cell");
+    expect(cells[3]?.textContent).toBe("");
+  });
+
   it("renders one row per repository with a repository link and a run link", () => {
     render(
       <GradeStatusSummaryPanel

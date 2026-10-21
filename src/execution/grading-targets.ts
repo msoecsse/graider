@@ -21,6 +21,8 @@ export interface GradingRepositoryTarget {
   readonly studentIds: readonly string[];
   readonly githubUsernames: readonly string[];
   readonly diagnostics: readonly Diagnostic[];
+  /** Freshly created repositories do not imply that a grading run should exist. */
+  readonly gradingResultsExpected?: boolean;
 }
 
 export interface NormalizedGradingTargets {
@@ -57,6 +59,9 @@ export const normalizeGradingTargets = (
       return [];
     }
 
+    const studentRecord = manifest.repositories.find(
+      (record) => record.studentId === target.targetId
+    );
     return [
       {
         repositoryMode: target.mode,
@@ -70,6 +75,12 @@ export const normalizeGradingTargets = (
         sectionIds: target.sectionIds,
         studentIds: target.studentIds,
         githubUsernames: target.githubUsernames,
+        gradingResultsExpected:
+          manifest.schemaVersion === 2
+            ? manifest.targets?.find((record) => record.targetId === target.targetId)
+                ?.lifecycleStatus !== "created"
+            : studentRecord?.lifecycle.status !== "created" &&
+              studentRecord?.permissions.student?.pendingInvite !== true,
         diagnostics: target.diagnostics
       }
     ];

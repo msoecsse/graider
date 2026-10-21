@@ -1,3 +1,5 @@
+import { GitHubClientError, createGitHubDiagnostic } from "../github/github-errors.js";
+import { reconcileRepositoryCreation } from "../github/reconcile-repository-creation.js";
 import type { LoadedGraiderConfig } from "../config/config-models.js";
 import { DiagnosticCode, createConfigDiagnostic } from "../diagnostics/error-catalog.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
@@ -80,6 +82,7 @@ export const executeGroupTargets = async (input: {
     });
     let repository: GitHubRepository | null = null;
     let repositoryCreated = false;
+    let creationInProgress = false;
     try {
       const existing = await input.githubClient.getRepository(
         input.config.course.github.organization,
@@ -116,24 +119,40 @@ export const executeGroupTargets = async (input: {
         };
       }
       if (existing === null && template?.status === "success") {
-        await input.githubClient.createRepositoryFromTemplate({
-          templateOwner: template.repository.owner,
-          templateRepo: template.repository.repo,
-          owner: input.config.course.github.organization,
-          name: target.repositoryName,
-          private: true
-        });
+        creationInProgress = true;
+        repository = await reconcileRepositoryCreation(
+          input.githubClient,
+          input.config.course.github.organization,
+          target.repositoryName,
+          () =>
+            input.githubClient.createRepositoryFromTemplate({
+              templateOwner: template.repository.owner,
+              templateRepo: template.repository.repo,
+              owner: input.config.course.github.organization,
+              name: target.repositoryName,
+              private: true
+            })
+        );
         repositoryCreated = true;
       } else if (existing === null) {
-        await input.githubClient.createRepository({
-          owner: input.config.course.github.organization,
-          name: target.repositoryName,
-          private: true
-        });
+        creationInProgress = true;
+        repository = await reconcileRepositoryCreation(
+          input.githubClient,
+          input.config.course.github.organization,
+          target.repositoryName,
+          () =>
+            input.githubClient.createRepository({
+              owner: input.config.course.github.organization,
+              name: target.repositoryName,
+              private: true
+            })
+        );
         repositoryCreated = true;
       }
+      creationInProgress = false;
       repository =
         existing ??
+        repository ??
         (await input.githubClient.getRepository(
           input.config.course.github.organization,
           target.repositoryName
@@ -233,15 +252,25 @@ export const executeGroupTargets = async (input: {
         );
       results.push(observedResult);
     } catch (error: unknown) {
-      const diagnostic = failure(
-        target,
-        error instanceof WorkflowDeploymentPermissionError
-          ? `Graider could not create or update ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${target.repositoryName}. Check the token's workflow-file write permission.`
-          : `Group target ${target.groupId} failed for repository ${target.repositoryName}.`,
-        error instanceof WorkflowDeploymentPermissionError
-          ? DiagnosticCode.WorkflowDeploymentForbidden
-          : "group_target_execution_failed"
-      );
+      const diagnostic =
+        creationInProgress && error instanceof GitHubClientError
+          ? {
+              ...createGitHubDiagnostic(error),
+              context: {
+                ...createGitHubDiagnostic(error).context,
+                groupId: target.groupId,
+                repositoryName: target.repositoryName
+              }
+            }
+          : failure(
+              target,
+              error instanceof WorkflowDeploymentPermissionError
+                ? `Graider could not create or update ${GRAIDER_MANAGED_WORKFLOW_PATH} in ${target.repositoryName}. Check the token's workflow-file write permission.`
+                : `Group target ${target.groupId} failed for repository ${target.repositoryName}.`,
+              error instanceof WorkflowDeploymentPermissionError
+                ? DiagnosticCode.WorkflowDeploymentForbidden
+                : "group_target_execution_failed"
+            );
       return {
         targets: [
           ...results,

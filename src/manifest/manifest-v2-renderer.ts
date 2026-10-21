@@ -20,6 +20,9 @@ export const renderManifestV2Yaml = (input: {
         .sort((a, b) => a.targetId.localeCompare(b.targetId))
         .map((target) => ({
           target_id: target.targetId,
+          ...(target.lifecycleStatus === undefined
+            ? {}
+            : { lifecycle_status: target.lifecycleStatus }),
           mode: target.mode,
           ...(target.groupId === undefined ? {} : { group_id: target.groupId }),
           repository_name: target.repositoryName,

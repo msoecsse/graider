@@ -84,6 +84,9 @@ const createStatus = (overrides: {
 });
 
 describe("formatGradeStatusLabel", () => {
+  it("renders no label for a lifecycle-inapplicable status", () => {
+    expect(formatGradeStatusLabel(createRow({ status: null }))).toBe("");
+  });
   const NON_COMPLETED_STATUSES: readonly [GradeStatusRepositoryStatus, string][] = [
     ["queued", "Queued"],
     ["in_progress", "In progress"],

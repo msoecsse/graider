@@ -450,7 +450,7 @@ const createTokenRequiredRow = (
     ref
   );
 
-const mapRunStatus = (run: GitHubWorkflowRun): GradeStatusRepositoryStatus => {
+const mapRunStatus = (run: GitHubWorkflowRun): Exclude<GradeStatusRepositoryStatus, null> => {
   if (run.status === "in_progress") {
     return "in_progress";
   }
@@ -531,6 +531,11 @@ const getRepositoryWorkflowStatus = async (
   ref: string | null
 ): Promise<GradeStatusRepositoryRow> => {
   try {
+    const observedRepository = await githubClient.getRepository(
+      repository.owner,
+      repository.repositoryName
+    );
+    if (observedRepository === null) return createMissingManifestRow(student, workflowPath, ref);
     const runs = await githubClient.listWorkflowRuns({
       owner: repository.owner,
       repo: repository.repositoryName,
@@ -539,7 +544,19 @@ const getRepositoryWorkflowStatus = async (
     const run = selectLatestWorkflowRun(runs);
 
     return run === null
-      ? createMissingRunRow(student, repository, workflowPath, ref)
+      ? repository.gradingResultsExpected === false
+        ? createRow(
+            student,
+            repository.fullName,
+            null,
+            "grading_not_yet_applicable",
+            workflowPath,
+            ref,
+            [],
+            null,
+            repository
+          )
+        : createMissingRunRow(student, repository, workflowPath, ref)
       : createRunRow(student, repository, workflowPath, ref, run);
   } catch (error: unknown) {
     return createUnknownRunRow(error, student, repository, workflowPath, ref);
@@ -758,7 +775,7 @@ export const buildAssignmentGradeStatus = async ({
     config.summary.assignmentSlug
   );
   const grading = getEffectiveAssignmentGrading(config);
-  const manifestResult = loadManifest(manifestPath.absolutePath, { required: grading.enabled });
+  const manifestResult = loadManifest(manifestPath.absolutePath);
   const manifest = manifestResult.status === "loaded" ? manifestResult.manifest : undefined;
   const normalizedTargets =
     manifest === undefined
@@ -792,7 +809,9 @@ export const buildAssignmentGradeStatus = async ({
   const statusCache = new Map<string, Promise<GradeStatusRepositoryRow>>();
   const repositoryRows = await Promise.all(
     selectedStudents.map((student) =>
-      createRepositoryStatusRow(config, student, normalizedTargets, githubClient, statusCache)
+      manifestResult.status === "missing"
+        ? Promise.resolve(createRow(student, null, null, "assignment_not_applied", null, null))
+        : createRepositoryStatusRow(config, student, normalizedTargets, githubClient, statusCache)
     )
   );
   const targetRows = Array.from(

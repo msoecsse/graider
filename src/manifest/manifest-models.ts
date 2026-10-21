@@ -34,6 +34,7 @@ export interface Manifest {
 }
 
 export interface ManifestRepositoryTarget {
+  lifecycleStatus?: ManifestLifecycleStatus;
   targetId: string;
   mode: "individual" | "group";
   groupId?: string;

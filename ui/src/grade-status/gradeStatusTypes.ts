@@ -8,6 +8,7 @@ import type {
 export type GradeStatusLoadResult = AssignmentGradeStatusResult;
 
 export type GradeStatusRepositoryStatus =
+  | null
   | "queued"
   | "in_progress"
   | "completed"

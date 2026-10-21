@@ -6,6 +6,7 @@ export const ASSIGNMENT_GRADE_STATUS_SCHEMA_VERSION = 1;
 export type GradeStatusResolvedFrom = "course_default" | "assignment_override" | "none";
 
 export type GradeStatusRepositoryStatus =
+  | null
   | "queued"
   | "in_progress"
   | "completed"

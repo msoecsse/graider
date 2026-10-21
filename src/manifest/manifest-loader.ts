@@ -204,6 +204,7 @@ const rawManifestV2Schema = z
       z
         .object({
           target_id: z.string().min(1),
+          lifecycle_status: z.enum(MANIFEST_LIFECYCLE_STATUSES).optional(),
           mode: z.enum(["individual", "group"]),
           group_id: z.string().min(1).optional(),
           repository_name: z.string().min(1),
@@ -354,6 +355,9 @@ const validateRawManifest = (filePath: string, value: unknown): ManifestLoadResu
         repositoryMode: result.data.repository_mode,
         targets: result.data.targets.map((target) => ({
           targetId: target.target_id,
+          ...(target.lifecycle_status === undefined
+            ? {}
+            : { lifecycleStatus: target.lifecycle_status }),
           mode: target.mode,
           ...(target.group_id === undefined ? {} : { groupId: target.group_id }),
           repositoryName: target.repository_name,

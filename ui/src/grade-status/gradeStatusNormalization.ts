@@ -85,7 +85,7 @@ const normalizeRepositoryRow = (value: unknown): GradeStatusRepositoryRow => {
     ref: getString(row, "ref"),
     runId: getNumber(row, "runId"),
     runUrl: getString(row, "runUrl"),
-    status: normalizeRepositoryStatus(getString(row, "status")),
+    status: row.status === null ? null : normalizeRepositoryStatus(getString(row, "status")),
     conclusion: getString(row, "conclusion"),
     startedAt: getString(row, "startedAt"),
     completedAt: getString(row, "completedAt"),
@@ -110,7 +110,7 @@ export const isTerminalGradeStatusRow = (row: GradeStatusRepositoryRow): boolean
   row.status === "not_configured";
 
 export const isNonTerminalGradeStatusRow = (row: GradeStatusRepositoryRow): boolean =>
-  !isTerminalGradeStatusRow(row);
+  row.status !== null && !isTerminalGradeStatusRow(row);
 
 export const createGradeStatusSummary = (
   rows: readonly GradeStatusRepositoryRow[]

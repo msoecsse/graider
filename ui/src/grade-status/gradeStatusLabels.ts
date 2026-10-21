@@ -53,6 +53,8 @@ export const formatGradeStatusLabel = (row: GradeStatusRepositoryRow): string =>
   const status: GradeStatusRepositoryStatus = row.status;
 
   switch (status) {
+    case null:
+      return "";
     case "queued":
       return "Queued";
     case "in_progress":
@@ -123,6 +125,10 @@ export const getGradeStatusSummaryText = (status: NormalizedGradeStatus): string
 
   if (status.repositories.length === 0) {
     return "No repository status rows were returned.";
+  }
+
+  if (status.repositories.some((row) => row.status === null)) {
+    return "Grading status is not applicable yet for some students.";
   }
 
   return "No grading runs need attention.";

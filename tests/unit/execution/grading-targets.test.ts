@@ -3,6 +3,11 @@ import {
   normalizeGradingTargets,
   selectGradingTargets
 } from "../../../src/execution/grading-targets.js";
+import { loadManifest } from "../../../src/manifest/manifest-loader.js";
+import { renderManifestV2Yaml } from "../../../src/manifest/manifest-v2-renderer.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { Manifest } from "../../../src/manifest/manifest-models.js";
 
 const groupManifest: Manifest = {
@@ -65,6 +70,35 @@ const groupManifest: Manifest = {
 };
 
 describe("grading targets", () => {
+  it("preserves fresh group lifecycle through manifest serialization and retains legacy mature semantics", () => {
+    const targets =
+      groupManifest.targets?.map((target, index) => ({
+        ...target,
+        ...(index === 0 ? { lifecycleStatus: "created" as const } : {})
+      })) ?? [];
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "graider-group-lifecycle-"));
+    try {
+      const file = path.join(cwd, "manifest.yml");
+      fs.writeFileSync(
+        file,
+        renderManifestV2Yaml({
+          repositoryMode: "group",
+          targets,
+          studentMappings: groupManifest.studentMappings ?? []
+        })
+      );
+      const loaded = loadManifest(file);
+      if (loaded.status !== "loaded") throw new Error("Expected valid manifest");
+      expect(
+        normalizeGradingTargets(loaded.manifest, "csc1120").targets.map(
+          (target) => target.gradingResultsExpected
+        )
+      ).toEqual([false, true]);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes shared group repositories and selects each target once", () => {
     const normalized = normalizeGradingTargets(groupManifest, "csc1120");
     const selected = selectGradingTargets(normalized, [

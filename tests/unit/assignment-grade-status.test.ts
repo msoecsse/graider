@@ -1,3 +1,7 @@
+import { loadManifest } from "../../src/manifest/manifest-loader.js";
+import { renderManifestYaml } from "../../src/manifest/manifest-renderer.js";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildAssignmentGradeStatus } from "../../src/grade-status/grade-status-builder.js";
@@ -80,6 +84,72 @@ const getRow = (
 };
 
 describe("assignment grade status builder", () => {
+  it("projects no student operational statuses before Apply", async () => {
+    const result = await buildAssignmentGradeStatus({
+      cwd: path.resolve("tests/fixtures/grade/missing-manifest"),
+      assignmentFile: ASSIGNMENT_FILE,
+      githubClient: createClient(null, null)
+    });
+    expect(result.repositories.length).toBeGreaterThan(0);
+    expect(result.repositories.every((row) => row.status === null)).toBe(true);
+    expect(result.repositories.some((row) => row.status === "blocked")).toBe(false);
+    expect(result.summary).toMatchObject({ blocked: 0, missing: 0, needsAttention: 0 });
+    expect(
+      result.diagnostics.some(
+        (diagnostic) => diagnostic.code === DiagnosticCode.StudentRepositoryMissing
+      )
+    ).toBe(false);
+  });
+
+  it("does not project missing grading for fresh repositories, but preserves observed runs", async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "graider-status-lifecycle-"));
+    try {
+      fs.cpSync(FIXTURE_ROOT, cwd, { recursive: true });
+      const manifestPath = path.join(cwd, "terms/27s1/manifests/lab04/manifest.yml");
+      fs.writeFileSync(
+        manifestPath,
+        fs
+          .readFileSync(manifestPath, "utf8")
+          .replaceAll("      status: active", "      status: created")
+      );
+      const result = await buildAssignmentGradeStatus({
+        cwd,
+        assignmentFile: ASSIGNMENT_FILE,
+        githubClient: createClient(
+          run(JONES_REPOSITORY, TestNumber.JonesRunId, "completed", "success"),
+          null
+        )
+      });
+      expect(result.repositories).toHaveLength(2);
+      expect(getRow(result, "kim").status).toBeNull();
+      expect(result.summary?.readyForReport).toBe(false);
+      expect(getRow(result, "jones").status).toBe("completed");
+      expect(result.summary).toMatchObject({ missing: 0, successful: 1 });
+      const absent = await buildAssignmentGradeStatus({
+        cwd,
+        assignmentFile: ASSIGNMENT_FILE,
+        githubClient: new FakeGitHubClient()
+      });
+      expect(absent.summary).toMatchObject({ blocked: 2, missing: 0 });
+      const loaded = loadManifest(manifestPath);
+      if (loaded.status !== "loaded") throw new Error("Expected valid manifest");
+      fs.writeFileSync(manifestPath, renderManifestYaml({ ...loaded.manifest, repositories: [] }));
+      const provisioning = await buildAssignmentGradeStatus({
+        cwd,
+        assignmentFile: ASSIGNMENT_FILE,
+        githubClient: createClient(null, null)
+      });
+      expect(provisioning.summary).toMatchObject({ missing: 0, readyForReport: false });
+      expect(
+        provisioning.diagnostics.some(
+          (diagnostic) => diagnostic.code === DiagnosticCode.GradingWorkflowRunMissing
+        )
+      ).toBe(false);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("counts queued, in-progress, completed success, and missing runs", async () => {
     const githubClient = createClient(
       run(JONES_REPOSITORY, TestNumber.JonesRunId, "queued", null),

@@ -1,3 +1,4 @@
+import { reconcileRepositoryCreation } from "../github/reconcile-repository-creation.js";
 import type { LoadedGraiderConfig } from "../config/config-models.js";
 import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
 import { parseTemplateRepository } from "../config/github-config-validation.js";
@@ -537,13 +538,19 @@ const executeCreateRepository = async (
       }
 
       const repository = await runGitHubOperation(input, () =>
-        input.githubClient.createRepositoryFromTemplate({
-          templateOwner: parsedTemplate.repository.owner,
-          templateRepo: parsedTemplate.repository.repo,
-          owner: input.config.course.github.organization,
-          name: repositoryName,
-          private: PRIVATE_REPOSITORY
-        })
+        reconcileRepositoryCreation(
+          input.githubClient,
+          input.config.course.github.organization,
+          repositoryName,
+          () =>
+            input.githubClient.createRepositoryFromTemplate({
+              templateOwner: parsedTemplate.repository.owner,
+              templateRepo: parsedTemplate.repository.repo,
+              owner: input.config.course.github.organization,
+              name: repositoryName,
+              private: PRIVATE_REPOSITORY
+            })
+        )
       );
 
       const templateCommitSha = state.manifest.template?.commitSha;
@@ -593,11 +600,17 @@ const executeCreateRepository = async (
           );
     } else {
       const repository = await runGitHubOperation(input, () =>
-        input.githubClient.createRepository({
-          owner: input.config.course.github.organization,
-          name: repositoryName,
-          private: PRIVATE_REPOSITORY
-        })
+        reconcileRepositoryCreation(
+          input.githubClient,
+          input.config.course.github.organization,
+          repositoryName,
+          () =>
+            input.githubClient.createRepository({
+              owner: input.config.course.github.organization,
+              name: repositoryName,
+              private: PRIVATE_REPOSITORY
+            })
+        )
       );
 
       return persistManifest(

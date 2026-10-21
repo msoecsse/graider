@@ -1,3 +1,4 @@
+import { GitHubClientError } from "../../src/github/github-errors.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -84,6 +85,62 @@ const createReadyClient = (): FakeGitHubClient =>
   });
 
 describe("apply recovery", () => {
+  it("reconciles create errors after GitHub created the repository without exposing transient errors", async () => {
+    const cwd = copyFixtureToTemp();
+    const githubClient = createReadyClient();
+    const create = githubClient.createRepositoryFromTemplate.bind(githubClient);
+    githubClient.createRepositoryFromTemplate = async (input) => {
+      await create(input);
+      throw new GitHubClientError("api_error", "Transient template response failure");
+    };
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(result.errors).toEqual([]);
+    expect(result.summary.created).toBeGreaterThan(0);
+    expect(JSON.stringify(result)).not.toContain("Transient template response failure");
+    expect(loadManifest(createManifestPath(cwd, "27s1", "lab04").absolutePath).status).toBe(
+      "loaded"
+    );
+  });
+
+  it("preserves a create failure when reconciliation finds no repository", async () => {
+    const cwd = copyFixtureToTemp();
+    const githubClient = createReadyClient();
+    githubClient.createRepositoryFromTemplate = () =>
+      Promise.reject(
+        new GitHubClientError("permission_denied", "Template creation permission denied", {
+          statusCode: 403
+        })
+      );
+    const result = await runApplyCommand({
+      cwd,
+      assignmentFile: ASSIGNMENT_FILE,
+      options: yesOptions,
+      githubClient,
+      clock: fixedClock,
+      retryOptions: { sleep: async () => {} }
+    });
+    expect(result.exitCode).toBe(ExitCode.AuthenticationOrAuthorizationFailure);
+    expect(result.errors).toContainEqual(
+      expect.objectContaining({
+        code: "github_permission_denied",
+        message: "Template creation permission denied",
+        context: expect.objectContaining({
+          statusCode: 403,
+          operationType: "create_repository_from_template"
+        }) as unknown
+      })
+    );
+    expect(githubClient.mutations.createdRepositories).toEqual([]);
+  });
+
   it("TC-RECOVERY-001 interrupted after repo creation and manifest update reruns no-op for repo creation", async () => {
     const cwd = copyFixtureToTemp();
     const githubClient = createReadyClient();
