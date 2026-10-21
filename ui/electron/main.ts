@@ -1,4 +1,5 @@
-import { BrowserWindow, app, dialog, ipcMain } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { registerExternalNavigation } from "./externalNavigation.js";
 import { applyAssignmentWithStudentRepositoryAccessPage } from "./assignmentApplyWithAccessPageService.js";
 import { gradeAssignment } from "./assignmentGradeRunner.js";
 import { getAssignmentApplyPreview } from "./assignmentApplyPreviewRunner.js";
@@ -1398,6 +1399,7 @@ export const createMainWindow = (): BrowserWindow => {
     }
   });
 
+  registerExternalNavigation(window, shell);
   registerRendererDiagnostics(window);
 
   if (isDebugEnabled()) {
