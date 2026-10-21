@@ -15,7 +15,11 @@ export interface RepositoryUpdateWorkspace extends GitWorkspaceWriter {
   pullUpstream(request: {
     readonly authentication: GitAuthenticationContextRef;
     readonly expectedHead: string;
-  }): Promise<{ readonly kind: "updated" | "conflict" }>;
+    readonly externalFastForward?: { readonly expectedRemote: string };
+  }): Promise<
+    | { readonly kind: "updated" | "conflict" }
+    | { readonly kind: "refused"; readonly message: string }
+  >;
 }
 export interface RepositoryUpdateBackend {
   updateGradingStudentRepository(
@@ -30,7 +34,11 @@ export interface RepositoryUpdateBackend {
       readRevisionFile(revision: string, file: string): Promise<string | null>;
       pullUpstream(request: {
         readonly expectedHead: string;
-      }): Promise<{ readonly kind: "updated" | "conflict" }>;
+        readonly externalFastForward?: { readonly expectedRemote: string };
+      }): Promise<
+        | { readonly kind: "updated" | "conflict" }
+        | { readonly kind: "refused"; readonly message: string }
+      >;
     }
   ): Promise<GradingStudentRepositoryUpdateResult>;
 }
@@ -84,8 +92,8 @@ export const createGradingStudentRepositoryUpdateService =
         {
           resolveHead: () => workspace.resolveHead(),
           readRevisionFile: (revision, file) => workspace.readRevisionFile(revision, file),
-          pullUpstream: ({ expectedHead }) =>
-            workspace.pullUpstream({ authentication: authenticated.authentication, expectedHead })
+          pullUpstream: (update) =>
+            workspace.pullUpstream({ ...update, authentication: authenticated.authentication })
         }
       );
     } catch {

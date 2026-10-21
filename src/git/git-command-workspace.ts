@@ -30,6 +30,7 @@ import {
   type PushBranchRequest,
   type PushUpstreamRequest,
   type PullUpstreamRequest,
+  type PullUpstreamResult,
   type RelativeGitPath,
   type RemoteName,
   type RevisionDiff,
@@ -166,6 +167,19 @@ const isTrustedGitHubHttpsRemote = (remote: string, host: string): boolean => {
   } catch {
     return false;
   }
+};
+
+const sameRepositoryRemote = (actual: string, expected: string): boolean => {
+  if (actual === expected) return true;
+  const identity = (value: string): string | null => {
+    if (!isTrustedGitHubHttpsRemote(value, GITHUB_HTTPS_HOST)) return null;
+    const url = new URL(value);
+    if (url.search !== "" || url.hash !== "") return null;
+    const pathname = url.pathname.replace(/\/$/u, "").replace(/\.git$/iu, "");
+    return /^\/[^/]+\/[^/]+$/u.test(pathname) ? pathname.toLowerCase() : null;
+  };
+  const actualIdentity = identity(actual);
+  return actualIdentity !== null && actualIdentity === identity(expected);
 };
 
 const requireAuthenticationContext = (
@@ -338,6 +352,7 @@ const requireDirectory = async (path: string): Promise<void> => {
 const parseObjectId = (
   stdout: string,
   operation:
+    | "pull"
     | "resolve_head"
     | "resolve_revision"
     | "resolve_tree"
@@ -668,9 +683,7 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
     }
   }
 
-  async pullUpstream(
-    request: PullUpstreamRequest = {}
-  ): Promise<{ readonly kind: "updated" | "conflict" }> {
+  async pullUpstream(request: PullUpstreamRequest = {}): Promise<PullUpstreamResult> {
     try {
       const state = await this.inspect();
       if (state.workingTree.conflicts.length > 0) return { kind: "conflict" };
@@ -681,7 +694,31 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
       )
         throw new GitError("operation_rejected", "pull");
       const expectedHead = request.expectedHead ?? state.head.commit;
-      if (state.head.commit !== expectedHead) throw new GitError("operation_rejected", "pull");
+      const external = state.head.commit !== expectedHead;
+      const refuse = (message: string): PullUpstreamResult => ({ kind: "refused", message });
+      if (external) {
+        if (request.externalFastForward === undefined)
+          throw new GitError("operation_rejected", "pull");
+        if (Object.values(state.workingTree).some((paths) => paths.length > 0))
+          return refuse(
+            "Automatic adoption requires a clean working tree. Commit or move local changes and review them manually. The expected SHA and grading work were preserved."
+          );
+        if (!isObjectId(expectedHead))
+          return refuse(
+            "The previous expected revision is unavailable. Manual recovery is required."
+          );
+        try {
+          await this.executor.run(
+            this.root,
+            ["merge-base", "--is-ancestor", expectedHead, state.head.commit],
+            "pull"
+          );
+        } catch {
+          return refuse(
+            "Local HEAD is not a proven descendant of the previous expected revision. Missing or rewritten history requires manual recovery."
+          );
+        }
+      }
       const remoteName = createRemoteName(state.upstream.remote);
       const upstreamRef = (
         await this.executor.run(
@@ -701,6 +738,13 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
       if (remoteName === null || branch === null) throw new GitError("operation_rejected", "pull");
       const remote = await this.remoteUrl(remoteName);
       if (remote === null) throw new GitError("operation_rejected", "pull");
+      if (
+        external &&
+        !sameRepositoryRemote(remote, request.externalFastForward?.expectedRemote ?? "")
+      )
+        return refuse(
+          "The upstream remote does not match the student's recorded repository. Review the remote configuration manually."
+        );
       await this.executor.run(
         this.root,
         ["fetch", "--no-tags", "--", remote, `refs/heads/${branch}`],
@@ -709,12 +753,52 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
           ? {}
           : { authentication: request.authentication, remote }
       );
-      if ((await this.resolveHead()) !== expectedHead)
+      if ((await this.resolveHead()) !== state.head.commit)
         throw new GitError("operation_rejected", "pull");
+      let mergeTarget = "FETCH_HEAD";
+      if (external) {
+        // Freeze the fetched commit: later FETCH_HEAD writes cannot change our evidence.
+        mergeTarget = parseObjectId(
+          await this.executor.run(
+            this.root,
+            ["rev-parse", "--verify", "FETCH_HEAD^{commit}"],
+            "pull"
+          ),
+          "pull"
+        );
+        try {
+          await this.executor.run(
+            this.root,
+            ["merge-base", "--is-ancestor", state.head.commit, mergeTarget],
+            "pull"
+          );
+        } catch {
+          return refuse(
+            "Local HEAD contains commits outside the freshly fetched upstream history. Local-only commits, divergence, or rewritten remote history require manual recovery."
+          );
+        }
+        const current = await this.inspect();
+        if (
+          current.head.kind !== "attached" ||
+          current.head.commit !== state.head.commit ||
+          current.head.branch !== state.head.branch ||
+          Object.values(current.workingTree).some((paths) => paths.length > 0)
+        )
+          return refuse(
+            "The repository changed during inspection. Review local changes before retrying."
+          );
+      }
       try {
         await this.executor.run(
           this.root,
-          ["merge", "--no-edit", "--no-stat", "--no-autostash", "FETCH_HEAD"],
+          [
+            "merge",
+            ...(external ? ["--ff-only"] : []),
+            "--no-edit",
+            "--no-stat",
+            "--no-autostash",
+            mergeTarget
+          ],
           "pull"
         );
       } catch (error) {

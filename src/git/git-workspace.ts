@@ -212,7 +212,7 @@ export interface CreateOrResetBranchRequest {
 }
 
 export interface GitWorkspacePreparer extends GitWorkspaceWriter {
-  pullUpstream(request?: PullUpstreamRequest): Promise<{ readonly kind: "updated" | "conflict" }>;
+  pullUpstream(request?: PullUpstreamRequest): Promise<PullUpstreamResult>;
   readRevisionFile(revision: string, file: string): Promise<string | null>;
   remoteDefaultBranch(remote: RemoteName): Promise<BranchName | null>;
   checkoutDetached(revision: ExactCommitRevision): Promise<ObjectId>;
@@ -249,7 +249,12 @@ export interface PushResult {
   readonly kind: "pushed";
 }
 
+export type PullUpstreamResult =
+  | { readonly kind: "updated" | "conflict" }
+  | { readonly kind: "refused"; readonly message: string };
+
 export interface PullUpstreamRequest {
+  readonly externalFastForward?: { readonly expectedRemote: string };
   readonly authentication?: GitAuthenticationContext;
   readonly expectedHead?: string;
 }

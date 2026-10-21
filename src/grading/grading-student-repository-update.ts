@@ -1,3 +1,11 @@
+import { loadGraiderConfig } from "../config/config-loader.js";
+import { loadManifest } from "../manifest/manifest-loader.js";
+import { createManifestPath } from "../manifest/manifest-paths.js";
+import {
+  findStudentRepositoryMapping,
+  normalizeManifestRepositories
+} from "../manifest/repository-targets.js";
+import type { PullUpstreamRequest, PullUpstreamResult } from "../git/git-workspace.js";
 import {
   loadGradingState,
   saveGradingState,
@@ -8,9 +16,9 @@ import {
 export interface StudentRepositoryUpdateWorkspace {
   resolveHead(): Promise<string>;
   readRevisionFile(revision: string, file: string): Promise<string | null>;
-  pullUpstream(request: {
-    readonly expectedHead: string;
-  }): Promise<{ readonly kind: "updated" | "conflict" }>;
+  pullUpstream(
+    request: PullUpstreamRequest & { readonly expectedHead: string }
+  ): Promise<PullUpstreamResult>;
 }
 
 export interface StudentRepositoryUpdateResult {
@@ -74,10 +82,43 @@ const relocate = async (
   };
 };
 
+// Resolve identity without the normal submission guard: that guard intentionally
+// remains strict for every operation other than this explicit recovery action.
+const expectedRepositoryRemote = (request: GradingStatePathRequest): string | null => {
+  const manifest = loadManifest(
+    createManifestPath(request.courseRoot, request.termCode, request.assignmentSlug).absolutePath,
+    { required: true }
+  );
+  if (
+    manifest.status !== "loaded" ||
+    manifest.manifest.assignment.termCode !== request.termCode ||
+    manifest.manifest.assignment.assignmentSlug !== request.assignmentSlug
+  )
+    return null;
+  const mapping = findStudentRepositoryMapping(
+    normalizeManifestRepositories(manifest.manifest),
+    request.studentId
+  );
+  if (mapping === undefined) return null;
+  const config = loadGraiderConfig({
+    cwd: request.courseRoot,
+    assignmentFile: `terms/${request.termCode}/assignments/${request.assignmentSlug}/assignment.yml`
+  });
+  const owner =
+    manifest.manifest.schemaVersion === 1
+      ? manifest.manifest.repositories.find((record) => record.studentId === request.studentId)
+          ?.repository.owner
+      : config.status === "success"
+        ? config.config.course.github.organization
+        : undefined;
+  return owner ? `https://github.com/${owner}/${mapping.repositoryName}.git` : null;
+};
+
 const activeUpdates = new Set<string>();
 export const updateGradingStudentRepository = async (
   request: GradingStatePathRequest,
-  workspace: StudentRepositoryUpdateWorkspace
+  workspace: StudentRepositoryUpdateWorkspace,
+  dependencies = { expectedRepositoryRemote }
 ): Promise<StudentRepositoryUpdateResult> => {
   const key = JSON.stringify(request);
   if (activeUpdates.has(key))
@@ -92,9 +133,19 @@ export const updateGradingStudentRepository = async (
     if (loaded.status !== "success" || loaded.value.studentId !== request.studentId)
       return { status: "grading_state_error" };
     const previous = loaded.value;
-    if ((await workspace.resolveHead()) !== previous.submissionCommitSha)
-      return { status: "submission_changed" };
-    const pulled = await workspace.pullUpstream({ expectedHead: previous.submissionCommitSha });
+    const external = (await workspace.resolveHead()) !== previous.submissionCommitSha;
+    const expectedRemote = external ? dependencies.expectedRepositoryRemote(request) : null;
+    if (external && expectedRemote === null)
+      return {
+        status: "submission_changed",
+        message:
+          "The student's recorded repository identity could not be verified. The expected SHA and grading work were preserved."
+      };
+    const pulled = await workspace.pullUpstream({
+      expectedHead: previous.submissionCommitSha,
+      ...(expectedRemote === null ? {} : { externalFastForward: { expectedRemote } })
+    });
+    if (pulled.kind === "refused") return { status: "submission_changed", message: pulled.message };
     if (pulled.kind === "conflict")
       return {
         status: "merge_conflict",

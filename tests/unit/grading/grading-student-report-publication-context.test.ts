@@ -1,3 +1,8 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { updateGradingStudentRepository } from "../../../src/grading/grading-student-repository-update.js";
+import { loadGradingState, saveGradingState } from "../../../src/grading/grading-state.js";
 import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
 import * as evidenceContext from "../../../src/grading/grading-student-evidence-context.js";
 import { describe, expect, it, vi } from "vitest";
@@ -308,12 +313,34 @@ describe("grading student report publication context", () => {
 
   it("regenerates and republishes revised feedback repeatedly at an authorized updated SHA", async () => {
     const newSha = "b".repeat(COMMIT_SHA_LENGTH);
-    let state: GradingState = {
-      ...gradingState("published"),
-      submissionCommitSha: newSha,
-      updatedSinceGrading: true,
-      repositoryUpdates: [{ previousSha: SHA, newSha, updatedAt: "2026-10-21T12:00:00.000Z" }]
-    };
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-recovery-publication-"));
+    let state: GradingState;
+    try {
+      const stateRequest = {
+        courseRoot: root,
+        termCode: "27s1",
+        assignmentSlug: "lab1",
+        studentId: "ada"
+      };
+      saveGradingState(stateRequest, gradingState("published"));
+      expect(
+        await updateGradingStudentRepository(
+          stateRequest,
+          {
+            resolveHead: () => Promise.resolve(newSha),
+            readRevisionFile: () => Promise.resolve("unchanged source"),
+            pullUpstream: vi.fn().mockResolvedValue({ kind: "updated" })
+          },
+          { expectedRepositoryRemote: () => "https://github.com/trusted-org/lab1-ada.git" }
+        )
+      ).toEqual({ status: "success" });
+      const recovered = loadGradingState(stateRequest);
+      if (recovered.status !== "success") throw new Error(recovered.status);
+      state = recovered.value;
+      expect(state.repositoryUpdates?.[0]).toMatchObject({ previousSha: SHA, newSha });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
     let remoteHtml = "Previous feedback";
     const client = {
       getRepository: vi.fn().mockResolvedValue({ defaultBranch: "main" }),

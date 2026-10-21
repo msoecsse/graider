@@ -95,90 +95,124 @@ const fixture = async () => {
     git(student, "commit", "-am", "Student corrections");
     git(student, "push");
   };
-  return { root, request, state, workspace, read, advance, student, local, sha };
+  const update = () =>
+    updateGradingStudentRepository(request, workspace, { expectedRepositoryRemote: () => remote });
+  return { root, request, state, workspace, read, advance, student, local, sha, remote, update };
 };
 const rubric = [{ id: "code", name: "Code", points: 20 }];
 
 describe("authorized student repository update", () => {
-  it("pulls remote corrections, advances canonical SHA, preserves all grading, and conservatively maps anchors", async () => {
-    const f = await fixture();
-    // Uncommitted instructor feedback is retained by a normal Git update.
-    fs.writeFileSync(path.join(f.local, "instructor-notes.txt"), "Local notes");
-    fs.writeFileSync(path.join(f.local, "feedback.txt"), "Revised instructor report");
-    f.advance();
-    const pull = vi.spyOn(f.workspace, "pullUpstream");
-    expect(await updateGradingStudentRepository(f.request, f.workspace)).toEqual({
-      status: "success"
-    });
-    expect(pull).toHaveBeenCalledExactlyOnceWith({ expectedHead: f.sha });
-    const updated = f.read();
-    expect(updated.submissionCommitSha).toBe(git(f.student, "rev-parse", "HEAD"));
-    expect(updated.submissionCommitSha).toBe(await f.workspace.resolveHead());
-    expect(updated.repositoryUpdates?.[0]?.previousSha).toBe(f.sha);
-    expect(updated.repositoryUpdates?.[0]?.newSha).toBe(updated.submissionCommitSha);
-    expect(updated.repositoryUpdates?.[0]?.updatedAt).toEqual(expect.any(String));
-    expect(updated.updatedSinceGrading).toBe(true);
-    expect(updated.status).toBe("published");
-    expect(updated.manualAdjustments).toEqual(f.state.manualAdjustments);
-    expect(updated.viewState).toEqual(f.state.viewState);
-    expect(calculateGrade(updated, rubric)).toEqual(calculateGrade(f.state, rubric));
-    for (const [index, comment] of updated.appliedComments.entries()) {
-      const original = f.state.appliedComments[index];
-      expect({
-        id: comment.id,
-        sourceCommentId: comment.sourceCommentId,
-        text: comment.text,
-        deduction: comment.deduction,
-        rubricCategoryId: comment.rubricCategoryId
-      }).toEqual({
-        id: original?.id,
-        sourceCommentId: original?.sourceCommentId,
-        text: original?.text,
-        deduction: original?.deduction,
-        rubricCategoryId: original?.rubricCategoryId
-      });
-    }
-    expect(updated.appliedComments[0]).toMatchObject({
-      sourceLocation: { startLine: 3, endLine: 3 },
-      sourceAnchor: {
-        status: "relocated",
-        originalCommitSha: f.sha,
-        originalText: "unique source",
-        originalLocation: { startLine: 2 }
+  it.each(["managed", "externally pulled", "externally pulled then advanced again"])(
+    "%s: advances canonical SHA, preserves all grading, and conservatively maps anchors",
+    async (mode) => {
+      const f = await fixture();
+      if (mode === "managed") {
+        // Existing managed pull behavior retains nonoverlapping local feedback.
+        fs.writeFileSync(path.join(f.local, "instructor-notes.txt"), "Local notes");
+        fs.writeFileSync(path.join(f.local, "feedback.txt"), "Revised instructor report");
       }
-    });
-    for (const index of [1, 2])
-      expect(updated.appliedComments[index]).toMatchObject({
-        sourceLocation: f.state.appliedComments[index]?.sourceLocation,
-        sourceAnchor: { status: "stale", originalCommitSha: f.sha }
+      f.advance();
+      if (mode !== "managed") {
+        git(f.local, "pull", "--ff-only");
+        expect(
+          resolveGradingSubmissionContext({
+            ...f.request,
+            courseFolderPath: f.root,
+            currentSubmissionCommitSha: git(f.local, "rev-parse", "HEAD")
+          }).status
+        ).toBe("submission_changed");
+        expect(f.read()).toEqual(f.state);
+        if (mode === "externally pulled then advanced again")
+          f.advance(
+            "remote advanced again\ninserted\nheader\nunique source\nrepeat\nrepeat\nfooter\n"
+          );
+      }
+      const pull = vi.spyOn(f.workspace, "pullUpstream");
+      const commit = vi.spyOn(f.workspace, "commit");
+      expect(await f.update()).toEqual({
+        status: "success"
       });
-    expect(updated.appliedComments[3]).toEqual(f.state.appliedComments[3]);
-    expect(fs.readFileSync(path.join(f.local, "feedback.txt"), "utf8")).toBe(
-      "Revised instructor report"
-    );
-    expect(fs.readFileSync(path.join(f.local, "instructor-notes.txt"), "utf8")).toBe("Local notes");
-    expect(
-      resolveGradingSubmissionContext({
-        courseFolderPath: f.root,
-        ...f.request,
-        currentSubmissionCommitSha: updated.submissionCommitSha
-      }).status
-    ).toBe("success");
-    // Stale context survives text-only edits until explicitly re-anchored.
-    const edited = editAppliedComment(updated, "deleted", {
-      text: "Revised feedback",
-      deduction: -1,
-      sourceLocation: updated.appliedComments[2]?.sourceLocation
-    });
-    expect(
-      edited.status === "success" && edited.value.appliedComments[2]?.sourceAnchor?.status
-    ).toBe("stale");
-    f.advance("another insertion\ninserted\nheader\nunique source\nrepeat\nrepeat\nfooter\n");
-    expect((await updateGradingStudentRepository(f.request, f.workspace)).status).toBe("success");
-    expect(f.read().repositoryUpdates).toHaveLength(2);
-    expect(f.read().appliedComments[0]?.sourceAnchor?.originalCommitSha).toBe(f.sha);
-    expect(f.read().appliedComments[1]?.sourceAnchor?.status).toBe("stale");
-  });
+      expect(pull).toHaveBeenCalledExactlyOnceWith({
+        expectedHead: f.sha,
+        ...(mode === "managed" ? {} : { externalFastForward: { expectedRemote: f.remote } })
+      });
+      expect(commit).not.toHaveBeenCalled();
+      const updated = f.read();
+      expect(updated.submissionCommitSha).toBe(git(f.student, "rev-parse", "HEAD"));
+      expect(updated.submissionCommitSha).toBe(await f.workspace.resolveHead());
+      expect(updated.repositoryUpdates?.[0]?.previousSha).toBe(f.sha);
+      expect(updated.repositoryUpdates?.[0]?.newSha).toBe(updated.submissionCommitSha);
+      expect(updated.repositoryUpdates?.[0]?.updatedAt).toEqual(expect.any(String));
+      expect(updated.updatedSinceGrading).toBe(true);
+      expect(updated.status).toBe("published");
+      expect(updated.manualAdjustments).toEqual(f.state.manualAdjustments);
+      expect(updated.viewState).toEqual(f.state.viewState);
+      expect(calculateGrade(updated, rubric)).toEqual(calculateGrade(f.state, rubric));
+      for (const [index, comment] of updated.appliedComments.entries()) {
+        const original = f.state.appliedComments[index];
+        expect({
+          id: comment.id,
+          sourceCommentId: comment.sourceCommentId,
+          text: comment.text,
+          deduction: comment.deduction,
+          rubricCategoryId: comment.rubricCategoryId
+        }).toEqual({
+          id: original?.id,
+          sourceCommentId: original?.sourceCommentId,
+          text: original?.text,
+          deduction: original?.deduction,
+          rubricCategoryId: original?.rubricCategoryId
+        });
+      }
+      expect(updated.appliedComments[0]).toMatchObject({
+        sourceLocation: {
+          startLine: mode === "externally pulled then advanced again" ? 4 : 3,
+          endLine: mode === "externally pulled then advanced again" ? 4 : 3
+        },
+        sourceAnchor: {
+          status: "relocated",
+          originalCommitSha: f.sha,
+          originalText: "unique source",
+          originalLocation: { startLine: 2 }
+        }
+      });
+      for (const index of [1, 2])
+        expect(updated.appliedComments[index]).toMatchObject({
+          sourceLocation: f.state.appliedComments[index]?.sourceLocation,
+          sourceAnchor: { status: "stale", originalCommitSha: f.sha }
+        });
+      expect(updated.appliedComments[3]).toEqual(f.state.appliedComments[3]);
+      if (mode === "managed") {
+        expect(fs.readFileSync(path.join(f.local, "feedback.txt"), "utf8")).toBe(
+          "Revised instructor report"
+        );
+        expect(fs.readFileSync(path.join(f.local, "instructor-notes.txt"), "utf8")).toBe(
+          "Local notes"
+        );
+      }
+      expect(
+        resolveGradingSubmissionContext({
+          courseFolderPath: f.root,
+          ...f.request,
+          currentSubmissionCommitSha: updated.submissionCommitSha
+        }).status
+      ).toBe("success");
+      // Stale context survives text-only edits until explicitly re-anchored.
+      const edited = editAppliedComment(updated, "deleted", {
+        text: "Revised feedback",
+        deduction: -1,
+        sourceLocation: updated.appliedComments[2]?.sourceLocation
+      });
+      expect(
+        edited.status === "success" && edited.value.appliedComments[2]?.sourceAnchor?.status
+      ).toBe("stale");
+      f.advance("another insertion\ninserted\nheader\nunique source\nrepeat\nrepeat\nfooter\n");
+      expect((await updateGradingStudentRepository(f.request, f.workspace)).status).toBe("success");
+      expect(f.read().repositoryUpdates).toHaveLength(2);
+      expect(f.read().appliedComments[0]?.sourceAnchor?.originalCommitSha).toBe(f.sha);
+      expect(f.read().appliedComments[1]?.sourceAnchor?.status).toBe("stale");
+    }
+  );
 
   it("leaves an up-to-date repository and grading state unchanged", async () => {
     const f = await fixture();
@@ -204,23 +238,91 @@ describe("authorized student repository update", () => {
     expect(fs.readFileSync(path.join(f.local, "Main.java"), "utf8")).toContain("instructor edits");
   });
 
-  it("continues rejecting external/manual commits and never adopts them via the update action", async () => {
+  it.each(["dirty", "local-only", "divergent", "rewritten", "remote mismatch", "conflicted"])(
+    "refuses unsafe external state: %s",
+    async (mode) => {
+      const f = await fixture();
+      f.advance();
+      git(f.local, "pull", "--ff-only");
+      if (mode === "dirty") fs.writeFileSync(path.join(f.local, "notes.txt"), "unsaved");
+      if (mode === "local-only" || mode === "divergent" || mode === "conflicted") {
+        fs.writeFileSync(path.join(f.local, "Main.java"), "instructor changes\n");
+        git(f.local, "commit", "-am", "Manual changes");
+        if (mode !== "local-only") f.advance("different student changes\n");
+        if (mode === "conflicted") {
+          expect(() => git(f.local, "pull", "--no-rebase")).toThrow();
+        }
+      }
+      if (mode === "rewritten") {
+        git(f.local, "checkout", "--orphan", "replacement");
+        git(f.local, "commit", "-m", "Unrelated history");
+        git(
+          f.local,
+          "branch",
+          "--set-upstream-to",
+          "origin/" + git(f.student, "branch", "--show-current")
+        );
+      }
+      if (mode === "remote mismatch") git(f.local, "remote", "set-url", "origin", f.student);
+      const head = await f.workspace.resolveHead();
+      const result = await f.update();
+      expect(result.status).toBe(mode === "conflicted" ? "merge_conflict" : "submission_changed");
+      expect(result.message).toEqual(expect.any(String));
+      expect(f.read()).toEqual(f.state);
+      expect(await f.workspace.resolveHead()).toBe(head);
+      expect(
+        resolveGradingSubmissionContext({
+          ...f.request,
+          courseFolderPath: f.root,
+          currentSubmissionCommitSha: head
+        }).status
+      ).toBe("submission_changed");
+    }
+  );
+
+  it("requires recorded repository identity before attempting recovery", async () => {
     const f = await fixture();
     f.advance();
-    git(f.local, "pull", "--no-rebase");
-    const currentSubmissionCommitSha = git(f.local, "rev-parse", "HEAD");
-    expect(
-      resolveGradingSubmissionContext({
-        ...f.request,
-        courseFolderPath: f.root,
-        currentSubmissionCommitSha
-      }).status
-    ).toBe("submission_changed");
+    git(f.local, "pull", "--ff-only");
     const pull = vi.spyOn(f.workspace, "pullUpstream");
-    expect(await updateGradingStudentRepository(f.request, f.workspace)).toEqual({
-      status: "submission_changed"
-    });
+    expect((await updateGradingStudentRepository(f.request, f.workspace)).status).toBe(
+      "submission_changed"
+    );
     expect(pull).not.toHaveBeenCalled();
+    expect(f.read()).toEqual(f.state);
+  });
+
+  it("derives the recovery remote from the persisted student repository mapping", async () => {
+    const f = await fixture();
+    f.advance();
+    git(f.local, "pull", "--ff-only");
+    const directory = path.join(f.root, "terms/27s1/manifests/lab1");
+    fs.mkdirSync(directory, { recursive: true });
+    const manifest = fs
+      .readFileSync("tests/fixtures/manifest/valid-manifest/manifest.yml", "utf8")
+      .replaceAll("lab04", "lab1")
+      .replaceAll("student_id: jones", "student_id: ada");
+    fs.writeFileSync(path.join(directory, "manifest.yml"), manifest);
+    const pull = vi.spyOn(f.workspace, "pullUpstream").mockResolvedValue({ kind: "updated" });
+    expect(await updateGradingStudentRepository(f.request, f.workspace)).toEqual({
+      status: "success"
+    });
+    expect(pull).toHaveBeenCalledExactlyOnceWith({
+      expectedHead: f.sha,
+      externalFastForward: {
+        expectedRemote: "https://github.com/example-org/27s1-se2030-lab1-seanjones.git"
+      }
+    });
+    expect(f.read().submissionCommitSha).toBe(await f.workspace.resolveHead());
+  });
+
+  it("keeps the Git equality guard unless explicit external adoption is requested", async () => {
+    const f = await fixture();
+    f.advance();
+    git(f.local, "pull", "--ff-only");
+    await expect(f.workspace.pullUpstream({ expectedHead: f.sha })).rejects.toMatchObject({
+      kind: "operation_rejected"
+    });
     expect(f.read()).toEqual(f.state);
   });
 

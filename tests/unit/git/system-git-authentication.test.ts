@@ -166,9 +166,13 @@ describe("Command workspace authenticated execution contract", () => {
     expect(process.env.GIT_TERMINAL_PROMPT).toBe(originalTerminalPrompt);
   });
 
-  it.each([GITHUB_REMOTE, OTHER_HTTPS_REMOTE])(
-    "authenticates pull only to a trusted upstream: %s",
-    async (remote) => {
+  it.each(
+    [GITHUB_REMOTE, OTHER_HTTPS_REMOTE].flatMap((remote) =>
+      [false, true].map((recover) => ({ remote, recover }))
+    )
+  )(
+    "authenticates pull only to a trusted upstream: $remote, recovery: $recover",
+    async ({ remote, recover }) => {
       const root = await createTemporaryDirectory("graider-auth-pull-");
       const requests: GitCommandExecutionRequest[] = [];
       const context = authenticationContext("pull-context");
@@ -189,19 +193,35 @@ describe("Command workspace authenticated execution contract", () => {
               ? "refs/heads/main\n"
               : "origin\n";
           if (request.args[0] === "config") return `${remote}\n`;
-          if (request.args[0] === "fetch" || request.args[0] === "merge") return "";
+          if (
+            request.args[0] === "fetch" ||
+            request.args[0] === "merge" ||
+            request.args[0] === "merge-base"
+          )
+            return "";
           throw new Error("Unexpected operation");
         }
       });
       const workspace = await factory.open(root);
+      const pullRequest = {
+        authentication: context,
+        ...(recover
+          ? {
+              expectedHead: "b".repeat(COMMIT_SHA_LENGTH),
+              externalFastForward: {
+                expectedRemote: remote === GITHUB_REMOTE ? remote.replace(/\.git$/u, "") : remote
+              }
+            }
+          : {})
+      };
       if (remote !== GITHUB_REMOTE) {
-        await expect(workspace.pullUpstream({ authentication: context })).rejects.toMatchObject({
+        await expect(workspace.pullUpstream(pullRequest)).rejects.toMatchObject({
           kind: "operation_rejected"
         });
         expect(requests.some((request) => request.args[0] === "fetch")).toBe(false);
         return;
       }
-      expect(await workspace.pullUpstream({ authentication: context })).toEqual({
+      expect(await workspace.pullUpstream(pullRequest)).toEqual({
         kind: "updated"
       });
       const fetch = requests.find((request) => request.args[0] === "fetch");

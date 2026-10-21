@@ -31,7 +31,10 @@ const fixture = () => {
     >(async (_request, adapter) => {
       await adapter.resolveHead();
       await adapter.readRevisionFile("a".repeat(40), "Main.java");
-      await adapter.pullUpstream({ expectedHead: "a".repeat(40) });
+      await adapter.pullUpstream({
+        expectedHead: "a".repeat(40),
+        externalFastForward: { expectedRemote: "https://github.com/course/lab1-ada.git" }
+      });
       return { status: "success" };
     })
   };
@@ -56,7 +59,8 @@ describe("selected student authenticated repository update", () => {
     });
     expect(f.workspace.pullUpstream).toHaveBeenCalledExactlyOnceWith({
       authentication: f.authentication,
-      expectedHead: "a".repeat(40)
+      expectedHead: "a".repeat(40),
+      externalFastForward: { expectedRemote: "https://github.com/course/lab1-ada.git" }
     });
     expect(f.backend.updateGradingStudentRepository).toHaveBeenCalledWith(
       { courseRoot: "/course", termCode: "27s1", assignmentSlug: "lab1", studentId: "ada" },
