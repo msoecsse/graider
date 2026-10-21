@@ -190,6 +190,58 @@ const withoutEvidence = (input: BuildGradingReportModelInput): BuildGradingRepor
   return copy;
 };
 
+it("keeps stale anchors in feedback without attaching them to an unrelated valid line", () => {
+  const input = baseInput();
+  const location = { file: "src/Main.java", startLine: 1, endLine: 1 };
+  const result = buildGradingReportModel({
+    ...input,
+    gradingState: {
+      ...input.gradingState,
+      appliedComments: [
+        {
+          id: "stale",
+          text: "Preserved stale deduction",
+          deduction: -2,
+          sourceLocation: location,
+          sourceAnchor: {
+            status: "stale",
+            originalCommitSha: SUBMISSION_SHA,
+            originalLocation: location,
+            originalText: "Removed source"
+          }
+        }
+      ]
+    }
+  });
+  expect(result.status).toBe("success");
+  if (result.status !== "success") throw new Error(result.code);
+  expect(result.value.unmappedSourceComments).toEqual([
+    expect.objectContaining({ id: "stale", locationAvailable: false, deduction: -2 })
+  ]);
+  expect(renderGradingReportHtml(result.value)).toContain("Preserved stale deduction");
+});
+
+it("retains historical automated results with an explicit original revision label after authorized updates", () => {
+  const input = baseInput();
+  const newSha = "b".repeat(COMMIT_SHA_LENGTH);
+  const updatedState = {
+    ...input.gradingState,
+    submissionCommitSha: newSha,
+    updatedSinceGrading: true,
+    repositoryUpdates: [
+      { previousSha: SUBMISSION_SHA, newSha, updatedAt: "2026-10-21T12:00:00.000Z" }
+    ]
+  };
+  const withoutHistory = { ...input };
+  delete withoutHistory.commitHistory;
+  const result = buildGradingReportModel({ ...withoutHistory, gradingState: updatedState });
+  if (result.status !== "success") throw new Error(result.message);
+  expect(result.value.evidence).toEqual(evidenceFrom(input).evidence);
+  expect(renderGradingReportHtml(result.value)).toContain(
+    `Results from previous revision ${SUBMISSION_SHA}`
+  );
+});
+
 describe("grading report model", () => {
   it("uses the canonical grade projection and preserves rubric, comments, and adjustments", () => {
     const model = buildModel();

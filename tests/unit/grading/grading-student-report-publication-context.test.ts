@@ -306,6 +306,60 @@ describe("grading student report publication context", () => {
     expect(retrieve.mock.calls[0]?.[1]).toBe(client);
   });
 
+  it("regenerates and republishes revised feedback repeatedly at an authorized updated SHA", async () => {
+    const newSha = "b".repeat(COMMIT_SHA_LENGTH);
+    let state: GradingState = {
+      ...gradingState("published"),
+      submissionCommitSha: newSha,
+      updatedSinceGrading: true,
+      repositoryUpdates: [{ previousSha: SHA, newSha, updatedAt: "2026-10-21T12:00:00.000Z" }]
+    };
+    let remoteHtml = "Previous feedback";
+    const client = {
+      getRepository: vi.fn().mockResolvedValue({ defaultBranch: "main" }),
+      getRepositoryFileContent: vi.fn(() => Promise.resolve(remoteHtml)),
+      writeRepositoryFile: vi.fn((input: { content: string }) => {
+        remoteHtml = input.content;
+        return Promise.resolve({ path: "grading/final.html", commitSha: newSha });
+      })
+    };
+    for (const text of ["Corrections reviewed", "Additional revised feedback"]) {
+      state = {
+        ...state,
+        appliedComments: state.appliedComments.map((comment) => ({ ...comment, text }))
+      };
+      const deps = {
+        ...dependencies(state),
+        resolveSubmission: vi.fn().mockReturnValue({
+          status: "success",
+          value: { studentId: "ada", submissionCommitSha: newSha }
+        })
+      };
+      const prepared = prepareGradingStudentReportPublicationContext(
+        { ...request, currentSubmissionCommitSha: newSha },
+        deps
+      );
+      expect(prepared.status).toBe("success");
+      if (prepared.status !== "success") throw new Error(prepared.status);
+      const rendered = renderPreparedGradingStudentReport(prepared.value, {});
+      if (rendered.status !== "success") throw new Error(rendered.status);
+      expect(rendered.html).toContain(text);
+      expect(
+        await publishRenderedGradingStudentReport(prepared.value, rendered.html, client, () =>
+          Promise.resolve(
+            revalidatePreparedGradingStudentReportPublication(prepared.value, newSha, deps)
+              .status === "success"
+          )
+        )
+      ).toEqual({ status: "published", writePerformed: true });
+      expect(markPreparedGradingStudentReportPublished(prepared.value, newSha, deps).status).toBe(
+        "success"
+      );
+    }
+    expect(client.writeRepositoryFile).toHaveBeenCalledTimes(2);
+    expect(remoteHtml).toContain("Additional revised feedback");
+  });
+
   it("uses the supplied client and publishes only the trusted repository/path", async () => {
     const prepared = prepare();
     const writeRepositoryFile = vi.fn().mockResolvedValue({ path: prepared.reportPath });

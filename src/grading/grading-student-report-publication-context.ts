@@ -17,7 +17,10 @@ import {
 import type { GitHubClient } from "../github/github-client.js";
 import { GitHubClientError } from "../github/github-errors.js";
 import { isManagedGradingWorkflowEligible } from "../workflows/managed-workflow-deployment.js";
-import { retrievePreparedGradingStudentEvidence } from "./grading-student-evidence-context.js";
+import {
+  retrievePreparedGradingStudentEvidence,
+  historicalEvidenceRevisions
+} from "./grading-student-evidence-context.js";
 import { renderGradingReportHtml } from "./grading-report-html.js";
 import { buildGradingReportModel, type GradingReportCommit } from "./grading-report-model.js";
 import {
@@ -67,6 +70,7 @@ export interface PreparedGradingStudentReportPublicationContext {
   >;
   readonly studentId: string;
   readonly submissionCommitSha: string;
+  readonly previousSubmissionCommitShas?: readonly string[];
   readonly reportPath: string;
   readonly repository: { readonly owner: string; readonly repo: string };
   readonly managedEvidenceEligible: boolean;
@@ -312,6 +316,7 @@ export const prepareGradingStudentReportPublicationContext = (
       },
       studentId: request.studentId,
       submissionCommitSha: state.submissionCommitSha,
+      ...historicalEvidenceRevisions(loaded),
       reportPath: destination.path,
       repository: { owner, repo: mapping.repositoryName },
       managedEvidenceEligible: isManagedGradingWorkflowEligible(grading),
@@ -356,7 +361,7 @@ export const renderPreparedGradingStudentReport = (
       : {
           evidence: {
             studentId: prepared.studentId,
-            submissionCommitSha: prepared.submissionCommitSha,
+            submissionCommitSha: input.evidence.metadata.submissionCommitSha,
             evidence: input.evidence
           }
         }),

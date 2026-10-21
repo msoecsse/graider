@@ -196,6 +196,18 @@ const showAllStudents = async (): Promise<void> => {
 };
 
 describe("GradingWorkspacePage automated checks", () => {
+  it("keeps earlier automated results visible and labels the earlier revision after source updates", async () => {
+    const historical = { ...evidence("ada"), submissionCommitSha: "b".repeat(40) };
+    setApis({ loadEvidence: vi.fn().mockResolvedValue(historical) });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    expect(await screen.findByText(/Results from previous revision/u)).toHaveTextContent(
+      "01234567"
+    );
+    expect(screen.getByRole("region", { name: "Automated Checks" })).toHaveTextContent(
+      "Total6Passed3Failed1Errors1Skipped1"
+    );
+  });
+
   it("loads independently with canonical identity and renders normalized JUnit and Checkstyle", async () => {
     const pendingSource = deferred<ReturnType<typeof source>>();
     const pendingSnapshot = deferred<ReturnType<typeof snapshot>>();

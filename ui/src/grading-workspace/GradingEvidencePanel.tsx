@@ -129,6 +129,12 @@ const SuccessEvidence = ({ result }: { readonly result: EvidenceSuccess }): Reac
   return (
     <>
       <p className="grading-evidence__student">Automated checks for {result.studentId}</p>
+      {evidence.metadata.submissionCommitSha === result.submissionCommitSha ? null : (
+        <p role="status">
+          Results from previous revision {evidence.metadata.submissionCommitSha.slice(0, 8)}. Source
+          has since been updated; rerun automated checks manually.
+        </p>
+      )}
       <details className="grading-evidence__phase" open>
         <summary>Compile</summary>
         <p>{outcomeLabel(evidence.metadata.compile.outcome)}</p>

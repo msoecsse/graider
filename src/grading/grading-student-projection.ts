@@ -7,6 +7,7 @@ import {
 
 export interface GradingStudentProjection {
   readonly studentId: string;
+  readonly updatedSinceGrading?: boolean;
   readonly gradingStatus: GradingState["status"];
   readonly appliedComments: GradingState["appliedComments"];
   readonly manualAdjustments: GradingState["manualAdjustments"];
@@ -25,6 +26,9 @@ export const projectGradingStudent = (
         value: {
           studentId: state.studentId,
           gradingStatus: state.status,
+          ...(state.updatedSinceGrading === undefined
+            ? {}
+            : { updatedSinceGrading: state.updatedSinceGrading }),
           appliedComments: state.appliedComments,
           manualAdjustments: state.manualAdjustments,
           grade: grade.value

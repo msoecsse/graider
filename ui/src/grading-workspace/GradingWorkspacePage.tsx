@@ -496,6 +496,11 @@ export const GradingWorkspacePage = ({
   request: GradingWorkspacePrepareRequest;
 }): ReactElement => {
   const [result, setResult] = useState<PreparationResult | null>(null);
+  const [repositoryUpdateStudentId, setRepositoryUpdateStudentId] = useState<string>();
+  const [repositoryUpdateNotice, setRepositoryUpdateNotice] = useState<{
+    studentId: string;
+    message: string;
+  }>();
   const [selected, setSelected] = useState(0);
   const [studentFilter, setStudentFilter] = useState<StudentFilterId>("to_grade");
   const [source, setSource] = useState<SourceLoadState>({ status: "idle" });
@@ -1394,7 +1399,8 @@ export const GradingWorkspacePage = ({
   const sourceAnnotations = useMemo<readonly GradingSourceAnnotation[]>(() => {
     if (snapshot.status !== "success") return [];
     return snapshot.snapshot.appliedComments.flatMap((comment) => {
-      if (comment.sourceLocation === undefined) return [];
+      if (comment.sourceLocation === undefined || comment.sourceAnchor?.status === "stale")
+        return [];
       const rubricCategoryName = snapshot.snapshot.grade.categories.find(
         (category) => category.id === comment.rubricCategoryId
       )?.name;
@@ -1497,6 +1503,72 @@ export const GradingWorkspacePage = ({
   // the selection changes, so this only needs to guard against a dirty draft —
   // it does not need to close panels itself the way requestPanelOpen does.
   const requestStudentSwitch = (perform: () => void): void => withDraftGuard(perform);
+
+  const pullLatestChanges = async (studentId: string): Promise<void> => {
+    const pull = window.graiderUI.pullLatestGradingStudentChanges;
+    if (
+      pull === undefined ||
+      repositoryUpdateStudentId !== undefined ||
+      gradingMutationStudentId !== undefined
+    )
+      return;
+    gradingMutationStudents.current.add(studentId);
+    const wasAutosaveBlocked = autosaveBlockedStudents.current.has(studentId);
+    const wasGradingBlocked = gradingMutationBlockedStudents.current.has(studentId);
+    setRepositoryUpdateStudentId(studentId);
+    setGradingMutationStudentId(studentId);
+    setRepositoryUpdateNotice(undefined);
+    let keepBlocked = false;
+    try {
+      await flushPendingViewState(studentId, true);
+      autosaveBlockedStudents.current.add(studentId);
+      gradingMutationBlockedStudents.current.add(studentId);
+      const updated = await pull({ ...request, studentId });
+      keepBlocked =
+        updated.status === "submission_changed" || updated.status === "update_state_record_failed";
+      if (!mounted.current) return;
+      setRepositoryUpdateNotice({
+        studentId,
+        message:
+          updated.message ??
+          {
+            success:
+              "Latest changes pulled. Grading work preserved. Automated checks have not been rerun.",
+            unchanged: "This repository is already up to date.",
+            submission_changed:
+              "The repository changed outside Graider. Its expected SHA was preserved. Review the manual changes before continuing.",
+            github_auth_unavailable: "GitHub authentication is required to pull latest changes.",
+            grading_state_missing: "Save grading work before updating this repository."
+          }[updated.status] ??
+          "Unable to update this repository safely. Grading work was preserved."
+      });
+      if (updated.status === "success" || updated.status === "unchanged") {
+        gradingMutationBlockedStudents.current.delete(studentId);
+        autosaveBlockedStudents.current.delete(studentId);
+        if (currentStudentIdRef.current === studentId) {
+          setCanonicalSourceTarget(undefined);
+          setReportPreview({ status: "idle" });
+          // Refresh the existing readers; none of these dispatch grading workflows.
+          setResult((current) => (isReady(current) ? { ...current } : current));
+        }
+      }
+    } catch {
+      if (mounted.current)
+        setRepositoryUpdateNotice({
+          studentId,
+          message: "Unable to pull latest changes. Check the repository and GitHub authentication."
+        });
+    } finally {
+      gradingMutationStudents.current.delete(studentId);
+      if (!keepBlocked && !wasAutosaveBlocked) autosaveBlockedStudents.current.delete(studentId);
+      if (!keepBlocked && !wasGradingBlocked)
+        gradingMutationBlockedStudents.current.delete(studentId);
+      if (mounted.current) {
+        setRepositoryUpdateStudentId(undefined);
+        setGradingMutationStudentId(undefined);
+      }
+    }
+  };
 
   const confirmDiscardDraft = (): void => {
     const pending = discardDraftConfirmation;
@@ -3082,6 +3154,36 @@ export const GradingWorkspacePage = ({
         />
         <aside className="grading-workspace__grading-pane">
           <h2>Grading</h2>
+          {student === undefined ? null : (
+            <div className="grading-repository-controls">
+              <button
+                type="button"
+                className="secondary-action"
+                disabled={
+                  snapshot.status === "loading" ||
+                  source.status === "loading" ||
+                  window.graiderUI.pullLatestGradingStudentChanges === undefined ||
+                  gradingMutationStudentId !== undefined ||
+                  reportPublicationStudentId !== undefined ||
+                  publishReviewRunning ||
+                  bulkWorkflowRepairState === "running" ||
+                  workflowRepair.status === "running"
+                }
+                onClick={() => requestPanelOpen(() => void pullLatestChanges(student.studentId))}
+              >
+                {repositoryUpdateStudentId === student.studentId
+                  ? "Pulling latest changes…"
+                  : "Pull latest changes"}
+              </button>
+              <p>
+                Updates only {student.studentId}. Existing grading is preserved; rerun automated
+                checks manually.
+              </p>
+              {repositoryUpdateNotice?.studentId === student.studentId ? (
+                <p role="status">{repositoryUpdateNotice.message}</p>
+              ) : null}
+            </div>
+          )}
           {student === undefined || snapshot.status === "idle" ? (
             <p>Select a student to view grading details.</p>
           ) : (snapshot.status === "success" ? snapshot.snapshot.studentId : snapshot.studentId) !==
@@ -3098,6 +3200,9 @@ export const GradingWorkspacePage = ({
             <div className="grading-student-snapshot">
               <p>
                 Status: <strong>{label(currentEffectiveStatus ?? "")}</strong>
+                {snapshot.snapshot.updatedSinceGrading ? (
+                  <span className="status-chip status-chip--attention">Updated Since Grading</span>
+                ) : null}
               </p>
               {currentEffectiveStatus === "not_started" ||
               currentEffectiveStatus === "in_progress" ? (

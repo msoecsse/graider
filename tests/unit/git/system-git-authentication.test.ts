@@ -28,6 +28,7 @@ const GITHUB_REMOTE = "https://github.com/msoecsse/private-course.git";
 const OTHER_HTTPS_REMOTE = "https://example.test/msoecsse/private-course.git";
 const TOKEN_A = "graider-auth-fixture-A-4f8d1c";
 const TOKEN_B = "graider-auth-fixture-B-91ae77";
+const COMMIT_SHA_LENGTH = 40;
 const GITHUB_TOKEN_USERNAME = "x-access-token";
 
 const authenticationContext = (id: string): GitAuthenticationContext => {
@@ -164,6 +165,54 @@ describe("Command workspace authenticated execution contract", () => {
     expect(process.env.GIT_CONFIG_COUNT).toBe(originalRuntimeCount);
     expect(process.env.GIT_TERMINAL_PROMPT).toBe(originalTerminalPrompt);
   });
+
+  it.each([GITHUB_REMOTE, OTHER_HTTPS_REMOTE])(
+    "authenticates pull only to a trusted upstream: %s",
+    async (remote) => {
+      const root = await createTemporaryDirectory("graider-auth-pull-");
+      const requests: GitCommandExecutionRequest[] = [];
+      const context = authenticationContext("pull-context");
+      const factory = new GitCommandWorkspaceFactory({
+        credentialResolver: createResolver({ [context.id]: githubCredential(TOKEN_A) }),
+        runGitBinary: () => Promise.reject(new Error("Unexpected binary operation")),
+        runGit: async (request) => {
+          await Promise.resolve();
+          requests.push(request);
+          if (request.args[0] === "rev-parse")
+            return request.args.includes("--show-toplevel")
+              ? `${root}\n`
+              : `${"a".repeat(COMMIT_SHA_LENGTH)}\n`;
+          if (request.args[0] === "status")
+            return `# branch.oid ${"a".repeat(COMMIT_SHA_LENGTH)}\0# branch.head main\0# branch.upstream origin/main\0# branch.ab +0 -0\0`;
+          if (request.args[0] === "for-each-ref")
+            return request.args.includes("--format=%(upstream:remoteref)")
+              ? "refs/heads/main\n"
+              : "origin\n";
+          if (request.args[0] === "config") return `${remote}\n`;
+          if (request.args[0] === "fetch" || request.args[0] === "merge") return "";
+          throw new Error("Unexpected operation");
+        }
+      });
+      const workspace = await factory.open(root);
+      if (remote !== GITHUB_REMOTE) {
+        await expect(workspace.pullUpstream({ authentication: context })).rejects.toMatchObject({
+          kind: "operation_rejected"
+        });
+        expect(requests.some((request) => request.args[0] === "fetch")).toBe(false);
+        return;
+      }
+      expect(await workspace.pullUpstream({ authentication: context })).toEqual({
+        kind: "updated"
+      });
+      const fetch = requests.find((request) => request.args[0] === "fetch");
+      expect(fetch?.args).toEqual(["fetch", "--no-tags", "--", GITHUB_REMOTE, "refs/heads/main"]);
+      expect(runtimeConfig(fetch?.env ?? {}).get("http.https://github.com/.extraHeader")).toBe(
+        `AUTHORIZATION: basic ${encodedCredential(TOKEN_A)}`
+      );
+      expect(fetch?.args.join(" ")).not.toContain(TOKEN_A);
+      expect(requests.find((request) => request.args[0] === "merge")?.env).toBeUndefined();
+    }
+  );
 
   it("uses the same protected environment path for authenticated push", async () => {
     const root = await createTemporaryDirectory("graider-auth-push-");

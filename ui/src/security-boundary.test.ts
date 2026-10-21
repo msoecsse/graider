@@ -83,6 +83,7 @@ describe("UI security boundary", () => {
       "graider-ui:grading-student-view-state:load",
       "graider-ui:grading-student-view-state:save",
       "graider-ui:grading-student-view-state:clear",
+      "graider-ui:grading-student-repository:pull",
       "graider-ui:grading-student-snapshot:load",
       "graider-ui:grading-student-evidence:load",
       "graider-ui:grading-student-workflow:repair",
@@ -133,6 +134,7 @@ describe("UI security boundary", () => {
     expect(preloadSource).toContain("getRosterSectionSummaries:");
     expect(preloadSource).toContain("saveGradingStudentViewState:");
     expect(preloadSource).toContain("clearGradingStudentViewState:");
+    expect(preloadSource).toContain("pullLatestGradingStudentChanges:");
     expect(preloadSource).toContain("loadGradingStudentSnapshot:");
     expect(preloadSource).toContain("loadGradingStudentEvidence:");
     expect(preloadSource).toContain("loadGradingStudentCommitHistory:");

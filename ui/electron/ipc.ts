@@ -65,6 +65,7 @@ export const IPC_CHANNELS = {
   loadGradingStudentViewState: "graider-ui:grading-student-view-state:load",
   saveGradingStudentViewState: "graider-ui:grading-student-view-state:save",
   clearGradingStudentViewState: "graider-ui:grading-student-view-state:clear",
+  pullLatestGradingStudentChanges: "graider-ui:grading-student-repository:pull",
   loadGradingStudentSnapshot: "graider-ui:grading-student-snapshot:load",
   loadGradingStudentEvidence: "graider-ui:grading-student-evidence:load",
   repairGradingStudentWorkflow: "graider-ui:grading-student-workflow:repair",
@@ -1145,6 +1146,11 @@ export interface GraiderUIApi {
   readonly clearGradingStudentViewState: (
     request: GradingStudentViewStateRequest
   ) => Promise<import("./gradingStudentViewStateService.js").GradingStudentViewStateResult>;
+  readonly pullLatestGradingStudentChanges?: (
+    request: GradingStudentSourceRequest
+  ) => Promise<
+    import("./gradingStudentRepositoryUpdateService.js").GradingStudentRepositoryUpdateResult
+  >;
   readonly loadGradingStudentSnapshot?: (
     request: GradingStudentSnapshotRequest
   ) => Promise<import("./gradingStudentSnapshotService.js").GradingStudentSnapshotResult>;

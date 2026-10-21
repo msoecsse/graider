@@ -27,6 +27,8 @@ export type GitOperationName =
   | "inspect"
   | "stage"
   | "commit"
+  | "pull"
+  | "read_revision_file"
   | "push"
   | "remote_url"
   | "remote_default_branch"
@@ -210,6 +212,8 @@ export interface CreateOrResetBranchRequest {
 }
 
 export interface GitWorkspacePreparer extends GitWorkspaceWriter {
+  pullUpstream(request?: PullUpstreamRequest): Promise<{ readonly kind: "updated" | "conflict" }>;
+  readRevisionFile(revision: string, file: string): Promise<string | null>;
   remoteDefaultBranch(remote: RemoteName): Promise<BranchName | null>;
   checkoutDetached(revision: ExactCommitRevision): Promise<ObjectId>;
   createOrResetBranch(request: CreateOrResetBranchRequest): Promise<ObjectId>;
@@ -243,6 +247,11 @@ export interface CommitRequest {
 
 export interface PushResult {
   readonly kind: "pushed";
+}
+
+export interface PullUpstreamRequest {
+  readonly authentication?: GitAuthenticationContext;
+  readonly expectedHead?: string;
 }
 
 export interface PushUpstreamRequest {

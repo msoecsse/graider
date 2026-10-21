@@ -77,7 +77,16 @@ const appliedCommentSchema = z
     text: z.string(),
     deduction: z.number(),
     rubricCategoryId: z.string().trim().min(1).optional(),
-    sourceLocation: sourceLocationSchema.optional()
+    sourceLocation: sourceLocationSchema.optional(),
+    sourceAnchor: z
+      .object({
+        status: z.enum(["relocated", "stale"]),
+        originalLocation: sourceLocationSchema,
+        originalCommitSha: z.string().min(1),
+        originalText: z.string().optional()
+      })
+      .strict()
+      .optional()
   })
   .strict();
 const manualAdjustmentSchema = z
@@ -95,6 +104,18 @@ export const gradingStateSchema = z
     studentId: z.string().trim().min(1),
     submissionCommitSha: z.string().trim().min(1),
     status: gradingStatusSchema,
+    updatedSinceGrading: z.boolean().optional(),
+    repositoryUpdates: z
+      .array(
+        z
+          .object({
+            previousSha: z.string().min(1),
+            newSha: z.string().min(1),
+            updatedAt: z.iso.datetime()
+          })
+          .strict()
+      )
+      .optional(),
     appliedComments: z.array(appliedCommentSchema),
     manualAdjustments: z.array(manualAdjustmentSchema),
     viewState: gradingEditorViewStateSchema.optional()

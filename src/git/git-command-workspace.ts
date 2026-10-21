@@ -29,6 +29,7 @@ import {
   type PushResult,
   type PushBranchRequest,
   type PushUpstreamRequest,
+  type PullUpstreamRequest,
   type RelativeGitPath,
   type RemoteName,
   type RevisionDiff,
@@ -650,6 +651,80 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
     } catch (error) {
       if (error instanceof GitError) throw error;
       throw errorForFailure(error, "commit", "operation_rejected");
+    }
+  }
+
+  async readRevisionFile(revision: string, file: string): Promise<string | null> {
+    if (!isObjectId(revision) || createRelativeGitPath(file) === null)
+      throw new GitError("operation_rejected", "read_revision_file");
+    try {
+      return await this.executor.run(
+        this.root,
+        ["show", `${revision}:${file}`],
+        "read_revision_file"
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  async pullUpstream(
+    request: PullUpstreamRequest = {}
+  ): Promise<{ readonly kind: "updated" | "conflict" }> {
+    try {
+      const state = await this.inspect();
+      if (state.workingTree.conflicts.length > 0) return { kind: "conflict" };
+      if (
+        state.head.kind !== "attached" ||
+        state.upstream.kind !== "configured" ||
+        state.upstream.remote === null
+      )
+        throw new GitError("operation_rejected", "pull");
+      const expectedHead = request.expectedHead ?? state.head.commit;
+      if (state.head.commit !== expectedHead) throw new GitError("operation_rejected", "pull");
+      const remoteName = createRemoteName(state.upstream.remote);
+      const upstreamRef = (
+        await this.executor.run(
+          this.root,
+          [
+            "for-each-ref",
+            "--format=%(upstream:remoteref)",
+            "--count=1",
+            `refs/heads/${state.head.branch}`
+          ],
+          "pull"
+        )
+      ).trim();
+      const branch = upstreamRef.startsWith("refs/heads/")
+        ? createBranchName(upstreamRef.slice("refs/heads/".length))
+        : null;
+      if (remoteName === null || branch === null) throw new GitError("operation_rejected", "pull");
+      const remote = await this.remoteUrl(remoteName);
+      if (remote === null) throw new GitError("operation_rejected", "pull");
+      await this.executor.run(
+        this.root,
+        ["fetch", "--no-tags", "--", remote, `refs/heads/${branch}`],
+        "pull",
+        request.authentication === undefined
+          ? {}
+          : { authentication: request.authentication, remote }
+      );
+      if ((await this.resolveHead()) !== expectedHead)
+        throw new GitError("operation_rejected", "pull");
+      try {
+        await this.executor.run(
+          this.root,
+          ["merge", "--no-edit", "--no-stat", "--no-autostash", "FETCH_HEAD"],
+          "pull"
+        );
+      } catch (error) {
+        if ((await this.inspect()).workingTree.conflicts.length > 0) return { kind: "conflict" };
+        throw error;
+      }
+      return { kind: "updated" };
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "pull", "operation_rejected");
     }
   }
 

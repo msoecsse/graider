@@ -45,6 +45,7 @@ export type GradingStudentSnapshotResult =
   | {
       readonly status: "success";
       readonly studentId: string;
+      readonly updatedSinceGrading?: boolean;
       readonly gradingStatus: "not_started" | "in_progress" | "complete" | "published";
       readonly appliedComments: readonly AppliedCommentDto[];
       readonly manualAdjustments: readonly ManualAdjustmentDto[];

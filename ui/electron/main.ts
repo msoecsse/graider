@@ -1,3 +1,4 @@
+import { pullLatestGradingStudentChanges } from "./gradingStudentRepositoryUpdateService.js";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { registerExternalNavigation } from "./externalNavigation.js";
 import { applyAssignmentWithStudentRepositoryAccessPage } from "./assignmentApplyWithAccessPageService.js";
@@ -1088,6 +1089,11 @@ export const registerIpcHandlers = (): void => {
       ...request,
       userDataPath: app.getPath("userData")
     });
+  });
+  ipcMain.handle(IPC_CHANNELS.pullLatestGradingStudentChanges, (_event, request: unknown) => {
+    if (!isLoadGradingStudentSourceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered course folder is required for student repository updates.");
+    return pullLatestGradingStudentChanges({ ...request, userDataPath: app.getPath("userData") });
   });
   ipcMain.handle(IPC_CHANNELS.loadGradingStudentEvidence, (_event, request: unknown) => {
     if (

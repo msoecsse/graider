@@ -285,7 +285,9 @@ const checkstyleLocation = (
       violation.line <= candidate.lines.length
   );
   const label = `${escapeHtml(violation.file)}${suffix}`;
-  return source?.status === "found" && violation.line !== undefined
+  return model.evidence?.metadata.submissionCommitSha === model.submissionCommitSha &&
+    source?.status === "found" &&
+    violation.line !== undefined
     ? `<a href="#source-file-${formatNumber(source.fileIndex)}-line-${formatNumber(violation.line)}">${label}</a>`
     : label;
 };
@@ -334,6 +336,7 @@ const renderEvidence = (model: GradingReportModel): string => {
   return `
 <section id="automated-checks" aria-labelledby="automated-checks-heading">
 <h2 id="automated-checks-heading">Automated Checks</h2>
+${evidence.metadata.submissionCommitSha === model.submissionCommitSha ? "" : `<p class="secondary">Results from previous revision ${escapeHtml(evidence.metadata.submissionCommitSha)}. Source has since been updated; these results describe the earlier source.</p>`}
 <p class="secondary">Informational only; these results do not independently alter the score.</p>
 <dl class="phase-grid"><dt>Compile</dt><dd><span class="outcome">${outcomeLabel(evidence.metadata.compile.outcome)}</span></dd><dt>Unit Tests</dt><dd><span class="outcome">${outcomeLabel(evidence.metadata.junit.outcome)}</span></dd><dt>Checkstyle</dt><dd><span class="outcome">${outcomeLabel(evidence.metadata.checkstyle.outcome)}</span></dd></dl>
 ${renderJunit(model)}

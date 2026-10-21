@@ -33,6 +33,7 @@ export interface GradingStudentEvidenceContextRequest {
 export interface PreparedGradingStudentEvidenceContext {
   readonly studentId: string;
   readonly submissionCommitSha: string;
+  readonly previousSubmissionCommitShas?: readonly string[];
   readonly repository: { readonly owner: string; readonly repo: string };
   readonly grading: EffectiveAssignmentGrading;
 }
@@ -132,11 +133,30 @@ export const prepareGradingStudentEvidenceContext = (
     value: {
       studentId: request.studentId,
       submissionCommitSha,
+      ...historicalEvidenceRevisions(
+        resolved.loadState({
+          courseRoot: request.courseFolderPath,
+          termCode: request.termCode,
+          assignmentSlug: request.assignmentSlug,
+          studentId: request.studentId
+        })
+      ),
       repository: { owner, repo: mapping.repositoryName },
       grading
     }
   };
 };
+
+export const historicalEvidenceRevisions = (
+  loaded: ReturnType<typeof loadGradingState>
+): { readonly previousSubmissionCommitShas?: readonly string[] } =>
+  loaded.status === "success" && loaded.value.repositoryUpdates !== undefined
+    ? {
+        previousSubmissionCommitShas: [...loaded.value.repositoryUpdates]
+          .reverse()
+          .map((update) => update.previousSha)
+      }
+    : {};
 
 export const retrievePreparedGradingStudentEvidence = async (
   prepared: PreparedGradingStudentEvidenceContext,
@@ -144,12 +164,26 @@ export const retrievePreparedGradingStudentEvidence = async (
   overrides: Partial<GradingStudentEvidenceContextDependencies> = {}
 ): Promise<GradingEvidenceRetrievalResult> => {
   const resolved = { ...dependencies, ...overrides };
-  return await resolved.retrieve({
-    githubClient,
-    repository: prepared.repository,
-    grading: prepared.grading,
-    submissionCommitSha: prepared.submissionCommitSha
-  });
+  const retrieve = (submissionCommitSha: string) =>
+    resolved.retrieve({
+      githubClient,
+      repository: prepared.repository,
+      grading: prepared.grading,
+      submissionCommitSha
+    });
+  const current = await retrieve(prepared.submissionCommitSha);
+  if (
+    current.status !== "failure" ||
+    !["workflow_run_not_found", "evidence_artifact_missing", "evidence_artifact_expired"].includes(
+      current.error.code
+    )
+  )
+    return current;
+  for (const sha of prepared.previousSubmissionCommitShas ?? []) {
+    const previous = await retrieve(sha);
+    if (previous.status === "success") return previous;
+  }
+  return current;
 };
 
 export const gradingStudentEvidenceContextBackend = {

@@ -36,6 +36,7 @@ export interface PublishGradingStudentReportRequest extends FacultyScopeServiceR
 interface PreparedContext {
   readonly studentId: string;
   readonly submissionCommitSha: string;
+  readonly previousSubmissionCommitShas?: readonly string[];
   readonly reportPath: string;
   readonly repository: { readonly owner: string; readonly repo: string };
   readonly managedEvidenceEligible: boolean;
@@ -323,7 +324,10 @@ export const createGradingStudentReportPublicationService = (
         );
         if (
           evidence.status === "success" &&
-          evidence.value.evidence.metadata.submissionCommitSha === prepared.submissionCommitSha
+          (evidence.value.evidence.metadata.submissionCommitSha === prepared.submissionCommitSha ||
+            prepared.previousSubmissionCommitShas?.includes(
+              evidence.value.evidence.metadata.submissionCommitSha
+            ) === true)
         )
           reportInput.evidence = evidence.value.evidence;
         else if (

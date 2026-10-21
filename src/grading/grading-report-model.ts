@@ -140,9 +140,12 @@ export const buildGradingReportModel = (
 
   if (
     input.evidence !== undefined &&
-    (!sameSubmissionIdentity(input.evidence, input.gradingState) ||
-      input.evidence.evidence.metadata.submissionCommitSha !==
-        input.gradingState.submissionCommitSha)
+    (input.evidence.studentId !== input.gradingState.studentId ||
+      input.evidence.evidence.metadata.submissionCommitSha !== input.evidence.submissionCommitSha ||
+      (input.evidence.submissionCommitSha !== input.gradingState.submissionCommitSha &&
+        !input.gradingState.repositoryUpdates?.some(
+          (update) => update.previousSha === input.evidence?.submissionCommitSha
+        )))
   )
     return failure(
       "report_evidence_identity_mismatch",
@@ -177,6 +180,7 @@ export const buildGradingReportModel = (
       .map(({ comment, reportIndex }) => {
         const location = comment.sourceLocation;
         const locationAvailable =
+          comment.sourceAnchor?.status !== "stale" &&
           lines !== undefined &&
           location !== undefined &&
           location.startLine <= location.endLine &&

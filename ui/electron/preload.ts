@@ -272,6 +272,10 @@ const graiderUI: GraiderUIApi = {
     request: GradingStudentViewStateRequest
   ): Promise<GradingStudentViewStateResult> =>
     await invoke<GradingStudentViewStateResult>(IPC_CHANNELS.clearGradingStudentViewState, request),
+  pullLatestGradingStudentChanges: async (request: GradingStudentSourceRequest) =>
+    await invoke<
+      import("./gradingStudentRepositoryUpdateService.js").GradingStudentRepositoryUpdateResult
+    >(IPC_CHANNELS.pullLatestGradingStudentChanges, request),
   loadGradingStudentSnapshot: async (
     request: GradingStudentSnapshotRequest
   ): Promise<GradingStudentSnapshotResult> =>

@@ -18,6 +18,16 @@ export interface AppliedCommentDto {
   readonly text: string;
   readonly deduction: number;
   readonly rubricCategoryId?: string;
+  readonly sourceAnchor?: {
+    readonly status: "relocated" | "stale";
+    readonly originalCommitSha: string;
+    readonly originalText?: string;
+    readonly originalLocation: {
+      readonly file: string;
+      readonly startLine: number;
+      readonly endLine: number;
+    };
+  };
   readonly sourceLocation?: {
     readonly file: string;
     readonly startLine: number;

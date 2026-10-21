@@ -61,8 +61,22 @@ export const GradingAppliedCommentsPanel = ({
                 </p>
               )}
               {comment.sourceLocation === undefined ? null : (
-                <p>Source: {sourceLocationLabel(comment.sourceLocation)}</p>
+                <p>
+                  Source: {sourceLocationLabel(comment.sourceLocation)}
+                  {comment.sourceAnchor?.status === "stale"
+                    ? " · Stale/unresolved source anchor"
+                    : null}
+                </p>
               )}
+              {comment.sourceAnchor?.status === "stale" &&
+              comment.sourceAnchor.originalText !== undefined ? (
+                <details>
+                  <summary>
+                    Original source context ({comment.sourceAnchor.originalCommitSha.slice(0, 8)})
+                  </summary>
+                  <pre>{comment.sourceAnchor.originalText}</pre>
+                </details>
+              ) : null}
               <div className="grading-applied-comment__actions">
                 <button
                   className="secondary-action"

@@ -168,6 +168,76 @@ const assertNoDuplicateAccessibleNames = (): void => {
   expect(duplicates).toEqual([]);
 };
 
+describe("explicit student repository updates", () => {
+  it("updates only the selected student, retains graded status and deductions, and does not rerun workflows", async () => {
+    let updated = false;
+    const repair = vi.fn().mockResolvedValue({ status: "grading_not_eligible", studentId: "ada" });
+    const pull = vi.fn(async () => {
+      updated = true;
+      return { status: "success" };
+    });
+    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve({
+        ...studentSnapshot(studentId, "complete"),
+        updatedSinceGrading: updated,
+        appliedComments: [
+          {
+            id: "kept",
+            text: "Existing deduction",
+            deduction: -2,
+            sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 },
+            sourceAnchor: {
+              status: "stale",
+              originalCommitSha: "a".repeat(40),
+              originalText: "old source",
+              originalLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+            }
+          }
+        ]
+      })
+    );
+    configureApis({ statuses: { ada: "complete", grace: "complete" }, loadSnapshot });
+    Object.assign(window.graiderUI, {
+      pullLatestGradingStudentChanges: pull,
+      repairGradingStudentWorkflow: repair
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByText("Existing deduction");
+    expect(pull).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+    expect(await screen.findByText(/Updated Since Grading/u)).toBeInTheDocument();
+    expect(pull).toHaveBeenCalledExactlyOnceWith({ ...REQUEST, studentId: "ada" });
+    expect(repair).not.toHaveBeenCalledWith(expect.objectContaining({ confirmed: true }));
+    expect(
+      screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Existing deduction")).toBeInTheDocument();
+    expect(screen.getByText(/Stale\/unresolved source anchor/u)).toBeInTheDocument();
+    expect(screen.getByText("old source")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish this student's report" })).toBeEnabled();
+  });
+
+  it("surfaces conflicts and keeps existing grading visible", async () => {
+    configureApis();
+    Object.assign(window.graiderUI, {
+      pullLatestGradingStudentChanges: vi.fn().mockResolvedValue({
+        status: "merge_conflict",
+        message: "Resolve merge conflicts manually. Grading preserved."
+      })
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByText("Complete", { selector: ".grading-student-snapshot strong" });
+    fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+    expect(
+      await screen.findByText("Resolve merge conflicts manually. Grading preserved.")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Updated Since Grading/u)).not.toBeInTheDocument();
+  });
+});
+
 describe("GradingWorkspacePage report publication", () => {
   it("retries only an unavailable publish-review detail without changing selection", async () => {
     const retry = deferred<GradingStudentSnapshotResult>();

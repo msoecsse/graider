@@ -301,6 +301,90 @@ describe("grading student evidence context", () => {
     ).toEqual({ status: "repository_unavailable" });
   });
 
+  it("preserves historical results after an authorized source update and prefers a later explicit rerun", async () => {
+    const prepared = prepareGradingStudentEvidenceContext(
+      request,
+      deps({
+        state: {
+          status: "success",
+          value: {
+            schemaVersion: 1,
+            studentId: "ada",
+            submissionCommitSha: SHA,
+            status: "complete",
+            appliedComments: [],
+            manualAdjustments: [],
+            repositoryUpdates: [
+              { previousSha: OTHER_SHA, newSha: SHA, updatedAt: "2026-10-21T12:00:00.000Z" }
+            ]
+          }
+        }
+      })
+    );
+    if (prepared.status !== "success") throw new Error(prepared.status);
+    expect(prepared.value.previousSubmissionCommitShas).toEqual([OTHER_SHA]);
+    const success = {
+      status: "success" as const,
+      value: {
+        runId: 1,
+        runAttempt: 1,
+        artifactId: 1,
+        evidence: {
+          metadata: {
+            schemaVersion: 1 as const,
+            submissionCommitSha: OTHER_SHA,
+            workflowRunId: "1",
+            workflowRunAttempt: "1",
+            compile: { outcome: "failure" as const },
+            junit: { outcome: "skipped" as const },
+            checkstyle: { outcome: "skipped" as const }
+          },
+          junit: {
+            available: false,
+            outcome: "skipped" as const,
+            summary: { total: 0, passed: 0, failed: 0, errors: 0, skipped: 0 },
+            failures: []
+          },
+          checkstyle: {
+            available: false,
+            outcome: "skipped" as const,
+            violationCount: 0,
+            violations: []
+          }
+        }
+      }
+    };
+    const retrieve = vi
+      .fn<GradingStudentEvidenceContextDependencies["retrieve"]>()
+      .mockResolvedValueOnce({
+        status: "failure",
+        error: { code: "workflow_run_not_found", message: "No new run" }
+      })
+      .mockResolvedValueOnce(success);
+    const client = new FakeGitHubClient();
+    expect(
+      await retrievePreparedGradingStudentEvidence(prepared.value, client, { retrieve })
+    ).toEqual(success);
+    expect(retrieve.mock.calls.map(([input]) => input.submissionCommitSha)).toEqual([
+      SHA,
+      OTHER_SHA
+    ]);
+    retrieve.mockClear();
+    retrieve.mockResolvedValue({
+      ...success,
+      value: {
+        ...success.value,
+        evidence: {
+          ...success.value.evidence,
+          metadata: { ...success.value.evidence.metadata, submissionCommitSha: SHA }
+        }
+      }
+    });
+    await retrievePreparedGradingStudentEvidence(prepared.value, client, { retrieve });
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(retrieve.mock.calls[0]?.[0].submissionCommitSha).toBe(SHA);
+  });
+
   it("uses the supplied GitHub client at retrieval and passes trusted prepared values to Slice 39", async () => {
     const client = new FakeGitHubClient();
     const retrieve = vi

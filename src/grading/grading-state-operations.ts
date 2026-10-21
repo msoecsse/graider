@@ -95,6 +95,10 @@ export const editAppliedComment = (
         ? {}
         : { title: existing.title }
       : { title: update.title }),
+    ...(existing.sourceAnchor !== undefined &&
+    JSON.stringify(update.sourceLocation) === JSON.stringify(existing.sourceLocation)
+      ? { sourceAnchor: existing.sourceAnchor }
+      : {}),
     text: update.text,
     deduction: update.deduction,
     ...(update.rubricCategoryId === undefined ? {} : { rubricCategoryId: update.rubricCategoryId }),
