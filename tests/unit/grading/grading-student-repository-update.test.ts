@@ -28,6 +28,9 @@ const git = (root: string, ...args: string[]): string =>
 const identity = (root: string): void => {
   git(root, "config", "user.name", "Faculty");
   git(root, "config", "user.email", "faculty@example.test");
+  // Keep host-wide ignore rules (notably .DS_Store) out of these fixtures.
+  fs.writeFileSync(path.join(root, ".git/info/exclude"), "");
+  git(root, "config", "core.excludesFile", path.join(root, ".git/info/exclude"));
 };
 const fixture = async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-student-update-"));
@@ -100,9 +103,16 @@ const fixture = async () => {
   return { root, request, state, workspace, read, advance, student, local, sha, remote, update };
 };
 const rubric = [{ id: "code", name: "Code", points: 20 }];
+const finderMetadata = Buffer.from("000000014275643100001000", "hex");
 
 describe("authorized student repository update", () => {
-  it.each(["managed", "externally pulled", "externally pulled then advanced again"])(
+  it.each([
+    "managed",
+    "externally pulled",
+    "externally pulled then advanced again",
+    "externally pulled with Finder metadata",
+    "externally pulled with ignored files"
+  ])(
     "%s: advances canonical SHA, preserves all grading, and conservatively maps anchors",
     async (mode) => {
       const f = await fixture();
@@ -113,7 +123,27 @@ describe("authorized student repository update", () => {
       }
       f.advance();
       if (mode !== "managed") {
-        git(f.local, "pull", "--ff-only");
+        git(f.local, "pull");
+        expect((await f.workspace.inspect()).workingTree).toEqual({
+          trackedChanges: [],
+          stagedChanges: [],
+          untrackedPaths: [],
+          conflicts: []
+        });
+        if (mode === "externally pulled with Finder metadata") {
+          fs.mkdirSync(path.join(f.local, "src"));
+          fs.writeFileSync(path.join(f.local, ".DS_Store"), finderMetadata);
+          fs.writeFileSync(path.join(f.local, "src/.DS_Store"), finderMetadata);
+          expect((await f.workspace.inspect()).workingTree.untrackedPaths).toEqual([
+            ".DS_Store",
+            "src/.DS_Store"
+          ]);
+        }
+        if (mode === "externally pulled with ignored files") {
+          fs.appendFileSync(path.join(f.local, ".git/info/exclude"), "\nignored-output/\n");
+          fs.mkdirSync(path.join(f.local, "ignored-output"));
+          fs.writeFileSync(path.join(f.local, "ignored-output/result.txt"), "build output");
+        }
         expect(
           resolveGradingSubmissionContext({
             ...f.request,
@@ -182,6 +212,10 @@ describe("authorized student repository update", () => {
           sourceAnchor: { status: "stale", originalCommitSha: f.sha }
         });
       expect(updated.appliedComments[3]).toEqual(f.state.appliedComments[3]);
+      if (mode === "externally pulled with Finder metadata") {
+        expect(fs.readFileSync(path.join(f.local, ".DS_Store"))).toEqual(finderMetadata);
+        expect(fs.readFileSync(path.join(f.local, "src/.DS_Store"))).toEqual(finderMetadata);
+      }
       if (mode === "managed") {
         expect(fs.readFileSync(path.join(f.local, "feedback.txt"), "utf8")).toBe(
           "Revised instructor report"
@@ -216,11 +250,79 @@ describe("authorized student repository update", () => {
 
   it("leaves an up-to-date repository and grading state unchanged", async () => {
     const f = await fixture();
+    expect((await f.workspace.inspect()).workingTree).toEqual({
+      trackedChanges: [],
+      stagedChanges: [],
+      untrackedPaths: [],
+      conflicts: []
+    });
     expect(await updateGradingStudentRepository(f.request, f.workspace)).toEqual({
       status: "unchanged"
     });
     expect(f.read()).toEqual(f.state);
   });
+
+  it.each([
+    ["unstaged", "modified tracked files", "Main.java"],
+    ["staged", "staged files", "Main.java"],
+    ["untracked", "untracked files", "notes.txt"],
+    ["feedback", "modified tracked files", "feedback.txt"],
+    ["untracked feedback", "untracked files", "grading/report.html"],
+    ["fake Finder file", "untracked files", ".DS_Store"],
+    ["Finder symlink", "untracked files", ".DS_Store"],
+    ["tracked Finder file", "modified tracked files", ".DS_Store"],
+    ["staged Finder file", "staged files", ".DS_Store"]
+  ])("blocks %s and reports its category and relative path", async (mode, category, file) => {
+    const f = await fixture();
+    if (mode === "tracked Finder file") {
+      fs.writeFileSync(path.join(f.student, file), finderMetadata);
+      git(f.student, "add", file);
+      git(f.student, "commit", "-m", "Tracked Finder file");
+      git(f.student, "push");
+    }
+    f.advance();
+    git(f.local, "pull");
+    fs.mkdirSync(path.dirname(path.join(f.local, file)), { recursive: true });
+    if (mode === "Finder symlink") fs.symlinkSync("Main.java", path.join(f.local, file));
+    else
+      fs.writeFileSync(
+        path.join(f.local, file),
+        mode === "staged Finder file" ? finderMetadata : "local edits"
+      );
+    if (mode === "staged" || mode === "staged Finder file") git(f.local, "add", file);
+    const head = await f.workspace.resolveHead();
+    const before = git(f.local, "status", "--porcelain=v2");
+    const result = await f.update();
+    expect(result.status).toBe("submission_changed");
+    expect(result.message).toContain(`${category}: ${JSON.stringify(file)}`);
+    expect(result.message).not.toContain(f.local);
+    expect(f.read()).toEqual(f.state);
+    expect(await f.workspace.resolveHead()).toBe(head);
+    expect(git(f.local, "status", "--porcelain=v2")).toBe(before);
+  });
+
+  it.each(["ahead", "behind"])(
+    "adopts clean committed history with %s tracking metadata",
+    async (relation) => {
+      const f = await fixture();
+      f.advance();
+      git(f.local, "pull");
+      if (relation === "ahead") {
+        const branch = git(f.local, "branch", "--show-current");
+        git(f.local, "update-ref", `refs/remotes/origin/${branch}`, f.sha);
+      } else {
+        f.advance("further student corrections\n");
+        git(f.local, "fetch");
+      }
+      expect(await f.workspace.resolveHead()).not.toBe(f.sha);
+      expect(await f.workspace.inspect()).toMatchObject({
+        workingTree: { trackedChanges: [], stagedChanges: [], untrackedPaths: [], conflicts: [] },
+        upstream: { relation }
+      });
+      expect(await f.update()).toEqual({ status: "success" });
+      expect(f.read().submissionCommitSha).toBe(git(f.student, "rev-parse", "HEAD"));
+    }
+  );
 
   it("stops real merge conflicts with canonical SHA and grading work intact", async () => {
     const f = await fixture();
@@ -268,6 +370,9 @@ describe("authorized student repository update", () => {
       const result = await f.update();
       expect(result.status).toBe(mode === "conflicted" ? "merge_conflict" : "submission_changed");
       expect(result.message).toEqual(expect.any(String));
+      if (mode === "dirty") expect(result.message).toContain('untracked files: "notes.txt"');
+      if (mode === "conflicted")
+        expect(result.message).toContain('unmerged/conflicted files: "Main.java"');
       expect(f.read()).toEqual(f.state);
       expect(await f.workspace.resolveHead()).toBe(head);
       expect(

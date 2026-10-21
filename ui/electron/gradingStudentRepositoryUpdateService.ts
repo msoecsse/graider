@@ -17,7 +17,7 @@ export interface RepositoryUpdateWorkspace extends GitWorkspaceWriter {
     readonly expectedHead: string;
     readonly externalFastForward?: { readonly expectedRemote: string };
   }): Promise<
-    | { readonly kind: "updated" | "conflict" }
+    | { readonly kind: "updated" | "conflict"; readonly message?: string }
     | { readonly kind: "refused"; readonly message: string }
   >;
 }
@@ -36,7 +36,7 @@ export interface RepositoryUpdateBackend {
         readonly expectedHead: string;
         readonly externalFastForward?: { readonly expectedRemote: string };
       }): Promise<
-        | { readonly kind: "updated" | "conflict" }
+        | { readonly kind: "updated" | "conflict"; readonly message?: string }
         | { readonly kind: "refused"; readonly message: string }
       >;
     }

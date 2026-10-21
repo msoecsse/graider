@@ -250,7 +250,7 @@ export interface PushResult {
 }
 
 export type PullUpstreamResult =
-  | { readonly kind: "updated" | "conflict" }
+  | { readonly kind: "updated" | "conflict"; readonly message?: string }
   | { readonly kind: "refused"; readonly message: string };
 
 export interface PullUpstreamRequest {

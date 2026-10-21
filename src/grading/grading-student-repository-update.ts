@@ -150,6 +150,7 @@ export const updateGradingStudentRepository = async (
       return {
         status: "merge_conflict",
         message:
+          pulled.message ??
           "Git reports merge conflicts. Resolve them manually before continuing. The expected SHA and grading work have been preserved."
       };
     const newSha = await workspace.resolveHead();

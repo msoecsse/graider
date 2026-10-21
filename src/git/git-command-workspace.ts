@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { realpath, stat } from "node:fs/promises";
+import { lstat, open, realpath, stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   GitError,
   createBranchName,
@@ -62,6 +63,7 @@ const STATUS_RECORD_PATTERN = /^1 ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ 
 const RENAME_RECORD_PATTERN = /^2 ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ (.*)$/su;
 const CONFLICT_RECORD_PATTERN =
   /^u ([^ ]{2}) [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ [^ ]+ (.*)$/su;
+const FINDER_METADATA_HEADER = Buffer.from("0000000142756431", "hex");
 
 export class GitCommandFailure extends Error {
   readonly code: unknown;
@@ -540,6 +542,50 @@ const relationForCounts = (
   return "current";
 };
 
+// Finder writes these files when browsing a checkout. Exempt only untracked,
+// regular files with the Finder format header, never tracked edits or symlinks.
+const isFinderMetadata = async (root: string, path: RelativeGitPath): Promise<boolean> => {
+  if (path !== ".DS_Store" && !path.endsWith("/.DS_Store")) return false;
+  try {
+    const absolute = join(root, path);
+    if (!(await lstat(absolute)).isFile()) return false;
+    const file = await open(absolute, "r");
+    try {
+      const header = Buffer.alloc(FINDER_METADATA_HEADER.length);
+      const { bytesRead } = await file.read(header, 0, header.length, 0);
+      return bytesRead === header.length && header.equals(FINDER_METADATA_HEADER);
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return false;
+  }
+};
+
+// Only uncommitted index/filesystem state belongs here. HEAD, saved revisions,
+// fetched history, and branch ahead/behind counts are independent safety checks.
+const unsafeWorkingTreeDetails = async (
+  root: string,
+  tree: RepositoryState["workingTree"]
+): Promise<string | null> => {
+  const untracked = [];
+  for (const path of tree.untrackedPaths) {
+    if (!(await isFinderMetadata(root, path))) untracked.push(path);
+  }
+  const categories = [
+    ["modified tracked files", tree.trackedChanges.map((change) => change.path)],
+    ["staged files", tree.stagedChanges.map((change) => change.path)],
+    ["unmerged/conflicted files", tree.conflicts.map((conflict) => conflict.path)],
+    ["untracked files", untracked]
+  ] as const;
+  const details = categories
+    .filter(([, paths]) => paths.length > 0)
+    .map(
+      ([category, paths]) => `${category}: ${paths.map((path) => JSON.stringify(path)).join(", ")}`
+    );
+  return details.length === 0 ? null : details.join("; ");
+};
+
 class GitCommandWorkspace implements GitWorkspacePreparer {
   readonly root: string;
 
@@ -686,7 +732,11 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
   async pullUpstream(request: PullUpstreamRequest = {}): Promise<PullUpstreamResult> {
     try {
       const state = await this.inspect();
-      if (state.workingTree.conflicts.length > 0) return { kind: "conflict" };
+      const dirtyDetails = await unsafeWorkingTreeDetails(this.root, state.workingTree);
+      const dirtyMessage = (details: string): string =>
+        `Automatic adoption requires a clean working tree. Unsafe uncommitted changes — ${details}. Commit or move local changes and review them manually. The expected SHA and grading work were preserved.`;
+      if (state.workingTree.conflicts.length > 0)
+        return { kind: "conflict", message: dirtyMessage(dirtyDetails ?? "unmerged paths") };
       if (
         state.head.kind !== "attached" ||
         state.upstream.kind !== "configured" ||
@@ -699,10 +749,7 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
       if (external) {
         if (request.externalFastForward === undefined)
           throw new GitError("operation_rejected", "pull");
-        if (Object.values(state.workingTree).some((paths) => paths.length > 0))
-          return refuse(
-            "Automatic adoption requires a clean working tree. Commit or move local changes and review them manually. The expected SHA and grading work were preserved."
-          );
+        if (dirtyDetails !== null) return refuse(dirtyMessage(dirtyDetails));
         if (!isObjectId(expectedHead))
           return refuse(
             "The previous expected revision is unavailable. Manual recovery is required."
@@ -778,11 +825,12 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
           );
         }
         const current = await this.inspect();
+        const currentDirtyDetails = await unsafeWorkingTreeDetails(this.root, current.workingTree);
+        if (currentDirtyDetails !== null) return refuse(dirtyMessage(currentDirtyDetails));
         if (
           current.head.kind !== "attached" ||
           current.head.commit !== state.head.commit ||
-          current.head.branch !== state.head.branch ||
-          Object.values(current.workingTree).some((paths) => paths.length > 0)
+          current.head.branch !== state.head.branch
         )
           return refuse(
             "The repository changed during inspection. Review local changes before retrying."
@@ -802,7 +850,14 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
           "pull"
         );
       } catch (error) {
-        if ((await this.inspect()).workingTree.conflicts.length > 0) return { kind: "conflict" };
+        const current = await this.inspect();
+        if (current.workingTree.conflicts.length > 0)
+          return {
+            kind: "conflict",
+            message: dirtyMessage(
+              (await unsafeWorkingTreeDetails(this.root, current.workingTree)) ?? "unmerged paths"
+            )
+          };
         throw error;
       }
       return { kind: "updated" };
