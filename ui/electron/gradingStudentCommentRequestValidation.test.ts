@@ -10,18 +10,24 @@ const identity = {
 };
 
 describe("grading student comment request validation", () => {
-  it("requires a nonblank snapshot title for new comments and rejects unrelated fields", () => {
+  it("accepts a title, body, or both and rejects empty content", () => {
     const request = {
       ...identity,
       comment: { id: "comment", title: "Naming", text: "Use a clearer name.", deduction: -1 }
     };
     expect(isAddGradingStudentCommentRequest(request)).toBe(true);
-    expect(
-      isAddGradingStudentCommentRequest({
-        ...identity,
-        comment: { id: "comment", title: " ", text: "Use a clearer name.", deduction: -1 }
-      })
-    ).toBe(false);
+    for (const comment of [
+      { id: "title", title: "Naming", text: "Feedback", deduction: -1 },
+      { id: "title-only", title: "Naming", text: "", deduction: -1 },
+      { id: "body-only", text: "Feedback", deduction: -1 }
+    ])
+      expect(isAddGradingStudentCommentRequest({ ...identity, comment })).toBe(true);
+    for (const comment of [
+      { id: "empty", title: "", text: "", deduction: -1 },
+      { id: "whitespace", title: "  \n", text: " \t ", deduction: -1 },
+      { id: "missing-content", text: "", deduction: -1 }
+    ])
+      expect(isAddGradingStudentCommentRequest({ ...identity, comment })).toBe(false);
     expect(isAddGradingStudentCommentRequest({ ...request, evidence: { status: "success" } })).toBe(
       false
     );

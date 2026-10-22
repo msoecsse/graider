@@ -152,7 +152,11 @@ const isSourceLocation = (value: unknown): boolean => {
   );
 };
 
-const isCommentFields = (value: unknown, includeId: boolean, requireTitle: boolean): boolean => {
+const isCommentFields = (
+  value: unknown,
+  includeId: boolean,
+  allowEmptyContent = false
+): boolean => {
   const comment = record(value);
   if (comment === null) return false;
   const optional = [
@@ -168,14 +172,14 @@ const isCommentFields = (value: unknown, includeId: boolean, requireTitle: boole
     (!includeId || (typeof comment.id === "string" && comment.id.trim() !== "")) &&
     (comment.sourceCommentId === undefined ||
       (typeof comment.sourceCommentId === "string" && comment.sourceCommentId.trim() !== "")) &&
-    (requireTitle
-      ? typeof comment.title === "string" && comment.title.trim() !== ""
-      : comment.title === undefined ||
-        (typeof comment.title === "string" && comment.title.trim() !== "")) &&
+    (comment.title === undefined || typeof comment.title === "string") &&
     (comment.tags === undefined ||
       (Array.isArray(comment.tags) &&
         comment.tags.every((tag: unknown) => typeof tag === "string" && tag.trim() !== ""))) &&
     typeof comment.text === "string" &&
+    (allowEmptyContent ||
+      (typeof comment.title === "string" && comment.title.trim() !== "") ||
+      comment.text.trim() !== "") &&
     typeof comment.deduction === "number" &&
     Number.isFinite(comment.deduction) &&
     (comment.rubricCategoryId === undefined ||
@@ -199,7 +203,7 @@ export const isAddGradingStudentCommentRequest = (
     (request.duplicateOfCommentId === undefined ||
       (typeof request.duplicateOfCommentId === "string" &&
         request.duplicateOfCommentId.trim() !== "")) &&
-    isCommentFields(request.comment, true, request.duplicateOfCommentId === undefined)
+    isCommentFields(request.comment, true, request.duplicateOfCommentId !== undefined)
   );
 };
 
@@ -213,7 +217,7 @@ export const isEditGradingStudentCommentRequest = (
     hasIdentity(request) &&
     typeof request.commentId === "string" &&
     request.commentId.trim() !== "" &&
-    isCommentFields(request.replacement, false, false)
+    isCommentFields(request.replacement, false)
   );
 };
 

@@ -116,7 +116,8 @@ const renderFormattedCommentContent = (text: string): string =>
     .join("\n");
 
 const renderCommentBody = (comment: GradingReportComment): string => `
-${renderFormattedCommentContent(comment.text)}
+${comment.title === undefined ? "" : `<h4>${escapeHtml(comment.title)}</h4>`}
+${comment.text.trim() === "" ? "" : renderFormattedCommentContent(comment.text)}
 <p class="secondary">${commentCategory(comment)} · Score adjustment: ${formatSignedNumber(comment.deduction)}</p>`;
 
 const sourceLocationText = (comment: GradingReportComment): string => {
@@ -161,7 +162,6 @@ const commentsForLine = (
 
 const renderInlineSourceComment = (comment: GradingReportComment): string =>
   `<article class="feedback inline-source-feedback" id="source-comment-${formatNumber(comment.reportIndex)}">
-<h4>${commentLabel(comment)}</h4>
 ${renderCommentBody(comment)}
 </article>`;
 

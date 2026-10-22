@@ -90,17 +90,19 @@ export const editAppliedComment = (
     ...(existing.sourceCommentId === undefined
       ? {}
       : { sourceCommentId: existing.sourceCommentId }),
-    ...(update.title === undefined
+    ...(!("title" in update)
       ? existing.title === undefined
         ? {}
         : { title: existing.title }
-      : { title: update.title }),
+      : update.title === undefined || update.title.trim() === ""
+        ? {}
+        : { title: update.title.trim() }),
     ...(existing.sourceAnchor !== undefined &&
     JSON.stringify(update.sourceLocation) === JSON.stringify(existing.sourceLocation)
       ? { sourceAnchor: existing.sourceAnchor }
       : {}),
     ...(existing.tags === undefined ? {} : { tags: [...existing.tags] }),
-    text: update.text,
+    text: update.text.trim(),
     deduction: update.deduction,
     ...(update.rubricCategoryId === undefined ? {} : { rubricCategoryId: update.rubricCategoryId }),
     ...(update.sourceLocation === undefined ? {} : { sourceLocation: update.sourceLocation })

@@ -185,8 +185,9 @@ export const addGradingStudentCommentContext = (
       ? save(request, duplicated.value)
       : stateError(request.studentId, duplicated.code);
   }
-  if (comment.title === undefined || comment.title.trim() === "")
-    return stateError(request.studentId, "comment_title_required");
+  const title = comment.title?.trim() ?? "";
+  const text = comment.text.trim();
+  if (title === "" && text === "") return stateError(request.studentId, "comment_content_required");
   const invalidComment = validateCommentAgainstAssignment(request, comment);
   if (invalidComment !== undefined) return invalidComment;
   let state: GradingState;
@@ -200,10 +201,12 @@ export const addGradingStudentCommentContext = (
     state = initial.value;
   }
   const { tags, ...fields } = comment;
+  delete fields.title;
   const updated = addAppliedComment(state, {
     ...fields,
+    text,
     ...(tags === undefined ? {} : { tags: [...tags] }),
-    title: comment.title.trim()
+    ...(title === "" ? {} : { title })
   });
   return updated.status === "success"
     ? save(request, updated.value)
@@ -219,13 +222,15 @@ export const editGradingStudentCommentContext = (
   if (loaded.status === "failure") return loaded.result;
   if (loaded.status === "missing")
     return { status: "not_found", studentId: request.studentId, code: "applied_comment_not_found" };
-  if (replacement.title !== undefined && replacement.title.trim() === "")
-    return stateError(request.studentId, "comment_title_required");
+  const title = replacement.title?.trim() ?? "";
+  const text = replacement.text.trim();
+  if (title === "" && text === "") return stateError(request.studentId, "comment_content_required");
   const invalidComment = validateCommentAgainstAssignment(request, replacement);
   if (invalidComment !== undefined) return invalidComment;
   const updated = editAppliedComment(loaded.state, commentId, {
     ...replacement,
-    ...(replacement.title === undefined ? {} : { title: replacement.title.trim() })
+    text,
+    ...(replacement.title === undefined ? {} : { title })
   });
   if (updated.status === "not_found")
     return { status: "not_found", studentId: request.studentId, code: updated.code };

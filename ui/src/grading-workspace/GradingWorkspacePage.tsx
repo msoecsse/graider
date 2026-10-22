@@ -1652,7 +1652,6 @@ export const GradingWorkspacePage = ({
       studentId: selectedStudent.studentId,
       commentId: comment.id,
       title: comment.title ?? "",
-      hasPersistedTitle: comment.title !== undefined,
       text: comment.text,
       deduction: String(Math.abs(comment.deduction)),
       rubricCategoryId: comment.rubricCategoryId ?? "",
@@ -1932,12 +1931,9 @@ export const GradingWorkspacePage = ({
       return;
     const deduction = Number(commentEditor.deduction);
     const title = commentEditor.title.trim();
-    if (title === "" && (commentEditor.operation === "add" || commentEditor.hasPersistedTitle)) {
-      setGradingMutationError("Comment title is required.");
-      return;
-    }
-    if (commentEditor.text.trim() === "") {
-      setGradingMutationError("Comment text is required.");
+    const text = commentEditor.text.trim();
+    if (title === "" && text === "") {
+      setGradingMutationError("Enter a comment title or comment text.");
       return;
     }
     if (commentEditor.deduction.trim() === "" || !Number.isFinite(deduction)) {
@@ -1990,8 +1986,8 @@ export const GradingWorkspacePage = ({
                     )?.tags ?? [])
                   : []
             }),
-        title,
-        text: editor.text,
+        ...(title === "" ? {} : { title }),
+        text,
         deduction,
         ...(editor.rubricCategoryId === "" ? {} : { rubricCategoryId: editor.rubricCategoryId }),
         ...(sourceLocation === undefined ? {} : { sourceLocation })
@@ -2003,7 +1999,7 @@ export const GradingWorkspacePage = ({
               appliedCommentId,
               value: {
                 title,
-                text: editor.text,
+                text,
                 // Applied comments submit a nonnegative deduction magnitude;
                 // reusable defaults store the equivalent score adjustment.
                 defaultDeduction: -deduction,

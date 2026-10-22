@@ -89,7 +89,10 @@ const appliedCommentSchema = z
       .strict()
       .optional()
   })
-  .strict();
+  .strict()
+  .refine((comment) => comment.title?.trim() !== "" || comment.text.trim() !== "", {
+    message: "A grading comment requires a title or comment text."
+  });
 const manualAdjustmentSchema = z
   .object({
     id: z.string().trim().min(1),

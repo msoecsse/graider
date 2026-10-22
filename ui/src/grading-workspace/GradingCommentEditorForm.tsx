@@ -32,7 +32,6 @@ export interface EditCommentEditorState {
   readonly studentId: string;
   readonly commentId: string;
   readonly title: string;
-  readonly hasPersistedTitle: boolean;
   readonly text: string;
   readonly deduction: string;
   readonly rubricCategoryId: string;
@@ -191,7 +190,6 @@ export const GradingCommentEditorForm = ({
         Title
         <input
           value={editor.title}
-          required={editor.operation === "add" || editor.hasPersistedTitle}
           onChange={(event) =>
             onEditorChange((current) =>
               current === undefined ? current : { ...current, title: event.target.value }

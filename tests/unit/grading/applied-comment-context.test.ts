@@ -52,7 +52,7 @@ afterEach(() => {
 });
 
 describe("applied grading comment context", () => {
-  it("requires a nonblank title for new comments and persists a trimmed snapshot title", () => {
+  it("accepts a title, body, or both and persists normalized content", () => {
     const { request, stateRequest } = setup();
     expect(
       addGradingStudentCommentContext(request, {
@@ -61,7 +61,15 @@ describe("applied grading comment context", () => {
         text: "Feedback",
         deduction: -1
       })
-    ).toMatchObject({ status: "grading_state_error", code: "comment_title_required" });
+    ).toMatchObject({ status: "success" });
+    expect(
+      addGradingStudentCommentContext(request, {
+        id: "empty",
+        title: " \t ",
+        text: " \n ",
+        deduction: -1
+      })
+    ).toMatchObject({ status: "grading_state_error", code: "comment_content_required" });
     expect(
       addGradingStudentCommentContext(request, {
         id: "titled",
@@ -70,9 +78,23 @@ describe("applied grading comment context", () => {
         deduction: -1
       })
     ).toMatchObject({ status: "success" });
+    expect(
+      addGradingStudentCommentContext(request, {
+        id: "title-only",
+        title: "  Title only  ",
+        text: "  ",
+        deduction: -1
+      })
+    ).toMatchObject({ status: "success" });
     expect(loadGradingState(stateRequest)).toMatchObject({
       status: "success",
-      value: { appliedComments: [{ id: "titled", title: "Naming" }] }
+      value: {
+        appliedComments: [
+          { id: "untitled", text: "Feedback" },
+          { id: "titled", title: "Naming", text: "Feedback" },
+          { id: "title-only", title: "Title only", text: "" }
+        ]
+      }
     });
   });
 

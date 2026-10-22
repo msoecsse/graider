@@ -1410,24 +1410,67 @@ describe("GradingWorkspacePage comment application", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
 
-    expect(addComment).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
-      target: { value: `  ${directComment.title}  ` }
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
-
     await waitFor(() => expect(addComment).toHaveBeenCalledTimes(1));
     expect(addComment.mock.calls[0]?.[0].comment).toMatchObject({
-      title: directComment.title,
       text: directComment.text,
       deduction: 3,
       sourceLocation: directComment.sourceLocation
     });
+    expect(addComment.mock.calls[0]?.[0].comment).not.toHaveProperty("title");
     expect(addComment.mock.calls[0]?.[0].comment).not.toHaveProperty("sourceCommentId");
     expect(await screen.findByText(directComment.text)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Save to course library" })
     ).not.toBeInTheDocument();
+  });
+
+  it("applies a title-only general comment from the UI", async () => {
+    const addComment = vi.fn().mockResolvedValue({
+      status: "success",
+      studentId: "ada",
+      gradingStatus: "in_progress",
+      appliedComments: []
+    });
+    setApis(
+      vi.fn().mockResolvedValue(workspace()),
+      vi.fn().mockResolvedValue(source("ada")),
+      undefined,
+      undefined,
+      vi
+        .fn()
+        .mockResolvedValueOnce(snapshot("ada"))
+        .mockResolvedValueOnce(snapshot("ada", "in_progress")),
+      undefined,
+      addComment
+    );
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+    expect(addComment).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a comment title or comment text.");
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "  \t" }
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: " \n " }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+    expect(addComment).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "  Clear naming  " }
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Deduction" }), {
+      target: { value: "0" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+
+    await waitFor(() => expect(addComment).toHaveBeenCalledTimes(1));
+    expect(addComment.mock.calls[0]?.[0].comment).toMatchObject({
+      title: "Clear naming",
+      text: "",
+      deduction: 0
+    });
   });
 
   it("prefills and locally saves a promoted one-shot without changing its applied snapshot", async () => {

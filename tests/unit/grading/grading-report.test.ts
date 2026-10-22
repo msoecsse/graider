@@ -384,6 +384,39 @@ describe("grading report HTML", () => {
     expect(html).not.toContain("<script>alert(1)</script>");
   });
 
+  it("renders optional titles and bodies for general and source comments", () => {
+    const input = baseInput();
+    const source = input.gradingState.appliedComments.find(({ id }) => id === "source-1");
+    if (source === undefined) throw new Error("Expected source comment fixture.");
+    const html = renderGradingReportHtml(
+      buildModel({
+        ...input,
+        gradingState: {
+          ...input.gradingState,
+          appliedComments: [
+            {
+              id: "general-title-body",
+              title: "General title",
+              text: "General body",
+              deduction: 0
+            },
+            { id: "general-title-only", title: "Title only", text: "", deduction: 0 },
+            { id: "general-body-only", text: "Body only", deduction: 0 },
+            { ...source, title: "Source title", text: "Source body" }
+          ]
+        }
+      })
+    );
+
+    expect(html).toContain("<h4>General title</h4>");
+    expect(html).toContain("General body");
+    expect(html).toContain("<h4>Title only</h4>");
+    expect(html).not.toContain("<h4></h4>");
+    expect(html).toContain("Body only");
+    expect(html).toContain("<h4>Source title</h4>");
+    expect(html).toContain("Source body");
+  });
+
   it("does not allow fence language metadata to create HTML or attributes", () => {
     const input = baseInput();
     const html = renderGradingReportHtml(
@@ -446,10 +479,8 @@ describe("grading report HTML", () => {
     expect(html).toContain('id="source-comment-2"');
     expect(html).toContain('id="source-comment-3"');
     expect(html).toContain("<h4>Close resources</h4>");
-    expect(html).toContain("<h4>Feedback 3</h4>");
-    expect(html.indexOf("<h4>Close resources</h4>")).toBeLessThan(
-      html.indexOf("<h4>Feedback 3</h4>")
-    );
+    expect(html).not.toContain("<h4>Feedback 3</h4>");
+    expect(html).toContain("A second note for the same range.");
     expect(html).toContain("Rubric: Correctness · Score adjustment: -2");
     expect(html.match(/Close the resource on every path\./gu)).toHaveLength(1);
     expect(html.match(/A second note for the same range\./gu)).toHaveLength(1);
