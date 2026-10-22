@@ -250,3 +250,81 @@ describe("applied grading comment context", () => {
     expect(fs.readFileSync(statePath.value, "utf8")).toBe(before);
   });
 });
+
+it("duplicates an applied library snapshot with independent identity, tags, rubric, and anchor history", () => {
+  const { request, stateRequest } = setup();
+  const initial = createInitialGradingState("jones", SHA);
+  if (initial.status === "failure") throw new Error(initial.message);
+  const original = {
+    id: "original",
+    sourceCommentId: "library-original",
+    title: "Naming",
+    text: "Original body",
+    deduction: -2,
+    tags: ["design"],
+    rubricCategoryId: "design",
+    sourceLocation: { file: "src/Main.java", startLine: 3, endLine: 4 },
+    sourceAnchor: {
+      status: "stale" as const,
+      originalCommitSha: SHA,
+      originalText: "old source",
+      originalLocation: { file: "src/Main.java", startLine: 1, endLine: 2 }
+    }
+  };
+  saveGradingState(stateRequest, { ...initial.value, appliedComments: [original] });
+  const duplicate = addGradingStudentCommentContext(
+    request,
+    { id: "copy", text: "Ignored client content", deduction: 0 },
+    original.id
+  );
+  expect(duplicate).toMatchObject({
+    status: "success",
+    appliedComments: [original, { ...original, id: "copy" }]
+  });
+  if (duplicate.status !== "success") throw new Error(duplicate.status);
+  expect(duplicate.appliedComments[0]).not.toBe(duplicate.appliedComments[1]);
+  expect(duplicate.appliedComments[0]?.tags).not.toBe(duplicate.appliedComments[1]?.tags);
+  expect(duplicate.appliedComments[0]?.sourceAnchor).not.toBe(
+    duplicate.appliedComments[1]?.sourceAnchor
+  );
+  editGradingStudentCommentContext(request, "copy", {
+    title: "Copy",
+    text: "Copy body",
+    deduction: 3,
+    rubricCategoryId: "design",
+    sourceLocation: original.sourceLocation
+  });
+  expect(loadGradingState(stateRequest)).toMatchObject({
+    status: "success",
+    value: { appliedComments: [original, { id: "copy", text: "Copy body", tags: ["design"] }] }
+  });
+  editGradingStudentCommentContext(request, "original", { text: "Changed original", deduction: 1 });
+  expect(loadGradingState(stateRequest)).toMatchObject({
+    status: "success",
+    value: {
+      appliedComments: [
+        { id: "original", text: "Changed original" },
+        { id: "copy", text: "Copy body" }
+      ]
+    }
+  });
+  deleteGradingStudentCommentContext(request, "copy");
+  expect(loadGradingState(stateRequest)).toMatchObject({
+    status: "success",
+    value: { appliedComments: [{ id: "original", text: "Changed original" }] }
+  });
+  expect(
+    addGradingStudentCommentContext(request, { id: "missing", text: "", deduction: 0 }, "unknown")
+  ).toMatchObject({ status: "not_found" });
+});
+
+it("duplicates legacy untitled comments without inventing a title", () => {
+  const { request, stateRequest } = setup();
+  const initial = createInitialGradingState("jones", SHA);
+  if (initial.status === "failure") throw new Error(initial.message);
+  const original = { id: "original", text: "Legacy", deduction: -1 };
+  saveGradingState(stateRequest, { ...initial.value, appliedComments: [original] });
+  expect(
+    addGradingStudentCommentContext(request, { id: "copy", text: "", deduction: 0 }, original.id)
+  ).toMatchObject({ status: "success", appliedComments: [original, { ...original, id: "copy" }] });
+});

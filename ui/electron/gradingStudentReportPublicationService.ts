@@ -115,6 +115,7 @@ interface PublicationBackend {
         readonly code: string;
       };
   prepareGradingStudentReportPublicationContext(request: {
+    readonly mode?: "publish" | "preview";
     readonly courseFolderPath: string;
     readonly termCode: string;
     readonly assignmentSlug: string;
@@ -272,7 +273,15 @@ export const createGradingStudentReportPublicationService = (
         assignmentSlug: request.assignmentSlug,
         studentId: request.studentId
       });
-      if (eligibility.status !== "success") return eligibility;
+      if (
+        eligibility.status !== "success" &&
+        !(
+          mode === "preview" &&
+          (eligibility.status === "grading_not_complete" ||
+            eligibility.status === "grading_state_missing")
+        )
+      )
+        return eligibility;
     } catch {
       return { status: "report_render_failed" };
     }
@@ -285,6 +294,7 @@ export const createGradingStudentReportPublicationService = (
     let preparedResult: PrepareResult;
     try {
       preparedResult = backend.prepareGradingStudentReportPublicationContext({
+        ...(mode === "preview" ? { mode } : {}),
         courseFolderPath: request.courseFolderPath,
         termCode: request.termCode,
         assignmentSlug: request.assignmentSlug,

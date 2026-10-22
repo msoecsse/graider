@@ -743,3 +743,50 @@ describe("GradingWorkspacePage report publication", () => {
     ).toBeInTheDocument();
   });
 });
+
+it.each(["not_started", "in_progress", "complete", "published"] as const)(
+  "previews %s saved state repeatedly without changing completion or publishing",
+  async (status) => {
+    const preview = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "success",
+        studentId: "ada",
+        html: "<p>Current comments and rubric</p>",
+        warnings: []
+      })
+      .mockResolvedValueOnce({
+        status: "success",
+        studentId: "ada",
+        html: "<p>Later comments and rubric</p>",
+        warnings: []
+      });
+    const { publish } = configureApis({ statuses: { ada: status }, preview });
+    const markComplete = vi.fn();
+    Object.assign(window.graiderUI, { markGradingStudentComplete: markComplete });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    const expectedStatus =
+      status === "not_started"
+        ? "Not Started"
+        : status === "in_progress"
+          ? "In Progress"
+          : status === "complete"
+            ? "Complete"
+            : "Published";
+    for (const expected of ["Current comments and rubric", "Later comments and rubric"]) {
+      fireEvent.click(await screen.findByRole("button", { name: "Preview Report" }));
+      await screen.findByRole("dialog", { name: "Report Preview" });
+      expect(screen.getByTitle("Grading report preview")).toHaveAttribute(
+        "srcdoc",
+        expect.stringContaining(expected)
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Close report preview" }));
+      expect(
+        screen.getByText(expectedStatus, { selector: ".grading-student-snapshot strong" })
+      ).toBeInTheDocument();
+    }
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(publish).not.toHaveBeenCalled();
+    expect(markComplete).not.toHaveBeenCalled();
+  }
+);

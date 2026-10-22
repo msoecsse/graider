@@ -460,3 +460,25 @@ describe("grading student report publication Electron service", () => {
     expect(publicationBackend.publishRenderedGradingStudentReport).not.toHaveBeenCalled();
   });
 });
+
+it.each(["grading_not_complete", "grading_state_missing"] as const)(
+  "allows %s for preview alone and never publishes or marks complete",
+  async (status) => {
+    const { values, publicationBackend } = dependencies();
+    publicationBackend.checkGradingStudentReportPublicationEligibility.mockReturnValue({
+      status,
+      studentId: "ada"
+    } as never);
+    const service = createGradingStudentReportPublicationService(values);
+    expect(await service(request, "preview")).toMatchObject({
+      status: "success",
+      html: expect.stringContaining("trusted report")
+    });
+    expect(publicationBackend.prepareGradingStudentReportPublicationContext).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "preview" })
+    );
+    expect(publicationBackend.publishRenderedGradingStudentReport).not.toHaveBeenCalled();
+    expect(publicationBackend.markPreparedGradingStudentReportPublished).not.toHaveBeenCalled();
+    expect(await service(request)).toEqual({ status, studentId: "ada" });
+  }
+);

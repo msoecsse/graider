@@ -73,6 +73,7 @@ const appliedCommentSchema = z
   .object({
     id: z.string().trim().min(1),
     sourceCommentId: z.string().trim().min(1).optional(),
+    tags: z.array(z.string().trim().min(1)).optional(),
     title: z.string().trim().min(1).optional(),
     text: z.string(),
     deduction: z.number(),

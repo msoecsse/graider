@@ -379,3 +379,36 @@ describe("MonacoSourceViewer", () => {
     expect(model.combinedText).toBe("first\nsecond\n\nlast");
   });
 });
+
+it("updates comment decorations without recreating the editor or changing scroll, caret, or selection", () => {
+  const model = source("class Main {}\nvoid run() {}\n}");
+  const { rerender } = render(<MonacoSourceViewer model={model} studentId="ada" />);
+  const scrollTop = 840;
+  monaco.emitSelection(1, 2, 2, 4);
+  monaco.emitScroll(scrollTop);
+  const beforeSelection = monaco.editor.getSelection();
+  const beforePosition = monaco.editor.getPosition();
+  const creationCount = monaco.create.mock.calls.length;
+  for (const annotations of [
+    [
+      {
+        id: "added",
+        text: "New",
+        deduction: 2,
+        sourceLocation: { file: "Main.java", startLine: 1, endLine: 1 }
+      }
+    ],
+    [{ id: "added", text: "Edited", deduction: 3 }],
+    [
+      { id: "added", text: "Edited", deduction: 3 },
+      { id: "duplicate", text: "Edited", deduction: 3 }
+    ],
+    []
+  ]) {
+    rerender(<MonacoSourceViewer model={model} studentId="ada" annotations={annotations} />);
+    expect(monaco.create).toHaveBeenCalledTimes(creationCount);
+    expect(monaco.editor.getScrollTop()).toBe(scrollTop);
+    expect(monaco.editor.getSelection()).toEqual(beforeSelection);
+    expect(monaco.editor.getPosition()).toEqual(beforePosition);
+  }
+});

@@ -14,6 +14,7 @@ import { readLocalRepositoryHead, type LocalRepositoryHeadResult } from "./local
 export interface AppliedCommentDto {
   readonly id: string;
   readonly sourceCommentId?: string;
+  readonly tags?: readonly string[];
   readonly title?: string;
   readonly text: string;
   readonly deduction: number;
@@ -51,6 +52,7 @@ export interface GradingStudentCommentRequest extends FacultyScopeServiceRequest
 
 export interface AddGradingStudentCommentRequest extends GradingStudentCommentRequest {
   readonly comment: AppliedCommentDto;
+  readonly duplicateOfCommentId?: string;
 }
 
 export interface EditGradingStudentCommentRequest extends GradingStudentCommentRequest {
@@ -103,7 +105,8 @@ interface BackendRequest {
 export interface GradingStudentCommentBackend {
   addGradingStudentCommentContext(
     request: BackendRequest,
-    comment: AppliedCommentDto
+    comment: AppliedCommentDto,
+    duplicateOfCommentId?: string
   ): GradingStudentCommentResult;
   editGradingStudentCommentContext(
     request: BackendRequest,
@@ -173,7 +176,13 @@ export const createGradingStudentCommentService = (
       const prepared = await prepare(request);
       return prepared.status === "failure"
         ? prepared.result
-        : getBackend().addGradingStudentCommentContext(prepared.backendRequest, request.comment);
+        : request.duplicateOfCommentId === undefined
+          ? getBackend().addGradingStudentCommentContext(prepared.backendRequest, request.comment)
+          : getBackend().addGradingStudentCommentContext(
+              prepared.backendRequest,
+              request.comment,
+              request.duplicateOfCommentId
+            );
     },
     edit: async (request) => {
       const prepared = await prepare(request);

@@ -76,6 +76,12 @@ vi.mock("./MonacoSourceViewer", () => ({
   )
 }));
 
+vi.mock("./RepositoryDocumentViewer", () => ({
+  RepositoryDocumentViewer: ({ request }: { request: { file: string } }) => (
+    <div data-testid="document-view">{request.file}</div>
+  )
+}));
+
 import { GradingWorkspacePage } from "./GradingWorkspacePage";
 
 const REQUEST: GradingWorkspacePrepareRequest = {
@@ -1419,7 +1425,9 @@ describe("GradingWorkspacePage comment application", () => {
     });
     expect(addComment.mock.calls[0]?.[0].comment).not.toHaveProperty("sourceCommentId");
     expect(await screen.findByText(directComment.text)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save to course library" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save to course library" })
+    ).not.toBeInTheDocument();
   });
 
   it("prefills and locally saves a promoted one-shot without changing its applied snapshot", async () => {
@@ -1464,7 +1472,8 @@ describe("GradingWorkspacePage comment application", () => {
         .mockResolvedValueOnce({
           ...snapshot("ada", "in_progress"),
           appliedComments: [oneShot]
-        }),
+        })
+        .mockResolvedValue({ ...snapshot("ada", "in_progress"), appliedComments: [oneShot] }),
       vi.fn().mockResolvedValue({
         status: "success",
         comments: [{ ...reusableComment, tags: ["existing"] }]
@@ -1491,7 +1500,10 @@ describe("GradingWorkspacePage comment application", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
 
-    await screen.findByRole("button", { name: "Save to course library" });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit comment: Explain this `branch`." })
+    );
+    await screen.findByRole("button", { name: "Add to Library" });
     expect(createLibraryComment).not.toHaveBeenCalled();
     expect(addComment.mock.calls[0]?.[0].comment).toMatchObject({
       id: oneShot.id,
@@ -1501,7 +1513,8 @@ describe("GradingWorkspacePage comment application", () => {
       rubricCategoryId: "quality",
       sourceLocation: oneShot.sourceLocation
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save to course library" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add to Library" }));
+    await screen.findByRole("textbox", { name: "Comment text" });
     expect(screen.getByRole("textbox", { name: "Comment text" })).toHaveValue(oneShot.text);
     expect(screen.getByRole("spinbutton", { name: "Default adjustment" })).toHaveValue(-2);
     expect(screen.getByRole("combobox", { name: "Default rubric category" })).toHaveValue(
@@ -1536,7 +1549,7 @@ describe("GradingWorkspacePage comment application", () => {
     expect(screen.getAllByText("branch").every((element) => element.tagName === "CODE")).toBe(true);
   });
 
-  it("offers promotion when a saved one-shot cannot refresh its grading snapshot", async () => {
+  it("keeps promotion out of the grading panel when a saved one-shot cannot refresh its snapshot", async () => {
     const addComment = vi.fn().mockResolvedValue({
       status: "success",
       studentId: "ada",
@@ -1573,7 +1586,9 @@ describe("GradingWorkspacePage comment application", () => {
         /The grading change was saved, but current grading details could not/u
       )
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save to course library" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save to course library" })
+    ).not.toBeInTheDocument();
   });
 
   it.skip("does not attach a late one-shot promotion offer to a different student", async () => {
@@ -1699,6 +1714,7 @@ describe("GradingWorkspacePage comment application", () => {
         id: expect.any(String),
         sourceCommentId: "library-one",
         title: "Loop clarity",
+        tags: reusableComment.tags,
         text: "Customized feedback",
         deduction: 4,
         rubricCategoryId: "quality",
@@ -3121,3 +3137,201 @@ describe("GradingWorkspacePage grading progress and filters", () => {
 
 const snapshotSubmissionChangedText =
   "The local submission changed after grading state was created. Existing grading state belongs to a different local submission and is not being applied.";
+
+describe("comment mutation viewer identity", () => {
+  it.each(["", "report.pdf", "report.docx"])(
+    "preserves mounted viewer state through add, edit, duplicate, promotion, and delete while viewing %s",
+    async (file) => {
+      const original = {
+        id: "original",
+        title: "Naming",
+        text: "Original body",
+        deduction: 2,
+        rubricCategoryId: "quality",
+        tags: ["design"],
+        sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+      };
+      let comments = [original];
+      const success = () => ({
+        status: "success",
+        studentId: "ada",
+        gradingStatus: "in_progress",
+        appliedComments: comments
+      });
+      const add = vi.fn(async ({ comment, duplicateOfCommentId }) => {
+        comments = [
+          ...comments,
+          duplicateOfCommentId === undefined
+            ? comment
+            : {
+                ...structuredClone(comments.find(({ id }) => id === duplicateOfCommentId)),
+                id: comment.id
+              }
+        ];
+        return success();
+      });
+      const edit = vi.fn(async ({ commentId, replacement }) => {
+        comments = comments.map((comment) =>
+          comment.id === commentId ? { ...comment, ...replacement } : comment
+        );
+        return success();
+      });
+      const remove = vi.fn(async ({ commentId }) => {
+        comments = comments.filter(({ id }) => id !== commentId);
+        return success();
+      });
+      const loadSource = vi.fn().mockResolvedValue({
+        ...source("ada"),
+        documents: ["report.pdf", "report.docx"],
+        documentRevision: "same-revision"
+      });
+      setApis(
+        vi.fn().mockResolvedValue({
+          ...workspace(),
+          rubric: [{ id: "quality", name: "Quality", points: 100 }]
+        }),
+        loadSource,
+        undefined,
+        undefined,
+        vi.fn(async () => ({ ...snapshot("ada", "in_progress"), appliedComments: comments })),
+        undefined,
+        add,
+        edit,
+        remove
+      );
+      const createLibrary = vi.fn(async ({ comment }) => ({
+        status: "success",
+        comment: { ...comment, id: "library-copy" },
+        diagnostics: [],
+        publication: { status: "success" }
+      }));
+      Object.assign(window.graiderUI, { createGradingLibraryComment: createLibrary });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      const monaco = await screen.findByTestId("mock-monaco");
+      const select = screen.getByRole("combobox", { name: "View submission file" });
+      if (file !== "") fireEvent.change(select, { target: { value: file } });
+      const viewer = file === "" ? monaco : screen.getByTestId("document-view");
+      const gradingScrollTop = 850;
+      viewer.scrollTop = gradingScrollTop;
+      const assertPosition = () => {
+        expect(screen.getByTestId("mock-monaco")).toBe(monaco);
+        expect(viewer.isConnected).toBe(true);
+        expect(viewer.scrollTop).toBe(gradingScrollTop);
+        expect(select).toHaveValue(file);
+        expect(loadSource).toHaveBeenCalledTimes(1);
+      };
+      fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+      assertPosition();
+      fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+        target: { value: "Added" }
+      });
+      fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+        target: { value: "New body" }
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+      await screen.findByRole("button", { name: "Edit comment: New body" });
+      assertPosition();
+      expect(screen.queryByRole("button", { name: "Add to Library" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Save to course library" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Edit comment: Original body" }));
+      fireEvent.click(screen.getByRole("button", { name: "Duplicate" }));
+      await waitFor(() => expect(add).toHaveBeenCalledTimes(2));
+      const duplicateId = add.mock.calls[1]?.[0].comment.id;
+      expect(duplicateId).not.toBe(original.id);
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save comment" })).toBeEnabled()
+      );
+      expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue(original.title);
+      expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue(original.text);
+      assertPosition();
+      fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+        target: { value: "Copy body" }
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+      await screen.findByRole("button", { name: "Edit comment: Copy body" });
+      expect(comments.find(({ id }) => id === "original")).toEqual(original);
+      expect(comments.find(({ id }) => id === duplicateId)).toMatchObject({
+        tags: original.tags,
+        sourceLocation: original.sourceLocation,
+        rubricCategoryId: "quality"
+      });
+      assertPosition();
+      fireEvent.click(screen.getByRole("button", { name: "Edit comment: Copy body" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add to Library" }));
+      await screen.findByRole("textbox", { name: "Comment text" });
+      expect(screen.getByRole("textbox", { name: "Comment text" })).toHaveValue("Copy body");
+      expect(screen.getByLabelText("Selected tags")).toHaveTextContent("design");
+      assertPosition();
+      fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+      await waitFor(() => expect(createLibrary).toHaveBeenCalledTimes(1));
+      await screen.findByRole("button", { name: "Edit comment: Copy body" });
+      assertPosition();
+      fireEvent.click(screen.getByRole("button", { name: "Edit comment: Copy body" }));
+      expect(screen.queryByRole("button", { name: "Add to Library" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete comment: Copy body" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm deleting comment" }));
+      await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Edit comment: Copy body" })).toBeNull()
+      );
+      expect(comments.find(({ id }) => id === "original")).toEqual(original);
+      assertPosition();
+    }
+  );
+});
+
+it("duplicates a library-derived applied instance into the active editor without creating a reusable entry", async () => {
+  const original = {
+    id: "library-applied",
+    sourceCommentId: "reusable",
+    title: "Naming",
+    text: "Library feedback",
+    deduction: 2,
+    tags: ["style"],
+    rubricCategoryId: "quality",
+    sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+  };
+  let comments = [original];
+  const add = vi.fn(async ({ comment, duplicateOfCommentId }) => {
+    expect(duplicateOfCommentId).toBe(original.id);
+    comments = [original, { ...structuredClone(original), id: comment.id }];
+    return {
+      status: "success",
+      studentId: "ada",
+      gradingStatus: "in_progress",
+      appliedComments: comments
+    };
+  });
+  const createReusable = vi.fn();
+  setApis(
+    vi.fn().mockResolvedValue({
+      ...workspace(),
+      rubric: [{ id: "quality", name: "Quality", points: 100 }]
+    }),
+    vi.fn().mockResolvedValue(source("ada")),
+    undefined,
+    undefined,
+    vi.fn(async () => ({ ...snapshot("ada", "in_progress"), appliedComments: comments })),
+    undefined,
+    add
+  );
+  Object.assign(window.graiderUI, { createGradingLibraryComment: createReusable });
+  render(<GradingWorkspacePage request={REQUEST} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Library feedback" }));
+  expect(screen.queryByRole("button", { name: "Add to Library" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Duplicate" }));
+  await waitFor(() => expect(add).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save comment" })).toBeEnabled());
+  expect(comments[1]).toEqual({ ...original, id: add.mock.calls[0]?.[0].comment.id });
+  expect(comments[1]?.id).not.toBe(original.id);
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue(original.title);
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue(original.text);
+  expect(screen.queryByRole("button", { name: "Add to Library" })).toBeNull();
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+    target: { value: "Copy draft" }
+  });
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Copy draft");
+  expect(original.text).toBe("Library feedback");
+  expect(createReusable).not.toHaveBeenCalled();
+});

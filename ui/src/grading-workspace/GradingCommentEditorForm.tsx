@@ -57,6 +57,8 @@ export const GradingCommentEditorForm = ({
   isStudentMutationBlocked,
   onSubmit,
   onCancel,
+  onDuplicate,
+  onAddToLibrary,
   sourceTargetLabel
 }: {
   readonly editor: CommentEditorState;
@@ -66,6 +68,8 @@ export const GradingCommentEditorForm = ({
   readonly gradingMutationStudentId: string | undefined;
   readonly isStudentMutationBlocked: (studentId: string) => boolean;
   readonly onSubmit: () => void;
+  readonly onDuplicate?: (() => void) | undefined;
+  readonly onAddToLibrary?: (() => void) | undefined;
   readonly onCancel: () => void;
   readonly sourceTargetLabel: (target: CanonicalSourceRange) => string;
 }): ReactElement => {
@@ -154,6 +158,28 @@ export const GradingCommentEditorForm = ({
         onSubmit();
       }}
     >
+      <div className="grading-apply-comment__actions">
+        {onDuplicate === undefined ? null : (
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={gradingMutationStudentId !== undefined}
+            onClick={onDuplicate}
+          >
+            Duplicate
+          </button>
+        )}
+        {onAddToLibrary === undefined ? null : (
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={gradingMutationStudentId !== undefined}
+            onClick={onAddToLibrary}
+          >
+            Add to Library
+          </button>
+        )}
+      </div>
       <h4>
         {editor.operation === "add"
           ? editor.reusableCommentTitle === undefined

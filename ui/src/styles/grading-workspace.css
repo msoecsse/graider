@@ -953,3 +953,24 @@
     flex-wrap: wrap;
   }
 }
+
+/* Keep viewer geometry stable while the comment workspace covers the grid.
+   Collapsing it makes PDF resize observers shrink pages and clamp scroll. */
+.grading-workspace__body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.grading-workspace__body > .grading-workspace__grid,
+.grading-workspace__body > .grading-comment-workspace {
+  grid-area: 1 / 1;
+}
+
+.grading-workspace__grid[hidden] {
+  display: grid;
+  visibility: hidden;
+  pointer-events: none;
+}

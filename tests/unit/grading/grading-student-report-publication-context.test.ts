@@ -411,3 +411,59 @@ describe("grading student report publication context", () => {
     );
   });
 });
+
+it.each(["not_started", "in_progress", "complete", "published"] as const)(
+  "previews current %s state with the final renderer without saving or publishing",
+  (status) => {
+    const state = gradingState(status);
+    const deps = dependencies(state);
+    const previewRequest = { ...request, mode: "preview" as const };
+    const prepared = prepareGradingStudentReportPublicationContext(previewRequest, deps);
+    expect(prepared.status).toBe("success");
+    if (prepared.status !== "success") throw new Error(prepared.status);
+    const rendered = renderPreparedGradingStudentReport(prepared.value, {});
+    expect(rendered.status).toBe("success");
+    if (rendered.status !== "success") throw new Error(rendered.status);
+    expect(rendered.html).toContain("Frozen feedback");
+    expect(rendered.html).toContain("Main.java");
+    expect(rendered.html).toContain("Correctness");
+    vi.mocked(deps.loadState).mockReturnValue({
+      status: "success",
+      value: {
+        ...state,
+        appliedComments: state.appliedComments.map((comment) => ({
+          ...comment,
+          text: "Later feedback"
+        }))
+      }
+    });
+    const later = prepareGradingStudentReportPublicationContext(previewRequest, deps);
+    if (later.status !== "success") throw new Error(later.status);
+    const laterRendered = renderPreparedGradingStudentReport(later.value, {});
+    expect(laterRendered.status).toBe("success");
+    if (laterRendered.status !== "success") throw new Error(laterRendered.status);
+    expect(laterRendered.html).toContain("Later feedback");
+    expect(deps.saveState).not.toHaveBeenCalled();
+    expect(state.status).toBe(status);
+    if (status === "not_started" || status === "in_progress")
+      expect(prepareGradingStudentReportPublicationContext(request, deps)).toEqual({
+        status: "grading_not_complete",
+        studentId: "ada"
+      });
+  }
+);
+
+it("previews an unstarted submission without creating a grading state file", () => {
+  const deps = dependencies();
+  vi.mocked(deps.loadState).mockReturnValue({ status: "missing" });
+  const prepared = prepareGradingStudentReportPublicationContext(
+    { ...request, mode: "preview" },
+    deps
+  );
+  expect(prepared.status).toBe("success");
+  expect(deps.saveState).not.toHaveBeenCalled();
+  expect(prepareGradingStudentReportPublicationContext(request, deps)).toEqual({
+    status: "grading_state_missing",
+    studentId: "ada"
+  });
+});

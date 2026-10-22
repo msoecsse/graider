@@ -771,6 +771,7 @@ export type { GradingStudentWorkflowRepairResult } from "./gradingStudentWorkflo
 export type GradingStudentCommitHistoryRequest = GradingStudentSourceRequest;
 export type { GradingStudentCommitHistoryResult } from "./gradingStudentCommitHistoryService.js";
 export interface AddGradingStudentCommentRequest extends GradingStudentViewStateRequest {
+  readonly duplicateOfCommentId?: string;
   readonly comment: AppliedCommentDto;
 }
 export interface EditGradingStudentCommentRequest extends GradingStudentViewStateRequest {

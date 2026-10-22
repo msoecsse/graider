@@ -156,7 +156,7 @@ const isCommentFields = (value: unknown, includeId: boolean, requireTitle: boole
   const comment = record(value);
   if (comment === null) return false;
   const optional = [
-    ...(includeId ? ["id", "sourceCommentId"] : []),
+    ...(includeId ? ["id", "sourceCommentId", "tags"] : []),
     "title",
     "rubricCategoryId",
     "sourceLocation"
@@ -172,6 +172,9 @@ const isCommentFields = (value: unknown, includeId: boolean, requireTitle: boole
       ? typeof comment.title === "string" && comment.title.trim() !== ""
       : comment.title === undefined ||
         (typeof comment.title === "string" && comment.title.trim() !== "")) &&
+    (comment.tags === undefined ||
+      (Array.isArray(comment.tags) &&
+        comment.tags.every((tag: unknown) => typeof tag === "string" && tag.trim() !== ""))) &&
     typeof comment.text === "string" &&
     typeof comment.deduction === "number" &&
     Number.isFinite(comment.deduction) &&
@@ -187,9 +190,16 @@ export const isAddGradingStudentCommentRequest = (
   const request = record(value);
   return (
     request !== null &&
-    hasOnlyKeys(request, [...IDENTITY_KEYS, "comment"]) &&
+    hasOnlyKeys(request, [
+      ...IDENTITY_KEYS,
+      "comment",
+      ...(request.duplicateOfCommentId === undefined ? [] : ["duplicateOfCommentId"])
+    ]) &&
     hasIdentity(request) &&
-    isCommentFields(request.comment, true, true)
+    (request.duplicateOfCommentId === undefined ||
+      (typeof request.duplicateOfCommentId === "string" &&
+        request.duplicateOfCommentId.trim() !== "")) &&
+    isCommentFields(request.comment, true, request.duplicateOfCommentId === undefined)
   );
 };
 

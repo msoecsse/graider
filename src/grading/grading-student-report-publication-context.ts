@@ -25,6 +25,7 @@ import {
 import { renderGradingReportHtml } from "./grading-report-html.js";
 import { buildGradingReportModel, type GradingReportCommit } from "./grading-report-model.js";
 import {
+  createInitialGradingState,
   loadGradingState,
   saveGradingState,
   type GradingState,
@@ -51,6 +52,7 @@ export interface GradingStudentReportPublicationContextRequest {
   readonly termCode: string;
   readonly assignmentSlug: string;
   readonly studentId: string;
+  readonly mode?: "publish" | "preview";
   readonly repositoryRoot: string;
   readonly currentSubmissionCommitSha: string;
 }
@@ -214,7 +216,7 @@ export const prepareGradingStudentReportPublicationContext = (
 ): PrepareGradingStudentReportPublicationResult => {
   const resolved = { ...dependencies, ...overrides };
   const loaded = resolved.loadState(stateRequest(request));
-  if (loaded.status === "missing")
+  if (loaded.status === "missing" && request.mode !== "preview")
     return { status: "grading_state_missing", studentId: request.studentId };
   if (loaded.status === "failure")
     return {
@@ -222,14 +224,20 @@ export const prepareGradingStudentReportPublicationContext = (
       studentId: request.studentId,
       code: loaded.code
     };
-  const state = loaded.value;
+  const initial =
+    loaded.status === "missing"
+      ? createInitialGradingState(request.studentId, request.currentSubmissionCommitSha)
+      : loaded;
+  if (initial.status === "failure")
+    return { status: "grading_state_error", studentId: request.studentId, code: initial.code };
+  const state = initial.value;
   if (state.studentId !== request.studentId)
     return {
       status: "grading_state_error",
       studentId: request.studentId,
       code: "grading_state_student_mismatch"
     };
-  if (state.status !== "complete" && state.status !== "published")
+  if (request.mode !== "preview" && state.status !== "complete" && state.status !== "published")
     return { status: "grading_not_complete", studentId: request.studentId };
 
   const submission = resolved.resolveSubmission(request, { loadState: resolved.loadState });

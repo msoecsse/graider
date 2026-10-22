@@ -16,6 +16,7 @@ import {
 export interface AppliedCommentInput {
   readonly id: string;
   readonly sourceCommentId?: string;
+  readonly tags?: readonly string[];
   readonly title?: string;
   readonly text: string;
   readonly deduction: number;
@@ -160,10 +161,30 @@ const save = (
 
 export const addGradingStudentCommentContext = (
   request: AppliedCommentContextRequest,
-  comment: AppliedCommentInput
+  comment: AppliedCommentInput,
+  duplicateOfCommentId?: string
 ): AppliedCommentContextResult => {
   const loaded = loadCurrent(request);
   if (loaded.status === "failure") return loaded.result;
+  if (duplicateOfCommentId !== undefined) {
+    const original =
+      loaded.status === "success"
+        ? loaded.state.appliedComments.find(({ id }) => id === duplicateOfCommentId)
+        : undefined;
+    if (original === undefined || loaded.status !== "success")
+      return {
+        status: "not_found",
+        studentId: request.studentId,
+        code: "applied_comment_not_found"
+      };
+    const duplicated = addAppliedComment(loaded.state, {
+      ...structuredClone(original),
+      id: comment.id
+    });
+    return duplicated.status === "success"
+      ? save(request, duplicated.value)
+      : stateError(request.studentId, duplicated.code);
+  }
   if (comment.title === undefined || comment.title.trim() === "")
     return stateError(request.studentId, "comment_title_required");
   const invalidComment = validateCommentAgainstAssignment(request, comment);
@@ -178,7 +199,12 @@ export const addGradingStudentCommentContext = (
     if (initial.status === "failure") return stateError(request.studentId, initial.code);
     state = initial.value;
   }
-  const updated = addAppliedComment(state, { ...comment, title: comment.title.trim() });
+  const { tags, ...fields } = comment;
+  const updated = addAppliedComment(state, {
+    ...fields,
+    ...(tags === undefined ? {} : { tags: [...tags] }),
+    title: comment.title.trim()
+  });
   return updated.status === "success"
     ? save(request, updated.value)
     : stateError(request.studentId, updated.code);

@@ -99,6 +99,7 @@ export const editAppliedComment = (
     JSON.stringify(update.sourceLocation) === JSON.stringify(existing.sourceLocation)
       ? { sourceAnchor: existing.sourceAnchor }
       : {}),
+    ...(existing.tags === undefined ? {} : { tags: [...existing.tags] }),
     text: update.text,
     deduction: update.deduction,
     ...(update.rubricCategoryId === undefined ? {} : { rubricCategoryId: update.rubricCategoryId }),

@@ -33,6 +33,8 @@ export const GradingCommentWorkspace = ({
   canonicalSourceTarget,
   gradingMutationStudentId,
   isStudentMutationBlocked,
+  onDuplicate,
+  onAddToLibrary,
   onSaveStudentComment,
   onCancelStudentComment,
   sourceTargetLabel,
@@ -67,6 +69,8 @@ export const GradingCommentWorkspace = ({
   readonly gradingMutationStudentId: string | undefined;
   readonly isStudentMutationBlocked: (studentId: string) => boolean;
   readonly onSaveStudentComment: () => void;
+  readonly onDuplicate?: (() => void) | undefined;
+  readonly onAddToLibrary?: (() => void) | undefined;
   readonly onCancelStudentComment: () => void;
   readonly sourceTargetLabel: (target: CanonicalSourceRange) => string;
   readonly commentLibrary: CommentLibraryLoadState;
@@ -143,6 +147,8 @@ export const GradingCommentWorkspace = ({
             canonicalSourceTarget={canonicalSourceTarget}
             gradingMutationStudentId={gradingMutationStudentId}
             isStudentMutationBlocked={isStudentMutationBlocked}
+            onDuplicate={onDuplicate}
+            onAddToLibrary={onAddToLibrary}
             onSubmit={onSaveStudentComment}
             onCancel={onCancelStudentComment}
             sourceTargetLabel={sourceTargetLabel}
