@@ -52,6 +52,25 @@ describe("GradingCommentLibraryBrowser", () => {
     ).toBe("  value();");
   });
 
+  it("renders library Markdown without changing the reusable source text", () => {
+    const markdownComment = { ...comment, text: "**Bold**\n\n- one\n  - nested" };
+    const onApply = vi.fn();
+    const { container } = render(
+      <GradingCommentLibraryBrowser
+        {...baseProps}
+        matchingComments={[markdownComment]}
+        applyAction={{ isDisabled: () => false, onApply }}
+      />
+    );
+
+    expect(container.querySelector(".formatted-grading-comment strong")?.textContent).toBe("Bold");
+    expect(container.querySelector(".formatted-grading-comment ul ul")).not.toBeNull();
+    expect(container.querySelector(".formatted-grading-comment")?.textContent).toContain("nested");
+    fireEvent.click(screen.getByRole("button", { name: "Apply Off-by-one" }));
+    expect(onApply).toHaveBeenCalledWith(markdownComment);
+    expect(markdownComment.text).toBe("**Bold**\n\n- one\n  - nested");
+  });
+
   it("disables Apply when no student is selected", () => {
     render(
       <GradingCommentLibraryBrowser

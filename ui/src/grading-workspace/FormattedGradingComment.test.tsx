@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { FormattedGradingComment } from "./FormattedGradingComment";
+import { renderGradingReportHtml } from "../../../src/grading/grading-report-html";
+import type { GradingReportModel } from "../../../src/grading/grading-report-model";
 
 describe("FormattedGradingComment", () => {
   it("renders one ordinary character as a paragraph", () => {
@@ -53,5 +55,92 @@ describe("FormattedGradingComment", () => {
         (node) => node.textContent
       )
     ).toEqual(["First", "Second"]);
+  });
+
+  it("renders the supported Markdown subset with inert links and HTML", () => {
+    const { container } = render(
+      <FormattedGradingComment
+        text={[
+          "A **bold** and *italic* paragraph with a line break.",
+          "continued with `code` and [guide](javascript:alert(1)).",
+          "",
+          "- outer",
+          "  - nested",
+          "1. first",
+          "2. second",
+          "> quoted",
+          "```js",
+          "<img src=x onerror=alert(1)>",
+          "```",
+          "<script>alert(1)</script>"
+        ].join("\n")}
+      />
+    );
+
+    expect(container.querySelector("strong")?.textContent).toBe("bold");
+    expect(container.querySelector("em")?.textContent).toBe("italic");
+    expect(
+      container.querySelector("code.formatted-grading-comment__inline-code")?.textContent
+    ).toBe("code");
+    expect(container.querySelector("ul ul li")?.textContent).toBe("nested");
+    expect(container.querySelector("ol")?.children).toHaveLength(2);
+    expect(container.querySelector("blockquote")?.textContent).toBe("quoted");
+    expect(container.querySelector("a, img, script, iframe, object, embed")).toBeNull();
+    expect(container.textContent).toContain("guide (javascript:alert(1))");
+    expect(container.textContent).toContain("<script>alert(1)</script>");
+  });
+
+  it("uses the shared Markdown semantics in grading reports while preserving anchors", () => {
+    const report = {
+      course: { code: "cs", title: "CS" },
+      assignment: { slug: "lab", title: "Lab" },
+      studentId: "student",
+      submissionCommitSha: "0123456789abcdef",
+      gradingStatus: "complete",
+      grade: {
+        totalScore: 10,
+        pointsPossible: 10,
+        categories: [],
+        uncategorizedCommentAdjustmentTotal: 0
+      },
+      generalComments: [
+        {
+          reportIndex: 1,
+          id: "comment-1",
+          title: "Feedback",
+          text: [
+            "**bold** [site](javascript:alert(1))",
+            "",
+            "- first",
+            "- second",
+            "> quote",
+            "",
+            "```java",
+            "int n = 1;",
+            "```",
+            "<script>alert(1)</script>"
+          ].join("\n"),
+          deduction: 0,
+          locationAvailable: false
+        }
+      ],
+      manualAdjustments: [],
+      sourceFiles: [],
+      unmappedSourceComments: [],
+      evidence: undefined,
+      commitHistory: [],
+      generatedAt: "2026-10-23T00:00:00.000Z"
+    } as unknown as GradingReportModel;
+    const html = renderGradingReportHtml(report);
+
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain('<ul class="comment-content__list">');
+    expect(html).toContain('<blockquote class="comment-content__quote">');
+    expect(html).toContain(
+      '<pre class="comment-content__code-block"><code>int n = 1;</code></pre>'
+    );
+    expect(html).not.toContain('<a href="javascript:');
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain('id="general-comment-1"');
   });
 });

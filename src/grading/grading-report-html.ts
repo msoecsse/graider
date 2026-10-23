@@ -1,6 +1,10 @@
 import type { DocumentNode } from "../shared/document-content.js";
 import type { GradingEvidenceOutcome, JunitFailure } from "./grading-evidence-parser.js";
-import { parseCommentContent, type CommentInlineNode } from "../shared/comment-content.js";
+import {
+  parseCommentContent,
+  type CommentContentBlock,
+  type CommentInlineNode
+} from "../shared/comment-content.js";
 import type {
   GradingReportComment,
   GradingReportModel,
@@ -31,6 +35,8 @@ thead th { background: #f1f5f9; }
 .comment-content__inline-code { border-radius: 3px; background: #e2e8f0; padding: 0 .22em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .comment-content__code-block { max-width: 100%; overflow-x: auto; margin: .65rem 0 0; border: 1px solid #cbd5e1; border-radius: 4px; background: #f1f5f9; padding: .65rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em; line-height: 1.5; white-space: pre; }
 .comment-content__code-block code { font-family: inherit; }
+.comment-content__list { padding-left: 1.4rem; margin: .35rem 0; }
+.comment-content__quote { margin: .45rem 0; padding-left: .8rem; border-left: 3px solid #94a3b8; color: #475569; }
 .source-file { break-inside: avoid; }
 .source-scroll { max-width: 100%; overflow-x: auto; border: 1px solid #cbd5e1; }
 .source-code { margin: 0; border: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .875rem; }
@@ -102,18 +108,32 @@ const renderCommentInlineContent = (nodes: readonly CommentInlineNode[]): string
     .map((node) =>
       node.kind === "inline_code"
         ? `<code class="comment-content__inline-code">${escapeHtml(node.text)}</code>`
-        : escapeHtml(node.text)
+        : node.kind === "strong"
+          ? `<strong>${renderCommentInlineContent(node.children)}</strong>`
+          : node.kind === "emphasis"
+            ? `<em>${renderCommentInlineContent(node.children)}</em>`
+            : node.kind === "link_text"
+              ? `${escapeHtml(node.text)}${node.url === undefined ? "" : ` (${escapeHtml(node.url)})`}`
+              : escapeHtml(node.text)
     )
     .join("");
 
-const renderFormattedCommentContent = (text: string): string =>
-  parseCommentContent(text)
-    .map((block) =>
-      block.kind === "code_block"
-        ? `<pre class="comment-content__code-block"><code>${escapeHtml(block.text)}</code></pre>`
-        : `<p class="comment-content__paragraph">${renderCommentInlineContent(block.children)}</p>`
-    )
+const renderCommentBlocks = (blocks: readonly CommentContentBlock[]): string =>
+  blocks
+    .map((block) => {
+      if (block.kind === "code_block")
+        return `<pre class="comment-content__code-block"><code>${escapeHtml(block.text)}</code></pre>`;
+      if (block.kind === "paragraph")
+        return `<p class="comment-content__paragraph">${renderCommentInlineContent(block.children)}</p>`;
+      if (block.kind === "quote")
+        return `<blockquote class="comment-content__quote">${renderCommentBlocks(block.children)}</blockquote>`;
+      const tag = block.ordered ? "ol" : "ul";
+      return `<${tag} class="comment-content__list">${block.items.map((item) => `<li>${renderCommentBlocks(item.children)}</li>`).join("")}</${tag}>`;
+    })
     .join("\n");
+
+const renderFormattedCommentContent = (text: string): string =>
+  renderCommentBlocks(parseCommentContent(text));
 
 const renderCommentBody = (comment: GradingReportComment): string => `
 ${comment.title === undefined ? "" : `<h4>${escapeHtml(comment.title)}</h4>`}

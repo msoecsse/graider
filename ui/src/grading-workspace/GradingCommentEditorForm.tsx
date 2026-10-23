@@ -200,6 +200,7 @@ export const GradingCommentEditorForm = ({
       <label>
         Comment
         <textarea
+          className="grading-comment-body-editor"
           ref={textareaRef}
           value={editor.text}
           onChange={(event) => {

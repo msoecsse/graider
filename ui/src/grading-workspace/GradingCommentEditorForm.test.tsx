@@ -47,6 +47,13 @@ describe("GradingCommentEditorForm", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
+  it("provides a tall, vertically resizable body field for longer comments", () => {
+    render(<GradingCommentEditorForm {...baseProps} editor={addEditor} />);
+    const textarea = screen.getByRole("textbox", { name: "Comment" });
+    expect(textarea).toHaveClass("grading-comment-body-editor");
+    expect(textarea.tagName).toBe("TEXTAREA");
+  });
+
   it("disables submit for a source-targeted comment with no selected range", () => {
     render(
       <GradingCommentEditorForm

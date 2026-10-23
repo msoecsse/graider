@@ -414,6 +414,18 @@
   white-space: pre-wrap;
 }
 
+.formatted-grading-comment ul,
+.formatted-grading-comment ol {
+  margin: 0.35rem 0;
+  padding-left: 1.5rem;
+}
+.formatted-grading-comment blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--border-color, #94a3b8);
+  color: var(--text-muted);
+}
+
 .formatted-grading-comment__inline-code {
   border-radius: 4px;
   background: var(--surface-sunken);
@@ -745,6 +757,15 @@
   resize: vertical;
 }
 
+.grading-apply-comment .grading-comment-body-editor {
+  box-sizing: border-box;
+  min-height: 12lh;
+  max-height: 38vh;
+  resize: vertical;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .grading-comment-formatting-controls {
   display: flex;
   flex-wrap: wrap;
@@ -765,6 +786,10 @@
 
 .grading-comment-preview__empty {
   color: var(--text-muted);
+}
+
+.grading-comment-preview .formatted-grading-comment__code-block {
+  max-height: 24vh;
 }
 
 .grading-apply-comment fieldset {
