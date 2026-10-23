@@ -1,3 +1,4 @@
+import { loadRecentGradingComments } from "./recentGradingComments.js";
 import path from "node:path";
 import type {
   CourseMutationPublicationResult,
@@ -57,7 +58,11 @@ type GradingCommentLibraryOperationFailure = {
 };
 
 export type GradingCommentLibraryLoadResult =
-  | { readonly status: "success"; readonly comments: readonly ReusableCommentDto[] }
+  | {
+      readonly status: "success";
+      readonly comments: readonly ReusableCommentDto[];
+      readonly recentCommentIds?: readonly string[];
+    }
   | GradingCommentLibraryAccessFailure
   | GradingCommentLibraryOperationFailure;
 
@@ -114,6 +119,19 @@ export interface GradingCommentLibraryDependencies {
 const loadBackend = (): GradingCommentLibraryBackend =>
   require(path.join(__dirname, "gradingCommentLibraryBackend.cjs")) as GradingCommentLibraryBackend;
 
+const withRecentComments = (
+  request: GradingCommentLibraryServiceRequest,
+  result: GradingCommentLibraryLoadResult
+): GradingCommentLibraryLoadResult =>
+  result.status === "success"
+    ? {
+        ...result,
+        recentCommentIds: loadRecentGradingComments(request)
+          .map((entry) => entry.id)
+          .filter((id) => result.comments.some((comment) => comment.id === id))
+      }
+    : result;
+
 export const createGradingCommentLibraryService = (
   dependencies: Partial<GradingCommentLibraryDependencies> &
     Pick<GradingCommentLibraryDependencies, "publishCourseChanges">
@@ -154,9 +172,12 @@ export const createGradingCommentLibraryService = (
   return {
     load: (request) =>
       authorize(request) ??
-      getBackend().loadGradingCommentLibraryContext({
-        courseFolderPath: request.courseFolderPath
-      }),
+      withRecentComments(
+        request,
+        getBackend().loadGradingCommentLibraryContext({
+          courseFolderPath: request.courseFolderPath
+        })
+      ),
     create: async (request) => {
       const authorizationFailure = authorize(request);
       if (authorizationFailure !== undefined) return authorizationFailure;
@@ -192,9 +213,10 @@ export const loadGradingCommentLibrary = (request: GradingCommentLibraryServiceR
   const scope = resolveCurrentFacultyScope(request);
   if (scope.status !== "success") return { status: scope.status };
   if (scope.sections.length === 0) return { status: "no_assigned_sections" as const };
-  return loadBackend().loadGradingCommentLibraryContext({
+  const result = loadBackend().loadGradingCommentLibraryContext({
     courseFolderPath: request.courseFolderPath
   });
+  return withRecentComments(request, result);
 };
 export const createGradingLibraryComment = (
   request: CreateGradingLibraryCommentServiceRequest,

@@ -87,12 +87,14 @@ const createAnnotationDecorations = (
 
 export const MonacoSourceViewer = ({
   annotations = [],
+  navigation,
   initialViewState,
   model,
   studentId,
   onCanonicalViewStateChange,
   onCanonicalSelectionChange
 }: {
+  navigation?: { readonly target: CanonicalSourceRange } | undefined;
   annotations?: readonly GradingSourceAnnotation[];
   initialViewState?: CanonicalEditorViewState | null;
   model: SubmissionSourceModelDto;
@@ -100,6 +102,7 @@ export const MonacoSourceViewer = ({
   onCanonicalViewStateChange?: (viewState: CanonicalEditorViewState) => void;
   onCanonicalSelectionChange?: (selection: CanonicalSourceRange | undefined) => void;
 }): ReactElement => {
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const viewStateChangeRef = useRef(onCanonicalViewStateChange);
   const selectionChangeRef = useRef(onCanonicalSelectionChange);
@@ -119,6 +122,7 @@ export const MonacoSourceViewer = ({
       ...MONACO_SOURCE_OPTIONS,
       model: sourceModel
     });
+    editorRef.current = editor;
     const decorations = editor.createDecorationsCollection();
     decorationsRef.current = decorations;
     editor.changeViewZones((accessor) => {
@@ -214,6 +218,7 @@ export const MonacoSourceViewer = ({
       if (decorationsRef.current === decorations) decorationsRef.current = null;
       selectionListener.dispose();
       scrollListener.dispose();
+      editorRef.current = null;
       editor.dispose();
       sourceModel.dispose();
     };
@@ -222,6 +227,24 @@ export const MonacoSourceViewer = ({
   useEffect(() => {
     decorationsRef.current?.set(createAnnotationDecorations(model, annotations));
   }, [annotations, model, studentId]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (editor !== null && navigation !== undefined) {
+      const target = mapCanonicalSourceRangeToCombinedLineRange(model, navigation.target);
+      if (target !== undefined) {
+        const range = new monaco.Range(
+          target.startLineNumber,
+          1,
+          target.endLineNumber,
+          model.combinedText.split("\n")[target.endLineNumber - 1]!.length + 1
+        );
+        editor.setSelection(range);
+        editor.revealRangeInCenter(range);
+        if (containerRef.current?.closest("[hidden]") === null) editor.focus();
+      }
+    }
+  }, [navigation, model, studentId]);
 
   return (
     <div

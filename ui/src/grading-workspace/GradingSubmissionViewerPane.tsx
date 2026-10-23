@@ -23,6 +23,7 @@ export type SourceLoadState =
 
 export const GradingSubmissionViewerPane = ({
   request,
+  navigation,
   hasSelectedStudent,
   viewStateWarning,
   source,
@@ -36,6 +37,7 @@ export const GradingSubmissionViewerPane = ({
   onAddComment,
   sourceTargetLabel
 }: {
+  readonly navigation?: { readonly target: CanonicalSourceRange } | undefined;
   readonly request?: Omit<GradingStudentSourceRequest, "studentId">;
   readonly hasSelectedStudent: boolean;
   readonly viewStateWarning: string | undefined;
@@ -56,10 +58,14 @@ export const GradingSubmissionViewerPane = ({
   const [documentSelection, setDocumentSelection] = useState<{
     readonly source: SourceLoadState;
     readonly file: string;
+    readonly navigation: typeof navigation;
   }>();
   // Tie selection to the loaded source snapshot so refresh/student changes
   // close the old document during render, before another read can start.
-  const selectedDocument = documentSelection?.source === source ? documentSelection.file : "";
+  const selectedDocument =
+    documentSelection?.source === source && documentSelection.navigation === navigation
+      ? documentSelection.file
+      : "";
   const documentRequest = useMemo(
     () =>
       request !== undefined && source.status === "success" && selectedDocument !== ""
@@ -88,7 +94,7 @@ export const GradingSubmissionViewerPane = ({
               <select
                 value={selectedDocument}
                 onChange={(event) => {
-                  setDocumentSelection({ source, file: event.target.value });
+                  setDocumentSelection({ source, file: event.target.value, navigation });
                   onCanonicalSelectionChange(source.source.studentId, undefined);
                 }}
               >
@@ -130,6 +136,7 @@ export const GradingSubmissionViewerPane = ({
           <Suspense fallback={<p aria-live="polite">Starting source viewer…</p>}>
             <>
               <MonacoSourceViewer
+                navigation={navigation}
                 annotations={snapshotStudentId === source.source.studentId ? sourceAnnotations : []}
                 key={source.source.studentId}
                 initialViewState={source.initialViewState}

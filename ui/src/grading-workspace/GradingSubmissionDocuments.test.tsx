@@ -104,3 +104,20 @@ describe("documents inside the grading source pane", () => {
     expect(screen.getByText("Document for grace: nested/Notes.DOCX")).toBeVisible();
   });
 });
+
+it("opens source instead of the active repository document for comment navigation", async () => {
+  const loaded = source();
+  const { rerender } = render(<GradingSubmissionViewerPane {...props} source={loaded} />);
+  await screen.findByRole("textbox", { name: "Source state" });
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "normal.pdf" } });
+  expect(screen.getByText("Document for ada: normal.pdf")).toBeVisible();
+  rerender(
+    <GradingSubmissionViewerPane
+      {...props}
+      source={loaded}
+      navigation={{ target: { file: "Main.java", startLine: 1, endLine: 1 } }}
+    />
+  );
+  await waitFor(() => expect(screen.getByRole("combobox")).toHaveValue(""));
+  expect(screen.getByRole("textbox", { name: "Source state" })).toBeVisible();
+});

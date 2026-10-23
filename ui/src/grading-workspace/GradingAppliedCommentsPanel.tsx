@@ -22,6 +22,8 @@ export const GradingAppliedCommentsPanel = ({
   gradingMutationStudentId,
   isStudentMutationBlocked,
   onEdit,
+  onNavigate,
+  isLocationAvailable = () => true,
   onRequestDelete,
   deleteConfirmation,
   onConfirmDelete,
@@ -33,6 +35,8 @@ export const GradingAppliedCommentsPanel = ({
   readonly studentId: string;
   readonly gradingMutationStudentId: string | undefined;
   readonly isStudentMutationBlocked: (studentId: string) => boolean;
+  readonly isLocationAvailable?: (comment: AppliedComment) => boolean;
+  readonly onNavigate?: (comment: AppliedComment) => void;
   readonly onEdit: (comment: AppliedComment) => void;
   readonly onRequestDelete: (comment: AppliedComment) => void;
   readonly deleteConfirmation: DeleteCommentConfirmation | undefined;
@@ -48,57 +52,84 @@ export const GradingAppliedCommentsPanel = ({
         <p>No comments applied.</p>
       ) : (
         <ul className="grading-comment-list">
-          {appliedComments.map((comment) => (
-            <li key={comment.id}>
-              {comment.title === undefined ? null : <h4>{comment.title}</h4>}
-              <FormattedGradingComment text={comment.text} />
-              <p>Adjustment: {comment.deduction}</p>
-              {comment.rubricCategoryId === undefined ? null : (
-                <p>
-                  Category:{" "}
-                  {categories.find((category) => category.id === comment.rubricCategoryId)?.name ??
-                    comment.rubricCategoryId}
-                </p>
-              )}
-              {comment.sourceLocation === undefined ? null : (
-                <p>
-                  Source: {sourceLocationLabel(comment.sourceLocation)}
-                  {comment.sourceAnchor?.status === "stale"
-                    ? " · Stale/unresolved source anchor"
-                    : null}
-                </p>
-              )}
-              {comment.sourceAnchor?.status === "stale" &&
-              comment.sourceAnchor.originalText !== undefined ? (
-                <details>
-                  <summary>
-                    Original source context ({comment.sourceAnchor.originalCommitSha.slice(0, 8)})
-                  </summary>
-                  <pre>{comment.sourceAnchor.originalText}</pre>
-                </details>
-              ) : null}
-              <div className="grading-applied-comment__actions">
-                <button
-                  className="secondary-action"
-                  type="button"
-                  aria-label={`Edit comment: ${comment.text}`}
-                  disabled={disabled}
-                  onClick={() => onEdit(comment)}
+          {appliedComments.map((comment) => {
+            const canNavigate =
+              comment.sourceLocation !== undefined &&
+              comment.sourceAnchor?.status !== "stale" &&
+              isLocationAvailable(comment);
+            return (
+              <li key={comment.id}>
+                <div
+                  className={canNavigate ? "grading-applied-comment__location" : undefined}
+                  role={canNavigate ? "button" : undefined}
+                  tabIndex={canNavigate ? 0 : undefined}
+                  aria-label={
+                    canNavigate
+                      ? `Show comment location: ${comment.title || comment.text}`
+                      : undefined
+                  }
+                  onClick={() => {
+                    if (canNavigate) onNavigate?.(comment);
+                  }}
+                  onKeyDown={(event) => {
+                    if ((event.key === "Enter" || event.key === " ") && canNavigate) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onNavigate?.(comment);
+                    }
+                  }}
                 >
-                  Edit
-                </button>
-                <button
-                  className="danger-action"
-                  type="button"
-                  aria-label={`Delete comment: ${comment.text}`}
-                  disabled={disabled}
-                  onClick={() => onRequestDelete(comment)}
-                >
-                  Delete
-                </button>
-              </div>
-            </li>
-          ))}
+                  {comment.title === undefined ? null : <h4>{comment.title}</h4>}
+                  <FormattedGradingComment text={comment.text} />
+                </div>
+                <p>Adjustment: {comment.deduction}</p>
+                {comment.rubricCategoryId === undefined ? null : (
+                  <p>
+                    Category:{" "}
+                    {categories.find((category) => category.id === comment.rubricCategoryId)
+                      ?.name ?? comment.rubricCategoryId}
+                  </p>
+                )}
+                {comment.sourceLocation === undefined ? null : (
+                  <p>
+                    Source: {sourceLocationLabel(comment.sourceLocation)}
+                    {comment.sourceAnchor?.status === "stale"
+                      ? " · Stale/unresolved source anchor"
+                      : null}
+                  </p>
+                )}
+                {comment.sourceAnchor?.status === "stale" &&
+                comment.sourceAnchor.originalText !== undefined ? (
+                  <details>
+                    <summary>
+                      Original source context ({comment.sourceAnchor.originalCommitSha.slice(0, 8)})
+                    </summary>
+                    <pre>{comment.sourceAnchor.originalText}</pre>
+                  </details>
+                ) : null}
+                <div className="grading-applied-comment__actions">
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    aria-label={`Edit comment: ${comment.text}`}
+                    disabled={disabled}
+                    onClick={() => onEdit(comment)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="danger-action"
+                    type="button"
+                    aria-label={`Delete comment: ${comment.text}`}
+                    disabled={disabled}
+                    onClick={() => onRequestDelete(comment)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
       {deleteConfirmation !== undefined && deleteConfirmation.studentId === studentId ? (

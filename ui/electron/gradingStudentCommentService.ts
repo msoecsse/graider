@@ -1,3 +1,4 @@
+import { recordRecentGradingComment } from "./recentGradingComments.js";
 import path from "node:path";
 import {
   resolveCurrentFacultyScope,
@@ -174,15 +175,24 @@ export const createGradingStudentCommentService = (
   return {
     add: async (request) => {
       const prepared = await prepare(request);
-      return prepared.status === "failure"
-        ? prepared.result
-        : request.duplicateOfCommentId === undefined
-          ? getBackend().addGradingStudentCommentContext(prepared.backendRequest, request.comment)
-          : getBackend().addGradingStudentCommentContext(
-              prepared.backendRequest,
-              request.comment,
-              request.duplicateOfCommentId
-            );
+      const result =
+        prepared.status === "failure"
+          ? prepared.result
+          : request.duplicateOfCommentId === undefined
+            ? getBackend().addGradingStudentCommentContext(prepared.backendRequest, request.comment)
+            : getBackend().addGradingStudentCommentContext(
+                prepared.backendRequest,
+                request.comment,
+                request.duplicateOfCommentId
+              );
+      if (
+        result.status === "success" &&
+        request.comment.sourceCommentId !== undefined &&
+        request.duplicateOfCommentId === undefined
+      ) {
+        recordRecentGradingComment(request, request.comment.sourceCommentId);
+      }
+      return result;
     },
     edit: async (request) => {
       const prepared = await prepare(request);

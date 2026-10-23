@@ -95,3 +95,41 @@ describe("GradingAppliedCommentsPanel", () => {
     expect(screen.getByText("No comments applied.")).toBeInTheDocument();
   });
 });
+
+it("navigates linked comment clicks/keyboard and preserves Edit, but never navigates general/stale comments", () => {
+  const onNavigate = vi.fn();
+  const onEdit = vi.fn();
+  const linked = {
+    ...comment,
+    sourceLocation: { file: "src/Main.java", startLine: 40, endLine: 42 }
+  };
+  const props = { ...baseProps, onNavigate, onEdit };
+  const { rerender } = render(
+    <GradingAppliedCommentsPanel {...props} appliedComments={[linked]} />
+  );
+  fireEvent.click(screen.getByText(comment.text));
+  fireEvent.keyDown(screen.getByRole("button", { name: /Show comment location/u }), {
+    key: "Enter"
+  });
+  expect(onNavigate).toHaveBeenCalledTimes(2);
+  expect(onNavigate).toHaveBeenLastCalledWith(linked);
+  fireEvent.click(screen.getByLabelText(`Edit comment: ${comment.text}`));
+  expect(onEdit).toHaveBeenCalledWith(linked);
+  onNavigate.mockClear();
+  rerender(<GradingAppliedCommentsPanel {...props} appliedComments={[comment]} />);
+  fireEvent.click(screen.getByText(comment.text));
+  expect(screen.queryByRole("button", { name: /Show comment location/u })).not.toBeInTheDocument();
+  const stale = {
+    ...linked,
+    sourceAnchor: {
+      status: "stale" as const,
+      originalCommitSha: "abc",
+      originalLocation: linked.sourceLocation
+    }
+  };
+  rerender(<GradingAppliedCommentsPanel {...props} appliedComments={[stale]} />);
+  fireEvent.click(screen.getByText(comment.text));
+  fireEvent.click(screen.getByLabelText(`Edit comment: ${comment.text}`));
+  expect(onNavigate).not.toHaveBeenCalled();
+  expect(screen.getByText(/Stale\/unresolved/u)).toBeInTheDocument();
+});

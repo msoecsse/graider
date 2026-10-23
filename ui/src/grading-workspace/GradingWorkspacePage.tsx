@@ -1,3 +1,7 @@
+import { mapCanonicalSourceRangeToCombinedLineRange } from "./submissionSourceView";
+import { RECENT_COMMENT_LIMIT } from "../../electron/recentCommentLimit";
+import { RecentCommentsMenu } from "./RecentCommentsMenu";
+import { ReportPreviewViewer } from "./ReportPreviewViewer";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type {
   GradingEditorViewState,
@@ -521,6 +525,12 @@ export const GradingWorkspacePage = ({
   const [commentLibrary, setCommentLibrary] = useState<CommentLibraryLoadState>({
     status: "loading"
   });
+  const [recentCommentIds, setRecentCommentIds] = useState<readonly string[]>([]);
+  const [sourceNavigation, setSourceNavigation] = useState<{
+    studentId: string;
+    target: CanonicalSourceRange;
+    source: SourceLoadState;
+  }>();
   const [commentSearch, setCommentSearch] = useState("");
   const [selectedCommentTags, setSelectedCommentTags] = useState<readonly string[]>([]);
   const [commentWorkspaceMode, setCommentWorkspaceMode] = useState<
@@ -753,6 +763,7 @@ export const GradingWorkspacePage = ({
         if (!active) return;
         if (value.status === "success" && "comments" in value) {
           setCommentLibrary({ status: "success", comments: value.comments });
+          setRecentCommentIds(value.recentCommentIds ?? []);
           return;
         }
         setCommentLibrary({ status: "failure", message: commentLibraryLoadFailureMessage(value) });
@@ -2021,6 +2032,12 @@ export const GradingWorkspacePage = ({
         undefined,
         () => {
           persisted = true;
+          if (editor.reusableCommentId !== undefined) {
+            const id = editor.reusableCommentId;
+            setRecentCommentIds((current) =>
+              [id, ...current.filter((entry) => entry !== id)].slice(0, RECENT_COMMENT_LIMIT)
+            );
+          }
         }
       );
       if ((saved || persisted) && currentStudentIdRef.current === studentId) {
@@ -3195,6 +3212,12 @@ export const GradingWorkspacePage = ({
               student === undefined ? undefined : viewStateWarnings[student.studentId]
             }
             source={source}
+            navigation={
+              sourceNavigation?.studentId === student?.studentId &&
+              sourceNavigation?.source === source
+                ? sourceNavigation
+                : undefined
+            }
             snapshotStudentId={
               snapshot.status === "success" ? snapshot.snapshot.studentId : undefined
             }
@@ -3405,11 +3428,9 @@ export const GradingWorkspacePage = ({
                           </ul>
                         </div>
                       )}
-                      <iframe
-                        className="grading-report-preview__frame"
-                        title="Grading report preview"
-                        sandbox=""
-                        srcDoc={reportPreview.html}
+                      <ReportPreviewViewer
+                        key={reportPreview.studentId}
+                        html={reportPreview.html}
                       />
                       <div className="grading-apply-comment__actions">
                         <button
@@ -3471,6 +3492,16 @@ export const GradingWorkspacePage = ({
                   >
                     Add comment
                   </button>
+                  <RecentCommentsMenu
+                    ids={recentCommentIds}
+                    comments={commentLibrary.status === "success" ? commentLibrary.comments : []}
+                    disabled={
+                      gradingMutationStudentId !== undefined ||
+                      gradingMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                    }
+                    onApply={openApplyEditor}
+                    onSearch={openCommentLibrary}
+                  />
                   <button className="secondary-action" type="button" onClick={openCommentLibrary}>
                     Browse comment library
                   </button>
@@ -3488,6 +3519,27 @@ export const GradingWorkspacePage = ({
                   isStudentMutationBlocked={(studentId) =>
                     gradingMutationBlockedStudents.current.has(studentId)
                   }
+                  isLocationAvailable={(comment) =>
+                    source.status === "success" &&
+                    source.source.studentId === snapshot.snapshot.studentId &&
+                    comment.sourceLocation !== undefined &&
+                    mapCanonicalSourceRangeToCombinedLineRange(
+                      source.source,
+                      comment.sourceLocation
+                    ) !== undefined
+                  }
+                  onNavigate={(comment) => {
+                    if (
+                      comment.sourceLocation !== undefined &&
+                      comment.sourceAnchor?.status !== "stale"
+                    ) {
+                      setSourceNavigation({
+                        studentId: snapshot.snapshot.studentId,
+                        target: comment.sourceLocation,
+                        source
+                      });
+                    }
+                  }}
                   onEdit={(comment) => openEditEditor(comment)}
                   onRequestDelete={openDeleteCommentConfirmation}
                   deleteConfirmation={deleteConfirmation}

@@ -9,6 +9,7 @@ let updateCanonicalSourceSelection:
 vi.mock("./MonacoSourceViewer", () => ({
   MonacoSourceViewer: ({
     annotations,
+    navigation,
     initialViewState,
     model,
     onCanonicalViewStateChange,
@@ -16,6 +17,9 @@ vi.mock("./MonacoSourceViewer", () => ({
     studentId
   }: {
     annotations?: readonly unknown[];
+    navigation?:
+      | { readonly target: { file: string; startLine: number; endLine: number } }
+      | undefined;
     initialViewState?: GradingEditorViewState | null;
     model: { combinedText: string; sections: readonly { file: string; status: string }[] };
     onCanonicalViewStateChange?: (viewState: GradingEditorViewState) => void;
@@ -34,6 +38,7 @@ vi.mock("./MonacoSourceViewer", () => ({
         {model.sections.map((section) => `${section.file}-${section.status}`).join(",")}:
         {JSON.stringify(initialViewState ?? null)}
       </div>
+      <div data-testid="mock-navigation">{JSON.stringify(navigation?.target ?? null)}</div>
       <div data-testid="mock-annotations">{JSON.stringify(annotations ?? [])}</div>
       <button
         onClick={() =>
@@ -3377,4 +3382,131 @@ it("duplicates a library-derived applied instance into the active editor without
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Copy draft");
   expect(original.text).toBe("Library feedback");
   expect(createReusable).not.toHaveBeenCalled();
+});
+
+it("loads faculty-local recents and records only successful applications through the existing library editor", async () => {
+  const library = [
+    { id: "older", title: "Older", text: "Older body", defaultDeduction: -2, tags: ["style"] },
+    { id: "newer", title: "Newer", text: "Newer body", defaultDeduction: 0, tags: [] }
+  ];
+  const add = vi.fn().mockResolvedValue({
+    status: "success",
+    studentId: "ada",
+    gradingStatus: "in_progress",
+    appliedComments: []
+  });
+  setApis(
+    vi.fn().mockResolvedValue(workspace()),
+    vi
+      .fn()
+      .mockImplementation(({ studentId }: { studentId: string }) =>
+        Promise.resolve(source(studentId))
+      ),
+    undefined,
+    undefined,
+    undefined,
+    vi.fn().mockResolvedValue({
+      status: "success",
+      comments: library,
+      recentCommentIds: ["newer", "older"]
+    }),
+    add
+  );
+  render(<GradingWorkspacePage request={REQUEST} />);
+  const recent = await screen.findByRole("combobox", { name: "Recent Comments" });
+  expect(within(recent).getAllByRole("option")[1]).toHaveTextContent("Newer");
+  fireEvent.change(recent, { target: { value: "comment:older" } });
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Older body");
+  expect(add).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
+  expect(within(recent).getAllByRole("option")[1]).toHaveTextContent("Newer");
+  fireEvent.change(recent, { target: { value: "comment:older" } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Back to grading" })).not.toBeInTheDocument()
+  );
+  expect(add).toHaveBeenCalledWith(
+    expect.objectContaining({
+      comment: expect.objectContaining({
+        sourceCommentId: "older",
+        text: "Older body",
+        deduction: 2,
+        tags: ["style"],
+        id: expect.any(String)
+      })
+    })
+  );
+  expect(within(recent).getAllByRole("option")[1]).toHaveTextContent("Older");
+});
+
+it("navigates saved comment anchors after reopening and uses relocated positions after Pull latest changes", async () => {
+  let relocated = false;
+  const target = () => ({
+    file: "src/Main.java",
+    startLine: relocated ? 3 : 1,
+    endLine: relocated ? 3 : 1
+  });
+  const loadSnapshot = vi.fn().mockImplementation(() =>
+    Promise.resolve({
+      ...snapshot("ada"),
+      appliedComments: [
+        {
+          id: "saved",
+          text: "Saved anchor",
+          deduction: 0,
+          sourceLocation: target(),
+          ...(relocated
+            ? {
+                sourceAnchor: {
+                  status: "relocated",
+                  originalCommitSha: "a".repeat(40),
+                  originalLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+                }
+              }
+            : {})
+        }
+      ]
+    })
+  );
+  const loadedSource = () => {
+    const loaded = source("ada", "one\ntwo\nthree");
+    return {
+      ...loaded,
+      sections: loaded.sections.map((section) => ({
+        ...section,
+        sourceLineCount: 3,
+        combinedEndLine: 3
+      }))
+    };
+  };
+  setApis(
+    vi.fn().mockResolvedValue(workspace()),
+    vi.fn().mockImplementation(async () => loadedSource()),
+    undefined,
+    undefined,
+    loadSnapshot
+  );
+  Object.assign(window.graiderUI, {
+    pullLatestGradingStudentChanges: vi.fn(async () => {
+      relocated = true;
+      return { status: "success" };
+    })
+  });
+  const first = render(<GradingWorkspacePage request={REQUEST} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Show comment location: Saved anchor" })
+  );
+  expect(screen.getByTestId("mock-navigation")).toHaveTextContent(JSON.stringify(target()));
+  first.unmount();
+  render(<GradingWorkspacePage request={REQUEST} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Show comment location: Saved anchor" })
+  );
+  expect(screen.getByTestId("mock-navigation")).toHaveTextContent(JSON.stringify(target()));
+  fireEvent.click(screen.getByRole("button", { name: "Pull latest changes" }));
+  await waitFor(() =>
+    expect(screen.getByText("Source: src/Main.java, line 3")).toBeInTheDocument()
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Show comment location: Saved anchor" }));
+  expect(screen.getByTestId("mock-navigation")).toHaveTextContent(JSON.stringify(target()));
 });

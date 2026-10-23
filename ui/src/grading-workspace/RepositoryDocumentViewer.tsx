@@ -59,7 +59,40 @@ export const RepositoryDocumentViewer = ({
     };
   }, [request]);
   return (
-    <section className="repository-document" aria-label={`Document ${request.file}`}>
+    <section
+      className="repository-document"
+      tabIndex={-1}
+      onPointerDown={(event) => {
+        if (
+          (event.target as HTMLElement).closest(
+            'input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"])'
+          ) === null
+        )
+          event.currentTarget.focus({ preventScroll: true });
+      }}
+      aria-label={`Document ${request.file}`}
+      onKeyDown={(event) => {
+        const target = event.target as HTMLElement;
+        const input = event.currentTarget.querySelector<HTMLInputElement>(
+          ".repository-document__find input"
+        );
+        if (
+          (event.metaKey || event.ctrlKey) &&
+          !event.altKey &&
+          event.key.toLowerCase() === "f" &&
+          input !== null &&
+          (target === input ||
+            target.closest(
+              'input, textarea, select, [contenteditable]:not([contenteditable="false"])'
+            ) === null)
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          input.focus();
+          input.select();
+        }
+      }}
+    >
       <p>{request.file} · Read only</p>
       {result === undefined ? (
         <p role="status">Loading document…</p>

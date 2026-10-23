@@ -57,6 +57,8 @@ const monaco = vi.hoisted(() => {
       position = next;
     }),
     setSelection: vi.fn(),
+    revealRangeInCenter: vi.fn(),
+    focus: vi.fn(),
     setScrollTop: vi.fn((next: number) => {
       scrollTop = next;
     }),
@@ -253,7 +255,7 @@ describe("MonacoSourceViewer", () => {
     );
     expect(monaco.editor.setScrollTop).toHaveBeenCalledWith(90);
     expect(onCanonicalViewStateChange).not.toHaveBeenCalled();
-    expect(monaco.editor).not.toHaveProperty("focus");
+    expect(monaco.editor.focus).not.toHaveBeenCalled();
   });
 
   it("ignores stale restoration coordinates and captures canonical cursor/selection/scroll", () => {
@@ -411,4 +413,28 @@ it("updates comment decorations without recreating the editor or changing scroll
     expect(monaco.editor.getSelection()).toEqual(beforeSelection);
     expect(monaco.editor.getPosition()).toEqual(beforePosition);
   }
+});
+
+it("reveals canonical locations after reopen and relocations without recreating Monaco, ignoring unavailable files", () => {
+  const model = source("class Main {}");
+  const target = { file: "src/Main.java", startLine: 1, endLine: 1 };
+  const { rerender } = render(
+    <MonacoSourceViewer model={model} studentId="ada" navigation={{ target }} />
+  );
+  expect(monaco.editor.setSelection).toHaveBeenCalledWith(
+    expect.objectContaining({ startLineNumber: 1, endLineNumber: 1 })
+  );
+  expect(monaco.editor.revealRangeInCenter).toHaveBeenCalledOnce();
+  const creationCount = monaco.create.mock.calls.length;
+  rerender(
+    <MonacoSourceViewer
+      model={model}
+      studentId="ada"
+      navigation={{ target: { ...target, file: "deleted.java" } }}
+    />
+  );
+  expect(monaco.editor.revealRangeInCenter).toHaveBeenCalledOnce();
+  rerender(<MonacoSourceViewer model={model} studentId="ada" navigation={{ target }} />);
+  expect(monaco.editor.revealRangeInCenter).toHaveBeenCalledTimes(2);
+  expect(monaco.create).toHaveBeenCalledTimes(creationCount);
 });

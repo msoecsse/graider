@@ -48,16 +48,25 @@ export const sanitizeDocumentHtml = (html: string): string => {
   return container.innerHTML;
 };
 
-export const findDocumentMatches = (root: HTMLElement, query: string): Range[] => {
+export const findDocumentMatches = (
+  root: HTMLElement,
+  query: string,
+  matchLimit: number = DOCUMENT_LIMITS.findMatches
+): Range[] => {
   const matches: Range[] = [];
   if (query.trim() !== "") {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes: { node: Node; start: number; end: number }[] = [];
     let combined = "";
     for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-      const start = combined.length;
-      combined += node.textContent ?? "";
-      nodes.push({ node, start, end: combined.length });
+      if (
+        node.parentElement?.closest("script, style, noscript, [hidden], [aria-hidden='true']") ===
+        null
+      ) {
+        const start = combined.length;
+        combined += node.textContent ?? "";
+        nodes.push({ node, start, end: combined.length });
+      }
     }
     // Unicode case-insensitive matching retains original UTF-16 offsets;
     // lowercasing strings can expand characters and detach Range boundaries.
@@ -68,17 +77,25 @@ export const findDocumentMatches = (root: HTMLElement, query: string): Range[] =
       metaCharacters.includes(character) ? escapeCharacter + character : character
     ).join("");
     const pattern = new RegExp(escaped, "giu");
+    let startNodeIndex = 0;
+    let endNodeIndex = 0;
     for (
       let match = pattern.exec(combined);
-      match !== null && matches.length < DOCUMENT_LIMITS.findMatches;
+      match !== null && matches.length < matchLimit;
       match = pattern.exec(combined)
     ) {
       const offset = match.index;
       const length = match[0].length;
-      const start = nodes.find((entry) => entry.end > offset);
-      const end = nodes.find((entry) => entry.end >= offset + length);
+      // Matches advance through the text in order; advance node cursors too,
+      // so searching a long report does not rescan every preceding source line.
+      while (startNodeIndex < nodes.length && nodes[startNodeIndex]!.end <= offset)
+        startNodeIndex += 1;
+      while (endNodeIndex < nodes.length && nodes[endNodeIndex]!.end < offset + length)
+        endNodeIndex += 1;
+      const start = nodes[startNodeIndex];
+      const end = nodes[endNodeIndex];
       if (start && end) {
-        const range = document.createRange();
+        const range = root.ownerDocument.createRange();
         range.setStart(start.node, offset - start.start);
         range.setEnd(end.node, offset + length - end.start);
         matches.push(range);
