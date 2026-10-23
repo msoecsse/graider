@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactElement } from "react";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js";
+import "monaco-editor/esm/vs/base/browser/ui/codicons/codiconStyles.js";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import "monaco-editor/esm/vs/basic-languages/java/java.contribution.js";
 import "monaco-editor/esm/vs/editor/contrib/bracketMatching/browser/bracketMatching.js";
