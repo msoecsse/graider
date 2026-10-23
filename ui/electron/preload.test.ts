@@ -237,3 +237,23 @@ describe("repository document preload boundary", () => {
       expect(api).not.toHaveProperty(name);
   });
 });
+
+describe("faculty OAuth preload boundary", () => {
+  it("exposes only high-level operations with no credential or URL arguments", async () => {
+    const api = electron.exposedApi?.githubOAuth;
+    expect(api).toBeDefined();
+    await api!.get();
+    await api!.signIn();
+    await api!.switchAccount();
+    await api!.signOut();
+    await api!.cancel();
+    expect(electron.invoke.mock.calls).toEqual([
+      ["graider-ui:faculty-auth:get"],
+      ["graider-ui:faculty-auth:sign-in"],
+      ["graider-ui:faculty-auth:switch"],
+      ["graider-ui:faculty-auth:sign-out"],
+      ["graider-ui:faculty-auth:cancel"]
+    ]);
+    expect(Object.keys(api!)).toEqual(["get", "signIn", "signOut", "switchAccount", "cancel"]);
+  });
+});

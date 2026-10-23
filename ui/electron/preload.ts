@@ -1,3 +1,4 @@
+import { GITHUB_OAUTH_CHANNELS, type GithubOAuthState } from "./githubOAuthTypes.js";
 import { contextBridge, ipcRenderer } from "electron";
 import {
   IPC_CHANNELS,
@@ -119,6 +120,13 @@ const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<
   (await ipcRenderer.invoke(channel, ...args)) as T;
 
 const graiderUI: GraiderUIApi = {
+  githubOAuth: {
+    get: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.get),
+    signIn: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.signIn),
+    signOut: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.signOut),
+    switchAccount: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.switchAccount),
+    cancel: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.cancel)
+  },
   getAppInfo: async (): Promise<AppInfo> => await invoke<AppInfo>(IPC_CHANNELS.getAppInfo),
   getLocalSettings: async (): Promise<LocalSettingsResult> =>
     await invoke<LocalSettingsResult>(IPC_CHANNELS.getLocalSettings),

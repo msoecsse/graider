@@ -187,6 +187,8 @@ interface AsyncIterableCandidate {
   [Symbol.asyncIterator]?: unknown;
 }
 
+const AUTHENTICATED_USER_TIMEOUT_MS = 30_000;
+
 export class OctokitGitHubClient implements GitHubClient {
   private readonly octokit: OctokitRestClientLike;
   private readonly token: string | undefined;
@@ -203,8 +205,14 @@ export class OctokitGitHubClient implements GitHubClient {
       }) as unknown as OctokitRestClientLike);
   }
 
-  async getAuthenticatedUser(): Promise<GitHubUser> {
-    const data = await this.run(() => this.octokit.rest.users.getAuthenticated());
+  async getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser> {
+    const data = await this.run(() =>
+      options === undefined
+        ? this.octokit.rest.users.getAuthenticated()
+        : this.octokit.rest.users.getAuthenticated({
+            request: { signal: options.signal, timeout: AUTHENTICATED_USER_TIMEOUT_MS }
+          })
+    );
     return mapUser(data);
   }
 
@@ -1015,15 +1023,19 @@ function getErrorHeaders(error: unknown): Record<string, string | undefined> {
 function mapUser(value: unknown): GitHubUser {
   const record = asRecord(value);
   const id = asNumber(record.id);
+  const name = asString(record.name);
+  const displayName = name === undefined ? {} : { name };
 
   if (id === undefined) {
     return {
+      ...displayName,
       username: asString(record.login) ?? ""
     };
   }
 
   return {
     id,
+    ...displayName,
     username: asString(record.login) ?? ""
   };
 }

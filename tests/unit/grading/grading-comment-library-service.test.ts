@@ -87,7 +87,11 @@ describe("grading comment library production service", () => {
       publishCourseChanges
     });
 
-    expect(service.load(request)).toEqual({ status: "success", comments: [] });
+    expect(service.load(request)).toEqual({
+      status: "success",
+      comments: [],
+      recentCommentIds: []
+    });
     expect(publishCourseChanges).not.toHaveBeenCalled();
 
     const created = await service.create({ ...request, comment: fields() });
@@ -115,7 +119,11 @@ describe("grading comment library production service", () => {
       status: "success",
       publication: { status: "success" }
     });
-    expect(service.load(request)).toEqual({ status: "success", comments: [] });
+    expect(service.load(request)).toEqual({
+      status: "success",
+      comments: [],
+      recentCommentIds: []
+    });
     expect(publishCourseChanges).toHaveBeenCalledTimes(3);
     expect(publishCourseChanges).toHaveBeenNthCalledWith(1, courseFolderPath);
     expect(publishCourseChanges).toHaveBeenNthCalledWith(2, courseFolderPath);

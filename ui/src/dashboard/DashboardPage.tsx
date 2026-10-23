@@ -1,3 +1,4 @@
+import { GithubAccountPanel } from "./GithubAccountPanel";
 import { useEffect, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
 import type {
@@ -461,6 +462,7 @@ export const DashboardPage = (): ReactElement => {
         {!isFacultySettingsOpen ? null : (
           <section className="detail-panel" aria-label="Faculty settings">
             <h2>Faculty settings</h2>
+            <GithubAccountPanel />
             <label>
               Current faculty MSOE username
               <input

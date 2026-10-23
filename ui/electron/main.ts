@@ -1,9 +1,15 @@
+import path from "node:path";
+import { GithubOAuthSession } from "./githubOAuthSession.js";
+import { createGithubOAuthCredentialStore } from "./githubOAuthCredentialStore.js";
+import { createGithubOAuthNetwork } from "./githubOAuthNetwork.js";
+import { readGithubOAuthSecret } from "./githubOAuthConfiguration.js";
+import { GITHUB_OAUTH_CHANNELS } from "./githubOAuthTypes.js";
 import {
   loadGradingStudentDocument,
   isGradingStudentDocumentRequest
 } from "./gradingStudentDocumentService.js";
 import { pullLatestGradingStudentChanges } from "./gradingStudentRepositoryUpdateService.js";
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell, safeStorage } from "electron";
 import { registerExternalNavigation } from "./externalNavigation.js";
 import { applyAssignmentWithStudentRepositoryAccessPage } from "./assignmentApplyWithAccessPageService.js";
 import { gradeAssignment } from "./assignmentGradeRunner.js";
@@ -1428,7 +1434,43 @@ export const createMainWindow = (): BrowserWindow => {
 
 registerIpcHandlers();
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const facultyAuth = new GithubOAuthSession({
+    store: createGithubOAuthCredentialStore(
+      path.join(app.getPath("userData"), "github-oauth.credential"),
+      safeStorage
+    ),
+    secret: readGithubOAuthSecret,
+    openBrowser: (url) => shell.openExternal(url),
+    network: createGithubOAuthNetwork()
+  });
+  const restoration = facultyAuth.restore();
+  const operations = {
+    get: async () => {
+      await restoration;
+      return facultyAuth.getState();
+    },
+    signIn: async () => {
+      await restoration;
+      return facultyAuth.signIn();
+    },
+    signOut: async () => {
+      await restoration;
+      return facultyAuth.signOut();
+    },
+    switchAccount: async () => {
+      await restoration;
+      return facultyAuth.signIn(true);
+    },
+    cancel: async () => facultyAuth.cancel()
+  };
+  for (const operation of Object.keys(operations) as (keyof typeof operations)[]) {
+    ipcMain.handle(GITHUB_OAUTH_CHANNELS[operation], (_event, ...args: unknown[]) => {
+      if (args.length !== 0) throw new Error("This account operation accepts no arguments.");
+      return operations[operation]();
+    });
+  }
+  app.on("before-quit", () => facultyAuth.shutdown());
   createMainWindow();
 
   app.on("activate", () => {

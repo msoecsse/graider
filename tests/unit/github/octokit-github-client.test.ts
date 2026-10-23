@@ -556,6 +556,25 @@ describe("OctokitGitHubClient", () => {
     });
   });
 
+  it("maps faculty display name and forwards cancellation with a bounded request timeout", async () => {
+    const octokit = createMockOctokit();
+    const getAuthenticated = vi.fn().mockResolvedValue({
+      data: { login: USERNAME, id: OctokitTestNumber.UserId, name: "Faculty Name" }
+    });
+    octokit.rest.users.getAuthenticated = getAuthenticated;
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    const signal = new AbortController().signal;
+    const REQUEST_TIMEOUT_MS = 30_000;
+    await expect(client.getAuthenticatedUser({ signal })).resolves.toEqual({
+      username: USERNAME,
+      id: OctokitTestNumber.UserId,
+      name: "Faculty Name"
+    });
+    expect(getAuthenticated).toHaveBeenCalledExactlyOnceWith({
+      request: { signal, timeout: REQUEST_TIMEOUT_MS }
+    });
+  });
+
   it("missing token maps to github_auth_missing", async () => {
     const client = new OctokitGitHubClient({ octokit: createMockOctokit() });
 

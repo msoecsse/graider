@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  Object.defineProperty(window, "graiderUI", {
+  Object.defineProperty(typeof window === "undefined" ? {} : window, "graiderUI", {
     configurable: true,
     value: {
       getAppInfo: vi.fn().mockResolvedValue({ name: "Graider", version: "0.1.0" }),

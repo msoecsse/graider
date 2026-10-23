@@ -33,7 +33,7 @@ import type {
 } from "./github-models.js";
 
 export interface GitHubClient {
-  getAuthenticatedUser(): Promise<GitHubUser>;
+  getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser>;
 
   getRepository(owner: string, repo: string): Promise<GitHubRepository | null>;
 

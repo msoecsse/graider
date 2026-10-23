@@ -26,6 +26,7 @@ module.exports = {
   dmg: {
     sign: false
   },
+  beforePack: require("./scripts/write-oauth-release-config.cjs").default,
   asar: true,
   asarUnpack: ["dist-graider-cli/**/*", "node_modules/dugite/**/*"]
 };

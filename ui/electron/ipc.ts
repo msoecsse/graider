@@ -1,3 +1,4 @@
+import type { GithubOAuthApi } from "./githubOAuthTypes.js";
 import type { GradingEditorViewStateDto } from "./gradingStudentViewStateService.js";
 import type {
   AppliedCommentDto,
@@ -1059,6 +1060,7 @@ export interface CombinedDashboardResult {
 }
 
 export interface GraiderUIApi {
+  readonly githubOAuth?: GithubOAuthApi;
   readonly getAppInfo: () => Promise<AppInfo>;
   readonly getLocalSettings?: () => Promise<LocalSettingsResult>;
   readonly saveLocalSettings?: (currentFacultyMsoeUsername: string) => Promise<LocalSettingsResult>;
