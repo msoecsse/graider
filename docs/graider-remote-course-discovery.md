@@ -1,7 +1,7 @@
-# Remote Graider course discovery and managed bootstrap
+# Remote Graider course discovery, bootstrap and synchronization
 
-Phase 2.4 implements identity-scoped initial course/admin bootstrap after discovery.
-See [current bootstrap behavior, operational precedence and Phase 2.5](#phase-24--identity-scoped-managed-course-bootstrap).
+Phase 2.5 adds startup and explicit-refresh synchronization to Phase 2.4 managed
+course/admin caches. See [synchronization and the next boundary](#phase-25--managed-course-synchronization).
 The discovery foundation below describes Phase 2.3.
 
 Phase 2.1 supplies browser authorization-code + PKCE, one active GitHub identity,
@@ -277,8 +277,10 @@ commit; `master` is supported. Tracked/staged modifications, conflicts, untracke
 files and unexpected HEAD prevent readiness. Ignored files follow the existing Git
 inspection semantics. Canonical course/term parsers validate checked-out metadata
 and faculty authorization, with current remote/local content comparisons to reject
-changes during setup. An existing clean clone receives the same validation and is
-reused **without clone, fetch, pull, reset or branch switching**.
+changes during setup. In Phase 2.4, existing clean clones received the same validation without fetching.
+Phase 2.5 checks existing caches structurally during bootstrap/reconciliation, then
+classifies and validates their state through synchronization below. Stale local
+metadata does not prevent a safe fast-forward to current remote metadata.
 
 Successful validation is followed by a same-filesystem rename into the canonical
 `repo` child and only then a ready catalog update. Failure leaves no partial clone
@@ -312,21 +314,155 @@ courses disappear from active discovery while disk data remains untouched.
   editable-folder, reveal, relocation or other mutation controls. Existing general
   assignment/grading routes continue to require the legacy operational source.
 - **Future cutover:** managed paths are not yet authoritative for every operation.
-  No synchronization, pre-mutation guard, dirty-cache repair/reset, transfer migration,
+  No pre-mutation guard, dirty-cache repair/reset, transfer migration,
   student download manager, schema-v2 or lifecycle work is included.
 
 ### Phase 2.5 — managed course synchronization
 
-Add explicit authorized refresh of existing managed course/admin caches: revalidate
-identity/scopes/repository and organization binding, inspect cleanliness and HEAD,
-fetch with the same operation-scoped OAuth transport, validate remote metadata,
-and fast-forward only a clean cache with a safe matching upstream. Keep local
-changes, unexpected branches, divergence and transfer cases intact as Needs
-attention. Define cancellation, per-course progress/retry and account isolation for
-sync, with focused transport/failure tests. Preserve legacy operational precedence
-until a separately reviewed cutover. Do not include OAuth mutation migration,
-student clones, schema-v2 migration, reset/conflict repair or synchronization timers
-without a separately agreed scope.
+The main-process pipeline is OAuth restoration → organization access → remote course
+rediscovery → bootstrap/structural reuse → synchronization → managed metadata refresh.
+Startup runs asynchronously after window creation. **Refresh courses** repeats the
+whole pipeline; **Retry synchronization** uses that same trusted refresh, including
+fresh discovery and authorization. There is no periodic fetch timer or synchronization
+polling loop. The existing renderer state reader only reads progress.
+
+Identity remains immutable GitHub user ID plus repository ID. Paths are reconstructed
+under `managed-courses/<user-id>/<repository-id>/repo`. Renderer cannot supply paths,
+URLs, branches, credentials or generic Git commands. Legacy registered paths, student
+repositories, templates and Pages repositories are excluded. Legacy paths retain all
+operational/mutation workflows; their separate managed cache synchronizes independently
+and still produces one dashboard course. Remote-only caches offer course/term/assignment
+inspection, not managed mutations.
+
+**Fetching is safe; changing checked-out files is conditional.** Bootstrap and sync
+share a per-identity destination lock and a global two-operation limit, including
+across overlapping refreshes/account switches. New clones finish bootstrap first.
+Each sync revalidates the current immutable user and both OAuth capabilities, resolves
+repository ID afresh, checks readability, disabled state and organization binding
+against discovery/catalog, and reuses canonical course/term/faculty validation. Invalid
+term metadata blocks synchronization. No parallel YAML parser or username identity is
+introduced.
+
+Before fetch, existing managed-path, symlink, real local `.git`, alternates and Git
+operation protections run again. Origin must be credential-free and API-resolve to
+the same repository/organization IDs. Structural corruption, lost authorization,
+identity mismatch and organization transfer block fetch. Safe dirty worktrees may
+fetch refs for diagnosis; their checked-out files/index remain untouched.
+
+The bundled Git workspace adds semantic `fetchOrigin(authentication)` and
+`fastForwardUpstream(expectedHead, expectedBranch)` operations. Fetch uses the verified
+origin URL with an explicit remote-tracking refspec instead of trusting configured
+destination refspecs. It disables tags/submodule recursion and does not write FETCH*HEAD.
+Authentication reuses operation-scoped OAuth transport: ephemeral host-scoped
+`GIT_CONFIG*\*` environment, disabled credential helpers and terminal prompting; no
+credentials in URLs, argv, config, catalog, logs or renderer. No system Git, GitHub CLI,
+environment PAT or credential-store fallback is added. Invalid auth contexts fail.
+
+Each inspection rereads porcelain-v2 branch ahead/behind counts and upstream remote.
+Fetched refs are reflected without reopening; post-fetch classification is authoritative:
+
+| State                                                                      | Result                                                                |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Clean, attached expected default branch, expected origin upstream, current | Up to date; no worktree operation                                     |
+| Same safety conditions, strictly behind                                    | Revalidate, fast-forward only, inspect and validate metadata; Updated |
+| Tracked/staged/conflicted/untracked work                                   | Needs attention — local changes; preserve files/index                 |
+| Ahead                                                                      | Needs attention — local commits; safe counts, no push/reset           |
+| Diverged                                                                   | Needs attention — cache diverged; no merge/rebase/reset               |
+| Detached/unborn HEAD                                                       | Needs attention; no checkout                                          |
+| Missing/wrong upstream or missing upstream ref                             | Needs attention; no config changes                                    |
+| Changed GitHub default branch                                              | Needs attention; preserve existing branch/upstream                    |
+| Organization transfer                                                      | Needs attention — reconciliation; no fetch or relocation              |
+
+Fast-forward freezes a full upstream commit and rechecks HEAD, branch, relationship,
+cleanliness and operation markers immediately before `merge --ff-only --no-autostash`.
+Hooks and submodule recursion are disabled. Git refuses divergence instead of creating
+a merge commit. A refused update is reinspected and reported without force convergence.
+After an update, validation requires attached expected branch/upstream, clean/current
+relationship, canonical local course/term metadata, agreement with remote metadata,
+current faculty authorization and current repository binding. Invalid authoritative
+metadata consumed during a race stays checked out as Needs attention. Successful
+remote changes are never rolled back to an older commit.
+
+A rename under the same ID reuses its path and refreshes catalog locator metadata.
+A safely API-resolved redirect from the old origin is sufficient; origin cleanup is
+unnecessary. Default-branch transitions and organization transfers remain deliberate
+reconciliation/migration operations.
+
+Separate typed transient synchronization state reports queued/checking/fetching/updating,
+up_to_date/updated, failed or needs_attention, safe reasons, commit identifiers/counts
+and success timestamp. Schema-1 catalogs remain compatible without migration; successful
+sync updates existing whitelisted locator/validation metadata. Transient state and raw
+errors are not persisted. Missing catalog entries can be reconstructed from fresh
+canonical identities and a validated cache; unknown fields are still discarded.
+
+The compact dashboard shows real service transitions and completed-course counts.
+Retryable provider access/policy/SSO, network, rate-limit, authentication and storage
+failures preserve cache and sign-in. A Git rejection alone cannot sign out: the session
+confirms global invalidity through the identity endpoint before existing credential
+removal semantics apply. Lost faculty authorization disables active managed use.
+Refresh reinspects manually corrected attention states without resetting them. Successful
+sync refreshes open details, including new terms and assignments. Sign-out/account
+switch aborts the generation and clears active display. A fetch may finish, but stale
+results cannot update a new account UI/catalog or start a worktree update. Namespaces
+and disk caches are preserved.
+
+Remote access remains read-only: no REST writes, topics, workflow dispatch, permission
+changes, Git push or commit. Fast-forward updates only the local managed cache. No
+reset, clean, stash, rebase, merge commit, forced checkout, repair button or automatic
+deletion is provided. Managed mutations and pre-mutation sync guards remain deferred.
+
+**Phase 2.6 — dirty managed-cache handling and reconciliation:** design reviewable,
+data-preserving recovery for local changes, staged/untracked/conflicted work, local
+commits/divergence, missing upstream/detached HEAD and default-branch transitions.
+Require explicit evidence and user decisions before discard/destructive actions.
+Keep organization transfers as explicit migration work. Periodic timing, pre-mutation
+guards, managed mutation cutover, OAuth push migration, schema-v2 and student operations
+remain outside this slice.
+
+### Phase 2.5 validation and Electron evidence
+
+Focused service/lifecycle/dashboard plus real bundled-Git two-clone tests pass
+(142 tests). Coverage includes authenticated ref-only fetch, clean fast-forward,
+post-update metadata visibility, local/staged/untracked/conflict/ahead/diverged
+preservation, operation/path/origin/organization checks, missing/detached upstream,
+rename, invalid post-update metadata without rollback, retry, serialization/bounds,
+schema-1 catalog compatibility, stale accounts, sign-out and confirmed global auth
+invalidity. A canceled fast-forward is refused before the local update. Final
+inspection also detects local changes arriving during authorization validation.
+
+On 2026-10-24 the real Electron app restored user **22993125**, reused course
+repository **1342086585** (`csc1120/csc1120`) and authenticated its startup fetch.
+Startup, process restart, Refresh courses and retry all reported **Up to date** at
+`09e782a664f0b6bd31f2afc3655e8799ee7bf4e7`. No production remote changes were made.
+The final instrumented run recorded four fetch attempts (one deliberately failed),
+193 GitHub API reads, zero REST writes, zero clones/pushes/commits/merges or
+reset/rebase/clean/stash operations, and zero system-Git calls. There was one legacy
+card and no duplicate remote card. Traced assignment navigation read the original
+registered folder. Its config/course files stayed unchanged. The managed cache
+remained clean, attached to `master`, current with `origin/master`, on its original
+account/repository path. Origin remained credential-free; config/catalog checks
+found no credentials. Simulated fetch failure retained cache, encrypted credential
+and sign-in; explicit retry recovered without restart.
+
+An isolated remote-only Electron profile reused a copy of the cache with no catalog
+entry, reconstructed its schema-1 catalog, fetched once and showed one course card,
+one term and 19 assignment metadata entries. No mutation controls were present.
+Sign-out removed active metadata/display while leaving the cache on disk; the real
+profile remained signed in. There were zero clones, pushes or REST writes.
+
+Separate isolated Electron two-clone smoke fixtures used local bare remotes:
+clean-behind advanced exactly to fetched upstream and exposed the new course title;
+dirty and diverged scenarios retained their worktree/HEAD evidence as Needs attention.
+The synchronization measurements were three fetches, one fast-forward, zero pushes,
+commits, merge commits, reset/rebase/clean/stash or system-Git operations. Fixture
+setup alone committed/pushed to local temporary remotes. No student repositories
+were selected, cloned or synchronized by this slice.
+
+Full backend/UI suites, Git transport/authentication tests, backend/UI typechecks,
+lint, formatting, production builds and `git diff --check` were run. Sandbox-only
+OAuth callback failures were resolved by running the UI suite with loopback access.
+Two backend Git-fixture five-second timeouts under concurrent build/test load were
+rerun with two workers; no test timeout or production behavior was weakened.
 
 ### Phase 2.4 validation and Electron evidence
 

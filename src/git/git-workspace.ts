@@ -23,6 +23,8 @@ export type BranchName = string & { readonly __branchName: unique symbol };
 export type GitOperationName =
   | "verify_available"
   | "clone"
+  | "fetch"
+  | "fast_forward"
   | "open"
   | "inspect"
   | "stage"
@@ -211,7 +213,16 @@ export interface CreateOrResetBranchRequest {
   };
 }
 
-export interface GitWorkspacePreparer extends GitWorkspaceWriter {
+export interface GitWorkspaceSynchronizer extends GitWorkspaceReader {
+  fetchOrigin(request: { readonly authentication: GitAuthenticationContext }): Promise<void>;
+  fastForwardUpstream(request: {
+    readonly expectedHead: string;
+    readonly expectedBranch: string;
+    readonly signal?: AbortSignal;
+  }): Promise<void>;
+}
+
+export interface GitWorkspacePreparer extends GitWorkspaceWriter, GitWorkspaceSynchronizer {
   pullUpstream(request?: PullUpstreamRequest): Promise<PullUpstreamResult>;
   readRevisionFile(revision: string, file: string): Promise<string | null>;
   remoteDefaultBranch(remote: RemoteName): Promise<BranchName | null>;

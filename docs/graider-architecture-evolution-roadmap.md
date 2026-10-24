@@ -130,10 +130,10 @@ Phase 1 acceptance is complete:
 - Git transport credentials remain separate from API-client composition.
 - Architecture tests protect both local Git and GitHub host boundaries.
 
-Phase 2 slices 2.1–2.4 are implemented: OAuth identity, organization access, read-only
-course discovery and verified identity-scoped managed bootstrap. Existing mutation
-credential fallback and legacy operational paths remain transitional. Next is
-slice 2.5: managed course synchronization. See the implementation boundary in
+Phase 2 slices 2.1–2.5 are implemented: OAuth identity, organization access, read-only
+course discovery, verified identity-scoped managed bootstrap and startup/explicit-refresh
+clean fast-forward synchronization. Existing mutation credentials and legacy operational
+paths remain transitional. Next is slice 2.6: dirty managed-cache handling and reconciliation. See the implementation boundary in
 [remote course discovery](graider-remote-course-discovery.md).
 
 ---
@@ -181,14 +181,26 @@ Needs attention states. Existing registered paths remain operational. Remote-onl
 courses offer cached course/term/assignment metadata inspection without registry
 workarounds or mutation controls. No ongoing synchronization or student cloning.
 
-## Slice 2.5 — Managed course synchronization (next)
+## Slice 2.5 — Managed course synchronization (implemented)
 
-Authorized refresh of existing managed course/admin caches with clean-worktree
-checks, OAuth fetch, validated fast-forward only, scoped asynchronous progress and
-retry. Preserve dirty/divergent/unexpected/transfer states for review and legacy
-path precedence until an explicit cutover. No automatic reset, student cloning,
-OAuth mutation migration, schema-v2 migration or timers in the default scope.
-See [bootstrap details and next boundary](graider-remote-course-discovery.md#phase-24--identity-scoped-managed-course-bootstrap).
+Startup, Refresh courses and retry revalidate identity/capabilities/repository ID,
+organization binding, schema-v1 metadata and faculty authorization, authenticate
+bundled-Git fetch and inspect again. Only clean attached expected default branches
+with expected origin upstream can fast-forward. Current caches stay untouched;
+dirty/ahead/diverged/default-branch/structural/transfer states retain evidence as Needs
+attention. Post-update metadata validates without rollback. Separate typed progress,
+completed-course counts, retries, per-cache serialization, two-operation concurrency
+and stale-account guards preserve legacy precedence and schema-1 compatibility.
+No timers, repair/reset, push/REST writes, managed mutation migration or student Git
+operations. See [semantics and validation](graider-remote-course-discovery.md#phase-25--managed-course-synchronization).
+
+## Slice 2.6 — Dirty managed-cache handling and reconciliation (next)
+
+Design reviewable data-preserving recovery for dirty/staged/untracked/conflicted caches,
+local commits/divergence, missing upstream/detached HEAD and default-branch transitions.
+Destructive decisions require explicit user intent and preserved evidence. Organization
+transfers remain migration work. Do not implicitly add periodic timing, pre-mutation
+guards, managed mutation cutover, OAuth push migration or student synchronization.
 
 ---
 

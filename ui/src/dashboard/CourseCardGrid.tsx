@@ -1,3 +1,4 @@
+import { synchronizationLabel } from "../../electron/remoteCourseTypes";
 import type { RemoteCourse } from "../../electron/remoteCourseTypes";
 import type { ReactElement } from "react";
 import type { CourseFolderRecord } from "../../electron/ipc";
@@ -170,6 +171,12 @@ export const CourseCardGrid = ({
                             : course.bootstrap?.status === "needs_attention"
                               ? " · Managed cache needs attention"
                               : ""}
+                      {course.synchronization
+                        ? ` · ${synchronizationLabel(course.synchronization)}`
+                        : ""}
+                      {course.synchronization?.diagnostic
+                        ? ` — ${course.synchronization.diagnostic}`
+                        : ""}
                       {course.archived ? " · GitHub repository archived (read-only)" : ""}
                       {course.authorization === "faculty_identity_required"
                         ? " · Set your MSOE username to verify course access."

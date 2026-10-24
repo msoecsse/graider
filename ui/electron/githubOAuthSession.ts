@@ -1,6 +1,10 @@
 import { mapBounded } from "./remoteCourseDiscovery.js";
 import { MANAGED_BOOTSTRAP_CONCURRENCY } from "./managedCourses.js";
-import type { RemoteCourse, ManagedCourseState } from "./remoteCourseTypes.js";
+import type {
+  RemoteCourse,
+  ManagedCourseState,
+  ManagedSynchronizationState
+} from "./remoteCourseTypes.js";
 import { emptyCourseDiscovery } from "./remoteCourseTypes.js";
 import type { RemoteCourseDiscovery } from "./remoteCourseTypes.js";
 import type { GithubOrganization } from "./githubOAuthTypes.js";
@@ -23,6 +27,13 @@ export const createOAuthProof = () => {
     state: randomBytes(RANDOM_BYTE_COUNT).toString("base64url")
   };
 };
+interface ManagedOperationInput {
+  readonly token: string;
+  readonly userId: number;
+  readonly course: RemoteCourse;
+  readonly signal: AbortSignal;
+  readonly revalidateSession: () => Promise<boolean>;
+}
 interface Dependencies {
   readonly store: GithubOAuthCredentialStore;
   readonly secret: () => string | undefined;
@@ -34,13 +45,12 @@ interface Dependencies {
     organizations: readonly GithubOrganization[],
     signal: AbortSignal
   ) => Promise<RemoteCourseDiscovery>;
-  readonly bootstrapCourse?: (input: {
-    token: string;
-    userId: number;
-    course: RemoteCourse;
-    signal: AbortSignal;
-    revalidateSession: () => Promise<boolean>;
-  }) => Promise<ManagedCourseState>;
+  readonly bootstrapCourse?: (input: ManagedOperationInput) => Promise<ManagedCourseState>;
+  readonly synchronizeCourse?: (
+    input: ManagedOperationInput & {
+      readonly onProgress: (state: ManagedSynchronizationState) => void;
+    }
+  ) => Promise<ManagedSynchronizationState>;
   readonly callback?: typeof startOAuthCallback;
 }
 const signedOut = (): GithubOAuthState => ({
@@ -299,6 +309,10 @@ export class GithubOAuthSession {
                     ...courses,
                     courses: courses.courses.map((course) => ({
                       ...course,
+                      synchronization:
+                        course.authorization === "authorized"
+                          ? { status: "queued", diagnostic: null, retryable: false }
+                          : undefined,
                       bootstrap: {
                         status:
                           course.authorization === "authorized" ? "queued" : "not_bootstrapped",
@@ -339,7 +353,7 @@ export class GithubOAuthSession {
                           diagnostic: null,
                           retryable: false
                         });
-                        const result = await bootstrap({
+                        const input: ManagedOperationInput = {
                           token,
                           userId,
                           course,
@@ -357,8 +371,89 @@ export class GithubOAuthSession {
                               controller.signal
                             )) &&
                             current()
-                        });
+                        };
+                        const result = await bootstrap(input);
                         update(course.repositoryId, result);
+                        if (current() && result.status !== "ready")
+                          this.state = {
+                            ...this.state,
+                            courseDiscovery: {
+                              ...this.state.courseDiscovery,
+                              courses: this.state.courseDiscovery.courses.map((candidate) =>
+                                candidate.repositoryId === course.repositoryId
+                                  ? {
+                                      ...candidate,
+                                      synchronization: {
+                                        status:
+                                          result.status === "needs_attention"
+                                            ? "needs_attention"
+                                            : "failed",
+                                        diagnostic: result.diagnostic,
+                                        retryable: result.retryable
+                                      }
+                                    }
+                                  : candidate
+                              )
+                            }
+                          };
+                        if (current() && result.status === "ready" && this.deps.synchronizeCourse) {
+                          const onProgress = (
+                            synchronization: ManagedSynchronizationState
+                          ): void => {
+                            if (current())
+                              this.state = {
+                                ...this.state,
+                                courseDiscovery: {
+                                  ...this.state.courseDiscovery,
+                                  courses: this.state.courseDiscovery.courses.map((candidate) =>
+                                    candidate.repositoryId === course.repositoryId
+                                      ? {
+                                          ...candidate,
+                                          synchronization,
+                                          ...(synchronization.metadata ?? {}),
+                                          authorization:
+                                            synchronization.reason === "authorization_lost"
+                                              ? "unavailable"
+                                              : candidate.authorization
+                                        }
+                                      : candidate
+                                  )
+                                }
+                              };
+                          };
+                          try {
+                            const synchronized = await this.deps.synchronizeCourse({
+                              ...input,
+                              onProgress
+                            });
+                            // A Git rejection alone cannot revoke the global OAuth session.
+                            if (current() && synchronized.reason === "authentication_failed") {
+                              try {
+                                await this.deps.network.identity(token, controller.signal);
+                              } catch (error) {
+                                if (
+                                  error instanceof GithubOAuthError &&
+                                  error.code === "invalid_credential"
+                                )
+                                  throw error;
+                              }
+                            }
+                            onProgress(synchronized);
+                          } catch (error) {
+                            if (
+                              error instanceof GithubOAuthError &&
+                              error.code === "invalid_credential"
+                            )
+                              throw error;
+                            onProgress({
+                              status: "failed",
+                              reason: "network_failure",
+                              diagnostic:
+                                "Course update could not finish. Retry synchronization. Your sign-in is preserved.",
+                              retryable: true
+                            });
+                          }
+                        }
                       }
                     },
                     MANAGED_BOOTSTRAP_CONCURRENCY

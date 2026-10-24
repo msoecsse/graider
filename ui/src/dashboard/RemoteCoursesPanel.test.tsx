@@ -203,3 +203,126 @@ describe("remote dashboard course discovery", () => {
     expect(f.onSettings).toHaveBeenCalledOnce();
   });
 });
+
+describe("managed synchronization dashboard state", () => {
+  it.each([
+    ["checking", "Checking…"],
+    ["fetching", "Fetching…"],
+    ["updating", "Updating…"],
+    ["up_to_date", "Up to date"],
+    ["updated", "Updated"],
+    ["needs_attention", "Needs attention"],
+    ["failed", "Course update failed"]
+  ] as const)("shows actual %s state", (status, label) => {
+    const f = show({
+      ...state,
+      courseDiscovery: {
+        ...state.courseDiscovery,
+        courses: [
+          {
+            ...course,
+            bootstrap: { status: "ready", diagnostic: null, retryable: false },
+            synchronization: {
+              status,
+              diagnostic:
+                status === "needs_attention" ? "Managed cache has diverged from GitHub." : null,
+              retryable: status === "failed"
+            }
+          }
+        ]
+      }
+    });
+    expect(screen.getByText(label)).toBeInTheDocument();
+    if (status === "failed") {
+      fireEvent.click(screen.getByRole("button", { name: "Retry synchronization" }));
+      expect(f.onRefresh).toHaveBeenCalledOnce();
+    }
+    if (status === "needs_attention") {
+      expect(screen.queryByRole("button", { name: "Inspect course" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Reset|Repair|Discard|Force/ })
+      ).not.toBeInTheDocument();
+    }
+  });
+  it("counts completed operations, including registered-course caches without duplicating cards", () => {
+    show({
+      ...state,
+      courseDiscovery: {
+        ...state.courseDiscovery,
+        courses: [
+          {
+            ...course,
+            synchronization: { status: "fetching", diagnostic: null, retryable: false }
+          },
+          {
+            ...course,
+            repositoryId: 124,
+            localStatus: "registered_local",
+            synchronization: { status: "up_to_date", diagnostic: null, retryable: false }
+          },
+          { ...course, repositoryId: 125, authorization: "not_authorized" }
+        ]
+      }
+    });
+    expect(screen.getByText("Updating courses — 1 of 2 complete")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "1");
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+  });
+  it("refreshes open managed metadata when a completed synchronization changes its version", async () => {
+    const inspectManagedCourse = vi
+      .fn()
+      .mockResolvedValueOnce({
+        repositoryId: 123,
+        code: "CSC1020",
+        title: "Before sync",
+        terms: ["27s1"],
+        assignments: []
+      })
+      .mockResolvedValue({
+        repositoryId: 123,
+        code: "CSC1020",
+        title: "After sync",
+        terms: ["27s1", "27s2"],
+        assignments: []
+      });
+    Object.assign(window.graiderUI, { githubOAuth: { inspectManagedCourse } });
+    const ready: GithubOAuthState = {
+      ...state,
+      courseDiscovery: {
+        ...state.courseDiscovery,
+        courses: [{ ...course, bootstrap: { status: "ready", diagnostic: null, retryable: false } }]
+      }
+    };
+    const { rerender } = render(
+      <RemoteCoursesPanel state={ready} onRefresh={() => {}} onSettings={() => {}} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Inspect course" }));
+    expect(await screen.findByText(/Before sync/)).toBeInTheDocument();
+    rerender(
+      <RemoteCoursesPanel
+        state={{
+          ...ready,
+          courseDiscovery: {
+            ...ready.courseDiscovery,
+            courses: [
+              {
+                ...course,
+                bootstrap: { status: "ready", diagnostic: null, retryable: false },
+                synchronization: {
+                  status: "updated",
+                  lastSuccessfulAt: "2026-10-24T20:00:00Z",
+                  diagnostic: null,
+                  retryable: false
+                }
+              }
+            ]
+          }
+        }}
+        onRefresh={() => {}}
+        onSettings={() => {}}
+      />
+    );
+    expect(await screen.findByText(/After sync/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "27s2" })).toBeInTheDocument();
+  });
+});

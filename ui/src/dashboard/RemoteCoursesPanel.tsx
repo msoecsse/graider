@@ -1,3 +1,4 @@
+import { synchronizationLabel } from "../../electron/remoteCourseTypes";
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import type { GithubOAuthState } from "../../electron/githubOAuthTypes";
 
@@ -88,6 +89,35 @@ export const RemoteCoursesPanel = ({
         (course.authorization === "authorized" ||
           course.authorization === "faculty_identity_required")
     ) ?? [];
+  const synchronizing =
+    current?.courses.filter(
+      (course) =>
+        course.authorization === "authorized" &&
+        ["queued", "checking", "fetching", "updating"].includes(
+          course.synchronization?.status ?? ""
+        )
+    ) ?? [];
+  const eligible = current?.courses.filter((course) => course.authorization === "authorized") ?? [];
+  const completed = eligible.length - synchronizing.length;
+  const inspectionVersion = current?.courses.find(
+    (course) => course.repositoryId === inspection?.repositoryId
+  )?.synchronization?.lastSuccessfulAt;
+  useEffect(() => {
+    let active = true;
+    if (inspectionVersion && inspection && inspectionUserId === current?.userId) {
+      void window.graiderUI.githubOAuth
+        ?.inspectManagedCourse?.(inspection.repositoryId)
+        .then((value) => {
+          if (active) setInspection(value);
+        })
+        .catch(() => {
+          if (active) setInspection(null);
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [inspectionVersion, inspection?.repositoryId, inspectionUserId, current?.userId]);
   return (
     <section aria-label="Remote courses" className="detail-panel">
       <h2>Remote courses</h2>
@@ -120,6 +150,28 @@ export const RemoteCoursesPanel = ({
               Course discovery temporarily unavailable. Your sign-in is preserved.
             </p>
           ) : null}
+          {synchronizing.length > 0 ? (
+            <div role="status">
+              <p>
+                Updating courses — {completed} of {eligible.length} complete
+              </p>
+              <progress
+                aria-label="Course synchronization"
+                value={completed}
+                max={eligible.length}
+              />
+            </div>
+          ) : null}
+          {current?.courses
+            .filter(
+              (course) =>
+                course.localStatus === "registered_local" && course.synchronization?.retryable
+            )
+            .map((course) => (
+              <button type="button" key={course.repositoryId} onClick={onRefresh}>
+                Retry synchronization — {course.code}
+              </button>
+            ))}
           {visible.map((course) => (
             <article key={course.repositoryId}>
               <h3>
@@ -137,7 +189,9 @@ export const RemoteCoursesPanel = ({
                 <>
                   <p>
                     {course.bootstrap?.status === "ready"
-                      ? "Cached locally"
+                      ? course.synchronization
+                        ? synchronizationLabel(course.synchronization)
+                        : "Cached locally"
                       : course.bootstrap?.status === "bootstrapping"
                         ? "Setting up course…"
                         : course.bootstrap?.status === "queued"
@@ -148,13 +202,22 @@ export const RemoteCoursesPanel = ({
                               ? "Needs attention"
                               : "Available remotely"}
                   </p>
+                  {course.synchronization?.diagnostic ? (
+                    <p>{course.synchronization.diagnostic}</p>
+                  ) : null}
+                  {course.synchronization?.retryable ? (
+                    <button type="button" onClick={onRefresh}>
+                      Retry synchronization
+                    </button>
+                  ) : null}
                   {course.bootstrap?.diagnostic ? <p>{course.bootstrap.diagnostic}</p> : null}
                   {course.bootstrap?.retryable ? (
                     <button type="button" onClick={onRefresh}>
                       Retry course setup
                     </button>
                   ) : null}
-                  {course.bootstrap?.status === "ready" ? (
+                  {course.bootstrap?.status === "ready" &&
+                  course.synchronization?.status !== "needs_attention" ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -188,13 +251,14 @@ export const RemoteCoursesPanel = ({
           visible.some(
             (course) =>
               course.repositoryId === inspection.repositoryId &&
-              course.bootstrap?.status === "ready"
+              course.bootstrap?.status === "ready" &&
+              course.synchronization?.status !== "needs_attention"
           ) ? (
             <section aria-label="Cached course details">
               <h3>
                 {inspection.code} — {inspection.title}
               </h3>
-              <p>Cached course metadata. Ongoing synchronization is not enabled.</p>
+              <p>Managed course metadata. Updated at startup and when you refresh courses.</p>
               <ul>
                 {inspection.terms.map((term) => (
                   <li key={term}>

@@ -207,11 +207,21 @@ Local data protection is delegated to normal OS account/filesystem protections. 
 
 ## 6. Course Discovery and Bootstrap
 
-Implementation status: Phase 2.4 adds verified, identity-scoped managed course/admin
-bootstrap after read-only discovery. Legacy paths remain operational; remote-only
-caches support safe course/term/assignment metadata inspection. No ongoing sync or
-student clones are implemented. Schema-v2 faculty identity remains future work; see
-[current bootstrap behavior and Phase 2.5 boundary](graider-remote-course-discovery.md#phase-24--identity-scoped-managed-course-bootstrap).
+Implementation status: Phase 2.5 adds startup, Refresh courses and explicit-retry
+synchronization after identity-scoped managed bootstrap. Authenticated bundled Git
+fetches refs; only clean, attached expected-default-branch caches with expected origin
+upstream can fast-forward. Dirty/ahead/diverged/unexpected/transfer states remain
+Needs attention. Canonical metadata/faculty validation follows updates; invalid new
+remote state is preserved without rollback. Account generations and a shared cache
+lock isolate results; two concurrent Git operations bound resource use. Schema-1
+catalog compatibility, credential-free origins and legacy operational precedence are
+preserved. Remote-only caches remain metadata inspection surfaces. Remote access is
+read-only even though local managed files may update. There is no periodic timer,
+repair/reset, managed mutation cutover, pre-mutation guard or student Git operation.
+See [synchronization semantics and Phase 2.6](graider-remote-course-discovery.md#phase-25--managed-course-synchronization).
+
+The remaining architecture describes long-term requirements; periodic timing, student
+synchronization and mutation migration below are not Phase 2.5 behavior.
 
 After authentication, Graider automatically discovers every authorized Graider course accessible to the signed-in identity.
 

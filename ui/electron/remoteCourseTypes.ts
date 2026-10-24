@@ -11,6 +11,7 @@ export type CourseLocalStatus =
   | "local_unverified";
 export interface RemoteCourse {
   readonly bootstrap?: ManagedCourseState;
+  readonly synchronization?: ManagedSynchronizationState;
   readonly repositoryId: number;
   readonly nodeId: string | null;
   readonly organizationId: number;
@@ -97,3 +98,53 @@ export interface ManagedCourseInspection {
     readonly status: string;
   }[];
 }
+
+/** Transient synchronization state is separate from schema-1 bootstrap catalog state. */
+export interface ManagedSynchronizationState {
+  readonly status:
+    | "idle"
+    | "queued"
+    | "checking"
+    | "fetching"
+    | "updating"
+    | "up_to_date"
+    | "updated"
+    | "failed"
+    | "needs_attention";
+  readonly reason?:
+    | "local_changes"
+    | "local_ahead"
+    | "diverged"
+    | "default_branch_changed"
+    | "upstream_missing"
+    | "detached_head"
+    | "organization_transfer"
+    | "authorization_lost"
+    | "remote_unavailable"
+    | "network_failure"
+    | "rate_limited"
+    | "authentication_failed"
+    | "invalid_remote_metadata"
+    | "local_storage_failure"
+    | "unsafe_repository";
+  readonly diagnostic: string | null;
+  readonly retryable: boolean;
+  readonly localCommit?: string;
+  readonly currentCommit?: string;
+  readonly ahead?: number;
+  readonly behind?: number;
+  readonly lastSuccessfulAt?: string;
+  readonly metadata?: { readonly code: string; readonly title: string };
+}
+export const synchronizationLabel = (state: ManagedSynchronizationState): string =>
+  ({
+    idle: "Waiting for synchronization",
+    queued: "Update queued",
+    checking: "Checking…",
+    fetching: "Fetching…",
+    updating: "Updating…",
+    up_to_date: "Up to date",
+    updated: "Updated",
+    failed: "Course update failed",
+    needs_attention: "Needs attention"
+  })[state.status];

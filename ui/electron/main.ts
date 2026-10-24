@@ -1,5 +1,9 @@
 import { createAuthenticatedProductionGitWorkspace } from "./gitWorkspaceReader.js";
-import { bootstrapManagedCourse, inspectManagedCourse } from "./managedCourses.js";
+import {
+  bootstrapManagedCourse,
+  synchronizeManagedCourse,
+  inspectManagedCourse
+} from "./managedCourses.js";
 import { createRemoteRepositoryReader } from "./githubRemoteRepositories.js";
 import { discoverRemoteCourses, inspectLocalCourseOrigins } from "./remoteCourseDiscovery.js";
 import {
@@ -1492,10 +1496,24 @@ app.whenReady().then(async () => {
     bootstrapCourse: async ({ token, userId, course, signal, revalidateSession }) =>
       bootstrapManagedCourse({
         userData: app.getPath("userData"),
+        prepareSynchronization: true,
         userId,
         course,
         signal,
         revalidateSession,
+        username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+          .currentFacultyMsoeUsername,
+        reader: createRemoteRepositoryReader(token, signal),
+        authenticate: () => createAuthenticatedProductionGitWorkspace(token)
+      }),
+    synchronizeCourse: async ({ token, userId, course, signal, revalidateSession, onProgress }) =>
+      synchronizeManagedCourse({
+        userData: app.getPath("userData"),
+        userId,
+        course,
+        signal,
+        revalidateSession,
+        onProgress,
         username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
           .currentFacultyMsoeUsername,
         reader: createRemoteRepositoryReader(token, signal),

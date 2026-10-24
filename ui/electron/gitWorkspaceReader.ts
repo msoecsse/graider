@@ -59,6 +59,15 @@ export interface GitWorkspaceInspector {
   remoteUrl(remote: "origin"): Promise<string | null>;
 }
 
+export interface GitWorkspaceSynchronizer extends GitWorkspaceInspector {
+  fetchOrigin(request: { readonly authentication: GitAuthenticationContextRef }): Promise<void>;
+  fastForwardUpstream(request: {
+    readonly expectedHead: string;
+    readonly expectedBranch: string;
+    readonly signal?: AbortSignal;
+  }): Promise<void>;
+}
+
 export interface GitWorkspaceWriter extends GitWorkspaceInspector {
   stage(paths: readonly RelativeGitPath[]): Promise<void>;
   commit(request: { readonly message: string }): Promise<string>;
@@ -98,6 +107,7 @@ export interface GitAuthenticationContextRef {
 
 export interface AuthenticatedGitWorkspaceContext {
   readonly factory: GitWorkspaceWriterFactory & {
+    open(root: string): Promise<GitWorkspaceWriter & GitWorkspaceSynchronizer>;
     clone(request: {
       readonly remote: string;
       readonly destination: string;

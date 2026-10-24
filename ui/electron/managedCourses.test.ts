@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bootstrapManagedCourse,
+  synchronizeManagedCourse,
   managedCoursePath,
   loadManagedCatalog,
   inspectManagedCourse,
@@ -489,4 +490,341 @@ describe("existing destination and clone validation", () => {
     expect(results[0].status).toBe("failed");
     expect(results.slice(1).every((result) => result.status === "ready")).toBe(true);
   });
+});
+
+describe("managed synchronization classification and preservation", () => {
+  const ready = async (userId = 42) => {
+    const f = fixture();
+    f.request.userId = userId;
+    await f.run();
+    const clean = {
+      ...(await f.inspect()),
+      upstream: {
+        kind: "configured",
+        remote: "origin",
+        branch: "origin/master",
+        ahead: 0,
+        behind: 0,
+        relation: "current"
+      }
+    };
+    f.inspect.mockResolvedValue(clean);
+    const fetchOrigin = vi.fn().mockResolvedValue(undefined);
+    const fastForwardUpstream = vi.fn().mockImplementation(async () => {
+      f.inspect.mockResolvedValue(clean);
+    });
+    const onProgress = vi.fn();
+    const open = vi.fn().mockImplementation((root) =>
+      Promise.resolve({
+        root,
+        inspect: f.inspect,
+        remoteUrl: f.remoteUrl,
+        fetchOrigin,
+        fastForwardUpstream
+      })
+    );
+    const request = {
+      ...f.request,
+      onProgress,
+      authenticate: () => ({ authentication: { id: "operation" }, factory: { ...f.factory, open } })
+    };
+    return {
+      ...f,
+      clean,
+      request,
+      fetchOrigin,
+      fastForwardUpstream,
+      onProgress,
+      sync: () => synchronizeManagedCourse(request)
+    };
+  };
+  it("bounds overlapping synchronization across different courses and isolates a failed fetch", async () => {
+    const fixtures = await Promise.all(
+      Array.from({ length: 5 }, (_value, index) => ready(index + 50))
+    );
+    let active = 0;
+    let peak = 0;
+    for (const [index, f] of fixtures.entries()) {
+      f.fetchOrigin.mockImplementation(async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        if (index === 0) throw new Error("offline");
+      });
+    }
+    const results = await Promise.all(fixtures.map((f) => f.sync()));
+    expect(peak).toBe(MANAGED_BOOTSTRAP_CONCURRENCY);
+    expect(results[0].status).toBe("failed");
+    expect(results.slice(1).every((result) => result.status === "up_to_date")).toBe(true);
+  });
+  it("retry reinspects local changes and only resumes synchronization after manual correction", async () => {
+    const f = await ready();
+    f.inspect.mockResolvedValue({
+      ...f.clean,
+      workingTree: { ...f.clean.workingTree, untrackedPaths: ["evidence"] }
+    });
+    expect((await f.sync()).reason).toBe("local_changes");
+    expect((await f.sync()).reason).toBe("local_changes");
+    expect(f.fastForwardUpstream).not.toHaveBeenCalled();
+    f.inspect.mockResolvedValue(f.clean);
+    expect((await f.sync()).status).toBe("up_to_date");
+  });
+  it("fetches current state, reports success without worktree update, and reuses schema-1 catalog", async () => {
+    const f = await ready();
+    expect(await f.sync()).toMatchObject({
+      status: "up_to_date",
+      currentCommit: "a".repeat(40),
+      ahead: 0,
+      behind: 0
+    });
+    expect(f.onProgress.mock.calls.map(([state]) => state.status)).toEqual([
+      "checking",
+      "fetching"
+    ]);
+    expect(f.fetchOrigin).toHaveBeenCalledWith({ authentication: { id: "operation" } });
+    expect(f.fastForwardUpstream).not.toHaveBeenCalled();
+    expect(loadManagedCatalog(f.request.userData, 42).schemaVersion).toBe(1);
+    expect(f.factory.clone).toHaveBeenCalledOnce();
+  });
+  it("uses post-fetch relationship, then validates after fast-forward", async () => {
+    const f = await ready();
+    f.fetchOrigin.mockImplementation(async () => {
+      f.inspect.mockResolvedValue({
+        ...f.clean,
+        upstream: { ...f.clean.upstream, behind: 2, relation: "behind" }
+      });
+    });
+    expect((await f.sync()).status).toBe("updated");
+    expect(f.fastForwardUpstream).toHaveBeenCalledWith({
+      expectedHead: "a".repeat(40),
+      expectedBranch: "master",
+      signal: f.request.signal
+    });
+    expect(f.onProgress.mock.calls.map(([state]) => state.status)).toEqual([
+      "checking",
+      "fetching",
+      "updating"
+    ]);
+  });
+  it.each(["trackedChanges", "stagedChanges", "untrackedPaths", "conflicts"])(
+    "fetches but preserves %s",
+    async (field) => {
+      const f = await ready();
+      f.inspect.mockResolvedValue({
+        ...f.clean,
+        workingTree: { ...f.clean.workingTree, [field]: ["local"] }
+      });
+      expect(await f.sync()).toMatchObject({ status: "needs_attention", reason: "local_changes" });
+      expect(f.fetchOrigin).toHaveBeenCalledOnce();
+      expect(f.fastForwardUpstream).not.toHaveBeenCalled();
+      expect(fs.existsSync(f.final)).toBe(true);
+    }
+  );
+  it.each([
+    ["ahead", 2, 0, "local_ahead"],
+    ["diverged", 1, 2, "diverged"]
+  ] as const)("preserves %s history", async (relation, ahead, behind, reason) => {
+    const f = await ready();
+    f.inspect.mockResolvedValue({
+      ...f.clean,
+      upstream: { ...f.clean.upstream, relation, ahead, behind }
+    });
+    expect(await f.sync()).toMatchObject({ status: "needs_attention", reason, ahead, behind });
+    expect(f.fastForwardUpstream).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["head", { kind: "detached", commit: "a".repeat(40) }, "detached_head"],
+    ["head", { kind: "attached", branch: "old", commit: "a".repeat(40) }, "default_branch_changed"],
+    ["upstream", { kind: "missing" }, "upstream_missing"],
+    [
+      "upstream",
+      { kind: "configured", remote: "other", branch: "other/master", relation: "current" },
+      "upstream_missing"
+    ]
+  ])("preserves unexpected %s / %s", async (field, value, reason) => {
+    const f = await ready();
+    f.inspect.mockResolvedValue({ ...f.clean, [field as string]: value });
+    expect(await f.sync()).toMatchObject({ status: "needs_attention", reason });
+    expect(f.fastForwardUpstream).not.toHaveBeenCalled();
+  });
+  it.each([
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "rebase-merge",
+    "rebase-apply",
+    "sequencer",
+    "BISECT_LOG",
+    "commondir",
+    "objects/info/alternates"
+  ])("blocks fetch with %s", async (name) => {
+    const f = await ready();
+    const file = path.join(f.final, ".git", name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "preserve");
+    expect((await f.sync()).status).toBe("needs_attention");
+    expect(f.fetchOrigin).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, "utf8")).toBe("preserve");
+  });
+  it("blocks organization transfer even when discovery accepts its new organization", async () => {
+    const f = await ready();
+    f.request.course = { ...f.request.course, organizationId: 99 };
+    f.reader.resolveId.mockResolvedValue({ ...f.repo, organizationId: 99 });
+    expect(await f.sync()).toMatchObject({ reason: "organization_transfer" });
+    expect(f.fetchOrigin).not.toHaveBeenCalled();
+  });
+  it("rename reuses the canonical path and refreshes catalog locator", async () => {
+    const f = await ready();
+    f.reader.resolveId.mockResolvedValue({
+      ...f.repo,
+      name: "new-name",
+      fullName: "csc1120/new-name"
+    });
+    expect((await f.sync()).status).toBe("up_to_date");
+    expect(loadManagedCatalog(f.request.userData, 42).courses[String(f.repo.id)]).toMatchObject({
+      name: "new-name",
+      managedPath: f.final
+    });
+  });
+  it("blocks wrong origin identity and symlinks before fetch", async () => {
+    const f = await ready();
+    f.reader.resolve.mockResolvedValue({ ...f.repo, id: 99 });
+    expect((await f.sync()).status).toBe("needs_attention");
+    expect(f.fetchOrigin).not.toHaveBeenCalled();
+    f.reader.resolve.mockResolvedValue(f.repo);
+    fs.symlinkSync(path.join(f.final, "course.yml"), path.join(f.final, "link"));
+    expect((await f.sync()).status).toBe("needs_attention");
+    expect(f.fetchOrigin).not.toHaveBeenCalled();
+  });
+  it("lost faculty authorization blocks fetch without deleting cache", async () => {
+    const f = await ready();
+    f.request.username = "unauthorized";
+    expect(await f.sync()).toMatchObject({ reason: "authorization_lost" });
+    expect(f.fetchOrigin).not.toHaveBeenCalled();
+    expect(fs.existsSync(f.final)).toBe(true);
+  });
+  it.each([
+    ["repository_inaccessible", "remote_unavailable"],
+    ["network_unavailable", "network_failure"],
+    ["rate_limited", "rate_limited"],
+    ["invalid_credential", "authentication_failed"]
+  ])("normalizes %s without leaking provider errors", async (code, reason) => {
+    const f = await ready();
+    f.reader.resolveId.mockRejectedValue(
+      new GithubOAuthError(code, "SECRET /private/absolute/path")
+    );
+    expect(await f.sync()).toMatchObject({ status: "failed", reason, retryable: true });
+    expect(JSON.stringify(await f.sync())).not.toMatch(/SECRET|absolute/);
+    expect(fs.existsSync(f.final)).toBe(true);
+  });
+  it("reinspects a refused update without attempting recovery", async () => {
+    const f = await ready();
+    f.inspect.mockResolvedValue({
+      ...f.clean,
+      upstream: { ...f.clean.upstream, relation: "behind", behind: 1 }
+    });
+    f.fastForwardUpstream.mockImplementation(async () => {
+      f.inspect.mockResolvedValue({
+        ...f.clean,
+        upstream: { ...f.clean.upstream, relation: "diverged", behind: 1, ahead: 1 }
+      });
+      throw new Error("race");
+    });
+    expect(await f.sync()).toMatchObject({ reason: "diverged" });
+    expect(f.fastForwardUpstream).toHaveBeenCalledOnce();
+  });
+  it("keeps successfully updated remote state when local metadata is invalid", async () => {
+    const f = await ready();
+    f.inspect.mockResolvedValue({
+      ...f.clean,
+      upstream: { ...f.clean.upstream, relation: "behind", behind: 1 }
+    });
+    f.fastForwardUpstream.mockImplementation(async () => {
+      fs.writeFileSync(path.join(f.final, "course.yml"), "invalid metadata");
+      f.inspect.mockResolvedValue(f.clean);
+    });
+    expect(await f.sync()).toMatchObject({ reason: "invalid_remote_metadata" });
+    expect(fs.readFileSync(path.join(f.final, "course.yml"), "utf8")).toBe("invalid metadata");
+  });
+  it("does not report success when the worktree changes during final authorization validation", async () => {
+    const f = await ready();
+    let checks = 0;
+    f.revalidateSession.mockImplementation(async () => {
+      checks += 1;
+      if (checks === 3)
+        f.inspect.mockResolvedValue({
+          ...f.clean,
+          workingTree: { ...f.clean.workingTree, stagedChanges: ["late local change"] }
+        });
+      return true;
+    });
+    expect(await f.sync()).toMatchObject({ status: "needs_attention", reason: "local_changes" });
+  });
+  it("returns newly validated metadata rather than stale discovery titles", async () => {
+    const f = await ready();
+    const changed = courseYaml.replace("Data Structures", "New synchronized title");
+    fs.writeFileSync(path.join(f.final, "course.yml"), changed);
+    f.reader.file.mockImplementation((_repo, file) =>
+      Promise.resolve(file === "course.yml" ? changed : termYaml)
+    );
+    expect(await f.sync()).toMatchObject({
+      status: "up_to_date",
+      metadata: { code: "csc1020", title: "New synchronized title" }
+    });
+  });
+  it("late aborted fetch cannot persist sync success", async () => {
+    const f = await ready();
+    const catalog = path.join(path.dirname(path.dirname(f.final)), "catalog.json");
+    const previous = fs.readFileSync(catalog, "utf8");
+    f.fetchOrigin.mockImplementation(async () => {
+      f.controller.abort();
+    });
+    await f.sync();
+    expect(fs.readFileSync(catalog, "utf8")).toBe(previous);
+    expect(f.fastForwardUpstream).not.toHaveBeenCalled();
+  });
+  it("serializes overlapping bootstrap and synchronization for the same cache", async () => {
+    const f = await ready();
+    let finish!: () => void;
+    f.fetchOrigin.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const first = f.sync();
+    await vi.waitFor(() => expect(f.fetchOrigin).toHaveBeenCalledOnce());
+    const second = bootstrapManagedCourse({ ...f.request, prepareSynchronization: true });
+    const third = f.sync();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(f.fetchOrigin).toHaveBeenCalledOnce();
+    finish();
+    expect((await first).status).toBe("up_to_date");
+    expect((await second).status).toBe("ready");
+    expect((await third).status).toBe("up_to_date");
+    expect(f.fetchOrigin).toHaveBeenCalledTimes(2);
+  });
+});
+
+it("limits managed synchronization capability to inspection, authenticated fetch and fast-forward", () => {
+  const source = fs.readFileSync("electron/managedCourses.ts", "utf8");
+  const synchronize = source.slice(source.indexOf("const performSynchronization"));
+  expect(synchronize).not.toMatch(
+    /runGit|execFile|spawn\(|push|commit\(|reset|rebase|stash|clean\(|checkout|setInterval|setTimeout|fetch\(/
+  );
+  expect(source).not.toMatch(
+    /studentRepos|studentRepositories|dispatchWorkflow|createRepository|setRepositoryTopics|updatePermission/
+  );
+  const reader = fs.readFileSync("electron/gitWorkspaceReader.ts", "utf8");
+  const capability = reader.slice(
+    reader.indexOf("export interface GitWorkspaceSynchronizer"),
+    reader.indexOf("export interface GitWorkspaceWriter")
+  );
+  expect(capability).toContain("fetchOrigin");
+  expect(capability).toContain("fastForwardUpstream");
+  expect(capability).not.toMatch(/runGit|push|pull|reset|rebase|commit|stage/);
+  expect(fs.readFileSync("electron/preload.ts", "utf8")).not.toMatch(
+    /fetchOrigin|fastForwardUpstream|pullUpstream|runGit/
+  );
 });

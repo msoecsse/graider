@@ -616,9 +616,7 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
               ? { kind: "detached", commit: status.headOid }
               : { kind: "attached", branch: status.branch, commit: status.headOid };
       let upstream: RepositoryState["upstream"] = { kind: "missing" };
-      if (status.upstreamBranch !== null) {
-        if (status.ahead === null || status.behind === null)
-          throw new GitError("unknown_engine_failure", "inspect");
+      if (status.upstreamBranch !== null && status.ahead !== null && status.behind !== null) {
         const remoteOutput = await this.executor.run(
           this.root,
           [
@@ -649,6 +647,97 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
     } catch (error) {
       if (error instanceof GitError) throw error;
       throw errorForFailure(error, "inspect", "unknown_engine_failure");
+    }
+  }
+
+  /** Fetch only remote-tracking refs; never honor configurable destination refspecs. */
+  async fetchOrigin(request: { readonly authentication: GitAuthenticationContext }): Promise<void> {
+    try {
+      const origin = createRemoteName("origin");
+      if (origin === null) throw new GitError("operation_rejected", "fetch");
+      const remote = await this.remoteUrl(origin);
+      if (remote === null) throw new GitError("operation_rejected", "fetch");
+      await this.executor.run(
+        this.root,
+        [
+          "fetch",
+          "--no-tags",
+          "--no-recurse-submodules",
+          "--no-write-fetch-head",
+          "--",
+          remote,
+          "refs/heads/*:refs/remotes/origin/*"
+        ],
+        "fetch",
+        { authentication: request.authentication, remote }
+      );
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "fetch", "remote_unavailable");
+    }
+  }
+
+  /** No network, branch creation, merge commit, autostash or recovery capability. */
+  async fastForwardUpstream(request: {
+    readonly expectedHead: string;
+    readonly expectedBranch: string;
+    readonly signal?: AbortSignal;
+  }): Promise<void> {
+    try {
+      const origin = createRemoteName("origin");
+      const branch = createBranchName(request.expectedBranch);
+      if (!isObjectId(request.expectedHead) || branch === null || origin === null)
+        throw new GitError("operation_rejected", "fast_forward");
+      const unsafeState = [
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "rebase-merge",
+        "rebase-apply",
+        "sequencer",
+        "BISECT_LOG",
+        "commondir",
+        "gitdir",
+        "objects/info/alternates"
+      ];
+      if (unsafeState.some((name) => existsSync(join(this.root, ".git", name))))
+        throw new GitError("operation_rejected", "fast_forward");
+      const target = await this.resolveRemoteBranch(origin, branch);
+      const state = await this.inspect();
+      const tree = state.workingTree;
+      if (
+        state.head.kind !== "attached" ||
+        state.head.commit !== request.expectedHead ||
+        state.head.branch !== request.expectedBranch ||
+        state.upstream.kind !== "configured" ||
+        state.upstream.remote !== "origin" ||
+        state.upstream.branch !== `origin/${request.expectedBranch}` ||
+        state.upstream.relation !== "behind" ||
+        tree.trackedChanges.length > 0 ||
+        tree.stagedChanges.length > 0 ||
+        tree.conflicts.length > 0 ||
+        tree.untrackedPaths.length > 0
+      )
+        throw new GitError("operation_rejected", "fast_forward");
+      if (request.signal?.aborted) throw new GitError("operation_rejected", "fast_forward");
+      await this.executor.run(
+        this.root,
+        [
+          "-c",
+          "core.hooksPath=/dev/null",
+          "-c",
+          "submodule.recurse=false",
+          "merge",
+          "--ff-only",
+          "--no-edit",
+          "--no-autostash",
+          target
+        ],
+        "fast_forward"
+      );
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "fast_forward", "operation_rejected");
     }
   }
 

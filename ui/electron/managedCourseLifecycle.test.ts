@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
+import { GithubOAuthError } from "./githubOAuthCallback.js";
 import { GithubOAuthSession } from "./githubOAuthSession.js";
 import type { RemoteCourse } from "./remoteCourseTypes.js";
 const course = (
@@ -163,4 +164,177 @@ describe("automatic bootstrap session orchestration", () => {
     expect(await input.revalidateSession()).toBe(false);
     f.session.shutdown();
   });
+});
+
+describe("startup, refresh and synchronization lifecycle", () => {
+  const synchronizationFixture = (courses = [course(20)]) => {
+    const f = fixture(courses);
+    const synchronizeCourse = vi
+      .fn()
+      .mockResolvedValue({ status: "up_to_date", diagnostic: null, retryable: false });
+    const session = new GithubOAuthSession({
+      store: f.store,
+      network: f.network,
+      bootstrapCourse: f.bootstrapCourse,
+      discoverCourses: f.discoverCourses,
+      synchronizeCourse,
+      secret: () => "secret",
+      openBrowser: async () => {},
+      callback: async () => ({
+        redirectUri: "http://127.0.0.1/callback",
+        code: Promise.resolve("code"),
+        cancel: () => {}
+      })
+    });
+    return { ...f, session, synchronizeCourse };
+  };
+  it("bootstrap precedes sync; restoration returns before a fetch finishes; refresh reruns both", async () => {
+    const f = synchronizationFixture();
+    let finish!: () => void;
+    f.synchronizeCourse.mockImplementationOnce(async (input) => {
+      expect(f.bootstrapCourse).toHaveBeenCalledOnce();
+      input.onProgress({ status: "fetching", diagnostic: null, retryable: false });
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return { status: "up_to_date", diagnostic: null, retryable: false };
+    });
+    await f.session.restore();
+    await vi.waitFor(() => expect(f.synchronizeCourse).toHaveBeenCalledOnce());
+    expect(f.session.getState().courseDiscovery.courses[0].synchronization?.status).toBe(
+      "fetching"
+    );
+    finish();
+    await vi.waitFor(() =>
+      expect(f.session.getState().courseDiscovery.courses[0].synchronization?.status).toBe(
+        "up_to_date"
+      )
+    );
+    await f.session.refreshOrganizations();
+    expect(f.synchronizeCourse).toHaveBeenCalledTimes(2);
+    expect(f.bootstrapCourse).toHaveBeenCalledTimes(2);
+    expect(f.discoverCourses).toHaveBeenCalledTimes(2);
+    f.session.shutdown();
+  });
+  it("one sync failure does not stop another course; refresh retries transient failures", async () => {
+    const f = synchronizationFixture([course(20), course(21), course(22, "not_authorized")]);
+    f.synchronizeCourse.mockRejectedValueOnce(new Error("private raw error"));
+    await f.session.restore();
+    await vi.waitFor(() => expect(f.synchronizeCourse).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(f.session.getState().courseDiscovery.courses[0].synchronization?.status).toBe("failed")
+    );
+    expect(f.session.getState().courseDiscovery.courses[1].synchronization?.status).toBe(
+      "up_to_date"
+    );
+    expect(f.session.getState().status).toBe("signed_in");
+    expect(f.store.delete).not.toHaveBeenCalled();
+    await f.session.refreshOrganizations();
+    expect(f.session.getState().courseDiscovery.courses[0].synchronization?.status).toBe(
+      "up_to_date"
+    );
+    f.session.shutdown();
+  });
+  it("ignores progress and results arriving after sign-out", async () => {
+    const f = synchronizationFixture();
+    let finish!: () => void;
+    f.synchronizeCourse.mockImplementationOnce(async (input) => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      input.onProgress({ status: "updated", diagnostic: null, retryable: false });
+      return { status: "updated", diagnostic: null, retryable: false };
+    });
+    await f.session.restore();
+    await vi.waitFor(() => expect(f.synchronizeCourse).toHaveBeenCalledOnce());
+    await f.session.signOut();
+    finish();
+    await vi.waitFor(() => expect(f.session.getState().identity).toBeNull());
+    expect(f.session.getState().courseDiscovery.courses).toEqual([]);
+    f.session.shutdown();
+  });
+  it("late old-account synchronization cannot overwrite a newly signed-in account", async () => {
+    const f = synchronizationFixture();
+    let finish!: () => void;
+    f.synchronizeCourse.mockImplementationOnce(async (input) => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      input.onProgress({
+        status: "needs_attention",
+        diagnostic: "Old account diagnostic",
+        retryable: false
+      });
+      return { status: "updated", diagnostic: null, retryable: false };
+    });
+    await f.session.restore();
+    await vi.waitFor(() => expect(f.synchronizeCourse).toHaveBeenCalledOnce());
+    f.network.identity.mockResolvedValue({ id: 99, login: "new", name: null });
+    await f.session.signIn(true);
+    await vi.waitFor(() => expect(f.synchronizeCourse).toHaveBeenCalledTimes(2));
+    finish();
+    await vi.waitFor(() =>
+      expect(f.session.getState().courseDiscovery.courses[0].synchronization?.status).toBe(
+        "up_to_date"
+      )
+    );
+    expect(f.session.getState().courseDiscovery.userId).toBe(99);
+    expect(JSON.stringify(f.session.getState())).not.toContain("Old account");
+    f.session.shutdown();
+  });
+  it("lost faculty authorization disables active managed navigation without signing out", async () => {
+    const f = synchronizationFixture();
+    f.synchronizeCourse.mockResolvedValueOnce({
+      status: "needs_attention",
+      reason: "authorization_lost",
+      diagnostic: "Faculty authorization changed",
+      retryable: false
+    });
+    await f.session.restore();
+    await vi.waitFor(() =>
+      expect(f.session.getState().courseDiscovery.courses[0].authorization).toBe("unavailable")
+    );
+    expect(f.session.getState().status).toBe("signed_in");
+    f.session.shutdown();
+  });
+});
+
+it("keeps a valid global identity on Git authentication rejection, but clears a confirmed globally invalid credential", async () => {
+  const f = fixture();
+  const synchronizeCourse = vi.fn().mockResolvedValue({
+    status: "failed",
+    reason: "authentication_failed",
+    diagnostic: "Git transport rejected",
+    retryable: true
+  });
+  const session = new GithubOAuthSession({
+    store: f.store,
+    network: f.network,
+    bootstrapCourse: f.bootstrapCourse,
+    discoverCourses: f.discoverCourses,
+    synchronizeCourse,
+    secret: () => "secret",
+    openBrowser: async () => {}
+  });
+  await session.restore();
+  await vi.waitFor(() =>
+    expect(session.getState().courseDiscovery.courses[0].synchronization?.status).toBe("failed")
+  );
+  expect(session.getState().status).toBe("signed_in");
+  expect(f.store.delete).not.toHaveBeenCalled();
+  synchronizeCourse.mockImplementation(async () => {
+    f.network.identity.mockRejectedValue(
+      new GithubOAuthError("invalid_credential", "Expired sign-in")
+    );
+    return {
+      status: "failed",
+      reason: "authentication_failed",
+      diagnostic: "Git transport rejected",
+      retryable: true
+    };
+  });
+  await session.refreshOrganizations();
+  expect(session.getState().status).toBe("signed_out");
+  expect(f.store.delete).toHaveBeenCalledOnce();
+  session.shutdown();
 });
