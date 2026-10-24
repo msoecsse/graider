@@ -312,6 +312,7 @@ ${renderUnmappedSourceComments(model.unmappedSourceComments)}
 const renderRubric = (model: GradingReportModel): string => `
 <section id="rubric" aria-labelledby="rubric-heading">
 <h2 id="rubric-heading">Rubric and Scoring</h2>
+${model.grade.finalScoreOverride === undefined ? "" : "<p>Final score set to 0 by instructor. Rubric details below preserve prior grading work.</p>"}
 <table><thead><tr><th scope="col">Category</th><th scope="col" class="number">Possible</th><th scope="col" class="number">Comment adjustments</th><th scope="col" class="number">Manual adjustments</th><th scope="col" class="number">Score</th></tr></thead><tbody>
 ${model.grade.categories
   .map(

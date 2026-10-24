@@ -1,3 +1,4 @@
+import { getStudentSort, rememberStudentSort, sortGradingStudents } from "./studentSort";
 import { mapCanonicalSourceRangeToCombinedLineRange } from "./submissionSourceView";
 import { RECENT_COMMENT_LIMIT } from "../../electron/recentCommentLimit";
 import { RecentCommentsMenu } from "./RecentCommentsMenu";
@@ -34,6 +35,7 @@ import {
 } from "./GradingEvidencePanel";
 import {
   GradingPublishReviewPanel,
+  GradingGradeSummaryTable,
   type PublishReviewDetailState,
   type PublishReviewOutcome,
   type PublishReviewPublishedRow,
@@ -129,6 +131,7 @@ type SnapshotLoadState =
   | { readonly status: "failure"; readonly studentId: string; readonly message: string };
 
 interface MarkCompleteConfirmation {
+  readonly setScoreToZero?: boolean;
   readonly studentId: string;
 }
 
@@ -448,8 +451,17 @@ const publishReviewOutcomeFromResult = (
   warnings: result.status === "success" ? result.warnings.map(publicationWarningMessage) : []
 });
 
+const withoutLoadingGradeDetails = (
+  current: Readonly<Record<string, PublishReviewDetailState>>
+): Readonly<Record<string, PublishReviewDetailState>> => {
+  const entries = Object.entries(current);
+  return entries.some(([, detail]) => detail.status === "loading")
+    ? Object.fromEntries(entries.filter(([, detail]) => detail.status !== "loading"))
+    : current;
+};
+
 const scoreSummaryLabel = (grade: Snapshot["grade"]): string =>
-  grade.categories.length === 0
+  grade.categories.length === 0 && grade.finalScoreOverride === undefined
     ? "No rubric — enter a score manually"
     : `${grade.totalScore} / ${grade.pointsPossible}`;
 
@@ -507,6 +519,7 @@ export const GradingWorkspacePage = ({
     message: string;
   }>();
   const [selected, setSelected] = useState(0);
+  const [studentSort, setStudentSort] = useState(getStudentSort);
   const [studentFilter, setStudentFilter] = useState<StudentFilterId>("to_grade");
   const [source, setSource] = useState<SourceLoadState>({ status: "idle" });
   const [snapshot, setSnapshot] = useState<SnapshotLoadState>({ status: "idle" });
@@ -558,7 +571,10 @@ export const GradingWorkspacePage = ({
     useState<DiscardDraftConfirmation>();
   const { message: toastMessage, showToast } = useToast();
   const [reportPreview, setReportPreview] = useState<ReportPreviewState>({ status: "idle" });
+  const [publishReviewFinished, setPublishReviewFinished] = useState(false);
   const [publishReviewOpen, setPublishReviewOpen] = useState(false);
+  const gradedSummaryOpenRef = useRef(false);
+  gradedSummaryOpenRef.current = studentFilter === "graded";
   const [publishReviewSelectedIds, setPublishReviewSelectedIds] = useState<readonly string[]>([]);
   const [publishReviewDetails, setPublishReviewDetails] = useState<
     Readonly<Record<string, PublishReviewDetailState>>
@@ -947,17 +963,20 @@ export const GradingWorkspacePage = ({
   const studentsWithStatus = useMemo(
     () =>
       isReady(result)
-        ? result.students.map((candidate, index) => ({
-            student: candidate,
-            index,
-            status: effectiveGradingStatus(
-              studentStatusOverrides,
-              candidate.studentId,
-              candidate.gradingStatus
-            )
-          }))
+        ? sortGradingStudents(
+            result.students.map((candidate, index) => ({
+              student: candidate,
+              index,
+              status: effectiveGradingStatus(
+                studentStatusOverrides,
+                candidate.studentId,
+                candidate.gradingStatus
+              )
+            })),
+            studentSort
+          )
         : [],
-    [result, studentStatusOverrides]
+    [result, studentStatusOverrides, studentSort]
   );
   const completeStudentIds = useMemo(
     () =>
@@ -998,15 +1017,12 @@ export const GradingWorkspacePage = ({
     [studentsWithStatus, studentFilter]
   );
   const nextStudentNeedingGradingIndex = useMemo(() => {
-    const total = studentsWithStatus.length;
-    if (total === 0) return undefined;
-    const searchOrder = Array.from(
-      { length: total - 1 },
-      (_, offset) => (selected + offset + 1) % total
-    );
-    return searchOrder.find((index) =>
-      UNGRADED_STATUSES.includes(studentsWithStatus[index]?.status ?? "")
-    );
+    const position = studentsWithStatus.findIndex((entry) => entry.index === selected);
+    const searchOrder = [
+      ...studentsWithStatus.slice(position + 1),
+      ...studentsWithStatus.slice(0, position)
+    ];
+    return searchOrder.find((entry) => UNGRADED_STATUSES.includes(entry.status))?.index;
   }, [studentsWithStatus, selected]);
   const loadEvidence = useCallback(
     async (studentId: string): Promise<void> => {
@@ -1853,6 +1869,18 @@ export const GradingWorkspacePage = ({
           );
         return false;
       }
+      publishReviewDetailRequestGenerations.current.set(
+        studentId,
+        (publishReviewDetailRequestGenerations.current.get(studentId) ?? 0) + 1
+      );
+      setPublishReviewDetails((current) => ({
+        ...current,
+        [studentId]: {
+          status: "success",
+          scoreLabel: scoreSummaryLabel(refreshed.grade),
+          summaryLabel: reportContentSummaryLabel(refreshed)
+        }
+      }));
       setStudentStatusOverrides((current) => ({
         ...current,
         [studentId]: refreshed.gradingStatus
@@ -2227,7 +2255,12 @@ export const GradingWorkspacePage = ({
     const confirmation = markCompleteConfirmation;
     return runGradingMutation(
       confirmation.studentId,
-      () => markComplete({ ...request, studentId: confirmation.studentId }),
+      () =>
+        markComplete({
+          ...request,
+          studentId: confirmation.studentId,
+          ...(confirmation.setScoreToZero ? { setScoreToZero: true } : {})
+        }),
       () => setMarkCompleteConfirmation(undefined)
     );
   };
@@ -2514,7 +2547,7 @@ export const GradingWorkspacePage = ({
         }));
       const isCurrentFetch = (): boolean =>
         mounted.current &&
-        publishReviewOpenRef.current &&
+        (publishReviewOpenRef.current || gradedSummaryOpenRef.current) &&
         publishReviewDetailGeneration.current === reviewGeneration &&
         publishReviewDetailRequestGenerations.current.get(studentId) === requestGeneration;
       try {
@@ -2545,6 +2578,7 @@ export const GradingWorkspacePage = ({
   const openPublishReview = (): void => {
     requestPanelOpen(() => {
       void flushPendingViewState(currentStudentId);
+      setPublishReviewFinished(false);
       setPublishReviewResults(undefined);
       setPublishReviewRefreshFailedStudentIds([]);
       setPublishReviewSelectedIds(publishReviewReadyEntries.map((entry) => entry.studentId));
@@ -2559,15 +2593,7 @@ export const GradingWorkspacePage = ({
     // queued student ids instead of draining the whole batch for a closed screen.
     publishReviewDetailGeneration.current += 1;
     publishReviewOpenRef.current = false;
-    setPublishReviewDetails((current) => {
-      const abandonedStudentIds = Object.entries(current)
-        .filter(([, detail]) => detail.status === "loading")
-        .map(([studentId]) => studentId);
-      if (abandonedStudentIds.length === 0) return current;
-      const next = { ...current };
-      abandonedStudentIds.forEach((studentId) => delete next[studentId]);
-      return next;
-    });
+    setPublishReviewDetails(withoutLoadingGradeDetails);
     setPublishReviewOpen(false);
   };
 
@@ -2668,13 +2694,23 @@ export const GradingWorkspacePage = ({
       setGradingMutationStudentId((current) =>
         current !== undefined && studentIds.includes(current) ? undefined : current
       );
-      if (isCurrentPublishReview()) setPublishReviewRunning(false);
+      if (isCurrentPublishReview()) {
+        setPublishReviewRunning(false);
+        setPublishReviewFinished(true);
+      }
       if (selectedStudentId !== undefined) void flushPendingViewState(selectedStudentId);
     }
   };
 
   useEffect(() => {
-    if (!publishReviewOpen) return;
+    if (!publishReviewOpen && studentFilter !== "graded") {
+      publishReviewDetailGeneration.current += 1;
+      setPublishReviewDetails(withoutLoadingGradeDetails);
+    }
+  }, [publishReviewOpen, studentFilter]);
+
+  useEffect(() => {
+    if (!publishReviewOpen && studentFilter !== "graded") return;
     const missingIds = publishReviewReadyEntries
       .map((entry) => entry.studentId)
       .filter((studentId) => publishReviewDetails[studentId] === undefined);
@@ -2690,7 +2726,7 @@ export const GradingWorkspacePage = ({
     });
     const isCurrentFetch = (): boolean =>
       mounted.current &&
-      publishReviewOpenRef.current &&
+      (publishReviewOpenRef.current || gradedSummaryOpenRef.current) &&
       publishReviewDetailGeneration.current === generation;
 
     // Bounds concurrent git-backed snapshot fetches: each worker claims the next
@@ -2719,6 +2755,7 @@ export const GradingWorkspacePage = ({
   }, [
     fetchPublishReviewDetail,
     publishReviewOpen,
+    studentFilter,
     publishReviewReadyEntries,
     publishReviewDetails
   ]);
@@ -3061,6 +3098,22 @@ export const GradingWorkspacePage = ({
       />
     );
 
+  const zeroScoreDialog = (
+    <ConfirmDialog
+      isOpen={markCompleteConfirmation?.setScoreToZero === true}
+      title={`Set ${markCompleteConfirmation?.studentId ?? "student"} score to 0 and mark complete?`}
+      summary="Existing comments and notes are preserved. This completes grading without publishing feedback. Editing feedback afterward restores the calculated score."
+      diff={[]}
+      confirmLabel="Confirm set score to 0 and complete"
+      isConfirming={gradingMutationStudentId !== undefined}
+      onConfirm={() => void confirmMarkComplete()}
+      onCancel={() => {
+        setMarkCompleteConfirmation(undefined);
+        setGradingMutationError(undefined);
+      }}
+    />
+  );
+
   const libraryDeleteDialog = (
     <ConfirmDialog
       confirmLabel="Delete reusable comment"
@@ -3097,9 +3150,11 @@ export const GradingWorkspacePage = ({
           onCancel={cancelPublishReview}
           onPublish={() => void runPublishReview()}
           onRetryDetail={retryPublishReviewDetail}
+          finished={publishReviewFinished}
           running={publishReviewRunning}
           refreshFailedStudentIds={publishReviewRefreshFailedStudentIds}
         />
+        {gradingMutationError === undefined ? null : <p role="alert">{gradingMutationError}</p>}
         {footer}
         {cheatSheet}
         {discardDraftPrompt}
@@ -3177,10 +3232,28 @@ export const GradingWorkspacePage = ({
   return (
     <main className="dashboard-shell grading-workspace">
       {header}
+      {studentFilter === "graded" ? (
+        <section
+          className="grading-publish-review grading-completed-summary"
+          aria-label="Completed grades"
+        >
+          <h2>Completed grades</h2>
+          <GradingGradeSummaryTable
+            rows={publishReviewReadyRows}
+            caption="Completed grades"
+            onRetryDetail={retryPublishReviewDetail}
+          />
+        </section>
+      ) : null}
       <div className="grading-workspace__body">
         {commentWorkspace}
         <div className="grading-workspace__grid" hidden={commentWorkspace !== null}>
           <GradingStudentListPane
+            sort={studentSort}
+            onSortChange={(sort) => {
+              rememberStudentSort(sort);
+              setStudentSort(sort);
+            }}
             totalStudentsCount={result.students.length}
             filteredStudents={filteredStudents}
             selectedIndex={selected}
@@ -3445,6 +3518,7 @@ export const GradingWorkspacePage = ({
                   </div>
                 ) : null}
                 {markCompleteConfirmation !== undefined &&
+                !markCompleteConfirmation.setScoreToZero &&
                 markCompleteConfirmation.studentId === snapshot.snapshot.studentId ? (
                   <div
                     className="grading-delete-comment-confirmation"
@@ -3607,6 +3681,32 @@ export const GradingWorkspacePage = ({
               runAfterReplacement={workflowRepairRunAfterReplacement}
               onRunAfterReplacementChange={setWorkflowRepairRunAfterReplacement}
             />
+            {snapshot.status === "success" ? (
+              <div className="grading-zero-score-action">
+                <button
+                  className="secondary-action"
+                  type="button"
+                  disabled={
+                    gradingMutationStudentId !== undefined ||
+                    gradingMutationBlockedStudents.current.has(snapshot.snapshot.studentId)
+                  }
+                  onClick={() =>
+                    requestPanelOpen(() =>
+                      setMarkCompleteConfirmation({
+                        studentId: snapshot.snapshot.studentId,
+                        setScoreToZero: true
+                      })
+                    )
+                  }
+                >
+                  Set score to 0 and complete
+                </button>
+                <p>
+                  Exceptional grading action. Existing comments are preserved. Editing feedback
+                  afterward restores the calculated score.
+                </p>
+              </div>
+            ) : null}
           </aside>
         </div>
       </div>
@@ -3614,6 +3714,7 @@ export const GradingWorkspacePage = ({
       {cheatSheet}
       {discardDraftPrompt}
       {libraryDeleteDialog}
+      {zeroScoreDialog}
       <Toast message={toastMessage} />
     </main>
   );

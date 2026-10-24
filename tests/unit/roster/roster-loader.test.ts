@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import { resolveFacultyScope } from "../../../src/faculty/faculty-scope-resolver.js";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadGraiderConfig } from "../../../src/config/config-loader.js";
@@ -108,4 +111,29 @@ describe("roster loading and validation", () => {
   it("TC-ROSTER-010 invalid GitHub username syntax fails", () => {
     expectRosterError("invalid-github-username", "invalid_github_username");
   });
+});
+
+it("reads optional structured names from roster CSV into faculty scope without rewriting the roster", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-sort-roster-"));
+  try {
+    fs.cpSync(path.join(FIXTURE_ROOT, "valid-course"), root, { recursive: true });
+    const file = path.join(root, "terms/27s1/rosters/section-001.csv");
+    const original = fs.readFileSync(file, "utf8");
+    const csv = original
+      .trimEnd()
+      .split("\n")
+      .map((line, index) => (index === 0 ? `${line},first_name,last_name` : `${line},Ada,Lovelace`))
+      .join("\n");
+    fs.writeFileSync(file, csv);
+    const config = loadGraiderConfig({ cwd: root, assignmentFile: ASSIGNMENT_FILE });
+    if (config.status !== "success") throw new Error("Expected config");
+    const roster = loadAssignmentRosters(config.config);
+    expect(roster.errors).toEqual([]);
+    expect(roster.students[0]).toMatchObject({ firstName: "Ada", lastName: "Lovelace" });
+    const scoped = resolveFacultyScope("faculty", [{ id: "001", faculty: ["faculty"] }], roster);
+    expect(scoped.students[0]).toMatchObject({ firstName: "Ada", lastName: "Lovelace" });
+    expect(fs.readFileSync(file, "utf8")).toBe(csv);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

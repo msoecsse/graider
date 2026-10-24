@@ -467,3 +467,15 @@ it("previews an unstarted submission without creating a grading state file", () 
     studentId: "ada"
   });
 });
+
+it("rejects publication when the final zero override changes during an active operation", () => {
+  const prepared = prepare();
+  expect(
+    revalidatePreparedGradingStudentReportPublication(prepared, SHA, {
+      ...dependencies(),
+      loadState: vi
+        .fn()
+        .mockReturnValue({ status: "success", value: { ...gradingState(), finalScoreOverride: 0 } })
+    })
+  ).toEqual({ status: "publication_stale", studentId: "ada" });
+});

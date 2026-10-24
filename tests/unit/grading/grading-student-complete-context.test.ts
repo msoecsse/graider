@@ -44,6 +44,35 @@ afterEach(() => {
 });
 
 describe("mark grading student complete context", () => {
+  it.each([false, true])(
+    "atomically persists a zero total and completion, preserving existing work: %s",
+    (hasWork) => {
+      const { request, stateRequest } = setup();
+      const initial = createInitialGradingState("jones", SHA);
+      if (initial.status === "failure") throw new Error(initial.message);
+      const comments = hasWork ? [{ id: "keep", text: "Existing note", deduction: 2 }] : [];
+      saveGradingState(stateRequest, {
+        ...initial.value,
+        status: "published",
+        appliedComments: comments
+      });
+      expect(markGradingStudentCompleteContext({ ...request, setScoreToZero: true })).toEqual({
+        status: "success",
+        studentId: "jones",
+        gradingStatus: "complete"
+      });
+      expect(loadGradingState(stateRequest)).toMatchObject({
+        status: "success",
+        value: {
+          finalScoreOverride: 0,
+          status: "complete",
+          submissionCommitSha: SHA,
+          appliedComments: comments,
+          manualAdjustments: []
+        }
+      });
+    }
+  );
   it("atomically creates a canonical complete state at the trusted HEAD without a score", () => {
     const { request, stateRequest } = setup();
     expect(markGradingStudentCompleteContext(request)).toEqual({

@@ -19,6 +19,8 @@ export interface GradingWorkspaceAssignment {
 }
 
 export interface GradingWorkspaceStudent {
+  readonly firstName?: string;
+  readonly lastName?: string;
   readonly studentId: string;
   readonly githubUsername: string;
   readonly section: string;

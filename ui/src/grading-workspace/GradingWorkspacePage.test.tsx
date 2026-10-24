@@ -1,3 +1,4 @@
+import { rememberStudentSort } from "./studentSort";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GradingEditorViewState, GradingWorkspacePrepareRequest } from "../../electron/ipc";
@@ -270,6 +271,7 @@ const setApis = (
 };
 
 afterEach(() => {
+  rememberStudentSort({ key: "default", direction: "ascending" });
   vi.useRealTimers();
 });
 
@@ -3268,6 +3270,10 @@ describe("comment mutation viewer identity", () => {
         expect(select).toHaveValue(file);
         expect(loadSource).toHaveBeenCalledTimes(1);
       };
+      fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), {
+        target: { value: "section" }
+      });
+      assertPosition();
       fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
       assertPosition();
       fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
@@ -3276,6 +3282,11 @@ describe("comment mutation viewer identity", () => {
       fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
         target: { value: "New body" }
       });
+      fireEvent.change(screen.getByRole("combobox", { name: "Sort by", hidden: true }), {
+        target: { value: "lastName" }
+      });
+      expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("New body");
+      assertPosition();
       fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
       await screen.findByRole("button", { name: "Edit comment: New body" });
       assertPosition();
@@ -3509,4 +3520,201 @@ it("navigates saved comment anchors after reopening and uses relocated positions
   );
   fireEvent.click(screen.getByRole("button", { name: "Show comment location: Saved anchor" }));
   expect(screen.getByTestId("mock-navigation")).toHaveTextContent(JSON.stringify(target()));
+});
+
+describe("grading workflow cleanup", () => {
+  it("confirms the bottom-pane zero action, preserves work, and shares its score across Graded and Publish", async () => {
+    let zeroed = false;
+    const markComplete = vi.fn().mockImplementation(() => {
+      zeroed = true;
+      return Promise.resolve({ status: "success", studentId: "ada", gradingStatus: "complete" });
+    });
+    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve({
+        ...snapshot(studentId, zeroed ? "complete" : "in_progress"),
+        appliedComments: [{ id: "keep", text: "Preserved note", deduction: 2 }],
+        grade: {
+          ...snapshot(studentId).grade,
+          totalScore: zeroed ? 0 : 98,
+          ...(zeroed ? { finalScoreOverride: 0 } : {})
+        }
+      })
+    );
+    setApis(
+      vi
+        .fn()
+        .mockResolvedValue(
+          workspace([{ studentId: "ada", section: "001", gradingStatus: "in_progress" }])
+        ),
+      vi.fn().mockResolvedValue(source("ada")),
+      undefined,
+      undefined,
+      loadSnapshot,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      markComplete
+    );
+    const publish = vi.fn();
+    Object.assign(window.graiderUI, { bulkPublishGradingStudentReports: publish });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    const action = await screen.findByRole("button", { name: "Set score to 0 and complete" });
+    expect(action.closest("aside")?.lastElementChild).toHaveClass("grading-zero-score-action");
+    fireEvent.click(action);
+    expect(screen.getByRole("dialog")).toHaveTextContent("Set ada score to 0 and mark complete?");
+    expect(markComplete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(markComplete).not.toHaveBeenCalled();
+    fireEvent.click(action);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm set score to 0 and complete" }));
+    await waitFor(() =>
+      expect(markComplete).toHaveBeenCalledWith({
+        ...REQUEST,
+        studentId: "ada",
+        setScoreToZero: true
+      })
+    );
+    expect(
+      await screen.findByText("0 / 100", { selector: ".grading-score-total" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Preserved note")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Graded 1" }));
+    const graded = await screen.findByRole("region", { name: "Completed grades" });
+    expect(within(graded).getByRole("table")).toHaveTextContent("adaSection 0010 / 100");
+    expect(within(graded).queryByRole("checkbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Publish 1 report" }));
+    expect(
+      await screen.findByRole("table", { name: "Students ready to publish" })
+    ).toHaveTextContent("adaSection 0010 / 100");
+    expect(publish).not.toHaveBeenCalled();
+    expect(markComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("sorts without switching student or clearing an unsaved comment", async () => {
+    const loadSource = vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve(source(studentId))
+    );
+    setApis(
+      vi.fn().mockResolvedValue(
+        workspace([
+          { studentId: "ada", section: "10", gradingStatus: "not_started" },
+          { studentId: "grace", section: "2", gradingStatus: "not_started" }
+        ])
+      ),
+      loadSource
+    );
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    const viewer = screen.getByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    const editor = screen.getByRole("textbox", { name: "Comment" });
+    fireEvent.change(editor, { target: { value: "Unsaved work" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort by", hidden: true }), {
+      target: { value: "section" }
+    });
+    expect(editor).toHaveValue("Unsaved work");
+    expect(screen.getByTestId("mock-monaco")).toBe(viewer);
+    expect(viewer).toHaveTextContent("ada:");
+    expect(loadSource).toHaveBeenCalledTimes(1);
+  });
+});
+
+it("uses sorted visible order for next/previous while preserving the selected row", async () => {
+  const loadSource = vi.fn(({ studentId }: { studentId: string }) =>
+    Promise.resolve(source(studentId))
+  );
+  setApis(
+    vi.fn().mockResolvedValue(
+      workspace([
+        { studentId: "ada", section: "10", gradingStatus: "not_started" },
+        { studentId: "grace", section: "2", gradingStatus: "not_started" },
+        { studentId: "henry", section: "3", gradingStatus: "not_started" }
+      ])
+    ),
+    loadSource
+  );
+  render(<GradingWorkspacePage request={REQUEST} />);
+  await screen.findByTestId("mock-monaco");
+  fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), {
+    target: { value: "section" }
+  });
+  expect(
+    [...document.querySelectorAll(".grading-workspace__student-row")].map(
+      (row) => row.textContent?.split(" ·")[0]
+    )
+  ).toEqual(["grace", "henry", "ada"]);
+  expect(document.querySelector(".grading-workspace__student-row.selected")).toHaveTextContent(
+    "ada"
+  );
+  expect(loadSource).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+  await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("henry:"));
+  fireEvent.click(screen.getByRole("button", { name: "Next ungraded" }));
+  await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
+  rememberStudentSort({ key: "default", direction: "ascending" });
+});
+
+it("refreshes the shared Graded and Ready to Publish score when completed feedback is edited", async () => {
+  let deduction = 5;
+  const currentSnapshot = () => ({
+    ...snapshot("ada", "complete"),
+    appliedComments: [
+      { id: "comment", text: "Existing feedback", deduction, rubricCategoryId: "quality" }
+    ],
+    grade: {
+      ...snapshot("ada").grade,
+      totalScore: 100 - deduction,
+      categories: [
+        {
+          id: "quality",
+          name: "Quality",
+          score: 100 - deduction,
+          pointsPossible: 100,
+          categorizedCommentAdjustmentTotal: -deduction,
+          manualAdjustmentTotal: 0
+        }
+      ]
+    }
+  });
+  const edit = vi.fn().mockImplementation(() => {
+    deduction = 15;
+    return Promise.resolve({
+      status: "success",
+      studentId: "ada",
+      gradingStatus: "complete",
+      appliedComments: currentSnapshot().appliedComments
+    });
+  });
+  setApis(
+    vi.fn().mockResolvedValue({
+      ...workspace([{ studentId: "ada", section: "001", gradingStatus: "complete" }]),
+      rubric: [{ id: "quality", name: "Quality", points: 100 }]
+    }),
+    vi.fn().mockResolvedValue(source("ada")),
+    undefined,
+    undefined,
+    vi.fn().mockImplementation(() => Promise.resolve(currentSnapshot())),
+    undefined,
+    undefined,
+    edit
+  );
+  render(<GradingWorkspacePage request={REQUEST} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Graded 1" }));
+  const summary = await screen.findByRole("region", { name: "Completed grades" });
+  await waitFor(() => expect(summary).toHaveTextContent("95 / 100"));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Existing feedback" }));
+  fireEvent.change(screen.getByRole("spinbutton", { name: "Deduction" }), {
+    target: { value: "15" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+  await waitFor(() => expect(summary).toHaveTextContent("85 / 100"));
+  expect(summary).not.toHaveTextContent("95 / 100");
+  fireEvent.click(screen.getByRole("button", { name: "Publish 1 report" }));
+  expect(await screen.findByRole("table", { name: "Students ready to publish" })).toHaveTextContent(
+    "85 / 100"
+  );
 });

@@ -11,6 +11,8 @@ export interface FacultyScopeSection {
 }
 
 export interface FacultyScopedStudent {
+  readonly firstName?: string;
+  readonly lastName?: string;
   readonly studentId: string;
   readonly githubUsername: string;
   readonly section: string;
@@ -76,6 +78,8 @@ export const resolveFacultyScope = (
 };
 
 const toScopedStudent = (student: RosterStudent): FacultyScopedStudent => ({
+  ...(student.firstName === undefined ? {} : { firstName: student.firstName }),
+  ...(student.lastName === undefined ? {} : { lastName: student.lastName }),
   studentId: student.studentId,
   githubUsername: student.githubUsername,
   section: student.section

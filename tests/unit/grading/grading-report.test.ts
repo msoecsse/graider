@@ -10,6 +10,7 @@ import {
 import { renderGradingReportHtml } from "../../../src/grading/grading-report-html.js";
 
 const COMMIT_SHA_LENGTH = 40;
+const REPORT_POINTS_POSSIBLE = 10;
 const POSITIVE_MANUAL_ADJUSTMENT = 1.5;
 const NEGATIVE_MANUAL_ADJUSTMENT = -0.25;
 const FOUR_POINT_DEDUCTION = 4;
@@ -307,6 +308,21 @@ describe("grading report model", () => {
       })
     );
   });
+});
+
+it("renders the canonical zero total and preserved rubric/comments in reports", () => {
+  const input = baseInput();
+  const model = buildGradingReportModel({
+    ...input,
+    gradingState: { ...input.gradingState, finalScoreOverride: 0 }
+  });
+  if (model.status !== "success") throw new Error("Expected report");
+  expect(model.value.grade.totalScore).toBe(0);
+  expect(model.value.grade.pointsPossible).toBe(REPORT_POINTS_POSSIBLE);
+  const html = renderGradingReportHtml(model.value);
+  expect(html).toContain("0 / 10 points");
+  expect(html).toContain("Final score set to 0 by instructor");
+  expect(html).toContain("Explain the design choice.");
 });
 
 describe("grading report HTML", () => {

@@ -36,6 +36,15 @@ describe("grading student complete service", () => {
       studentId: "ada",
       gradingStatus: "complete"
     });
+    await service({ ...request, setScoreToZero: true });
+    expect(mark).toHaveBeenLastCalledWith({
+      courseFolderPath: request.courseFolderPath,
+      termCode: request.termCode,
+      assignmentSlug: request.assignmentSlug,
+      studentId: request.studentId,
+      currentSubmissionCommitSha: "a".repeat(40),
+      setScoreToZero: true
+    });
     expect(resolveRepository).toHaveBeenCalledWith(request);
     expect(readHead).toHaveBeenCalledWith("/repo/ada");
     expect(mark).toHaveBeenCalledWith({

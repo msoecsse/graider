@@ -36,6 +36,102 @@ const detailSummaryText = (detail: PublishReviewDetailState): string => {
   return "Report contents unavailable";
 };
 
+export const GradingGradeSummaryTable = ({
+  rows,
+  caption,
+  selectedIds = [],
+  onToggle,
+  onRetryDetail,
+  running = false
+}: {
+  readonly rows: readonly PublishReviewReadyRow[];
+  readonly caption: string;
+  readonly selectedIds?: readonly string[];
+  readonly onToggle?: (studentId: string, selected: boolean) => void;
+  readonly onRetryDetail: (studentId: string) => void;
+  readonly running?: boolean;
+}): ReactElement => (
+  <table className="grading-publish-review__table">
+    <caption className="visually-hidden">{caption}</caption>
+    <thead>
+      <tr>
+        {onToggle === undefined ? null : (
+          <th scope="col">
+            <span className="visually-hidden">Publish</span>
+          </th>
+        )}
+        <th scope="col">Student</th>
+        <th scope="col">Section</th>
+        <th scope="col">Score</th>
+        <th scope="col">Report contents</th>
+        <th scope="col">Result</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows.map((row) => {
+        const inputId = `publish-review-select-${row.studentId}`;
+        return (
+          <tr key={row.studentId}>
+            {onToggle === undefined ? null : (
+              <td>
+                <input
+                  id={inputId}
+                  type="checkbox"
+                  checked={selectedIds.includes(row.studentId)}
+                  disabled={running}
+                  aria-label={`Select ${row.studentId} to publish`}
+                  onChange={(event) => {
+                    const checked = event.currentTarget.checked;
+                    onToggle?.(row.studentId, checked);
+                  }}
+                />
+              </td>
+            )}
+            <th scope="row">
+              {onToggle === undefined ? (
+                row.studentId
+              ) : (
+                <label htmlFor={inputId}>{row.studentId}</label>
+              )}
+            </th>
+            <td>Section {row.section}</td>
+            <td>
+              {detailScoreText(row.detail)}
+              {row.detail.status !== "unavailable" ? null : (
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => onRetryDetail(row.studentId)}
+                >
+                  Retry
+                </button>
+              )}
+            </td>
+            <td>{detailSummaryText(row.detail)}</td>
+            <td>
+              {row.outcome === undefined ? null : (
+                <div
+                  className={`grading-publish-review__outcome grading-publish-review__outcome--${row.outcome.tone}`}
+                  role="status"
+                >
+                  <p>{row.outcome.message}</p>
+                  {row.outcome.warnings.length === 0 ? null : (
+                    <ul>
+                      {row.outcome.warnings.map((warning, index) => (
+                        <li key={`${row.studentId}-${index}`}>{warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </td>
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+);
+
 export const GradingPublishReviewPanel = ({
   readyRows,
   publishedRows,
@@ -46,6 +142,7 @@ export const GradingPublishReviewPanel = ({
   onPublish,
   onRetryDetail,
   running,
+  finished = false,
   refreshFailedStudentIds
 }: {
   readonly readyRows: readonly PublishReviewReadyRow[];
@@ -57,6 +154,7 @@ export const GradingPublishReviewPanel = ({
   readonly onPublish: () => void;
   readonly onRetryDetail: (studentId: string) => void;
   readonly running: boolean;
+  readonly finished?: boolean;
   readonly refreshFailedStudentIds: readonly string[];
 }): ReactElement => {
   const selectedCount = selectedIds.length;
@@ -78,77 +176,14 @@ export const GradingPublishReviewPanel = ({
         {readyRows.length === 0 ? (
           <p>No completed reports are ready to publish.</p>
         ) : (
-          <table className="grading-publish-review__table">
-            <caption className="visually-hidden">Students ready to publish</caption>
-            <thead>
-              <tr>
-                <th scope="col">
-                  <span className="visually-hidden">Publish</span>
-                </th>
-                <th scope="col">Student</th>
-                <th scope="col">Section</th>
-                <th scope="col">Score</th>
-                <th scope="col">Report contents</th>
-                <th scope="col">Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              {readyRows.map((row) => {
-                const inputId = `publish-review-select-${row.studentId}`;
-                return (
-                  <tr key={row.studentId}>
-                    <td>
-                      <input
-                        id={inputId}
-                        type="checkbox"
-                        checked={selectedIds.includes(row.studentId)}
-                        disabled={running}
-                        aria-label={`Select ${row.studentId} to publish`}
-                        onChange={(event) => {
-                          const checked = event.currentTarget.checked;
-                          onToggle(row.studentId, checked);
-                        }}
-                      />
-                    </td>
-                    <th scope="row">
-                      <label htmlFor={inputId}>{row.studentId}</label>
-                    </th>
-                    <td>Section {row.section}</td>
-                    <td>
-                      {detailScoreText(row.detail)}
-                      {row.detail.status !== "unavailable" ? null : (
-                        <button
-                          className="secondary-action"
-                          type="button"
-                          onClick={() => onRetryDetail(row.studentId)}
-                        >
-                          Retry
-                        </button>
-                      )}
-                    </td>
-                    <td>{detailSummaryText(row.detail)}</td>
-                    <td>
-                      {row.outcome === undefined ? null : (
-                        <div
-                          className={`grading-publish-review__outcome grading-publish-review__outcome--${row.outcome.tone}`}
-                          role="status"
-                        >
-                          <p>{row.outcome.message}</p>
-                          {row.outcome.warnings.length === 0 ? null : (
-                            <ul>
-                              {row.outcome.warnings.map((warning, index) => (
-                                <li key={`${row.studentId}-${index}`}>{warning}</li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <GradingGradeSummaryTable
+            rows={readyRows}
+            caption="Students ready to publish"
+            selectedIds={selectedIds}
+            onToggle={onToggle}
+            onRetryDetail={onRetryDetail}
+            running={running}
+          />
         )}
       </div>
       <div className="grading-publish-review__section">
@@ -200,7 +235,7 @@ export const GradingPublishReviewPanel = ({
         </p>
         <div className="grading-publish-review__footer-actions">
           <button className="secondary-action" type="button" disabled={running} onClick={onCancel}>
-            Cancel
+            {finished ? "Close" : "Cancel"}
           </button>
           <button
             className="primary-action"

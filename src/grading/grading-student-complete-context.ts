@@ -13,6 +13,7 @@ export interface GradingStudentCompleteContextRequest {
   readonly assignmentSlug: string;
   readonly studentId: string;
   readonly currentSubmissionCommitSha: string;
+  readonly setScoreToZero?: boolean;
 }
 
 export type GradingStudentCompleteContextResult =
@@ -69,9 +70,12 @@ export const markGradingStudentCompleteContext = (
 
   // Publishing is a stronger lifecycle state. Explicitly completing an already published record
   // is a no-op; feedback mutations continue to use their canonical published -> complete behavior.
-  if (current.status === "published") return success(request.studentId, current);
+  if (current.status === "published" && !request.setScoreToZero)
+    return success(request.studentId, current);
 
-  const completed = markComplete(current);
+  const completed = markComplete(
+    request.setScoreToZero ? { ...current, finalScoreOverride: 0 } : current
+  );
   if (completed.status === "failure") return stateError(request.studentId, completed.code);
   const saved = saveGradingState(stateRequest(request), completed.value);
   return saved.status === "success"

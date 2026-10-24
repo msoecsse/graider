@@ -122,6 +122,7 @@ export const gradingStateSchema = z
       .optional(),
     appliedComments: z.array(appliedCommentSchema),
     manualAdjustments: z.array(manualAdjustmentSchema),
+    finalScoreOverride: z.literal(0).optional(),
     viewState: gradingEditorViewStateSchema.optional()
   })
   .strict()

@@ -26,6 +26,8 @@ export type FacultyScopeServiceResult = {
     | "term_config_error";
   readonly sections: readonly string[];
   readonly students: readonly {
+    readonly firstName?: string;
+    readonly lastName?: string;
     readonly studentId: string;
     readonly githubUsername: string;
     readonly section: string;

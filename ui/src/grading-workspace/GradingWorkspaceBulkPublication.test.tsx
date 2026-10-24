@@ -339,3 +339,66 @@ describe("GradingWorkspacePage publish review", () => {
     expect(screen.getByRole("button", { name: "Publish 0 reports" })).toBeDisabled();
   });
 });
+
+it.each(["success", "mixed", "failure"])(
+  "keeps %s publication results until Close and closes without republishing",
+  async (outcome) => {
+    const pending = deferred<unknown>();
+    const bulkPublish = vi.fn().mockReturnValue(pending.promise);
+    configure({ statuses: { ada: "complete", grace: "complete" }, bulkPublish });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await openPublishReview();
+    fireEvent.click(screen.getByRole("button", { name: "Publish 2 reports" }));
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+    await act(async () =>
+      pending.resolve({
+        status: "success",
+        results: ["ada", "grace"].map((studentId, index) => ({
+          studentId,
+          result:
+            outcome === "success" || (outcome === "mixed" && index === 0)
+              ? {
+                  status: "success",
+                  studentId,
+                  reportPath: "feedback.html",
+                  warnings: []
+                }
+              : { status: "report_generation_failed", studentId }
+        }))
+      })
+    );
+    const close = await screen.findByRole("button", { name: "Close" });
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Publish review" })).toBeInTheDocument();
+    expect(document.querySelectorAll(".grading-publish-review__outcome")).toHaveLength(2);
+    fireEvent.click(close);
+    expect(screen.queryByRole("heading", { name: "Publish review" })).not.toBeInTheDocument();
+    expect(bulkPublish).toHaveBeenCalledTimes(1);
+  }
+);
+
+it("reloads abandoned Graded summary reads when returning, without changing grading or publishing", async () => {
+  const pending = deferred<ReturnType<typeof snapshot>>();
+  let graceLoads = 0;
+  const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) => {
+    if (studentId === "grace") {
+      graceLoads += 1;
+      return graceLoads === 1 ? pending.promise : Promise.resolve(snapshot(studentId, "complete"));
+    }
+    return Promise.resolve(snapshot(studentId, "not_started"));
+  });
+  const { bulkPublish } = configure({
+    statuses: { ada: "not_started", grace: "complete" },
+    loadSnapshot
+  });
+  render(<GradingWorkspacePage request={REQUEST} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Graded 1" }));
+  await screen.findByText("Loading…");
+  fireEvent.click(screen.getByRole("button", { name: "All 2" }));
+  await act(async () => pending.resolve(snapshot("grace", "complete")));
+  fireEvent.click(screen.getByRole("button", { name: "Graded 1" }));
+  await screen.findByText("No comments or adjustments yet");
+  expect(graceLoads).toBe(2);
+  expect(bulkPublish).not.toHaveBeenCalled();
+});

@@ -1,8 +1,14 @@
 import type { ReactElement, RefObject } from "react";
+import type { StudentSort, StudentSortKey } from "./studentSort";
 import { FilterPills } from "../components/FilterPills";
 
 export interface GradingStudentListEntry {
-  readonly student: { readonly studentId: string; readonly section: string };
+  readonly student: {
+    readonly studentId: string;
+    readonly section: string;
+    readonly firstName?: string;
+    readonly lastName?: string;
+  };
   readonly index: number;
   readonly status: string;
 }
@@ -10,6 +16,8 @@ export interface GradingStudentListEntry {
 export type StudentFilterId = "to_grade" | "graded" | "published" | "all";
 
 export const GradingStudentListPane = ({
+  sort,
+  onSortChange,
   totalStudentsCount,
   filteredStudents,
   selectedIndex,
@@ -28,6 +36,8 @@ export const GradingStudentListPane = ({
   hasPrevious,
   hasNext
 }: {
+  readonly sort?: StudentSort;
+  readonly onSortChange?: (sort: StudentSort) => void;
   readonly totalStudentsCount: number;
   readonly filteredStudents: readonly GradingStudentListEntry[];
   readonly selectedIndex: number;
@@ -48,6 +58,38 @@ export const GradingStudentListPane = ({
 }): ReactElement => (
   <aside>
     <h2>Students</h2>
+    {sort === undefined || onSortChange === undefined ? null : (
+      <div className="grading-student-sort">
+        <label>
+          Sort by{" "}
+          <select
+            value={sort.key}
+            onChange={(event) =>
+              onSortChange({ ...sort, key: event.currentTarget.value as StudentSortKey })
+            }
+          >
+            <option value="default">Roster order</option>
+            <option value="section">Section</option>
+            <option value="firstName">First name</option>
+            <option value="lastName">Last name</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className="secondary-action"
+          aria-label={`Sort ${sort.direction === "ascending" ? "descending" : "ascending"}`}
+          disabled={sort.key === "default"}
+          onClick={() =>
+            onSortChange({
+              ...sort,
+              direction: sort.direction === "ascending" ? "descending" : "ascending"
+            })
+          }
+        >
+          {sort.direction === "ascending" ? "↑" : "↓"}
+        </button>
+      </div>
+    )}
     {totalStudentsCount === 0 ? null : (
       <div ref={filterPillsContainerRef}>
         <FilterPills

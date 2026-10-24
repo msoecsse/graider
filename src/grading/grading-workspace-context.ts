@@ -3,6 +3,8 @@ import { loadGradingState, type GradingState } from "./grading-state.js";
 import { calculateGrade, type RubricCategory } from "./grading-state-operations.js";
 
 export interface GradingWorkspaceScopedStudent {
+  readonly firstName?: string;
+  readonly lastName?: string;
   readonly studentId: string;
   readonly githubUsername: string;
   readonly section: string;

@@ -37,6 +37,7 @@ export interface RubricCategoryScore {
 }
 
 export interface GradeCalculation {
+  readonly finalScoreOverride?: number;
   readonly pointsPossible: number;
   readonly totalScore: number;
   readonly categories: readonly RubricCategoryScore[];
@@ -54,7 +55,11 @@ const mutationStatus = (status: GradingState["status"]): GradingState["status"] 
 };
 
 const validatedMutation = (state: GradingState): GradingStateResult<GradingState> =>
-  validateGradingState({ ...state, status: mutationStatus(state.status) });
+  validateGradingState({
+    ...state,
+    finalScoreOverride: undefined,
+    status: mutationStatus(state.status)
+  });
 
 const notFound = (
   kind: "applied comment" | "manual adjustment"
@@ -233,10 +238,14 @@ export const calculateGrade = (
   return {
     status: "success",
     value: {
+      ...(state.finalScoreOverride === undefined
+        ? {}
+        : { finalScoreOverride: state.finalScoreOverride }),
       pointsPossible: rubric.reduce((total, category) => total + category.points, 0),
       totalScore:
+        state.finalScoreOverride ??
         categories.reduce((total, category) => total + category.score, 0) +
-        uncategorizedCommentAdjustmentTotal,
+          uncategorizedCommentAdjustmentTotal,
       categories,
       uncategorizedCommentAdjustmentTotal
     }

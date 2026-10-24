@@ -15,6 +15,7 @@ export interface MarkGradingStudentCompleteRequest extends FacultyScopeServiceRe
   readonly courseFolderId: string;
   readonly assignmentSlug: string;
   readonly studentId: string;
+  readonly setScoreToZero?: boolean;
 }
 
 export type MarkGradingStudentCompleteResult =
@@ -44,6 +45,7 @@ interface BackendRequest {
   readonly assignmentSlug: string;
   readonly studentId: string;
   readonly currentSubmissionCommitSha: string;
+  readonly setScoreToZero?: boolean;
 }
 
 export interface GradingStudentCompleteBackend {
@@ -88,6 +90,7 @@ export const createGradingStudentCompleteService = (
       termCode: request.termCode,
       assignmentSlug: request.assignmentSlug,
       studentId: request.studentId,
+      ...(request.setScoreToZero === undefined ? {} : { setScoreToZero: request.setScoreToZero }),
       currentSubmissionCommitSha: head.submissionCommitSha
     });
   };

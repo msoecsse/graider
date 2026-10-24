@@ -10,6 +10,8 @@ export type RosterStatus =
   | typeof ROSTER_STATUS_HOLD;
 
 export interface RosterStudent {
+  readonly firstName?: string;
+  readonly lastName?: string;
   studentId: string;
   githubUsername: string;
   section: string;

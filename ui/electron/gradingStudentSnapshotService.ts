@@ -35,6 +35,7 @@ export interface RubricCategoryScoreDto {
 }
 
 export interface GradeCalculationDto {
+  readonly finalScoreOverride?: number;
   readonly pointsPossible: number;
   readonly totalScore: number;
   readonly categories: readonly RubricCategoryScoreDto[];

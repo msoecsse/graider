@@ -92,7 +92,17 @@ export const isGradingStudentViewStateRequest = (
 };
 
 export const isLoadGradingStudentSourceRequest = isGradingStudentViewStateRequest;
-export const isMarkGradingStudentCompleteRequest = isGradingStudentViewStateRequest;
+export const isMarkGradingStudentCompleteRequest = (
+  value: unknown
+): value is import("./ipc.js").MarkGradingStudentCompleteRequest => {
+  const request = record(value);
+  if (request === null) return false;
+  const { setScoreToZero, ...identity } = request;
+  return (
+    (setScoreToZero === undefined || typeof setScoreToZero === "boolean") &&
+    isGradingStudentViewStateRequest(identity)
+  );
+};
 export const isLoadGradingStudentEvidenceRequest = isGradingStudentViewStateRequest;
 export const isLoadGradingStudentCommitHistoryRequest = isGradingStudentViewStateRequest;
 export const isPublishGradingStudentReportRequest = isGradingStudentViewStateRequest;

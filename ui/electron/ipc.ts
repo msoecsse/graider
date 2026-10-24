@@ -794,7 +794,9 @@ export interface DeleteGradingStudentManualAdjustmentRequest extends GradingStud
   readonly adjustmentId: string;
 }
 export type { GradingStudentManualAdjustmentResult } from "./gradingStudentManualAdjustmentService.js";
-export type MarkGradingStudentCompleteRequest = GradingStudentViewStateRequest;
+export type MarkGradingStudentCompleteRequest = GradingStudentViewStateRequest & {
+  readonly setScoreToZero?: boolean;
+};
 export type { MarkGradingStudentCompleteResult } from "./gradingStudentCompleteService.js";
 export type PublishGradingStudentReportRequest = GradingStudentViewStateRequest;
 export type { PublishGradingStudentReportResult } from "./gradingStudentReportPublicationService.js";

@@ -7,12 +7,15 @@ export type SnapshotGrade = Snapshot["grade"];
 export const GradingScorePanel = ({ grade }: { readonly grade: SnapshotGrade }): ReactElement => (
   <section aria-labelledby="grading-score-heading">
     <h3 id="grading-score-heading">Score</h3>
-    {grade.categories.length === 0 ? (
+    {grade.categories.length === 0 && grade.finalScoreOverride === undefined ? (
       <p className="grading-score-total">No rubric — enter a score manually</p>
     ) : (
       <p className="grading-score-total">
         {grade.totalScore} / {grade.pointsPossible}
       </p>
+    )}
+    {grade.finalScoreOverride === undefined ? null : (
+      <p>Final score set to 0. Rubric details preserve prior grading work.</p>
     )}
     {grade.categories.length === 0 ? (
       <p>No rubric categories are configured.</p>

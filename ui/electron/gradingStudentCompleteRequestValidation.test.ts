@@ -11,6 +11,9 @@ describe("mark grading student complete request validation", () => {
       studentId: "ada"
     };
     expect(isMarkGradingStudentCompleteRequest(identity)).toBe(true);
+    expect(isMarkGradingStudentCompleteRequest({ ...identity, setScoreToZero: true })).toBe(true);
+    expect(isMarkGradingStudentCompleteRequest({ ...identity, setScoreToZero: "0" })).toBe(false);
+    expect(isMarkGradingStudentCompleteRequest({ ...identity, setScoreToZero: 0 })).toBe(false);
     for (const extra of [
       { status: "published" },
       { submissionCommitSha: "a".repeat(40) },

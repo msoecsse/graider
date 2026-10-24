@@ -20,6 +20,8 @@ import {
   markPublished
 } from "../../../src/grading/grading-state-operations.js";
 
+const TOTAL_POSSIBLE = 65;
+const REVISED_SCORE = 62;
 const rubric = [
   { id: "correctness", name: "Correctness", points: 40 },
   { id: "design", name: "Design", points: 25 }
@@ -35,6 +37,31 @@ const value = <T>(result: { status: "success"; value: T } | { status: string }):
 };
 
 describe("grading state operations", () => {
+  it("uses the persisted zero override without fake deductions and restores calculation when feedback is edited", () => {
+    const original = {
+      ...initial(),
+      status: "complete" as const,
+      finalScoreOverride: 0 as const,
+      appliedComments: [{ id: "keep", text: "Existing work", deduction: 2 }]
+    };
+    expect(calculateGrade(original, rubric)).toMatchObject({
+      status: "success",
+      value: { totalScore: 0, pointsPossible: TOTAL_POSSIBLE }
+    });
+    expect(calculateGrade(original, [])).toMatchObject({
+      status: "success",
+      value: { totalScore: 0, pointsPossible: 0 }
+    });
+    const edited = value<GradingState>(
+      editAppliedComment(original, "keep", { text: "Revised", deduction: 3 })
+    );
+    expect(edited.status).toBe("complete");
+    expect(edited.finalScoreOverride).toBeUndefined();
+    expect(calculateGrade(edited, rubric)).toMatchObject({
+      status: "success",
+      value: { totalScore: REVISED_SCORE }
+    });
+  });
   it("treats comment deductions as negative magnitudes while preserving signed manual adjustments", () => {
     const category = [{ id: "quality", name: "Quality", points: 20 }];
     const positive = calculateGrade(
@@ -87,7 +114,7 @@ describe("grading state operations", () => {
     expect(calculateGrade(state, rubric)).toEqual({
       status: "success",
       value: {
-        pointsPossible: 65,
+        pointsPossible: TOTAL_POSSIBLE,
         totalScore: 55,
         uncategorizedCommentAdjustmentTotal: -1,
         categories: [
@@ -117,7 +144,7 @@ describe("grading state operations", () => {
   it("keeps full points for an empty state and does not clamp or round signed adjustments", () => {
     expect(calculateGrade(initial(), rubric)).toMatchObject({
       status: "success",
-      value: { pointsPossible: 65, totalScore: 65 }
+      value: { pointsPossible: TOTAL_POSSIBLE, totalScore: 65 }
     });
     const state: GradingState = {
       ...initial(),

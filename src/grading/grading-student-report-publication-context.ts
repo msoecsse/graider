@@ -58,6 +58,7 @@ export interface GradingStudentReportPublicationContextRequest {
 }
 
 interface ReportStateBasis {
+  readonly finalScoreOverride?: number;
   readonly schemaVersion: GradingState["schemaVersion"];
   readonly studentId: string;
   readonly submissionCommitSha: string;
@@ -159,7 +160,10 @@ const reportStateBasis = (state: GradingState): string =>
     submissionCommitSha: state.submissionCommitSha,
     status: state.status,
     appliedComments: state.appliedComments,
-    manualAdjustments: state.manualAdjustments
+    manualAdjustments: state.manualAdjustments,
+    ...(state.finalScoreOverride === undefined
+      ? {}
+      : { finalScoreOverride: state.finalScoreOverride })
   } satisfies ReportStateBasis);
 
 export type CheckGradingStudentReportPublicationEligibilityResult =

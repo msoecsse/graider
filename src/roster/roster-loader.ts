@@ -10,7 +10,7 @@ import {
   type RosterStudent,
   type RosterSummary
 } from "./roster-models.js";
-import { parseAndValidateRosterCsv } from "./roster-shared.js";
+import { parseRosterCsvText, parseAndValidateRosterCsv } from "./roster-shared.js";
 import { validateRosterDuplicates } from "./roster-validation.js";
 
 const EMPTY_COUNT = 0;
@@ -69,7 +69,18 @@ const loadSectionRoster = (
     rosterPath: source.rosterPath,
     expectedSection: source.sectionId
   });
+  const document = parseRosterCsvText(fileResult.content);
+  const optionalName = (rowNumber: number, column: string): string => {
+    const index = document.headers.indexOf(column);
+    return document.rows.find((row) => row.rowNumber === rowNumber)?.values[index]?.trim() ?? "";
+  };
   const students: RosterStudent[] = parsed.records.map((record, index) => ({
+    ...(optionalName(parsed.recordRowNumbers[index] ?? EMPTY_COUNT, "first_name") === ""
+      ? {}
+      : { firstName: optionalName(parsed.recordRowNumbers[index] ?? EMPTY_COUNT, "first_name") }),
+    ...(optionalName(parsed.recordRowNumbers[index] ?? EMPTY_COUNT, "last_name") === ""
+      ? {}
+      : { lastName: optionalName(parsed.recordRowNumbers[index] ?? EMPTY_COUNT, "last_name") }),
     studentId: record.studentId,
     githubUsername: record.githubUsername,
     section: record.section,
