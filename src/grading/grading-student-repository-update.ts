@@ -1,3 +1,4 @@
+import { exactSourceMatches, sourceLines as lines } from "./exact-source-anchor.js";
 import { loadGraiderConfig } from "../config/config-loader.js";
 import { loadManifest } from "../manifest/manifest-loader.js";
 import { createManifestPath } from "../manifest/manifest-paths.js";
@@ -35,7 +36,6 @@ export interface StudentRepositoryUpdateResult {
 }
 
 type Comment = GradingState["appliedComments"][number];
-const lines = (text: string): string[] => text.replaceAll("\r\n", "\n").split("\n");
 
 // Exact, unique line sequences are intentionally conservative. Renames, edited text,
 // and repeated snippets need instructor review rather than a guessed source link.
@@ -67,12 +67,7 @@ const relocate = async (
   if (before === null || after === null || location.endLine > originalLines.length) return stale();
   if (before === after) return comment;
   if (snippet.every((line) => line.trim() === "")) return stale();
-  const updatedLines = lines(after);
-  const matches: number[] = [];
-  for (let index = 0; index <= updatedLines.length - snippet.length; index++) {
-    if (snippet.every((line, offset) => updatedLines[index + offset] === line))
-      matches.push(index + 1);
-  }
+  const matches = exactSourceMatches(after, snippet.join("\n"));
   const startLine = matches[0];
   if (matches.length !== 1 || startLine === undefined) return stale();
   return {

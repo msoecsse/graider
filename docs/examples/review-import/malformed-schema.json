@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "reviewId": "cs1021-lab4-jdoe-review-1",
+  "createdAt": "2026-10-23T12:00:00Z",
+  "generator": {
+    "name": "Java Assignment Review Skill",
+    "version": "1"
+  },
+  "assignment": {
+    "courseCode": "CS1021",
+    "termCode": "26s1",
+    "assignmentSlug": "lab4",
+    "title": "Collections"
+  },
+  "student": {
+    "githubUsername": "jane-doe",
+    "studentId": "jdoe",
+    "displayName": "Jane Doe"
+  },
+  "repository": {
+    "owner": "msoe-course",
+    "name": "lab4-jane-doe",
+    "reviewedCommitSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "findings": [
+    {
+      "id": "null-input",
+      "title": "Handle null input",
+      "text": "Validate the input before dereferencing it.",
+      "deduction": "two",
+      "rubric": {
+        "id": "correctness",
+        "name": "Correctness"
+      },
+      "tags": ["validation"],
+      "sourceLocation": {
+        "file": "src/jdoe/Main.java",
+        "startLine": 2,
+        "endLine": 2,
+        "excerpt": "    input.trim();"
+      }
+    },
+    {
+      "id": "documentation",
+      "text": "Document the public API.",
+      "deduction": 1
+    }
+  ]
+}

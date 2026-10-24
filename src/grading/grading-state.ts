@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { reviewProvenanceSchema } from "../review-import/review-schema.js";
 
 export const GRADING_STATE_SCHEMA_VERSION = 1;
 
@@ -73,6 +74,7 @@ const appliedCommentSchema = z
   .object({
     id: z.string().trim().min(1),
     sourceCommentId: z.string().trim().min(1).optional(),
+    importProvenance: reviewProvenanceSchema.optional(),
     tags: z.array(z.string().trim().min(1)).optional(),
     title: z.string().trim().min(1).optional(),
     text: z.string(),

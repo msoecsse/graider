@@ -1,0 +1,4 @@
+// Added header
+class Main {
+    input.trim();
+}

@@ -92,6 +92,9 @@ export const editAppliedComment = (
   if (existing === undefined) return notFound("applied comment");
   const replacement: AppliedComment = {
     id: existing.id,
+    ...(existing.importProvenance === undefined
+      ? {}
+      : { importProvenance: existing.importProvenance }),
     ...(existing.sourceCommentId === undefined
       ? {}
       : { sourceCommentId: existing.sourceCommentId }),
