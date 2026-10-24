@@ -30,7 +30,10 @@ export const GithubAccountPanel = ({
     setLocalState(next);
     onStateChange?.(next);
   };
-  const [pending, setPending] = useState<keyof GithubOAuthApi | null>(null);
+  const [pending, setPending] = useState<Exclude<
+    keyof GithubOAuthApi,
+    "inspectManagedCourse"
+  > | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let mounted = true;
@@ -68,7 +71,9 @@ export const GithubAccountPanel = ({
       clearInterval(timer);
     };
   }, [state?.busy, state?.organizationDiscovery.status, api, controlled]);
-  const run = async (operation: keyof GithubOAuthApi): Promise<void> => {
+  const run = async (
+    operation: Exclude<keyof GithubOAuthApi, "inspectManagedCourse">
+  ): Promise<void> => {
     if (api) {
       setPending(operation);
       setError(null);

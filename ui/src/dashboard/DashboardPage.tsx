@@ -371,6 +371,16 @@ export const DashboardPage = (): ReactElement => {
   };
 
   const hasCourseFolders = courseFolders.length > 0;
+  const currentRemoteCourses =
+    remote.state?.identity?.id === remote.state?.courseDiscovery.userId
+      ? (remote.state?.courseDiscovery.courses ?? [])
+      : [];
+  const remoteCourseCardCount = currentRemoteCourses.filter(
+    (course) =>
+      course.localStatus !== "registered_local" &&
+      (course.authorization === "authorized" ||
+        course.authorization === "faculty_identity_required")
+  ).length;
   const visibleCards = filterAndSortDashboardCards(
     aggregatedDashboard.cards,
     searchQuery,
@@ -498,8 +508,8 @@ export const DashboardPage = (): ReactElement => {
           isRefreshing={isRefreshingAll}
           isSelectingFolder={isSelectingFolder}
           hasCourseFolders={hasCourseFolders}
-          visibleCardCount={visibleCards.length}
-          totalCardCount={aggregatedDashboard.cards.length}
+          visibleCardCount={visibleCards.length + remoteCourseCardCount}
+          totalCardCount={aggregatedDashboard.cards.length + remoteCourseCardCount}
           onSearchQueryChange={setSearchQuery}
           onViewFilterChange={setViewFilter}
           onSortOptionChange={setSortOption}
@@ -604,7 +614,7 @@ export const DashboardPage = (): ReactElement => {
 
         {isLoadingFolders ? <p className="loading-state">Loading course folders...</p> : null}
 
-        {!isLoadingFolders && !hasCourseFolders ? (
+        {!isLoadingFolders && !hasCourseFolders && remoteCourseCardCount === 0 ? (
           <section aria-label="No courses added yet.">
             <EmptyState
               title={

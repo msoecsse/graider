@@ -205,6 +205,11 @@ export const createRemoteRepositoryReader = (
       }
       return { ids: [...ids], incomplete };
     },
+    async resolveId(repositoryId: number): Promise<CourseRepository | null> {
+      const id = positiveId(repositoryId);
+      const body = await request((bounded) => client.getCourseRepositoryById!(id, bounded), true);
+      return body === null ? null : normalize(body);
+    },
     async resolve(owner: string, name: string): Promise<CourseRepository | null> {
       const body = await request(
         (bounded) => client.getCourseRepository!(segment(owner), segment(name), bounded),

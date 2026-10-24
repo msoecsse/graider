@@ -1,3 +1,6 @@
+import { mapBounded } from "./remoteCourseDiscovery.js";
+import { MANAGED_BOOTSTRAP_CONCURRENCY } from "./managedCourses.js";
+import type { RemoteCourse, ManagedCourseState } from "./remoteCourseTypes.js";
 import { emptyCourseDiscovery } from "./remoteCourseTypes.js";
 import type { RemoteCourseDiscovery } from "./remoteCourseTypes.js";
 import type { GithubOrganization } from "./githubOAuthTypes.js";
@@ -31,6 +34,13 @@ interface Dependencies {
     organizations: readonly GithubOrganization[],
     signal: AbortSignal
   ) => Promise<RemoteCourseDiscovery>;
+  readonly bootstrapCourse?: (input: {
+    token: string;
+    userId: number;
+    course: RemoteCourse;
+    signal: AbortSignal;
+    revalidateSession: () => Promise<boolean>;
+  }) => Promise<ManagedCourseState>;
   readonly callback?: typeof startOAuthCallback;
 }
 const signedOut = (): GithubOAuthState => ({
@@ -282,7 +292,79 @@ export class GithubOAuthSession {
                 result.organizations,
                 controller.signal
               );
-              if (current()) this.state = { ...this.state, courseDiscovery: courses };
+              if (current()) {
+                this.state = {
+                  ...this.state,
+                  courseDiscovery: {
+                    ...courses,
+                    courses: courses.courses.map((course) => ({
+                      ...course,
+                      bootstrap: {
+                        status:
+                          course.authorization === "authorized" ? "queued" : "not_bootstrapped",
+                        diagnostic: null,
+                        retryable: false
+                      }
+                    }))
+                  }
+                };
+                if (this.deps.bootstrapCourse) {
+                  const bootstrap = this.deps.bootstrapCourse;
+                  const pending = courses.courses.filter(
+                    (course) => course.authorization === "authorized"
+                  );
+                  const update = (
+                    repositoryId: number,
+                    bootstrapState: ManagedCourseState
+                  ): void => {
+                    if (current())
+                      this.state = {
+                        ...this.state,
+                        courseDiscovery: {
+                          ...this.state.courseDiscovery,
+                          courses: this.state.courseDiscovery.courses.map((course) =>
+                            course.repositoryId === repositoryId
+                              ? { ...course, bootstrap: bootstrapState }
+                              : course
+                          )
+                        }
+                      };
+                  };
+                  await mapBounded(
+                    pending,
+                    async (course) => {
+                      if (current()) {
+                        update(course.repositoryId, {
+                          status: "bootstrapping",
+                          diagnostic: null,
+                          retryable: false
+                        });
+                        const result = await bootstrap({
+                          token,
+                          userId,
+                          course,
+                          signal: controller.signal,
+                          revalidateSession: async () =>
+                            current() &&
+                            (await this.deps.network.identity(token, controller.signal)).id ===
+                              userId &&
+                            (await this.deps.network.organizationCapability(
+                              token,
+                              controller.signal
+                            )) &&
+                            (await this.deps.network.repositoryCapability(
+                              token,
+                              controller.signal
+                            )) &&
+                            current()
+                        });
+                        update(course.repositoryId, result);
+                      }
+                    },
+                    MANAGED_BOOTSTRAP_CONCURRENCY
+                  );
+                }
+              }
             } catch (error) {
               if (error instanceof GithubOAuthError && error.code === "invalid_credential")
                 throw error;

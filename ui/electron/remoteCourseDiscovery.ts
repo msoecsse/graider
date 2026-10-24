@@ -21,7 +21,7 @@ import {
 import type * as Metadata from "../dist-electron/remoteCourseMetadataBackend.cjs";
 
 export const DISCOVERY_CONCURRENCY = 4;
-const loadMetadata = (): typeof Metadata =>
+export const loadMetadata = (): typeof Metadata =>
   require(
     path.join(
       __dirname,
@@ -32,12 +32,13 @@ const loadMetadata = (): typeof Metadata =>
 /** Fixed worker pool: metadata requests never scale with student repository count. */
 export const mapBounded = async <T, R>(
   values: readonly T[],
-  read: (value: T) => Promise<R>
+  read: (value: T) => Promise<R>,
+  concurrency = DISCOVERY_CONCURRENCY
 ): Promise<R[]> => {
   const results: R[] = new Array(values.length);
   let next = 0;
   await Promise.all(
-    Array.from({ length: Math.min(DISCOVERY_CONCURRENCY, values.length) }, async () => {
+    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
       let index = next++;
       while (index < values.length) {
         results[index] = await read(values[index]);

@@ -69,6 +69,16 @@ export const RemoteCoursesPanel = ({
   readonly onRefresh: () => void;
   readonly onSettings: () => void;
 }): ReactElement => {
+  const [inspection, setInspection] = useState<
+    import("../../electron/remoteCourseTypes").ManagedCourseInspection | null
+  >(null);
+  const [inspectionUserId, setInspectionUserId] = useState<number | null>(null);
+  const [selectedTerm, setSelectedTerm] = useState<string | null>(null);
+  const [inspectionError, setInspectionError] = useState<string | null>(null);
+  useEffect(() => {
+    setInspection(null);
+    setInspectionError(null);
+  }, [state?.identity?.id]);
   const discovery = state?.courseDiscovery;
   const current = state?.identity && discovery?.userId === state.identity.id ? discovery : null;
   const visible =
@@ -125,8 +135,47 @@ export const RemoteCoursesPanel = ({
                 </>
               ) : (
                 <>
-                  <p>Available remotely</p>
-                  <p>Local course setup will be available in Phase 2.4.</p>
+                  <p>
+                    {course.bootstrap?.status === "ready"
+                      ? "Cached locally"
+                      : course.bootstrap?.status === "bootstrapping"
+                        ? "Setting up course…"
+                        : course.bootstrap?.status === "queued"
+                          ? "Course setup queued"
+                          : course.bootstrap?.status === "failed"
+                            ? "Course setup failed"
+                            : course.bootstrap?.status === "needs_attention"
+                              ? "Needs attention"
+                              : "Available remotely"}
+                  </p>
+                  {course.bootstrap?.diagnostic ? <p>{course.bootstrap.diagnostic}</p> : null}
+                  {course.bootstrap?.retryable ? (
+                    <button type="button" onClick={onRefresh}>
+                      Retry course setup
+                    </button>
+                  ) : null}
+                  {course.bootstrap?.status === "ready" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const requestedUserId = state?.identity?.id ?? null;
+                        void window.graiderUI.githubOAuth
+                          ?.inspectManagedCourse?.(course.repositoryId)
+                          .then((value) => {
+                            setInspectionUserId(requestedUserId);
+                            setInspection(value);
+                            setSelectedTerm(value.terms[0] ?? null);
+                          })
+                          .catch(() =>
+                            setInspectionError(
+                              "Course cache could not be inspected. Refresh courses."
+                            )
+                          );
+                      }}
+                    >
+                      Inspect course
+                    </button>
+                  ) : null}
                 </>
               )}
               {course.diagnostics.map((message) => (
@@ -134,6 +183,52 @@ export const RemoteCoursesPanel = ({
               ))}
             </article>
           ))}
+          {inspection &&
+          inspectionUserId === current?.userId &&
+          visible.some(
+            (course) =>
+              course.repositoryId === inspection.repositoryId &&
+              course.bootstrap?.status === "ready"
+          ) ? (
+            <section aria-label="Cached course details">
+              <h3>
+                {inspection.code} — {inspection.title}
+              </h3>
+              <p>Cached course metadata. Ongoing synchronization is not enabled.</p>
+              <ul>
+                {inspection.terms.map((term) => (
+                  <li key={term}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTerm(term)}
+                      aria-pressed={term === selectedTerm}
+                    >
+                      {term}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {selectedTerm ? (
+                <section aria-label="Cached assignments">
+                  <h4>{selectedTerm} assignments</h4>
+                  {inspection.assignments
+                    .filter((assignment) => assignment.term === selectedTerm)
+                    .map((assignment) => (
+                      <details key={assignment.slug}>
+                        <summary>{assignment.title}</summary>
+                        <p>
+                          {assignment.slug} · {assignment.status}
+                        </p>
+                      </details>
+                    ))}
+                </section>
+              ) : null}
+              <button type="button" onClick={() => setInspection(null)}>
+                Close course details
+              </button>
+            </section>
+          ) : null}
+          {inspectionError ? <p role="status">{inspectionError}</p> : null}
           {current &&
           (current.diagnostics.length > 0 ||
             current.courses.some(

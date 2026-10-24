@@ -121,6 +121,11 @@ const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<
 
 const graiderUI: GraiderUIApi = {
   githubOAuth: {
+    inspectManagedCourse: (repositoryId) =>
+      invoke<import("./remoteCourseTypes.js").ManagedCourseInspection>(
+        "graider-ui:managed-course:inspect",
+        repositoryId
+      ),
     get: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.get),
     signIn: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.signIn),
     signOut: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.signOut),

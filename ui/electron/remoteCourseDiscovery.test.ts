@@ -70,6 +70,7 @@ const fixture = (repositories = [repo()]) => {
   const reader = {
     list: vi.fn().mockResolvedValue(repositories),
     search: vi.fn().mockResolvedValue({ ids: [], incomplete: false }),
+    resolveId: vi.fn().mockResolvedValue(repositories[0]),
     resolve: vi.fn().mockResolvedValue(repositories[0]),
     file: vi
       .fn()

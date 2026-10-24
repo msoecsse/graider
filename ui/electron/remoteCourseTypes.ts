@@ -10,6 +10,7 @@ export type CourseLocalStatus =
   | "local_origin_mismatch"
   | "local_unverified";
 export interface RemoteCourse {
+  readonly bootstrap?: ManagedCourseState;
   readonly repositoryId: number;
   readonly nodeId: string | null;
   readonly organizationId: number;
@@ -71,3 +72,28 @@ export const emptyCourseDiscovery = (): RemoteCourseDiscovery => ({
   courses: [],
   diagnostics: []
 });
+
+/** Public state contains neither credentials nor machine-local paths. */
+export interface ManagedCourseState {
+  readonly status:
+    | "not_bootstrapped"
+    | "queued"
+    | "bootstrapping"
+    | "ready"
+    | "failed"
+    | "needs_attention";
+  readonly diagnostic: string | null;
+  readonly retryable: boolean;
+}
+export interface ManagedCourseInspection {
+  readonly repositoryId: number;
+  readonly code: string;
+  readonly title: string;
+  readonly terms: readonly string[];
+  readonly assignments: readonly {
+    readonly term: string;
+    readonly slug: string;
+    readonly title: string;
+    readonly status: string;
+  }[];
+}

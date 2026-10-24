@@ -281,6 +281,13 @@ export class OctokitGitHubClient implements GitHubClient {
     );
   }
 
+  async getCourseRepositoryById(
+    repositoryId: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(`/repositories/${String(repositoryId)}`, {}, signal);
+  }
+
   async getCourseRepository(
     owner: string,
     repo: string,

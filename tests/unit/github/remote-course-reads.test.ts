@@ -6,6 +6,7 @@ import {
 const OK = 200;
 const MOVED = 301;
 const PAGE_SIZE = 100;
+const COURSE_REPOSITORY_ID = 1342086585;
 const fixture = () => {
   const response = { status: OK, headers: {}, data: {} };
   const request = vi.fn().mockResolvedValue(response);
@@ -16,6 +17,17 @@ const fixture = () => {
   return { request, client, response, signal: new AbortController().signal };
 };
 describe("remote course host read-only boundary", () => {
+  it("resolves canonical repository identity directly with a cancellable GET", async () => {
+    const f = fixture();
+    expect(await f.client.getCourseRepositoryById(COURSE_REPOSITORY_ID, f.signal)).toEqual(
+      f.response
+    );
+    expect(f.request).toHaveBeenCalledExactlyOnceWith({
+      method: "GET",
+      url: `/repositories/${String(COURSE_REPOSITORY_ID)}`,
+      request: { signal: f.signal, redirect: "error" }
+    });
+  });
   it("uses only GET routes, exact metadata paths, OAuth transport and bounded cancellation", async () => {
     const f = fixture();
     await f.client.listCourseRepositoriesPage("course-org", 1, PAGE_SIZE, f.signal);

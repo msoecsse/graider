@@ -97,7 +97,14 @@ export interface GitAuthenticationContextRef {
 }
 
 export interface AuthenticatedGitWorkspaceContext {
-  readonly factory: GitWorkspaceWriterFactory;
+  readonly factory: GitWorkspaceWriterFactory & {
+    clone(request: {
+      readonly remote: string;
+      readonly destination: string;
+      readonly checkout: "default";
+      readonly authentication: GitAuthenticationContextRef;
+    }): Promise<GitWorkspaceInspector>;
+  };
   readonly authentication: GitAuthenticationContextRef;
 }
 

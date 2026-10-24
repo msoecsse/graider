@@ -1,8 +1,15 @@
 import { createRosterSummary } from "../../src/roster/roster-models.js";
 import { parseCourseConfig } from "../../src/config/load-course-config.js";
 import { parseTermConfig } from "../../src/config/load-term-config.js";
-import { validateCourseConfig, validateTermConfig } from "../../src/config/config-validation.js";
-import { SUPPORTED_SCHEMA_VERSION } from "../../src/config/config-schemas.js";
+import {
+  validateAssignmentConfig,
+  validateCourseConfig,
+  validateTermConfig
+} from "../../src/config/config-validation.js";
+import {
+  rawAssignmentConfigSchema,
+  SUPPORTED_SCHEMA_VERSION
+} from "../../src/config/config-schemas.js";
 import { parseYaml } from "../../src/io/stable-yaml.js";
 import { resolveFacultyScope } from "../../src/faculty/faculty-scope-resolver.js";
 
@@ -63,5 +70,26 @@ export const inspectTermFaculty = (content: string, termCode: string, username: 
     return inspectTermFacultyMetadata(content, termCode, username);
   } catch {
     return "invalid_metadata" as const;
+  }
+};
+
+/** Metadata-only managed course navigation; never loads student repositories or grading state. */
+export const inspectAssignment = (content: string, slug: string) => {
+  try {
+    const yaml = parseYaml(content, "assignment.yml");
+    const result =
+      yaml.status === "success" ? rawAssignmentConfigSchema.safeParse(yaml.value) : null;
+    if (
+      !result?.success ||
+      validateAssignmentConfig("assignment.yml", result.data, slug).length > 0
+    )
+      return null;
+    return {
+      slug: result.data.assignment.slug,
+      title: result.data.assignment.title,
+      status: result.data.assignment.status
+    };
+  } catch {
+    return null;
   }
 };

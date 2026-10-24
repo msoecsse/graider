@@ -161,6 +161,15 @@ export const CourseCardGrid = ({
                     <p key={course.repositoryId}>
                       {course.fullName} — Registered locally · GitHub repository ID{" "}
                       {course.repositoryId}
+                      {course.bootstrap?.status === "ready"
+                        ? " · Managed cache ready"
+                        : course.bootstrap?.status === "bootstrapping"
+                          ? " · Setting up managed cache…"
+                          : course.bootstrap?.status === "failed"
+                            ? " · Managed cache setup failed; refresh courses to retry"
+                            : course.bootstrap?.status === "needs_attention"
+                              ? " · Managed cache needs attention"
+                              : ""}
                       {course.archived ? " · GitHub repository archived (read-only)" : ""}
                       {course.authorization === "faculty_identity_required"
                         ? " · Set your MSOE username to verify course access."

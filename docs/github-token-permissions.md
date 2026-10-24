@@ -129,3 +129,13 @@ GRAIDER_RUN_LIVE_DESTRUCTIVE_TESTS=true
 | `github_api_error`              | GitHub returned an API/server error; safe HTTP status/message and Apply operation context are included when available. | Review the affected repository row and operation; retry later or inspect GitHub status if persistent. |
 | `github_network_error`          | Network access to GitHub failed.                                                                                       | Check network, proxy, DNS, and CI egress policy.                                                      |
 | `workflow_deployment_forbidden` | Token cannot write the managed workflow.                                                                               | Grant Contents and workflow-file write authority for the target repository.                           |
+
+### Managed course bootstrap transport (Phase 2.4)
+
+Authorized course/admin clones use the active main-process OAuth credential and
+the established operation-scoped bundled Dugite transport. Host-scoped ephemeral
+Git configuration passes authentication through the child environment, with no
+token in arguments, URL, repository config, managed catalog or renderer IPC.
+Bootstrap performs reads only. Legacy normal GitHub mutation credential precedence
+remains unchanged. See [managed bootstrap](graider-remote-course-discovery.md#phase-24--identity-scoped-managed-course-bootstrap)
+for account isolation, local storage and synchronization limits.

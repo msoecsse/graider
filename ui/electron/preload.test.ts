@@ -239,6 +239,10 @@ describe("repository document preload boundary", () => {
 });
 
 describe("faculty OAuth preload boundary", () => {
+  it("inspects only a trusted managed repository ID without a URL or path", async () => {
+    await electron.exposedApi?.githubOAuth?.inspectManagedCourse?.(1342086585);
+    expect(electron.invoke).toHaveBeenCalledWith("graider-ui:managed-course:inspect", 1342086585);
+  });
   it("exposes only high-level operations with no credential or URL arguments", async () => {
     const api = electron.exposedApi?.githubOAuth;
     expect(api).toBeDefined();
@@ -259,6 +263,7 @@ describe("faculty OAuth preload boundary", () => {
       ["graider-ui:faculty-auth:manage-authorization"]
     ]);
     expect(Object.keys(api!)).toEqual([
+      "inspectManagedCourse",
       "get",
       "signIn",
       "signOut",

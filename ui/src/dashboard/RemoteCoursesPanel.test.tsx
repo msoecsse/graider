@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RemoteCoursesPanel } from "./RemoteCoursesPanel";
 import type { RemoteCourse } from "../../electron/remoteCourseTypes";
@@ -47,6 +47,102 @@ const show = (value: GithubOAuthState) => {
   return { onRefresh, onSettings };
 };
 describe("remote dashboard course discovery", () => {
+  it("inspects cached course/term/assignment metadata by ID and offers no mutation", async () => {
+    const inspectManagedCourse = vi.fn().mockResolvedValue({
+      repositoryId: course.repositoryId,
+      code: course.code,
+      title: course.title,
+      terms: ["27s1"],
+      assignments: [{ term: "27s1", slug: "lab1", title: "First lab", status: "active" }]
+    });
+    Object.assign(window.graiderUI, { githubOAuth: { inspectManagedCourse } });
+    show({
+      ...state,
+      courseDiscovery: {
+        ...state.courseDiscovery,
+        courses: [{ ...course, bootstrap: { status: "ready", diagnostic: null, retryable: false } }]
+      }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect course" }));
+    expect(await screen.findByText("First lab")).toBeInTheDocument();
+    expect(inspectManagedCourse).toHaveBeenCalledWith(course.repositoryId);
+    fireEvent.click(screen.getByRole("button", { name: "27s1" }));
+    expect(screen.getByRole("button", { name: "27s1" })).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.queryByRole("button", { name: /Publish|Apply|Grade|Reveal/ })
+    ).not.toBeInTheDocument();
+  });
+  it("discards late inspection visibility on account switch even for the same repository", async () => {
+    let finish!: (value: unknown) => void;
+    const inspectManagedCourse = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    Object.assign(window.graiderUI, { githubOAuth: { inspectManagedCourse } });
+    const ready = {
+      ...state,
+      courseDiscovery: {
+        ...state.courseDiscovery,
+        courses: [
+          { ...course, bootstrap: { status: "ready" as const, diagnostic: null, retryable: false } }
+        ]
+      }
+    };
+    const { rerender } = render(
+      <RemoteCoursesPanel state={ready} onRefresh={() => {}} onSettings={() => {}} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Inspect course" }));
+    rerender(
+      <RemoteCoursesPanel
+        state={{
+          ...ready,
+          identity: { id: 99, login: "other", name: null },
+          courseDiscovery: { ...ready.courseDiscovery, userId: 99 }
+        }}
+        onRefresh={() => {}}
+        onSettings={() => {}}
+      />
+    );
+    finish({
+      repositoryId: course.repositoryId,
+      code: course.code,
+      title: "Old account private metadata",
+      terms: [],
+      assignments: []
+    });
+    await waitFor(() => expect(inspectManagedCourse).toHaveBeenCalledOnce());
+    expect(screen.queryByText(/Old account private metadata/)).not.toBeInTheDocument();
+  });
+  it.each([
+    ["queued", "Course setup queued"],
+    ["bootstrapping", "Setting up course…"],
+    ["ready", "Cached locally"],
+    ["failed", "Course setup failed"],
+    ["needs_attention", "Needs attention"]
+  ] as const)("shows %s on the same repository card", (status, label) => {
+    const f = show({
+      ...state,
+      courseDiscovery: {
+        ...state.courseDiscovery,
+        courses: [
+          { ...course, bootstrap: { status, diagnostic: null, retryable: status === "failed" } }
+        ]
+      }
+    });
+    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    if (status === "failed") {
+      fireEvent.click(screen.getByRole("button", { name: "Retry course setup" }));
+      expect(f.onRefresh).toHaveBeenCalledOnce();
+    }
+    if (status === "needs_attention")
+      expect(screen.queryByRole("button", { name: "Retry course setup" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Reveal|Finder|Explorer/ })
+    ).not.toBeInTheDocument();
+  });
   it("shows authorized remote-only courses without a fake Open action", () => {
     const f = show(state);
     expect(screen.getByText("CSC1020 — Data Structures")).toBeInTheDocument();

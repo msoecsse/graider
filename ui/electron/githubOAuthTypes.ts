@@ -52,6 +52,9 @@ export const GITHUB_OAUTH_CHANNELS = {
   manageAuthorization: "graider-ui:faculty-auth:manage-authorization"
 } as const;
 export interface GithubOAuthApi {
+  inspectManagedCourse?(
+    repositoryId: number
+  ): Promise<import("./remoteCourseTypes.js").ManagedCourseInspection>;
   refreshOrganizations(): Promise<GithubOAuthState>;
   manageAuthorization(): Promise<GithubOAuthState>;
   get(): Promise<GithubOAuthState>;

@@ -1,3 +1,5 @@
+import { createAuthenticatedProductionGitWorkspace } from "./gitWorkspaceReader.js";
+import { bootstrapManagedCourse, inspectManagedCourse } from "./managedCourses.js";
 import { createRemoteRepositoryReader } from "./githubRemoteRepositories.js";
 import { discoverRemoteCourses, inspectLocalCourseOrigins } from "./remoteCourseDiscovery.js";
 import {
@@ -1477,6 +1479,18 @@ app.whenReady().then(async () => {
     secret: readGithubOAuthSecret,
     openBrowser: (url) => shell.openExternal(url),
     network: createGithubOAuthNetwork(),
+    bootstrapCourse: async ({ token, userId, course, signal, revalidateSession }) =>
+      bootstrapManagedCourse({
+        userData: app.getPath("userData"),
+        userId,
+        course,
+        signal,
+        revalidateSession,
+        username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+          .currentFacultyMsoeUsername,
+        reader: createRemoteRepositoryReader(token, signal),
+        authenticate: () => createAuthenticatedProductionGitWorkspace(token)
+      }),
     discoverCourses: async (token, userId, organizations, signal) =>
       discoverRemoteCourses({
         userId,
@@ -1488,6 +1502,19 @@ app.whenReady().then(async () => {
         ),
         reader: createRemoteRepositoryReader(token, signal)
       })
+  });
+  ipcMain.handle("graider-ui:managed-course:inspect", (_event, repositoryId: unknown) => {
+    const state = facultyAuth.getState();
+    const course = state.courseDiscovery.courses.find(
+      (candidate) => candidate.repositoryId === repositoryId
+    );
+    if (!state.identity || state.courseDiscovery.userId !== state.identity.id || !course)
+      throw new Error("Authorized course identity is required.");
+    try {
+      return inspectManagedCourse(app.getPath("userData"), state.identity.id, course);
+    } catch {
+      throw new Error("Cached course details are unavailable. Refresh courses.");
+    }
   });
   const restoration = facultyAuth.restore();
   const operations = {

@@ -53,6 +53,10 @@ export interface GitHubOAuthOrganizationClient {
 
 /** Read-only transport for trusted remote course discovery; never exposed over IPC. */
 export interface GitHubRemoteCourseClient {
+  getCourseRepositoryById(
+    repositoryId: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
   listCourseRepositoriesPage(
     org: string,
     page: number,

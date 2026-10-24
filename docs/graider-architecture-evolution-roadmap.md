@@ -130,10 +130,11 @@ Phase 1 acceptance is complete:
 - Git transport credentials remain separate from API-client composition.
 - Architecture tests protect both local Git and GitHub host boundaries.
 
-Phase 2 slices 2.1 and 2.2 are complete. Slice 2.3 adds trusted, read-only remote
-course discovery. Existing mutation credential fallback remains transitional.
-Next is slice 2.4: app-managed course bootstrap. See the implementation boundary
-in [remote course discovery](graider-remote-course-discovery.md).
+Phase 2 slices 2.1–2.4 are implemented: OAuth identity, organization access, read-only
+course discovery and verified identity-scoped managed bootstrap. Existing mutation
+credential fallback and legacy operational paths remain transitional. Next is
+slice 2.5: managed course synchronization. See the implementation boundary in
+[remote course discovery](graider-remote-course-discovery.md).
 
 ---
 
@@ -171,15 +172,23 @@ and reconciliation with the current path-based registry. Adds required `repo`
 scope for private contents; scope breadth grants no slice-level write authority.
 See [implementation details and limits](graider-remote-course-discovery.md).
 
-## Slice 2.4 — App-managed course bootstrap (next)
+## Slice 2.4 — App-managed course bootstrap (implemented)
 
-Use the authorized discovery record's immutable repository ID to revalidate the
-current remote locator and identity immediately before cloning only that course/admin
-repository into an identity-scoped managed directory. Verify origin and repository
-ID after cloning; handle existing local registrations without moving/deleting them.
-Keep student clones, synchronization, mutations, schema-v2 migration, transfer
-migration and lifecycle work separately scoped. Preserve existing routing until
-bootstrap has a concrete integration plan.
+Account/repository-ID storage under Electron userData, a per-account catalog,
+fresh repository-ID/identity/scope/faculty validation, operation-scoped OAuth
+Dugite clone, transactional validation/promotion, bounded workers, retry and
+Needs attention states. Existing registered paths remain operational. Remote-only
+courses offer cached course/term/assignment metadata inspection without registry
+workarounds or mutation controls. No ongoing synchronization or student cloning.
+
+## Slice 2.5 — Managed course synchronization (next)
+
+Authorized refresh of existing managed course/admin caches with clean-worktree
+checks, OAuth fetch, validated fast-forward only, scoped asynchronous progress and
+retry. Preserve dirty/divergent/unexpected/transfer states for review and legacy
+path precedence until an explicit cutover. No automatic reset, student cloning,
+OAuth mutation migration, schema-v2 migration or timers in the default scope.
+See [bootstrap details and next boundary](graider-remote-course-discovery.md#phase-24--identity-scoped-managed-course-bootstrap).
 
 ---
 

@@ -25,6 +25,7 @@ const fixture = () => {
     searchCourseMetadataPage: vi
       .fn()
       .mockResolvedValue(response({ items: [], total_count: 0, incomplete_results: false })),
+    getCourseRepositoryById: vi.fn().mockResolvedValue(response(rawRepo(20))),
     getCourseRepository: vi.fn().mockResolvedValue(response(rawRepo(20))),
     getCourseMetadataPath: vi.fn(),
     getOrganizationScopeResponse: vi.fn().mockResolvedValue(response({})),
@@ -42,6 +43,13 @@ const fixture = () => {
   };
 };
 describe("GitHub remote repository read adapter", () => {
+  it("resolves immutable ID without consulting old owner/name", async () => {
+    const f = fixture();
+    expect(await f.reader.resolveId(20)).toMatchObject({ id: 20, owner: "org" });
+    expect(f.client.getCourseRepositoryById).toHaveBeenCalledWith(20, expect.any(AbortSignal));
+    expect(f.client.getCourseRepository).not.toHaveBeenCalled();
+    await expect(f.reader.resolveId(-1)).rejects.toThrow();
+  });
   it("paginates the complete org inventory internally and deduplicates immutable IDs", async () => {
     const f = fixture();
     f.client.listCourseRepositoriesPage
@@ -135,7 +143,14 @@ describe("GitHub remote repository read adapter", () => {
       })
     );
     expect(await f.reader.file(repo, "course.yml")).toBe("hello");
-    expect(Object.keys(f.reader).sort()).toEqual(["file", "list", "resolve", "search", "terms"]);
+    expect(Object.keys(f.reader).sort()).toEqual([
+      "file",
+      "list",
+      "resolve",
+      "resolveId",
+      "search",
+      "terms"
+    ]);
     expect(f.client.createRepository).not.toHaveBeenCalled();
     expect(f.client.writeRepositoryFile).not.toHaveBeenCalled();
     expect(f.client.dispatchWorkflow).not.toHaveBeenCalled();
