@@ -1,3 +1,9 @@
+import type {
+  ImportAssignment,
+  ImportPreview,
+  ImportApplyRequest,
+  ImportResult
+} from "./reviewImportService.js";
 import type { GithubOAuthApi } from "./githubOAuthTypes.js";
 import type { GradingEditorViewStateDto } from "./gradingStudentViewStateService.js";
 import type {
@@ -17,6 +23,9 @@ import type {
 } from "./assignmentGradingLifecycleService.js";
 
 export const IPC_CHANNELS = {
+  chooseReviewImport: "graider-ui:review-import:choose",
+  applyReviewImport: "graider-ui:review-import:apply",
+  closeReviewImport: "graider-ui:review-import:close",
   getAppInfo: "graider-ui:get-app-info",
   getLocalSettings: "graider-ui:local-settings:get",
   saveLocalSettings: "graider-ui:local-settings:save",
@@ -1062,6 +1071,9 @@ export interface CombinedDashboardResult {
 }
 
 export interface GraiderUIApi {
+  readonly chooseReviewImport?: (request: ImportAssignment) => Promise<ImportPreview | null>;
+  readonly applyReviewImport?: (request: ImportApplyRequest) => Promise<ImportResult>;
+  readonly closeReviewImport?: () => Promise<void>;
   readonly githubOAuth?: GithubOAuthApi;
   readonly getAppInfo: () => Promise<AppInfo>;
   readonly getLocalSettings?: () => Promise<LocalSettingsResult>;

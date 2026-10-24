@@ -74,7 +74,9 @@ export interface GradingWorkspaceDependencies {
 const loadBackend = (): GradingWorkspaceBackend =>
   require(path.join(__dirname, "gradingWorkspaceBackend.cjs")) as GradingWorkspaceBackend;
 
-const isValidIdentity = (request: GradingWorkspaceRequest): boolean =>
+export const isValidGradingWorkspaceIdentity = (
+  request: Pick<GradingWorkspaceRequest, "termCode" | "assignmentSlug">
+): boolean =>
   TERM_CODE_PATTERN.test(request.termCode) && ASSIGNMENT_SLUG_PATTERN.test(request.assignmentSlug);
 
 export const createGradingWorkspaceService = (
@@ -85,7 +87,7 @@ export const createGradingWorkspaceService = (
     backend: dependencies.backend ?? loadBackend()
   };
   return (request) => {
-    if (!isValidIdentity(request)) return { status: "assignment_config_error" };
+    if (!isValidGradingWorkspaceIdentity(request)) return { status: "assignment_config_error" };
     const scope = services.resolveFacultyScope(request);
     if (scope.status !== "success") return { status: scope.status };
     return services.backend.resolveGradingWorkspaceContext({

@@ -108,3 +108,18 @@ await build({
   noExternal: ["fast-xml-parser"],
   external: ["mammoth", "pdfjs-dist", "yauzl"]
 });
+
+await build({
+  entry: {
+    reviewImportBackend: fileURLToPath(new URL("./reviewImportBackend.ts", import.meta.url))
+  },
+  outDir: fileURLToPath(new URL("../dist-electron", import.meta.url)),
+  format: ["cjs"],
+  outExtension: () => ({ js: ".cjs" }),
+  target: "node24",
+  clean: false,
+  tsconfig: fileURLToPath(new URL("../../tsconfig.json", import.meta.url)),
+  dts: { compilerOptions: { rootDir: fileURLToPath(new URL("../../", import.meta.url)) } },
+  noExternal: ["yaml", "zod"],
+  external: ["dugite"]
+});

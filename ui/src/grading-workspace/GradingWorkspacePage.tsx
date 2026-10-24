@@ -1,3 +1,4 @@
+import { ReviewImportWorkflow } from "../review-import/ReviewImportWorkflow";
 import { getStudentSort, rememberStudentSort, sortGradingStudents } from "./studentSort";
 import { mapCanonicalSourceRangeToCombinedLineRange } from "./submissionSourceView";
 import { RECENT_COMMENT_LIMIT } from "../../electron/recentCommentLimit";
@@ -3063,6 +3064,48 @@ export const GradingWorkspacePage = ({
       : ((gradedOrPublishedCount - publishedCount) / allStudentsCount) * 100;
   const header = (
     <GradingProgressHeader
+      importReviews={
+        <ReviewImportWorkflow
+          request={request}
+          disabled={gradingMutationStudentId !== undefined}
+          onApplied={async (applied) => {
+            const ids = [
+              ...new Set(
+                applied.outcomes
+                  .filter((item) => item.status === "applied")
+                  .map((item) => item.studentId)
+              )
+            ];
+            for (const studentId of ids) {
+              const refreshed = await window.graiderUI.loadGradingStudentSnapshot?.({
+                ...request,
+                studentId
+              });
+              if (refreshed?.status !== "success") throw new Error("Grading refresh failed.");
+              publishReviewDetailRequestGenerations.current.set(
+                studentId,
+                (publishReviewDetailRequestGenerations.current.get(studentId) ?? 0) + 1
+              );
+              setPublishReviewDetails((current) => ({
+                ...current,
+                [studentId]: {
+                  status: "success",
+                  scoreLabel: scoreSummaryLabel(refreshed.grade),
+                  summaryLabel: reportContentSummaryLabel(refreshed)
+                }
+              }));
+              setStudentStatusOverrides((current) => ({
+                ...current,
+                [studentId]: refreshed.gradingStatus
+              }));
+              if (currentStudentIdRef.current === studentId) {
+                snapshotRequestGeneration.current += 1;
+                setSnapshot({ status: "success", snapshot: refreshed });
+              }
+            }
+          }}
+        />
+      }
       assignmentTitle={result.assignment.title}
       termCode={result.assignment.termCode}
       assignmentSlug={result.assignment.slug}

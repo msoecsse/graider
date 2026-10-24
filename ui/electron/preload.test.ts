@@ -257,3 +257,25 @@ describe("faculty OAuth preload boundary", () => {
     expect(Object.keys(api!)).toEqual(["get", "signIn", "signOut", "switchAccount", "cancel"]);
   });
 });
+
+it("exposes only plan selection, apply selections and close for review import", async () => {
+  const api = electron.exposedApi;
+  const assignment = {
+    courseFolderId: "course",
+    courseFolderPath: "/trusted/course",
+    termCode: "27s1",
+    assignmentSlug: "lab04"
+  };
+  await api?.chooseReviewImport?.(assignment);
+  expect(electron.invoke).toHaveBeenLastCalledWith("graider-ui:review-import:choose", assignment);
+  const request = {
+    ...assignment,
+    planId: "plan",
+    version: 1 as const,
+    selections: [{ reviewIndex: 0, studentId: "ada", findingKey: "key", approved: true }]
+  };
+  await api?.applyReviewImport?.(request);
+  expect(electron.invoke).toHaveBeenLastCalledWith("graider-ui:review-import:apply", request);
+  await api?.closeReviewImport?.();
+  expect(electron.invoke).toHaveBeenLastCalledWith("graider-ui:review-import:close");
+});

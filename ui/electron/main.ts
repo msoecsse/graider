@@ -1,3 +1,8 @@
+import {
+  createReviewImportService,
+  loadReviewImportBackend,
+  isImportApplyRequest
+} from "./reviewImportService.js";
 import path from "node:path";
 import { GithubOAuthSession } from "./githubOAuthSession.js";
 import { createGithubOAuthCredentialStore } from "./githubOAuthCredentialStore.js";
@@ -1030,6 +1035,33 @@ export const registerIpcHandlers = (): void => {
       env: process.env
     });
   });
+  const reviewImports = createReviewImportService({
+    backend: loadReviewImportBackend,
+    showOpenDialog: (options) => dialog.showOpenDialog(options)
+  });
+  const reviewImportOwners = new WeakSet<Electron.WebContents>();
+  ipcMain.handle(IPC_CHANNELS.chooseReviewImport, (event, request: unknown) => {
+    if (!isPrepareGradingWorkspaceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A registered assignment is required for review import.");
+    if (!reviewImportOwners.has(event.sender)) {
+      reviewImportOwners.add(event.sender);
+      const ownerId = event.sender.id;
+      event.sender.once("destroyed", () => reviewImports.close(ownerId));
+    }
+    return reviewImports.choose(
+      { ...request, userDataPath: app.getPath("userData") },
+      event.sender.id
+    );
+  });
+  ipcMain.handle(IPC_CHANNELS.applyReviewImport, (event, request: unknown) => {
+    if (!isImportApplyRequest(request) || !isRegisteredAssignmentSetupCourse(request))
+      throw new Error("A current review plan and explicit selections are required.");
+    return reviewImports.apply(
+      { ...request, userDataPath: app.getPath("userData") },
+      event.sender.id
+    );
+  });
+  ipcMain.handle(IPC_CHANNELS.closeReviewImport, (event) => reviewImports.close(event.sender.id));
   ipcMain.handle(IPC_CHANNELS.prepareGradingWorkspace, (_event, request: unknown) => {
     if (!isPrepareGradingWorkspaceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for grading preparation.");

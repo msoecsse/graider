@@ -3,8 +3,70 @@
 Review Import accepts externally generated, faculty-reviewed findings as additive
 comments. Graider owns this contract. Generator metadata conveys no authority.
 Slice 1 supplies validation, trusted identity resolution and a read-only import
-plan; Slice 2 will provide preview, explicit recovery approval and application.
+plan; Slice 2 provides preview, explicit recovery approval and application.
 The Java Assignment Review Skill must adopt this contract in Slice 3.
+
+## Faculty batch workflow (Slice 2)
+
+Open an assignment's grading workspace and choose **Import Reviews...** in the
+assignment header. The native picker accepts multiple JSON files. Main reads a
+bounded amount using the Slice 1 limits; React never reads or parses review JSON.
+Canceling selection or closing **Review Import Preview** before apply changes no
+grading state.
+
+The preview shows typed batch status counts, student identities/sections,
+repositories, reviewed/current SHAs, and expandable finding details. Finding
+previews use Graider's existing comment Markdown renderer, including inert links.
+Ready findings start selected. Student checkboxes, individual checkboxes,
+**Select all Ready**, and **Clear selections** control the additions. Eligible
+warnings require explicit approval; changed-SHA findings use **Process with
+recovery**. Blocked, duplicate, invalid, and unmatched findings cannot be applied.
+Approval never turns an unresolved anchor or rubric association into an eligible
+finding. Recovered locations come exclusively from Slice 1.
+
+**Apply Reviews** sends the plan ID/version, review index, matched student ID,
+finding key, and approval boolean through specific IPC channels. Main retains
+trusted input/plan objects in an ephemeral, renderer-owned session. Apply rejects
+expired/mismatched sessions, rebuilds faculty scope and canonical context, and
+replans retained inputs. It checks the selected match, SHA, rubric, anchor,
+eligibility, and approval before each addition. The renderer supplies no persisted
+comment object or arbitrary file path.
+
+The trusted adapter in `ui/scripts/reviewImportBackend.ts` calls the ordinary
+`addGradingStudentCommentContext` operation. Each addition receives a normal UUID,
+its unchanged deduction, mapped rubric item, tags, validated source location, and
+stable import provenance. Recovered anchors retain their reviewed SHA, original
+location and excerpt in normal anchor history. A final synchronous provenance
+check immediately before comment creation handles duplicates introduced after
+preview. Edited imported comments remain recognizable without overwriting edits.
+
+The shared comment service has an internal lifecycle-preservation option for this
+workflow. Existing comments, notes, view state, completion/publication status,
+zero-score decisions, and repository metadata are preserved. Import does not
+pull, change the canonical SHA, preview/publish reports, commit, push, or dispatch
+workflows. Comments remain editable, movable, duplicable and deletable through
+normal grading controls and participate in normal scores/report previews.
+
+Results include applied, duplicate-skipped, failed and affected-student counts,
+with per-finding diagnostics. Successful additions survive unrelated failures.
+Affected grading snapshots and summary scores refresh immediately without
+resetting the current source/document or editor. Closing the flow discards its
+session; starting a new import always replans against current state.
+
+## Remaining Java Assignment Review Skill integration (Slice 3)
+
+Slice 3 must adapt the Java Assignment Review Skill to emit one schema-v1 review
+JSON artifact per reviewed student, using this document and
+`review-v1.schema.json` as the contract. It must supply the assignment identity,
+canonical roster GitHub/MSOE identity, mapped repository and exact reviewed SHA;
+use stable review/finding IDs across retries; emit faculty-reviewed deductions,
+exact rubric IDs where available, Markdown/title/tags, and exact repository-relative
+source locations/excerpts (or general findings with no location). Generator
+metadata remains informational. Exercise the generated multi-student batch
+through Graider preview, recovery approval, selective apply, faculty editing,
+report preview and re-import to verify end-to-end interoperability. No skill
+changes, schema-v2 work, repository synchronization, or overwrite semantics are
+part of Slice 2.
 
 ## Canonical artifacts
 

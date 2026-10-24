@@ -1,6 +1,7 @@
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 export const GradingProgressHeader = ({
+  importReviews,
   assignmentTitle,
   termCode,
   assignmentSlug,
@@ -14,6 +15,7 @@ export const GradingProgressHeader = ({
   onOpenPublishReview,
   onOpenCheatSheet
 }: {
+  readonly importReviews?: ReactNode;
   readonly assignmentTitle: string;
   readonly termCode: string;
   readonly assignmentSlug: string;
@@ -51,6 +53,7 @@ export const GradingProgressHeader = ({
         </div>
       </div>
     )}
+    {importReviews}
     {publishReviewOpen ? null : (
       <button
         className="primary-action"

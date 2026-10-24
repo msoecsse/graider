@@ -1,0 +1,108 @@
+.review-import {
+  width: min(960px, 94vw);
+  max-height: 90vh;
+  padding: 0;
+  border: 1px solid #d7dde4;
+  border-radius: 12px;
+  color: #243447;
+  background: #fff;
+}
+.review-import::backdrop {
+  background: rgb(20 30 45 / 45%);
+}
+.review-import__layout {
+  display: flex;
+  flex-direction: column;
+  max-height: 88vh;
+}
+.review-import header,
+.review-import footer {
+  padding: 16px 20px;
+  flex: none;
+}
+.review-import header {
+  border-bottom: 1px solid #e2e7ed;
+}
+.review-import h2 {
+  margin: 0;
+}
+.review-import p {
+  margin: 8px 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.review-import__summary,
+.review-import__actions,
+.review-import__row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.review-import__status {
+  border-radius: 5px;
+  background: #edf1f6;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+}
+.review-import__status--ready {
+  background: #e2f3e9;
+  color: #205c3a;
+}
+.review-import__status--warning {
+  background: #fff1cf;
+  color: #71500d;
+}
+.review-import__status--invalid,
+.review-import__status--unmatched {
+  background: #fbe7e6;
+  color: #8d3330;
+}
+.review-import__list {
+  overflow: auto;
+  padding: 16px 20px;
+  min-height: 0;
+}
+.review-import fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.review-import__review {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #d7dde4;
+  border-radius: 8px;
+}
+.review-import__finding {
+  border-top: 1px solid #e2e7ed;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.review-import pre {
+  background: #f4f6f8;
+  padding: 10px;
+  overflow: auto;
+  max-height: 200px;
+}
+.review-import__diagnostics {
+  font-size: 0.85rem;
+  color: #71500d;
+  padding-left: 20px;
+}
+.review-import__diagnostics:empty {
+  display: none;
+}
+.review-import__approval {
+  display: block;
+  padding: 8px;
+  background: #fff7e3;
+}
+.review-import footer {
+  justify-content: flex-end;
+  border-top: 1px solid #e2e7ed;
+}
+.review-import summary {
+  cursor: pointer;
+}

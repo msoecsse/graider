@@ -16,6 +16,8 @@ import {
 export interface AppliedCommentInput {
   readonly id: string;
   readonly sourceCommentId?: string;
+  readonly importProvenance?: GradingState["appliedComments"][number]["importProvenance"];
+  readonly sourceAnchor?: GradingState["appliedComments"][number]["sourceAnchor"];
   readonly tags?: readonly string[];
   readonly title?: string;
   readonly text: string;
@@ -162,7 +164,8 @@ const save = (
 export const addGradingStudentCommentContext = (
   request: AppliedCommentContextRequest,
   comment: AppliedCommentInput,
-  duplicateOfCommentId?: string
+  duplicateOfCommentId?: string,
+  options: { readonly preserveGradingLifecycle?: boolean } = {}
 ): AppliedCommentContextResult => {
   const loaded = loadCurrent(request);
   if (loaded.status === "failure") return loaded.result;
@@ -208,9 +211,26 @@ export const addGradingStudentCommentContext = (
     ...(tags === undefined ? {} : { tags: [...tags] }),
     ...(title === "" ? {} : { title })
   });
-  return updated.status === "success"
-    ? save(request, updated.value)
-    : stateError(request.studentId, updated.code);
+  // Batch review approval adds feedback without completing, reopening publication,
+  // or changing the instructor's explicit zero-score decision.
+  const result =
+    updated.status === "success" && options.preserveGradingLifecycle
+      ? {
+          ...updated.value,
+          status: state.status,
+          ...(state.finalScoreOverride === undefined
+            ? {}
+            : { finalScoreOverride: state.finalScoreOverride })
+        }
+      : updated.status === "success"
+        ? updated.value
+        : undefined;
+  return result === undefined
+    ? stateError(
+        request.studentId,
+        updated.status === "failure" ? updated.code : "comment_add_failed"
+      )
+    : save(request, result);
 };
 
 export const editGradingStudentCommentContext = (

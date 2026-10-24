@@ -266,6 +266,9 @@ const graiderUI: GraiderUIApi = {
     await invoke<CombinedDashboardResult>(IPC_CHANNELS.refreshDashboard),
   getAssignmentDetail: async (request: AssignmentDetailRequest): Promise<AssignmentDetailResult> =>
     await invoke<AssignmentDetailResult>(IPC_CHANNELS.getAssignmentDetail, request),
+  chooseReviewImport: (request) => invoke(IPC_CHANNELS.chooseReviewImport, request),
+  applyReviewImport: (request) => invoke(IPC_CHANNELS.applyReviewImport, request),
+  closeReviewImport: () => invoke(IPC_CHANNELS.closeReviewImport),
   prepareGradingWorkspace: async (request: GradingWorkspacePrepareRequest): Promise<unknown> =>
     await invoke<unknown>(IPC_CHANNELS.prepareGradingWorkspace, request),
   loadGradingStudentDocument: async (
