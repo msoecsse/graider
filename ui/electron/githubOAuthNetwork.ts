@@ -1,8 +1,9 @@
+import { createGithubOrganizationNetwork } from "./githubOrganizations.js";
 import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import { GithubOAuthError } from "./githubOAuthCallback.js";
 import type { GithubFacultyIdentity } from "./githubOAuthTypes.js";
 export const GITHUB_OAUTH_CLIENT_ID = "Ov23lilUrjxhcDiX2RBq";
-export const GITHUB_OAUTH_SCOPES: readonly string[] = [];
+export const GITHUB_OAUTH_SCOPES: readonly string[] = ["read:org"];
 const NETWORK_TIMEOUT_MS = 30_000;
 const UNAUTHORIZED_STATUS = 401;
 export interface OAuthExchange {
@@ -43,6 +44,7 @@ export const createGithubOAuthNetwork = (
     }
   };
   return {
+    ...createGithubOrganizationNetwork(provideClient),
     async exchange(input: OAuthExchange, signal: AbortSignal): Promise<string> {
       const body = await json(
         "https://github.com/login/oauth/access_token",

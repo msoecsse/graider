@@ -33,6 +33,10 @@ const fixture = () => {
     delete: vi.fn().mockResolvedValue(undefined)
   };
   const network = {
+    organizationCapability: vi.fn().mockResolvedValue(true),
+    discoverOrganizations: vi
+      .fn()
+      .mockResolvedValue({ status: "ready", organizations: [], message: null, stale: false }),
     exchange: vi.fn().mockResolvedValue(TOKEN),
     identity: vi.fn().mockResolvedValue(IDENTITY)
   };
@@ -105,7 +109,7 @@ describe("faculty session", () => {
     expect(url.searchParams.get("client_id")).toBe(GITHUB_OAUTH_CLIENT_ID);
     expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:54321/callback");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(url.searchParams.get("scope")).toBe("");
+    expect(url.searchParams.get("scope")).toBe("read:org");
     expect(url.searchParams.get("state")).toBeTruthy();
     const exchange = f.network.exchange.mock.calls[0][0];
     expect(exchange).toMatchObject({
@@ -314,5 +318,130 @@ describe("OS encrypted credential store", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("organization session lifecycle and authorization upgrades", () => {
+  it("detects an existing no-scope token and upgrades transactionally across restart", async () => {
+    const f = fixture();
+    f.store.load.mockResolvedValue(TOKEN);
+    f.network.organizationCapability.mockResolvedValue(false);
+    await f.session.restore();
+    await f.session.refreshOrganizations();
+    expect(f.session.getState()).toMatchObject({
+      status: "signed_in",
+      organizationPermission: "required",
+      organizationDiscovery: { status: "authorization_required" }
+    });
+    expect(f.network.discoverOrganizations).not.toHaveBeenCalled();
+    f.network.exchange.mockResolvedValue("fake_upgraded_token");
+    f.network.organizationCapability.mockResolvedValue(true);
+    await f.session.signIn();
+    expect(f.store.save).toHaveBeenCalledWith("fake_upgraded_token");
+    f.store.load.mockResolvedValue("fake_upgraded_token");
+    const restarted = new GithubOAuthSession(f);
+    await restarted.restore();
+    await restarted.refreshOrganizations();
+    expect(restarted.getState()).toMatchObject({
+      identity: IDENTITY,
+      organizationPermission: "available",
+      organizationDiscovery: { status: "ready" }
+    });
+    expect(JSON.stringify(restarted.getState())).not.toContain("fake_upgraded_token");
+  });
+  it.each(["denied", "exchange", "callback", "canceled"])(
+    "preserves the old credential when an upgrade fails: %s",
+    async (code) => {
+      const f = fixture();
+      f.store.load.mockResolvedValue(TOKEN);
+      f.network.organizationCapability.mockResolvedValue(false);
+      await f.session.restore();
+      await f.session.refreshOrganizations();
+      f.network.exchange.mockRejectedValueOnce(new GithubOAuthError(code, "Authorization failed."));
+      await f.session.signIn();
+      expect(f.session.getState()).toMatchObject({
+        identity: IDENTITY,
+        status: "signed_in",
+        organizationPermission: "required"
+      });
+      expect(f.store.save).not.toHaveBeenCalled();
+      expect(f.store.delete).not.toHaveBeenCalled();
+    }
+  );
+  it("cancels a pending authorization attempt without deleting the old session", async () => {
+    const f = fixture();
+    f.store.load.mockResolvedValue(TOKEN);
+    await f.session.restore();
+    let rejectCode!: (error: Error) => void;
+    f.callback.mockImplementationOnce(async (_state, signal) => ({
+      redirectUri: "http://127.0.0.1:54321/callback",
+      code: new Promise<string>((_resolve, reject) => {
+        rejectCode = reject;
+        signal.addEventListener("abort", () =>
+          reject(new GithubOAuthError("canceled", "Canceled"))
+        );
+      }),
+      cancel: vi.fn()
+    }));
+    const attempt = f.session.signIn();
+    await vi.waitFor(() => expect(rejectCode).toBeDefined());
+    f.session.cancel();
+    expect((await attempt).identity).toEqual(IDENTITY);
+    expect(f.store.save).not.toHaveBeenCalled();
+    expect(f.store.delete).not.toHaveBeenCalled();
+  });
+  it("preserves state on transient discovery failure, and clears only definitively invalid credentials", async () => {
+    const f = fixture();
+    await f.session.signIn();
+    await f.session.refreshOrganizations();
+    for (const code of ["network_unavailable", "rate_limited", "forbidden", "error"]) {
+      f.network.discoverOrganizations.mockRejectedValueOnce(
+        new GithubOAuthError(code, "Retry later.")
+      );
+      expect((await f.session.refreshOrganizations()).status).toBe("signed_in");
+      expect(f.store.delete).not.toHaveBeenCalled();
+    }
+    f.network.discoverOrganizations.mockRejectedValueOnce(
+      new GithubOAuthError("invalid_credential", "Revoked")
+    );
+    expect(await f.session.refreshOrganizations()).toMatchObject({
+      status: "signed_out",
+      identity: null,
+      organizationDiscovery: { organizations: [] }
+    });
+    expect(f.store.delete).toHaveBeenCalledOnce();
+  });
+  it("never runs discovery signed out and ignores late results after switching or signing out", async () => {
+    const f = fixture();
+    await f.session.refreshOrganizations();
+    expect(f.network.organizationCapability).not.toHaveBeenCalled();
+    await f.session.signIn();
+    await f.session.refreshOrganizations();
+    let finish!: (value: unknown) => void;
+    f.network.discoverOrganizations.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const pending = f.session.refreshOrganizations();
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    f.network.identity.mockResolvedValueOnce({ id: 99, login: "second", name: null });
+    await f.session.signIn(true);
+    finish({
+      status: "ready",
+      organizations: [{ login: "old-account-private" }],
+      message: null,
+      stale: false
+    });
+    await pending;
+    expect(JSON.stringify(f.session.getState())).not.toContain("old-account-private");
+    await f.session.signOut();
+    expect(f.session.getState().organizationDiscovery.organizations).toEqual([]);
+  });
+  it("opens only the fixed GitHub authorization destination", async () => {
+    const f = fixture();
+    await f.session.manageAuthorization();
+    expect(f.openBrowser).toHaveBeenCalledWith("https://github.com/settings/applications");
   });
 });

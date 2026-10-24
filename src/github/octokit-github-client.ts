@@ -3,7 +3,7 @@ import { inflateRawSync } from "node:zlib";
 
 import { Octokit } from "@octokit/rest";
 
-import { GitHubClient } from "./github-client.js";
+import { GitHubClient, type GitHubOrganizationResponse } from "./github-client.js";
 import { GitHubClientError } from "./github-errors.js";
 import { withGitHubRetry } from "./github-retry.js";
 import {
@@ -203,6 +203,56 @@ export class OctokitGitHubClient implements GitHubClient {
           fetch: fetchWithGitHubApiVersion
         }
       }) as unknown as OctokitRestClientLike);
+  }
+
+  private async organizationResponse(
+    route: string,
+    parameters: OctokitParameters,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    let response: OctokitResponseLike;
+    try {
+      response = await this.octokit.request({
+        method: "GET",
+        url: route,
+        ...parameters,
+        request: { signal, redirect: "error" }
+      });
+    } catch (error) {
+      // Preserve provider status/header evidence for the trusted OAuth classifier, never IPC.
+      if (
+        !error ||
+        typeof error !== "object" ||
+        !("response" in error) ||
+        !error.response ||
+        typeof error.response !== "object"
+      )
+        throw new Error("GitHub organization request unavailable.", { cause: error });
+      response = error.response as OctokitResponseLike;
+    }
+    const status = response.status;
+    if (typeof status !== "number" || !Number.isInteger(status))
+      throw new Error("GitHub organization response unavailable.");
+    return { status, headers: response.headers ?? {}, data: response.data };
+  }
+
+  async getOrganizationScopeResponse(signal: AbortSignal): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse("/user", {}, signal);
+  }
+
+  async listOrganizationMembershipsPage(
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse("/user/memberships/orgs", { page, per_page: perPage }, signal);
+  }
+
+  async getOrganizationMembership(
+    login: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse("/user/memberships/orgs/{org}", { org: login }, signal);
   }
 
   async getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser> {

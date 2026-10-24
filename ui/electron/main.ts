@@ -1494,6 +1494,11 @@ app.whenReady().then(async () => {
       await restoration;
       return facultyAuth.signIn(true);
     },
+    refreshOrganizations: async () => {
+      await restoration;
+      return facultyAuth.refreshOrganizations();
+    },
+    manageAuthorization: async () => facultyAuth.manageAuthorization(),
     cancel: async () => facultyAuth.cancel()
   };
   for (const operation of Object.keys(operations) as (keyof typeof operations)[]) {

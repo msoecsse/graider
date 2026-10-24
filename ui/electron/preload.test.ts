@@ -247,14 +247,26 @@ describe("faculty OAuth preload boundary", () => {
     await api!.switchAccount();
     await api!.signOut();
     await api!.cancel();
+    await api!.refreshOrganizations();
+    await api!.manageAuthorization();
     expect(electron.invoke.mock.calls).toEqual([
       ["graider-ui:faculty-auth:get"],
       ["graider-ui:faculty-auth:sign-in"],
       ["graider-ui:faculty-auth:switch"],
       ["graider-ui:faculty-auth:sign-out"],
-      ["graider-ui:faculty-auth:cancel"]
+      ["graider-ui:faculty-auth:cancel"],
+      ["graider-ui:faculty-auth:organizations"],
+      ["graider-ui:faculty-auth:manage-authorization"]
     ]);
-    expect(Object.keys(api!)).toEqual(["get", "signIn", "signOut", "switchAccount", "cancel"]);
+    expect(Object.keys(api!)).toEqual([
+      "get",
+      "signIn",
+      "signOut",
+      "switchAccount",
+      "cancel",
+      "refreshOrganizations",
+      "manageAuthorization"
+    ]);
   });
 });
 

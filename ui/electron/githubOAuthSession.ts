@@ -29,7 +29,9 @@ const signedOut = (): GithubOAuthState => ({
   identity: null,
   busy: false,
   persistence: "unknown",
-  message: null
+  message: null,
+  organizationPermission: "unknown",
+  organizationDiscovery: { status: "idle", organizations: [], message: null, stale: false }
 });
 const safeMessage = (error: unknown): string =>
   error instanceof GithubOAuthError
@@ -41,6 +43,7 @@ export class GithubOAuthSession {
   private active: AbortController | null = null;
   private restored: Promise<void> | null = null;
   private stopped = false;
+  private discovery: AbortController | null = null;
   constructor(private readonly deps: Dependencies) {}
   getState(): GithubOAuthState {
     return { ...this.state, busy: this.active !== null };
@@ -59,6 +62,7 @@ export class GithubOAuthSession {
         if (!controller.signal.aborted) {
           this.token = token;
           this.state = {
+            ...signedOut(),
             status: "signed_in",
             identity,
             busy: false,
@@ -92,10 +96,17 @@ export class GithubOAuthSession {
       }
     } finally {
       this.active = null;
+      if (this.token) void this.refreshOrganizations();
     }
   }
   async signIn(switchAccount = false): Promise<GithubOAuthState> {
     if (this.active || this.stopped) return this.getState();
+    this.discovery?.abort();
+    if (this.state.organizationDiscovery.status === "loading")
+      this.state = {
+        ...this.state,
+        organizationDiscovery: { ...this.state.organizationDiscovery, status: "idle" }
+      };
     const controller = new AbortController();
     this.active = controller;
     let callback: Awaited<ReturnType<typeof startOAuthCallback>> | undefined;
@@ -135,6 +146,17 @@ export class GithubOAuthSession {
       const identity = await this.deps.network.identity(token, controller.signal);
       if (controller.signal.aborted)
         throw new GithubOAuthError("canceled", "GitHub sign-in canceled.");
+      const organizationPermission = await this.deps.network.organizationCapability(
+        token,
+        controller.signal
+      );
+      if (this.state.identity && !organizationPermission)
+        throw new GithubOAuthError(
+          "insufficient_scope",
+          "Organization authorization was not granted. Your previous GitHub session was retained."
+        );
+      if (controller.signal.aborted)
+        throw new GithubOAuthError("canceled", "GitHub sign-in canceled.");
       let persistence: GithubOAuthState["persistence"] = "secure";
       let message: string | null = null;
       try {
@@ -150,7 +172,16 @@ export class GithubOAuthSession {
         message = "Secure persistence is unavailable. Sign in again after restarting Graider.";
       }
       this.token = token;
-      this.state = { status: "signed_in", identity, busy: false, persistence, message };
+      this.discovery?.abort();
+      this.state = {
+        ...signedOut(),
+        status: "signed_in",
+        identity,
+        busy: false,
+        persistence,
+        message,
+        organizationPermission: organizationPermission ? "available" : "required"
+      };
     } catch (error) {
       this.state = {
         ...this.state,
@@ -159,6 +190,7 @@ export class GithubOAuthSession {
     } finally {
       callback?.cancel();
       this.active = null;
+      if (this.token) void this.refreshOrganizations();
     }
     return this.getState();
   }
@@ -169,6 +201,7 @@ export class GithubOAuthSession {
   async signOut(): Promise<GithubOAuthState> {
     if (!this.active) {
       this.active = new AbortController();
+      this.discovery?.abort();
       this.token = null;
       this.state = signedOut();
       try {
@@ -186,8 +219,83 @@ export class GithubOAuthSession {
     }
     return this.getState();
   }
+  async manageAuthorization(): Promise<GithubOAuthState> {
+    // Fixed trusted destination; renderer cannot supply URLs.
+    await this.deps.openBrowser("https://github.com/settings/applications");
+    return this.getState();
+  }
+  async refreshOrganizations(): Promise<GithubOAuthState> {
+    const token = this.token;
+    const userId = this.state.identity?.id;
+    if (!token || !userId || this.stopped || this.active) return this.getState();
+    this.discovery?.abort();
+    const controller = new AbortController();
+    this.discovery = controller;
+    const current = (): boolean =>
+      !controller.signal.aborted && this.token === token && this.state.identity?.id === userId;
+    this.state = {
+      ...this.state,
+      organizationDiscovery: { ...this.state.organizationDiscovery, status: "loading" }
+    };
+    try {
+      const capable = await this.deps.network.organizationCapability(token, controller.signal);
+      if (current()) {
+        this.state = { ...this.state, organizationPermission: capable ? "available" : "required" };
+        if (capable) {
+          const result = await this.deps.network.discoverOrganizations(token, controller.signal);
+          if (current()) this.state = { ...this.state, organizationDiscovery: result };
+        } else {
+          this.state = {
+            ...this.state,
+            organizationDiscovery: {
+              status: "authorization_required",
+              organizations: [],
+              message: "Authorize organization access to discover your GitHub organizations.",
+              stale: false
+            }
+          };
+        }
+      }
+    } catch (error) {
+      if (current()) {
+        if (error instanceof GithubOAuthError && error.code === "invalid_credential") {
+          this.active = controller;
+          this.token = null;
+          this.state = { ...signedOut(), message: safeMessage(error) };
+          try {
+            await this.deps.store.delete();
+          } catch {
+            this.state = {
+              ...this.state,
+              status: "unavailable",
+              message:
+                "The invalid saved credential could not be removed. Choose Sign out to retry."
+            };
+          }
+        } else {
+          const insufficient =
+            error instanceof GithubOAuthError && error.code === "insufficient_scope";
+          this.state = {
+            ...this.state,
+            organizationPermission: insufficient ? "required" : this.state.organizationPermission,
+            organizationDiscovery: {
+              ...this.state.organizationDiscovery,
+              status: insufficient ? "authorization_required" : "error",
+              message: safeMessage(error),
+              stale: this.state.organizationDiscovery.organizations.length > 0
+            }
+          };
+        }
+      }
+    } finally {
+      if (this.discovery === controller) this.discovery = null;
+      if (this.active === controller) this.active = null;
+    }
+    return this.getState();
+  }
   shutdown(): void {
     this.stopped = true;
+    this.discovery?.abort();
     this.active?.abort();
   }
 }

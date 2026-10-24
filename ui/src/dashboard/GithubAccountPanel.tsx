@@ -1,12 +1,24 @@
 import { useEffect, useState, type ReactElement } from "react";
 import type { GithubOAuthApi, GithubOAuthState } from "../../electron/githubOAuthTypes";
 
+const organizationStatusLabels = {
+  accessible: "Accessible",
+  pending: "Invitation pending",
+  oauth_approval_required: "Graider needs approval for this organization",
+  sso_required: "SSO authorization required",
+  authorization_required: "Organization authorization required",
+  insufficient_scope: "Organization permission required",
+  forbidden: "Organization access denied",
+  network_unavailable: "Network unavailable",
+  rate_limited: "GitHub request limit reached",
+  error: "Unable to validate access"
+};
 const AUTH_STATE_POLL_INTERVAL_MS = 500;
 
 export const GithubAccountPanel = (): ReactElement => {
   const api = window.graiderUI.githubOAuth;
   const [state, setState] = useState<GithubOAuthState | null>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<keyof GithubOAuthApi | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let mounted = true;
@@ -26,7 +38,7 @@ export const GithubAccountPanel = (): ReactElement => {
   useEffect(() => {
     let mounted = true;
     const timer =
-      state?.busy && api
+      (state?.busy || state?.organizationDiscovery.status === "loading") && api
         ? setInterval(() => {
             void api
               .get()
@@ -42,21 +54,21 @@ export const GithubAccountPanel = (): ReactElement => {
       mounted = false;
       clearInterval(timer);
     };
-  }, [state?.busy, api]);
+  }, [state?.busy, state?.organizationDiscovery.status, api]);
   const run = async (operation: keyof GithubOAuthApi): Promise<void> => {
     if (api) {
-      setPending(true);
+      setPending(operation);
       setError(null);
       try {
         setState(await api[operation]());
       } catch {
         setError("GitHub account operation could not be completed. Try again.");
       } finally {
-        setPending(false);
+        setPending(null);
       }
     }
   };
-  const busy = pending || state?.busy;
+  const busy = Boolean(pending) || state?.busy;
   return (
     <div aria-label="GitHub faculty account">
       <p>
@@ -86,11 +98,75 @@ export const GithubAccountPanel = (): ReactElement => {
           Sign out
         </button>
       ) : null}
-      {busy ? (
+      {state?.busy || pending === "signIn" || pending === "switchAccount" ? (
         <button type="button" onClick={() => void api?.cancel()}>
           Cancel GitHub sign-in
         </button>
       ) : null}
+      {state?.identity ? (
+        <section aria-label="Organizations">
+          <h3>Organizations</h3>
+          {state.organizationPermission === "required" ? (
+            <button type="button" disabled={busy} onClick={() => void run("signIn")}>
+              Authorize organization access
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={busy || state.organizationDiscovery.status === "loading"}
+            onClick={() => void run("refreshOrganizations")}
+          >
+            Refresh organizations
+          </button>{" "}
+          <button type="button" disabled={busy} onClick={() => void run("manageAuthorization")}>
+            Manage GitHub authorization
+          </button>{" "}
+          {state.organizationPermission === "available" ? (
+            <button type="button" disabled={busy} onClick={() => void run("signIn")}>
+              Update GitHub authorization
+            </button>
+          ) : null}
+          {state.organizationDiscovery.status === "loading" ? (
+            <p role="status">Loading organizations…</p>
+          ) : null}
+          {state.organizationDiscovery.message ? (
+            <p role="status">{state.organizationDiscovery.message}</p>
+          ) : null}
+          {state.organizationDiscovery.stale ? (
+            <p>Previously discovered organizations; refresh to verify current access.</p>
+          ) : null}
+          <ul>
+            {state.organizationDiscovery.organizations.map((org) => (
+              <li key={org.organizationId}>
+                <strong>{org.login}</strong> — {org.membershipRole === "admin" ? "Owner" : "Member"}{" "}
+                — {organizationStatusLabels[org.accessStatus]}
+                <p>{org.accessDiagnostic}</p>
+                {org.accessStatus === "oauth_approval_required" ||
+                org.accessStatus === "sso_required" ||
+                org.accessStatus === "authorization_required" ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void run("manageAuthorization")}
+                  >
+                    Manage GitHub authorization
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {state.organizationDiscovery.status === "ready" &&
+          state.organizationDiscovery.organizations.length === 0 ? (
+            <p>No organization memberships were returned by GitHub.</p>
+          ) : null}
+          <p>
+            GitHub may hide organizations restricted by policy. Manage GitHub authorization if an
+            expected organization is missing.
+          </p>
+        </section>
+      ) : (
+        <p>Sign in to discover organizations.</p>
+      )}
       {state?.message || error ? <p role="status">{error ?? state?.message}</p> : null}
       <p>
         Faculty sign-in establishes your identity. Course and repository operations still use the

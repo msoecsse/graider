@@ -8,7 +8,9 @@ const signedOut: GithubOAuthState = {
   identity: null,
   busy: false,
   persistence: "unknown",
-  message: null
+  message: null,
+  organizationPermission: "unknown",
+  organizationDiscovery: { status: "idle", organizations: [], message: null, stale: false }
 };
 const signedIn: GithubOAuthState = {
   ...signedOut,
@@ -19,6 +21,10 @@ const signedIn: GithubOAuthState = {
 const setup = (initial = signedOut) => {
   const api = {
     get: vi.fn().mockResolvedValue(initial),
+    refreshOrganizations: vi
+      .fn()
+      .mockResolvedValue({ ...signedIn, organizationPermission: "available" }),
+    manageAuthorization: vi.fn().mockResolvedValue(initial),
     signIn: vi.fn().mockResolvedValue(signedIn),
     signOut: vi.fn().mockResolvedValue(signedOut),
     switchAccount: vi
@@ -66,5 +72,76 @@ describe("GitHub faculty account", () => {
     setup({ ...signedOut, status: "unavailable", message: "Saved credential preserved." });
     expect(await screen.findByText("GitHub: Saved sign-in unavailable")).toBeInTheDocument();
     expect(screen.getByText(/Course and repository operations still use/)).toBeInTheDocument();
+  });
+});
+
+const organizationsState: GithubOAuthState = {
+  ...signedIn,
+  organizationPermission: "available",
+  organizationDiscovery: {
+    status: "ready",
+    message: null,
+    stale: false,
+    organizations: [
+      {
+        organizationId: 1,
+        login: "faculty-course-org",
+        membershipState: "active",
+        membershipRole: "admin",
+        directMembership: true,
+        accessStatus: "accessible",
+        accessDiagnostic: "Access verified."
+      },
+      {
+        organizationId: 2,
+        login: "pending-org",
+        membershipState: "pending",
+        membershipRole: "member",
+        directMembership: null,
+        accessStatus: "pending",
+        accessDiagnostic: "Accept on GitHub."
+      },
+      {
+        organizationId: 3,
+        login: "restricted-org",
+        membershipState: "active",
+        membershipRole: "member",
+        directMembership: true,
+        accessStatus: "oauth_approval_required",
+        accessDiagnostic: "Your sign-in is valid; an owner may need to approve Graider."
+      }
+    ]
+  }
+};
+describe("faculty organizations", () => {
+  it("shows role, pending invitation, restriction and a trusted remediation action", async () => {
+    const api = setup(organizationsState);
+    expect(await screen.findByRole("region", { name: "Organizations" })).toBeInTheDocument();
+    expect(screen.getByText(/Owner — Accessible/)).toBeInTheDocument();
+    expect(screen.getByText(/Member — Invitation pending/)).toBeInTheDocument();
+    expect(screen.getByText(/Member — Graider needs approval/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Manage GitHub authorization" })[0]!);
+    await waitFor(() => expect(api.manageAuthorization).toHaveBeenCalledWith());
+  });
+  it("refreshes classifications, switches accounts and clears organizations on sign out", async () => {
+    const api = setup(organizationsState);
+    await screen.findByText("faculty-course-org");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh organizations" }));
+    await waitFor(() => expect(screen.queryByText("faculty-course-org")).not.toBeInTheDocument());
+    expect(api.refreshOrganizations).toHaveBeenCalledOnce();
+    api.signIn.mockResolvedValue(organizationsState);
+    fireEvent.click(screen.getByRole("button", { name: "Update GitHub authorization" }));
+    await screen.findByText("faculty-course-org");
+    fireEvent.click(screen.getByRole("button", { name: "Sign in as another account" }));
+    await screen.findByText("Signed in to GitHub as second");
+    expect(screen.queryByText("faculty-course-org")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await screen.findByText("GitHub: Not signed in");
+    expect(screen.queryByRole("region", { name: "Organizations" })).not.toBeInTheDocument();
+  });
+  it("offers a permission upgrade without requiring sign out", async () => {
+    const api = setup({ ...signedIn, organizationPermission: "required" });
+    fireEvent.click(await screen.findByRole("button", { name: "Authorize organization access" }));
+    await waitFor(() => expect(api.signIn).toHaveBeenCalledOnce());
   });
 });

@@ -125,7 +125,10 @@ const graiderUI: GraiderUIApi = {
     signIn: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.signIn),
     signOut: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.signOut),
     switchAccount: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.switchAccount),
-    cancel: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.cancel)
+    cancel: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.cancel),
+    refreshOrganizations: () =>
+      invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.refreshOrganizations),
+    manageAuthorization: () => invoke<GithubOAuthState>(GITHUB_OAUTH_CHANNELS.manageAuthorization)
   },
   getAppInfo: async (): Promise<AppInfo> => await invoke<AppInfo>(IPC_CHANNELS.getAppInfo),
   getLocalSettings: async (): Promise<LocalSettingsResult> =>

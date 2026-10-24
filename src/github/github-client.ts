@@ -32,7 +32,26 @@ import type {
   CreatePullRequestInput
 } from "./github-models.js";
 
-export interface GitHubClient {
+/** Trusted adapter metadata, consumed only by the faculty OAuth service. */
+export interface GitHubOrganizationResponse {
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly data: unknown;
+}
+export interface GitHubOAuthOrganizationClient {
+  getOrganizationScopeResponse(signal: AbortSignal): Promise<GitHubOrganizationResponse>;
+  listOrganizationMembershipsPage(
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  getOrganizationMembership(
+    login: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+}
+
+export interface GitHubClient extends Partial<GitHubOAuthOrganizationClient> {
   getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser>;
 
   getRepository(owner: string, repo: string): Promise<GitHubRepository | null>;
