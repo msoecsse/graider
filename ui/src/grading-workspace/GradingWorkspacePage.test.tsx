@@ -3785,3 +3785,156 @@ it("refreshes the shared Graded and Ready to Publish score when completed feedba
     "85 / 100"
   );
 });
+
+it("reorders actual rows for four-column rosters with missing names instead of retaining roster indexes", async () => {
+  const students = [
+    { studentId: "zulu", section: "2", gradingStatus: "not_started" },
+    { studentId: "bravo", section: "1", gradingStatus: "not_started" },
+    { studentId: "alpha", section: "2", gradingStatus: "not_started" },
+    { studentId: "charlie", section: "1", gradingStatus: "not_started" }
+  ];
+  const original = structuredClone(students);
+  const loadSource = vi.fn(({ studentId }: { studentId: string }) =>
+    Promise.resolve(source(studentId))
+  );
+  setApis(vi.fn().mockResolvedValue(workspace(students)), loadSource);
+  render(<GradingWorkspacePage request={REQUEST} />);
+  await screen.findByTestId("mock-monaco");
+  const rows = () => [...document.querySelectorAll(".grading-workspace__student-row")];
+  const ids = () => rows().map((row) => row.textContent?.split(" ·")[0]);
+  expect(ids()).toEqual(["zulu", "bravo", "alpha", "charlie"]);
+  const viewer = screen.getByTestId("mock-monaco");
+  for (const key of ["lastName", "firstName", "section"]) {
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), { target: { value: key } });
+    expect(ids()).toEqual(
+      key === "section"
+        ? ["bravo", "charlie", "alpha", "zulu"]
+        : ["alpha", "bravo", "charlie", "zulu"]
+    );
+    expect(rows().findIndex((row) => row.classList.contains("selected"))).toBe(3);
+    expect(screen.getByTestId("mock-monaco")).toBe(viewer);
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Sort descending" }));
+  expect(ids()).toEqual(["zulu", "alpha", "charlie", "bravo"]);
+  expect(rows().findIndex((row) => row.classList.contains("selected"))).toBe(0);
+  expect(loadSource).toHaveBeenCalledTimes(1);
+  expect(students).toEqual(original);
+});
+
+it.each(["to_grade", "graded"] as const)(
+  "renders all sort orders and navigates that order in the %s bucket across snapshot refreshes",
+  async (bucket) => {
+    const status = bucket === "graded" ? "complete" : "in_progress";
+    const students = [
+      {
+        studentId: "zulu",
+        firstName: "Cora",
+        lastName: "Baker",
+        section: "2",
+        gradingStatus: status
+      },
+      {
+        studentId: "bravo",
+        firstName: "Ada",
+        lastName: "Dover",
+        section: "2",
+        gradingStatus: status
+      },
+      {
+        studentId: "alpha",
+        firstName: "Dora",
+        lastName: "Able",
+        section: "1",
+        gradingStatus: status
+      },
+      {
+        studentId: "charlie",
+        firstName: "Bea",
+        lastName: "Cole",
+        section: "1",
+        gradingStatus: status
+      },
+      {
+        studentId: "excluded",
+        firstName: "Aaron",
+        lastName: "Aaron",
+        section: "0",
+        gradingStatus: "published"
+      }
+    ];
+    const original = structuredClone(students);
+    students.forEach(Object.freeze);
+    Object.freeze(students);
+    const loadSource = vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve(source(studentId))
+    );
+    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve(snapshot(studentId, studentId === "excluded" ? "published" : status))
+    );
+    setApis(
+      vi.fn().mockResolvedValue(workspace(students)),
+      loadSource,
+      undefined,
+      undefined,
+      loadSnapshot
+    );
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    if (bucket === "graded") fireEvent.click(screen.getByRole("button", { name: "Graded 4" }));
+    const rows = () => [...document.querySelectorAll(".grading-workspace__student-row")];
+    const ids = () => rows().map((row) => row.textContent?.split(" ·")[0]);
+    expect(ids()).toEqual(["zulu", "bravo", "alpha", "charlie"]);
+    const viewer = screen.getByTestId("mock-monaco");
+    const orders = [
+      ["lastName", ["alpha", "zulu", "charlie", "bravo"]],
+      ["firstName", ["bravo", "charlie", "zulu", "alpha"]],
+      ["section", ["alpha", "charlie", "zulu", "bravo"]]
+    ] as const;
+    for (const [key, expected] of orders) {
+      fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), {
+        target: { value: key }
+      });
+      expect(ids()).toEqual(expected);
+      expect(rows().findIndex((row) => row.classList.contains("selected"))).toBe(
+        expected.indexOf("zulu")
+      );
+      expect(screen.getByTestId("mock-monaco")).toBe(viewer);
+      if (bucket === "graded")
+        expect(
+          within(screen.getByRole("table", { name: "Completed grades" }))
+            .getAllByRole("rowheader")
+            .map((row) => row.textContent)
+        ).toEqual(expected);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Sort descending" }));
+    expect(ids()).toEqual(["bravo", "zulu", "charlie", "alpha"]);
+    expect(loadSource).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(window, { key: "j" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("charlie:"));
+    fireEvent.keyDown(window, { key: "k" });
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("zulu:"));
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("bravo:"));
+    fireEvent.click(
+      screen.getByRole("button", { name: bucket === "to_grade" ? "Next ungraded" : "Next" })
+    );
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("zulu:"));
+    expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveValue("section");
+    expect(ids()).toEqual(["bravo", "zulu", "charlie", "alpha"]);
+    // Saving feedback refreshes the active snapshot and status projection.
+    const previousLoads = loadSnapshot.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "Refresh while sorted" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+    await waitFor(() => expect(loadSnapshot.mock.calls.length).toBeGreaterThan(previousLoads));
+    await screen.findByRole("combobox", { name: "Sort by" });
+    expect(ids()).toEqual(["bravo", "zulu", "charlie", "alpha"]);
+    expect(screen.getByRole("button", { name: "Sort ascending" })).toBeEnabled();
+    expect(document.querySelector(".grading-workspace__student-row.selected")).toHaveTextContent(
+      "zulu"
+    );
+    expect(students).toEqual(original);
+  }
+);

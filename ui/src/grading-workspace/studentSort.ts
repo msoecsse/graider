@@ -37,6 +37,12 @@ export const sortGradingStudents = <T extends GradingStudentListEntry>(
           : collator.compare(a, b) * (sort.direction === "ascending" ? 1 : -1);
       return comparison !== 0;
     });
-    return comparison || left.index - right.index;
+    // Names are optional in canonical four-column rosters. Roster indexes
+    // would make every name sort (and its direction toggle) a no-op there.
+    const leftId = left.student.studentId;
+    const rightId = right.student.studentId;
+    const idComparison =
+      collator.compare(leftId, rightId) || (leftId < rightId ? -1 : leftId > rightId ? 1 : 0);
+    return comparison || idComparison * (sort.direction === "ascending" ? 1 : -1);
   });
 };

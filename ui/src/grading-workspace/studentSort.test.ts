@@ -20,13 +20,13 @@ const ids = (key: StudentSortKey, direction: "ascending" | "descending") =>
 describe("grading student sorting", () => {
   it.each([
     ["section", "ascending", ["a", "tie", "b", "z", "missing"]],
-    ["section", "descending", ["z", "b", "a", "tie", "missing"]],
+    ["section", "descending", ["z", "b", "tie", "a", "missing"]],
     ["firstName", "ascending", ["a", "tie", "z", "b", "missing"]],
-    ["firstName", "descending", ["b", "z", "a", "tie", "missing"]],
+    ["firstName", "descending", ["b", "z", "tie", "a", "missing"]],
     ["lastName", "ascending", ["a", "tie", "b", "z", "missing"]],
-    ["lastName", "descending", ["z", "b", "a", "tie", "missing"]]
+    ["lastName", "descending", ["z", "b", "tie", "a", "missing"]]
   ] as const)(
-    "%s %s uses natural/case-insensitive keys, secondary names, stable roster ties and missing-last",
+    "%s %s uses natural/case-insensitive keys, secondary names, stable ID ties and missing-last",
     (key, direction, expected) => {
       expect(ids(key, direction)).toEqual(expected);
       expect(entries[0]?.student.studentId).toBe("z");

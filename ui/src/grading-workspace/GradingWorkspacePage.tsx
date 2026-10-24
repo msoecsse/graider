@@ -87,7 +87,13 @@ import {
   type GradingCommentWorkspaceMode
 } from "./GradingCommentWorkspace";
 
-type Student = { studentId: string; section: string; gradingStatus: string };
+type Student = {
+  studentId: string;
+  section: string;
+  firstName?: string;
+  lastName?: string;
+  gradingStatus: string;
+};
 type Ready = {
   status: "success";
   assignment: { title: string; termCode: string; slug: string };
@@ -965,7 +971,7 @@ export const GradingWorkspacePage = ({
       if (mounted.current) setBulkWorkflowRepairState("idle");
     }
   };
-  const visibleSortedSubmissions = useMemo(
+  const orderedSubmissions = useMemo(
     () =>
       isReady(result)
         ? sortGradingStudents(
@@ -985,54 +991,50 @@ export const GradingWorkspacePage = ({
   );
   const completeStudentIds = useMemo(
     () =>
-      visibleSortedSubmissions
+      orderedSubmissions
         .filter((entry) => entry.status === "complete")
         .map((entry) => entry.student.studentId),
-    [visibleSortedSubmissions]
+    [orderedSubmissions]
   );
   const publishReviewReadyEntries = useMemo(
     () =>
-      visibleSortedSubmissions
+      orderedSubmissions
         .filter((entry) => entry.status === "complete")
         .map((entry) => ({ studentId: entry.student.studentId, section: entry.student.section })),
-    [visibleSortedSubmissions]
+    [orderedSubmissions]
   );
   const publishReviewPublishedEntries = useMemo(
     () =>
-      visibleSortedSubmissions
+      orderedSubmissions
         .filter((entry) => entry.status === "published")
         .map((entry) => ({ studentId: entry.student.studentId, section: entry.student.section })),
-    [visibleSortedSubmissions]
+    [orderedSubmissions]
   );
-  const toGradeCount = visibleSortedSubmissions.filter((entry) =>
+  const toGradeCount = orderedSubmissions.filter((entry) =>
     UNGRADED_STATUSES.includes(entry.status)
   ).length;
-  const gradedOnlyCount = visibleSortedSubmissions.filter(
-    (entry) => entry.status === "complete"
-  ).length;
-  const publishedCount = visibleSortedSubmissions.filter(
-    (entry) => entry.status === "published"
-  ).length;
-  const allStudentsCount = visibleSortedSubmissions.length;
+  const gradedOnlyCount = orderedSubmissions.filter((entry) => entry.status === "complete").length;
+  const publishedCount = orderedSubmissions.filter((entry) => entry.status === "published").length;
+  const allStudentsCount = orderedSubmissions.length;
   const gradedOrPublishedCount = gradedOnlyCount + publishedCount;
-  const filteredStudents = useMemo(
+  const orderedVisibleSubmissions = useMemo(
     () =>
-      visibleSortedSubmissions.filter((entry) => {
+      orderedSubmissions.filter((entry) => {
         if (studentFilter === "all") return true;
         if (studentFilter === "to_grade") return UNGRADED_STATUSES.includes(entry.status);
         if (studentFilter === "graded") return entry.status === "complete";
         return entry.status === "published";
       }),
-    [visibleSortedSubmissions, studentFilter]
+    [orderedSubmissions, studentFilter]
   );
   const nextStudentNeedingGradingIndex = useMemo(() => {
-    const position = visibleSortedSubmissions.findIndex((entry) => entry.index === selected);
+    const position = orderedSubmissions.findIndex((entry) => entry.index === selected);
     const searchOrder = [
-      ...visibleSortedSubmissions.slice(position + 1),
-      ...visibleSortedSubmissions.slice(0, position)
+      ...orderedSubmissions.slice(position + 1),
+      ...orderedSubmissions.slice(0, position)
     ];
     return searchOrder.find((entry) => UNGRADED_STATUSES.includes(entry.status))?.index;
-  }, [visibleSortedSubmissions, selected]);
+  }, [orderedSubmissions, selected]);
   const loadEvidence = useCallback(
     async (studentId: string): Promise<void> => {
       const generation = evidenceRequestGeneration.current + 1;
@@ -2800,10 +2802,10 @@ export const GradingWorkspacePage = ({
     });
   };
   const goToFilteredStudent = (direction: "next" | "previous"): void => {
-    switchToStudent(getStudentNavigationTarget(filteredStudents, direction));
+    switchToStudent(getStudentNavigationTarget(orderedVisibleSubmissions, direction));
   };
   const goToNextRosterStudent = (): void => {
-    switchToStudent(getStudentNavigationTarget(visibleSortedSubmissions, "next"));
+    switchToStudent(getStudentNavigationTarget(orderedSubmissions, "next"));
   };
   const goToNextStudentNeedingGrading = (): void => {
     switchToStudent(nextStudentNeedingGradingIndex);
@@ -3264,7 +3266,7 @@ export const GradingWorkspacePage = ({
               setStudentSort(sort);
             }}
             totalStudentsCount={result.students.length}
-            filteredStudents={filteredStudents}
+            filteredStudents={orderedVisibleSubmissions}
             selectedIndex={selected}
             studentFilter={studentFilter}
             onFilterChange={setStudentFilter}
@@ -3284,8 +3286,10 @@ export const GradingWorkspacePage = ({
             }}
             onPrevious={() => goToFilteredStudent("previous")}
             onNext={() => goToFilteredStudent("next")}
-            hasPrevious={getStudentNavigationTarget(filteredStudents, "previous") !== undefined}
-            hasNext={getStudentNavigationTarget(filteredStudents, "next") !== undefined}
+            hasPrevious={
+              getStudentNavigationTarget(orderedVisibleSubmissions, "previous") !== undefined
+            }
+            hasNext={getStudentNavigationTarget(orderedVisibleSubmissions, "next") !== undefined}
           />
           <GradingSubmissionViewerPane
             request={request}
