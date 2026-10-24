@@ -3,7 +3,8 @@ import { MANAGED_BOOTSTRAP_CONCURRENCY } from "./managedCourses.js";
 import type {
   RemoteCourse,
   ManagedCourseState,
-  ManagedSynchronizationState
+  ManagedSynchronizationState,
+  ManagedReconciliationState
 } from "./remoteCourseTypes.js";
 import { emptyCourseDiscovery } from "./remoteCourseTypes.js";
 import type { RemoteCourseDiscovery } from "./remoteCourseTypes.js";
@@ -27,7 +28,7 @@ export const createOAuthProof = () => {
     state: randomBytes(RANDOM_BYTE_COUNT).toString("base64url")
   };
 };
-interface ManagedOperationInput {
+export interface ManagedOperationInput {
   readonly token: string;
   readonly userId: number;
   readonly course: RemoteCourse;
@@ -51,6 +52,16 @@ interface Dependencies {
       readonly onProgress: (state: ManagedSynchronizationState) => void;
     }
   ) => Promise<ManagedSynchronizationState>;
+  readonly reconcileCourse?: (
+    input: ManagedOperationInput & {
+      readonly sessionGeneration: number;
+      readonly action: "plan" | "apply";
+      readonly planId?: string;
+      readonly confirmed?: boolean;
+      readonly onProgress: (state: ManagedSynchronizationState) => void;
+      readonly onReconciliationProgress: (state: ManagedReconciliationState) => void;
+    }
+  ) => Promise<ManagedReconciliationState>;
   readonly callback?: typeof startOAuthCallback;
 }
 const signedOut = (): GithubOAuthState => ({
@@ -74,6 +85,91 @@ export class GithubOAuthSession {
   private active: AbortController | null = null;
   private restored: Promise<void> | null = null;
   private stopped = false;
+  private accountGeneration = 0;
+  private readonly reconciliations = new Map<number, AbortController>();
+  private invalidateReconciliations(): void {
+    this.accountGeneration += 1;
+    for (const controller of this.reconciliations.values()) controller.abort();
+    this.reconciliations.clear();
+  }
+  cancelReconciliation(repositoryId: number): void {
+    this.reconciliations.get(repositoryId)?.abort();
+  }
+  async reconcileCourse(
+    repositoryId: number,
+    action: "plan" | "apply",
+    planId?: string,
+    confirmed?: boolean
+  ): Promise<ManagedReconciliationState> {
+    const token = this.token;
+    const userId = this.state.identity?.id;
+    const course = this.state.courseDiscovery.courses.find(
+      (item) => item.repositoryId === repositoryId
+    );
+    if (
+      !token ||
+      !userId ||
+      !course ||
+      this.state.courseDiscovery.userId !== userId ||
+      !this.deps.reconcileCourse ||
+      this.reconciliations.has(repositoryId)
+    )
+      throw new Error("Current authorized course is required.");
+    const generation = this.accountGeneration;
+    const controller = new AbortController();
+    this.reconciliations.set(repositoryId, controller);
+    const current = (): boolean =>
+      !this.stopped &&
+      generation === this.accountGeneration &&
+      token === this.token &&
+      this.state.identity?.id === userId;
+    const update = (change: Partial<RemoteCourse>): void => {
+      if (current())
+        this.state = {
+          ...this.state,
+          courseDiscovery: {
+            ...this.state.courseDiscovery,
+            courses: this.state.courseDiscovery.courses.map((item) =>
+              item.repositoryId === repositoryId ? { ...item, ...change } : item
+            )
+          }
+        };
+    };
+    try {
+      const result = await this.deps.reconcileCourse({
+        token,
+        userId,
+        course,
+        action,
+        planId,
+        confirmed,
+        signal: controller.signal,
+        sessionGeneration: generation,
+        revalidateSession: async () =>
+          current() &&
+          !controller.signal.aborted &&
+          (await this.deps.network.identity(token, controller.signal)).id === userId &&
+          (await this.deps.network.repositoryCapability(token, controller.signal)) &&
+          (await this.deps.network.organizationCapability(token, controller.signal)) &&
+          current(),
+        onProgress: (synchronization) =>
+          update({
+            synchronization,
+            ...(synchronization.metadata ?? {}),
+            ...(synchronization.status === "up_to_date" || synchronization.status === "updated"
+              ? { bootstrap: { status: "ready", diagnostic: null, retryable: false } }
+              : {})
+          }),
+        onReconciliationProgress: (reconciliation) => update({ reconciliation })
+      });
+      update({ reconciliation: result });
+      if (!current()) throw new Error("Account changed. Review the cache again.");
+      return result;
+    } finally {
+      if (this.reconciliations.get(repositoryId) === controller)
+        this.reconciliations.delete(repositoryId);
+    }
+  }
   private discovery: AbortController | null = null;
   constructor(private readonly deps: Dependencies) {}
   getState(): GithubOAuthState {
@@ -206,6 +302,7 @@ export class GithubOAuthSession {
         persistence = "memory";
         message = "Secure persistence is unavailable. Sign in again after restarting Graider.";
       }
+      this.invalidateReconciliations();
       this.token = token;
       this.discovery?.abort();
       this.state = {
@@ -238,6 +335,7 @@ export class GithubOAuthSession {
     if (!this.active) {
       this.active = new AbortController();
       this.discovery?.abort();
+      this.invalidateReconciliations();
       this.token = null;
       this.state = signedOut();
       try {
@@ -389,6 +487,7 @@ export class GithubOAuthSession {
                                             ? "needs_attention"
                                             : "failed",
                                         diagnostic: result.diagnostic,
+                                        reason: result.reason,
                                         retryable: result.retryable
                                       }
                                     }
@@ -554,6 +653,7 @@ export class GithubOAuthSession {
   }
   shutdown(): void {
     this.stopped = true;
+    this.invalidateReconciliations();
     this.discovery?.abort();
     this.active?.abort();
   }

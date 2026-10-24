@@ -58,7 +58,7 @@ const fixture = async () => {
   const remote = path.join(root, "remote.git");
   const writer = path.join(root, "clone-b");
   await git(root, ["init", "--bare", "--initial-branch=main", remote]);
-  await git(root, ["clone", remote, writer]);
+  await git(root, ["clone", "--no-hardlinks", remote, writer]);
   await git(writer, ["config", "user.name", "Fixture"]);
   await git(writer, ["config", "user.email", "fixture@example.test"]);
   fs.mkdirSync(path.join(writer, "terms", "27s1"), { recursive: true });
@@ -69,7 +69,7 @@ const fixture = async () => {
   await git(writer, ["push", "origin", "main"]);
   const cache = managedCoursePath(root, 42, 20);
   fs.mkdirSync(path.dirname(cache), { recursive: true });
-  await git(root, ["clone", remote, cache]);
+  await git(root, ["clone", "--no-hardlinks", remote, cache]);
   await git(cache, ["config", "user.name", "Fixture"]);
   await git(cache, ["config", "user.email", "fixture@example.test"]);
   const url = "https://github.com/fixture/course.git";

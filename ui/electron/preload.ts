@@ -121,6 +121,14 @@ const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<
 
 const graiderUI: GraiderUIApi = {
   githubOAuth: {
+    planManagedReconciliation: (repositoryId) =>
+      invoke("graider-ui:managed-course:plan-reconciliation", repositoryId),
+    applyManagedReconciliation: (repositoryId, planId, confirmed) =>
+      invoke("graider-ui:managed-course:apply-reconciliation", repositoryId, planId, confirmed),
+    cancelManagedReconciliation: (repositoryId, planId) =>
+      invoke("graider-ui:managed-course:cancel-reconciliation", repositoryId, planId),
+    revealManagedRecovery: (repositoryId, recoveryId) =>
+      invoke("graider-ui:managed-course:reveal-recovery", repositoryId, recoveryId),
     inspectManagedCourse: (repositoryId) =>
       invoke<import("./remoteCourseTypes.js").ManagedCourseInspection>(
         "graider-ui:managed-course:inspect",

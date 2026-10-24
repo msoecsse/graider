@@ -72,7 +72,7 @@ export const GithubAccountPanel = ({
     };
   }, [state?.busy, state?.organizationDiscovery.status, api, controlled]);
   const run = async (
-    operation: Exclude<keyof GithubOAuthApi, "inspectManagedCourse">
+    operation: keyof typeof import("../../electron/githubOAuthTypes").GITHUB_OAUTH_CHANNELS
   ): Promise<void> => {
     if (api) {
       setPending(operation);

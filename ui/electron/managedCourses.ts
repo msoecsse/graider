@@ -26,17 +26,20 @@ const CATALOG_FILE_MODE = 0o600;
 const CATALOG_FILE = "catalog.json";
 const TEMP_ROOT = ".bootstrap";
 const WORKTREE_DIRECTORY = "repo";
-const UNEXPECTED_GIT_STATE = [
+export const INTERRUPTED_GIT_OPERATIONS = [
   "MERGE_HEAD",
   "CHERRY_PICK_HEAD",
   "REVERT_HEAD",
   "rebase-merge",
   "rebase-apply",
   "sequencer",
-  "BISECT_LOG",
+  "BISECT_LOG"
+] as const;
+const EXTERNAL_GIT_STORAGE = [
   "commondir",
   "gitdir",
-  "objects/info/alternates"
+  "objects/info/alternates",
+  "objects/info/http-alternates"
 ] as const;
 const DISK_FAILURE_CODES = new Set(["ENOSPC", "EACCES", "EPERM", "EROFS"]);
 const TERM_PATTERN = /^\d{2}s[123]$/;
@@ -54,7 +57,7 @@ export const managedCoursePath = (userData: string, userId: number, repositoryId
     WORKTREE_DIRECTORY
   );
 
-class Attention extends Error {
+export class Attention extends Error {
   constructor(
     message: string,
     readonly reason: ManagedSynchronizationState["reason"] = "unsafe_repository"
@@ -63,7 +66,7 @@ class Attention extends Error {
   }
 }
 /** Every existing component below userData must be a real directory, never a symlink. */
-const safeDirectories = (userData: string, directory: string, create = false): void => {
+export const safeDirectories = (userData: string, directory: string, create = false): void => {
   const relative = path.relative(path.resolve(userData), path.resolve(directory));
   if (relative.startsWith("..") || path.isAbsolute(relative))
     throw new Attention("Managed storage path is unsafe.");
@@ -111,7 +114,7 @@ interface Catalog {
   readonly userId: number;
   readonly courses: Record<string, ManagedCatalogEntry>;
 }
-const accountRoot = (userData: string, userId: number): string =>
+export const accountRoot = (userData: string, userId: number): string =>
   path.join(userData, MANAGED_COURSE_ROOT, identityComponent(userId));
 /** Catalog is a hint. Paths are always reconstructed from IDs, never taken from JSON. */
 export const loadManagedCatalog = (userData: string, userId: number): Catalog => {
@@ -174,11 +177,11 @@ export const loadManagedCatalog = (userData: string, userId: number): Catalog =>
     throw new Attention("Managed catalog is invalid. Review is required before course setup.");
   }
 };
-const state = (
+export const state = (
   status: ManagedCourseState["status"],
   diagnostic: string | null = null
 ): ManagedCourseState => ({ status, diagnostic, retryable: status === "failed" });
-const catalogEntry = (
+export const catalogEntry = (
   userData: string,
   userId: number,
   repositoryId: number,
@@ -204,7 +207,7 @@ const catalogEntry = (
   bootstrap,
   lastValidatedAt
 });
-const saveEntry = (userData: string, entry: ManagedCatalogEntry): void => {
+export const saveEntry = (userData: string, entry: ManagedCatalogEntry): void => {
   const catalog = loadManagedCatalog(userData, entry.userId);
   const root = accountRoot(userData, entry.userId);
   const file = path.join(root, CATALOG_FILE);
@@ -246,7 +249,7 @@ export interface ManagedBootstrapRequest {
   /** Existing caches are structurally checked here, then classified by synchronization. */
   readonly prepareSynchronization?: boolean;
 }
-const assertActive = (request: ManagedBootstrapRequest): void => {
+export const assertActive = (request: ManagedBootstrapRequest): void => {
   if (request.signal.aborted) throw new Error("stale_session");
 };
 const validateMetadata = async (
@@ -325,7 +328,7 @@ const validateMetadata = async (
     );
   return { code: course.code, title: course.title };
 };
-const revalidateManagedRepository = async (
+export const revalidateManagedRepository = async (
   request: ManagedBootstrapRequest
 ): Promise<CourseRepository> => {
   if (
@@ -355,22 +358,51 @@ const revalidateManagedRepository = async (
   assertActive(request);
   return repo;
 };
+/** A complete rename preserves data only for self-contained storage. Never follow links. */
+export const validateManagedStorage = (userData: string, localPath: string): readonly string[] => {
+  safeDirectories(userData, localPath);
+  rejectLinks(localPath);
+  const gitDirectory = path.join(localPath, ".git");
+  if (
+    !fs.lstatSync(gitDirectory).isDirectory() ||
+    EXTERNAL_GIT_STORAGE.some((name) => fs.existsSync(path.join(gitDirectory, name)))
+  )
+    throw new Attention("Manual review required: external Git storage cannot be preserved safely.");
+  const inspectFiles = (directory: string): void => {
+    for (const name of fs.readdirSync(directory)) {
+      const file = path.join(directory, name);
+      const stat = fs.lstatSync(file);
+      if (stat.isDirectory()) inspectFiles(file);
+      else if (!stat.isFile() || stat.nlink !== 1)
+        throw new Attention(
+          "Manual review required: linked or special storage cannot be preserved safely."
+        );
+    }
+  };
+  inspectFiles(localPath);
+  const config = fs.readFileSync(path.join(gitDirectory, "config"), "utf8");
+  if (
+    /^\s*\[include(?:if)?(?:\s|\])/imu.test(config) ||
+    /^\s*(?:worktree|objectformat|alternateRefsCommand|fsmonitor)\s*=/imu.test(config) ||
+    fs.existsSync(path.join(gitDirectory, "config.worktree")) ||
+    fs.existsSync(path.join(gitDirectory, "modules"))
+  )
+    throw new Attention(
+      "Manual review required: external Git configuration cannot be preserved safely."
+    );
+  return INTERRUPTED_GIT_OPERATIONS.filter((name) => fs.existsSync(path.join(gitDirectory, name)));
+};
 const validateStructure = async (
   request: ManagedBootstrapRequest,
   repo: CourseRepository,
   localPath: string,
   context: BootstrapGitContext
 ): Promise<GitWorkspaceInspector> => {
-  safeDirectories(request.userData, localPath);
-  rejectLinks(localPath);
-  const gitDirectory = path.join(localPath, ".git");
-  if (
-    !fs.existsSync(gitDirectory) ||
-    !fs.lstatSync(gitDirectory).isDirectory() ||
-    UNEXPECTED_GIT_STATE.some((name) => fs.existsSync(path.join(gitDirectory, name)))
-  )
+  const operations = validateManagedStorage(request.userData, localPath);
+  if (!request.prepareSynchronization && operations.length)
     throw new Attention(
-      "Managed cache has an unexpected Git operation or external Git directory. Review is required."
+      "Interrupted Git operation. Review cache before restoring.",
+      "interrupted_operation"
     );
   const workspace = await context.factory.open(localPath);
   if (fs.realpathSync(workspace.root) !== fs.realpathSync(localPath))
@@ -379,8 +411,16 @@ const validateStructure = async (
   if (!locator)
     throw new Attention("Managed origin is missing or is not a credential-free GitHub locator.");
   const resolved = await request.reader.resolve(locator.owner, locator.name);
-  if (!resolved || resolved.id !== repo.id)
-    throw new Attention("Managed origin identifies a different repository. Review is required.");
+  if (!resolved)
+    throw new GithubOAuthError(
+      "repository_inaccessible",
+      REPOSITORY_FAILURE_MESSAGES.repository_inaccessible
+    );
+  if (resolved.id !== repo.id)
+    throw new Attention(
+      "This managed location contains a different Git repository.",
+      "wrong_repository"
+    );
   if (resolved.organizationId !== repo.organizationId)
     throw new Attention(
       "Organization transfer requires migration/reconciliation.",
@@ -388,13 +428,15 @@ const validateStructure = async (
     );
   return workspace;
 };
-const validateClone = async (
+export const validateClone = async (
   request: ManagedBootstrapRequest,
   repo: CourseRepository,
   localPath: string,
   context: BootstrapGitContext
 ): Promise<void> => {
   const workspace = await validateStructure(request, repo, localPath, context);
+  if (validateManagedStorage(request.userData, localPath).length)
+    throw new Attention("Replacement contains interrupted Git state.");
   const inspection = await workspace.inspect();
   const tree = inspection.workingTree;
   if (
@@ -412,7 +454,8 @@ const validateClone = async (
   await validateMetadata(request, repo, localPath);
 };
 const failure = (error: unknown): ManagedCourseState => {
-  if (error instanceof Attention) return state("needs_attention", error.message);
+  if (error instanceof Attention)
+    return { ...state("needs_attention", error.message), reason: error.reason };
   const code = (error as NodeJS.ErrnoException)?.code;
   if (code === "ENOSPC")
     return state(
@@ -605,7 +648,7 @@ export const inspectManagedCourse = (
 let activeBootstraps = 0;
 const waitingBootstraps: Array<() => void> = [];
 const destinationLocks = new Map<string, Promise<unknown>>();
-const serializeManagedOperation = async <T>(
+export const serializeManagedOperation = async <T>(
   request: ManagedBootstrapRequest,
   perform: () => Promise<T>
 ): Promise<T> => {
@@ -663,7 +706,7 @@ const attention = (
   diagnostic,
   retryable: false
 });
-const classify = (
+export const classify = (
   inspection: GitRepositoryState,
   defaultBranch: string
 ): ManagedSynchronizationState | null => {
@@ -698,7 +741,7 @@ const classify = (
     return attention("diverged", "Managed cache has diverged from GitHub.");
   return null;
 };
-const synchronizationFailure = (error: unknown): ManagedSynchronizationState => {
+export const synchronizationFailure = (error: unknown): ManagedSynchronizationState => {
   if (error instanceof Attention) return attention(error.reason, error.message);
   const code = (error as NodeJS.ErrnoException)?.code;
   const kind = (error as { kind?: string })?.kind;
@@ -735,7 +778,7 @@ const synchronizationFailure = (error: unknown): ManagedSynchronizationState => 
     retryable: true
   };
 };
-const performSynchronization = async (
+export const performSynchronization = async (
   request: ManagedSynchronizationRequest
 ): Promise<ManagedSynchronizationState> => {
   let observed: GitRepositoryState | null = null;
@@ -749,6 +792,12 @@ const performSynchronization = async (
     const repo = await revalidateManagedRepository(request);
     const localPath = managedCoursePath(request.userData, request.userId, repo.id);
     const context = request.authenticate();
+    const operations = validateManagedStorage(request.userData, localPath);
+    if (operations.length)
+      throw new Attention(
+        "Interrupted Git operation. Review cache before restoring.",
+        "interrupted_operation"
+      );
     await validateStructure(request, repo, localPath, context);
     const workspace = await context.factory.open(localPath);
     observed = await workspace.inspect();

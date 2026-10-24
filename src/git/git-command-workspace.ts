@@ -598,9 +598,11 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
 
   async inspect(options?: {
     readonly paths?: readonly RelativeGitPath[];
+    readonly readOnly?: boolean;
   }): Promise<RepositoryState> {
     try {
       const arguments_ = ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"];
+      if (options?.readOnly) arguments_.unshift("--no-optional-locks");
       if (options?.paths !== undefined && options.paths.length > 0)
         arguments_.push("--", ...options.paths);
       const status = parseStatus(await this.executor.run(this.root, arguments_, "inspect"));
@@ -1370,6 +1372,44 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
       if (error instanceof GitError) throw error;
       throw errorForFailure(error, "diff", "revision_unavailable");
     }
+  }
+
+  /** Managed-cache evidence uses fixed trusted revisions, never renderer-supplied input. */
+  async localOnlyCommits(maximumCount: number): Promise<{
+    readonly count: number;
+    readonly commits: readonly GitCommitSummary[];
+  }> {
+    if (
+      !Number.isInteger(maximumCount) ||
+      maximumCount < 1 ||
+      maximumCount > MAX_COMMIT_HISTORY_COUNT
+    )
+      throw new GitError("operation_rejected", "list_commits");
+    const count = Number(
+      (
+        await this.executor.run(
+          this.root,
+          ["rev-list", "--count", "HEAD", "--not", "--remotes=origin", "--"],
+          "list_commits"
+        )
+      ).trim()
+    );
+    if (!Number.isSafeInteger(count) || count < 0)
+      throw new GitError("unknown_engine_failure", "list_commits");
+    const stdout = await this.executor.run(
+      this.root,
+      [
+        "log",
+        `--max-count=${String(maximumCount)}`,
+        `--format=${LOG_FORMAT}`,
+        "HEAD",
+        "--not",
+        "--remotes=origin",
+        "--"
+      ],
+      "list_commits"
+    );
+    return { count, commits: count === 0 ? [] : parseCommitHistory(stdout).slice(0, maximumCount) };
   }
 
   async listCommits(request: CommitHistoryRequest): Promise<readonly GitCommitSummary[]> {

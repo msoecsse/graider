@@ -207,21 +207,21 @@ Local data protection is delegated to normal OS account/filesystem protections. 
 
 ## 6. Course Discovery and Bootstrap
 
-Implementation status: Phase 2.5 adds startup, Refresh courses and explicit-retry
-synchronization after identity-scoped managed bootstrap. Authenticated bundled Git
-fetches refs; only clean, attached expected-default-branch caches with expected origin
-upstream can fast-forward. Dirty/ahead/diverged/unexpected/transfer states remain
-Needs attention. Canonical metadata/faculty validation follows updates; invalid new
-remote state is preserved without rollback. Account generations and a shared cache
-lock isolate results; two concurrent Git operations bound resource use. Schema-1
-catalog compatibility, credential-free origins and legacy operational precedence are
-preserved. Remote-only caches remain metadata inspection surfaces. Remote access is
-read-only even though local managed files may update. There is no periodic timer,
-repair/reset, managed mutation cutover, pre-mutation guard or student Git operation.
-See [synchronization semantics and Phase 2.6](graider-remote-course-discovery.md#phase-25--managed-course-synchronization).
+Implementation status: Phase 2.6 adds explicit review and complete-cache preservation
+on top of Phase 2.5 synchronization. Recoverable local state is reviewed using trusted
+file/history/operation evidence and a content fingerprint. Only faculty confirmation
+can prepare a validated fresh clone, preserve the old complete repository in account-scoped
+recovery, and atomically activate the replacement. Failed promotion attempts rollback;
+failed final authoritative validation retains the replacement with Needs attention.
+External/linked Git storage is manual-only; organization transfer remains migration.
+Recovery manifests and narrow ID-only reveal are account scoped; copies never synchronize
+and are never automatically deleted. Legacy folders retain operational precedence.
+Remote-only caches remain inspection-oriented. No GitHub writes or in-place Git repair
+is added. See [Phase 2.6 transaction and safety details](graider-remote-course-discovery.md#phase-26--dirty-managed-cache-handling-and-reconciliation).
 
-The remaining architecture describes long-term requirements; periodic timing, student
-synchronization and mutation migration below are not Phase 2.5 behavior.
+The next slice is Phase 2.7, a pre-mutation synchronization guard. The remaining architecture
+describes long-term requirements; periodic timing, student synchronization and mutation
+migration below are not current implementation behavior.
 
 After authentication, Graider automatically discovers every authorized Graider course accessible to the signed-in identity.
 

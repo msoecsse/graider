@@ -263,6 +263,10 @@ describe("faculty OAuth preload boundary", () => {
       ["graider-ui:faculty-auth:manage-authorization"]
     ]);
     expect(Object.keys(api!)).toEqual([
+      "planManagedReconciliation",
+      "applyManagedReconciliation",
+      "cancelManagedReconciliation",
+      "revealManagedRecovery",
       "inspectManagedCourse",
       "get",
       "signIn",
@@ -319,4 +323,19 @@ it("forwards bulk publication progress without the Electron event and removes it
     "graider-ui:grading-student-reports:progress",
     handler
   );
+});
+
+it("reconciliation exposes only course/plan/recovery identities and explicit confirmation", async () => {
+  const api = electron.exposedApi!.githubOAuth!;
+  electron.invoke.mockClear();
+  await api.planManagedReconciliation!(20);
+  await api.applyManagedReconciliation!(20, "opaque-plan", true);
+  await api.cancelManagedReconciliation!(20, "opaque-plan");
+  await api.revealManagedRecovery!(20, "opaque-recovery");
+  expect(electron.invoke.mock.calls).toEqual([
+    ["graider-ui:managed-course:plan-reconciliation", 20],
+    ["graider-ui:managed-course:apply-reconciliation", 20, "opaque-plan", true],
+    ["graider-ui:managed-course:cancel-reconciliation", 20, "opaque-plan"],
+    ["graider-ui:managed-course:reveal-recovery", 20, "opaque-recovery"]
+  ]);
 });

@@ -12,6 +12,7 @@ export type CourseLocalStatus =
 export interface RemoteCourse {
   readonly bootstrap?: ManagedCourseState;
   readonly synchronization?: ManagedSynchronizationState;
+  readonly reconciliation?: ManagedReconciliationState;
   readonly repositoryId: number;
   readonly nodeId: string | null;
   readonly organizationId: number;
@@ -76,6 +77,7 @@ export const emptyCourseDiscovery = (): RemoteCourseDiscovery => ({
 
 /** Public state contains neither credentials nor machine-local paths. */
 export interface ManagedCourseState {
+  readonly reason?: ManagedSynchronizationState["reason"];
   readonly status:
     | "not_bootstrapped"
     | "queued"
@@ -126,7 +128,9 @@ export interface ManagedSynchronizationState {
     | "authentication_failed"
     | "invalid_remote_metadata"
     | "local_storage_failure"
-    | "unsafe_repository";
+    | "unsafe_repository"
+    | "interrupted_operation"
+    | "wrong_repository";
   readonly diagnostic: string | null;
   readonly retryable: boolean;
   readonly localCommit?: string;
@@ -148,3 +152,79 @@ export const synchronizationLabel = (state: ManagedSynchronizationState): string
     failed: "Course update failed",
     needs_attention: "Needs attention"
   })[state.status];
+
+/** Review projections contain no executable plan context, credentials, or filesystem roots. */
+export interface ManagedReconciliationEvidence {
+  readonly head: {
+    readonly kind: "attached" | "detached" | "unborn";
+    readonly branch: string | null;
+    readonly commit: string | null;
+  };
+  readonly upstream:
+    | { readonly kind: "missing" }
+    | {
+        readonly kind: "configured";
+        readonly branch: string;
+        readonly remote: string | null;
+        readonly ahead: number;
+        readonly behind: number;
+        readonly relation: string;
+      };
+  readonly files: readonly {
+    readonly category:
+      | "Modified"
+      | "Added"
+      | "Deleted"
+      | "Renamed"
+      | "Staged"
+      | "Untracked"
+      | "Conflict";
+    readonly path: string;
+    readonly originalPath?: string;
+  }[];
+  readonly localCommits: {
+    readonly count: number | null;
+    readonly commits: readonly {
+      readonly id: string;
+      readonly subject: string;
+      readonly committedAt: string;
+    }[];
+  };
+  readonly operations: readonly string[];
+  readonly defaultBranch: string;
+}
+export interface ManagedReconciliationState {
+  readonly status:
+    | "idle"
+    | "planning"
+    | "review_required"
+    | "preparing"
+    | "cloning_replacement"
+    | "preserving_existing"
+    | "activating_replacement"
+    | "validating"
+    | "completed"
+    | "failed"
+    | "manual_review_required"
+    | "stale_plan";
+  readonly repositoryId: number;
+  readonly planId?: string;
+  readonly recoveryId?: string;
+  readonly eligible: boolean;
+  readonly reason?: ManagedSynchronizationState["reason"];
+  readonly diagnostic: string | null;
+  readonly retryable: boolean;
+  readonly evidence?: ManagedReconciliationEvidence;
+}
+export const canReviewManagedCache = (course: RemoteCourse): boolean =>
+  course.authorization === "authorized" &&
+  [
+    "local_changes",
+    "local_ahead",
+    "diverged",
+    "default_branch_changed",
+    "upstream_missing",
+    "detached_head",
+    "interrupted_operation",
+    "wrong_repository"
+  ].includes(course.synchronization?.reason ?? course.bootstrap?.reason ?? "");

@@ -26,7 +26,10 @@ const course = (
   localFolderIds: [],
   diagnostics: []
 });
-const fixture = (courses = [course(20)]) => {
+const fixture = (
+  courses = [course(20)],
+  reconcileCourse?: ConstructorParameters<typeof GithubOAuthSession>[0]["reconcileCourse"]
+) => {
   const network = {
     identity: vi.fn().mockResolvedValue({ id: 42, login: "faculty", name: null }),
     organizationCapability: vi.fn().mockResolvedValue(true),
@@ -49,6 +52,7 @@ const fixture = (courses = [course(20)]) => {
     store,
     network,
     bootstrapCourse,
+    reconcileCourse,
     discoverCourses,
     secret: () => "secret",
     openBrowser: async () => {},
@@ -337,4 +341,72 @@ it("keeps a valid global identity on Git authentication rejection, but clears a 
   expect(session.getState().status).toBe("signed_out");
   expect(f.store.delete).toHaveBeenCalledOnce();
   session.shutdown();
+});
+
+describe("account-scoped reconciliation lifecycle", () => {
+  it("scopes review/apply inputs and suppresses late results after sign-out", async () => {
+    let finish!: (value: import("./remoteCourseTypes.js").ManagedReconciliationState) => void;
+    let input!: Parameters<
+      NonNullable<ConstructorParameters<typeof GithubOAuthSession>[0]["reconcileCourse"]>
+    >[0];
+    const reconcile = vi.fn().mockImplementation((request) => {
+      input = request;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    const f = fixture([course(20)], reconcile);
+    await f.session.restore();
+    await vi.waitFor(() => expect(f.session.getState().courseDiscovery.status).toBe("ready"));
+    const pending = f.session.reconcileCourse(20, "plan");
+    const rejected = expect(pending).rejects.toThrow("Account changed");
+    await vi.waitFor(() => expect(reconcile).toHaveBeenCalledOnce());
+    expect(input).toMatchObject({ userId: 42, course: { repositoryId: 20 }, action: "plan" });
+    await f.session.signOut();
+    expect(input.signal.aborted).toBe(true);
+    input.onReconciliationProgress({
+      repositoryId: 20,
+      status: "completed",
+      recoveryId: "old-private-record",
+      eligible: false,
+      diagnostic: null,
+      retryable: false
+    });
+    finish({
+      repositoryId: 20,
+      status: "review_required",
+      planId: "old-private-plan",
+      eligible: true,
+      diagnostic: null,
+      retryable: false
+    });
+    await rejected;
+    expect(f.session.getState().courseDiscovery.courses).toEqual([]);
+    expect(JSON.stringify(f.session.getState())).not.toMatch(/old-private|oauth-secret/);
+    f.session.shutdown();
+  });
+  it("cancels pre-swap work without revoking the signed-in account", async () => {
+    let input!: Parameters<
+      NonNullable<ConstructorParameters<typeof GithubOAuthSession>[0]["reconcileCourse"]>
+    >[0];
+    const f = fixture([course(20)], async (request) => {
+      input = request;
+      return {
+        repositoryId: 20,
+        status: "review_required",
+        planId: "review",
+        eligible: true,
+        diagnostic: null,
+        retryable: false
+      };
+    });
+    await f.session.restore();
+    await vi.waitFor(() => expect(f.session.getState().courseDiscovery.status).toBe("ready"));
+    const pending = f.session.reconcileCourse(20, "plan");
+    f.session.cancelReconciliation(20);
+    await pending;
+    expect(input.signal.aborted).toBe(true);
+    expect(f.session.getState().status).toBe("signed_in");
+    f.session.shutdown();
+  });
 });

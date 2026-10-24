@@ -224,6 +224,10 @@ describe("revalidation and safe clone transaction", () => {
         expect(checkout).toBe("default");
         fs.mkdirSync(path.join(destination, "terms", "27s1"), { recursive: true });
         fs.mkdirSync(path.join(destination, ".git"));
+        fs.writeFileSync(
+          path.join(destination, ".git", "config"),
+          "[core]\nrepositoryformatversion = 0\n"
+        );
         fs.writeFileSync(path.join(destination, "course.yml"), courseYaml);
         fs.writeFileSync(path.join(destination, "terms", "27s1", "term.yml"), termYaml);
       }

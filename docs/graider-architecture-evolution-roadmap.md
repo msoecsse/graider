@@ -133,7 +133,7 @@ Phase 1 acceptance is complete:
 Phase 2 slices 2.1–2.5 are implemented: OAuth identity, organization access, read-only
 course discovery, verified identity-scoped managed bootstrap and startup/explicit-refresh
 clean fast-forward synchronization. Existing mutation credentials and legacy operational
-paths remain transitional. Next is slice 2.6: dirty managed-cache handling and reconciliation. See the implementation boundary in
+paths remain transitional. Next is slice 2.7: pre-mutation synchronization guard. See the implementation boundary in
 [remote course discovery](graider-remote-course-discovery.md).
 
 ---
@@ -194,13 +194,25 @@ and stale-account guards preserve legacy precedence and schema-1 compatibility.
 No timers, repair/reset, push/REST writes, managed mutation migration or student Git
 operations. See [semantics and validation](graider-remote-course-discovery.md#phase-25--managed-course-synchronization).
 
-## Slice 2.6 — Dirty managed-cache handling and reconciliation (next)
+## Slice 2.6 — Dirty managed-cache handling and reconciliation (implemented)
 
-Design reviewable data-preserving recovery for dirty/staged/untracked/conflicted caches,
-local commits/divergence, missing upstream/detached HEAD and default-branch transitions.
-Destructive decisions require explicit user intent and preserved evidence. Organization
-transfers remain migration work. Do not implicitly add periodic timing, pre-mutation
-guards, managed mutation cutover, OAuth push migration or student synchronization.
+Explicit review and confirmation preserve the entire app-owned repository, including
+index, untracked/binary files, local history and interrupted operations. A validated fresh
+authoritative clone is prepared first, then the old repository moves to account-scoped
+recovery and the replacement is atomically promoted. Content fingerprints reject stale
+plans. Promotion failure attempts rollback; manifests track incomplete transactions.
+External/linked Git storage is manual-only; organization transfers remain excluded.
+Recovery is retained indefinitely and revealed through an account-owned ID-only action.
+No remote writes, in-place Git repair, managed mutation cutover or legacy/student changes.
+See [implementation details](graider-remote-course-discovery.md#phase-26--dirty-managed-cache-handling-and-reconciliation).
+
+## Slice 2.7 — Pre-mutation synchronization guard (next)
+
+Guard existing mutation entry points with operational-target validation, synchronization
+and canonical metadata/authorization checks. Block unsafe/stale/local-change states and
+route eligible cases to explicit Phase 2.6 review. Preserve legacy operational precedence.
+Do not bundle managed mutation cutover, OAuth push migration, organization migration,
+periodic synchronization, student synchronization or schema-v2 changes.
 
 ---
 

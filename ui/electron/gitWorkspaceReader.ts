@@ -55,8 +55,16 @@ export interface GitRepositoryState {
 
 export interface GitWorkspaceInspector {
   readonly root: string;
-  inspect(options?: { readonly paths?: readonly RelativeGitPath[] }): Promise<GitRepositoryState>;
+  inspect(options?: {
+    readonly paths?: readonly RelativeGitPath[];
+    readonly readOnly?: boolean;
+  }): Promise<GitRepositoryState>;
   remoteUrl(remote: "origin"): Promise<string | null>;
+  /** Fixed HEAD vs origin history; accepts no caller-supplied revision. */
+  localOnlyCommits?(maximumCount: number): Promise<{
+    readonly count: number;
+    readonly commits: readonly GitCommitSummary[];
+  }>;
 }
 
 export interface GitWorkspaceSynchronizer extends GitWorkspaceInspector {

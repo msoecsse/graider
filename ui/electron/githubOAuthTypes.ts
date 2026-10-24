@@ -52,6 +52,16 @@ export const GITHUB_OAUTH_CHANNELS = {
   manageAuthorization: "graider-ui:faculty-auth:manage-authorization"
 } as const;
 export interface GithubOAuthApi {
+  planManagedReconciliation?(
+    repositoryId: number
+  ): Promise<import("./remoteCourseTypes.js").ManagedReconciliationState>;
+  applyManagedReconciliation?(
+    repositoryId: number,
+    planId: string,
+    confirmed: true
+  ): Promise<import("./remoteCourseTypes.js").ManagedReconciliationState>;
+  cancelManagedReconciliation?(repositoryId: number, planId?: string): Promise<void>;
+  revealManagedRecovery?(repositoryId: number, recoveryId: string): Promise<void>;
   inspectManagedCourse?(
     repositoryId: number
   ): Promise<import("./remoteCourseTypes.js").ManagedCourseInspection>;

@@ -1,3 +1,9 @@
+import {
+  ManagedReconciliationService,
+  latestPreservedCopy,
+  resolvePreservedCopy,
+  preservedRecoveryState
+} from "./managedReconciliation.js";
 import { createAuthenticatedProductionGitWorkspace } from "./gitWorkspaceReader.js";
 import {
   bootstrapManagedCourse,
@@ -1485,6 +1491,7 @@ export const createMainWindow = (): BrowserWindow => {
 registerIpcHandlers();
 
 app.whenReady().then(async () => {
+  const reconciliation = new ManagedReconciliationService();
   const facultyAuth = new GithubOAuthSession({
     store: createGithubOAuthCredentialStore(
       path.join(app.getPath("userData"), "github-oauth.credential"),
@@ -1519,8 +1526,39 @@ app.whenReady().then(async () => {
         reader: createRemoteRepositoryReader(token, signal),
         authenticate: () => createAuthenticatedProductionGitWorkspace(token)
       }),
-    discoverCourses: async (token, userId, organizations, signal) =>
-      discoverRemoteCourses({
+    reconcileCourse: async ({
+      token,
+      userId,
+      course,
+      signal,
+      revalidateSession,
+      action,
+      planId,
+      confirmed,
+      sessionGeneration,
+      onProgress,
+      onReconciliationProgress
+    }) => {
+      const request = {
+        userData: app.getPath("userData"),
+        userId,
+        course,
+        signal,
+        revalidateSession,
+        sessionGeneration,
+        onProgress,
+        onReconciliationProgress,
+        username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+          .currentFacultyMsoeUsername,
+        reader: createRemoteRepositoryReader(token, signal),
+        authenticate: () => createAuthenticatedProductionGitWorkspace(token)
+      };
+      return action === "plan"
+        ? reconciliation.plan(request)
+        : reconciliation.apply(request, planId ?? "", confirmed === true);
+    },
+    discoverCourses: async (token, userId, organizations, signal) => {
+      const discovered = await discoverRemoteCourses({
         userId,
         organizations,
         username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
@@ -1529,7 +1567,29 @@ app.whenReady().then(async () => {
           listCourseFolders(getCourseRegistryPath(app.getPath("userData")))
         ),
         reader: createRemoteRepositoryReader(token, signal)
-      })
+      });
+      return {
+        ...discovered,
+        courses: discovered.courses.map((course) => {
+          const recoveryId = latestPreservedCopy(
+            app.getPath("userData"),
+            userId,
+            course.repositoryId
+          );
+          return recoveryId
+            ? {
+                ...course,
+                reconciliation: preservedRecoveryState(
+                  app.getPath("userData"),
+                  userId,
+                  course.repositoryId,
+                  recoveryId
+                )
+              }
+            : course;
+        })
+      };
+    }
   });
   ipcMain.handle("graider-ui:managed-course:inspect", (_event, repositoryId: unknown) => {
     const state = facultyAuth.getState();
@@ -1544,6 +1604,61 @@ app.whenReady().then(async () => {
       throw new Error("Cached course details are unavailable. Refresh courses.");
     }
   });
+  const ownedCourse = (repositoryId: unknown) => {
+    const state = facultyAuth.getState();
+    if (
+      !Number.isSafeInteger(repositoryId) ||
+      typeof repositoryId !== "number" ||
+      repositoryId <= 0 ||
+      !state.identity ||
+      state.courseDiscovery.userId !== state.identity.id ||
+      !state.courseDiscovery.courses.some((course) => course.repositoryId === repositoryId)
+    )
+      throw new Error("Current account course identity is required.");
+    return { userId: state.identity.id, repositoryId };
+  };
+  ipcMain.handle(
+    "graider-ui:managed-course:plan-reconciliation",
+    (_event, repositoryId: unknown, ...extra: unknown[]) => {
+      const owned = ownedCourse(repositoryId);
+      if (extra.length) throw new Error("Only course identity is accepted.");
+      return facultyAuth.reconcileCourse(owned.repositoryId, "plan");
+    }
+  );
+  ipcMain.handle(
+    "graider-ui:managed-course:apply-reconciliation",
+    (_event, repositoryId: unknown, planId: unknown, confirmed: unknown, ...extra: unknown[]) => {
+      const owned = ownedCourse(repositoryId);
+      if (typeof planId !== "string" || confirmed !== true || extra.length)
+        throw new Error("Reviewed plan and explicit confirmation are required.");
+      return facultyAuth.reconcileCourse(owned.repositoryId, "apply", planId, true);
+    }
+  );
+  ipcMain.handle(
+    "graider-ui:managed-course:cancel-reconciliation",
+    (_event, repositoryId: unknown, planId: unknown, ...extra: unknown[]) => {
+      const owned = ownedCourse(repositoryId);
+      if ((planId !== undefined && typeof planId !== "string") || extra.length)
+        throw new Error("Invalid plan identity.");
+      facultyAuth.cancelReconciliation(owned.repositoryId);
+      if (typeof planId === "string") reconciliation.discard(planId, owned.userId);
+    }
+  );
+  ipcMain.handle(
+    "graider-ui:managed-course:reveal-recovery",
+    (_event, repositoryId: unknown, recoveryId: unknown, ...extra: unknown[]) => {
+      const owned = ownedCourse(repositoryId);
+      if (typeof recoveryId !== "string" || extra.length)
+        throw new Error("Recovery identity is required.");
+      const preserved = resolvePreservedCopy(
+        app.getPath("userData"),
+        owned.userId,
+        owned.repositoryId,
+        recoveryId
+      );
+      shell.showItemInFolder(preserved);
+    }
+  );
   const restoration = facultyAuth.restore();
   const operations = {
     get: async () => {

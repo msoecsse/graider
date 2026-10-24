@@ -1,3 +1,4 @@
+import { ManagedCacheReview } from "./ManagedCacheReview";
 import { synchronizationLabel } from "../../electron/remoteCourseTypes";
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import type { GithubOAuthState } from "../../electron/githubOAuthTypes";
@@ -172,6 +173,16 @@ export const RemoteCoursesPanel = ({
                 Retry synchronization — {course.code}
               </button>
             ))}
+          {current?.courses
+            .filter((course) => course.localStatus === "registered_local")
+            .map((course) => (
+              <div
+                key={`${current.userId}:${course.repositoryId}`}
+                aria-label={`Managed cache — ${course.code}`}
+              >
+                <ManagedCacheReview course={course} />
+              </div>
+            ))}
           {visible.map((course) => (
             <article key={course.repositoryId}>
               <h3>
@@ -202,6 +213,10 @@ export const RemoteCoursesPanel = ({
                               ? "Needs attention"
                               : "Available remotely"}
                   </p>
+                  <ManagedCacheReview
+                    key={`${current?.userId}:${course.repositoryId}`}
+                    course={course}
+                  />
                   {course.synchronization?.diagnostic ? (
                     <p>{course.synchronization.diagnostic}</p>
                   ) : null}

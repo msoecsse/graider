@@ -1,6 +1,6 @@
 # Remote Graider course discovery, bootstrap and synchronization
 
-Phase 2.5 adds startup and explicit-refresh synchronization to Phase 2.4 managed
+Phase 2.6 adds explicitly confirmed, complete-cache preservation and replacement to managed
 course/admin caches. See [synchronization and the next boundary](#phase-25--managed-course-synchronization).
 The discovery foundation below describes Phase 2.3.
 
@@ -411,13 +411,11 @@ changes, Git push or commit. Fast-forward updates only the local managed cache. 
 reset, clean, stash, rebase, merge commit, forced checkout, repair button or automatic
 deletion is provided. Managed mutations and pre-mutation sync guards remain deferred.
 
-**Phase 2.6 — dirty managed-cache handling and reconciliation:** design reviewable,
-data-preserving recovery for local changes, staged/untracked/conflicted work, local
-commits/divergence, missing upstream/detached HEAD and default-branch transitions.
-Require explicit evidence and user decisions before discard/destructive actions.
-Keep organization transfers as explicit migration work. Periodic timing, pre-mutation
-guards, managed mutation cutover, OAuth push migration, schema-v2 and student operations
-remain outside this slice.
+**Phase 2.6 is implemented:** review evidence, explicitly confirm preservation, validate a
+fresh authoritative clone, preserve the complete old repository, and atomically replace
+the active cache. See the transaction details below. Organization transfer remains migration work.
+The next boundary is **Phase 2.7 — pre-mutation synchronization guard**; managed mutation
+cutover, OAuth push migration, periodic timing, schema-v2 and student operations remain deferred.
 
 ### Phase 2.5 validation and Electron evidence
 
@@ -514,3 +512,179 @@ Only repository ID **1342086585** was cloned. All live scenarios performed **zer
 student clones and zero course/GitHub repository writes**. Rename and account-switch
 races, malformed/dirty caches, disk errors and rate-limit/access-loss cases use
 focused fakes rather than modifying real repositories.
+
+## Phase 2.6 — dirty managed-cache handling and reconciliation
+
+Detection remains automatic; reconciliation never runs automatically. Local changes
+(tracked, staged, untracked, conflicts), ahead/diverged history, detached HEAD,
+missing/wrong upstream, changed default branch and interrupted operations offer
+**Review cache**. A self-contained repository whose GitHub origin resolves to the wrong
+repository ID can also be preserved; review explicitly identifies the different repository.
+Organization transfer, authorization loss, inaccessible repositories, invalid authoritative
+metadata, network/rate-limit/OAuth failure and local storage failures do not authorize replacement.
+Transient remote failures retain retry semantics.
+
+`MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `rebase-merge`, `rebase-apply`,
+`sequencer` and `BISECT_LOG` are recoverable operation markers. Synchronization refuses
+to alter those caches; reconciliation preserves the interrupted operation, index and
+worktree intact. No abort operation is run. Structural hazards remain **Manual review
+required** with no restoration action: symlinks (including dangling links), external
+`.git` files, `commondir`, `gitdir`, object alternates/http-alternates, linked/special
+files, external worktree/include configuration and nested module storage. Moving such
+storage cannot prove preservation of every dependency. Path/link checks are retained.
+
+### Review and confirmation
+
+The trusted main process resolves current account/repository/authorization and managed
+path. Renderer inputs are repository ID, generated opaque plan ID and explicit confirmation;
+there are no renderer revisions, commands, URLs, paths or editable evidence. Plans remain
+in memory and cannot survive restart or account generation changes.
+
+Review shows branch/detached state, original commit, expected current default branch,
+upstream and ahead/behind relationship, categorized repository-relative file paths
+(Modified, Added, Deleted, Renamed, Staged, Untracked, Conflict), interrupted operation
+markers and local-only commit summaries. The semantic bundled-Git reader compares fixed
+`HEAD` with origin remote-tracking refs, counts local-only commits, and bounds displayed
+subjects/IDs/timestamps to `LOCAL_COMMIT_REVIEW_LIMIT` (10). It never accepts renderer
+revisions. These counts describe the last observed origin history; a fresh authoritative
+clone and final synchronization establish current remote state. No full commit bodies,
+raw Git errors, OAuth context or managed absolute paths cross the review boundary.
+
+The action is **Preserve local cache and restore from GitHub**. The review explains that
+Graider creates and validates a new GitHub copy, preserves the entire current repository
+locally, replaces only the active managed cache, uploads nothing from the preserved
+copy and leaves legacy manually registered course folders alone. Cancel before the
+transaction boundary leaves the old cache untouched. The review panel reports real
+planning, cloning, validation, preservation and activation stages, without simulated percentages.
+
+A SHA-256 fingerprint includes the trusted account/repository identity, HEAD/upstream,
+status projection, local history and operation markers plus regular-file bytes, modes
+and inode identities throughout the worktree and `.git` (including ignored/untracked
+content, index, refs, objects and reflogs). Git status uses a read-only optional-lock
+mode for review. The complete fingerprint is recomputed before preparation and again
+immediately before preservation. Changed contents under an unchanged status/path are
+therefore stale. A changed plan refuses execution with **Managed cache changed since
+review. Review it again before restoring.** Fresh temporary state is fingerprinted too.
+
+### Storage and manifests
+
+Only the canonical account/repository path is active:
+
+```text
+<userData>/managed-courses/<github-user-id>/<repository-id>/repo
+<userData>/managed-courses/<github-user-id>/.reconcile/replacement-<generated>/repo
+<userData>/managed-courses/<github-user-id>/.recovery/<repository-id>/<recovery-id>/manifest.json
+<userData>/managed-courses/<github-user-id>/.recovery/<repository-id>/<recovery-id>/repo
+```
+
+IDs and temporary/recovery names come from trusted main-process code. Names and user-selected
+folders never determine paths. All moves stay on the account filesystem. Recovery is
+machine-local evidence, never a registered/operational course or discovery/synchronization
+target. No fetch, origin rewrite or other managed mutation runs on preserved repositories.
+
+Each recovery has a private, strict schema-1 manifest; no separate index is needed. Its
+whitelist includes generated recovery ID/timestamp, immutable account/repository IDs,
+organization identity and display names, original reason/status, HEAD/upstream/history
+and operation evidence, categorized changed-path counts, authoritative default branch,
+replacement commit and completion state. Tokens, credential-bearing URLs, authentication
+environments, arbitrary errors and executable paths are excluded. Completion distinguishes
+preparing, preserved, replacement active, completed, rollback restored and manual review.
+Manifest reads validate ownership, schema and field whitelist before reveal.
+
+### Fresh clone and atomic transaction
+
+The existing per-cache scheduler covers planning and the entire apply operation; its
+global two-operation limit also bounds replacements. Preparation revalidates session,
+faculty authorization, canonical remote course/term metadata, repository and organization.
+An authenticated bundled-Dugite clone is created in a separately owned `.reconcile`
+directory **before** the old cache is moved. Shared bootstrap validation verifies clean
+worktree/index, no conflicts/untracked files, attached current default branch,
+credential-free origin resolving to the expected repository/organization, canonical
+course/term metadata and faculty authorization. Replacement upstream must be current.
+
+After cloning, session/repository/organization/default branch/metadata and local fingerprint
+are checked again. The final synchronous path checks and renames have no intervening
+await. The old canonical `repo` moves to recovery `repo`, its full fingerprint is verified
+without a Git mutation, the manifest advances to preserved, and the fresh `repo` is
+renamed into the unchanged canonical path. Once the original moves, cancellation is
+not honored until activation or rollback reaches a deterministic state. Filesystem
+rename and path/inode checks minimize races; they do not lock out arbitrary external
+processes writing the same OS-account storage.
+
+If clone or validation fails, the existing cache stays untouched. If preservation fails,
+activation is never attempted. If promotion fails after preservation, Graider tries to
+rename the old repository back; successful rollback records rollback restored. Failed
+rollback retains recovery evidence and reports local-storage/manual attention, never
+healthy state. Manifest persistence failure cannot delete evidence or claim success.
+A post-activation authoritative metadata failure keeps the new cache active and marks
+Needs attention; it never restores the old dirty cache automatically. Normal synchronization
+and metadata inspection run before success; dashboard metadata returns to Up to date.
+Only owned temporary directories with matching inode/device and checked contents can
+be removed. Recovery copies have **no automatic cleanup or retention expiration**.
+
+Default-branch transitions rebuild from the new authoritative branch; missing/wrong
+upstream and detached state rebuild normally without in-place config/checkout repair.
+Local-ahead/divergent commits and operation/conflict/index/worktree state remain in
+the preserved repository, including `.git`, untracked and binary files.
+
+### Recovery access and boundaries
+
+**Reveal preserved copy** accepts only repository/recovery IDs. Main reconstructs the
+account-owned path, validates the manifest and storage, and invokes Electron's trusted
+`showItemInFolder` boundary. It cannot reveal the active cache or arbitrary renderer paths.
+Validated recovery references are rediscovered for the owning account after restart;
+sign-out clears review/UI state but leaves disk evidence intact. Account generations
+invalidate old plans and suppress late results. Switching back can reveal owned copies;
+another account cannot access them through IPC. Legacy precedence remains unchanged,
+with one course card when legacy and managed locations coexist.
+
+Reconciliation has no push, GitHub REST writes, commit, reset, clean, stash, merge,
+rebase, forced checkout, conflict resolution, student repository operations, managed
+mutation cutover or organization migration. Fixture setup may create local commits,
+remote fixture updates and interrupted operations; those are test-only operations.
+
+**Phase 2.7 — pre-mutation synchronization guard** should connect the synchronization
+engine to existing mutation entry points: verify the intended operational target,
+synchronize and validate before mutation, block stale/dirty/unauthorized/transfer states,
+and require this explicit review workflow where eligible. It must preserve legacy
+precedence and must not silently introduce managed mutation cutover, OAuth publishing,
+periodic sync, student synchronization or organization migration.
+
+### Phase 2.6 validation evidence
+
+Validation on 2026-10-24 passed:
+
+- 50 real bundled-Git reconciliation tests: file/index/binary preservation; staged,
+  untracked, normalized added/deleted/renamed paths and conflicts; bounded local history;
+  ahead/diverged/detached/upstream/default-branch replacement; all operation markers;
+  realistic interrupted merge and rebase; wrong repository; structural/manual-only and
+  remote/auth exclusions; content/index/operation/account stale plans; cancellation
+  before and during cloning; clone/validation failures; preservation/promotion/rollback/
+  manifest failure injection; final authoritative metadata failure; recovery ownership,
+  strict manifest whitelist and incomplete recovery restart projection.
+- Eight review UI tests, two additional account lifecycle tests and a narrow preload
+  identity/confirmation test. Existing discovery, legacy precedence, synchronization,
+  bootstrap and security suites remained passing.
+- Full backend: 138 files, 1,488 passed, one skipped. Full UI/Electron: 181 files,
+  1,703 passed, 25 skipped. Focused bundled-Git transport/authentication regression:
+  four files, 92 passed. Backend/UI typechecks, lint, root/UI formatting checks,
+  both production builds and `git diff --check` passed. The UI build retains its
+  existing bundle-size advisory. Loopback OAuth tests and backend config-cache/build
+  writes required running outside the filesystem/network sandbox.
+- Real Electron smoke used an isolated copy of the account profile and real `csc1120`
+  managed cache. The production cache received healthy read-only inspection only.
+  Healthy state had no Review cache control. Dirtying only isolated `course.yml`,
+  refreshing, reviewing its changed path and confirming restoration produced a clean
+  Up to date active cache and a recovery containing the edited file and Git index.
+  The trusted reveal action opened the recovery; traversal input was rejected.
+  Planning/cloning/validation/completion stages were observed through real state;
+  preservation/activation stage emissions are also asserted in integration tests.
+- Instrumented isolated restoration recorded 154 GitHub reads, zero GitHub writes,
+  one authenticated bundled clone, three fetches, zero pushes, zero commits, zero
+  reset/clean/stash/rebase/merge/abort commands and zero system-Git calls. Restart
+  confirmed healthy active state and owned recovery rediscovery. Sign-out cleared
+  UI and denied reveal while retaining disk recovery. Restoring the isolated copied
+  credential on another launch tests ownership re-entry without interactive OAuth.
+  No production remote, legacy course folder or student repository was mutated.
+  Local fixture setup intentionally uses fixture commits/pushes and merge/rebase to
+  construct test histories; those are separate from instrumented reconciliation.
