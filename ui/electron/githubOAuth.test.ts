@@ -33,6 +33,7 @@ const fixture = () => {
     delete: vi.fn().mockResolvedValue(undefined)
   };
   const network = {
+    repositoryCapability: vi.fn().mockResolvedValue(true),
     organizationCapability: vi.fn().mockResolvedValue(true),
     discoverOrganizations: vi
       .fn()
@@ -109,7 +110,7 @@ describe("faculty session", () => {
     expect(url.searchParams.get("client_id")).toBe(GITHUB_OAUTH_CLIENT_ID);
     expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:54321/callback");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(url.searchParams.get("scope")).toBe("read:org");
+    expect(url.searchParams.get("scope")).toBe("read:org repo");
     expect(url.searchParams.get("state")).toBeTruthy();
     const exchange = f.network.exchange.mock.calls[0][0];
     expect(exchange).toMatchObject({
@@ -443,5 +444,135 @@ describe("organization session lifecycle and authorization upgrades", () => {
     const f = fixture();
     await f.session.manageAuthorization();
     expect(f.openBrowser).toHaveBeenCalledWith("https://github.com/settings/applications");
+  });
+});
+
+describe("private course discovery capability and transactional upgrades", () => {
+  it("restores a read:org-only session with course upgrade required and never discovers courses", async () => {
+    const f = fixture();
+    f.store.load.mockResolvedValue(TOKEN);
+    f.network.repositoryCapability.mockResolvedValue(false);
+    const discoverCourses = vi.fn();
+    const session = new GithubOAuthSession({ ...f, discoverCourses });
+    await session.restore();
+    await session.refreshOrganizations();
+    expect(session.getState()).toMatchObject({
+      status: "signed_in",
+      repositoryPermission: "required",
+      organizationPermission: "available",
+      courseDiscovery: { status: "authorization_required", courses: [] }
+    });
+    expect(discoverCourses).not.toHaveBeenCalled();
+  });
+  it.each(["cancel", "failure", "missing_scope"])(
+    "preserves the read:org session on upgrade %s",
+    async (outcome) => {
+      const f = fixture();
+      f.store.load.mockResolvedValue(TOKEN);
+      f.network.repositoryCapability.mockResolvedValue(false);
+      await f.session.restore();
+      await f.session.refreshOrganizations();
+      if (outcome === "cancel")
+        f.network.exchange.mockRejectedValueOnce(new GithubOAuthError("canceled", "Canceled."));
+      if (outcome === "failure")
+        f.network.exchange.mockRejectedValueOnce(new Error("private-token"));
+      await f.session.signIn();
+      expect(f.session.getState()).toMatchObject({
+        identity: IDENTITY,
+        status: "signed_in",
+        repositoryPermission: "required"
+      });
+      expect(f.store.save).not.toHaveBeenCalled();
+      expect(f.store.delete).not.toHaveBeenCalled();
+      expect(new URL(f.openBrowser.mock.calls[0][0]).searchParams.get("scope")).toBe(
+        "read:org repo"
+      );
+    }
+  );
+  it("commits an upgraded credential only after capability validation and restores it", async () => {
+    const f = fixture();
+    f.store.load.mockResolvedValue(TOKEN);
+    f.network.repositoryCapability.mockResolvedValue(false);
+    await f.session.restore();
+    await f.session.refreshOrganizations();
+    f.network.repositoryCapability.mockResolvedValue(true);
+    f.network.exchange.mockResolvedValue("upgraded_token");
+    await f.session.signIn();
+    expect(f.store.save).toHaveBeenCalledWith("upgraded_token");
+    expect(f.session.getState().repositoryPermission).toBe("available");
+    f.store.load.mockResolvedValue("upgraded_token");
+    const restored = new GithubOAuthSession(f);
+    await restored.restore();
+    await restored.refreshOrganizations();
+    expect(restored.getState().repositoryPermission).toBe("available");
+    expect(JSON.stringify(restored.getState())).not.toContain("upgraded_token");
+  });
+  it("discovers after organizations, refreshes, and clears discovery on sign-out and account replacement", async () => {
+    const f = fixture();
+    f.store.load.mockResolvedValue(TOKEN);
+    const discoverCourses = vi.fn().mockImplementation(async (_token, userId) => ({
+      status: "ready",
+      userId,
+      courses: [],
+      diagnostics: [],
+      discoveredAt: "now"
+    }));
+    const session = new GithubOAuthSession({ ...f, discoverCourses });
+    await session.restore();
+    await session.refreshOrganizations();
+    expect(discoverCourses).toHaveBeenCalledWith(TOKEN, IDENTITY.id, [], expect.any(AbortSignal));
+    expect(session.getState().courseDiscovery.userId).toBe(IDENTITY.id);
+    f.network.identity.mockResolvedValue({ login: "second", id: 99, name: null });
+    await session.signIn(true);
+    await session.refreshOrganizations();
+    expect(session.getState().courseDiscovery.userId).toBe(99);
+    await session.signOut();
+    expect(session.getState().courseDiscovery.courses).toEqual([]);
+    expect(session.getState().courseDiscovery.userId).toBeNull();
+  });
+  it("preserves sign-in when remote discovery encounters a network outage", async () => {
+    const f = fixture();
+    f.store.load.mockResolvedValue(TOKEN);
+    const session = new GithubOAuthSession({
+      ...f,
+      discoverCourses: vi.fn().mockRejectedValue(new Error("private-token"))
+    });
+    await session.restore();
+    await session.refreshOrganizations();
+    expect(session.getState()).toMatchObject({
+      status: "signed_in",
+      identity: IDENTITY,
+      courseDiscovery: { status: "error" }
+    });
+    expect(f.store.delete).not.toHaveBeenCalled();
+    expect(JSON.stringify(session.getState())).not.toContain("private-token");
+  });
+});
+
+describe("in-flight course account isolation", () => {
+  it("discards a late previous-account result after sign-out", async () => {
+    const f = fixture();
+    f.store.load.mockResolvedValue(TOKEN);
+    let complete!: (value: import("./remoteCourseTypes.js").RemoteCourseDiscovery) => void;
+    const discoverCourses = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        })
+    );
+    const session = new GithubOAuthSession({ ...f, discoverCourses });
+    await session.restore();
+    await vi.waitFor(() => expect(discoverCourses).toHaveBeenCalled());
+    await session.signOut();
+    complete({
+      status: "ready",
+      userId: IDENTITY.id,
+      discoveredAt: "now",
+      courses: [],
+      diagnostics: [{ organizationId: null, status: "error", message: "Previous private metadata" }]
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(session.getState().courseDiscovery.userId).toBeNull();
+    expect(JSON.stringify(session.getState())).not.toContain("Previous private metadata");
   });
 });

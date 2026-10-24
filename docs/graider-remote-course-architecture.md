@@ -207,6 +207,11 @@ Local data protection is delegated to normal OS account/filesystem protections. 
 
 ## 6. Course Discovery and Bootstrap
 
+Implementation status: Phase 2.3 implements read-only organization-to-course
+discovery and legacy local registration reconciliation. The schema-v2 faculty
+identity and managed storage behavior below remain future architecture; see
+[current behavior and Phase 2.4 boundary](graider-remote-course-discovery.md).
+
 After authentication, Graider automatically discovers every authorized Graider course accessible to the signed-in identity.
 
 ### Discovery scope

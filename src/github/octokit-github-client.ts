@@ -255,6 +255,70 @@ export class OctokitGitHubClient implements GitHubClient {
     return this.organizationResponse("/user/memberships/orgs/{org}", { org: login }, signal);
   }
 
+  async listCourseRepositoriesPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/orgs/{org}/repos",
+      { org, page, per_page: perPage, type: "all" },
+      signal
+    );
+  }
+
+  async searchCourseMetadataPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/search/code",
+      { q: `org:${org} filename:course.yml path:/`, page, per_page: perPage },
+      signal
+    );
+  }
+
+  async getCourseRepository(
+    owner: string,
+    repo: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    const response = await this.organizationResponse(
+      "/repos/{owner}/{repo}",
+      { owner, repo },
+      signal
+    );
+    const MOVED_PERMANENTLY = 301;
+    if (response.status === MOVED_PERMANENTLY) {
+      const location = response.headers.location ?? response.headers.Location;
+      const immutableRoute = location?.match(
+        /^https:\/\/api\.github\.com(\/repositories\/[1-9][0-9]*)$/u
+      )?.[1];
+      if (immutableRoute !== undefined)
+        return this.organizationResponse(immutableRoute, {}, signal);
+    }
+    return response;
+  }
+
+  async getCourseMetadataPath(
+    owner: string,
+    repo: string,
+    metadataPath: string,
+    ref: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    if (!/^(?:course\.yml|terms|terms\/[A-Za-z0-9._-]+(?:\/term\.yml)?)$/u.test(metadataPath))
+      throw new Error("Only course and term metadata paths are permitted.");
+    return this.organizationResponse(
+      "/repos/{owner}/{repo}/contents/{path}",
+      { owner, repo, path: metadataPath, ref },
+      signal
+    );
+  }
+
   async getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser> {
     const data = await this.run(() =>
       options === undefined

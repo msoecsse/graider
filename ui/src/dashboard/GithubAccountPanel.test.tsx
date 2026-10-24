@@ -9,6 +9,14 @@ const signedOut: GithubOAuthState = {
   busy: false,
   persistence: "unknown",
   message: null,
+  repositoryPermission: "unknown",
+  courseDiscovery: {
+    status: "idle",
+    userId: null,
+    discoveredAt: null,
+    courses: [],
+    diagnostics: []
+  },
   organizationPermission: "unknown",
   organizationDiscovery: { status: "idle", organizations: [], message: null, stale: false }
 };
@@ -71,7 +79,7 @@ describe("GitHub faculty account", () => {
   it("shows preserved offline credential state and scope distinction", async () => {
     setup({ ...signedOut, status: "unavailable", message: "Saved credential preserved." });
     expect(await screen.findByText("GitHub: Saved sign-in unavailable")).toBeInTheDocument();
-    expect(screen.getByText(/Course and repository operations still use/)).toBeInTheDocument();
+    expect(screen.getByText(/Existing course mutations still use/)).toBeInTheDocument();
   });
 });
 
@@ -144,4 +152,19 @@ describe("faculty organizations", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Authorize organization access" }));
     await waitFor(() => expect(api.signIn).toHaveBeenCalledOnce());
   });
+});
+
+it("renders the dashboard account snapshot rather than a stale panel copy", async () => {
+  const api = {
+    get: vi.fn().mockResolvedValue(signedIn),
+    signOut: vi.fn().mockResolvedValue(signedOut)
+  };
+  Object.defineProperty(window, "graiderUI", {
+    configurable: true,
+    value: { ...window.graiderUI, githubOAuth: api }
+  });
+  const current = { ...signedIn, identity: { id: 99, login: "current-account", name: null } };
+  render(<GithubAccountPanel accountState={current} />);
+  expect(await screen.findByText("Signed in to GitHub as current-account")).toBeInTheDocument();
+  expect(screen.queryByText("Signed in to GitHub as octocat")).not.toBeInTheDocument();
 });

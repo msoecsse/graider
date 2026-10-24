@@ -1,9 +1,11 @@
+import type { RemoteCourse } from "../../electron/remoteCourseTypes";
 import type { ReactElement } from "react";
 import type { CourseFolderRecord } from "../../electron/ipc";
 import { CourseTermCard } from "./CourseTermCard";
 import type { CombinedDashboardCard, RecentAssignmentSummary } from "./dashboardTypes";
 
 interface CourseCardGridProps {
+  readonly remoteCourses?: readonly RemoteCourse[];
   readonly cards: readonly CombinedDashboardCard[];
   readonly courseFolders: readonly CourseFolderRecord[];
   readonly refreshingId: string | null;
@@ -118,6 +120,7 @@ const groupCardsByCourseFolder = (
 };
 
 export const CourseCardGrid = ({
+  remoteCourses = [],
   cards,
   courseFolders,
   refreshingId,
@@ -152,6 +155,18 @@ export const CourseCardGrid = ({
               <div>
                 <p className="course-dashboard__eyebrow">Course</p>
                 <h3>{getCourseLabel(firstCard)}</h3>
+                {remoteCourses
+                  .filter((course) => course.localFolderIds.includes(group.sourceFolderId))
+                  .map((course) => (
+                    <p key={course.repositoryId}>
+                      {course.fullName} — Registered locally · GitHub repository ID{" "}
+                      {course.repositoryId}
+                      {course.archived ? " · GitHub repository archived (read-only)" : ""}
+                      {course.authorization === "faculty_identity_required"
+                        ? " · Set your MSOE username to verify course access."
+                        : ""}
+                    </p>
+                  ))}
                 <details className="course-dashboard__advanced">
                   <summary>Advanced details</summary>
                   <p className="course-dashboard__path">{group.sourceFolderPath}</p>

@@ -1,3 +1,4 @@
+import { RemoteCoursesPanel, useRemoteCourses } from "./RemoteCoursesPanel";
 import { GithubAccountPanel } from "./GithubAccountPanel";
 import { useEffect, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
@@ -148,6 +149,7 @@ const CoursePublishPanel = ({
 };
 
 export const DashboardPage = (): ReactElement => {
+  const remote = useRemoteCourses();
   const {
     courseFolders,
     refreshResults,
@@ -313,6 +315,7 @@ export const DashboardPage = (): ReactElement => {
     if (saveLocalSettings === undefined) return;
     try {
       const settings = await saveLocalSettings(facultyUsername);
+      void remote.refresh();
       setFacultyUsername(settings.currentFacultyMsoeUsername ?? "");
       setFacultySettingsMessage(
         settings.currentFacultyMsoeUsername === null
@@ -462,7 +465,7 @@ export const DashboardPage = (): ReactElement => {
         {!isFacultySettingsOpen ? null : (
           <section className="detail-panel" aria-label="Faculty settings">
             <h2>Faculty settings</h2>
-            <GithubAccountPanel />
+            <GithubAccountPanel accountState={remote.state} onStateChange={remote.accept} />
             <label>
               Current faculty MSOE username
               <input
@@ -593,12 +596,24 @@ export const DashboardPage = (): ReactElement => {
           </p>
         )}
 
+        <RemoteCoursesPanel
+          state={remote.state}
+          onRefresh={() => void remote.refresh()}
+          onSettings={() => void handleOpenFacultySettings()}
+        />
+
         {isLoadingFolders ? <p className="loading-state">Loading course folders...</p> : null}
 
         {!isLoadingFolders && !hasCourseFolders ? (
           <section aria-label="No courses added yet.">
             <EmptyState
-              title="No courses added yet."
+              title={
+                remote.state?.courseDiscovery.courses.some(
+                  (course) => course.authorization === "authorized"
+                )
+                  ? "No local course folders added yet."
+                  : "No courses added yet."
+              }
               description={
                 <>
                   <span>Open a Graider course folder to get started.</span>
@@ -623,6 +638,11 @@ export const DashboardPage = (): ReactElement => {
           <>
             <FolderErrorPanel folderErrors={visibleFolderErrors} />
             <CourseCardGrid
+              remoteCourses={
+                remote.state?.identity?.id === remote.state?.courseDiscovery.userId
+                  ? (remote.state?.courseDiscovery.courses ?? [])
+                  : []
+              }
               cards={visibleCards}
               courseFolders={courseFolders}
               refreshingId={refreshingId}

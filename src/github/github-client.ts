@@ -51,7 +51,36 @@ export interface GitHubOAuthOrganizationClient {
   ): Promise<GitHubOrganizationResponse>;
 }
 
-export interface GitHubClient extends Partial<GitHubOAuthOrganizationClient> {
+/** Read-only transport for trusted remote course discovery; never exposed over IPC. */
+export interface GitHubRemoteCourseClient {
+  listCourseRepositoriesPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  searchCourseMetadataPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  getCourseRepository(
+    owner: string,
+    repo: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  getCourseMetadataPath(
+    owner: string,
+    repo: string,
+    metadataPath: string,
+    ref: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+}
+
+export interface GitHubClient
+  extends Partial<GitHubOAuthOrganizationClient>, Partial<GitHubRemoteCourseClient> {
   getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser>;
 
   getRepository(owner: string, repo: string): Promise<GitHubRepository | null>;

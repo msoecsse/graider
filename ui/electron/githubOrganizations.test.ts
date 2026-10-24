@@ -167,3 +167,17 @@ describe("OAuth organization adapter", () => {
     );
   });
 });
+
+describe("authoritative private repository capability", () => {
+  it.each([
+    ["read:org", false],
+    ["read:org, repo", true],
+    ["public_repo, read:org", false],
+    ["repo:status, read:org", false]
+  ])("requires full repo in %s", async (scopes, expected) => {
+    const network = createNetwork(
+      vi.fn().mockResolvedValue(response({}, 200, { "x-oauth-scopes": scopes }))
+    );
+    expect(await network.repositoryCapability(TOKEN, signal)).toBe(expected);
+  });
+});

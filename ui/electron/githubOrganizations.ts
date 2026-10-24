@@ -158,6 +158,16 @@ export const createGithubOrganizationNetwork = (
       if (!response.headers.has("x-oauth-scopes")) return failure("error");
       return hasOrganizationScope(response.headers.get("x-oauth-scopes")!);
     },
+    async repositoryCapability(token: string, signal: AbortSignal): Promise<boolean> {
+      const response = await get(token, signal, (client, bounded) =>
+        client.getOrganizationScopeResponse!(bounded)
+      );
+      const status = await classify(response);
+      if (status && status !== "insufficient_scope") return failure(status);
+      const scopes = response.headers.get("x-oauth-scopes");
+      if (scopes === null) return failure("error");
+      return scopes.split(/[ ,]+/).includes("repo");
+    },
     async discoverOrganizations(
       token: string,
       signal: AbortSignal

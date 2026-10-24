@@ -3,7 +3,7 @@ import { provideGithubClient, type GithubClientProvider } from "./githubClientPr
 import { GithubOAuthError } from "./githubOAuthCallback.js";
 import type { GithubFacultyIdentity } from "./githubOAuthTypes.js";
 export const GITHUB_OAUTH_CLIENT_ID = "Ov23lilUrjxhcDiX2RBq";
-export const GITHUB_OAUTH_SCOPES: readonly string[] = ["read:org"];
+export const GITHUB_OAUTH_SCOPES: readonly string[] = ["read:org", "repo"];
 const NETWORK_TIMEOUT_MS = 30_000;
 const UNAUTHORIZED_STATUS = 401;
 export interface OAuthExchange {

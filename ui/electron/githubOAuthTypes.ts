@@ -1,3 +1,4 @@
+import type { RemoteCourseDiscovery } from "./remoteCourseTypes.js";
 export type OrganizationAccessStatus =
   | "accessible"
   | "pending"
@@ -34,6 +35,8 @@ export interface GithubOAuthState {
   readonly status: "signed_out" | "signed_in" | "unavailable";
   readonly identity: GithubFacultyIdentity | null;
   readonly busy: boolean;
+  readonly repositoryPermission: "available" | "required" | "unknown";
+  readonly courseDiscovery: RemoteCourseDiscovery;
   readonly organizationPermission: "available" | "required" | "unknown";
   readonly organizationDiscovery: OrganizationDiscovery;
   readonly persistence: "secure" | "memory" | "unknown";

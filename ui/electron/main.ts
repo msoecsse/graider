@@ -1,3 +1,5 @@
+import { createRemoteRepositoryReader } from "./githubRemoteRepositories.js";
+import { discoverRemoteCourses, inspectLocalCourseOrigins } from "./remoteCourseDiscovery.js";
 import {
   createReviewImportService,
   loadReviewImportBackend,
@@ -1474,7 +1476,18 @@ app.whenReady().then(async () => {
     ),
     secret: readGithubOAuthSecret,
     openBrowser: (url) => shell.openExternal(url),
-    network: createGithubOAuthNetwork()
+    network: createGithubOAuthNetwork(),
+    discoverCourses: async (token, userId, organizations, signal) =>
+      discoverRemoteCourses({
+        userId,
+        organizations,
+        username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+          .currentFacultyMsoeUsername,
+        locals: await inspectLocalCourseOrigins(
+          listCourseFolders(getCourseRegistryPath(app.getPath("userData")))
+        ),
+        reader: createRemoteRepositoryReader(token, signal)
+      })
   });
   const restoration = facultyAuth.restore();
   const operations = {

@@ -130,10 +130,10 @@ Phase 1 acceptance is complete:
 - Git transport credentials remain separate from API-client composition.
 - Architecture tests protect both local Git and GitHub host boundaries.
 
-Next: Phase 2 — First-Class Authentication, slice 2.1 — Browser-based GitHub
-sign-in. Phase 2 has not begun; OAuth, secure credential storage, account
-switching, and removal of `gh auth token` or environment-token fallback remain
-future work.
+Phase 2 slices 2.1 and 2.2 are complete. Slice 2.3 adds trusted, read-only remote
+course discovery. Existing mutation credential fallback remains transitional.
+Next is slice 2.4: app-managed course bootstrap. See the implementation boundary
+in [remote course discovery](graider-remote-course-discovery.md).
 
 ---
 
@@ -147,43 +147,39 @@ and use a fresh, uncached operation-scoped authenticated Dugite factory/context 
 push. Missing authentication returns a safe failure, preserving saved files for retry;
 manual Course Publish also pushes existing ahead commits without recreating assignments.
 The Electron publication writer requires explicit push authentication. Transitional token
-precedence and the rest of Phase 1 architecture remain unchanged; Phase 2 has not begun.
+precedence remains transitional for existing mutation paths during Phase 2.
 
 # Phase 2 — First-Class Authentication
 
-## Slice 2.1 — Browser-based GitHub sign-in
+## Slice 2.1 — Browser-based GitHub sign-in (complete)
 
-Replace normal packaged-app dependence on:
+One active immutable GitHub user identity, authorization-code + PKCE in the system
+browser, OS-encrypted credential persistence, transactional account replacement,
+sign-out and restart restoration. Credentials remain main-process only.
 
-- `GRAIDER_GITHUB_TOKEN`;
-- `gh auth token`;
-- GitHub CLI setup.
+## Slice 2.2 — Organization access (complete)
 
-Implement one active GitHub account.
+Authoritative `read:org` capability evidence, paginated memberships, normalized
+role/state, per-organization policy/SSO/pending/transient classification, and
+transactional authorization upgrades. Committed as `81b0c88`.
 
-## Slice 2.2 — Secure credential persistence
+## Slice 2.3 — Remote Graider course discovery
 
-Store credentials in the OS secure credential facility.
+Read-only OAuth discovery of topic and legacy course/admin candidates, existing
+schema-v1 validation and faculty section authorization, immutable repository IDs,
+and reconciliation with the current path-based registry. Adds required `repo`
+scope for private contents; scope breadth grants no slice-level write authority.
+See [implementation details and limits](graider-remote-course-discovery.md).
 
-Test:
+## Slice 2.4 — App-managed course bootstrap (next)
 
-- restart;
-- sign out;
-- switch account;
-- revoked credential;
-- reauthentication;
-- token redaction.
-
-## Slice 2.3 — Identity-scoped local application state
-
-Namespace:
-
-- course cache;
-- hidden-course preferences;
-- student clone mappings;
-- default repository roots;
-
-by authenticated GitHub user ID.
+Use the authorized discovery record's immutable repository ID to revalidate the
+current remote locator and identity immediately before cloning only that course/admin
+repository into an identity-scoped managed directory. Verify origin and repository
+ID after cloning; handle existing local registrations without moving/deleting them.
+Keep student clones, synchronization, mutations, schema-v2 migration, transfer
+migration and lifecycle work separately scoped. Preserve existing routing until
+bootstrap has a concrete integration plan.
 
 ---
 

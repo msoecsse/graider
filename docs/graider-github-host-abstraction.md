@@ -133,10 +133,13 @@ and local Git transport credentials remain separate from API-client composition.
 No feature-level direct REST remains, and architecture tests protect the boundary.
 Future GitHub capabilities stay deferred until their roadmap phase needs them.
 
-Phase 1 is complete. The next work is Phase 2 — First-Class Authentication,
-slice 2.1 — Browser-based GitHub sign-in. It has not begun. Environment-token
-fallback and `gh auth token` remain in place; OAuth, secure storage, and account
-switching are deferred to Phase 2.
+Phase 1 is complete. Phase 2.1 and 2.2 now provide browser OAuth, secure storage,
+transactional account replacement and organization discovery. Phase 2.3 adds four
+GET-only course discovery transport operations behind this adapter; a trusted
+main-process facade owns normalized pagination and provider failure classification.
+Existing mutations retain environment-token/`gh auth token` fallback. See
+[remote course discovery](graider-remote-course-discovery.md) for capabilities,
+read-only restrictions, legacy discovery and the next bootstrap slice.
 
 ## Client construction inventory
 
@@ -254,4 +257,4 @@ boundary. Only the capabilities needed by these consumers were added.
 1.3A, 1.3B-1, 1.3B-2, 1.3C-1, and 1.3C-2 are complete. Phase 1.3 and Phase 1
 are closed. `GRAIDER_GITHUB_TOKEN`, `GITHUB_TOKEN`, `gh auth token`, faculty
 authentication, token priority, existing upsert retry, diagnostics, and repository/
-Actions behavior are preserved. Phase 2 / 2.1 is next and has not begun.
+Actions behavior were preserved at Phase 1 closure. Current Phase 2 status appears above.

@@ -111,6 +111,9 @@ await build({
 
 await build({
   entry: {
+    remoteCourseMetadataBackend: fileURLToPath(
+      new URL("./remoteCourseMetadataBackend.ts", import.meta.url)
+    ),
     reviewImportBackend: fileURLToPath(new URL("./reviewImportBackend.ts", import.meta.url))
   },
   outDir: fileURLToPath(new URL("../dist-electron", import.meta.url)),

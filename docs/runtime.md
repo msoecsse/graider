@@ -7,7 +7,7 @@ Graider is a Node.js CLI built with TypeScript and npm.
 - Node.js: current project runtime is Node.js 24, matching `package.json`.
 - Package manager: npm. Use `npm ci` in CI and `npm install` only for local dependency updates.
 - Git: Graider uses Dugite 3.2.3 with its bundled native Git distribution. Normal repository operations do not require `git` on `PATH`, and production code does not execute system Git. Development and test fixture utilities may still use the host Git installation.
-- GitHub authentication: transitional. Depending on the CLI or Electron path, token resolution may use `GRAIDER_GITHUB_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`. First-class OAuth is planned for Phase 2.
+- GitHub authentication: transitional. Depending on the CLI or Electron path, token resolution may use `GRAIDER_GITHUB_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`. Electron faculty sign-in and remote course discovery now use browser OAuth with OS-encrypted persistence; CLI and existing mutation credentials remain transitional. See [remote course discovery](graider-remote-course-discovery.md).
 
 After `npm run build`, the CLI entrypoint is:
 
@@ -66,7 +66,7 @@ GITHUB_TOKEN
 gh auth token
 ```
 
-Authentication remains transitional until Phase 2. Tokens are not read from command-line arguments or config files.
+CLI and existing mutation authentication remain transitional during Phase 2. Tokens are not read from command-line arguments or config files.
 
 ## Live GitHub Tests
 

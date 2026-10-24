@@ -14,7 +14,15 @@ export const loadCourseConfig = (filePath: string): SchemaValidationResult<RawCo
     };
   }
 
-  const yamlResult = parseYaml(fileResult.content, filePath);
+  return parseCourseConfig(fileResult.content, filePath);
+};
+
+/** Shared safe parser for local files and trusted remote metadata. */
+export const parseCourseConfig = (
+  content: string,
+  filePath: string
+): SchemaValidationResult<RawCourseConfig> => {
+  const yamlResult = parseYaml(content, filePath);
 
   if (yamlResult.status === "failure") {
     return {

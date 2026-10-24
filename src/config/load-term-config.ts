@@ -14,7 +14,15 @@ export const loadTermConfig = (filePath: string): SchemaValidationResult<RawTerm
     };
   }
 
-  const yamlResult = parseYaml(fileResult.content, filePath);
+  return parseTermConfig(fileResult.content, filePath);
+};
+
+/** Shared safe parser for local files and trusted remote metadata. */
+export const parseTermConfig = (
+  content: string,
+  filePath: string
+): SchemaValidationResult<RawTermConfig> => {
+  const yamlResult = parseYaml(content, filePath);
 
   if (yamlResult.status === "failure") {
     return {

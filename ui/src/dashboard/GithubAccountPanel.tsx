@@ -15,35 +15,48 @@ const organizationStatusLabels = {
 };
 const AUTH_STATE_POLL_INTERVAL_MS = 500;
 
-export const GithubAccountPanel = (): ReactElement => {
+export const GithubAccountPanel = ({
+  onStateChange,
+  accountState
+}: {
+  readonly accountState?: GithubOAuthState | null;
+  readonly onStateChange?: (state: GithubOAuthState) => void;
+}): ReactElement => {
   const api = window.graiderUI.githubOAuth;
-  const [state, setState] = useState<GithubOAuthState | null>(null);
+  const [localState, setLocalState] = useState<GithubOAuthState | null>(null);
+  const controlled = accountState !== undefined;
+  const state = controlled ? accountState : localState;
+  const accept = (next: GithubOAuthState): void => {
+    setLocalState(next);
+    onStateChange?.(next);
+  };
   const [pending, setPending] = useState<keyof GithubOAuthApi | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let mounted = true;
-    void api
-      ?.get()
-      .then((value) => {
-        if (mounted) setState(value);
-      })
-      .catch(() => {
-        if (mounted) setError("GitHub account status is unavailable.");
-      });
+    if (!controlled)
+      void api
+        ?.get()
+        .then((value) => {
+          if (mounted) accept(value);
+        })
+        .catch(() => {
+          if (mounted) setError("GitHub account status is unavailable.");
+        });
     return () => {
       mounted = false;
     };
-  }, [api]);
+  }, [api, controlled]);
   // A flow may finish while this panel is closed; refresh a remounted busy session.
   useEffect(() => {
     let mounted = true;
     const timer =
-      (state?.busy || state?.organizationDiscovery.status === "loading") && api
+      !controlled && (state?.busy || state?.organizationDiscovery.status === "loading") && api
         ? setInterval(() => {
             void api
               .get()
               .then((value) => {
-                if (mounted) setState(value);
+                if (mounted) accept(value);
               })
               .catch(() => {
                 if (mounted) setError("GitHub account status is unavailable.");
@@ -54,13 +67,13 @@ export const GithubAccountPanel = (): ReactElement => {
       mounted = false;
       clearInterval(timer);
     };
-  }, [state?.busy, state?.organizationDiscovery.status, api]);
+  }, [state?.busy, state?.organizationDiscovery.status, api, controlled]);
   const run = async (operation: keyof GithubOAuthApi): Promise<void> => {
     if (api) {
       setPending(operation);
       setError(null);
       try {
-        setState(await api[operation]());
+        accept(await api[operation]());
       } catch {
         setError("GitHub account operation could not be completed. Try again.");
       } finally {
@@ -106,6 +119,11 @@ export const GithubAccountPanel = (): ReactElement => {
       {state?.identity ? (
         <section aria-label="Organizations">
           <h3>Organizations</h3>
+          {state.repositoryPermission === "required" ? (
+            <button type="button" disabled={busy} onClick={() => void run("signIn")}>
+              Authorize course access
+            </button>
+          ) : null}
           {state.organizationPermission === "required" ? (
             <button type="button" disabled={busy} onClick={() => void run("signIn")}>
               Authorize organization access
@@ -169,8 +187,8 @@ export const GithubAccountPanel = (): ReactElement => {
       )}
       {state?.message || error ? <p role="status">{error ?? state?.message}</p> : null}
       <p>
-        Faculty sign-in establishes your identity. Course and repository operations still use the
-        existing GitHub credentials.
+        Faculty sign-in discovers courses using read-only OAuth access. Existing course mutations
+        still use the existing GitHub credentials.
       </p>
     </div>
   );

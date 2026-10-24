@@ -1,3 +1,6 @@
+import { emptyCourseDiscovery } from "./remoteCourseTypes.js";
+import type { RemoteCourseDiscovery } from "./remoteCourseTypes.js";
+import type { GithubOrganization } from "./githubOAuthTypes.js";
 import { createHash, randomBytes } from "node:crypto";
 import { GithubOAuthError, startOAuthCallback } from "./githubOAuthCallback.js";
 import {
@@ -22,6 +25,12 @@ interface Dependencies {
   readonly secret: () => string | undefined;
   readonly openBrowser: (url: string) => Promise<unknown>;
   readonly network: ReturnType<typeof createGithubOAuthNetwork>;
+  readonly discoverCourses?: (
+    token: string,
+    userId: number,
+    organizations: readonly GithubOrganization[],
+    signal: AbortSignal
+  ) => Promise<RemoteCourseDiscovery>;
   readonly callback?: typeof startOAuthCallback;
 }
 const signedOut = (): GithubOAuthState => ({
@@ -30,6 +39,8 @@ const signedOut = (): GithubOAuthState => ({
   busy: false,
   persistence: "unknown",
   message: null,
+  repositoryPermission: "unknown",
+  courseDiscovery: emptyCourseDiscovery(),
   organizationPermission: "unknown",
   organizationDiscovery: { status: "idle", organizations: [], message: null, stale: false }
 });
@@ -150,10 +161,14 @@ export class GithubOAuthSession {
         token,
         controller.signal
       );
-      if (this.state.identity && !organizationPermission)
+      const repositoryPermission = await this.deps.network.repositoryCapability(
+        token,
+        controller.signal
+      );
+      if (this.state.identity && (!organizationPermission || !repositoryPermission))
         throw new GithubOAuthError(
           "insufficient_scope",
-          "Organization authorization was not granted. Your previous GitHub session was retained."
+          "Course authorization was not granted. Your previous GitHub session was retained."
         );
       if (controller.signal.aborted)
         throw new GithubOAuthError("canceled", "GitHub sign-in canceled.");
@@ -180,6 +195,7 @@ export class GithubOAuthSession {
         busy: false,
         persistence,
         message,
+        repositoryPermission: repositoryPermission ? "available" : "required",
         organizationPermission: organizationPermission ? "available" : "required"
       };
     } catch (error) {
@@ -235,18 +251,67 @@ export class GithubOAuthSession {
       !controller.signal.aborted && this.token === token && this.state.identity?.id === userId;
     this.state = {
       ...this.state,
-      organizationDiscovery: { ...this.state.organizationDiscovery, status: "loading" }
+      organizationDiscovery: { ...this.state.organizationDiscovery, status: "loading" },
+      courseDiscovery: { ...emptyCourseDiscovery(), status: "loading", userId }
     };
     try {
       const capable = await this.deps.network.organizationCapability(token, controller.signal);
+      const repositoryCapable = await this.deps.network.repositoryCapability(
+        token,
+        controller.signal
+      );
       if (current()) {
-        this.state = { ...this.state, organizationPermission: capable ? "available" : "required" };
+        this.state = {
+          ...this.state,
+          organizationPermission: capable ? "available" : "required",
+          repositoryPermission: repositoryCapable ? "available" : "required",
+          courseDiscovery: {
+            ...emptyCourseDiscovery(),
+            userId,
+            status: repositoryCapable ? "loading" : "authorization_required"
+          }
+        };
         if (capable) {
           const result = await this.deps.network.discoverOrganizations(token, controller.signal);
           if (current()) this.state = { ...this.state, organizationDiscovery: result };
+          if (current() && repositoryCapable && this.deps.discoverCourses) {
+            try {
+              const courses = await this.deps.discoverCourses(
+                token,
+                userId,
+                result.organizations,
+                controller.signal
+              );
+              if (current()) this.state = { ...this.state, courseDiscovery: courses };
+            } catch (error) {
+              if (error instanceof GithubOAuthError && error.code === "invalid_credential")
+                throw error;
+              if (current())
+                this.state = {
+                  ...this.state,
+                  courseDiscovery: {
+                    ...emptyCourseDiscovery(),
+                    userId,
+                    status: "error",
+                    diagnostics: [
+                      {
+                        organizationId: null,
+                        status: "unavailable",
+                        message: "Course discovery temporarily unavailable. Refresh courses."
+                      }
+                    ]
+                  }
+                };
+            }
+          }
         } else {
           this.state = {
             ...this.state,
+            courseDiscovery: {
+              ...emptyCourseDiscovery(),
+              userId,
+              status: "authorization_required"
+            },
             organizationDiscovery: {
               status: "authorization_required",
               organizations: [],
@@ -277,6 +342,18 @@ export class GithubOAuthSession {
             error instanceof GithubOAuthError && error.code === "insufficient_scope";
           this.state = {
             ...this.state,
+            courseDiscovery: {
+              ...emptyCourseDiscovery(),
+              userId,
+              status: "error",
+              diagnostics: [
+                {
+                  organizationId: null,
+                  status: "unavailable",
+                  message: "Course discovery temporarily unavailable. Refresh courses."
+                }
+              ]
+            },
             organizationPermission: insufficient ? "required" : this.state.organizationPermission,
             organizationDiscovery: {
               ...this.state.organizationDiscovery,
@@ -288,6 +365,11 @@ export class GithubOAuthSession {
         }
       }
     } finally {
+      if (current() && this.state.courseDiscovery.status === "loading")
+        this.state = {
+          ...this.state,
+          courseDiscovery: { ...this.state.courseDiscovery, status: "ready" }
+        };
       if (this.discovery === controller) this.discovery = null;
       if (this.active === controller) this.active = null;
     }
