@@ -12,9 +12,15 @@ const request = {
 describe("bulk grading report publication request validation", () => {
   it("accepts a nonempty unique canonical student selection", () => {
     expect(isBulkPublishGradingStudentReportsRequest(request)).toBe(true);
+    expect(
+      isBulkPublishGradingStudentReportsRequest({ ...request, runId: "correlation-only" })
+    ).toBe(true);
   });
 
   it.each([
+    { runId: "" },
+    { runId: 12 },
+    { progress: { completed: 1 } },
     { studentIds: [] },
     { studentIds: ["ada", "ada"] },
     { studentIds: ["ada", ""] },

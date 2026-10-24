@@ -6,6 +6,8 @@ import { RecentCommentsMenu } from "./RecentCommentsMenu";
 import { ReportPreviewViewer } from "./ReportPreviewViewer";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type {
+  GradingBulkReportPublicationProgress,
+  GradingReportPublicationOutcome,
   GradingEditorViewState,
   GradingStudentCommentResult,
   MarkGradingStudentCompleteResult,
@@ -389,7 +391,9 @@ const previewWarningMessage = (warning: string): string =>
     commit_history_unavailable: "Commit history is unavailable and will be omitted."
   })[warning] ?? "This preview includes an informational warning.";
 
-const publicationFailureMessage = (result: PublishGradingStudentReportResult): string => {
+const publicationFailureMessage = (
+  result: Pick<PublishGradingStudentReportResult, "status">
+): string => {
   const messages: Readonly<Record<string, string>> = {
     grading_state_missing: "Complete this student's grading before publishing the report.",
     grading_not_complete: "Mark this student's grading Complete before publishing the report.",
@@ -423,7 +427,7 @@ const publicationFailureMessage = (result: PublishGradingStudentReportResult): s
   return messages[result.status] ?? "The grading report could not be published safely.";
 };
 
-const bulkPublicationResultLabel = (result: PublishGradingStudentReportResult): string => {
+const bulkPublicationResultLabel = (result: GradingReportPublicationOutcome): string => {
   if (result.status === "success") {
     const base = result.remoteWrite === "unchanged" ? "Already up to date" : "Published";
     return result.warnings.length === 0 ? base : `${base} with warnings`;
@@ -438,7 +442,7 @@ const bulkPublicationResultLabel = (result: PublishGradingStudentReportResult): 
 };
 
 const publishReviewOutcomeTone = (
-  result: PublishGradingStudentReportResult
+  result: GradingReportPublicationOutcome
 ): "success" | "warning" | "error" => {
   if (result.status === "success") return result.warnings.length === 0 ? "success" : "warning";
   if (
@@ -451,7 +455,7 @@ const publishReviewOutcomeTone = (
 };
 
 const publishReviewOutcomeFromResult = (
-  result: PublishGradingStudentReportResult
+  result: GradingReportPublicationOutcome
 ): PublishReviewOutcome => ({
   tone: publishReviewOutcomeTone(result),
   message: bulkPublicationResultLabel(result),
@@ -586,6 +590,15 @@ export const GradingWorkspacePage = ({
   const [publishReviewDetails, setPublishReviewDetails] = useState<
     Readonly<Record<string, PublishReviewDetailState>>
   >({});
+  const [publishReviewProgress, setPublishReviewProgress] =
+    useState<GradingBulkReportPublicationProgress>();
+  const [publishReviewIncrementalOutcomes, setPublishReviewIncrementalOutcomes] = useState<
+    Readonly<Record<string, PublishReviewOutcome>>
+  >({});
+  const publicationProgressCleanup = useRef<(() => void) | undefined>(undefined);
+  const publicationRunId = useRef<string | undefined>(undefined);
+  // Keep canonical ordering stable while authoritative status refreshes regroup this run.
+  const [publicationSort, setPublicationSort] = useState<typeof studentSort>();
   const [publishReviewRunning, setPublishReviewRunning] = useState(false);
   const [publishReviewResults, setPublishReviewResults] =
     useState<BulkPublishGradingStudentReportsResult["results"]>();
@@ -617,6 +630,20 @@ export const GradingWorkspacePage = ({
   const publishReviewDetailGeneration = useRef(0);
   const publishReviewDetailRequestGenerations = useRef(new Map<string, number>());
   const publishReviewOpenRef = useRef(false);
+  useEffect(() => {
+    setPublishReviewProgress(undefined);
+    setPublishReviewIncrementalOutcomes({});
+    setPublishReviewRunning(false);
+    setPublicationSort(undefined);
+    setPublishReviewOpen(false);
+    publishReviewOpenRef.current = false;
+    return () => {
+      publicationRunId.current = undefined;
+      publicationProgressCleanup.current?.();
+      publicationProgressCleanup.current = undefined;
+      bulkPublicationRequestGeneration.current += 1;
+    };
+  }, [request]);
   const selected =
     isReady(result) && selectedStudentId !== undefined
       ? result.students.findIndex((candidate) => candidate.studentId === selectedStudentId)
@@ -985,10 +1012,10 @@ export const GradingWorkspacePage = ({
                 candidate.gradingStatus
               )
             })),
-            studentSort
+            publicationSort ?? studentSort
           )
         : [],
-    [result, studentStatusOverrides, studentSort]
+    [result, studentStatusOverrides, studentSort, publicationSort]
   );
   const completeStudentIds = useMemo(
     () =>
@@ -2590,6 +2617,8 @@ export const GradingWorkspacePage = ({
   const openPublishReview = (): void => {
     requestPanelOpen(() => {
       void flushPendingViewState(currentStudentId);
+      setPublishReviewProgress(undefined);
+      setPublishReviewIncrementalOutcomes({});
       setPublishReviewFinished(false);
       setPublishReviewResults(undefined);
       setPublishReviewRefreshFailedStudentIds([]);
@@ -2624,8 +2653,11 @@ export const GradingWorkspacePage = ({
   };
 
   const runPublishReview = async (): Promise<void> => {
-    const studentIds = [...publishReviewSelectedIds];
-    if (studentIds.length === 0 || publishReviewRunning) return;
+    const studentIds = publishReviewReadyEntries
+      .map((entry) => entry.studentId)
+      .filter((studentId) => publishReviewSelectedIds.includes(studentId));
+    if (studentIds.length === 0 || publishReviewRunning || publicationRunId.current !== undefined)
+      return;
     const publishReports = window.graiderUI.bulkPublishGradingStudentReports;
     if (publishReports === undefined) {
       setGradingMutationError("Bulk report publication is unavailable.");
@@ -2635,6 +2667,34 @@ export const GradingWorkspacePage = ({
     bulkPublicationRequestGeneration.current = generation;
     const isCurrentPublishReview = (): boolean =>
       mounted.current && bulkPublicationRequestGeneration.current === generation;
+    const runId = crypto.randomUUID();
+    publicationRunId.current = runId;
+    publicationProgressCleanup.current?.();
+    setPublicationSort(studentSort);
+    setPublishReviewProgress({ total: studentIds.length, completed: 0 });
+    setPublishReviewIncrementalOutcomes({});
+    publicationProgressCleanup.current = window.graiderUI.onGradingBulkReportPublicationProgress?.(
+      (event) => {
+        if (
+          isCurrentPublishReview() &&
+          publishReviewOpenRef.current &&
+          publicationRunId.current === runId &&
+          event.runId === runId &&
+          event.courseFolderId === request.courseFolderId &&
+          event.termCode === request.termCode &&
+          event.assignmentSlug === request.assignmentSlug
+        ) {
+          setPublishReviewProgress(event.progress);
+          const completed = event.progress.lastCompleted;
+          if (completed !== undefined) {
+            setPublishReviewIncrementalOutcomes((current) => ({
+              ...current,
+              [completed.studentId]: publishReviewOutcomeFromResult(completed.result)
+            }));
+          }
+        }
+      }
+    );
     setPublishReviewRunning(true);
     setPublishReviewResults(undefined);
     setPublishReviewRefreshFailedStudentIds([]);
@@ -2653,9 +2713,11 @@ export const GradingWorkspacePage = ({
           courseFolderPath: request.courseFolderPath,
           termCode: request.termCode,
           assignmentSlug: request.assignmentSlug,
-          studentIds
+          studentIds,
+          runId
         });
         if (isCurrentPublishReview()) {
+          setPublishReviewProgress({ total: studentIds.length, completed: studentIds.length });
           const refreshFailedStudentIds: string[] = [];
           const loadSnapshot = window.graiderUI.loadGradingStudentSnapshot;
           for (const studentId of studentIds) {
@@ -2707,6 +2769,10 @@ export const GradingWorkspacePage = ({
         current !== undefined && studentIds.includes(current) ? undefined : current
       );
       if (isCurrentPublishReview()) {
+        publicationRunId.current = undefined;
+        publicationProgressCleanup.current?.();
+        publicationProgressCleanup.current = undefined;
+        setPublicationSort(undefined);
         setPublishReviewRunning(false);
         setPublishReviewFinished(true);
       }
@@ -3029,13 +3095,18 @@ export const GradingWorkspacePage = ({
     );
   }
   const student = result.students[selected];
-  const publishReviewOutcomeByStudentId: Readonly<Record<string, PublishReviewOutcome>> =
-    Object.fromEntries(
+  const publishReviewOutcomeByStudentId: Readonly<Record<string, PublishReviewOutcome>> = {
+    ...publishReviewIncrementalOutcomes,
+    ...Object.fromEntries(
       (publishReviewResults ?? []).map(({ studentId, result: publicationResult }) => [
         studentId,
-        publishReviewOutcomeFromResult(publicationResult)
+        publishReviewOutcomeFromResult({
+          ...publicationResult,
+          warnings: publicationResult.status === "success" ? publicationResult.warnings : []
+        })
       ])
-    );
+    )
+  };
   const publishReviewReadyRows: readonly PublishReviewReadyRow[] = publishReviewReadyEntries.map(
     (entry) => {
       const outcome = publishReviewOutcomeByStudentId[entry.studentId];
@@ -3206,6 +3277,7 @@ export const GradingWorkspacePage = ({
           onRetryDetail={retryPublishReviewDetail}
           finished={publishReviewFinished}
           running={publishReviewRunning}
+          progress={publishReviewProgress}
           refreshFailedStudentIds={publishReviewRefreshFailedStudentIds}
         />
         {gradingMutationError === undefined ? null : <p role="alert">{gradingMutationError}</p>}

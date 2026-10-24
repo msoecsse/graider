@@ -91,6 +91,7 @@ export const IPC_CHANNELS = {
   deleteGradingStudentManualAdjustment: "graider-ui:grading-student-manual-adjustment:delete",
   markGradingStudentComplete: "graider-ui:grading-student:mark-complete",
   publishGradingStudentReport: "graider-ui:grading-student-report:publish",
+  gradingBulkReportPublicationProgress: "graider-ui:grading-student-reports:progress",
   bulkPublishGradingStudentReports: "graider-ui:grading-student-reports:publish",
   loadGradingCommentLibrary: "graider-ui:grading-comment-library:load",
   createGradingLibraryComment: "graider-ui:grading-comment-library:create",
@@ -815,7 +816,19 @@ export interface BulkPublishGradingStudentReportsRequest extends Omit<
   "studentId"
 > {
   readonly studentIds: readonly string[];
+  readonly runId?: string;
 }
+export interface GradingBulkReportPublicationProgressEvent {
+  readonly runId: string;
+  readonly courseFolderId: string;
+  readonly termCode: string;
+  readonly assignmentSlug: string;
+  readonly progress: import("./gradingBulkReportPublicationService.js").GradingBulkReportPublicationProgress;
+}
+export type {
+  GradingBulkReportPublicationProgress,
+  GradingReportPublicationOutcome
+} from "./gradingBulkReportPublicationService.js";
 export type { BulkPublishGradingStudentReportsResult } from "./gradingBulkReportPublicationService.js";
 export interface LoadGradingCommentLibraryRequest {
   readonly courseFolderId: string;
@@ -1230,6 +1243,9 @@ export interface GraiderUIApi {
   readonly publishGradingStudentReport?: (
     request: PublishGradingStudentReportRequest
   ) => Promise<PublishGradingStudentReportResult>;
+  readonly onGradingBulkReportPublicationProgress?: (
+    listener: (event: GradingBulkReportPublicationProgressEvent) => void
+  ) => () => void;
   readonly bulkPublishGradingStudentReports?: (
     request: BulkPublishGradingStudentReportsRequest
   ) => Promise<

@@ -71,3 +71,15 @@
 .repository-document__docx h3 {
   color: inherit;
 }
+
+.grading-publish-review__progress {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.grading-publish-review__progress progress {
+  width: 100%;
+  accent-color: var(--accent);
+}

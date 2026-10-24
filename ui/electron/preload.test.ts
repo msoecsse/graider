@@ -296,3 +296,27 @@ it("exposes only plan selection, apply selections and close for review import", 
   await api?.closeReviewImport?.();
   expect(electron.invoke).toHaveBeenLastCalledWith("graider-ui:review-import:close");
 });
+
+it("forwards bulk publication progress without the Electron event and removes its listener", () => {
+  const api = electron.exposedApi;
+  const listener = vi.fn();
+  const unsubscribe = api?.onGradingBulkReportPublicationProgress?.(listener);
+  const subscription = electron.on.mock.calls.find(
+    ([channel]) => channel === "graider-ui:grading-student-reports:progress"
+  );
+  const handler = subscription?.[1] as (event: unknown, progress: unknown) => void;
+  const progress = {
+    runId: "run",
+    courseFolderId: "course",
+    termCode: "27s1",
+    assignmentSlug: "lab1",
+    progress: { total: 2, completed: 1 }
+  };
+  handler({ sender: "private" }, progress);
+  expect(listener).toHaveBeenCalledExactlyOnceWith(progress);
+  unsubscribe?.();
+  expect(electron.removeListener).toHaveBeenCalledWith(
+    "graider-ui:grading-student-reports:progress",
+    handler
+  );
+});

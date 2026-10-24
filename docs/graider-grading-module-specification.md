@@ -979,6 +979,26 @@ Every requested student is reauthorized independently, failures do not stop
 later students, and the renderer refreshes authoritative statuses after the
 batch rather than setting them optimistically.
 
+Publish review derives Ready and Published groups from the same canonical
+`studentSort` / `sortGradingStudents` projection as the grading list. Default
+selection and publication requests follow displayed order, including after
+checkbox reselection. An active run snapshots the sort.
+
+Bulk publication reports actual sequential processing progress through an
+optional service callback: initial zero, current student before each attempt,
+and completed count plus a compact outcome after each attempt. Failures count
+as processed and later students still run. Main sends progress only to the
+requesting renderer on `gradingBulkReportPublicationProgress`; a validated
+optional `runId` is correlation only, never publication authority. The event
+contains course/term/assignment identity, counts, student IDs, and outcome
+status/warnings/write disposition, without report paths or grading objects.
+Preload subscriptions return a listener cleanup function. The workspace rejects
+mismatched run or assignment events and removes listeners on completion,
+unmount, workspace change, or replacement. The review displays an accessible
+determinate progress bar, completed count, current student, and incremental row
+outcomes. Terminal progress remains visible until Close; status transitions
+still come from authoritative snapshot refreshes and retain canonical order.
+
 ---
 
 ## 25. Canvas Integration Boundary

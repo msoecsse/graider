@@ -1,3 +1,4 @@
+import type { GradingBulkReportPublicationProgress } from "../../electron/ipc";
 import type { ReactElement } from "react";
 
 export type PublishReviewDetailState =
@@ -16,6 +17,7 @@ export interface PublishReviewReadyRow {
   readonly section: string;
   readonly detail: PublishReviewDetailState;
   readonly outcome?: PublishReviewOutcome;
+  readonly publishing?: boolean;
 }
 
 export interface PublishReviewPublishedRow {
@@ -109,6 +111,7 @@ export const GradingGradeSummaryTable = ({
             </td>
             <td>{detailSummaryText(row.detail)}</td>
             <td>
+              {row.publishing ? "Publishing…" : null}
               {row.outcome === undefined ? null : (
                 <div
                   className={`grading-publish-review__outcome grading-publish-review__outcome--${row.outcome.tone}`}
@@ -143,6 +146,7 @@ export const GradingPublishReviewPanel = ({
   onRetryDetail,
   running,
   finished = false,
+  progress,
   refreshFailedStudentIds
 }: {
   readonly readyRows: readonly PublishReviewReadyRow[];
@@ -155,6 +159,7 @@ export const GradingPublishReviewPanel = ({
   readonly onRetryDetail: (studentId: string) => void;
   readonly running: boolean;
   readonly finished?: boolean;
+  readonly progress?: GradingBulkReportPublicationProgress | undefined;
   readonly refreshFailedStudentIds: readonly string[];
 }): ReactElement => {
   const selectedCount = selectedIds.length;
@@ -165,6 +170,22 @@ export const GradingPublishReviewPanel = ({
         Publishing writes each selected report to that student&rsquo;s GitHub repository. Students
         can see a published report immediately.
       </p>
+      {progress === undefined ? null : (
+        <div className="grading-publish-review__progress">
+          <h3>{running ? "Publishing reports" : "Publication processing finished"}</h3>
+          <p role="status">
+            {progress.completed} of {progress.total} {running ? "complete" : "processed"}
+          </p>
+          <progress
+            aria-label="Report publication progress"
+            value={progress.completed}
+            max={progress.total}
+          />
+          {progress.currentStudentId === undefined ? null : (
+            <p>Publishing {progress.currentStudentId}…</p>
+          )}
+        </div>
+      )}
       {refreshFailedStudentIds.length === 0 ? null : (
         <p className="grading-publish-review__refresh-warning" role="status">
           Current grading status could not be refreshed for {refreshFailedStudentIds.join(", ")}.
@@ -177,7 +198,10 @@ export const GradingPublishReviewPanel = ({
           <p>No completed reports are ready to publish.</p>
         ) : (
           <GradingGradeSummaryTable
-            rows={readyRows}
+            rows={readyRows.map((row) => ({
+              ...row,
+              publishing: running && progress?.currentStudentId === row.studentId
+            }))}
             caption="Students ready to publish"
             selectedIds={selectedIds}
             onToggle={onToggle}

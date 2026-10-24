@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { rememberStudentSort } from "./studentSort";
+import type { GradingBulkReportPublicationProgressEvent } from "../../electron/ipc";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GradingEditorViewState, GradingWorkspacePrepareRequest } from "../../electron/ipc";
 
 vi.mock("./MonacoSourceViewer", () => ({
@@ -25,6 +27,8 @@ vi.mock("./MonacoSourceViewer", () => ({
 }));
 
 import { GradingWorkspacePage } from "./GradingWorkspacePage";
+
+beforeEach(() => rememberStudentSort({ key: "default", direction: "ascending" }));
 
 const REQUEST: GradingWorkspacePrepareRequest = {
   courseFolderId: "course-1",
@@ -175,11 +179,16 @@ describe("GradingWorkspacePage publish review", () => {
     fireEvent.click(screen.getByRole("button", { name: "Publish 1 report" }));
 
     await waitFor(() => expect(bulkPublish).toHaveBeenCalledTimes(1));
-    expect(bulkPublish).toHaveBeenCalledWith({ ...REQUEST, studentIds: ["ada"] });
+    expect(bulkPublish).toHaveBeenCalledWith({
+      ...REQUEST,
+      studentIds: ["ada"],
+      runId: expect.any(String)
+    });
     expect(Object.keys(bulkPublish.mock.calls[0]?.[0] ?? {}).sort()).toEqual([
       "assignmentSlug",
       "courseFolderId",
       "courseFolderPath",
+      "runId",
       "studentIds",
       "termCode"
     ]);
@@ -401,4 +410,183 @@ it("reloads abandoned Graded summary reads when returning, without changing grad
   await screen.findByText("No comments or adjustments yet");
   expect(graceLoads).toBe(2);
   expect(bulkPublish).not.toHaveBeenCalled();
+});
+
+const sortedRoster = [
+  { studentId: "jones", section: "003", firstName: "Amy", lastName: "Jones" },
+  { studentId: "adams", section: "002", firstName: "Zoe", lastName: "Adams" },
+  { studentId: "smith", section: "001", firstName: "Bob", lastName: "Smith" },
+  { studentId: "brown", section: "004", firstName: "May", lastName: "Brown" }
+];
+const readyOrder = () =>
+  [...document.querySelectorAll(".grading-publish-review__table tbody th")].map(
+    (row) => row.textContent
+  );
+const publishedOrder = () =>
+  [...document.querySelectorAll(".grading-publish-review__published-row")].map(
+    (row) => row.textContent?.match(/jones|adams|smith|brown/u)?.[0]
+  );
+
+it.each([
+  ["section", "ascending", ["smith", "adams", "jones", "brown"]],
+  ["section", "descending", ["brown", "jones", "adams", "smith"]],
+  ["firstName", "ascending", ["jones", "smith", "brown", "adams"]],
+  ["firstName", "descending", ["adams", "brown", "smith", "jones"]],
+  ["lastName", "ascending", ["adams", "brown", "jones", "smith"]],
+  ["lastName", "descending", ["smith", "jones", "brown", "adams"]]
+] as const)(
+  "preserves rendered %s %s grading order in Ready, selection, request and partial Published results",
+  async (key, direction, expected) => {
+    let published = false;
+    const bulkPublish = vi.fn(async () => {
+      published = true;
+      return {
+        status: "success",
+        results: expected.map((studentId) => ({
+          studentId,
+          result: {
+            status: studentId === "smith" ? "report_publish_failed" : "success",
+            studentId,
+            warnings: []
+          }
+        }))
+      };
+    });
+    configure({
+      statuses: Object.fromEntries(sortedRoster.map(({ studentId }) => [studentId, "complete"])),
+      bulkPublish,
+      loadSnapshot: vi.fn(({ studentId }) =>
+        Promise.resolve(
+          snapshot(studentId, published && studentId !== "smith" ? "published" : "complete")
+        )
+      )
+    });
+    Object.assign(window.graiderUI, {
+      prepareGradingWorkspace: vi.fn().mockResolvedValue({
+        status: "success",
+        assignment: { title: "Lab 1", termCode: "27s1", slug: "lab1" },
+        requiredFiles: [],
+        rubric: [],
+        students: sortedRoster.map((student) => ({ ...student, gradingStatus: "complete" }))
+      })
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    const sort = await screen.findByRole("combobox", { name: "Sort by" });
+    fireEvent.change(sort, { target: { value: key } });
+    if (direction === "descending")
+      fireEvent.click(screen.getByRole("button", { name: "Sort descending" }));
+    fireEvent.click(screen.getByRole("button", { name: "All 4" }));
+    expect(
+      [...document.querySelectorAll(".grading-workspace__student-row")].map(
+        (row) => row.textContent?.split(" · ")[0]
+      )
+    ).toEqual(expected);
+    await openPublishReview();
+    expect(readyOrder()).toEqual(expected);
+    expect(
+      screen.getAllByRole("checkbox").every((input) => (input as HTMLInputElement).checked)
+    ).toBe(true);
+    const first = screen.getByRole("checkbox", { name: `Select ${expected[0]} to publish` });
+    fireEvent.click(first);
+    fireEvent.click(first);
+    fireEvent.click(screen.getByRole("button", { name: "Publish 4 reports" }));
+    await screen.findByRole("button", { name: "Close" });
+    expect(bulkPublish).toHaveBeenCalledWith({
+      ...REQUEST,
+      studentIds: expected,
+      runId: expect.any(String)
+    });
+    expect(publishedOrder()).toEqual(expected.filter((studentId) => studentId !== "smith"));
+    expect(readyOrder()).toEqual(["smith"]);
+  }
+);
+
+it("renders real incremental progress, rejects stale/wrong-scope events, and cleans listeners between runs", async () => {
+  const pending = deferred<unknown>();
+  const bulkPublish = vi.fn().mockReturnValue(pending.promise);
+  configure({ statuses: { ada: "complete", grace: "complete" }, bulkPublish });
+  const listeners = new Set<(event: GradingBulkReportPublicationProgressEvent) => void>();
+  const unsubscribe = vi.fn();
+  Object.assign(window.graiderUI, {
+    onGradingBulkReportPublicationProgress: vi.fn((listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+        unsubscribe();
+      };
+    })
+  });
+  const view = render(<GradingWorkspacePage request={REQUEST} />);
+  await openPublishReview();
+  expect(
+    screen.queryByRole("progressbar", { name: "Report publication progress" })
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await openPublishReview();
+  fireEvent.click(screen.getByRole("button", { name: "Publish 2 reports" }));
+  expect(screen.getByRole("progressbar", { name: "Report publication progress" })).toHaveAttribute(
+    "value",
+    "0"
+  );
+  await waitFor(() => expect(bulkPublish).toHaveBeenCalledTimes(1));
+  const runId = bulkPublish.mock.calls[0]?.[0].runId;
+  const oldListener = [...listeners][0]!;
+  const emit = (progress: GradingBulkReportPublicationProgressEvent["progress"], extra = {}) =>
+    act(() => oldListener({ ...REQUEST, runId, progress, ...extra }));
+  emit({ total: 2, completed: 2 }, { runId: "old-run" });
+  emit({ total: 2, completed: 2 }, { assignmentSlug: "other" });
+  emit({ total: 2, completed: 2 }, { courseFolderId: "other-workspace" });
+  emit({ total: 2, completed: 2 }, { termCode: "other-term" });
+  expect(screen.getByText("0 of 2 complete")).toBeInTheDocument();
+  emit({ total: 2, completed: 0, currentStudentId: "ada" });
+  expect(screen.getByText("Publishing ada…")).toBeInTheDocument();
+  expect(
+    screen.getByRole("checkbox", { name: "Select ada to publish" }).closest("tr")
+  ).toHaveTextContent("Publishing…");
+  emit({
+    total: 2,
+    completed: 1,
+    lastCompleted: { studentId: "ada", result: { status: "report_publish_failed", warnings: [] } }
+  });
+  expect(screen.getByText("1 of 2 complete")).toBeInTheDocument();
+  expect(
+    screen.getByRole("checkbox", { name: "Select ada to publish" }).closest("tr")
+  ).toHaveTextContent("Failed:");
+  emit({ total: 2, completed: 1, currentStudentId: "grace" });
+  expect(screen.getByText("Publishing grace…")).toBeInTheDocument();
+  emit({
+    total: 2,
+    completed: 2,
+    lastCompleted: { studentId: "grace", result: { status: "success", warnings: [] } }
+  });
+  expect(
+    screen.getByRole("checkbox", { name: "Select grace to publish" }).closest("tr")
+  ).toHaveTextContent("Published");
+  await act(async () => pending.resolve({ status: "success", results: [] }));
+  expect(screen.getByText("2 of 2 processed")).toBeInTheDocument();
+  expect(listeners.size).toBe(0);
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  await openPublishReview();
+  expect(
+    screen.queryByRole("progressbar", { name: "Report publication progress" })
+  ).not.toBeInTheDocument();
+  const next = deferred<unknown>();
+  bulkPublish.mockReturnValue(next.promise);
+  fireEvent.click(screen.getByRole("button", { name: "Publish 2 reports" }));
+  expect(listeners.size).toBe(1);
+  emit({ total: 2, completed: 2 });
+  expect(screen.getByText("0 of 2 complete")).toBeInTheDocument();
+  view.rerender(
+    <GradingWorkspacePage request={{ ...REQUEST, assignmentSlug: "other-assignment" }} />
+  );
+  expect(listeners.size).toBe(0);
+  emit({ total: 2, completed: 2 });
+  expect(screen.queryByRole("heading", { name: "Publish review" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("progressbar", { name: "Report publication progress" })
+  ).not.toBeInTheDocument();
+  view.unmount();
+  expect(unsubscribe).toHaveBeenCalledTimes(2);
+  await act(async () => next.resolve({ status: "success", results: [] }));
 });

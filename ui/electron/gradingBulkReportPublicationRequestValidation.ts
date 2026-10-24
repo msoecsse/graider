@@ -19,9 +19,10 @@ export const isBulkPublishGradingStudentReportsRequest = (
   const request = record(value);
   if (
     request === null ||
-    Object.keys(request).length !== REQUEST_KEYS.length ||
-    !Object.keys(request).every((key) =>
-      REQUEST_KEYS.includes(key as (typeof REQUEST_KEYS)[number])
+    Object.keys(request).length !== REQUEST_KEYS.length + ("runId" in request ? 1 : 0) ||
+    ("runId" in request && (typeof request.runId !== "string" || request.runId.trim() === "")) ||
+    !Object.keys(request).every(
+      (key) => key === "runId" || REQUEST_KEYS.includes(key as (typeof REQUEST_KEYS)[number])
     )
   )
     return false;

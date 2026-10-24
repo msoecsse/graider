@@ -346,6 +346,18 @@ const graiderUI: GraiderUIApi = {
       IPC_CHANNELS.publishGradingStudentReport,
       request
     ),
+  onGradingBulkReportPublicationProgress: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      progress: Parameters<typeof listener>[0]
+    ) => {
+      listener(progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.gradingBulkReportPublicationProgress, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.gradingBulkReportPublicationProgress, handler);
+    };
+  },
   bulkPublishGradingStudentReports: async (
     request: BulkPublishGradingStudentReportsRequest
   ): Promise<BulkPublishGradingStudentReportsResult> =>

@@ -102,6 +102,7 @@ describe("UI security boundary", () => {
       "graider-ui:grading-student-manual-adjustment:delete",
       "graider-ui:grading-student:mark-complete",
       "graider-ui:grading-student-report:publish",
+      "graider-ui:grading-student-reports:progress",
       "graider-ui:grading-student-reports:publish",
       "graider-ui:grading-comment-library:load",
       "graider-ui:grading-comment-library:create",

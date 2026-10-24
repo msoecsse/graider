@@ -92,3 +92,52 @@ describe("grading bulk report publication service", () => {
     expect(publishOne).toHaveBeenCalledTimes(3);
   });
 });
+
+it("emits actual sequential boundaries, advancing failures and preserving narrow outcomes", async () => {
+  const events: import("./gradingBulkReportPublicationService.js").GradingBulkReportPublicationProgress[] =
+    [];
+  const publishOne = vi.fn(async ({ studentId }: { studentId: string }) => {
+    expect(events.at(-1)).toEqual({
+      total: 3,
+      completed: publishOne.mock.calls.length - 1,
+      currentStudentId: studentId
+    });
+    if (studentId === "grace") throw new Error("private detail");
+    return { status: "grading_not_complete" as const, studentId };
+  });
+  const service = createGradingBulkReportPublicationService({
+    publishOne,
+    onProgress: (event) => {
+      events.push(event);
+    }
+  });
+  const result = await service(request);
+  expect(events.map(({ completed, currentStudentId }) => [completed, currentStudentId])).toEqual([
+    [0, undefined],
+    [0, "ada"],
+    [1, undefined],
+    [1, "grace"],
+    [2, undefined],
+    [2, "linus"],
+    [3, undefined]
+  ]);
+  expect(events[4]?.lastCompleted).toEqual({
+    studentId: "grace",
+    result: { status: "report_publish_failed", warnings: [] }
+  });
+  expect(result.results.map(({ studentId }) => studentId)).toEqual(request.studentIds);
+  expect(JSON.stringify(events)).not.toContain("private detail");
+});
+
+it("reports empty service input without invoking publication (IPC still rejects empty requests)", async () => {
+  const publishOne = vi.fn();
+  const onProgress = vi.fn();
+  expect(
+    await createGradingBulkReportPublicationService({ publishOne, onProgress })({
+      ...request,
+      studentIds: []
+    })
+  ).toEqual({ status: "success", results: [] });
+  expect(onProgress).toHaveBeenCalledExactlyOnceWith({ total: 0, completed: 0 });
+  expect(publishOne).not.toHaveBeenCalled();
+});

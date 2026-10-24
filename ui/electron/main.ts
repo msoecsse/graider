@@ -46,7 +46,7 @@ import {
   previewGradingStudentReport,
   publishGradingStudentReport
 } from "./gradingStudentReportPublicationService.js";
-import { bulkPublishGradingStudentReports } from "./gradingBulkReportPublicationService.js";
+import { createGradingBulkReportPublicationService } from "./gradingBulkReportPublicationService.js";
 import { isBulkPublishGradingStudentReportsRequest } from "./gradingBulkReportPublicationRequestValidation.js";
 import {
   addGradingStudentComment,
@@ -1211,16 +1211,26 @@ export const registerIpcHandlers = (): void => {
       throw new Error("A registered course folder is required for publishing a grading report.");
     return publishGradingStudentReport({ ...request, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.bulkPublishGradingStudentReports, (_event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.bulkPublishGradingStudentReports, (event, request: unknown) => {
     if (
       !isBulkPublishGradingStudentReportsRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
     )
       throw new Error("A registered course folder is required for publishing grading reports.");
-    return bulkPublishGradingStudentReports({
-      ...request,
-      userDataPath: app.getPath("userData")
-    });
+    const { runId, ...identity } = request;
+    return createGradingBulkReportPublicationService({
+      onProgress: (progress) => {
+        if (runId !== undefined && !event.sender.isDestroyed()) {
+          event.sender.send(IPC_CHANNELS.gradingBulkReportPublicationProgress, {
+            runId,
+            courseFolderId: identity.courseFolderId,
+            termCode: identity.termCode,
+            assignmentSlug: identity.assignmentSlug,
+            progress
+          });
+        }
+      }
+    })({ ...identity, userDataPath: app.getPath("userData") });
   });
   ipcMain.handle(IPC_CHANNELS.addGradingStudentComment, (_event, request: unknown) => {
     if (!isAddGradingStudentCommentRequest(request) || !isRegisteredAssignmentSetupCourse(request))
