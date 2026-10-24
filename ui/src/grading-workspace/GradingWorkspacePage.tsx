@@ -518,7 +518,7 @@ export const GradingWorkspacePage = ({
     studentId: string;
     message: string;
   }>();
-  const [selected, setSelected] = useState(0);
+  const [selectedStudentId, setSelectedStudentId] = useState<string>();
   const [studentSort, setStudentSort] = useState(getStudentSort);
   const [studentFilter, setStudentFilter] = useState<StudentFilterId>("to_grade");
   const [source, setSource] = useState<SourceLoadState>({ status: "idle" });
@@ -610,6 +610,10 @@ export const GradingWorkspacePage = ({
   const publishReviewDetailGeneration = useRef(0);
   const publishReviewDetailRequestGenerations = useRef(new Map<string, number>());
   const publishReviewOpenRef = useRef(false);
+  const selected =
+    isReady(result) && selectedStudentId !== undefined
+      ? result.students.findIndex((candidate) => candidate.studentId === selectedStudentId)
+      : 0;
   const currentStudentId = isReady(result) ? result.students[selected]?.studentId : undefined;
   const currentStudentIdRef = useRef<string | undefined>(currentStudentId);
   const pendingViewStateSaves = useRef(new Map<string, GradingEditorViewState>());
@@ -753,9 +757,10 @@ export const GradingWorkspacePage = ({
 
   useEffect(() => {
     void window.graiderUI.prepareGradingWorkspace(request).then((value) => {
-      setSelected(0);
+      const prepared = value as PreparationResult;
+      setSelectedStudentId(isReady(prepared) ? prepared.students[0]?.studentId : undefined);
       setStudentStatusOverrides({});
-      setResult(value as PreparationResult);
+      setResult(prepared);
     });
   }, [request]);
 
@@ -960,7 +965,7 @@ export const GradingWorkspacePage = ({
       if (mounted.current) setBulkWorkflowRepairState("idle");
     }
   };
-  const studentsWithStatus = useMemo(
+  const visibleSortedSubmissions = useMemo(
     () =>
       isReady(result)
         ? sortGradingStudents(
@@ -980,50 +985,54 @@ export const GradingWorkspacePage = ({
   );
   const completeStudentIds = useMemo(
     () =>
-      studentsWithStatus
+      visibleSortedSubmissions
         .filter((entry) => entry.status === "complete")
         .map((entry) => entry.student.studentId),
-    [studentsWithStatus]
+    [visibleSortedSubmissions]
   );
   const publishReviewReadyEntries = useMemo(
     () =>
-      studentsWithStatus
+      visibleSortedSubmissions
         .filter((entry) => entry.status === "complete")
         .map((entry) => ({ studentId: entry.student.studentId, section: entry.student.section })),
-    [studentsWithStatus]
+    [visibleSortedSubmissions]
   );
   const publishReviewPublishedEntries = useMemo(
     () =>
-      studentsWithStatus
+      visibleSortedSubmissions
         .filter((entry) => entry.status === "published")
         .map((entry) => ({ studentId: entry.student.studentId, section: entry.student.section })),
-    [studentsWithStatus]
+    [visibleSortedSubmissions]
   );
-  const toGradeCount = studentsWithStatus.filter((entry) =>
+  const toGradeCount = visibleSortedSubmissions.filter((entry) =>
     UNGRADED_STATUSES.includes(entry.status)
   ).length;
-  const gradedOnlyCount = studentsWithStatus.filter((entry) => entry.status === "complete").length;
-  const publishedCount = studentsWithStatus.filter((entry) => entry.status === "published").length;
-  const allStudentsCount = studentsWithStatus.length;
+  const gradedOnlyCount = visibleSortedSubmissions.filter(
+    (entry) => entry.status === "complete"
+  ).length;
+  const publishedCount = visibleSortedSubmissions.filter(
+    (entry) => entry.status === "published"
+  ).length;
+  const allStudentsCount = visibleSortedSubmissions.length;
   const gradedOrPublishedCount = gradedOnlyCount + publishedCount;
   const filteredStudents = useMemo(
     () =>
-      studentsWithStatus.filter((entry) => {
+      visibleSortedSubmissions.filter((entry) => {
         if (studentFilter === "all") return true;
         if (studentFilter === "to_grade") return UNGRADED_STATUSES.includes(entry.status);
         if (studentFilter === "graded") return entry.status === "complete";
         return entry.status === "published";
       }),
-    [studentsWithStatus, studentFilter]
+    [visibleSortedSubmissions, studentFilter]
   );
   const nextStudentNeedingGradingIndex = useMemo(() => {
-    const position = studentsWithStatus.findIndex((entry) => entry.index === selected);
+    const position = visibleSortedSubmissions.findIndex((entry) => entry.index === selected);
     const searchOrder = [
-      ...studentsWithStatus.slice(position + 1),
-      ...studentsWithStatus.slice(0, position)
+      ...visibleSortedSubmissions.slice(position + 1),
+      ...visibleSortedSubmissions.slice(0, position)
     ];
     return searchOrder.find((entry) => UNGRADED_STATUSES.includes(entry.status))?.index;
-  }, [studentsWithStatus, selected]);
+  }, [visibleSortedSubmissions, selected]);
   const loadEvidence = useCallback(
     async (studentId: string): Promise<void> => {
       const generation = evidenceRequestGeneration.current + 1;
@@ -2787,14 +2796,14 @@ export const GradingWorkspacePage = ({
     if (targetIndex === undefined || targetIndex === selected) return;
     requestStudentSwitch(() => {
       void flushPendingViewState(currentStudentId);
-      setSelected(targetIndex);
+      setSelectedStudentId(isReady(result) ? result.students[targetIndex]?.studentId : undefined);
     });
   };
   const goToFilteredStudent = (direction: "next" | "previous"): void => {
     switchToStudent(getStudentNavigationTarget(filteredStudents, direction));
   };
   const goToNextRosterStudent = (): void => {
-    switchToStudent(getStudentNavigationTarget(studentsWithStatus, "next"));
+    switchToStudent(getStudentNavigationTarget(visibleSortedSubmissions, "next"));
   };
   const goToNextStudentNeedingGrading = (): void => {
     switchToStudent(nextStudentNeedingGradingIndex);
@@ -3270,7 +3279,7 @@ export const GradingWorkspacePage = ({
               if (index === selected) return;
               requestStudentSwitch(() => {
                 void flushPendingViewState(student?.studentId);
-                setSelected(index);
+                setSelectedStudentId(result.students[index]?.studentId);
               });
             }}
             onPrevious={() => goToFilteredStudent("previous")}

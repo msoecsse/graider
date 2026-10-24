@@ -3651,10 +3651,77 @@ it("uses sorted visible order for next/previous while preserving the selected ro
     "ada"
   );
   expect(loadSource).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Sort descending" }));
+  expect(
+    [...document.querySelectorAll(".grading-workspace__student-row")].map(
+      (row) => row.textContent?.split(" ·")[0]
+    )
+  ).toEqual(["ada", "henry", "grace"]);
+  expect(document.querySelector(".grading-workspace__student-row.selected")).toHaveTextContent(
+    "ada"
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Sort ascending" }));
   fireEvent.click(screen.getByRole("button", { name: "Previous" }));
   await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("henry:"));
   fireEvent.click(screen.getByRole("button", { name: "Next ungraded" }));
   await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
+  rememberStudentSort({ key: "default", direction: "ascending" });
+});
+
+it("applies first and last name sorts immediately and keeps selection", async () => {
+  const students = [
+    {
+      studentId: "z-last",
+      section: "1",
+      firstName: "Ada",
+      lastName: "Zulu",
+      gradingStatus: "not_started"
+    },
+    {
+      studentId: "a-first",
+      section: "1",
+      firstName: "Grace",
+      lastName: "Able",
+      gradingStatus: "not_started"
+    },
+    {
+      studentId: "m-middle",
+      section: "1",
+      firstName: "Grace",
+      lastName: "Mason",
+      gradingStatus: "not_started"
+    }
+  ];
+  const loadSource = vi.fn(({ studentId }: { studentId: string }) =>
+    Promise.resolve(source(studentId))
+  );
+  setApis(vi.fn().mockResolvedValue(workspace(students)), loadSource);
+  render(<GradingWorkspacePage request={REQUEST} />);
+  await screen.findByTestId("mock-monaco");
+  fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), {
+    target: { value: "firstName" }
+  });
+  expect(
+    [...document.querySelectorAll(".grading-workspace__student-row")].map(
+      (row) => row.textContent?.split(" ·")[0]
+    )
+  ).toEqual(["z-last", "a-first", "m-middle"]);
+  fireEvent.change(screen.getByRole("combobox", { name: "Sort by" }), {
+    target: { value: "lastName" }
+  });
+  expect(
+    [...document.querySelectorAll(".grading-workspace__student-row")].map(
+      (row) => row.textContent?.split(" ·")[0]
+    )
+  ).toEqual(["a-first", "m-middle", "z-last"]);
+  expect(document.querySelector(".grading-workspace__student-row.selected")).toHaveTextContent(
+    "z-last"
+  );
+  fireEvent.keyDown(window, { key: "j" });
+  await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("a-first:"));
+  fireEvent.keyDown(window, { key: "k" });
+  await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("z-last:"));
+  expect(loadSource).toHaveBeenCalledTimes(3);
   rememberStudentSort({ key: "default", direction: "ascending" });
 });
 
