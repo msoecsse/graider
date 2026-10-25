@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalGitTemplateSyncGateway } from "../../../src/template-sync/local-git-template-sync-gateway.js";
 import { getTemplateSyncFailure } from "../../../src/template-sync/template-sync-failure.js";
 
+const EXECUTABLE_FILE_MODE = 0o755;
 const run = promisify(execFile);
 const temporaryDirectories: string[] = [];
 const template = { owner: "course", name: "template" };
@@ -67,6 +68,7 @@ const setup = async (
 };
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -403,5 +405,64 @@ describe("LocalGitTemplateSyncGateway", () => {
     expect(JSON.stringify(getTemplateSyncFailure(error))).not.toMatch(
       /missing|git|authorization/iu
     );
+  });
+
+  it("sends the token header and disables terminal prompts on every push", async () => {
+    const fixture = await setup();
+    await writeFile(join(fixture.templateDirectory, "shared.txt"), "faculty edit\n");
+    await git(fixture.templateDirectory, "commit", "-am", "template update");
+    const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
+    const realGit = (await run("which", ["git"])).stdout.trim();
+    const shimDirectory = await mkdtemp(join(tmpdir(), "graider-git-shim-"));
+    temporaryDirectories.push(shimDirectory);
+    const log = join(shimDirectory, "pushes.log");
+    const shim = join(shimDirectory, "git");
+    await writeFile(
+      shim,
+      `#!/bin/sh\ncase " $* " in *" push "*) echo "$GIT_TERMINAL_PROMPT|$*" >> "${log}";; esac\nexec "${realGit}" "$@"\n`
+    );
+    await chmod(shim, EXECUTABLE_FILE_MODE);
+    vi.stubEnv("PATH", `${shimDirectory}:${process.env["PATH"] ?? ""}`);
+    const gateway = new LocalGitTemplateSyncGateway({ ...fixture, token: "fake-token" });
+
+    await gateway.applyAndPushTemplateDelta({
+      templateRepository: template,
+      studentRepository: student,
+      templateBaseCommitSha: fixture.base,
+      templateTargetCommitSha: target,
+      studentBaseCommitSha: fixture.base,
+      studentCurrentCommitSha: await gateway.getDefaultBranchCommitSha(),
+      changes: []
+    });
+
+    const pushes = (await readFile(log, "utf8")).trim().split("\n");
+    expect(pushes).toHaveLength(1);
+    expect(pushes[0]).toMatch(/^0\|/u);
+    expect(pushes[0]).toContain(
+      `http.extraHeader=AUTHORIZATION: basic ${Buffer.from("x-access-token:fake-token").toString("base64")}`
+    );
+  });
+
+  it("fails a push at once instead of prompting when no credential is available", async () => {
+    const fixture = await setup();
+    await writeFile(join(fixture.templateDirectory, "shared.txt"), "faculty edit\n");
+    await git(fixture.templateDirectory, "commit", "-am", "template update");
+    const target = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
+    await git(fixture.studentDirectory, "remote", "set-url", "origin", "https://127.0.0.1:1/x.git");
+    const gateway = new LocalGitTemplateSyncGateway(fixture);
+
+    const error = await gateway
+      .applyAndPushTemplateDelta({
+        templateRepository: template,
+        studentRepository: student,
+        templateBaseCommitSha: fixture.base,
+        templateTargetCommitSha: target,
+        studentBaseCommitSha: fixture.base,
+        studentCurrentCommitSha: await gateway.getDefaultBranchCommitSha(),
+        changes: []
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(getTemplateSyncFailure(error)?.stage).toBe("push_failed");
   });
 });
