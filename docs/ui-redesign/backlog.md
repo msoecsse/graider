@@ -1902,6 +1902,70 @@ a student repository.
 
 ---
 
+## 71. Apply Preview says repositories would be created, but Apply refuses because a roster GitHub username does not exist — **Should fix**
+
+Found on 2026-10-27 with SWE4211 `lab9-10-swe4211-f26` ("SWE 4211 F26 Lab 9, 10").
+Apply Preview reported 21 repositories would be created and none blocked. **Apply**
+then created nothing. Roster row 18 of `terms/27s1/rosters/section-121.csv`
+(`rodriguezcurielj`, status `active`) names a GitHub account that returns 404;
+that student had a repository from an earlier assignment, so the account was
+renamed or deleted. The CLI `plan` command stops with `github_user_missing`
+(exit code 1) before planning any repository.
+
+What the code does:
+
+- `src/cli/commands/apply.command.ts` (around line 403) calls
+  `validateGitHubReadiness`
+  (`src/github/github-readiness-validation.ts`, around line 375), which looks up
+  every roster username. Any error there ends the command before repositories
+  are planned.
+- `src/apply-preview/apply-preview-builder.ts` does not call
+  `validateGitHubReadiness`, so it never looks up usernames. It checks only
+  whether each repository already exists, so every row is `would_create`.
+
+Impact: faculty are told Apply will work and it fails; the preview is the step
+meant to prevent that.
+
+Expected: the preview shows the student whose GitHub account was not found as
+blocked, with the reason, before faculty press Apply. Confirm with the course
+owner whether the preview should run the full readiness check or only the
+username check.
+
+Related, not decided: one missing username blocks the whole assignment, not only
+that student's repository. Ask the course owner whether that is intended.
+
+---
+
+## 72. A failed Apply shows "N repositories were blocked" and never says why — **Should fix**
+
+Found on 2026-10-27 with the item 71 failure. The result read "21 repositories
+were blocked. Failed. Exit code 1", with no message naming the failing student or
+the cause. The course owner could not tell what to fix; the cause was found only
+by running the CLI `plan` command.
+
+What the code does:
+
+- `ui/src/apply-preview/applyPreviewMerge.ts` (`getResultRowSummary`, around
+  line 266) counts any row with no apply result as `blocked`. When the command
+  fails before any row is attempted, as `github_user_missing` does, every row
+  gets this default.
+- The command-level error (`github_user_missing` with the student and roster
+  row in its context) is not attached to the rows, and the summary does not
+  show it. Raw exit codes also appear in faculty-facing text, which
+  `docs/ui-redesign/README.md` §2 and CLAUDE.md §8 prohibit.
+
+Expected: when Apply fails before attempting rows, show the cause in plain
+language, naming the student and what to change (for example, "GitHub could not
+find the account for <student>. Check their GitHub username in the roster."),
+instead of a count of blocked repositories. Confirm wording with the course
+owner.
+
+Related, not part of this item: the CLI prints raw `GET /repos/... 404` lines to
+stderr during a normal Apply Preview, because Octokit logs the expected
+"repository does not exist yet" checks. They look like errors and are noise.
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1932,7 +1996,7 @@ Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer par
 of this sequence.
 
 Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 57, 58, 59, 60, 61, 62,
-63, 64, 65, 66, 67, 68, 69, and 70.
+63, 64, 65, 66, 67, 68, 69, 70, 71, and 72.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
 48, 49, 50, 51, 53, 55, 56, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
