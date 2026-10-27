@@ -56,6 +56,9 @@ await build({
     ),
     rosterSharedBackend: fileURLToPath(
       new URL("../../src/roster/roster-shared.ts", import.meta.url)
+    ),
+    pagesAccessBackend: fileURLToPath(
+      new URL("../../src/pages-access/pages-access-context.ts", import.meta.url)
     )
   },
   outDir: fileURLToPath(new URL("../dist-electron", import.meta.url)),

@@ -477,7 +477,7 @@ const buildResult = (
       rows: [],
       diagnostics: [
         diagnostic(
-          "Student access Pages repository is not configured. Configure it before generating a public access page."
+          "Student access Pages repository is not configured. Configure it before generating a student access page."
         )
       ]
     };

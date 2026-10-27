@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import type { GitHubClient } from "../github/github-client.js";
+import {
+  createGitAuthorizationArguments,
+  createNonInteractiveGitEnvironment
+} from "./git-network-options.js";
 import { LocalGitTemplateSyncGateway } from "./local-git-template-sync-gateway.js";
 import {
   createGitHubTemplateSyncOperationError,
@@ -115,7 +119,11 @@ export const withProductionTemplateSyncWorkspace = async <T>(
         )
     );
     result = await operation({
-      gateway: new LocalGitTemplateSyncGateway({ templateDirectory, studentDirectory }),
+      gateway: new LocalGitTemplateSyncGateway({
+        templateDirectory,
+        studentDirectory,
+        token: input.token
+      }),
       pullRequests: createGitHubPullRequestGateway(input.githubClient),
       studentDefaultBranch
     });
@@ -179,18 +187,16 @@ const git = async (
   args: string[],
   token: string | null
 ): Promise<{ stdout: string }> => {
-  const authorization =
-    token === null
-      ? []
-      : [
-          "-c",
-          `http.extraHeader=AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`
-        ];
   const { stdout } = await execFile(
     GIT,
-    [...authorization, ...(directory === undefined ? [] : ["-C", directory]), ...args],
+    [
+      ...createGitAuthorizationArguments(token),
+      ...(directory === undefined ? [] : ["-C", directory]),
+      ...args
+    ],
     {
       encoding: "utf8",
+      env: createNonInteractiveGitEnvironment(),
       maxBuffer: MAX_GIT_COMMAND_OUTPUT_BYTES
     }
   );

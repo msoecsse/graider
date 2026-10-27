@@ -13,6 +13,7 @@ import {
   hasAttentionStatus
 } from "../components/statusLabels";
 import { formatReadableDateTime } from "../components/dateTime";
+import { getStudentPagesAccessWarning } from "../components/studentPagesAccessWarning";
 import type { AssignmentDetailDiagnostic } from "../assignment-detail/assignmentDetailTypes";
 import type { AssignmentApplyProgressEvent } from "../../electron/ipc";
 import { normalizeApplyResult } from "./applyResultNormalization";
@@ -918,6 +919,10 @@ export const ApplyPreviewPage = ({
   );
   const commandErrorMessage = getCommandErrorMessage(loadResult);
   const applyErrorMessage = getApplyCommandErrorMessage(applyResult);
+  const pagesAccessWarning = getStudentPagesAccessWarning(
+    applyResult?.pagesAccess,
+    "Run Apply again to retry."
+  );
   const showTokenGuidance =
     preview !== null &&
     (preview.diagnostics.some((diagnostic) => diagnostic.code === "github_token_required") ||
@@ -990,6 +995,12 @@ export const ApplyPreviewPage = ({
         {applyErrorMessage === null ? null : (
           <p className="error-message" role="alert">
             {applyErrorMessage}
+          </p>
+        )}
+
+        {pagesAccessWarning === null ? null : (
+          <p className="error-message" role="alert">
+            <strong>Assignment applied.</strong> {pagesAccessWarning}
           </p>
         )}
 

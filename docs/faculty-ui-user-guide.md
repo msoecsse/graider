@@ -57,8 +57,10 @@ Prepare these items before an assignment cycle:
 - `active`, `dropped`, or `hold` roster status for every student. Active
   students are eligible for repositories and access-page links; dropped and
   hold students are skipped.
-- A local clone of the configured student-access Pages repository. The private
-  course/admin repository can remain private.
+- A local clone of the configured student-access Pages repository. Both the
+  course/admin repository and the Pages repository stay private; Graider gives
+  students read access to the Pages repository (see **Student access to the
+  Pages site** below).
 - Either a configured custom grading workflow, or an assignment using Graider's
   managed `java-junit-checkstyle` preset. Managed assignments receive the
   canonical workflow during Apply; a custom workflow must be available before
@@ -263,6 +265,23 @@ For example:
 terms/27s2/notifications/lab02/student-repositories.html
 https://csc1120.github.io/csc1120pages/terms/27s2/notifications/lab02/student-repositories.html
 ```
+
+### Student access to the Pages site
+
+The Pages site is published privately, so only people signed in to GitHub with
+read access to the Pages repository can open it. Students must be signed in to
+GitHub in the browser they use to open the Canvas link.
+
+After each roster save, roster or section removal, and Apply, Graider checks the
+most recent term's rosters and gives every active or on-hold student read access
+to the Pages repository. It removes that access only from a student who is
+dropped and is not active or on hold in another section of that term, so a
+student who switches sections keeps access. Students in a roster or section you
+remove lose access the same way, unless they are active or on hold in another
+section. Students from earlier terms are left alone. If any change fails, the
+roster change or Apply still completes, and Graider names the students whose
+access could not be updated; save a roster, or run Apply again, to retry. Your
+GitHub sign-in needs admin access to the Pages repository.
 
 ## Publish the Student Repository Access Page
 

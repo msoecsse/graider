@@ -15,6 +15,10 @@ import type {
   TemplateTree
 } from "./template-sync.js";
 import {
+  createGitAuthorizationArguments,
+  createNonInteractiveGitEnvironment
+} from "./git-network-options.js";
+import {
   createTemplateSyncOperationError,
   type TemplateSyncFailureStage
 } from "./template-sync-failure.js";
@@ -42,6 +46,8 @@ export interface LocalGitTemplateSyncGatewayOptions {
   /** Clean, local clones; the student clone's origin is the student's repository. */
   templateDirectory: string;
   studentDirectory: string;
+  /** Sent with every git command so pushes authenticate like the clones did. */
+  token?: string | null;
 }
 
 /**
@@ -398,7 +404,11 @@ export class LocalGitTemplateSyncGateway implements TemplateSyncGitGateway {
   }
 
   private async git(directory: string, args: string[]) {
-    return execFile(GIT, ["-C", directory, ...args], { maxBuffer: MAX_GIT_COMMAND_OUTPUT_BYTES });
+    return execFile(
+      GIT,
+      [...createGitAuthorizationArguments(this.options.token ?? null), "-C", directory, ...args],
+      { env: createNonInteractiveGitEnvironment(), maxBuffer: MAX_GIT_COMMAND_OUTPUT_BYTES }
+    );
   }
 }
 
