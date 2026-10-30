@@ -1253,6 +1253,22 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
     }
   }
 
+  async isAncestor(ancestor: string, descendant: string): Promise<boolean> {
+    if (!isObjectId(ancestor) || !isObjectId(descendant))
+      throw new GitError("operation_rejected", "resolve_revision");
+    try {
+      await this.executor.run(
+        this.root,
+        ["merge-base", "--is-ancestor", ancestor, descendant],
+        "resolve_revision"
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof GitCommandFailure && error.code === 1) return false;
+      throw errorForFailure(error, "resolve_revision", "revision_unavailable");
+    }
+  }
+
   async resolveHead(): Promise<ObjectId> {
     try {
       return parseObjectId(

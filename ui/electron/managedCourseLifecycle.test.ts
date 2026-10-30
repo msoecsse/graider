@@ -28,7 +28,8 @@ const course = (
 });
 const fixture = (
   courses = [course(20)],
-  reconcileCourse?: ConstructorParameters<typeof GithubOAuthSession>[0]["reconcileCourse"]
+  reconcileCourse?: ConstructorParameters<typeof GithubOAuthSession>[0]["reconcileCourse"],
+  synchronizeCourse?: ConstructorParameters<typeof GithubOAuthSession>[0]["synchronizeCourse"]
 ) => {
   const network = {
     identity: vi.fn().mockResolvedValue({ id: 42, login: "faculty", name: null }),
@@ -53,6 +54,7 @@ const fixture = (
     network,
     bootstrapCourse,
     reconcileCourse,
+    synchronizeCourse,
     discoverCourses,
     secret: () => "secret",
     openBrowser: async () => {},
@@ -409,4 +411,45 @@ describe("account-scoped reconciliation lifecycle", () => {
     expect(f.session.getState().status).toBe("signed_in");
     f.session.shutdown();
   });
+});
+
+describe("pre-mutation target session synchronization", () => {
+  it("publishes the final needs-attention result so Review cache is available", async () => {
+    const sync = vi
+      .fn()
+      .mockResolvedValue({ status: "up_to_date", diagnostic: null, retryable: false });
+    const f = fixture([course(20)], undefined, sync);
+    await f.session.restore();
+    await vi.waitFor(() => expect(sync).toHaveBeenCalledOnce());
+    sync.mockImplementationOnce(async (input) => {
+      input.onProgress({ status: "fetching", diagnostic: null, retryable: false });
+      return {
+        status: "needs_attention",
+        reason: "local_changes",
+        diagnostic: "Review cache",
+        retryable: false
+      };
+    });
+    await f.session.withSynchronizedCourse(20, 42, async (_input, result) => {
+      expect(result.reason).toBe("local_changes");
+      expect(f.session.getState().courseDiscovery.courses[0].synchronization?.reason).toBe(
+        "local_changes"
+      );
+    });
+    expect(f.discoverCourses).toHaveBeenCalledOnce();
+    expect(JSON.stringify(f.session.getState())).not.toContain("oauth-secret");
+    f.session.shutdown();
+  });
+});
+
+it("account switch invalidates mutation generations immediately, even if replacement fails", async () => {
+  const f = fixture();
+  await f.session.restore();
+  const generation = f.session.mutationGeneration;
+  f.network.exchange.mockRejectedValueOnce(new Error("isolated replacement failed"));
+  const switching = f.session.signIn(true);
+  expect(f.session.mutationGeneration).toBeGreaterThan(generation);
+  await switching;
+  expect(f.session.getState().identity?.id).toBe(42);
+  f.session.shutdown();
 });

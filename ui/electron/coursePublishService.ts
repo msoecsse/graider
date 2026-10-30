@@ -29,7 +29,7 @@ const normalizeChangedPath = (entry: string): string | null => {
   return candidate.includes("..") || candidate === "" ? null : candidate;
 };
 
-const inspectChangedFiles = (
+export const inspectChangedFiles = (
   paths: readonly string[]
 ): { readonly allowed: readonly string[]; readonly unrelated: readonly string[] } => {
   const allowed: string[] = [];

@@ -1,3 +1,5 @@
+import { createCourseMutationIpc } from "./courseMutationIpc.js";
+import { ManagedCourseMutationGuard } from "./managedCourseMutationGuard.js";
 import {
   ManagedReconciliationService,
   latestPreservedCopy,
@@ -18,6 +20,7 @@ import {
   isImportApplyRequest
 } from "./reviewImportService.js";
 import path from "node:path";
+import fs from "node:fs";
 import { GithubOAuthSession } from "./githubOAuthSession.js";
 import { createGithubOAuthCredentialStore } from "./githubOAuthCredentialStore.js";
 import { createGithubOAuthNetwork } from "./githubOAuthNetwork.js";
@@ -487,7 +490,25 @@ const isTemplateManagedWorkflowReplacementRequest = (
   );
 };
 
+let courseMutationGuard: ManagedCourseMutationGuard | undefined;
+
 export const registerIpcHandlers = (): void => {
+  const courseIpc = createCourseMutationIpc(
+    ipcMain,
+    () => courseMutationGuard,
+    (setupPath) => {
+      const folder = listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).find(
+        (item) => item.path === setupPath
+      );
+      return {
+        folderId: folder?.id,
+        isNew:
+          !folder &&
+          typeof setupPath === "string" &&
+          !fs.existsSync(path.join(setupPath, "course.yml"))
+      };
+    }
+  );
   const approvedCourseSetupRoots = new Set<string>();
   const processRunner = createNodeProcessRunner({
     graiderCli: app.isPackaged
@@ -529,26 +550,26 @@ export const registerIpcHandlers = (): void => {
   const publishAuthenticatedCourseChanges = (courseFolderPath: string) =>
     publishCourseChanges(courseFolderPath, { runner: processRunner, env: process.env });
 
-  ipcMain.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
-  ipcMain.handle(IPC_CHANNELS.getLocalSettings, () =>
+  courseIpc.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
+  courseIpc.handle(IPC_CHANNELS.getLocalSettings, () =>
     loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
   );
-  ipcMain.handle(IPC_CHANNELS.saveLocalSettings, (_event, username: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.saveLocalSettings, (_event, username: unknown) => {
     if (typeof username !== "string") throw new Error("Faculty MSOE username is required.");
     return saveCurrentFacultyMsoeUsername(getLocalSettingsPath(app.getPath("userData")), username);
   });
-  ipcMain.handle(IPC_CHANNELS.getCoursePublishStatus, async (_event, courseFolderId: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getCoursePublishStatus, async (_event, courseFolderId: unknown) => {
     const courseFolderPath = getRegisteredCourseFolderPath(courseFolderId);
     if (courseFolderPath === null) throw new Error("A registered course folder is required.");
     return await getCoursePublishStatus(courseFolderPath);
   });
-  ipcMain.handle(IPC_CHANNELS.publishCourseChanges, async (_event, courseFolderId: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.publishCourseChanges, async (_event, courseFolderId: unknown) => {
     const courseFolderPath = getRegisteredCourseFolderPath(courseFolderId);
     if (courseFolderPath === null) throw new Error("A registered course folder is required.");
     return await publishAuthenticatedCourseChanges(courseFolderPath);
   });
 
-  ipcMain.handle(
+  courseIpc.handle(
     IPC_CHANNELS.checkGitHubAuth,
     async () =>
       await checkGitHubAuth({
@@ -557,11 +578,11 @@ export const registerIpcHandlers = (): void => {
       })
   );
 
-  ipcMain.handle(IPC_CHANNELS.listCourseFolders, () =>
+  courseIpc.handle(IPC_CHANNELS.listCourseFolders, () =>
     listCourseFolders(getCourseRegistryPath(app.getPath("userData")))
   );
 
-  ipcMain.handle(IPC_CHANNELS.removeCourseFolder, (_event, id: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.removeCourseFolder, (_event, id: unknown) => {
     if (typeof id !== "string") {
       throw new Error("Course folder id is required.");
     }
@@ -569,7 +590,7 @@ export const registerIpcHandlers = (): void => {
     removeCourseFolderFromRegistry(getCourseRegistryPath(app.getPath("userData")), id);
   });
 
-  ipcMain.handle(IPC_CHANNELS.selectCourseFolder, async () => {
+  courseIpc.handle(IPC_CHANNELS.selectCourseFolder, async () => {
     const selectedFolder = await selectNativeDirectory({
       properties: ["openDirectory"],
       settingsPath: getLocalSettingsPath(app.getPath("userData")),
@@ -597,7 +618,7 @@ export const registerIpcHandlers = (): void => {
     return selectionResult;
   });
 
-  ipcMain.handle(
+  courseIpc.handle(
     IPC_CHANNELS.selectStudentAccessPagesRepositoryFolder,
     async (_event, courseFolderId: unknown) => {
       if (typeof courseFolderId !== "string") throw new Error("Course folder id is required.");
@@ -625,7 +646,7 @@ export const registerIpcHandlers = (): void => {
         : { canceled: false, folderPath: registered.pagesRepositoryFolderPath ?? null };
     }
   );
-  ipcMain.handle(IPC_CHANNELS.selectRepositoryDownloadFolder, async () => {
+  courseIpc.handle(IPC_CHANNELS.selectRepositoryDownloadFolder, async () => {
     const folderPath = await selectNativeDirectory({
       properties: ["openDirectory", "createDirectory"],
       settingsPath: getLocalSettingsPath(app.getPath("userData")),
@@ -634,7 +655,7 @@ export const registerIpcHandlers = (): void => {
     return { canceled: folderPath === null, folderPath };
   });
 
-  ipcMain.handle(IPC_CHANNELS.selectCourseSetupFolder, async () => {
+  courseIpc.handle(IPC_CHANNELS.selectCourseSetupFolder, async () => {
     const selectedFolder = await selectNativeDirectory({
       properties: ["openDirectory", "createDirectory"],
       settingsPath: getLocalSettingsPath(app.getPath("userData")),
@@ -644,13 +665,13 @@ export const registerIpcHandlers = (): void => {
     return { canceled: selectedFolder === null, courseFolderPath: selectedFolder };
   });
 
-  ipcMain.handle(IPC_CHANNELS.previewCourseSetup, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.previewCourseSetup, (_event, request: unknown) => {
     if (!isCourseSetupRequest(request) || !approvedCourseSetupRoots.has(request.courseFolderPath))
       throw new Error("Approved course setup request is required.");
     return previewCourseSetup(request);
   });
 
-  ipcMain.handle(IPC_CHANNELS.saveCourseSetup, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.saveCourseSetup, (_event, request: unknown) => {
     if (!isCourseSetupRequest(request) || !approvedCourseSetupRoots.has(request.courseFolderPath))
       throw new Error("Approved course setup request is required.");
     const result = saveCourseSetup(request);
@@ -661,20 +682,20 @@ export const registerIpcHandlers = (): void => {
       );
     return result;
   });
-  ipcMain.handle(IPC_CHANNELS.saveStudentAccessPagesConfig, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.saveStudentAccessPagesConfig, (_event, request: unknown) => {
     if (!isStudentAccessPagesConfigRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for Student Access Pages settings.");
     return saveStudentAccessPagesConfig(request);
   });
 
-  ipcMain.handle(IPC_CHANNELS.loadAssignmentSetupTerms, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.loadAssignmentSetupTerms, (_event, request: unknown) => {
     if (!isAssignmentSetupTermsRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for assignment setup.");
     }
     return loadAssignmentSetupTerms(request.courseFolderPath);
   });
 
-  ipcMain.handle(IPC_CHANNELS.previewAssignmentSetup, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.previewAssignmentSetup, async (_event, request: unknown) => {
     if (!isAssignmentSetupRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for assignment setup.");
     }
@@ -706,7 +727,7 @@ export const registerIpcHandlers = (): void => {
         };
   });
 
-  ipcMain.handle(IPC_CHANNELS.saveAssignmentSetup, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.saveAssignmentSetup, async (_event, request: unknown) => {
     if (!isAssignmentSetupRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for assignment setup.");
     }
@@ -747,7 +768,7 @@ export const registerIpcHandlers = (): void => {
       publishAuthenticatedCourseChanges
     );
   });
-  ipcMain.handle(IPC_CHANNELS.getAssignmentForEdit, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getAssignmentForEdit, (_event, request: unknown) => {
     if (
       !isAssignmentSetupTermsRequest(request) ||
       typeof (request as unknown as Record<string, unknown>).assignmentFile !== "string" ||
@@ -759,7 +780,7 @@ export const registerIpcHandlers = (): void => {
       (request as unknown as Record<string, unknown>).assignmentFile as string
     );
   });
-  ipcMain.handle(IPC_CHANNELS.previewAssignmentEdit, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.previewAssignmentEdit, async (_event, request: unknown) => {
     if (!isAssignmentEditRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment edit request.");
     const preview = previewAssignmentEdit(request);
@@ -790,7 +811,7 @@ export const registerIpcHandlers = (): void => {
           diagnostics: [...preview.diagnostics, ...validation.diagnostics]
         };
   });
-  ipcMain.handle(IPC_CHANNELS.saveAssignmentEdit, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.saveAssignmentEdit, async (_event, request: unknown) => {
     if (!isAssignmentEditRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment edit request.");
     const original = getAssignmentForEdit(request.courseFolderPath, request.assignmentFile).model;
@@ -826,7 +847,7 @@ export const registerIpcHandlers = (): void => {
       publishAuthenticatedCourseChanges
     );
   });
-  ipcMain.handle(IPC_CHANNELS.deleteAssignment, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.deleteAssignment, async (_event, request: unknown) => {
     if (!isAssignmentDeleteRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment delete request.");
     return await publishSuccessfulCourseMutation(
@@ -835,12 +856,12 @@ export const registerIpcHandlers = (): void => {
       publishAuthenticatedCourseChanges
     );
   });
-  ipcMain.handle(IPC_CHANNELS.getAssignmentGroupConfig, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getAssignmentGroupConfig, (_event, request: unknown) => {
     if (!isAssignmentGroupConfigRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment group settings request.");
     return getAssignmentGroupConfig(request);
   });
-  ipcMain.handle(IPC_CHANNELS.saveAssignmentGroupConfig, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.saveAssignmentGroupConfig, async (_event, request: unknown) => {
     if (!isAssignmentGroupConfigSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("Invalid assignment group settings request.");
     return await publishSuccessfulCourseMutation(
@@ -849,7 +870,7 @@ export const registerIpcHandlers = (): void => {
       publishAuthenticatedCourseChanges
     );
   });
-  ipcMain.handle(
+  courseIpc.handle(
     IPC_CHANNELS.getStudentRepositoryAccessPageStatus,
     async (_event, request: unknown) => {
       if (
@@ -865,7 +886,7 @@ export const registerIpcHandlers = (): void => {
       return await getStudentRepositoryAccessPageStatus(accessRequest, mappings);
     }
   );
-  ipcMain.handle(
+  courseIpc.handle(
     IPC_CHANNELS.generateStudentRepositoryAccessPage,
     async (_event, request: unknown) => {
       if (
@@ -881,7 +902,7 @@ export const registerIpcHandlers = (): void => {
       return await generateStudentRepositoryAccessPage(accessRequest, mappings);
     }
   );
-  ipcMain.handle(
+  courseIpc.handle(
     IPC_CHANNELS.getStudentRepositoryAccessPagePublishStatus,
     async (_event, request: unknown) => {
       if (
@@ -897,7 +918,7 @@ export const registerIpcHandlers = (): void => {
       return await getStudentRepositoryAccessPagePublishStatus(accessRequest, mappings);
     }
   );
-  ipcMain.handle(
+  courseIpc.handle(
     IPC_CHANNELS.publishStudentRepositoryAccessPage,
     async (_event, request: unknown) => {
       if (
@@ -917,35 +938,35 @@ export const registerIpcHandlers = (): void => {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.loadRosterTerms, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.loadRosterTerms, (_event, request: unknown) => {
     if (!isAssignmentSetupTermsRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
     return loadRosterTerms(request.courseFolderPath);
   });
 
-  ipcMain.handle(IPC_CHANNELS.getRosterForSection, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getRosterForSection, (_event, request: unknown) => {
     if (!isRosterSectionRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
     return getRosterForSection(request);
   });
 
-  ipcMain.handle(IPC_CHANNELS.getRosterSectionSummaries, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getRosterSectionSummaries, (_event, request: unknown) => {
     if (!isRosterSectionSummariesRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
     return getRosterSectionSummaries(request);
   });
 
-  ipcMain.handle(IPC_CHANNELS.previewRosterSave, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.previewRosterSave, (_event, request: unknown) => {
     if (!isRosterSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
     return previewRosterSave(request);
   });
 
-  ipcMain.handle(IPC_CHANNELS.saveRoster, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.saveRoster, async (_event, request: unknown) => {
     if (!isRosterSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
@@ -962,7 +983,7 @@ export const registerIpcHandlers = (): void => {
       publishAuthenticatedCourseChanges
     );
   });
-  ipcMain.handle(IPC_CHANNELS.removeRoster, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.removeRoster, async (_event, request: unknown) => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
@@ -976,7 +997,7 @@ export const registerIpcHandlers = (): void => {
       publishAuthenticatedCourseChanges
     );
   });
-  ipcMain.handle(IPC_CHANNELS.removeSection, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.removeSection, async (_event, request: unknown) => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
@@ -991,35 +1012,38 @@ export const registerIpcHandlers = (): void => {
     );
   });
 
-  ipcMain.handle(IPC_CHANNELS.getTemplateWorkflow, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getTemplateWorkflow, async (_event, request: unknown) => {
     if (!isTemplateWorkflowRequest(request))
       throw new Error("Template workflow request is required.");
     return await getTemplateWorkflow(request, { env: process.env, runner: processRunner });
   });
 
-  ipcMain.handle(IPC_CHANNELS.previewTemplateWorkflowSave, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.previewTemplateWorkflowSave, async (_event, request: unknown) => {
     if (!isTemplateWorkflowSaveRequest(request))
       throw new Error("Template workflow save request is required.");
     return await previewTemplateWorkflowSave(request, { env: process.env, runner: processRunner });
   });
 
-  ipcMain.handle(IPC_CHANNELS.saveTemplateWorkflow, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.saveTemplateWorkflow, async (_event, request: unknown) => {
     if (!isTemplateWorkflowSaveRequest(request))
       throw new Error("Template workflow save request is required.");
     return await saveTemplateWorkflow(request, { env: process.env, runner: processRunner });
   });
-  ipcMain.handle(IPC_CHANNELS.replaceTemplateManagedWorkflow, async (_event, request: unknown) => {
-    if (
-      !isTemplateManagedWorkflowReplacementRequest(request) ||
-      !isRegisteredAssignmentSetupCourse(request)
-    )
-      throw new Error(
-        "A registered course folder is required for managed template workflow replacement."
-      );
-    return await replaceTemplateManagedWorkflow(request);
-  });
+  courseIpc.handle(
+    IPC_CHANNELS.replaceTemplateManagedWorkflow,
+    async (_event, request: unknown) => {
+      if (
+        !isTemplateManagedWorkflowReplacementRequest(request) ||
+        !isRegisteredAssignmentSetupCourse(request)
+      )
+        throw new Error(
+          "A registered course folder is required for managed template workflow replacement."
+        );
+      return await replaceTemplateManagedWorkflow(request);
+    }
+  );
 
-  ipcMain.handle(IPC_CHANNELS.refreshCourseFolder, async (_event, id: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.refreshCourseFolder, async (_event, id: unknown) => {
     if (typeof id !== "string") {
       throw new Error("Course folder id is required.");
     }
@@ -1030,7 +1054,7 @@ export const registerIpcHandlers = (): void => {
     });
   });
 
-  ipcMain.handle(
+  courseIpc.handle(
     IPC_CHANNELS.refreshDashboard,
     async () =>
       await refreshDashboard(getCourseRegistryPath(app.getPath("userData")), {
@@ -1039,7 +1063,7 @@ export const registerIpcHandlers = (): void => {
       })
   );
 
-  ipcMain.handle(IPC_CHANNELS.getAssignmentDetail, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getAssignmentDetail, async (_event, request: unknown) => {
     if (!isAssignmentDetailRequest(request)) {
       throw new Error("Assignment detail request is required.");
     }
@@ -1054,7 +1078,7 @@ export const registerIpcHandlers = (): void => {
     showOpenDialog: (options) => dialog.showOpenDialog(options)
   });
   const reviewImportOwners = new WeakSet<Electron.WebContents>();
-  ipcMain.handle(IPC_CHANNELS.chooseReviewImport, (event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.chooseReviewImport, (event, request: unknown) => {
     if (!isPrepareGradingWorkspaceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered assignment is required for review import.");
     if (!reviewImportOwners.has(event.sender)) {
@@ -1067,7 +1091,7 @@ export const registerIpcHandlers = (): void => {
       event.sender.id
     );
   });
-  ipcMain.handle(IPC_CHANNELS.applyReviewImport, (event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.applyReviewImport, (event, request: unknown) => {
     if (!isImportApplyRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A current review plan and explicit selections are required.");
     return reviewImports.apply(
@@ -1075,8 +1099,8 @@ export const registerIpcHandlers = (): void => {
       event.sender.id
     );
   });
-  ipcMain.handle(IPC_CHANNELS.closeReviewImport, (event) => reviewImports.close(event.sender.id));
-  ipcMain.handle(IPC_CHANNELS.prepareGradingWorkspace, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.closeReviewImport, (event) => reviewImports.close(event.sender.id));
+  courseIpc.handle(IPC_CHANNELS.prepareGradingWorkspace, (_event, request: unknown) => {
     if (!isPrepareGradingWorkspaceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for grading preparation.");
     return prepareGradingWorkspace({
@@ -1086,7 +1110,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.getAssignmentGradingLifecycle, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getAssignmentGradingLifecycle, (_event, request: unknown) => {
     if (
       !isAssignmentGradingLifecycleRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1099,12 +1123,12 @@ export const registerIpcHandlers = (): void => {
       assignmentSlug: request.assignmentSlug
     });
   });
-  ipcMain.handle(IPC_CHANNELS.loadGradingStudentDocument, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.loadGradingStudentDocument, (_event, request: unknown) => {
     if (!isGradingStudentDocumentRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course and repository document are required.");
     return loadGradingStudentDocument({ ...request, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.loadGradingStudentSource, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.loadGradingStudentSource, (_event, request: unknown) => {
     if (!isLoadGradingStudentSourceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for grading source loading.");
     return loadGradingStudentSource({
@@ -1116,7 +1140,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.loadGradingStudentViewState, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.loadGradingStudentViewState, (_event, request: unknown) => {
     if (!isGradingStudentViewStateRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for grading view-state loading.");
     return loadGradingStudentViewState({
@@ -1124,7 +1148,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.saveGradingStudentViewState, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.saveGradingStudentViewState, (_event, request: unknown) => {
     if (
       !isSaveGradingStudentViewStateRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1135,7 +1159,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.clearGradingStudentViewState, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.clearGradingStudentViewState, (_event, request: unknown) => {
     if (!isGradingStudentViewStateRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for grading view-state clearing.");
     return clearGradingStudentViewState({
@@ -1143,7 +1167,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.loadGradingStudentSnapshot, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.loadGradingStudentSnapshot, (_event, request: unknown) => {
     if (!isGradingStudentViewStateRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for grading snapshot loading.");
     return loadGradingStudentSnapshot({
@@ -1151,12 +1175,12 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.pullLatestGradingStudentChanges, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.pullLatestGradingStudentChanges, (_event, request: unknown) => {
     if (!isLoadGradingStudentSourceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for student repository updates.");
     return pullLatestGradingStudentChanges({ ...request, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.loadGradingStudentEvidence, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.loadGradingStudentEvidence, (_event, request: unknown) => {
     if (
       !isLoadGradingStudentEvidenceRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1167,7 +1191,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.repairGradingStudentWorkflow, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.repairGradingStudentWorkflow, (_event, request: unknown) => {
     if (
       !isGradingStudentWorkflowRepairRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1178,7 +1202,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.repairGradingAssignmentWorkflows, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.repairGradingAssignmentWorkflows, (_event, request: unknown) => {
     if (!isGradingBulkWorkflowRepairRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for bulk grading workflow repair.");
     return repairGradingWorkflowsForAssignment({
@@ -1186,7 +1210,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.previewGradingStudentReport, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.previewGradingStudentReport, (_event, request: unknown) => {
     if (
       !isPublishGradingStudentReportRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1194,7 +1218,7 @@ export const registerIpcHandlers = (): void => {
       throw new Error("A registered course folder is required for report preview.");
     return previewGradingStudentReport({ ...request, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.loadGradingStudentCommitHistory, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.loadGradingStudentCommitHistory, (_event, request: unknown) => {
     if (
       !isLoadGradingStudentCommitHistoryRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1205,7 +1229,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.markGradingStudentComplete, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.markGradingStudentComplete, (_event, request: unknown) => {
     if (
       !isMarkGradingStudentCompleteRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1213,7 +1237,7 @@ export const registerIpcHandlers = (): void => {
       throw new Error("A registered course folder is required for marking grading complete.");
     return markGradingStudentComplete({ ...request, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.publishGradingStudentReport, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.publishGradingStudentReport, (_event, request: unknown) => {
     if (
       !isPublishGradingStudentReportRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1221,7 +1245,7 @@ export const registerIpcHandlers = (): void => {
       throw new Error("A registered course folder is required for publishing a grading report.");
     return publishGradingStudentReport({ ...request, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.bulkPublishGradingStudentReports, (event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.bulkPublishGradingStudentReports, (event, request: unknown) => {
     if (
       !isBulkPublishGradingStudentReportsRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1242,17 +1266,17 @@ export const registerIpcHandlers = (): void => {
       }
     })({ ...identity, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.addGradingStudentComment, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.addGradingStudentComment, (_event, request: unknown) => {
     if (!isAddGradingStudentCommentRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder and a valid grading comment are required.");
     return addGradingStudentComment({ ...request, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.editGradingStudentComment, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.editGradingStudentComment, (_event, request: unknown) => {
     if (!isEditGradingStudentCommentRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder and a valid grading comment are required.");
     return editGradingStudentComment({ ...request, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.deleteGradingStudentComment, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.deleteGradingStudentComment, (_event, request: unknown) => {
     if (
       !isDeleteGradingStudentCommentRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1260,7 +1284,7 @@ export const registerIpcHandlers = (): void => {
       throw new Error("A registered course folder and a valid grading comment are required.");
     return deleteGradingStudentComment({ ...request, userDataPath: app.getPath("userData") });
   });
-  ipcMain.handle(IPC_CHANNELS.addGradingStudentManualAdjustment, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.addGradingStudentManualAdjustment, (_event, request: unknown) => {
     if (
       !isAddGradingStudentManualAdjustmentRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1271,7 +1295,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.editGradingStudentManualAdjustment, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.editGradingStudentManualAdjustment, (_event, request: unknown) => {
     if (
       !isEditGradingStudentManualAdjustmentRequest(request) ||
       !isRegisteredAssignmentSetupCourse(request)
@@ -1282,18 +1306,21 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.deleteGradingStudentManualAdjustment, (_event, request: unknown) => {
-    if (
-      !isDeleteGradingStudentManualAdjustmentRequest(request) ||
-      !isRegisteredAssignmentSetupCourse(request)
-    )
-      throw new Error("A registered course folder and a valid manual adjustment are required.");
-    return deleteGradingStudentManualAdjustment({
-      ...request,
-      userDataPath: app.getPath("userData")
-    });
-  });
-  ipcMain.handle(IPC_CHANNELS.loadGradingCommentLibrary, (_event, request: unknown) => {
+  courseIpc.handle(
+    IPC_CHANNELS.deleteGradingStudentManualAdjustment,
+    (_event, request: unknown) => {
+      if (
+        !isDeleteGradingStudentManualAdjustmentRequest(request) ||
+        !isRegisteredAssignmentSetupCourse(request)
+      )
+        throw new Error("A registered course folder and a valid manual adjustment are required.");
+      return deleteGradingStudentManualAdjustment({
+        ...request,
+        userDataPath: app.getPath("userData")
+      });
+    }
+  );
+  courseIpc.handle(IPC_CHANNELS.loadGradingCommentLibrary, (_event, request: unknown) => {
     if (!isLoadGradingCommentLibraryRequest(request))
       throw new Error(
         "A registered course and valid term are required for comment-library loading."
@@ -1306,7 +1333,7 @@ export const registerIpcHandlers = (): void => {
       userDataPath: app.getPath("userData")
     });
   });
-  ipcMain.handle(IPC_CHANNELS.createGradingLibraryComment, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.createGradingLibraryComment, (_event, request: unknown) => {
     if (!isCreateGradingLibraryCommentRequest(request))
       throw new Error("A registered course and valid reusable comment are required.");
     const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
@@ -1321,7 +1348,7 @@ export const registerIpcHandlers = (): void => {
       publishAuthenticatedCourseChanges
     );
   });
-  ipcMain.handle(IPC_CHANNELS.editGradingLibraryComment, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.editGradingLibraryComment, (_event, request: unknown) => {
     if (!isEditGradingLibraryCommentRequest(request))
       throw new Error("A registered course and valid reusable comment are required.");
     const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
@@ -1337,7 +1364,7 @@ export const registerIpcHandlers = (): void => {
       publishAuthenticatedCourseChanges
     );
   });
-  ipcMain.handle(IPC_CHANNELS.deleteGradingLibraryComment, (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.deleteGradingLibraryComment, (_event, request: unknown) => {
     if (!isDeleteGradingLibraryCommentRequest(request))
       throw new Error("A registered course and reusable comment ID are required.");
     const courseFolderPath = getRegisteredCourseFolderPath(request.courseFolderId);
@@ -1354,12 +1381,12 @@ export const registerIpcHandlers = (): void => {
   });
 
   registerAssignmentTemplateSyncIpc(
-    ipcMain,
+    courseIpc,
     assignmentTemplateSyncService,
     isRegisteredAssignmentSetupCourse
   );
 
-  ipcMain.handle(IPC_CHANNELS.getAssignmentApplyPreview, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getAssignmentApplyPreview, async (_event, request: unknown) => {
     if (!isAssignmentApplyPreviewRequest(request)) {
       throw new Error("Assignment apply preview request is required.");
     }
@@ -1370,7 +1397,7 @@ export const registerIpcHandlers = (): void => {
     });
   });
 
-  ipcMain.handle(IPC_CHANNELS.getAssignmentGradePreview, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getAssignmentGradePreview, async (_event, request: unknown) => {
     if (!isAssignmentGradePreviewRequest(request)) {
       throw new Error("Assignment grade preview request is required.");
     }
@@ -1381,7 +1408,7 @@ export const registerIpcHandlers = (): void => {
     });
   });
 
-  ipcMain.handle(IPC_CHANNELS.getAssignmentGradeStatus, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getAssignmentGradeStatus, async (_event, request: unknown) => {
     if (!isAssignmentGradeStatusRequest(request)) {
       throw new Error("Assignment grade status request is required.");
     }
@@ -1392,7 +1419,7 @@ export const registerIpcHandlers = (): void => {
     });
   });
 
-  ipcMain.handle(IPC_CHANNELS.getFacultyReport, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.getFacultyReport, async (_event, request: unknown) => {
     if (!isFacultyReportRequest(request)) {
       throw new Error("Faculty report request is required.");
     }
@@ -1403,7 +1430,7 @@ export const registerIpcHandlers = (): void => {
     });
   });
 
-  ipcMain.handle(IPC_CHANNELS.applyAssignment, async (event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.applyAssignment, async (event, request: unknown) => {
     if (!isAssignmentApplyRequest(request)) {
       throw new Error("Assignment apply request is required.");
     }
@@ -1422,33 +1449,36 @@ export const registerIpcHandlers = (): void => {
         withRegisteredPagesFolder(request).pagesRepositoryFolderPath ?? null
     });
   });
-  ipcMain.handle(IPC_CHANNELS.downloadAssignmentRepositories, async (_event, request: unknown) => {
-    if (!isAssignmentRepositoryDownloadRequest(request))
-      throw new Error("Assignment download request is required.");
-    const parsed = await runAssignmentRepositoryDownload(request, { runner: processRunner });
-    try {
-      const match = request.assignmentFile
-        .replaceAll("\\", "/")
-        .match(
-          /^terms\/(\d{2}s[123])\/assignments\/([A-Za-z0-9][A-Za-z0-9._-]*)\/assignment\.yml$/u
-        );
-      if (match !== null)
-        recordSuccessfulDownloadLocators(
-          getLocalRepositoryLocatorPath(app.getPath("userData")),
-          {
-            courseFolderId: request.courseFolderId,
-            termCode: match[1] ?? "",
-            assignmentSlug: match[2] ?? ""
-          },
-          parsed.targets ?? []
-        );
-      return parsed as unknown;
-    } catch {
-      throw new Error("Repository download returned invalid JSON.");
+  courseIpc.handle(
+    IPC_CHANNELS.downloadAssignmentRepositories,
+    async (_event, request: unknown) => {
+      if (!isAssignmentRepositoryDownloadRequest(request))
+        throw new Error("Assignment download request is required.");
+      const parsed = await runAssignmentRepositoryDownload(request, { runner: processRunner });
+      try {
+        const match = request.assignmentFile
+          .replaceAll("\\", "/")
+          .match(
+            /^terms\/(\d{2}s[123])\/assignments\/([A-Za-z0-9][A-Za-z0-9._-]*)\/assignment\.yml$/u
+          );
+        if (match !== null)
+          recordSuccessfulDownloadLocators(
+            getLocalRepositoryLocatorPath(app.getPath("userData")),
+            {
+              courseFolderId: request.courseFolderId,
+              termCode: match[1] ?? "",
+              assignmentSlug: match[2] ?? ""
+            },
+            parsed.targets ?? []
+          );
+        return parsed as unknown;
+      } catch {
+        throw new Error("Repository download returned invalid JSON.");
+      }
     }
-  });
+  );
 
-  ipcMain.handle(IPC_CHANNELS.gradeAssignment, async (_event, request: unknown) => {
+  courseIpc.handle(IPC_CHANNELS.gradeAssignment, async (_event, request: unknown) => {
     if (!isAssignmentGradeRequest(request)) {
       throw new Error("Assignment grade request is required.");
     }
@@ -1590,6 +1620,13 @@ app.whenReady().then(async () => {
         })
       };
     }
+  });
+  courseMutationGuard = new ManagedCourseMutationGuard({
+    userData: app.getPath("userData"),
+    session: facultyAuth,
+    folders: () => listCourseFolders(getCourseRegistryPath(app.getPath("userData"))),
+    username: () =>
+      loadLocalSettings(getLocalSettingsPath(app.getPath("userData"))).currentFacultyMsoeUsername
   });
   ipcMain.handle("graider-ui:managed-course:inspect", (_event, repositoryId: unknown) => {
     const state = facultyAuth.getState();

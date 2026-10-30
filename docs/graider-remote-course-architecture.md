@@ -219,9 +219,11 @@ and are never automatically deleted. Legacy folders retain operational precedenc
 Remote-only caches remain inspection-oriented. No GitHub writes or in-place Git repair
 is added. See [Phase 2.6 transaction and safety details](graider-remote-course-discovery.md#phase-26--dirty-managed-cache-handling-and-reconciliation).
 
-The next slice is Phase 2.7, a pre-mutation synchronization guard. The remaining architecture
-describes long-term requirements; periodic timing, student synchronization and mutation
-migration below are not current implementation behavior.
+Phase 2.7 is implemented: a trusted main-process guard synchronizes the target managed cache and
+validates the legacy operational source before existing mutations. See the implementation summary
+at the end of this document. Next is an explicit policy for safely updating/cutting over legacy
+sources. The remaining architecture describes long-term requirements; periodic timing, student
+synchronization and mutation migration below are not current implementation behavior.
 
 After authentication, Graider automatically discovers every authorized Graider course accessible to the signed-in identity.
 
@@ -1801,3 +1803,89 @@ Do not include:
 - generic Git conflict-editor UI.
 
 Those belong to later efforts or remain intentionally unsupported.
+
+## Phase 2 / Slice 2.7: trusted pre-mutation synchronization
+
+The main-process `ManagedCourseMutationGuard` uses the managed clone as the freshness oracle.
+The registered legacy folder remains the operational source and mutation destination. Remote-only
+courses remain inspection-only. No managed path or reusable guard ticket crosses IPC.
+
+`courseMutationIpc.ts` records the enforced mutation inventory. Course-admin handlers cover roster
+save/remove, section remove, existing-course setup replacement, assignment setup/edit/delete/group configuration, Student Access Pages
+configuration, and Comment Library create/edit/delete. Course-driven remote handlers cover Apply,
+grading dispatch, individual/bulk workflow repair, individual/bulk report publication, Access Page
+publication, template workflow save/replacement, and template distribution. Explicit Publish Course
+Changes uses publication-retry mode. The existing save/publication services run inside the boundary.
+Student Access Pages configuration remains a local save requiring subsequent publication.
+
+Resolution uses the trusted registry ID/path and discovery's immutable-repository mapping, scoped to
+the active immutable user ID. Ambiguous or unavailable mapping fails closed. One target-course session
+operation invokes existing synchronization and repository/organization/schema-v1 faculty revalidation;
+it does not rediscover every organization. The synchronization result supplies `currentCommit`, the
+exact validated authoritative SHA. The source validator checks self-contained Git storage, origin's
+resolved repository and organization IDs, attached default branch and origin upstream, conflicts,
+and source version. Missing MSOE faculty identity blocks before mutation; existing section and
+assignment authorization still runs. A GitHub login never substitutes for the MSOE username.
+
+New mutations require legacy HEAD equal to authoritative HEAD and no staged, unstaged, renamed, or
+untracked Graider-managed pending paths. Path classification reuses course publication policy.
+Unrelated local files remain allowed subject to existing publication rules and storage safety.
+Ahead, behind, diverged, detached, mismatched or unprovable sources block; Graider does not pull,
+reset, replace or reconcile the legacy folder. Previous unpublished changes must be published or
+resolved before another mutation.
+
+Publication retry allows pending working-tree changes on the authoritative baseline, or committed
+local history proven to descend from that baseline through the read-only exact-SHA `isAncestor`
+primitive. Remote advance beyond the local baseline or divergent history blocks. Existing staging,
+commit and non-force push semantics remain authoritative; publication failures preserve local evidence.
+A remote race after the guard remains possible and existing write conflicts must still fail safely.
+
+The per-account/repository mutation queue encloses synchronization, source validation, the existing
+operation, and immediate publication. Lock ordering is mutation queue -> managed synchronization
+queue; synchronization releases its cache lock before legacy mutation. Reconciliation takes only the
+managed cache queue and never enters the mutation queue. Different courses remain independent.
+Waiting requests retain the session generation; account change/sign-out invalidates them. Identity
+is revalidated after source inspection before handing the internal frozen context to the operation.
+Duplicate submissions of the same IPC action are refused while it is running. Bulk operations guard
+once at the outer batch boundary; existing per-student checks remain intact.
+
+Sanitized block reasons distinguish retryable synchronization, reviewable/manual cache problems,
+authorization/faculty identity, organization migration, stale/mismatched/unsafe operational source,
+remote-only mutation, and local storage failure. A shared notification surface shows checking and
+remediation, reusing `ManagedCacheReview` directly. Review/cancel/reconciliation never resumes a
+mutation: faculty must invoke the original action again, which runs a fresh guard. Notifications
+cannot authorize writes. Apply still rebuilds its CLI plan from the guarded operational config and
+runs the separate existing `evaluateMutationGuard`; renderer preview data is not executed as a plan.
+
+Initial course setup remains outside the guard before course identity exists. Setup cannot overwrite
+an existing course.yml or registered course through this exception. Subsequent discovered course
+mutations use normal guarded handlers. OAuth authenticates freshness checks only; existing mutation
+transport credentials remain transitional and unchanged.
+
+Excluded: draft typing, local student comments/adjustments/completion, editor autosave, read-only
+previews/reports, local/account settings, discovery/bootstrap/sync/reconciliation/recovery reveal,
+student Pull Latest, clone/download, local Access Page generation, review import, and local grading
+workspace preparation. These do not become network-guarded course mutations.
+
+Next boundary: an explicit design for safely updating/cutting over the legacy operational source,
+followed by managed-course mutation semantics. This slice adds no automatic legacy update, managed
+mutation cutover, OAuth write migration, student synchronization, schema-v2 roles, periodic fetch,
+automatic reconciliation, migration, or remotely durable grading state.
+
+### Slice 2.7 validation evidence
+
+- Backend: 138 files; 1,508 passed, one skipped.
+- UI/Electron: 183 files; 1,764 passed, 25 skipped. OAuth loopback tests require an unrestricted local listener.
+- Focused guard/source tests cover exact baseline, pending/staged configuration, unrelated files,
+  ahead/behind/divergent histories, publication retry, conflicts, unsafe storage, identity mismatch,
+  stale accounts, per-repository serialization, independent courses, creation exception, and all
+  inventoried blocked handler boundaries.
+- Real bundled-Git fixtures cover remote advance, cache fast-forward with unchanged legacy source,
+  publication recovery, publication conflict, and dirty-cache remediation.
+- `ui/scripts/smoke-managed-course-guard.cjs` opens the production renderer in an isolated Electron
+  profile with fixture identities/local remotes. It verifies stale-source messaging, zero blocked
+  target writes/commits/pushes, zero stale dispatch/repair/report student writes, existing cache review,
+  cancel, explicit reconciliation without mutation, fresh retry, publication recovery, and sign-out.
+  The real csc1120 profile is untouched; this is not a live OAuth/GitHub write test.
+- Backend/UI typechecks, lint, formatting, production builds, and diff whitespace checks pass.
+  Production builds retain the existing large-chunk advisory.

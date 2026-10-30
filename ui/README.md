@@ -59,3 +59,13 @@ npm run make
 See [Electron Packaging Guide](../docs/electron-packaging.md) for bundled CLI
 behavior, GitHub authentication requirements, unsigned app notes, and the
 packaged app smoke-test checklist.
+
+Course-derived Electron mutations must use the trusted boundary documented in
+[remote course architecture](../docs/graider-remote-course-architecture.md#phase-2--slice-27-trusted-pre-mutation-synchronization).
+Add new write handlers to the explicit `courseMutationIpc.ts` inventory before enabling them.
+
+After building, run `node_modules/.bin/electron scripts/smoke-managed-course-guard.cjs` from `ui`
+for the isolated guard smoke. It creates temporary local repositories and a separate Electron profile,
+uses fixture identities and local transport, opens the production renderer, and prints its evidence
+location. It covers stale-source blocking, cache review/cancel/reconciliation, explicit retry, pending
+publication recovery, student-facing blocking, and sign-out. It never uses the real faculty profile.

@@ -187,6 +187,7 @@ export interface GitWorkspaceReader {
   readonly root: string;
   inspect(options?: { readonly paths?: readonly RelativeGitPath[] }): Promise<RepositoryState>;
   remoteUrl(remote: RemoteName): Promise<string | null>;
+  isAncestor(ancestor: string, descendant: string): Promise<boolean>;
   resolveHead(): Promise<ObjectId>;
   resolveRevision(revision: ExactCommitRevision): Promise<ObjectId>;
   resolveTree(commit: ObjectId): Promise<ObjectId>;

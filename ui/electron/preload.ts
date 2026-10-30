@@ -120,6 +120,16 @@ const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<
   (await ipcRenderer.invoke(channel, ...args)) as T;
 
 const graiderUI: GraiderUIApi = {
+  onCourseMutationNotice: (listener) => {
+    const receive = (
+      _event: unknown,
+      notice: import("./managedCourseMutationTypes.js").CourseMutationNotice
+    ) => listener(notice);
+    ipcRenderer.on("graider-ui:course-mutation:notice", receive);
+    return () => {
+      ipcRenderer.removeListener("graider-ui:course-mutation:notice", receive);
+    };
+  },
   githubOAuth: {
     planManagedReconciliation: (repositoryId) =>
       invoke("graider-ui:managed-course:plan-reconciliation", repositoryId),

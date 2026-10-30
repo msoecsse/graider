@@ -86,6 +86,9 @@ export class GithubOAuthSession {
   private restored: Promise<void> | null = null;
   private stopped = false;
   private accountGeneration = 0;
+  get mutationGeneration(): number {
+    return this.accountGeneration;
+  }
   private readonly reconciliations = new Map<number, AbortController>();
   private invalidateReconciliations(): void {
     this.accountGeneration += 1;
@@ -170,6 +173,70 @@ export class GithubOAuthSession {
         this.reconciliations.delete(repositoryId);
     }
   }
+  /** Main-process only: one target synchronization, then a non-reusable operation context. */
+  async withSynchronizedCourse<T>(
+    repositoryId: number,
+    expectedUserId: number,
+    operation: (
+      input: ManagedOperationInput,
+      synchronization: ManagedSynchronizationState
+    ) => Promise<T>
+  ): Promise<T> {
+    const token = this.token;
+    const generation = this.accountGeneration;
+    const course = this.state.courseDiscovery.courses.find(
+      (item) => item.repositoryId === repositoryId
+    );
+    if (
+      !token ||
+      !course ||
+      this.state.identity?.id !== expectedUserId ||
+      this.state.courseDiscovery.userId !== expectedUserId ||
+      !this.deps.synchronizeCourse ||
+      this.active !== null
+    )
+      throw new Error("Current authorized course is required.");
+    const controller = new AbortController();
+    const current = () =>
+      !this.stopped &&
+      this.active === null &&
+      generation === this.accountGeneration &&
+      token === this.token &&
+      this.state.identity?.id === expectedUserId;
+    const input: ManagedOperationInput = {
+      token,
+      userId: expectedUserId,
+      course,
+      signal: controller.signal,
+      revalidateSession: async () =>
+        current() &&
+        (await this.deps.network.identity(token, controller.signal)).id === expectedUserId &&
+        (await this.deps.network.repositoryCapability(token, controller.signal)) &&
+        (await this.deps.network.organizationCapability(token, controller.signal)) &&
+        current()
+    };
+    const updateSynchronization = (synchronization: ManagedSynchronizationState): void => {
+      if (current())
+        this.state = {
+          ...this.state,
+          courseDiscovery: {
+            ...this.state.courseDiscovery,
+            courses: this.state.courseDiscovery.courses.map((item) =>
+              item.repositoryId === repositoryId
+                ? { ...item, synchronization, ...(synchronization.metadata ?? {}) }
+                : item
+            )
+          }
+        };
+    };
+    const synchronization = await this.deps.synchronizeCourse({
+      ...input,
+      onProgress: updateSynchronization
+    });
+    updateSynchronization(synchronization);
+    if (!current()) throw new Error("Account changed. Retry the operation.");
+    return operation(input, synchronization);
+  }
   private discovery: AbortController | null = null;
   constructor(private readonly deps: Dependencies) {}
   getState(): GithubOAuthState {
@@ -228,6 +295,7 @@ export class GithubOAuthSession {
   }
   async signIn(switchAccount = false): Promise<GithubOAuthState> {
     if (this.active || this.stopped) return this.getState();
+    if (switchAccount) this.invalidateReconciliations();
     this.discovery?.abort();
     if (this.state.organizationDiscovery.status === "loading")
       this.state = {

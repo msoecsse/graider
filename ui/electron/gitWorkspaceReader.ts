@@ -8,6 +8,7 @@ export interface GitCommitSummary {
 
 export interface GitWorkspaceReader {
   readonly root: string;
+  isAncestor(ancestor: string, descendant: string): Promise<boolean>;
   resolveHead(): Promise<string>;
   resolveRevision(revision: string): Promise<string>;
   listCommits(request: {

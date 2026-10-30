@@ -1,7 +1,7 @@
 import { RemoteCoursesPanel, useRemoteCourses } from "./RemoteCoursesPanel";
 import { GithubAccountPanel } from "./GithubAccountPanel";
 import { useEffect, useState, type ReactElement } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import type {
   CourseFolderRecord,
   CoursePublishActionResult,
@@ -167,6 +167,7 @@ export const DashboardPage = (): ReactElement => {
     handleRemoveCourseFolder
   } = useDashboardData();
   const navigate = useNavigate();
+  const location = useLocation();
   const [coursePublishStatuses, setCoursePublishStatuses] = useState<
     Readonly<Record<string, CoursePublishStatusResult>>
   >({});
@@ -177,7 +178,12 @@ export const DashboardPage = (): ReactElement => {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewFilter, setViewFilter] = useState<DashboardViewFilter>("active");
   const [sortOption, setSortOption] = useState<DashboardSortOption>("newest-first");
-  const [isFacultySettingsOpen, setIsFacultySettingsOpen] = useState(false);
+  const [isFacultySettingsOpen, setIsFacultySettingsOpen] = useState(() =>
+    window.location.hash.includes("facultySettings=1")
+  );
+  useEffect(() => {
+    if (new URLSearchParams(location.search).has("facultySettings")) setIsFacultySettingsOpen(true);
+  }, [location.search]);
   const [courseFolderRemovalConfirmation, setCourseFolderRemovalConfirmation] = useState<
     string | null
   >(null);

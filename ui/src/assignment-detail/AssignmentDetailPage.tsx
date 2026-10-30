@@ -737,6 +737,8 @@ export const AssignmentDetailPage = ({
     detail === null || workflowResult === null
       ? null
       : {
+          courseFolderId: selection.courseFolderId,
+          courseFolderPath: selection.courseFolderPath,
           templateRepository: detail.template.repository,
           templateBranch: detail.template.branch,
           workflowPath: detail.grading.workflow,

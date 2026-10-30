@@ -10,6 +10,7 @@ const OLDER_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 const createFactory = (workspace: Partial<GitWorkspaceReader>) => {
   const completeWorkspace: GitWorkspaceReader = {
+    isAncestor: vi.fn(),
     root: "/trusted/repository",
     resolveHead: vi.fn(),
     resolveRevision: vi.fn().mockResolvedValue(SHA),

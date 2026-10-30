@@ -664,6 +664,8 @@ export interface TemplateWorkflowResult {
 }
 
 export interface TemplateWorkflowSaveRequest extends TemplateWorkflowRequest {
+  readonly courseFolderId?: string;
+  readonly courseFolderPath?: string;
   readonly assignmentSlug: string | null;
   readonly content: string;
   readonly loadedSha: string | null;
@@ -1084,6 +1086,9 @@ export interface CombinedDashboardResult {
 }
 
 export interface GraiderUIApi {
+  readonly onCourseMutationNotice?: (
+    listener: (notice: import("./managedCourseMutationTypes.js").CourseMutationNotice) => void
+  ) => () => void;
   readonly chooseReviewImport?: (request: ImportAssignment) => Promise<ImportPreview | null>;
   readonly applyReviewImport?: (request: ImportApplyRequest) => Promise<ImportResult>;
   readonly closeReviewImport?: () => Promise<void>;

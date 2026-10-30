@@ -1,7 +1,7 @@
 # Remote Graider course discovery, bootstrap and synchronization
 
-Phase 2.6 adds explicitly confirmed, complete-cache preservation and replacement to managed
-course/admin caches. See [synchronization and the next boundary](#phase-25--managed-course-synchronization).
+Phase 2.7 adds a trusted pre-mutation synchronization guard on top of Phase 2.6 explicit
+managed-cache preservation and replacement. Legacy folders remain the mutation targets. See [synchronization and the next boundary](#phase-25--managed-course-synchronization).
 The discovery foundation below describes Phase 2.3.
 
 Phase 2.1 supplies browser authorization-code + PKCE, one active GitHub identity,
@@ -409,13 +409,14 @@ and disk caches are preserved.
 Remote access remains read-only: no REST writes, topics, workflow dispatch, permission
 changes, Git push or commit. Fast-forward updates only the local managed cache. No
 reset, clean, stash, rebase, merge commit, forced checkout, repair button or automatic
-deletion is provided. Managed mutations and pre-mutation sync guards remain deferred.
+deletion is provided. Managed mutations remain deferred; Phase 2.7 now guards the existing legacy mutation boundaries.
 
 **Phase 2.6 is implemented:** review evidence, explicitly confirm preservation, validate a
 fresh authoritative clone, preserve the complete old repository, and atomically replace
 the active cache. See the transaction details below. Organization transfer remains migration work.
-The next boundary is **Phase 2.7 — pre-mutation synchronization guard**; managed mutation
-cutover, OAuth push migration, periodic timing, schema-v2 and student operations remain deferred.
+**Phase 2.7 is implemented** as documented below. The next boundary is an explicit legacy-source
+update/cutover policy; managed mutation cutover, OAuth push migration, periodic timing, schema-v2
+and student synchronization remain deferred.
 
 ### Phase 2.5 validation and Electron evidence
 
@@ -643,12 +644,10 @@ rebase, forced checkout, conflict resolution, student repository operations, man
 mutation cutover or organization migration. Fixture setup may create local commits,
 remote fixture updates and interrupted operations; those are test-only operations.
 
-**Phase 2.7 — pre-mutation synchronization guard** should connect the synchronization
-engine to existing mutation entry points: verify the intended operational target,
-synchronize and validate before mutation, block stale/dirty/unauthorized/transfer states,
-and require this explicit review workflow where eligible. It must preserve legacy
-precedence and must not silently introduce managed mutation cutover, OAuth publishing,
-periodic sync, student synchronization or organization migration.
+**Phase 2.7 — pre-mutation synchronization guard** now connects this engine to existing
+mutation entry points, with source-version checks and publication-retry semantics. See the
+implemented boundary below. Managed mutation cutover, OAuth publishing, periodic sync, student
+synchronization and organization migration remain deferred.
 
 ### Phase 2.6 validation evidence
 
@@ -688,3 +687,71 @@ Validation on 2026-10-24 passed:
   No production remote, legacy course folder or student repository was mutated.
   Local fixture setup intentionally uses fixture commits/pushes and merge/rebase to
   construct test histories; those are separate from instrumented reconciliation.
+
+## Phase 2 / Slice 2.7: trusted pre-mutation synchronization
+
+The main-process `ManagedCourseMutationGuard` uses the managed clone as the freshness oracle.
+The registered legacy folder remains the operational source and mutation destination. Remote-only
+courses remain inspection-only. No managed path or reusable guard ticket crosses IPC.
+
+`courseMutationIpc.ts` records the enforced mutation inventory. Course-admin handlers cover roster
+save/remove, section remove, existing-course setup replacement, assignment setup/edit/delete/group configuration, Student Access Pages
+configuration, and Comment Library create/edit/delete. Course-driven remote handlers cover Apply,
+grading dispatch, individual/bulk workflow repair, individual/bulk report publication, Access Page
+publication, template workflow save/replacement, and template distribution. Explicit Publish Course
+Changes uses publication-retry mode. The existing save/publication services run inside the boundary.
+Student Access Pages configuration remains a local save requiring subsequent publication.
+
+Resolution uses the trusted registry ID/path and discovery's immutable-repository mapping, scoped to
+the active immutable user ID. Ambiguous or unavailable mapping fails closed. One target-course session
+operation invokes existing synchronization and repository/organization/schema-v1 faculty revalidation;
+it does not rediscover every organization. The synchronization result supplies `currentCommit`, the
+exact validated authoritative SHA. The source validator checks self-contained Git storage, origin's
+resolved repository and organization IDs, attached default branch and origin upstream, conflicts,
+and source version. Missing MSOE faculty identity blocks before mutation; existing section and
+assignment authorization still runs. A GitHub login never substitutes for the MSOE username.
+
+New mutations require legacy HEAD equal to authoritative HEAD and no staged, unstaged, renamed, or
+untracked Graider-managed pending paths. Path classification reuses course publication policy.
+Unrelated local files remain allowed subject to existing publication rules and storage safety.
+Ahead, behind, diverged, detached, mismatched or unprovable sources block; Graider does not pull,
+reset, replace or reconcile the legacy folder. Previous unpublished changes must be published or
+resolved before another mutation.
+
+Publication retry allows pending working-tree changes on the authoritative baseline, or committed
+local history proven to descend from that baseline through the read-only exact-SHA `isAncestor`
+primitive. Remote advance beyond the local baseline or divergent history blocks. Existing staging,
+commit and non-force push semantics remain authoritative; publication failures preserve local evidence.
+A remote race after the guard remains possible and existing write conflicts must still fail safely.
+
+The per-account/repository mutation queue encloses synchronization, source validation, the existing
+operation, and immediate publication. Lock ordering is mutation queue -> managed synchronization
+queue; synchronization releases its cache lock before legacy mutation. Reconciliation takes only the
+managed cache queue and never enters the mutation queue. Different courses remain independent.
+Waiting requests retain the session generation; account change/sign-out invalidates them. Identity
+is revalidated after source inspection before handing the internal frozen context to the operation.
+Duplicate submissions of the same IPC action are refused while it is running. Bulk operations guard
+once at the outer batch boundary; existing per-student checks remain intact.
+
+Sanitized block reasons distinguish retryable synchronization, reviewable/manual cache problems,
+authorization/faculty identity, organization migration, stale/mismatched/unsafe operational source,
+remote-only mutation, and local storage failure. A shared notification surface shows checking and
+remediation, reusing `ManagedCacheReview` directly. Review/cancel/reconciliation never resumes a
+mutation: faculty must invoke the original action again, which runs a fresh guard. Notifications
+cannot authorize writes. Apply still rebuilds its CLI plan from the guarded operational config and
+runs the separate existing `evaluateMutationGuard`; renderer preview data is not executed as a plan.
+
+Initial course setup remains outside the guard before course identity exists. Setup cannot overwrite
+an existing course.yml or registered course through this exception. Subsequent discovered course
+mutations use normal guarded handlers. OAuth authenticates freshness checks only; existing mutation
+transport credentials remain transitional and unchanged.
+
+Excluded: draft typing, local student comments/adjustments/completion, editor autosave, read-only
+previews/reports, local/account settings, discovery/bootstrap/sync/reconciliation/recovery reveal,
+student Pull Latest, clone/download, local Access Page generation, review import, and local grading
+workspace preparation. These do not become network-guarded course mutations.
+
+Next boundary: an explicit design for safely updating/cutting over the legacy operational source,
+followed by managed-course mutation semantics. This slice adds no automatic legacy update, managed
+mutation cutover, OAuth write migration, student synchronization, schema-v2 roles, periodic fetch,
+automatic reconciliation, migration, or remotely durable grading state.

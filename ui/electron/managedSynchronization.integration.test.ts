@@ -1,3 +1,10 @@
+import {
+  requireSynchronizedCommit,
+  validateOperationalCourseSource
+} from "./managedCourseMutationGuard";
+import { getProductionGitWorkspaceFactory } from "./gitWorkspaceReader";
+import { publishCourseChanges } from "./coursePublishService";
+import { localPublicationOptions } from "./gitPublicationFixtures";
 // @vitest-environment node
 import fs from "node:fs";
 import os from "node:os";
@@ -314,5 +321,97 @@ describe("bundled Git managed synchronization, real two-clone history", () => {
     expect(fs.readFileSync(path.join(f.cache, "course.yml"), "utf8")).toBe(
       "invalid: remote metadata\n"
     );
+  });
+});
+
+// Phase 2.7: the oracle advances; the operational legacy worktree never does.
+describe("pre-mutation oracle with real remote and separate legacy clone", () => {
+  const operational = async (f: Awaited<ReturnType<typeof fixture>>) => {
+    const root = path.join(f.root, "legacy");
+    await git(f.root, ["clone", "--no-hardlinks", f.remote, root]);
+    await git(root, ["config", "user.name", "Fixture"]);
+    await git(root, ["config", "user.email", "fixture@example.test"]);
+    await git(root, ["remote", "set-url", "origin", "https://github.com/fixture/course.git"]);
+    await git(root, [
+      "config",
+      `url.${f.remote}.insteadOf`,
+      "https://github.com/fixture/course.git"
+    ]);
+    return {
+      root,
+      course: f.request.course,
+      factory: getProductionGitWorkspaceFactory(),
+      resolveOrigin: async () => ({ id: 20, organizationId: 10 }),
+      mode: "new_mutation" as const
+    };
+  };
+  it("synchronizes the oracle before blocking stale legacy, with no target writes", async () => {
+    const f = await fixture();
+    const source = await operational(f);
+    const initial = await git(source.root, ["rev-parse", "HEAD"]);
+    const current = requireSynchronizedCommit(f.request.course, await f.sync());
+    expect(await validateOperationalCourseSource({ ...source, authoritativeCommit: current })).toBe(
+      initial
+    );
+    const advanced = await f.advance();
+    const authoritativeCommit = requireSynchronizedCommit(f.request.course, await f.sync());
+    expect(authoritativeCommit).toBe(advanced);
+    await expect(
+      validateOperationalCourseSource({ ...source, authoritativeCommit })
+    ).rejects.toMatchObject({ result: { reason: "operational_source_stale" } });
+    expect(await git(source.root, ["rev-parse", "HEAD"])).toBe(initial);
+    expect(await git(source.root, ["status", "--porcelain"])).toBe("");
+  });
+  it("preserves failed publication and permits explicit retry, then accepts next mutation", async () => {
+    const f = await fixture();
+    const source = await operational(f);
+    const authoritativeCommit = requireSynchronizedCommit(f.request.course, await f.sync());
+    fs.writeFileSync(
+      path.join(source.root, "course.yml"),
+      courseYaml.replace("Original title", "Local title")
+    );
+    await expect(
+      validateOperationalCourseSource({ ...source, authoritativeCommit })
+    ).rejects.toThrow();
+    await validateOperationalCourseSource({
+      ...source,
+      authoritativeCommit,
+      mode: "publication_retry"
+    });
+    await git(source.root, ["commit", "-am", "Publish Graider course changes"]);
+    // A failed push leaves this exact committed evidence recoverable.
+    await expect(
+      validateOperationalCourseSource({ ...source, authoritativeCommit })
+    ).rejects.toThrow();
+    await validateOperationalCourseSource({
+      ...source,
+      authoritativeCommit,
+      mode: "publication_retry"
+    });
+    const publication = await publishCourseChanges(source.root, localPublicationOptions());
+    expect(publication.status).toBe("success");
+    const published = requireSynchronizedCommit(f.request.course, await f.sync());
+    await expect(
+      validateOperationalCourseSource({ ...source, authoritativeCommit: published })
+    ).resolves.toBe(published);
+  });
+  it("blocks publication conflict and dirty cache without touching legacy or remote", async () => {
+    const f = await fixture();
+    const source = await operational(f);
+    fs.writeFileSync(
+      path.join(source.root, "course.yml"),
+      courseYaml.replace("Original title", "Unpublished")
+    );
+    const advanced = await f.advance();
+    const authoritativeCommit = requireSynchronizedCommit(f.request.course, await f.sync());
+    await expect(
+      validateOperationalCourseSource({ ...source, authoritativeCommit, mode: "publication_retry" })
+    ).rejects.toThrow();
+    expect(await git(f.remote, ["rev-parse", "main"])).toBe(advanced);
+    fs.writeFileSync(path.join(f.cache, "notes.txt"), "preserve cache evidence");
+    const sync = await f.sync();
+    expect(() => requireSynchronizedCommit(f.request.course, sync)).toThrow();
+    expect(sync.reason).toBe("local_changes");
+    expect(fs.readFileSync(path.join(source.root, "course.yml"), "utf8")).toContain("Unpublished");
   });
 });

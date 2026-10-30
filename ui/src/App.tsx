@@ -1,3 +1,4 @@
+import { CourseMutationStatus } from "./dashboard/CourseMutationStatus";
 import type { ReactElement } from "react";
 import { HashRouter } from "react-router-dom";
 import { DashboardDataProvider } from "./dashboard/DashboardDataContext";
@@ -22,6 +23,7 @@ export const App = (): ReactElement => (
   <DashboardDataProvider>
     <HashRouter>
       <RouteErrorBoundary>
+        <CourseMutationStatus />
         <AppRoutes />
       </RouteErrorBoundary>
     </HashRouter>
