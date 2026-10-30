@@ -70,6 +70,12 @@ export interface GitWorkspaceInspector {
 
 export interface GitWorkspaceSynchronizer extends GitWorkspaceInspector {
   fetchOrigin(request: { readonly authentication: GitAuthenticationContextRef }): Promise<void>;
+  fastForwardToCommit(request: {
+    readonly expectedHead: string;
+    readonly expectedBranch: string;
+    readonly targetCommit: string;
+    readonly signal?: AbortSignal;
+  }): Promise<void>;
   fastForwardUpstream(request: {
     readonly expectedHead: string;
     readonly expectedBranch: string;

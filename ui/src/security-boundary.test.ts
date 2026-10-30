@@ -36,6 +36,8 @@ describe("UI security boundary", () => {
     const channelNames = Object.values(IPC_CHANNELS);
 
     expect(channelNames).toEqual([
+      "graider-ui:course-source:update",
+      "graider-ui:course-source:reload-view",
       "graider-ui:review-import:choose",
       "graider-ui:review-import:apply",
       "graider-ui:review-import:close",

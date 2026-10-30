@@ -348,55 +348,58 @@ describe("guard execution and account isolation", () => {
     ).rejects.toMatchObject({ result: { reason: "remote_only_mutation_unavailable" } });
     expect(operation).not.toHaveBeenCalled();
   });
-  it("different repositories enter synchronization independently", async () => {
-    const f = await execution();
-    const secondSource = await fixture();
-    await git(secondSource.root, [
-      "remote",
-      "set-url",
-      "origin",
-      "https://github.com/fixture/other.git"
-    ]);
-    const other = { ...course, repositoryId: 21, localFolderIds: ["other"] };
-    f.sync.mockImplementation(async (_repo, _user, operation) =>
-      operation(
-        { course: other, userId: 42, token: "test", revalidateSession: async () => true },
-        { ...ready, currentCommit: secondSource.head }
-      )
-    );
-    const session = f.deps.session;
-    Object.assign(session, {
-      getState: () => ({
-        identity: { id: 42 },
-        courseDiscovery: { userId: 42, courses: [course, other] }
-      })
-    });
-    const held = deferred();
-    const started = deferred();
-    f.sync.mockImplementationOnce(async (_repo, _user, operation) => {
-      started.release();
-      await held.promise;
-      return operation(
-        { course, userId: 42, token: "test", revalidateSession: async () => true },
-        { ...ready, currentCommit: f.head }
+  it.each(["new_mutation", "source_update"] as const)(
+    "different repositories enter %s synchronization independently",
+    async (mode) => {
+      const f = await execution();
+      const secondSource = await fixture();
+      await git(secondSource.root, [
+        "remote",
+        "set-url",
+        "origin",
+        "https://github.com/fixture/other.git"
+      ]);
+      const other = { ...course, repositoryId: 21, localFolderIds: ["other"] };
+      f.sync.mockImplementation(async (_repo, _user, operation) =>
+        operation(
+          { course: other, userId: 42, token: "test", revalidateSession: async () => true },
+          { ...ready, currentCommit: secondSource.head }
+        )
       );
-    });
-    const guard = new ManagedCourseMutationGuard({
-      ...f.deps,
-      folders: () => [
-        ...f.deps.folders(),
-        { ...f.deps.folders()[0], id: "other", path: secondSource.root }
-      ]
-    });
-    const first = guard.run("registered", f.root, "new_mutation", async () => {});
-    await started.promise;
-    const second = guard.run("other", secondSource.root, "new_mutation", async () => {});
-    // It need not wait for the first course's held synchronization.
-    await second;
-    expect(f.sync).toHaveBeenCalledTimes(2);
-    held.release();
-    await first;
-  });
+      const session = f.deps.session;
+      Object.assign(session, {
+        getState: () => ({
+          identity: { id: 42 },
+          courseDiscovery: { userId: 42, courses: [course, other] }
+        })
+      });
+      const held = deferred();
+      const started = deferred();
+      f.sync.mockImplementationOnce(async (_repo, _user, operation) => {
+        started.release();
+        await held.promise;
+        return operation(
+          { course, userId: 42, token: "test", revalidateSession: async () => true },
+          { ...ready, currentCommit: f.head }
+        );
+      });
+      const guard = new ManagedCourseMutationGuard({
+        ...f.deps,
+        folders: () => [
+          ...f.deps.folders(),
+          { ...f.deps.folders()[0], id: "other", path: secondSource.root }
+        ]
+      });
+      const first = guard.run("registered", f.root, mode, async () => {});
+      await started.promise;
+      const second = guard.run("other", secondSource.root, mode, async () => {});
+      // It need not wait for the first course's held synchronization.
+      await second;
+      expect(f.sync).toHaveBeenCalledTimes(2);
+      held.release();
+      await first;
+    }
+  );
   it("ready context stays internal and still targets legacy", async () => {
     const f = await execution();
     const operation = vi.fn(async (context) => context.courseFolderPath);

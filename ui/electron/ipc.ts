@@ -23,6 +23,8 @@ import type {
 } from "./assignmentGradingLifecycleService.js";
 
 export const IPC_CHANNELS = {
+  updateCourseSource: "graider-ui:course-source:update",
+  reloadCourseView: "graider-ui:course-source:reload-view",
   chooseReviewImport: "graider-ui:review-import:choose",
   applyReviewImport: "graider-ui:review-import:apply",
   closeReviewImport: "graider-ui:review-import:close",
@@ -1086,6 +1088,8 @@ export interface CombinedDashboardResult {
 }
 
 export interface GraiderUIApi {
+  readonly updateCourseSource?: (courseFolderId: string) => Promise<void>;
+  readonly reloadCourseView?: () => Promise<void>;
   readonly onCourseMutationNotice?: (
     listener: (notice: import("./managedCourseMutationTypes.js").CourseMutationNotice) => void
   ) => () => void;

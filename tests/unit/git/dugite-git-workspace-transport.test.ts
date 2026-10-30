@@ -282,3 +282,83 @@ describe("Dugite command workspace transport conformance", () => {
     expect(process.env).toEqual(parentEnvironment);
   });
 });
+
+it("authenticated legacy fetch plus exact fast-forward uses only bundled Git and never selects a later remote commit", async () => {
+  const root = await createRoot();
+  const source = await createRepository(root, "source");
+  const remote = join(root, "remote.git");
+  const legacy = join(root, "legacy");
+  await git(root, ["init", "--bare", remote]);
+  await git(remote, ["symbolic-ref", "HEAD", "refs/heads/main"]);
+  await git(source.repository, ["remote", "add", "origin", remote]);
+  await git(source.repository, ["push", "-u", "origin", "main"]);
+  await git(root, ["clone", remote, legacy]);
+  await git(legacy, ["remote", "set-url", "origin", "https://github.com/fixture/private.git"]);
+  await git(legacy, [
+    "config",
+    `url.${remote}.insteadOf`,
+    "https://github.com/fixture/private.git"
+  ]);
+  await writeFile(join(source.repository, "course file.txt"), "validated target\n");
+  await git(source.repository, ["commit", "-am", "Validated"]);
+  const target = (await git(source.repository, ["rev-parse", "HEAD"])).trim();
+  await writeFile(join(source.repository, "course file.txt"), "later remote revision\n");
+  await git(source.repository, ["commit", "-am", "Later"]);
+  await git(source.repository, ["push", "origin", "main"]);
+  const requests: GitCommandExecutionRequest[] = [];
+  const binaries: string[] = [];
+  const authentication = required(
+    createGitAuthenticationContext("legacy-operation"),
+    "authentication"
+  );
+  const factory = new GitCommandWorkspaceFactory({
+    ...createDugiteGitRunners({
+      onRequest: (request) => {
+        requests.push(request);
+      },
+      onSpawn: (child) => {
+        binaries.push(child.spawnfile);
+      }
+    }),
+    credentialResolver: {
+      resolve: (context) =>
+        Promise.resolve(
+          context === authentication
+            ? { kind: "github_token", host: "github.com", token: "private-fetch-secret" }
+            : null
+        )
+    }
+  });
+  const workspace = await factory.open(legacy);
+  await workspace.fetchOrigin({ authentication });
+  await workspace.fastForwardToCommit({
+    expectedHead: source.head,
+    expectedBranch: "main",
+    targetCommit: target
+  });
+  expect(await workspace.resolveHead()).toBe(target);
+  expect(await readFile(join(legacy, "course file.txt"), "utf8")).toBe("validated target\n");
+  const fetch = requests.find((request) => request.args.includes("fetch"));
+  expect(fetch?.env).toBeDefined();
+  expect(fetch?.env?.GIT_CONFIG_VALUE_1).toContain(
+    Buffer.from("x-access-token:private-fetch-secret").toString("base64")
+  );
+  const mutations = requests.filter((request) => request.args.includes("merge"));
+  expect(mutations).toHaveLength(1);
+  expect(mutations[0]?.args).toEqual(
+    expect.arrayContaining(["merge", "--ff-only", "--no-autostash", target])
+  );
+  expect(
+    requests.some((request) =>
+      request.args.some((arg) =>
+        ["pull", "reset", "rebase", "clean", "stash", "checkout", "push"].includes(arg)
+      )
+    )
+  ).toBe(false);
+  expect(await git(legacy, ["rev-list", "--merges", "HEAD"])).toBe("");
+  expect(binaries.length).toBeGreaterThan(0);
+  expect(binaries.every((binary) => binary === resolveGitBinary())).toBe(true);
+  expect(await readFile(join(legacy, ".git", "config"), "utf8")).not.toContain(
+    "private-fetch-secret"
+  );
+});

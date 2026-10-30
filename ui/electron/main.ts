@@ -507,7 +507,8 @@ export const registerIpcHandlers = (): void => {
           typeof setupPath === "string" &&
           !fs.existsSync(path.join(setupPath, "course.yml"))
       };
-    }
+    },
+    () => BrowserWindow.getAllWindows().map((window) => window.webContents)
   );
   const approvedCourseSetupRoots = new Set<string>();
   const processRunner = createNodeProcessRunner({

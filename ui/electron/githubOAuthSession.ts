@@ -90,8 +90,10 @@ export class GithubOAuthSession {
     return this.accountGeneration;
   }
   private readonly reconciliations = new Map<number, AbortController>();
+  private readonly courseOperations = new Set<AbortController>();
   private invalidateReconciliations(): void {
     this.accountGeneration += 1;
+    for (const controller of this.courseOperations) controller.abort();
     for (const controller of this.reconciliations.values()) controller.abort();
     this.reconciliations.clear();
   }
@@ -229,13 +231,18 @@ export class GithubOAuthSession {
           }
         };
     };
-    const synchronization = await this.deps.synchronizeCourse({
-      ...input,
-      onProgress: updateSynchronization
-    });
-    updateSynchronization(synchronization);
-    if (!current()) throw new Error("Account changed. Retry the operation.");
-    return operation(input, synchronization);
+    this.courseOperations.add(controller);
+    try {
+      const synchronization = await this.deps.synchronizeCourse({
+        ...input,
+        onProgress: updateSynchronization
+      });
+      updateSynchronization(synchronization);
+      if (!current()) throw new Error("Account changed. Retry the operation.");
+      return await operation(input, synchronization);
+    } finally {
+      this.courseOperations.delete(controller);
+    }
   }
   private discovery: AbortController | null = null;
   constructor(private readonly deps: Dependencies) {}

@@ -10,16 +10,27 @@ export interface CourseMutationBlock {
     | "course_access_lost"
     | "organization_migration_required"
     | "operational_source_stale"
+    | "operational_source_updateable"
+    | "view_refresh_required"
     | "operational_source_mismatch"
     | "operational_source_unsafe"
     | "remote_only_mutation_unavailable"
     | "local_storage_failure";
   readonly repositoryId?: number;
+  readonly courseFolderId?: string;
   readonly message: string;
-  readonly action: "retry" | "review_cache" | "faculty_settings" | "authorization" | "attention";
+  readonly action:
+    | "retry"
+    | "review_cache"
+    | "faculty_settings"
+    | "authorization"
+    | "attention"
+    | "update_source"
+    | "refresh_view";
   readonly retryable: boolean;
 }
 export type CourseMutationNotice =
   | CourseMutationBlock
+  | { readonly status: "source_updated" | "view_invalidated" }
   | { readonly status: "checking" | "finished" };
 export const COURSE_MUTATION_NOTICE = "graider-ui:course-mutation:notice";

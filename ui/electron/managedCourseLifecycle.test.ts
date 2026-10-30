@@ -453,3 +453,41 @@ it("account switch invalidates mutation generations immediately, even if replace
   expect(f.session.getState().identity?.id).toBe(42);
   f.session.shutdown();
 });
+
+it("sign-out aborts the operation signal while a synchronized legacy update is preparing", async () => {
+  const synchronize = vi.fn().mockResolvedValue({
+    status: "up_to_date",
+    currentCommit: "a".repeat(40),
+    diagnostic: null,
+    retryable: false
+  });
+  const f = fixture([course(20)], undefined, synchronize);
+  await f.session.restore();
+  await vi.waitFor(() =>
+    expect(f.session.getState().courseDiscovery.courses[0]?.synchronization?.status).toBe(
+      "up_to_date"
+    )
+  );
+  let signal!: AbortSignal;
+  let finish!: () => void;
+  let started!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const operation = f.session.withSynchronizedCourse(20, 42, async (input) => {
+    signal = input.signal;
+    started();
+    await held;
+    expect(signal.aborted).toBe(true);
+    expect(await input.revalidateSession()).toBe(false);
+  });
+  await entered;
+  await f.session.signOut();
+  expect(signal.aborted).toBe(true);
+  finish();
+  await operation;
+  f.session.shutdown();
+});

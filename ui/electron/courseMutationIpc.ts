@@ -1,4 +1,4 @@
-import type { IpcMain } from "electron";
+import type { IpcMain, WebContents } from "electron";
 import { IPC_CHANNELS } from "./ipc.js";
 import {
   CourseMutationBlocked,
@@ -37,13 +37,88 @@ export const COURSE_MUTATION_CHANNELS: readonly string[] = [
 export const createCourseMutationIpc = (
   ipc: Pick<IpcMain, "handle">,
   guard: () => ManagedCourseMutationGuard | undefined,
-  resolveSetup?: (path: unknown) => { readonly isNew: boolean; readonly folderId?: string }
+  resolveSetup?: (path: unknown) => { readonly isNew: boolean; readonly folderId?: string },
+  views: () => readonly WebContents[] = () => []
 ): Pick<IpcMain, "handle"> => {
   const active = new Set<string>();
+  const documents = new WeakMap<
+    WebContents,
+    { stale: boolean; epoch: number; revision: number; loadingRevision: number }
+  >();
+  const document = (sender: WebContents) => {
+    let state = documents.get(sender);
+    if (!state) {
+      state = { stale: false, epoch: 0, revision: 0, loadingRevision: 0 };
+      documents.set(sender, state);
+      const captured = state;
+      sender.on?.("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+        if (isMainFrame && !isInPlace) captured.loadingRevision = captured.revision;
+      });
+      sender.on?.("did-finish-load", () => {
+        // A load begun before the final worktree verification cannot make an editor current.
+        captured.stale = captured.loadingRevision !== captured.revision;
+        captured.epoch++;
+      });
+    }
+    return state;
+  };
+  const invalidate = (sender: WebContents) => {
+    const state = document(sender);
+    state.stale = true;
+    state.revision++;
+  };
+  const requireFreshView = (state: { stale: boolean; epoch: number }, epoch: number) => {
+    if (state.stale || state.epoch !== epoch)
+      blockMutation(
+        "view_refresh_required",
+        "Course source changed. Refresh/reopen this view before retrying the change.",
+        "refresh_view"
+      );
+  };
+  ipc.handle(IPC_CHANNELS.reloadCourseView, (event) => {
+    event.sender.reload();
+  });
+  ipc.handle(IPC_CHANNELS.updateCourseSource, async (event, folderId: unknown) => {
+    if (typeof folderId !== "string") throw new Error("Registered course folder ID is required.");
+    const boundary = guard();
+    if (!boundary)
+      blockMutation(
+        "authorization_required",
+        "Authorize course access before updating.",
+        "authorization"
+      );
+    const affected = new Set<WebContents>();
+    try {
+      await boundary!.updateSource(folderId, () => {
+        for (const sender of [event.sender, ...views()]) {
+          if (sender.isDestroyed()) continue;
+          invalidate(sender);
+          affected.add(sender);
+          sender.send(COURSE_MUTATION_NOTICE, { status: "view_invalidated" });
+        }
+      });
+      for (const sender of affected)
+        if (!sender.isDestroyed()) {
+          invalidate(sender);
+          sender.send(COURSE_MUTATION_NOTICE, { status: "source_updated" });
+        }
+    } catch (error) {
+      for (const sender of affected)
+        if (!sender.isDestroyed()) {
+          invalidate(sender);
+          sender.send(COURSE_MUTATION_NOTICE, { status: "view_invalidated" });
+        }
+      if (error instanceof CourseMutationBlocked && !event.sender.isDestroyed())
+        event.sender.send(COURSE_MUTATION_NOTICE, error.result);
+      throw error;
+    }
+  });
   return {
     handle(channel, handler) {
       ipc.handle(channel, async (event, ...args: unknown[]) => {
         if (!COURSE_MUTATION_CHANNELS.includes(channel)) return handler(event, ...args);
+        const view = document(event.sender);
+        const epoch = view.epoch;
         const request = args[0];
         const fields =
           typeof request === "object" && request !== null
@@ -70,6 +145,7 @@ export const createCourseMutationIpc = (
         active.add(key);
         notify({ status: "checking" });
         try {
+          requireFreshView(view, epoch);
           const boundary = guard();
           if (!boundary)
             return blockMutation(
@@ -82,6 +158,7 @@ export const createCourseMutationIpc = (
             fields.courseFolderPath,
             channel === IPC_CHANNELS.publishCourseChanges ? "publication_retry" : "new_mutation",
             async () => {
+              requireFreshView(view, epoch);
               notify({ status: "finished" });
               return handler(event, ...args);
             }

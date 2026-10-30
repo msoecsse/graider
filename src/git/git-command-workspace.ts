@@ -657,7 +657,13 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
     try {
       const origin = createRemoteName("origin");
       if (origin === null) throw new GitError("operation_rejected", "fetch");
-      const remote = await this.remoteUrl(origin);
+      const configured = await this.remoteUrl(origin);
+      // OAuth transport for credential-free GitHub SSH origins, without rewriting faculty config.
+      const remote =
+        configured?.replace(
+          /^(?:git@github\.com:|ssh:\/\/git@github\.com\/)/iu,
+          "https://github.com/"
+        ) ?? null;
       if (remote === null) throw new GitError("operation_rejected", "fetch");
       await this.executor.run(
         this.root,
@@ -685,10 +691,31 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
     readonly expectedBranch: string;
     readonly signal?: AbortSignal;
   }): Promise<void> {
+    const origin = createRemoteName("origin");
+    const branch = createBranchName(request.expectedBranch);
+    if (!branch || !origin) throw new GitError("operation_rejected", "fast_forward");
+    return this.fastForwardToCommit({
+      ...request,
+      targetCommit: await this.resolveRemoteBranch(origin, branch)
+    });
+  }
+
+  /** Exact validated target: a concurrent remote advance cannot select a newer commit. */
+  async fastForwardToCommit(request: {
+    readonly expectedHead: string;
+    readonly expectedBranch: string;
+    readonly targetCommit: string;
+    readonly signal?: AbortSignal;
+  }): Promise<void> {
     try {
       const origin = createRemoteName("origin");
       const branch = createBranchName(request.expectedBranch);
-      if (!isObjectId(request.expectedHead) || branch === null || origin === null)
+      if (
+        !isObjectId(request.expectedHead) ||
+        !isObjectId(request.targetCommit) ||
+        branch === null ||
+        origin === null
+      )
         throw new GitError("operation_rejected", "fast_forward");
       const unsafeState = [
         "MERGE_HEAD",
@@ -700,12 +727,19 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
         "BISECT_LOG",
         "commondir",
         "gitdir",
-        "objects/info/alternates"
+        "objects/info/alternates",
+        "objects/info/http-alternates"
       ];
       if (unsafeState.some((name) => existsSync(join(this.root, ".git", name))))
         throw new GitError("operation_rejected", "fast_forward");
-      const target = await this.resolveRemoteBranch(origin, branch);
-      const state = await this.inspect();
+      const target = request.targetCommit;
+      const remoteCommit = await this.resolveRemoteBranch(origin, branch);
+      if (
+        !(await this.isAncestor(request.expectedHead, target)) ||
+        !(await this.isAncestor(target, remoteCommit))
+      )
+        throw new GitError("operation_rejected", "fast_forward");
+      const state = await this.inspect({ readOnly: true });
       const tree = state.workingTree;
       if (
         state.head.kind !== "attached" ||

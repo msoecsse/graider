@@ -4,12 +4,23 @@ import type { GithubOAuthSession } from "./githubOAuthSession.js";
 import type { CourseFolderRecord } from "./ipc.js";
 import {
   getProductionGitWorkspaceFactory,
+  createAuthenticatedProductionGitWorkspace,
+  type AuthenticatedGitWorkspaceContext,
+  type GitWorkspaceSynchronizer,
+  type GitWorkspaceWriter,
   type GitWorkspaceFactory
 } from "./gitWorkspaceReader.js";
 import { inspectChangedFiles } from "./coursePublishService.js";
 import { parseGithubOrigin } from "./remoteCourseDiscovery.js";
 import { createRemoteRepositoryReader } from "./githubRemoteRepositories.js";
-import { MANAGED_COURSE_ROOT, validateManagedStorage } from "./managedCourses.js";
+import {
+  MANAGED_COURSE_ROOT,
+  managedCoursePath,
+  validateManagedStorage,
+  revalidateManagedRepository,
+  synchronizationFailure
+} from "./managedCourses.js";
+import type { ManagedOperationInput } from "./githubOAuthSession.js";
 import {
   canReviewManagedCache,
   type ManagedSynchronizationState,
@@ -17,7 +28,7 @@ import {
 } from "./remoteCourseTypes.js";
 import type { CourseMutationBlock } from "./managedCourseMutationTypes.js";
 
-export type CourseMutationMode = "new_mutation" | "publication_retry";
+export type CourseMutationMode = "new_mutation" | "publication_retry" | "source_update";
 export interface VerifiedCourseMutationContext {
   readonly userId: number;
   readonly repositoryId: number;
@@ -101,17 +112,23 @@ export const requireSynchronizedCommit = (
   return sync.currentCommit;
 };
 
-/** Read-only source semantics shared by every mutation class. Never fetches or updates legacy. */
+/** Read-only source semantics shared by mutations and source updates. */
 export const validateOperationalCourseSource = async (request: {
   readonly root: string;
   readonly course: RemoteCourse;
   readonly authoritativeCommit: string;
   readonly mode: CourseMutationMode;
   readonly factory: GitWorkspaceFactory;
+  readonly isAuthoritativeAncestor?: (head: string, target: string) => Promise<boolean>;
   readonly resolveOrigin: (
     owner: string,
     name: string
-  ) => Promise<{ id: number; organizationId: number } | null>;
+  ) => Promise<{
+    id: number;
+    organizationId: number;
+    defaultBranch?: string;
+    disabled?: boolean;
+  } | null>;
 }): Promise<string> => {
   const { root, course, authoritativeCommit, mode, factory } = request;
   const unsafe = () =>
@@ -135,6 +152,11 @@ export const validateOperationalCourseSource = async (request: {
       "attention",
       course.repositoryId
     );
+  if (
+    repo?.disabled ||
+    (repo?.defaultBranch !== undefined && repo.defaultBranch !== course.defaultBranch)
+  )
+    unsafe();
   const state = await workspace.inspect({ readOnly: true });
   if (
     state.head.kind !== "attached" ||
@@ -147,6 +169,14 @@ export const validateOperationalCourseSource = async (request: {
     unsafe();
   if (state.head.kind !== "attached") return unsafe();
   const changed = [...state.workingTree.trackedChanges, ...state.workingTree.stagedChanges];
+  const clean = !changed.length && !state.workingTree.untrackedPaths.length;
+  if (mode === "source_update" && !clean) unsafe();
+  if (
+    mode === "source_update" &&
+    state.upstream.kind === "configured" &&
+    (state.upstream.relation === "ahead" || state.upstream.relation === "diverged")
+  )
+    unsafe();
   const pending =
     inspectChangedFiles([
       ...changed.flatMap((item) => [item.path, ...(item.originalPath ? [item.originalPath] : [])]),
@@ -161,6 +191,23 @@ export const validateOperationalCourseSource = async (request: {
     );
   const head = state.head.commit;
   if (head !== authoritativeCommit) {
+    const behind =
+      clean &&
+      state.upstream.kind === "configured" &&
+      state.upstream.relation !== "ahead" &&
+      state.upstream.relation !== "diverged" &&
+      (await (request.isAuthoritativeAncestor ?? workspace.isAncestor.bind(workspace))(
+        head,
+        authoritativeCommit
+      ).catch(() => false));
+    if (behind && mode === "source_update") return head;
+    if (behind)
+      blockMutation(
+        "operational_source_updateable",
+        "Course source is out of date. The registered course folder is clean and can be safely fast-forwarded to the latest course revision.",
+        "update_source",
+        course.repositoryId
+      );
     const safelyAhead =
       mode === "publication_retry" && (await workspace.isAncestor(authoritativeCommit, head));
     if (!safelyAhead)
@@ -180,15 +227,115 @@ interface Dependencies {
   readonly folders: () => readonly CourseFolderRecord[];
   readonly username: () => string | null;
   readonly factory?: GitWorkspaceFactory;
+  readonly authenticate?: (token: string) => AuthenticatedGitWorkspaceContext;
 }
 export class ManagedCourseMutationGuard {
   private readonly pending = new Map<string, Promise<unknown>>();
   constructor(private readonly deps: Dependencies) {}
+  /** Trusted registry ID only; never resumes the mutation that prompted this operation. */
+  updateSource(folderId: unknown, beforeWrite: () => void = () => {}): Promise<void> {
+    const faculty = this.deps.username();
+    return this.run(folderId, undefined, "source_update", async (context, input) => {
+      const factory = this.deps.factory ?? getProductionGitWorkspaceFactory();
+      const oracle = await factory.open(
+        managedCoursePath(this.deps.userData, input.userId, input.course.repositoryId)
+      );
+      const auth = (this.deps.authenticate ?? createAuthenticatedProductionGitWorkspace)(
+        input.token
+      );
+      // The authenticated bundled backend exposes the synchronizer in addition to publication.
+      const workspace = (await auth.factory.open(context.courseFolderPath)) as GitWorkspaceWriter &
+        GitWorkspaceSynchronizer;
+      const validate = () =>
+        validateOperationalCourseSource({
+          root: context.courseFolderPath,
+          course: input.course,
+          authoritativeCommit: context.authoritativeCommit,
+          mode: "source_update",
+          factory,
+          isAuthoritativeAncestor: (head, target) => oracle.isAncestor(head, target),
+          resolveOrigin: (owner, name) =>
+            createRemoteRepositoryReader(input.token, input.signal).resolve(owner, name)
+        });
+      const active = async () => {
+        if (input.signal.aborted || !(await input.revalidateSession()))
+          blockMutation(
+            "authorization_required",
+            "Account authorization changed. Refresh course access.",
+            "authorization"
+          );
+        if (
+          !faculty ||
+          this.deps.username() !== faculty ||
+          !this.deps
+            .folders()
+            .some(
+              (item) => item.id === context.courseFolderId && item.path === context.courseFolderPath
+            )
+        )
+          blockMutation(
+            "operational_source_mismatch",
+            "Faculty identity or course registration changed. Refresh courses."
+          );
+      };
+      await active();
+      await validate();
+      await workspace.fetchOrigin({ authentication: auth.authentication });
+      const head = await validate();
+      await active();
+      // Reuse managed metadata/faculty verification after the network wait as well.
+      try {
+        const latest = await revalidateManagedRepository({
+          ...input,
+          userData: this.deps.userData,
+          username: faculty,
+          reader: createRemoteRepositoryReader(input.token, input.signal),
+          authenticate: () => auth
+        });
+        if (latest.defaultBranch !== input.course.defaultBranch)
+          blockMutation(
+            "operational_source_unsafe",
+            "The course default branch changed. Review the registered source before retrying."
+          );
+      } catch (error) {
+        if (error instanceof CourseMutationBlocked) throw error;
+        requireSynchronizedCommit(input.course, synchronizationFailure(error));
+        throw error;
+      }
+      await active();
+      // From this point every existing editor must reload, even if a final verification fails.
+      beforeWrite();
+      if (head !== context.authoritativeCommit)
+        await workspace.fastForwardToCommit({
+          expectedHead: head,
+          expectedBranch: input.course.defaultBranch,
+          targetCommit: context.authoritativeCommit,
+          signal: input.signal
+        });
+      await active();
+      if (
+        (await validate()) !== context.authoritativeCommit ||
+        (await oracle.resolveHead()) !== context.authoritativeCommit
+      )
+        blockMutation(
+          "operational_source_stale",
+          "Course state changed during update. Refresh the view and retry source synchronization.",
+          "refresh_view",
+          input.course.repositoryId
+        );
+      if (input.signal.aborted)
+        blockMutation(
+          "authorization_required",
+          "Account authorization changed. Refresh course access.",
+          "authorization"
+        );
+    });
+  }
   async run<T>(
     folderId: unknown,
     suppliedPath: unknown,
     mode: CourseMutationMode,
-    operation: (context: VerifiedCourseMutationContext) => Promise<T>
+    operation: (context: VerifiedCourseMutationContext, input: ManagedOperationInput) => Promise<T>
   ): Promise<T> {
     const session = this.deps.session;
     const state = session.getState();
@@ -271,6 +418,12 @@ export class ManagedCourseMutationGuard {
             authoritativeCommit,
             mode,
             factory: this.deps.factory ?? getProductionGitWorkspaceFactory(),
+            isAuthoritativeAncestor: async (head, target) => {
+              const oracle = await (this.deps.factory ?? getProductionGitWorkspaceFactory()).open(
+                managedCoursePath(this.deps.userData, input.userId, input.course.repositoryId)
+              );
+              return oracle.isAncestor(head, target);
+            },
             resolveOrigin: (owner, name) =>
               createRemoteRepositoryReader(input.token, input.signal).resolve(owner, name)
           });
@@ -288,19 +441,27 @@ export class ManagedCourseMutationGuard {
               "Course registration changed during validation. Retry after refreshing courses."
             );
           operationStarted = true;
-          return operation({
-            userId: input.userId,
-            repositoryId: course.repositoryId,
-            authoritativeCommit,
-            operationalCommit,
-            courseFolderId: folder.id,
-            courseFolderPath: folder.path,
-            mode
-          });
+          return operation(
+            {
+              userId: input.userId,
+              repositoryId: course.repositoryId,
+              authoritativeCommit,
+              operationalCommit,
+              courseFolderId: folder.id,
+              courseFolderPath: folder.path,
+              mode
+            },
+            input
+          );
         });
       })
       .catch((error) => {
-        if (operationStarted || error instanceof CourseMutationBlocked) throw error;
+        if (error instanceof CourseMutationBlocked) {
+          if (error.result.action === "update_source")
+            throw new CourseMutationBlocked({ ...error.result, courseFolderId: folder.id });
+          throw error;
+        }
+        if (operationStarted) throw error;
         return blockMutation(
           "operational_source_unsafe",
           "Current course readiness could not be proven. Check course access, local storage, and source safety, then retry.",

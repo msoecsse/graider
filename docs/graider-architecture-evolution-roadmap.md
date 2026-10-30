@@ -130,11 +130,11 @@ Phase 1 acceptance is complete:
 - Git transport credentials remain separate from API-client composition.
 - Architecture tests protect both local Git and GitHub host boundaries.
 
-Phase 2 slices 2.1–2.7 are implemented: OAuth identity, organization access, read-only
+Phase 2 slices 2.1–2.8 are implemented: OAuth identity, organization access, read-only
 course discovery, verified identity-scoped managed bootstrap and startup/explicit-refresh
 clean fast-forward synchronization, explicit cache reconciliation, and trusted pre-mutation
-source validation. Existing mutation credentials and legacy operational paths remain transitional.
-Next is an explicit safe legacy-source update/cutover policy. See the implementation boundary in
+source validation plus explicit safe legacy fast-forward. Existing mutation credentials and legacy
+operational paths remain transitional. Next is a designed managed-course mutation cutover. See the implementation boundary in
 [remote course discovery](graider-remote-course-discovery.md).
 
 ---
@@ -898,9 +898,9 @@ A broader UI redesign should occur after these workflows are understood and impl
 
 # Recommended Immediate Next Work
 
-Phase 2.7 now protects the existing mutation boundaries. The next course-management boundary is an
-explicit policy for safely updating or cutting over the legacy operational source when the freshness
-oracle is newer. Do not add an implicit pull/reset or silently use the managed cache for writes.
+Phase 2.8 now safely updates eligible legacy sources within the existing mutation boundary. The next course-management boundary is an
+explicit design for managed-course mutation semantics and cutover. Preserve the verified legacy
+operation boundary until that design is implemented; never silently switch write targets.
 Managed-course mutations and OAuth write authentication require their own later slices. Signed
 release/update infrastructure remains necessary before schema-breaking migration reaches Stable.
 
@@ -967,7 +967,26 @@ previews/reports, local/account settings, discovery/bootstrap/sync/reconciliatio
 student Pull Latest, clone/download, local Access Page generation, review import, and local grading
 workspace preparation. These do not become network-guarded course mutations.
 
-Next boundary: an explicit design for safely updating/cutting over the legacy operational source,
-followed by managed-course mutation semantics. This slice adds no automatic legacy update, managed
+The legacy-source update portion is now implemented in Slice 2.8. The next boundary is a designed
+managed-course mutation cutover with read-version and publication semantics. This slice adds no automatic legacy update, managed
 mutation cutover, OAuth write migration, student synchronization, schema-v2 roles, periodic fetch,
 automatic reconciliation, migration, or remotely durable grading state.
+
+## Slice 2.8 — Safe legacy operational-source update (implemented)
+
+Explicit **Update course source** shares the 2.7 per-account/repository operation queue. Managed
+synchronization establishes the exact authoritative commit; only verified, wholly clean, attached
+legacy sources with the expected upstream and strictly behind history can fast-forward. Current
+sources are verified no-ops. OAuth authenticates fetch; exact-SHA FF-only prevents remote-fetch races
+from selecting unvalidated newer revisions. Final legacy and managed HEAD must agree exactly.
+Dirty/untracked/ahead/diverged/unsafe/mismatched states remain preserved; publication retry retains
+its pending-work/local-commit recovery semantics. No managed-cache reconciliation touches legacy.
+
+Source updates invalidate open documents in main. Assignment/roster stale form submissions and old
+queued callbacks remain blocked until full view reload; no mutation automatically resumes. Startup
+and Refresh retain managed synchronization and existing dashboard loading; legacy update stays
+explicit to avoid background editor invalidation and another startup orchestration path.
+See [Slice 2.8 safety and transition details](graider-remote-course-architecture.md#phase-2--slice-28-safe-legacy-operational-source-synchronization).
+
+Next: design managed-course mutation/read-version/publication semantics before cutover. OAuth write
+migration, schema v2, periodic fetch, branch/org migration and student sync remain excluded.

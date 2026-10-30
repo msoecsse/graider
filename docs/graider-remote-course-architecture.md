@@ -1867,8 +1867,8 @@ previews/reports, local/account settings, discovery/bootstrap/sync/reconciliatio
 student Pull Latest, clone/download, local Access Page generation, review import, and local grading
 workspace preparation. These do not become network-guarded course mutations.
 
-Next boundary: an explicit design for safely updating/cutting over the legacy operational source,
-followed by managed-course mutation semantics. This slice adds no automatic legacy update, managed
+The legacy-source update portion is now implemented in Slice 2.8 below. The next boundary is
+managed-course mutation semantics and cutover. This slice adds no automatic legacy update, managed
 mutation cutover, OAuth write migration, student synchronization, schema-v2 roles, periodic fetch,
 automatic reconciliation, migration, or remotely durable grading state.
 
@@ -1889,3 +1889,97 @@ automatic reconciliation, migration, or remotely durable grading state.
   The real csc1120 profile is untouched; this is not a live OAuth/GitHub write test.
 - Backend/UI typechecks, lint, formatting, production builds, and diff whitespace checks pass.
   Production builds retain the existing large-chunk advisory.
+
+## Phase 2 / Slice 2.8: safe legacy operational-source synchronization
+
+The managed cache remains the authoritative freshness oracle. The registered legacy folder remains
+all existing mutations' destination. **Update course source** is an explicit trusted main-process
+operation accepting only a registered folder ID. Renderer paths, URLs, branches, revisions and
+commands cannot choose an update target. This action never resumes the blocked mutation.
+
+Eligibility requires a unique authorized discovery/registry mapping, active OAuth identity and
+schema-v1 faculty authorization, matching immutable repository and organization IDs, valid metadata,
+self-contained Git storage without links/external gitdirs/alternates, attached expected default
+branch and expected `origin/<default-branch>` upstream, no interrupted operation, and a completely
+clean index/worktree including **no untracked files**. Ignored files retain existing inspection
+behavior. Local ahead/diverged history, branch/default-branch changes, authorization loss, organization
+transfer, unsafe storage and any uncertain state remain blocked and preserved. This never invokes
+Phase 2.6 managed-cache reconciliation on faculty-owned folders.
+
+The existing account/repository mutation queue encloses managed synchronization, source validation,
+authenticated fetch, exact-target ancestry checks, fast-forward and final verification. Ordering
+remains operation queue -> managed synchronization queue; the managed queue releases before legacy
+work. Reconciliation takes only the managed queue. Different course operations remain independent.
+Queued operations retain the account generation. Sign-out/account switch also aborts active course
+operation signals; bundled Git checks cancellation again immediately before fast-forward.
+
+After managed synchronization supplies its exact validated commit, source ancestry is checked using
+managed history, so eligibility does not depend on an already-fetched legacy object. Source identity,
+branch/upstream, cleanliness and storage are re-inspected before and after authenticated fetch. The
+existing managed repository/metadata/faculty verifier runs again after that network wait. Bundled Git
+fetches only remote-tracking refs using the active OAuth token in transient process authentication.
+It never honors configurable fetch destination refspecs. `fastForwardToCommit` requires the exact
+validated target, expected starting HEAD/branch, a clean source, and ancestry from starting HEAD to
+target to fetched default-branch tip. It executes `merge --ff-only --no-edit --no-autostash <exact SHA>`
+with hooks and submodule recursion disabled. There is no pull, merge commit, rebase, reset, clean,
+stash, checkout, push, branch switch, replacement or automatic repair. A current source still gets
+verified/authenticated fetch and final inspection, without rewriting HEAD/worktree.
+
+A remote advance during legacy fetch cannot substitute a newer target. Legacy may fast-forward only
+to the exact managed-validated commit, even when origin's fetched tip is newer. Success requires clean
+source, expected branch/upstream, and both legacy and managed HEAD equal to that exact commit. If a
+concurrent managed synchronization moved the oracle, completion fails closed and faculty refresh/retry;
+no rollback or arbitrary advancement occurs. A later update synchronizes managed state afresh.
+
+The Phase 2.7 guard distinguishes proven clean-behind sources as `operational_source_updateable`
+and offers **Update course source**. Generic stale/unsafe states retain attention messages without
+an update button. The action shows **Updating course source…** and success reports **Course source
+updated. Refresh/reopen this view before retrying the change.** Faculty must retry their original
+operation, which runs the entire guard again. Unpublished Graider-managed working-tree changes or
+local publication commits are ineligible; existing `publication_retry` remains responsible for them.
+Remote divergence still blocks publication and update, preserving local evidence without force push.
+
+Assignment and roster pages hold edit values in component state. Dashboard refresh updates shared
+route data but does not safely replace those forms. Therefore source update does not refetch only the
+dashboard or enable the old form. Before any possible worktree update, all open application documents
+are invalidated in main and shown a required **Refresh view** overlay. Main refuses all inventoried
+course mutation IPC from these documents, including requests already queued before invalidation.
+The document epoch rejects old queued callbacks even after reload. **Refresh view** reloads the whole
+document, discarding form values and dashboard cache and triggering normal assignment/roster loaders.
+Only a completed reload clears the gate; failed/partial updates also require reload after crossing the
+write boundary. Reload during preparation does not clear final invalidation. No mutation is replayed.
+
+Startup and **Refresh courses** continue their existing managed-cache synchronization and dashboard
+loading behavior; legacy synchronization is explicit in this slice. These are separate asynchronous
+flows, and opportunistic legacy writes would require coordinating discovery, registry, operation
+serialization and open editors during background startup. Keeping updates on the explicit operation
+boundary avoids background form invalidation and does not block startup. No arbitrary registered
+folder is updated. Periodic polling and student-repository synchronization remain excluded.
+
+The remaining transition is a designed managed-course mutation cutover with renderer read-version
+and write/publication semantics. Existing write credentials remain transitional; this slice uses OAuth
+only for source freshness/fetch and does not migrate existing write transports or introduce schema v2.
+
+Validation includes real local bare remotes and bundled Git for current/no-op, clean behind, dirty,
+ahead/diverged, interrupted/unsafe storage, remote advance, exact-target authentication/command tracing,
+publication preservation and post-fetch authorization/metadata refusal. Assignment/roster IPC tests
+prove stale payloads cannot reach writes, including queued requests. The isolated production-renderer
+smoke is `ui/scripts/smoke-managed-course-guard.cjs`; fixture accounts/remotes/profile never touch the
+real csc1120 course and perform no live GitHub writes.
+
+### Slice 2.8 validation evidence
+
+- Backend: 138 files, 1,509 passed, one skipped.
+- UI/Electron: 184 files, 1,803 passed, 25 skipped, with a permitted local OAuth callback listener.
+- Focused synchronization/guard/session/stale-document/UI/security suites: six files, 128 passed.
+  The affected Electron, publication, authentication, assignment and roster suites: ten files, 250 passed.
+- Bundled-Git/auth focused suites: ten files, 213 passed. Transport tracing proves authenticated fetch and one exact-SHA FF-only merge, with no
+  pull/reset/rebase/clean/stash/checkout/push. Real remotes exercise advancement during preparation,
+  current no-op, preserved dirty/ahead/diverged histories and publication recovery/conflict.
+- The isolated production Electron smoke passes 18 scenarios, including explicit update, exact HEAD
+  agreement, no replay, stale-save refusal, full view reload, fresh guard and publication retry.
+  Blocked target writes/commits/pushes and student writes are all zero. Screenshots confirm the safe
+  stale action and required-refresh overlay. This uses fixture identities/local remotes, not live OAuth
+  or the real csc1120 profile.
+- Backend/UI typechecks, lint, formatting, production builds and `git diff --check` pass. The production
+  renderer retains the existing large-chunk advisory.

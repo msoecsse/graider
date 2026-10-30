@@ -15,7 +15,7 @@ const { createAuthenticatedProductionGitWorkspace } = require(base + "/gitWorksp
 const { publishCourseChanges } = require(base + "/coursePublishService.js");
 const { IPC_CHANNELS } = require(base + "/ipc.js");
 const { GITHUB_OAUTH_CHANNELS } = require(base + "/githubOAuthTypes.js");
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-s27-electron-"));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-s28-electron-"));
 const screenshotPath = path.join(root, "stale-source.png");
 const resultPath = path.join(root, "smoke-result.json");
 app.setPath("userData", path.join(root, "profile"));
@@ -177,7 +177,8 @@ app
       userData: root,
       session,
       username: () => "jones",
-      folders: () => [{ id: "legacy", path: legacy }]
+      folders: () => [{ id: "legacy", path: legacy }],
+      authenticate: () => context
     });
     const guarded = createCourseMutationIpc(ipcMain, () => guard);
     guarded.handle(IPC_CHANNELS.saveRoster, () => {
@@ -250,7 +251,7 @@ app
     await tick();
     assert.ok(
       await win.webContents.executeJavaScript(
-        `document.body.textContent.includes('registered operational course source is not based')`
+        `document.body.textContent.includes('Course source is out of date')`
       )
     );
     fs.writeFileSync(screenshotPath, (await win.webContents.capturePage()).toPNG());
@@ -289,9 +290,42 @@ app
     );
     assert.equal(restored.status, "completed");
     assert.equal(mutations, 1);
-    // Explicit fixture preparation only; production never updates legacy.
-    await git(legacy, ["fetch", "origin"]);
-    await git(legacy, ["merge", "--ff-only", "origin/main"]);
+    // Production operation: registry ID only, existing per-course boundary and bundled Git.
+    assert.ok((await invoke("saveRoster", input)).error);
+    await tick();
+    await win.webContents.executeJavaScript(
+      `Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Update course source').click()`
+    );
+    for (let attempt = 0; attempt < 80; attempt++) {
+      if (
+        await win.webContents.executeJavaScript(
+          `document.body.textContent.includes('Course source updated. Refresh/reopen')`
+        )
+      )
+        break;
+      await tick();
+    }
+    assert.ok(
+      await win.webContents.executeJavaScript(
+        `document.body.textContent.includes('Course source updated. Refresh/reopen')`
+      )
+    );
+    assert.equal(mutations, 1);
+    assert.equal(await git(legacy, ["rev-parse", "HEAD"]), await git(cache, ["rev-parse", "HEAD"]));
+    assert.ok(
+      (await invoke("saveRoster", { ...input, rows: [{ studentId: "stale-renderer" }] })).error
+    );
+    assert.equal(mutations, 1);
+    fs.writeFileSync(
+      path.join(root, "updated-refresh-required.png"),
+      (await win.webContents.capturePage()).toPNG()
+    );
+    const reloaded = new Promise((resolve) => win.webContents.once("did-finish-load", resolve));
+    await win.webContents.executeJavaScript(
+      `Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Refresh view').click()`
+    );
+    await reloaded;
+    await tick();
     const beforeRetry = checks;
     assert.equal((await invoke("saveRoster", input)).value.status, "success");
     assert.ok(checks > beforeRetry);
@@ -301,6 +335,11 @@ app
     );
     assert.ok((await invoke("saveRoster", input)).error);
     assert.equal(mutations, 2);
+    const pendingHead = await git(legacy, ["rev-parse", "HEAD"]);
+    const pendingContent = fs.readFileSync(path.join(legacy, "course.yml"), "utf8");
+    assert.ok((await invoke("updateCourseSource", "legacy")).error);
+    assert.equal(await git(legacy, ["rev-parse", "HEAD"]), pendingHead);
+    assert.equal(fs.readFileSync(path.join(legacy, "course.yml"), "utf8"), pendingContent);
     const publication = await invoke("publishCourseChanges", "legacy");
     assert.equal(publication.value.status, "success");
     assert.equal((await invoke("saveRoster", input)).value.status, "success");
@@ -327,7 +366,12 @@ app
         "existing Review cache panel",
         "cancel no mutation",
         "explicit reconciliation no mutation",
-        "fresh retry",
+        "authenticated exact legacy fast-forward",
+        "no mutation replay",
+        "stale renderer save blocked",
+        "required full document reload",
+        "fresh guard on retry",
+        "unpublished changes refused by source update",
         "pending publication",
         "publication retry",
         "post-publication mutation",

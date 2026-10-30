@@ -120,6 +120,8 @@ const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<
   (await ipcRenderer.invoke(channel, ...args)) as T;
 
 const graiderUI: GraiderUIApi = {
+  updateCourseSource: (courseFolderId) => invoke(IPC_CHANNELS.updateCourseSource, courseFolderId),
+  reloadCourseView: () => invoke(IPC_CHANNELS.reloadCourseView),
   onCourseMutationNotice: (listener) => {
     const receive = (
       _event: unknown,

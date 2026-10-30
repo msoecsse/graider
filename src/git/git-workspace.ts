@@ -216,6 +216,12 @@ export interface CreateOrResetBranchRequest {
 
 export interface GitWorkspaceSynchronizer extends GitWorkspaceReader {
   fetchOrigin(request: { readonly authentication: GitAuthenticationContext }): Promise<void>;
+  fastForwardToCommit(request: {
+    readonly expectedHead: string;
+    readonly expectedBranch: string;
+    readonly targetCommit: string;
+    readonly signal?: AbortSignal;
+  }): Promise<void>;
   fastForwardUpstream(request: {
     readonly expectedHead: string;
     readonly expectedBranch: string;
