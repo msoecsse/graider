@@ -124,8 +124,22 @@ to Graider's result statuses, and writes:
 graider-output/grading-results.json
 ```
 
-The workflow uploads that file as the configured grading artifact. Student
-repositories do not need Graider or Graider npm dependencies installed.
+CheckStyle, compilation, and unit tests retain `continue-on-error: true` so
+failed grading checks still allow result/evidence generation and artifact upload.
+Both generation and upload use `if: always()`. After upload has been attempted,
+the final `Set final grading status` step also runs with `if: always()` and reads
+the generated result. Only a version-1 result object with status `passed` allows
+that step to succeed; `failed`, missing, empty, malformed, or unsupported results
+fail the job. Thus failed grading results produce a red GitHub Actions job while
+preserving the uploaded evidence. Other workflow or upload failures also keep
+the job failed.
+
+Existing version-1 workflows without this gate are `managed_outdated` and can be
+replaced through Apply or the existing explicit individual/bulk repair flows.
+This content fix does not increment the ownership version or automatically
+rewrite installed student workflows.
+
+Student repositories do not need Graider or Graider npm dependencies installed.
 
 ## Published Student Repository Files
 

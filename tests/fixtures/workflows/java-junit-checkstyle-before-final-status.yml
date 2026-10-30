@@ -1,0 +1,312 @@
+# Managed by Graider
+# graider-workflow-version: 1
+name: AutoGrading Tests
+
+"on":
+  push:
+    paths-ignore:
+      - .github/workflows/grade.yml
+  workflow_dispatch:
+    inputs:
+      submission_sha:
+        description: Canonical student submission commit SHA
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  run-autograding-tests:
+    if: >-
+      github.actor != 'github-classroom[bot]' &&
+      !(
+        github.event_name == 'push' &&
+        github.event.before == '0000000000000000000000000000000000000000' &&
+        github.ref_name == github.event.repository.default_branch
+      )
+    runs-on: ubuntu-24.04
+    env:
+      JAVA_VERSION: "25"
+      CHECKSTYLE_VERSION: "14.1.0"
+      CHECKSTYLE_CONFIG_URL: "https://csse.msoe.us/csc1110/MSOE_checkStyle.xml"
+      JUNIT_PLATFORM_CONSOLE_VERSION: "6.1.2"
+      MOCKITO_VERSION: "5.18.0"
+      BYTE_BUDDY_VERSION: "1.17.5"
+      OBJENESIS_VERSION: "3.3"
+      JAVAFX_VERSION: "25.0.2"
+      TOOLS_DIR: ${{ github.workspace }}/graider-tools
+      JAVAFX_LIB: ${{ github.workspace }}/graider-tools/javafx
+      BUILD_DIR: ${{ github.workspace }}/.graider-build
+      EVIDENCE_DIR: ${{ github.workspace }}/grading-evidence
+      OUTPUT_DIR: ${{ github.workspace }}/graider-output
+      EFFECTIVE_SUBMISSION_SHA: ${{ inputs.submission_sha || github.sha }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.EFFECTIVE_SUBMISSION_SHA }}
+
+      - name: Detect JavaFX requirements
+        id: javafx
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_ROOTS=()
+          if [[ -d src ]]; then SOURCE_ROOTS+=(src); fi
+          if [[ -d test ]]; then SOURCE_ROOTS+=(test); fi
+          if [[ -d tests ]]; then SOURCE_ROOTS+=(tests); fi
+          JAVA_FILES=()
+          if (( ${#SOURCE_ROOTS[@]} > 0 )); then
+            while IFS= read -r -d '' java_file; do JAVA_FILES+=("$java_file"); done < <(find "${SOURCE_ROOTS[@]}" -type f -name '*.java' -print0)
+          fi
+          JAVAFX_REQUIRED=false
+          JAVAFX_REASONS=()
+          if [[ -d src ]]; then
+            FXML_FILES=()
+            while IFS= read -r -d '' fxml_file; do FXML_FILES+=("$fxml_file"); done < <(find src -type f -name '*.fxml' -print0)
+            if (( ${#FXML_FILES[@]} > 0 )); then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("FXML resources found under src/")
+            fi
+          fi
+          if (( ${#JAVA_FILES[@]} > 0 )); then
+            if grep -h -E -q '^[[:space:]]*import[[:space:]]+(static[[:space:]]+)?javafx\.' "${JAVA_FILES[@]}"; then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("JavaFX imports found")
+            fi
+            if grep -h -E -q '^[[:space:]]*import[[:space:]]+(static[[:space:]]+)?org\.testfx\.' "${JAVA_FILES[@]}"; then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("TestFX imports found")
+            fi
+            if grep -h -E -q '(^|[;{])[[:space:]]*requires([[:space:]]+(transitive|static))*[[:space:]]+javafx\.[[:alnum:]_.]+[[:space:]]*;' "${JAVA_FILES[@]}"; then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("JavaFX module requirements found")
+            fi
+            if grep -h -E -q '(^|[^[:alnum:]_])javafx\.[[:alpha:]_][[:alnum:]_]*\.' "${JAVA_FILES[@]}"; then
+              JAVAFX_REQUIRED=true
+              JAVAFX_REASONS+=("JavaFX package references found")
+            fi
+          fi
+          if [[ "$JAVAFX_REQUIRED" == true ]]; then
+            echo "JavaFX required: yes"
+            for reason in "${JAVAFX_REASONS[@]}"; do echo "Reason: $reason"; done
+          else
+            echo "JavaFX required: no"
+            echo "Using standard Java/JUnit environment."
+          fi
+          printf 'GRAIDER_JAVAFX_REQUIRED=%s\n' "$JAVAFX_REQUIRED" >> "$GITHUB_ENV"
+
+      - name: Prepare grading directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$TOOLS_DIR" "$BUILD_DIR" "$EVIDENCE_DIR" "$OUTPUT_DIR"
+          mkdir -p "$TOOLS_DIR" "$BUILD_DIR" "$EVIDENCE_DIR" "$OUTPUT_DIR"
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Install headless JavaFX dependencies
+        if: env.GRAIDER_JAVAFX_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0t64 libasound2t64
+
+      - name: Download core grading tools
+        id: tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          download() {
+            local url="$1"
+            local destination="$2"
+            echo "Downloading $(basename "$destination")"
+            curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors --output "$destination" "$url"
+            if [[ ! -s "$destination" ]]; then
+              echo "::error::Downloaded file is missing or empty: $destination"
+              return 1
+            fi
+          }
+          download "https://github.com/checkstyle/checkstyle/releases/download/checkstyle-${CHECKSTYLE_VERSION}/checkstyle-${CHECKSTYLE_VERSION}-all.jar" "$TOOLS_DIR/checkstyle.jar"
+          download "$CHECKSTYLE_CONFIG_URL" "$TOOLS_DIR/checkstyle.xml"
+          download "https://repo.maven.apache.org/maven2/org/junit/platform/junit-platform-console-standalone/${JUNIT_PLATFORM_CONSOLE_VERSION}/junit-platform-console-standalone-${JUNIT_PLATFORM_CONSOLE_VERSION}.jar" "$TOOLS_DIR/junit-platform-console-standalone.jar"
+          download "https://repo.maven.apache.org/maven2/org/mockito/mockito-core/${MOCKITO_VERSION}/mockito-core-${MOCKITO_VERSION}.jar" "$TOOLS_DIR/mockito-core.jar"
+          download "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy/${BYTE_BUDDY_VERSION}/byte-buddy-${BYTE_BUDDY_VERSION}.jar" "$TOOLS_DIR/byte-buddy.jar"
+          download "https://repo.maven.apache.org/maven2/net/bytebuddy/byte-buddy-agent/${BYTE_BUDDY_VERSION}/byte-buddy-agent-${BYTE_BUDDY_VERSION}.jar" "$TOOLS_DIR/byte-buddy-agent.jar"
+          download "https://repo.maven.apache.org/maven2/org/objenesis/objenesis/${OBJENESIS_VERSION}/objenesis-${OBJENESIS_VERSION}.jar" "$TOOLS_DIR/objenesis.jar"
+          JARS=("$TOOLS_DIR/checkstyle.jar" "$TOOLS_DIR/junit-platform-console-standalone.jar" "$TOOLS_DIR/mockito-core.jar" "$TOOLS_DIR/byte-buddy.jar" "$TOOLS_DIR/byte-buddy-agent.jar" "$TOOLS_DIR/objenesis.jar")
+          for jar_file in "${JARS[@]}"; do
+            if ! jar tf "$jar_file" >/dev/null; then echo "::error::Downloaded JAR is invalid: $jar_file"; exit 1; fi
+          done
+          if ! grep -q '<module' "$TOOLS_DIR/checkstyle.xml"; then echo "::error::Downloaded Checkstyle configuration is not valid XML configuration."; exit 1; fi
+
+      - name: Download JavaFX modules
+        if: env.GRAIDER_JAVAFX_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$JAVAFX_LIB"
+          download() {
+            local url="$1"
+            local destination="$2"
+            echo "Downloading $(basename "$destination")"
+            curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors --output "$destination" "$url"
+            if [[ ! -s "$destination" ]]; then
+              echo "::error::Downloaded file is missing or empty: $destination"
+              return 1
+            fi
+          }
+          for javafx_module in base graphics controls fxml swing; do
+            download "https://repo.maven.apache.org/maven2/org/openjfx/javafx-$javafx_module/${JAVAFX_VERSION}/javafx-$javafx_module-${JAVAFX_VERSION}-linux.jar" "$JAVAFX_LIB/javafx-$javafx_module.jar"
+          done
+          JARS=("$JAVAFX_LIB/javafx-base.jar" "$JAVAFX_LIB/javafx-graphics.jar" "$JAVAFX_LIB/javafx-controls.jar" "$JAVAFX_LIB/javafx-fxml.jar" "$JAVAFX_LIB/javafx-swing.jar")
+          for jar_file in "${JARS[@]}"; do
+            if ! jar tf "$jar_file" >/dev/null; then echo "::error::Downloaded JAR is invalid: $jar_file"; exit 1; fi
+          done
+
+      - name: CheckStyle
+        id: checkstyle
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [[ ! -d src ]]; then echo "::error::Required source directory 'src' does not exist."; exit 1; fi
+          mapfile -d '' JAVA_FILES < <(find src -type f -name '*.java' -print0)
+          if (( ${#JAVA_FILES[@]} == 0 )); then echo "::error::No Java source files were found under src/."; exit 1; fi
+          mkdir -p "$EVIDENCE_DIR"
+          set +e
+          java -jar "$TOOLS_DIR/checkstyle.jar" -c "$TOOLS_DIR/checkstyle.xml" "${JAVA_FILES[@]}"; text_status=$?
+          java -jar "$TOOLS_DIR/checkstyle.jar" -f xml -o "$EVIDENCE_DIR/checkstyle.xml" -c "$TOOLS_DIR/checkstyle.xml" "${JAVA_FILES[@]}"; xml_status=$?
+          set -e
+          if [[ ! -s "$EVIDENCE_DIR/checkstyle.xml" ]]; then echo "::error::Checkstyle did not produce grading-evidence/checkstyle.xml."; exit 1; fi
+          if (( text_status != 0 || xml_status != 0 )); then exit 1; fi
+
+      - name: Compile Java sources
+        id: compile
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_ROOTS=()
+          if [[ -d src ]]; then SOURCE_ROOTS+=(src); fi
+          if [[ -d test ]]; then SOURCE_ROOTS+=(test); fi
+          if [[ -d tests ]]; then SOURCE_ROOTS+=(tests); fi
+          if (( ${#SOURCE_ROOTS[@]} == 0 )); then echo "::error::No Java source roots were found. Expected src/, test/, or tests/."; exit 1; fi
+          mapfile -d '' JAVA_FILES < <(find "${SOURCE_ROOTS[@]}" -type f -name '*.java' -print0)
+          if (( ${#JAVA_FILES[@]} == 0 )); then echo "::error::No Java source files were found."; exit 1; fi
+          REPOSITORY_JARS=()
+          if [[ -d lib ]]; then mapfile -d '' REPOSITORY_JARS < <(find lib -type f -name '*.jar' -print0); fi
+          CLASSPATH_PARTS=("$TOOLS_DIR/junit-platform-console-standalone.jar" "$TOOLS_DIR/mockito-core.jar" "$TOOLS_DIR/byte-buddy.jar" "$TOOLS_DIR/byte-buddy-agent.jar" "$TOOLS_DIR/objenesis.jar" "${REPOSITORY_JARS[@]}")
+          CLASSPATH=$(IFS=:; echo "${CLASSPATH_PARTS[*]}")
+          rm -rf "$BUILD_DIR"
+          mkdir -p "$BUILD_DIR"
+          JAVAFX_COMPILE_ARGS=()
+          if [[ "$GRAIDER_JAVAFX_REQUIRED" == true ]]; then
+            JAVAFX_COMPILE_ARGS=(--module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)
+          fi
+          javac "${JAVAFX_COMPILE_ARGS[@]}" -cp "$CLASSPATH" -d "$BUILD_DIR" "${JAVA_FILES[@]}"
+
+      - name: Stage FXML resources
+        id: fxml
+        if: steps.compile.outcome == 'success' && env.GRAIDER_JAVAFX_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d src ]]; then
+            while IFS= read -r -d '' fxml_file; do
+              relative_path="${fxml_file#src/}"
+              destination="$BUILD_DIR/$relative_path"
+              mkdir -p "$(dirname "$destination")"
+              cp "$fxml_file" "$destination"
+              echo "Staged FXML resource: $fxml_file -> $destination"
+            done < <(find src -type f -name '*.fxml' -print0)
+          fi
+
+      - name: Unit Tests
+        id: unittests
+        if: always() && steps.compile.outcome == 'success' && (env.GRAIDER_JAVAFX_REQUIRED != 'true' || steps.fxml.outcome == 'success')
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR/junit"
+          REPOSITORY_JARS=()
+          if [[ -d lib ]]; then mapfile -d '' REPOSITORY_JARS < <(find lib -type f -name '*.jar' -print0); fi
+          TEST_CLASSPATH_PARTS=("$BUILD_DIR" "$TOOLS_DIR/mockito-core.jar" "$TOOLS_DIR/byte-buddy.jar" "$TOOLS_DIR/byte-buddy-agent.jar" "$TOOLS_DIR/objenesis.jar" "${REPOSITORY_JARS[@]}")
+          TEST_CLASSPATH=$(IFS=:; echo "${TEST_CLASSPATH_PARTS[*]}")
+          TAG_ARGS=()
+          JUNIT_TAGS_PRESENT=false
+          while IFS= read -r -d '' class_file; do
+            if [[ "$JUNIT_TAGS_PRESENT" == false ]] && grep -a -q -E 'org/junit/jupiter/api/Tag(s)?' "$class_file"; then
+              JUNIT_TAGS_PRESENT=true
+            fi
+          done < <(find "$BUILD_DIR" -type f -name '*.class' -print0)
+          if [[ "$JUNIT_TAGS_PRESENT" == true ]]; then
+            COMMIT_MSG=$(git log -1 --pretty=%s "$EFFECTIVE_SUBMISSION_SHA")
+            case "$COMMIT_MSG" in
+              COMMIT[0-9]*|DONE[0-9]*) TAG="${COMMIT_MSG%% *}"; TAG_ARGS=(--include-tag "$TAG");;
+            esac
+          fi
+          JUNIT_COMMAND=(java)
+          JAVAFX_RUNTIME_ARGS=()
+          if [[ "$GRAIDER_JAVAFX_REQUIRED" == true ]]; then
+            JUNIT_COMMAND=(xvfb-run -a -s "-screen 0 1280x1024x24" java)
+            JAVAFX_RUNTIME_ARGS=(-Dprism.order=sw --module-path "$JAVAFX_LIB" --add-modules javafx.controls,javafx.fxml,javafx.swing)
+          fi
+          "${JUNIT_COMMAND[@]}" "${JAVAFX_RUNTIME_ARGS[@]}" -jar "$TOOLS_DIR/junit-platform-console-standalone.jar" execute "${TAG_ARGS[@]}" --scan-class-path --class-path "$TEST_CLASSPATH" --reports-dir "$EVIDENCE_DIR/junit" --fail-if-no-tests
+
+      - name: Write Graider grading result and evidence metadata
+        if: always()
+        shell: bash
+        env:
+          CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}
+          COMPILE_OUTCOME: ${{ steps.compile.outcome }}
+          UNIT_TESTS_OUTCOME: ${{ steps.unittests.outcome }}
+          SUBMISSION_COMMIT_SHA: ${{ env.EFFECTIVE_SUBMISSION_SHA }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          RESULT_OUTPUT_PATH: graider-output/grading-results.json
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUTPUT_DIR" "$EVIDENCE_DIR"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          VALID_EVIDENCE_OUTCOMES = {"success", "failure", "skipped"}
+          def evidence_outcome(name):
+              value = os.environ.get(name, "").strip().lower()
+              if value == "cancelled": return "failure"
+              return value if value in VALID_EVIDENCE_OUTCOMES else "failure"
+          checkstyle = evidence_outcome("CHECKSTYLE_OUTCOME")
+          compile_result = evidence_outcome("COMPILE_OUTCOME")
+          junit = evidence_outcome("UNIT_TESTS_OUTCOME")
+          checkstyle_status = "passed" if checkstyle == "success" else "failed"
+          unit_tests_status = "passed" if compile_result == "success" and junit == "success" else "failed"
+          overall_status = "passed" if checkstyle_status == "passed" and unit_tests_status == "passed" else "failed"
+          grading_result = {"schema_version": 1, "status": overall_status, "checks": [{"name": "CheckStyle", "status": checkstyle_status}, {"name": "Unit Tests", "status": unit_tests_status}]}
+          metadata = {"schemaVersion": 1, "submissionCommitSha": os.environ["SUBMISSION_COMMIT_SHA"], "workflowRunId": os.environ["WORKFLOW_RUN_ID"], "workflowRunAttempt": os.environ["WORKFLOW_RUN_ATTEMPT"], "compile": {"outcome": compile_result}, "junit": {"outcome": junit}, "checkstyle": {"outcome": checkstyle}}
+          output_path = Path(os.environ["RESULT_OUTPUT_PATH"])
+          output_path.parent.mkdir(parents=True, exist_ok=True)
+          output_path.write_text(json.dumps(grading_result, indent=2) + "\n", encoding="utf-8")
+          evidence_path = Path(os.environ["EVIDENCE_DIR"]) / "metadata.json"
+          evidence_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload Graider grading result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grading-results
+          path: |
+            graider-output/grading-results.json
+            grading-evidence/
+          if-no-files-found: error

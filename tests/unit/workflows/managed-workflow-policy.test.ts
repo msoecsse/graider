@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { RawCourseConfig } from "../../../src/config/config-models.js";
 import {
@@ -19,10 +20,16 @@ const grading = {
 
 const canonicalWorkflow = (): string => renderJavaJunitCheckstyleWorkflow({ grading });
 
+const previousCanonicalV1 = fs.readFileSync(
+  "tests/fixtures/workflows/java-junit-checkstyle-before-final-status.yml",
+  "utf8"
+);
+
 describe("managed workflow policy", () => {
   it("adds one stable, versioned ownership marker to deterministic canonical output", () => {
     const workflow = canonicalWorkflow();
 
+    expect(GRAIDER_MANAGED_WORKFLOW_VERSION).toBe(1);
     expect(workflow).toBe(canonicalWorkflow());
     expect(workflow.split(GRAIDER_MANAGED_WORKFLOW_MARKER)).toHaveLength(2);
     expect(workflow).toContain(
@@ -52,12 +59,11 @@ describe("managed workflow policy", () => {
 
   it("classifies changed canonical v1 content as safely replaceable", () => {
     const canonical = canonicalWorkflow();
-    const earlierManagedWorkflow = canonical.replace(
-      "      - name: Detect JavaFX requirements\n",
-      "      - name: Legacy always-on JavaFX setup\n"
-    );
+    const earlierManagedWorkflow = previousCanonicalV1;
 
     expect(earlierManagedWorkflow).not.toBe(canonical);
+    expect(earlierManagedWorkflow).not.toContain("Set final grading status");
+    expect(canonical.startsWith(earlierManagedWorkflow)).toBe(true);
     expect(earlierManagedWorkflow).toContain("# graider-workflow-version: 1");
     expect(classifyManagedWorkflow(earlierManagedWorkflow, canonical)).toEqual({
       classification: "managed_outdated",

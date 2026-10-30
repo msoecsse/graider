@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { EffectiveAssignmentGrading } from "../../../src/config/effective-grading.js";
 import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
@@ -6,6 +7,7 @@ import { renderJavaJunitCheckstyleWorkflow } from "../../../src/workflows/java-j
 import {
   isManualManagedGradingWorkflowEligible,
   manuallyInstallManagedGradingWorkflow,
+  previewManualManagedGradingWorkflowInstallation,
   manuallyInstallAndDispatchManagedGradingWorkflow
 } from "../../../src/workflows/manual-managed-grading-workflow.js";
 import {
@@ -72,6 +74,10 @@ const clientWithWorkflow = (content: string) =>
       }
     ]
   });
+
+const previousCanonicalV1 = fs
+  .readFileSync("tests/fixtures/workflows/java-junit-checkstyle-before-final-status.yml", "utf8")
+  .replaceAll("graider-output/grading-results.json", "graider-output/results.json");
 
 describe("manual managed grading workflow installation", () => {
   it("installs only: it creates the canonical file and never dispatches", async () => {
@@ -205,15 +211,22 @@ describe("manual managed grading workflow installation", () => {
   });
 
   it("replaces recognized outdated managed workflows and dispatches them", async () => {
-    const client = clientWithWorkflow(
-      `${GRAIDER_MANAGED_WORKFLOW_MARKER}\n# graider-workflow-version: 1\nname: Older\n`
-    );
+    const client = clientWithWorkflow(previousCanonicalV1);
+    const preview = await previewManualManagedGradingWorkflowInstallation({
+      githubClient: client,
+      repository: { owner: OWNER, name: REPOSITORY_NAME, defaultBranch: DEFAULT_BRANCH },
+      grading
+    });
+    expect(preview).toMatchObject({ classification: "outdated", action: "replace" });
+    expect(client.mutations.fileWrites).toEqual([]);
 
     await expect(run(client)).resolves.toMatchObject({
       workflow: { status: "replaced_managed", commitSha: FIRST_GENERATED_COMMIT_SHA },
       dispatch: { status: "dispatched" }
     });
-    expect(client.mutations.fileWrites).toHaveLength(1);
+    expect(client.mutations.fileWrites).toEqual([
+      expect.objectContaining({ content: canonicalContent })
+    ]);
     expect(client.mutations.workflowDispatches).toHaveLength(1);
   });
 

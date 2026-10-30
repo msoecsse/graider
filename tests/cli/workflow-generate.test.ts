@@ -2,11 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseDocument } from "yaml";
+import { parse, parseDocument } from "yaml";
 import { runWorkflowGenerateCommand } from "../../src/cli/commands/workflow.command.js";
 import { formatCommandResultAsJson, formatCommandResultAsText } from "../../src/cli/output.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { ExitCode } from "../../src/core/exit-codes.js";
+
+const FINAL_GRADING_STEP_COUNT = 3;
 
 const FIXTURE_ROOT = path.resolve("tests/fixtures/config");
 const TEMP_FIXTURE_PREFIX = "graider-workflow-generate-";
@@ -144,91 +146,34 @@ describe("graider workflow generate command", () => {
     expect(workflow).toContain(
       "org/junit/platform/junit-platform-console-standalone/${JUNIT_PLATFORM_CONSOLE_VERSION}"
     );
-    expect(workflow).toContain(
-      "com/puppycrawl/tools/checkstyle/${CHECKSTYLE_VERSION}/checkstyle-${CHECKSTYLE_VERSION}-all.jar"
-    );
-    expect(workflow).toContain('"$TOOLS_DIR/junit-platform-console-standalone.jar"');
-    expect(workflow).toContain('"$TOOLS_DIR/checkstyle.jar"');
-    expect(workflow).not.toContain("junit-platform-console-standalone-6.1.0.jar");
-    expect(workflow).not.toContain("checkstyle-13.4.1-all.jar");
-    expect(workflow).toContain("  push:");
-    expect(workflow).toContain("    paths-ignore:");
-    expect(workflow).toContain("      - .github/workflows/grade.yml");
-    expect(workflow).not.toContain(".github/**");
-    expect(workflow).not.toContain("repository_dispatch");
-    expect(workflow).toContain("  workflow_dispatch:");
-    expect(workflow).toContain(".graider/write-grading-result.py");
-    expect(workflow).toContain("python3 .graider/write-grading-result.py");
-    expect(workflow).toContain(
-      "CHECKSTYLE_CLASSROOM_RESULT: ${{ steps.checkstyle.outputs.result }}"
-    );
-    expect(workflow).toContain(
-      "UNIT_TESTS_CLASSROOM_RESULT: ${{ steps.unit-tests.outputs.result }}"
-    );
-    expect(workflow).toContain("CHECKSTYLE_OUTCOME: ${{ steps.checkstyle.outcome }}");
-    expect(workflow).toContain("UNIT_TESTS_OUTCOME: ${{ steps.unit-tests.outcome }}");
-    expect(workflow).toContain(
-      '--classroom-check "CheckStyle=CHECKSTYLE_CLASSROOM_RESULT:CHECKSTYLE_OUTCOME"'
-    );
-    expect(workflow).toContain(
-      '--classroom-check "Unit Tests=UNIT_TESTS_CLASSROOM_RESULT:UNIT_TESTS_OUTCOME"'
-    );
-    expect(workflow).toContain("name: grading-results");
-    expect(workflow).toContain('java -jar "$TOOLS_DIR/checkstyle.jar" -c "$CHECKSTYLE_CONFIG_URL"');
-    expect(workflow).toContain("COMMIT_MSG='${{ github.event.head_commit.message }}'");
-    expect(workflow).toContain("COMMIT[0-9]*|DONE[0-9]*)");
-    expect(workflow).toContain('TAG="${COMMIT_MSG%% *}"');
-    expect(workflow).toContain('TAG_ARGS="--include-tag $TAG"');
-    expect(workflow).toContain('TAG_ARGS=""');
-    expect(workflow).toContain("$TAG_ARGS --scan-class-path --class-path bin");
-    expect(workflow).toContain("--reports-dir grading-evidence/junit");
-    expect(workflow).toContain("-f xml -o grading-evidence/checkstyle.xml");
-    expect(workflow).toContain("--evidence-metadata-output grading-evidence/metadata.json");
-    expect(workflow).toContain("SUBMISSION_COMMIT_SHA: ${{ github.sha }}");
-    expect(workflow).toContain("WORKFLOW_RUN_ID: ${{ github.run_id }}");
-    expect(workflow).toContain("WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}");
-    expect(workflow).toContain("COMPILE_OUTCOME: ${{ steps.compile.outcome }}");
-    expect(workflow).toContain('--evidence-outcome "junit=${UNIT_TESTS_OUTCOME}"');
-    expect(workflow).toContain("if: always()");
-    expect(workflow).toContain("continue-on-error: true");
-    expect(workflow).toContain("path: |");
-    expect(workflow).toContain("  graider-output/grading-results.json");
-    expect(workflow).toContain("  grading-evidence/");
-    expect(workflow).not.toContain("path: .");
-    expect(workflow).toContain("schema_version");
-    expect(workflow).toContain("steps.checkstyle.outcome");
-    expect(workflow).toContain("steps.unit-tests.outcome");
-    expect(workflow).toContain('STATUS_PASSED = "passed"');
-    expect(workflow).toContain('STATUS_FAILED = "failed"');
-    expect(workflow).toContain('STATUS_SKIPPED = "skipped"');
-    expect(workflow).toContain('"success": STATUS_PASSED');
-    expect(workflow).toContain('"failure": STATUS_FAILED');
-    expect(workflow).toContain('"cancelled": STATUS_FAILED');
-    expect(workflow).toContain('"skipped": STATUS_SKIPPED');
-    expect(workflow).toContain("decode_classroom_result");
-    expect(workflow).toContain("status_from_classroom_or_outcome");
-    expect(workflow).toContain("classroom-resources/autograding-command-grader@v1");
-    expect(workflow).toContain("classroom-resources/autograding-grading-reporter@v1");
-    expect(workflow).toContain("CHECKSTYLE_RESULTS: ${{ steps.checkstyle.outputs.result }}");
-    expect(workflow).toContain("UNIT-TESTS_RESULTS: ${{ steps.unit-tests.outputs.result }}");
-    expect(workflow).toContain("runners: checkstyle,unit-tests");
-    expect(workflow).not.toContain("education/autograding@v1");
-    expect(workflow).toContain("$(find src -name '*.java' -print)");
-    const compileStep = workflow.slice(
-      workflow.indexOf("      - name: Compile Java sources"),
-      workflow.indexOf("      - name: Unit Tests")
-    );
-    expect(compileStep).toContain("-d bin $(find src test -name '*.java' -print)");
-    expect(compileStep).not.toContain("continue-on-error");
-    expect(workflow).not.toContain("actions/github-script");
-    expect(workflow).not.toContain('--check "CheckStyle=${{ steps.checkstyle.outputs.result }}"');
-    expect(workflow).not.toContain('--check "Unit Tests=${{ steps.unit-tests.outputs.result }}"');
-    expect(workflow).not.toContain('--check "CheckStyle=${{ steps.checkstyle.outcome }}"');
-    expect(workflow).not.toContain('--check "Unit Tests=${{ steps.unit-tests.outcome }}"');
-    expect(workflow).not.toContain('"status": "${{ steps.checkstyle.outputs.result }}"');
-    expect(workflow).not.toContain('"status": "${{ steps.unit-tests.outputs.result }}"');
-    expect(workflow).not.toContain('"status": "${{ steps.checkstyle.outcome }}"');
-    expect(workflow).not.toContain('"status": "${{ steps.unit-tests.outcome }}"');
+    const document = parse(workflow) as { jobs: Record<string, { steps: unknown }> };
+    const steps = document.jobs["run-autograding-tests"]?.steps as Array<{
+      name: string;
+      if?: string;
+      "continue-on-error"?: boolean;
+      env?: Record<string, string>;
+      run?: string;
+    }>;
+    for (const name of ["CheckStyle", "Compile Java sources", "Unit Tests"]) {
+      expect(steps.find((step) => step.name === name)?.["continue-on-error"]).toBe(true);
+    }
+    const finalSteps = steps.slice(-FINAL_GRADING_STEP_COUNT);
+    expect(finalSteps.map((step) => step.name)).toEqual([
+      "Write Graider grading result and evidence metadata",
+      "Upload Graider grading result",
+      "Set final grading status"
+    ]);
+    expect(finalSteps.map((step) => step.if)).toEqual(["always()", "always()", "always()"]);
+    expect(finalSteps[0]?.env).toMatchObject({
+      CHECKSTYLE_OUTCOME: "${{ steps.checkstyle.outcome }}",
+      COMPILE_OUTCOME: "${{ steps.compile.outcome }}",
+      UNIT_TESTS_OUTCOME: "${{ steps.unittests.outcome }}"
+    });
+    expect(finalSteps[2]?.env?.RESULT_OUTPUT_PATH).toBe("graider-output/grading-results.json");
+    expect(finalSteps[2]?.run).toContain('os.environ["RESULT_OUTPUT_PATH"]');
+    expect(finalSteps[2]?.run).not.toContain("steps.");
+    expect(workflow).not.toContain("classroom-resources/");
+    expect(workflow).not.toContain(".conclusion");
     expect(workflow).not.toContain("faculty-summary");
     expect(workflow).not.toContain("GRAIDER_GITHUB_TOKEN");
   });

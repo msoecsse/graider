@@ -1,10 +1,12 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { renderJavaJunitCheckstyleWorkflow } from "../../../src/workflows/java-junit-checkstyle-workflow.js";
+
+const FINAL_GRADING_STEP_COUNT = 3;
 
 const grading = {
   enabled: true,
@@ -19,6 +21,8 @@ interface GeneratedWorkflowStep {
   readonly name?: string;
   readonly if?: string;
   readonly run?: string;
+  readonly env?: Readonly<Record<string, string>>;
+  readonly "continue-on-error"?: boolean;
 }
 
 interface GeneratedWorkflowDocument {
@@ -142,6 +146,114 @@ describe("java-junit-checkstyle workflow", () => {
     expect(workflow).toContain("uses: actions/upload-artifact@v4");
     expect(workflow).toContain("if: always()");
     expect(workflow).not.toContain("repository_dispatch");
+  });
+
+  it("uploads evidence before the unconditional final result gate", () => {
+    const workflow = renderJavaJunitCheckstyleWorkflow({ grading });
+    const steps = workflowDocument(workflow).jobs["run-autograding-tests"].steps;
+    for (const name of ["CheckStyle", "Compile Java sources", "Unit Tests"]) {
+      expect(workflowStep(workflow, name)["continue-on-error"]).toBe(true);
+    }
+    const writer = workflowStep(workflow, "Write Graider grading result and evidence metadata");
+    const upload = workflowStep(workflow, "Upload Graider grading result");
+    const gate = workflowStep(workflow, "Set final grading status");
+    expect(writer.if).toBe("always()");
+    expect(upload.if).toBe("always()");
+    expect(gate.if).toBe("always()");
+    expect(steps.slice(-FINAL_GRADING_STEP_COUNT)).toEqual([writer, upload, gate]);
+    expect(gate.env?.RESULT_OUTPUT_PATH).toBe(writer.env?.RESULT_OUTPUT_PATH);
+    expect(gate.run).toContain('os.environ["RESULT_OUTPUT_PATH"]');
+    expect(gate.run).not.toMatch(/steps\.|CHECKSTYLE_OUTCOME|COMPILE_OUTCOME|UNIT_TESTS_OUTCOME/);
+    expect(writer.env).toMatchObject({
+      CHECKSTYLE_OUTCOME: "${{ steps.checkstyle.outcome }}",
+      COMPILE_OUTCOME: "${{ steps.compile.outcome }}",
+      UNIT_TESTS_OUTCOME: "${{ steps.unittests.outcome }}"
+    });
+    expect(workflow).not.toContain(".conclusion");
+  });
+
+  it.each([
+    ["passed", '{"schema_version":1,"status":"passed"}', true],
+    ["failed", '{"schema_version":1,"status":"failed"}', false],
+    ["missing", undefined, false],
+    ["empty", "", false],
+    ["malformed", "{", false],
+    ["array", "[]", false],
+    ["null", "null", false],
+    ["scalar", '"passed"', false],
+    ["missing status", '{"schema_version":1}', false],
+    ["unsupported status", '{"schema_version":1,"status":"skipped"}', false],
+    ["wrong status type", '{"schema_version":1,"status":[]}', false],
+    ["missing version", '{"status":"passed"}', false],
+    ["future version", '{"schema_version":2,"status":"passed"}', false],
+    ["boolean version", '{"schema_version":true,"status":"passed"}', false]
+  ])("gates a %s result safely", (_name, content, succeeds) => {
+    const workflow = renderJavaJunitCheckstyleWorkflow({
+      grading: { ...grading, result_file: "custom output/result.json" }
+    });
+    const repository = createTemporaryRepository();
+    const gate = workflowStep(workflow, "Set final grading status");
+    const resultPath = gate.env?.RESULT_OUTPUT_PATH ?? "";
+    if (content !== undefined) writeRepositoryFile(repository, resultPath, content);
+    const execution = spawnSync("bash", ["-e", "-o", "pipefail", "-c", gate.run ?? ""], {
+      cwd: repository,
+      env: { ...process.env, ...gate.env },
+      encoding: "utf8"
+    });
+    expect(execution.error).toBeUndefined();
+    expect(execution.status).toBe(succeeds ? 0 : 1);
+    if (!succeeds) expect(execution.stdout).toContain("::error::");
+    expect(execution.stderr).toBe("");
+  });
+
+  it.each([
+    ["success", "success", "success", "passed"],
+    ["failure", "success", "success", "failed"],
+    ["success", "failure", "skipped", "failed"],
+    ["success", "success", "failure", "failed"],
+    ["failure", "failure", "failure", "failed"]
+  ])("records and gates outcomes %s/%s/%s as %s", (checkstyle, compile, junit, status) => {
+    const workflow = renderJavaJunitCheckstyleWorkflow({ grading });
+    const repository = createTemporaryRepository();
+    const writer = workflowStep(workflow, "Write Graider grading result and evidence metadata");
+    const gate = workflowStep(workflow, "Set final grading status");
+    const resultPath = writer.env?.RESULT_OUTPUT_PATH ?? "";
+    const environment = {
+      CHECKSTYLE_OUTCOME: checkstyle,
+      COMPILE_OUTCOME: compile,
+      UNIT_TESTS_OUTCOME: junit,
+      SUBMISSION_COMMIT_SHA: "submission-sha",
+      WORKFLOW_RUN_ID: "123",
+      WORKFLOW_RUN_ATTEMPT: "1",
+      RESULT_OUTPUT_PATH: resultPath,
+      OUTPUT_DIR: path.join(repository, "graider-output"),
+      EVIDENCE_DIR: path.join(repository, "grading-evidence")
+    };
+    runBashStep(writer.run ?? "", repository, environment);
+    expect(JSON.parse(fs.readFileSync(path.join(repository, resultPath), "utf8"))).toMatchObject({
+      schema_version: 1,
+      status,
+      checks: [
+        { name: "CheckStyle", status: checkstyle === "success" ? "passed" : "failed" },
+        {
+          name: "Unit Tests",
+          status: compile === "success" && junit === "success" ? "passed" : "failed"
+        }
+      ]
+    });
+    expect(
+      JSON.parse(fs.readFileSync(path.join(environment.EVIDENCE_DIR, "metadata.json"), "utf8"))
+    ).toMatchObject({
+      compile: { outcome: compile },
+      junit: { outcome: junit },
+      checkstyle: { outcome: checkstyle }
+    });
+    const execution = spawnSync("bash", ["-c", gate.run ?? ""], {
+      cwd: repository,
+      env: { ...process.env, ...gate.env },
+      encoding: "utf8"
+    });
+    expect(execution.status).toBe(status === "passed" ? 0 : 1);
   });
 
   it("makes every JavaFX-specific setup and execution path conditional", () => {

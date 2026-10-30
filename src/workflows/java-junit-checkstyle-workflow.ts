@@ -329,6 +329,33 @@ jobs:
             __RESULT_PATH__
             grading-evidence/
           if-no-files-found: error
+
+      - name: Set final grading status
+        if: always()
+        shell: bash
+        env:
+          RESULT_OUTPUT_PATH: __RESULT_PATH__
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          EXPECTED_SCHEMA_VERSION = 1
+          FAILURE_EXIT_STATUS = 1
+          try:
+              result = json.loads(Path(os.environ["RESULT_OUTPUT_PATH"]).read_text(encoding="utf-8"))
+          except (OSError, UnicodeError, ValueError):
+              print("::error::Graider grading result is missing or invalid.")
+              sys.exit(FAILURE_EXIT_STATUS)
+          if not isinstance(result, dict) or type(result.get("schema_version")) is not int or result.get("schema_version") != EXPECTED_SCHEMA_VERSION or result.get("status") not in ("passed", "failed"):
+              print("::error::Graider grading result has an unsupported structure or status.")
+              sys.exit(FAILURE_EXIT_STATUS)
+          if result["status"] != "passed":
+              print("::error::Autograding checks failed. See the CheckStyle and Unit Tests results above.")
+              sys.exit(FAILURE_EXIT_STATUS)
+          PY
 `;
 
   return [...renderManagedWorkflowMarker(), workflow]

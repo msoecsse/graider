@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { FakeGitHubClient } from "../../../src/github/fake-github-client.js";
 import { GitHubClientError } from "../../../src/github/github-errors.js";
@@ -45,6 +46,10 @@ const ensure = (client: FakeGitHubClient) =>
     defaultBranch: DEFAULT_BRANCH,
     grading
   });
+
+const previousCanonicalV1 = fs
+  .readFileSync("tests/fixtures/workflows/java-junit-checkstyle-before-final-status.yml", "utf8")
+  .replaceAll("graider-output/grading-results.json", "graider-output/results.json");
 
 describe("managed workflow deployment", () => {
   it("keeps Apply eligibility strict and does not treat the legacy default as a managed preset", () => {
@@ -96,10 +101,6 @@ describe("managed workflow deployment", () => {
   });
 
   it("updates changed canonical content that retains ownership version 1", async () => {
-    const previousCanonicalV1 = canonicalContent.replace(
-      "      - name: Detect JavaFX requirements\n",
-      "      - name: Legacy always-on JavaFX setup\n"
-    );
     const client = new FakeGitHubClient({
       repositories: [repository],
       repositoryFiles: [
