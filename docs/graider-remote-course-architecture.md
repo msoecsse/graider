@@ -579,6 +579,111 @@ If a faculty member has not yet accepted the organization invitation:
 - Graider completes team membership after invitation acceptance;
 - affected workflows clearly show that faculty access is incomplete.
 
+### 11.5 Managed-team identity contract (Slice 7.1)
+
+Slice 7.1 implements a pure identity subsystem in `src/github/managed-team-identity.ts`.
+It performs no GitHub mutations and is not wired into production v1 behavior.
+Team ownership must **never** be inferred from a human-readable name or slug.
+
+The seven logical kinds align with Phase 6's independent coordinator, section-faculty
+and course-administration concepts:
+
+| Kind                          | Required scope          | Meaning                                    |
+| ----------------------------- | ----------------------- | ------------------------------------------ |
+| `course-read`                 | course repository       | Course-wide faculty read team              |
+| `course-write`                | course repository       | Course-wide faculty write team             |
+| `course-current-coordinators` | course repository       | Course-wide current-coordinator/admin team |
+| `term-current-coordinators`   | course + term           | Current coordinators for one term          |
+| `term-former-coordinators`    | course + term           | Former coordinators for one term           |
+| `section-current-faculty`     | course + term + section | Current faculty for one section            |
+| `section-former-faculty`      | course + term + section | Former faculty for one section             |
+
+These identify roles/scopes only. They do not compute membership, map the fallback
+administrator to a team, or calculate strongest effective repository permissions.
+`AuthorizationResolver`, `TermCoordinators`, `SectionFaculty` and fallback-administrator
+policy remain independent; membership and permission calculation belong to later slices.
+
+#### Metadata representation and versioning
+
+The [GitHub Teams REST API](https://docs.github.com/en/rest/teams/teams#get-a-team-by-name)
+exposes numeric team ID, description, current name and slug, and supports descriptions
+as a team field. Graider reserves the **entire description** for one compact marker:
+
+```text
+graider-team:v1:{"courseRepositoryId":1342086585,"kind":"section-current-faculty","termCode":"27s1","sectionId":"001"}
+```
+
+`graider-team:` explicitly identifies the Graider ownership namespace; `v1` is metadata
+version 1, independent of course/term YAML schema versions. The payload is canonical
+compact JSON in exactly this order: `courseRepositoryId`, `kind`, then `termCode` and
+`sectionId` only where applicable. JSON escaping preserves opaque section IDs without
+delimiter collisions. This representation is deterministic and is also the logical
+identity key; property order in caller input does not affect rendering.
+
+`createManagedTeamIdentity` strictly validates shape and returns an immutable snapshot.
+Repository IDs must be positive safe integers. Course kinds reject all term/section
+fields. Term kinds require a valid `YYsN` term code using the existing `TERM_CODE_PATTERN`
+(semesters 1–3) and reject section fields. Section kinds require both term and section;
+section IDs use the existing term schema's nonempty string definition without numeric
+coercion, case folding or trimming. `001` remains distinct from `1`. Unknown kinds or
+extra fields are rejected rather than stripped.
+
+`renderManagedTeamMetadata` and `parseManagedTeamMetadata` are the sole serialization
+boundary. The parser accepts only the exact canonical v1 representation. Duplicate
+JSON keys, additional text, multiple markers, invalid scope, extra fields, whitespace
+changes or reordered fields fail closed as `malformed_metadata`. An unknown positive
+version is `unsupported_metadata_version`; its payload stays opaque and never receives
+v1 semantics. Descriptions without the reserved marker namespace are `unmanaged`.
+Invalid or unsupported metadata never establishes ownership or permission to modify.
+
+#### Course isolation, concrete identity and conflicts
+
+`courseRepositoryId` is the immutable GitHub **course/admin repository ID** supplied
+by trusted outer course context (for example, Phase 2 discovery). Current v2 YAML does
+not persist this ID, and this slice adds no YAML field or guessed identity. Organization
+login, repository name, course code and local/managed paths are display/locator data.
+Repository and organization renames do not create a new logical team identity.
+
+`classifyManagedTeam(team, selectedCourseRepositoryId)` distinguishes `managed_for_course`
+from `managed_for_other_course`, `unmanaged`, `malformed_metadata`,
+`unsupported_metadata_version` and `invalid_team_resource`. Selected-course context
+must itself be a valid repository ID. A marker for repository 111 cannot authorize
+operations for repository 222, even when names and role/scope match. Recognized teams
+retain an immutable `ObservedManagedTeam` snapshot containing logical `identity` and
+the concrete `team` resource with its required positive safe-integer GitHub numeric ID.
+Legacy read clients may omit ID, but such a resource cannot be recognized as manageable.
+
+For a team with numeric ID 12345, changing name from `27s1-section-001-faculty` to
+`CSC1020 Section 001 Faculty` and changing its slug leaves both logical identity and
+concrete resource identity unchanged when metadata stays intact. Names and slugs are
+locators only. A different numeric team ID is a different remote resource even if its
+description claims the same logical role. Rename reconciliation is deferred.
+
+`findDuplicateManagedTeams` inspects selected-course claims and returns immutable
+conflict information with `status: needs_attention`,
+`reason: duplicate_managed_team_identity`, logical identity and **every distinct
+claiming resource**. Repeated observations of the same numeric team ID do not create
+a duplicate. Different kinds, terms, sections and courses remain distinct; another
+course's teams never enter the selected-course conflict groups. No winner, deletion,
+merge or rename is inferred. Classification alone is neither mutation authorization
+nor proof of uniqueness: future reconciliation must inspect the complete visible
+inventory, stop on conflicts and enforce outer authenticated course/organization
+authority. The description marker is an ownership declaration, not a cryptographic
+proof against someone who already has permission to edit team descriptions.
+
+The existing `GitHubTeam` read model gained optional nullable `description`; Octokit
+projects it alongside existing ID/name/slug/org. ID remains optional for compatibility
+with old v1 readers, while managed classification requires it. No new team discovery
+or mutation endpoint was added. Legacy Schema-v1 `faculty_team` names, retained grader
+evidence from 6.6 and unrelated teams without valid metadata remain unmanaged, even
+when their names look generated. Explicit migration/adoption belongs to Phase 9.
+
+Both `OPERATIONAL_COURSE_SCHEMA_VERSION` and `OPERATIONAL_TERM_SCHEMA_VERSION` remain
+**1**. Existing v1 faculty-team handling is unchanged. No team creation, deletion,
+rename, membership reconciliation, invitations, permission reconciliation, branch
+rules or production-v2 activation occurs. Next: **7.2 — Faculty Organization Invitation**;
+7.3 will calculate membership and 7.4/7.5 will reconcile permissions.
+
 ---
 
 ## 12. Course Creation

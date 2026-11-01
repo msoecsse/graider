@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phase 6 is complete. Next: **Phase 7 — GitHub Desired-State Permission Model**.
+Phase 6 is complete. Phase 7 has begun; next: **7.2 — Faculty Organization Invitation**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -429,17 +429,35 @@ scheduled for **Phase 9.4**. See the
 
 # Phase 7 — GitHub Desired-State Permission Model
 
-## Slice 7.1 — Managed team identities
+## Slice 7.1 — Managed team identities (complete)
 
-Define stable managed-team metadata for:
+The pure desired-state identity model defines seven kinds:
 
-- course read;
-- course write;
-- current coordinators;
-- term current/former coordinators;
-- section current/former faculty.
+- `course-read`, `course-write`, `course-current-coordinators` (no term/section scope);
+- `term-current-coordinators`, `term-former-coordinators` (term required, section forbidden);
+- `section-current-faculty`, `section-former-faculty` (term and section required).
 
-Do not depend solely on human-readable team names to recognize managed teams.
+Ownership uses the entire GitHub team description: `graider-team:v1:` followed by
+canonical compact JSON with fixed field order `courseRepositoryId`, `kind`, optional
+`termCode`, optional `sectionId`. The immutable course/admin repository ID comes
+from trusted outer course context, not YAML or organization/repository/course names.
+One renderer/parser validates scopes, existing term-code rules and opaque nonempty
+term-model section IDs. Unsupported versions stay opaque; malformed/noncanonical
+metadata cannot establish ownership. Human-readable names/slugs never identify teams.
+
+Observed resources preserve numeric GitHub team IDs separately from logical identity;
+renames change locators only. Classification distinguishes this course from other
+courses and unmanaged teams, and fails closed for invalid concrete team IDs. Duplicate
+selected-course claims by distinct team IDs produce **Needs attention** conflicts
+containing all claiming resources, with no automatic winner or resolution. Legacy v1
+`faculty_team`, historical grader teams and similar names are never auto-adopted.
+
+Only the existing GitHub read projection gained description support; no live team,
+membership, invitation, permission or rename reconciliation runs. Both operational
+schema gates remain **1**, and production v1 faculty-team behavior is preserved.
+See [the full metadata contract](graider-remote-course-architecture.md#115-managed-team-identity-contract-slice-71).
+Next: **7.2 — Faculty Organization Invitation**; membership and effective permissions
+remain deferred to 7.3–7.5, with explicit legacy adoption in Phase 9.
 
 ## Slice 7.2 — Faculty organization invitation
 

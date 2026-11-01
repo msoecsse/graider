@@ -31,7 +31,9 @@ export interface GitHubTeam {
   org: string;
   slug: string;
   name: string;
+  /** Optional for legacy v1 fixtures/readers; managed recognition requires a valid numeric ID. */
   id?: number;
+  description?: string | null;
 }
 
 export type GitHubPermission = "none" | "pull" | "triage" | "push" | "maintain" | "admin";

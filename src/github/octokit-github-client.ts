@@ -442,6 +442,7 @@ export class OctokitGitHubClient implements GitHubClient {
       name: asString(record.name) ?? teamSlug,
       org,
       slug: asString(record.slug) ?? teamSlug,
+      description: asString(record.description) ?? null,
       ...(id === undefined ? {} : { id })
     };
   }

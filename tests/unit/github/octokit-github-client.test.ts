@@ -796,6 +796,32 @@ describe("OctokitGitHubClient", () => {
     await expect(client.getTeam(OWNER, TEAM_SLUG)).resolves.toBeNull();
   });
 
+  it.each([null, 'graider-team:v1:{"courseRepositoryId":202,"kind":"course-write"}'])(
+    "getTeam preserves numeric ID, current locators and description %s",
+    async (description) => {
+      const octokit = createMockOctokit();
+      let observedInput: Record<string, unknown> = {};
+      octokit.rest.teams.getByName = (input = {}) => {
+        observedInput = input;
+        return resolvedResponse({
+          id: OctokitTestNumber.TeamId,
+          name: "Renamed Faculty",
+          slug: "renamed-faculty",
+          description
+        });
+      };
+      const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+      await expect(client.getTeam(OWNER, TEAM_SLUG)).resolves.toEqual({
+        id: OctokitTestNumber.TeamId,
+        org: OWNER,
+        name: "Renamed Faculty",
+        slug: "renamed-faculty",
+        description
+      });
+      expect(observedInput).toEqual({ org: OWNER, team_slug: TEAM_SLUG });
+    }
+  );
+
   it("writeRepositoryFile base64 encodes content and includes existing SHA", async () => {
     const octokit = createMockOctokit();
     let observedContent = "";
