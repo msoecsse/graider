@@ -683,7 +683,7 @@ Both `OPERATIONAL_COURSE_SCHEMA_VERSION` and `OPERATIONAL_TERM_SCHEMA_VERSION` r
 rename, membership reconciliation, invitations, permission reconciliation, branch
 rules or production-v2 activation occurs in Slice 7.1. Slice 7.2 adds organization
 invitation infrastructure below; 7.3 adds team membership reconciliation, 7.4 course
-repository permissions, and 7.5 student-repository permissions remain deferred.
+repository permissions, and 7.5 student-repository permissions below. Branch rules remain deferred.
 
 ### 11.6 Faculty organization access contract (Slice 7.2)
 
@@ -1037,9 +1037,141 @@ Both operational schema gates remain **1**. Production v1 faculty-team Apply han
 is unchanged. No student-repository permissions, branch rules, invitations, organization
 removal, team mutation/adoption, migration or term lifecycle is implemented here.
 
-Next: **7.5 — Student Repository Permissions**. Reuse canonical repository identity,
-7.3 verified scoped membership and exact permission verification; preserve incomplete
+Slice **7.5 — Student Repository Permissions** below reuses canonical repository identity,
+7.3 verified scoped membership and exact permission verification, preserving incomplete
 access and unowned-grant boundaries rather than inferring authority from team names.
+
+### 11.9 Student/group repository permission contract (Slice 7.5)
+
+`StudentRepositoryPermissionReconciler` is backend-only Schema v2 desired-state
+infrastructure. Each repository requires a trusted immutable numeric GitHub repository
+ID and exact term/section ownership. Names, URLs, course codes, assignment patterns,
+local paths and renderer-provided section/team fields cannot establish that authority.
+
+`TrustedStudentRepositoryTarget` contains canonical course repository ID, immutable
+organization ID, student repository ID, term code, exact section ID, assignment slug,
+target ID, individual/group mode and complete trusted section evidence (`sectionIds`).
+Both individual and group evidence must identify exactly one section matching `sectionId`.
+Group membership/roster evidence must account for all members; groups spanning sections
+are Needs attention. Validation returns immutable snapshots and typed incomplete/failure
+results rather than guessing missing identity. Targets must name an existing exact
+term/section in the supplied v2 state and cannot identify the course/admin repository.
+
+The entire input batch is checked before remote work. Repeated repository IDs, conflicting
+ID→term/section/assignment/target mappings, and the same logical target mapped to different
+repository IDs are rejected for every affected row. An otherwise-invalid conflicting
+row cannot authorize a valid-looking row for the same ID. Independent valid targets
+continue. These checks validate consistency, not provenance: the future outer caller
+must establish trust in the source state before constructing this context.
+
+**Current persistence boundary:** individual Apply's `ManifestRepositoryIdentity.id`
+is populated from the observed GitHub repository in `apply-executor.ts`, and round-trips
+through the existing manifest loader/renderer. It is optional for old manifests, and
+the existing loader's numeric type is not itself sufficient: 7.5 requires a positive
+safe integer. `studentTargetsFromManifest` uses only explicit individual record ID,
+section, student/target identity and assignment term/slug, plus trusted course/org IDs.
+It never joins or resolves records by repository name/URL. The outer caller must
+verify manifest/source revision and course binding before using this adapter.
+
+Current `ApplyRepositoryTarget` and `ManifestRepositoryTarget` contain names and scope
+but no immutable repository ID. Group execution temporarily observes a `GitHubRepository`,
+but its result/checkpoint projection preserves target/name/URLs without that numeric ID.
+Therefore group manifests and ID-less legacy records yield typed
+`immutable_repository_id_required`, even when their names look correct. A trusted outer
+resolver must supply an explicitly verified ID and single-section mapping for those
+repositories. No manifest schema, group Apply projection or Phase 11 section-state
+migration is changed, and no production flow is wired to this adapter in this slice.
+
+For each trusted target, the exact four independent team grants are:
+
+| Team identity scoped to the target       | Exact permission |
+| ---------------------------------------- | ---------------- |
+| `term-current-coordinators` / term       | `admin`          |
+| `section-current-faculty` / term/section | `admin`          |
+| `term-former-coordinators` / term        | `pull`           |
+| `section-former-faculty` / term/section  | `pull`           |
+
+Current roles receive admin; former roles intentionally retain historical read access
+for grading/regrading. A current coordinator who is also former section faculty keeps
+both independent grants, and GitHub naturally supplies effective admin. No role sources
+are collapsed, and no Draft/Active/Archived filtering or other Phase 8 policy is invented.
+Course-wide teams and fallback-only administration never create a desired student
+grant. A fallback administrator with an independently relevant role receives that role's
+ordinary team access through 7.3. Desired permissions are only `admin`, `pull`, `none`;
+`push`, `maintain` and custom roles are never substitutes.
+
+7.4's canonical repository/session checks, complete repository-team pagination,
+numeric team verification and safe 7.3 outcome checks are shared through
+`RepositoryTeamPermissionBoundary`. Existing course/admin behavior is retained.
+For student work, both canonical course and target repositories are refreshed by ID;
+expected immutable organization ownership, current session/owner/repository admin
+authority and available GitHub capability must still hold. Transfer is a migration
+condition. Renames preserve identity and only update runtime API locators. Locator-based
+reads are bracketed by canonical re-resolution; names/slugs never authorize writes.
+
+Fresh read-only 7.3 `inspect()` outcomes prove logical identity, numeric team ID,
+uniqueness and membership. `up_to_date`/`reconciled` are safe. Safe Pending outcomes
+with no observed unauthorized extras may receive their exact grant; missing faculty
+gain access when 7.2/7.3 complete. Unknown or unsafe membership blocks changes for
+that team. Missing teams require explicit 7.3 reconciliation, with no creation or
+membership path in 7.5. Production composition must retain 7.3's durable unresolved-
+creation journal and shared serialization requirement.
+
+Missing/lower grants are added/upgraded, excessive grants are reduced exactly, and
+exact permissions cause no write. Permission is chosen from the exact four identities,
+never from team name or current member count. Complete association snapshots retain
+numeric team ID, current name/slug, canonical description, parent evidence and observed
+permission. Pagination remains bounded at 1000 pages of 100, with no supplied URLs
+followed. Incomplete, conflicting, custom-role or inherited-team evidence fails closed.
+
+Any other proven **selected-course** managed team directly associated with a student
+repository is undesired access: wrong section, wrong term, obsolete scoped identity or
+course-wide team. Cleanup first requires all four replacement desired grants to be exact,
+with verified safe 7.3 membership and a complete repository snapshot. **Pending alone
+does not prevent cleanup**: another section's access must not linger solely because
+correct faculty are awaiting organization access. An unsafe/missing desired dependency
+does block destructive cleanup, and ambiguous repository scope blocks every mutation.
+
+Before removal, read the complete organization team inventory, rule out duplicate
+logical ownership claims, and verify the exact numeric resource/7.1 marker/organization.
+This also permits removing a proven obsolete identity outside supplied term state
+without inventing its current membership or lifecycle policy. Parent/child ambiguity
+is not reconciled. Another course's association is surfaced as Needs attention and
+preserved; unmanaged, legacy faculty/grader and malformed/unsupported claims are never
+adopted or removed. Historical `pull` on either of the four desired teams remains desired.
+
+Students remain individual collaborators on their own individual/group repositories.
+No direct collaborator read/write/removal, student permission calculation or arbitrary
+collaborator sweep is introduced. Such grants lack Graider ownership metadata and
+remain untouched, as in 7.4. This slice manages only faculty team repository associations.
+
+Every write rechecks canonical repository/account/org identity, numeric team and marker,
+desired scope and the applicable dependency/cleanup proof. After PUT/DELETE, reread
+the canonical repository and complete associations and require the exact observed state.
+HTTP success is insufficient; a lost response recovers only if desired state is visible.
+Old/unknown state remains Needs attention, and a later explicit idempotent retry must
+start from fresh observed drift. There are no adapter-level blind retries or new creation
+paths. As in 7.4, GitHub has no atomic conditional write across all these resources;
+concurrent external changes may cause failure or unverified results.
+
+Results are per repository and per team, with repository ID, exact term/section/target,
+logical identity, numeric team ID when known, desired/observed permission and safe
+reason. Statuses remain `up_to_date`, `reconciled`, `pending_organization_access`,
+`needs_attention`; unknown observations are `null`. One failed repository does not
+prevent independent targets from proceeding. Credentials/provider bodies never enter
+results. Persisted course/term role metadata and direct student/group collaborator
+grants remain unchanged throughout reconciliation.
+
+The future production caller must bind authenticated OAuth session, canonical course
+and organization IDs, validated complete v2 term state, trusted repository ID→scope
+evidence, source revisions and `AuthorizationResolver` authority. Renderer names,
+sections or team slugs cannot construct this trust boundary. Both operational schema
+gates remain **1**, and current v1 individual/group Apply, student permissions, faculty
+scope, setup, grading and discovery behavior remain unchanged. No branch rules,
+invitations, team creation/membership, adoption, migration or lifecycle is activated.
+
+Next: **7.6 — Managed Branch Rules**. Preserve explicit immutable target/scope proof,
+the direct-collaborator non-ownership boundary and the production/journal gates.
 
 ---
 

@@ -1,14 +1,22 @@
+import {
+  RepositoryTeamPermissionBoundary,
+  checked,
+  fail,
+  reasonFor,
+  object,
+  positiveId,
+  permission,
+  type RepositoryPermissionReason,
+  type PermissionRepository as Repository,
+  type RepositoryTeamAssociation as Association
+} from "./repository-team-permission-boundary.js";
 import type { RawCourseConfigV2 } from "../config/config-models.js";
 import { rawCourseConfigV2Schema } from "../config/config-schemas.js";
 import { FallbackAdministrator } from "../faculty/fallback-administrator.js";
 import { isGithubUsername } from "../roster/roster-validation.js";
-import type { GitHubCoursePermissionClient, GitHubOrganizationResponse } from "./github-client.js";
-import type { GitHubPermission, GitHubTeam } from "./github-models.js";
-import {
-  facultyOrganizationAttentionReasonFor,
-  requireOrganizationResponse,
-  type FacultyOrganizationAccess
-} from "./faculty-organization-access.js";
+import type { GitHubCoursePermissionClient } from "./github-client.js";
+import type { GitHubPermission } from "./github-models.js";
+import { type FacultyOrganizationAccess } from "./faculty-organization-access.js";
 import {
   classifyManagedTeam,
   createManagedTeamIdentity,
@@ -18,12 +26,11 @@ import {
 } from "./managed-team-identity.js";
 import type {
   ManagedTeamOutcome,
-  TeamReconciliationReason,
   TeamReconciliationStatus
 } from "./managed-team-reconciliation.js";
 
-const PAGE_SIZE = 100;
 const PAGE_LIMIT = 1000;
+const PAGE_SIZE = 100;
 const TIMEOUT_MS = 30_000;
 const HTTP_NO_CONTENT = 204;
 const COURSE_TEAM_KINDS = ["course-current-coordinators", "course-write", "course-read"] as const;
@@ -45,18 +52,7 @@ export const courseTeamRepositoryPermission = (
       return undefined;
   }
 };
-export type CoursePermissionReason =
-  | TeamReconciliationReason
-  | "repository_identity_mismatch"
-  | "repository_transfer_requires_migration"
-  | "repository_unavailable"
-  | "repository_changed_during_read"
-  | "unsafe_team_membership"
-  | "cross_course_repository_access"
-  | "unowned_repository_access"
-  | "scoped_team_cleanup_deferred"
-  | "permission_unverified"
-  | "unsupported_repository_permission";
+export type CoursePermissionReason = RepositoryPermissionReason;
 export interface CourseRepositoryPermissionOutcome {
   readonly repositoryId: number;
   readonly subject: "team" | "fallback_administrator";
@@ -79,57 +75,6 @@ export interface CourseRepositoryPermissionDependencies {
     signal: AbortSignal
   ): Promise<readonly FacultyOrganizationAccess[]>;
 }
-interface Repository {
-  readonly id: number;
-  readonly nodeId: string;
-  readonly organizationId: number;
-  readonly owner: string;
-  readonly name: string;
-}
-interface Association {
-  readonly team: GitHubTeam & { readonly id: number };
-  readonly permission: GitHubPermission;
-  readonly parentId: number | null;
-}
-class PermissionError extends Error {
-  constructor(readonly reason: CoursePermissionReason) {
-    super(reason);
-  }
-}
-const fail = (reason: CoursePermissionReason): never => {
-  throw new PermissionError(reason);
-};
-const reasonFor = (error: unknown): CoursePermissionReason =>
-  error instanceof PermissionError ? error.reason : facultyOrganizationAttentionReasonFor(error);
-const object = (value: unknown): Record<string, unknown> => {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return fail("unexpected_response");
-  return value as Record<string, unknown>;
-};
-const positiveId = (value: unknown): value is number =>
-  typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-const segment = (value: unknown): string => {
-  if (typeof value !== "string" || !/^[a-z\d._-]+$/i.test(value) || [".", ".."].includes(value))
-    return fail("unexpected_response");
-  return value;
-};
-const checked = (response: GitHubOrganizationResponse, status?: number): unknown => {
-  requireOrganizationResponse(response, status);
-  return response.data;
-};
-const permission = (value: unknown): GitHubPermission => {
-  if (
-    value === "admin" ||
-    value === "maintain" ||
-    value === "push" ||
-    value === "triage" ||
-    value === "pull" ||
-    value === "none"
-  )
-    return value;
-  return fail("unsupported_repository_permission");
-};
-
 /**
  * Backend only. Trusted context comes from Phase 2 canonical repository/organization
  * IDs and the selected authenticated OAuth session, never renderer names or paths.
@@ -143,7 +88,7 @@ export class CourseRepositoryPermissionReconciler {
   private readonly fallback: ReturnType<FallbackAdministrator["getFacultyRecord"]>;
   private readonly repositoryId: number;
   private readonly organizationId: number;
-  private readonly accountId: number;
+  private readonly boundary: RepositoryTeamPermissionBoundary;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(
@@ -166,7 +111,9 @@ export class CourseRepositoryPermissionReconciler {
       throw new Error("Invalid trusted repository/organization/account identity.");
     this.repositoryId = context.courseRepositoryId;
     this.organizationId = context.organizationId;
-    this.accountId = context.authenticatedUserId;
+    this.boundary = new RepositoryTeamPermissionBoundary(client, context, (organization, signal) =>
+      dependencies.inspectTeamMemberships(organization, signal)
+    );
   }
 
   reconcile(
@@ -177,173 +124,29 @@ export class CourseRepositoryPermissionReconciler {
     return operation;
   }
 
-  private async repository(signal: AbortSignal): Promise<Repository> {
-    const userResponse = await this.client.getOrganizationScopeResponse(signal);
-    if (object(checked(userResponse)).id !== this.accountId) return fail("session_mismatch");
-    const value = object(
-      checked(await this.client.getCourseRepositoryById(this.repositoryId, signal))
-    );
-    const owner = object(value.owner);
-    if (value.id !== this.repositoryId || typeof value.node_id !== "string" || !value.node_id)
-      return fail("repository_identity_mismatch");
-    if (owner.id !== this.organizationId || owner.type !== "Organization")
-      return fail("repository_transfer_requires_migration");
-    if (value.archived !== false || value.disabled !== false) return fail("repository_unavailable");
-    if (object(value.permissions).admin !== true) return fail("permission_denied");
-    const login = segment(owner.login);
-    const membership = object(checked(await this.client.getOrganizationMembership(login, signal)));
-    const organization = object(membership.organization);
-    if (
-      organization.id !== this.organizationId ||
-      typeof organization.login !== "string" ||
-      organization.login.toLowerCase() !== login.toLowerCase()
-    )
-      return fail("identity_mismatch");
-    if (membership.user !== undefined && object(membership.user).id !== this.accountId)
-      return fail("session_mismatch");
-    if (membership.state !== "active" || membership.role !== "admin")
-      return fail("permission_denied");
-    const scopes = new Headers(userResponse.headers).get("x-oauth-scopes");
-    if (scopes !== null && !scopes.split(/[ ,]+/).includes("repo"))
-      return fail("insufficient_scope");
-    return Object.freeze({
-      id: this.repositoryId,
-      nodeId: value.node_id,
-      organizationId: this.organizationId,
-      owner: login,
-      name: segment(value.name)
-    });
+  private repository(signal: AbortSignal): Promise<Repository> {
+    return this.boundary.repository(this.repositoryId, signal);
   }
-
   private sameLocator(before: Repository, after: Repository): void {
-    if (
-      before.nodeId !== after.nodeId ||
-      before.owner !== after.owner ||
-      before.name !== after.name
-    )
-      return fail("repository_changed_during_read");
+    this.boundary.sameLocator(before, after);
   }
-
-  private async associations(
-    repo: Repository,
-    signal: AbortSignal
-  ): Promise<readonly Association[]> {
-    const values = new Map<number, Association>();
-    const slugs = new Map<string, number>();
-    for (let page = 1; page <= PAGE_LIMIT; page += 1) {
-      const response = await this.client.listCourseRepositoryTeamsPage(
-        repo.owner,
-        repo.name,
-        page,
-        PAGE_SIZE,
-        signal
-      );
-      const data = checked(response);
-      if (!Array.isArray(data) || data.length > PAGE_SIZE) return fail("unexpected_response");
-      for (const input of data as unknown[]) {
-        const value = object(input);
-        if (
-          !positiveId(value.id) ||
-          typeof value.name !== "string" ||
-          !value.name ||
-          (value.description !== null && typeof value.description !== "string")
-        )
-          return fail("unexpected_response");
-        const slug = segment(value.slug);
-        const parent = value.parent === null ? null : object(value.parent).id;
-        if (parent !== null && !positiveId(parent)) return fail("unexpected_response");
-        const association: Association = {
-          team: {
-            id: value.id,
-            org: repo.owner,
-            name: value.name,
-            slug,
-            description: value.description
-          },
-          permission: permission(value.permission),
-          parentId: parent
-        };
-        if (value.role_name !== undefined) {
-          const roleAliases: Record<string, string | undefined> = {
-            read: "pull",
-            write: "push",
-            pull: "pull",
-            push: "push",
-            admin: "admin",
-            maintain: "maintain",
-            triage: "triage"
-          };
-          if (
-            typeof value.role_name !== "string" ||
-            roleAliases[value.role_name] !== association.permission
-          )
-            return fail("unsupported_repository_permission");
-        }
-        const previous = values.get(value.id);
-        if (
-          (previous && JSON.stringify(previous) !== JSON.stringify(association)) ||
-          (slugs.has(slug) && slugs.get(slug) !== value.id)
-        )
-          return fail("team_identity_changed");
-        values.set(value.id, association);
-        slugs.set(slug, value.id);
-      }
-      if (
-        data.length < PAGE_SIZE &&
-        !/rel="next"/.test(new Headers(response.headers).get("link") ?? "")
-      ) {
-        this.sameLocator(repo, await this.repository(signal));
-        return Object.freeze([...values.values()]);
-      }
-    }
-    return fail("unexpected_response");
+  private associations(repo: Repository, signal: AbortSignal): Promise<readonly Association[]> {
+    return this.boundary.associations(repo, signal);
   }
-
-  private async membership(
+  private membership(
     identity: ManagedTeamIdentity,
     repo: Repository,
     signal: AbortSignal
   ): Promise<ManagedTeamOutcome> {
-    const values = await this.dependencies.inspectTeamMemberships(repo.owner, signal);
-    const key = renderManagedTeamMetadata(identity);
-    const matches = values.filter((value) => renderManagedTeamMetadata(value.identity) === key);
-    const outcome = matches[0];
-    if (matches.length !== 1 || !outcome) return fail("unsafe_team_membership");
-    if (outcome.status === "needs_attention")
-      return fail(outcome.reason ?? "unsafe_team_membership");
-    if (!positiveId(outcome.teamId)) return fail("unsafe_team_membership");
-    if (
-      !outcome.faculty.every(
-        (value) =>
-          value.observed !== null &&
-          value.status !== "needs_attention" &&
-          (value.desired || !value.observed) &&
-          (value.status === "pending_organization_access" || value.desired === value.observed)
-      )
-    )
-      return fail("unsafe_team_membership");
-    return outcome;
+    return this.boundary.membership(identity, repo, signal);
   }
-
-  private async verifyTeam(
+  private verifyTeam(
     identity: ManagedTeamIdentity,
     teamId: number,
     repo: Repository,
     signal: AbortSignal
   ): Promise<void> {
-    const value = object(
-      checked(await this.client.getManagedTeam(repo.organizationId, teamId, signal))
-    );
-    const org = object(value.organization);
-    if (
-      value.id !== teamId ||
-      value.description !== renderManagedTeamMetadata(identity) ||
-      org.id !== repo.organizationId ||
-      typeof org.login !== "string" ||
-      org.login.toLowerCase() !== repo.owner.toLowerCase()
-    )
-      return fail("team_identity_changed");
-    if (value.parent !== null) return fail("team_hierarchy_unsupported");
+    return this.boundary.verifyTeam(identity, teamId, repo, signal);
   }
 
   private base(

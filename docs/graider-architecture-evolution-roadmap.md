@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phase 6 is complete. Phase 7 has begun; next: **7.5 — Student Repository Permissions**.
+Phase 6 is complete. Phase 7 has begun; next: **7.6 — Managed Branch Rules**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -457,8 +457,8 @@ membership, invitation, permission or rename reconciliation runs. Both operation
 schema gates remain **1**, and production v1 faculty-team behavior is preserved.
 See [the full metadata contract](graider-remote-course-architecture.md#115-managed-team-identity-contract-slice-71).
 Organization invitation infrastructure and managed-team membership are complete in
-7.2/7.3 below; course permissions are complete in 7.4 and student permissions remain
-deferred to 7.5, with explicit legacy adoption in Phase 9.
+7.2/7.3 below; course and student permissions are complete in 7.4/7.5, with explicit
+legacy adoption in Phase 9.
 
 ## Slice 7.2 — Faculty organization invitation (complete)
 
@@ -486,7 +486,7 @@ permission mutation is introduced. Both operational gates remain **1**. Slice 7.
 should consume these access states to defer team reconciliation for Pending faculty.
 See [the access contract and trust requirements](graider-remote-course-architecture.md#116-faculty-organization-access-contract-slice-72).
 
-Team membership and course permissions are implemented below. Next: **7.5 — Student Repository Permissions**.
+Team membership and repository permissions are implemented below. Next: **7.6 — Managed Branch Rules**.
 
 ## Slice 7.3 — Team membership reconciliation (complete)
 
@@ -520,7 +520,7 @@ creation journal. No repository permissions, invitations, organization removal,
 team rename/deletion, adoption, migration or lifecycle is introduced.
 See [the full membership contract](graider-remote-course-architecture.md#117-managed-team-membership-contract-slice-73).
 
-Course permissions are implemented in 7.4 below. Next: **7.5 — Student Repository Permissions**.
+Repository permissions are implemented below. Next: **7.6 — Managed Branch Rules**.
 
 ## Slice 7.4 — Course repository permissions (complete)
 
@@ -554,15 +554,42 @@ behavior is unchanged. No student permissions, branch rules, invitations, organi
 removal, migration or lifecycle is activated.
 See [the full permission contract](graider-remote-course-architecture.md#118-courseadmin-repository-permission-contract-slice-74).
 
-Next: **7.5 — Student Repository Permissions**.
+Student permissions are implemented in 7.5 below. Next: **7.6 — Managed Branch Rules**.
 
-## Slice 7.5 — Student repository permissions
+## Slice 7.5 — Student repository permissions (complete)
 
-Reconcile:
+Backend-only individual/group target validation requires trusted immutable repository,
+course and organization IDs plus exact term/section/assignment/target identity and
+single-section evidence. Duplicate/conflicting mappings are blocked before writes;
+independent valid targets continue. Names/URLs never establish scope. Existing individual
+manifest records may provide their observed numeric repository ID; ID-less legacy and
+current group target projections require explicit trusted ID resolution. No manifest
+schema or Phase 11 section-state migration is introduced.
 
-- section current faculty → admin;
-- term coordinator → admin;
-- historical/former → required read access.
+Exact grants are current term coordinators → `admin`, current section faculty → `admin`,
+former term coordinators → `pull`, former section faculty → `pull`, scoped precisely
+to the target. Multiple roles remain independent sources of GitHub's strongest effective
+permission. Course-wide teams and fallback-only administration receive no implicit grant.
+Historical read is intentional; no Phase 8 lifecycle filtering is inferred.
+
+7.4's canonical repository, pagination and numeric team checks are shared with this
+slice. Fresh read-only 7.3 inspection permits safe Pending memberships, blocks unsafe
+or missing teams, and never creates teams or changes members. Missing/lower/higher
+grants reconcile exactly. Undesired selected-course managed grants are removed only
+after all four replacements and complete ownership snapshots are safe; Pending alone
+does not preserve wrong-section access. Unmanaged/legacy/malformed claims are never
+adopted or removed, and other-course access is surfaced as Needs attention.
+
+Repository transfers are migration conditions; renames refresh locators without changing
+identity. PUT/DELETE success and lost responses require observed-state verification;
+later explicit retries start with fresh reads. Per-repository/per-team outcomes preserve
+partial progress and safe reasons. Direct student/group/arbitrary collaborators remain
+untouched. Both operational gates remain **1**, with no production workflow wiring.
+Future composition still requires trusted session/source/authorization/scope bindings,
+complete intended term state, shared serialization and 7.3's durable creation journal.
+See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
+
+Next: **7.6 — Managed Branch Rules**.
 
 ## Slice 7.6 — Managed branch rules
 
