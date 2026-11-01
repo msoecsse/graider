@@ -5,6 +5,7 @@ import { ManagedCacheReview } from "./ManagedCacheReview";
 
 /** Observational notifications cannot authorize or resume a mutation. */
 export const CourseMutationStatus = () => {
+  const [publishedRefreshRequired, setPublishedRefreshRequired] = useState(false);
   const [checking, setChecking] = useState(false);
   const [blocked, setBlocked] = useState<CourseMutationBlock | null>(null);
   const [course, setCourse] = useState<RemoteCourse | null>(null);
@@ -19,6 +20,7 @@ export const CourseMutationStatus = () => {
           setInvalidated(true);
           if (notice.status === "source_updated") setUpdated(true);
         }
+        if (notice.status === "published_refresh_required") setPublishedRefreshRequired(true);
         if (notice.status === "checking") {
           setChecking(true);
           setBlocked(null);
@@ -40,6 +42,22 @@ export const CourseMutationStatus = () => {
   );
   return (
     <>
+      {publishedRefreshRequired ? (
+        <aside role="alert" className="detail-panel">
+          <p>
+            Published remotely. Local course refresh needs attention. Refresh courses before
+            continuing; do not repeat the mutation.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              void window.graiderUI.reloadCourseView?.();
+            }}
+          >
+            Refresh view
+          </button>
+        </aside>
+      ) : null}
       {invalidated ? (
         <div
           role="dialog"

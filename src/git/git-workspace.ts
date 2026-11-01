@@ -259,6 +259,7 @@ export interface DeleteLocalBranchRequest {
 }
 
 export interface CommitRequest {
+  readonly author?: { readonly name: string; readonly email: string };
   readonly message: string;
   readonly allowEmpty?: boolean;
 }

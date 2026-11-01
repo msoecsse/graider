@@ -215,15 +215,16 @@ recovery, and atomically activate the replacement. Failed promotion attempts rol
 failed final authoritative validation retains the replacement with Needs attention.
 External/linked Git storage is manual-only; organization transfer remains migration.
 Recovery manifests and narrow ID-only reveal are account scoped; copies never synchronize
-and are never automatically deleted. Legacy folders retain operational precedence.
+and are never automatically deleted. Legacy folders retain operational precedence until explicit 2.9 cutover.
 Remote-only caches remain inspection-oriented. No GitHub writes or in-place Git repair
 is added. See [Phase 2.6 transaction and safety details](graider-remote-course-discovery.md#phase-26--dirty-managed-cache-handling-and-reconciliation).
 
-Phase 2.7 is implemented: a trusted main-process guard synchronizes the target managed cache and
-validates the legacy operational source before existing mutations. See the implementation summary
-at the end of this document. Next is an explicit policy for safely updating/cutting over legacy
-sources. The remaining architecture describes long-term requirements; periodic timing, student
-synchronization and mutation migration below are not current implementation behavior.
+Phase 2.9 is implemented: the trusted main-process guard synchronizes the target managed cache,
+proves one-time registered-source cutover eligibility, and persists managed operational mode.
+Managed course-admin mutations enforce exact read versions and publish from isolated transactions
+using OAuth. Legacy folders become optional external copies with explicit 2.8 refresh. Remote-only
+mutation enablement is next. See the implementation summaries at the end of this document;
+periodic timing, schema v2, student synchronization, and domain-aware merge remain future work.
 
 After authentication, Graider automatically discovers every authorized Graider course accessible to the signed-in identity.
 
@@ -1983,3 +1984,160 @@ real csc1120 course and perform no live GitHub writes.
   or the real csc1120 profile.
 - Backend/UI typechecks, lint, formatting, production builds and `git diff --check` pass. The production
   renderer retains the existing large-chunk advisory.
+
+## Phase 2 / Slice 2.9: managed-course mutation cutover
+
+Registered courses can explicitly **Use managed course source** from their managed-cache
+controls. This is a one-time operational decision, separate from cache bootstrap and
+reconciliation. Remote-only courses remain inspection-only.
+
+### Eligibility and persisted source mode
+
+`ManagedCourseMutationGuard.cutover` uses the existing synchronized OAuth operation and
+per-user/repository queue. It requires current identity/capabilities, exact repository and
+organization IDs, valid synchronized managed storage, and an attached registered legacy
+branch with the expected origin/upstream. **All** tracked, staged, untracked, conflicted,
+interrupted, unpublished, ahead, or diverged legacy state blocks cutover. Legacy HEAD must
+match the authoritative managed SHA. A proven clean-behind copy first requires the 2.8
+**Update course source** action. Graider never imports, resets, or discards local work.
+
+The existing account catalog persists `operationalSource: "managed"` and the registered
+folder IDs under the immutable repository ID. Catalog parsing whitelists these fields;
+synchronization/bootstrap/reconciliation preserve the completed decision. Folder IDs are
+compatibility bindings, not a path authority. Discovery resolves persisted registrations
+by repository ID, independently of the old folder's files/origin. Removed registrations do
+not become remote-only mutation registrations. Signed-out, wrong-account, and lost-access
+reads cannot silently fall back to a previously cut-over legacy copy.
+
+### Trusted source routing and read versions
+
+The same guard resolves user/repository IDs, managed path, authoritative SHA, metadata,
+OAuth operation credential, abort signal, and session generation in main. Existing IPC
+schemas may still carry a registered legacy path, but it must match the registry; main
+projects its own managed/transaction path. The main-only async operation context also
+covers services that resolve paths by folder ID (notably Comment Library). No token, Git
+command, arbitrary managed path, or reusable authorization ticket is exposed to renderer.
+
+All registered course identity requests through `courseMutationIpc` use this source after
+cutover: assignment setup/edit/delete/group configuration, roster/section administration,
+Access Pages settings, Comment Library, grading workspace/configuration, Apply and grading
+previews/dispatch, workflow repair, report publication, Access Page generation/publication,
+template workflow/distribution, downloads, and dashboard configuration reads. Uncut
+courses keep their existing legacy behavior and publication recovery path.
+
+Existing generated-output path constructors route Apply/template manifests, generated
+reports, and per-student grading state into an account/repository `runtime` directory
+beside the managed Git source. Main registers this mapping for its bundled domain backends
+and supplies the same source/runtime pair to CLI subprocesses. Configuration and the shared
+Comment Library remain in the authoritative course repository. Existing generated artifacts
+in the managed source seed local runtime state once; subsequent local operation history is
+preserved without dirtying the cache or staging it for course publication. Legacy artifacts
+are not imported. This is local output routing, not another synchronization protocol.
+
+Managed loads return `courseReadRevision`, the exact commit held under the repository
+lease. Editable forms retain it and send `expectedCourseRevision` through previews and
+saves. Main synchronizes again before comparing; a missing/mismatched revision produces
+`remote_version_conflict` **before cloning, domain writes, staging, or publication**.
+Course setup takes its initial read revision from its reviewed preview. Revisions assert
+an expected version; current main-process authorization remains independently mandatory.
+Fresh dispatches use current synchronized state, and Apply/template plans retain their
+existing rebuild/revalidation behavior.
+
+### Course-admin publication transaction
+
+`managedCourseTransaction` uses the existing bundled Git factory and authenticated host
+context. Under the existing user/repository lease, it clones into a main-owned account
+`.transactions/course-*/repo` directory and verifies the checked-out default-branch HEAD
+is **exactly** the synchronized expected base. A remote advance during cloning aborts;
+there is no automatic checkout/rebase/merge of stale editable data.
+
+Existing domain mutation services run on that isolated repository. Course/term/assignment,
+roster, and Comment Library validators run before staging. Storage inspection rejects links,
+external object storage, and interrupted Git state. The existing Graider-managed path
+allowlist is intersected with an operation-specific path scope; unrelated staged/untracked
+files, rename sources, unsafe paths, and unexpected domain files reject publication. A
+transaction file snapshot includes ignored output, so ignored configuration cannot be
+silently reported as published.
+Only those explicit paths are staged. Commit attribution comes from the trusted OAuth
+identity, without relying on a configured external Git author. Post-edit validation checks
+metadata validity, not continued faculty membership: an authorized faculty edit may
+intentionally change its own section assignment.
+
+The transaction revalidates immutable repository/organization identity and remote authorization
+before publication. It performs an authenticated fetch immediately before publication and requires
+`origin/<defaultBranch>` still equal the expected base. The existing Git `pushBranch` uses
+an explicit `HEAD:refs/heads/<defaultBranch>` refspec with no force flag. The active managed
+cache is never the local editing/committing workspace. A successful push is followed by
+normal synchronization and final managed validation. Derived roster Access Pages refresh
+runs only after confirmed course publication and successful cache activation.
+
+### Authentication boundary
+
+Only managed **course-admin repository** publication changes write credentials in this
+slice: assignment create/edit/delete/group settings; roster/section changes; existing-course
+setup/configuration; Access Pages configuration in `course.yml`; and shared Comment Library
+changes. These commits/pushes use the OAuth credential held by the main managed operation.
+They bypass the legacy manual/CLI-token course publisher. Student/template/workflow/report
+and Access Pages repository write transports retain their existing authentication. Their
+course configuration source changes to the managed cache.
+
+### Failure, races, and views
+
+Before confirmed push success, failed validation/domain operations cannot publish, and the
+active cache has no transaction changes or ahead commits. Push rejection never triggers a
+force push, transaction merge/rebase, or mutation retry. Main fetches the remote outcome, synchronizes
+the clean cache to the winning authoritative commit, invalidates sibling views, and returns
+a typed stale/publication failure. If a transport error follows server acceptance, main
+checks whether the remote contains the transaction commit before reporting failure.
+Unverifiable outcomes are recorded as `outcome_unknown` and require attention, not a blind
+retry.
+
+After push success, the remote commit remains authoritative even if local activation fails.
+The catalog records `lastPublication` with its commit and `published`/`refresh_required`
+status. Results distinguish remote success with `publication.refreshRequired`, and the UI
+shows **Published remotely. Local course refresh needs attention**. Normal subsequent
+synchronization can recover the cache without publishing again. No rollback of the remote
+commit is attempted. Post-publication activation validates shape/identity without requiring
+faculty membership after an intentional faculty-assignment edit.
+
+The 2.8 document mechanism invalidates other open views that loaded the previous revision;
+main rejects stale requests even if renderer UI is unchanged. Originating forms update from
+the successful result or refetch their data. Remote-version conflicts preserve the current
+form in memory and offer explicit refresh; generic merge/conflict editing remains deferred.
+Account switch/sign-out aborts stale/queued operations, and the shared managed repository
+lease spans synchronization, expected-version checks, transaction, push, and activation.
+
+### Legacy compatibility and next boundary
+
+The old folder is an external/IDE working copy after cutover. Its HEAD, cleanliness, and
+availability no longer choose the operational source. Managed mutations do not mirror into
+it. **Update course source** remains an explicit, safety-checked fast-forward operation;
+Graider never repairs/reset/cleans it. **Publish Course Changes** reports no pending managed
+changes and cannot publish that legacy folder after cutover; uncut courses retain the
+existing recovery action.
+
+Next: enable remote-only navigation/mutation controls using these managed semantics, then
+address schema v2 and domain-specific stale-edit resolution separately. This slice adds no
+polling, student clone manager/synchronization, organization migration, automatic legacy
+mirroring, generic Git editor, or broad write-credential migration.
+
+### Slice 2.9 validation evidence
+
+- Full backend: 139 files; 1,514 passed, one skipped.
+- Full UI/Electron: 185 files; 1,870 passed, 25 skipped. OAuth callback tests ran
+  with permission for their isolated loopback listener.
+- Bundled-Git/auth focused coverage: ten files, 213 passed. The managed operational
+  integration suite adds 63 cases covering cutover, path routing, expected versions,
+  real local-remote publication/races, validation/staging refusal (including ignored
+  output), account changes, remote acceptance after transport errors, refresh recovery,
+  and real grading-state writes outside the clean managed source.
+- `ui/scripts/smoke-managed-course-transactions.cjs` passes 14 isolated production-renderer
+  scenarios: atomic publication, preserved stale form, sibling invalidation, losing push,
+  post-push refresh attention/recovery, local grading state, no legacy publication, and
+  explicit optional legacy refresh. Three transaction push attempts include one rejected
+  race; legacy publication calls are zero and the final managed cache is clean.
+- The existing `ui/scripts/smoke-managed-course-guard.cjs` also passes all 18 legacy/source
+  compatibility scenarios, with zero blocked target writes/commits/pushes or student writes.
+  Both smokes use disposable profiles and local bare remotes, never real course write fixtures.
+- Backend/UI typechecks, lint, formatting, root/UI/bundled-CLI production builds, and
+  `git diff --check` pass. The production renderer retains its existing large-chunk advisory.

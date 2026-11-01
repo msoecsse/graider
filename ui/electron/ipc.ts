@@ -23,6 +23,8 @@ import type {
 } from "./assignmentGradingLifecycleService.js";
 
 export const IPC_CHANNELS = {
+  getCourseOperationalMode: "graider-ui:managed-course:source-mode",
+  cutoverManagedCourse: "graider-ui:managed-course:cutover",
   updateCourseSource: "graider-ui:course-source:update",
   reloadCourseView: "graider-ui:course-source:reload-view",
   chooseReviewImport: "graider-ui:review-import:choose",
@@ -113,6 +115,12 @@ export const IPC_CHANNELS = {
   gradeAssignment: "graider-ui:assignment-grade:run"
 } as const;
 
+export interface CourseReadVersion {
+  readonly courseReadRevision?: string;
+}
+export interface ExpectedCourseReadVersion {
+  readonly expectedCourseRevision?: string | undefined;
+}
 export interface AppInfo {
   readonly name: string;
   readonly version: string;
@@ -122,7 +130,7 @@ export interface LocalSettingsResult {
   readonly currentFacultyMsoeUsername: string | null;
 }
 
-export interface StudentAccessPagesConfigRequest {
+export interface StudentAccessPagesConfigRequest extends ExpectedCourseReadVersion {
   readonly courseFolderId: string;
   readonly courseFolderPath: string;
   readonly repository: string;
@@ -130,7 +138,7 @@ export interface StudentAccessPagesConfigRequest {
   readonly branch: string;
 }
 
-export interface StudentAccessPagesConfigResult {
+export interface StudentAccessPagesConfigResult extends CourseReadVersion {
   readonly status: "success" | "failure";
   readonly diagnostics: readonly CourseSetupDiagnostic[];
   readonly changed: boolean;
@@ -163,6 +171,8 @@ export interface CoursePublishActionResult {
 }
 
 export interface CourseMutationPublicationResult {
+  readonly commit?: string;
+  readonly refreshRequired?: boolean;
   readonly status: "success" | "failure";
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
@@ -207,7 +217,7 @@ export interface CourseSetupSection {
   readonly faculty: readonly string[];
 }
 
-export interface CourseSetupRequest {
+export interface CourseSetupRequest extends ExpectedCourseReadVersion {
   readonly courseFolderPath: string;
   readonly courseTitle: string;
   readonly courseCode: string;
@@ -231,13 +241,13 @@ export interface CourseSetupFilePreview {
   readonly content: string;
   readonly exists: boolean;
 }
-export interface CourseSetupPreviewResult {
+export interface CourseSetupPreviewResult extends CourseReadVersion {
   readonly status: "ready" | "invalid";
   readonly files: readonly CourseSetupFilePreview[];
   readonly diagnostics: readonly CourseSetupDiagnostic[];
   readonly hasConflicts: boolean;
 }
-export interface CourseSetupSaveResult {
+export interface CourseSetupSaveResult extends CourseReadVersion {
   readonly status: "success" | "failure";
   readonly writtenFiles: readonly string[];
   readonly diagnostics: readonly CourseSetupDiagnostic[];
@@ -248,12 +258,12 @@ export interface AssignmentSetupTerm {
   readonly sections: readonly string[];
 }
 
-export interface AssignmentSetupTermsRequest {
+export interface AssignmentSetupTermsRequest extends ExpectedCourseReadVersion {
   readonly courseFolderId: string;
   readonly courseFolderPath: string;
 }
 
-export interface AssignmentSetupTermsResult {
+export interface AssignmentSetupTermsResult extends CourseReadVersion {
   readonly terms: readonly AssignmentSetupTerm[];
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
@@ -283,14 +293,14 @@ export interface AssignmentSetupFilePreview {
   readonly exists: boolean;
 }
 
-export interface AssignmentSetupPreviewResult {
+export interface AssignmentSetupPreviewResult extends CourseReadVersion {
   readonly status: "ready" | "invalid";
   readonly files: readonly AssignmentSetupFilePreview[];
   readonly diagnostics: readonly CourseSetupDiagnostic[];
   readonly hasConflicts: boolean;
 }
 
-export interface AssignmentSetupSaveResult {
+export interface AssignmentSetupSaveResult extends CourseReadVersion {
   readonly status: "success" | "failure";
   readonly writtenFiles: readonly string[];
   readonly diagnostics: readonly CourseSetupDiagnostic[];
@@ -352,21 +362,21 @@ export interface AssignmentEditModel {
   readonly originalContent: string;
 }
 
-export interface AssignmentEditLoadResult {
+export interface AssignmentEditLoadResult extends CourseReadVersion {
   readonly status: "ready" | "error";
   readonly model: AssignmentEditModel | null;
   readonly terms: readonly AssignmentSetupTerm[];
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
-export interface AssignmentEditPreviewResult {
+export interface AssignmentEditPreviewResult extends CourseReadVersion {
   readonly status: "ready" | "invalid" | "conflict";
   readonly path: string;
   readonly content: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
-export interface AssignmentEditSaveResult {
+export interface AssignmentEditSaveResult extends CourseReadVersion {
   readonly status: "success" | "failure" | "conflict";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
@@ -378,7 +388,7 @@ export interface AssignmentDeleteRequest extends AssignmentSetupTermsRequest {
   readonly confirmed: boolean;
 }
 
-export interface AssignmentDeleteResult {
+export interface AssignmentDeleteResult extends CourseReadVersion {
   readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
@@ -394,7 +404,7 @@ export interface AssignmentGroupConfigSaveRequest extends AssignmentGroupConfigR
   readonly groupsCsv: string;
 }
 
-export interface AssignmentGroupConfigResult {
+export interface AssignmentGroupConfigResult extends CourseReadVersion {
   readonly status: "ready" | "success" | "failure";
   readonly repositoryMode: "individual" | "group";
   readonly groupsFile: string;
@@ -470,7 +480,7 @@ export interface StudentRepositoryAccessPageSummary {
   readonly missingRepository: number;
 }
 
-export interface StudentRepositoryAccessPageResult {
+export interface StudentRepositoryAccessPageResult extends CourseReadVersion {
   readonly schemaVersion: 1;
   readonly assignmentFile: string;
   readonly termCode: string | null;
@@ -601,7 +611,7 @@ export type RosterSectionSummariesResult =
       readonly diagnostics: readonly RosterSectionSummaryDiagnostic[];
     };
 
-export interface RosterLoadResult {
+export interface RosterLoadResult extends CourseReadVersion {
   readonly status: "ready" | "migration_required" | "invalid";
   readonly path: string;
   readonly exists: boolean;
@@ -619,7 +629,7 @@ export interface RosterSaveRequest extends RosterSectionRequest {
   readonly confirmed: boolean;
 }
 
-export interface RosterPreviewResult {
+export interface RosterPreviewResult extends CourseReadVersion {
   readonly status: "ready" | "invalid";
   readonly path: string;
   readonly content: string;
@@ -629,7 +639,7 @@ export interface RosterPreviewResult {
   readonly diagnostics: readonly CourseSetupDiagnostic[];
 }
 
-export interface RosterSaveResult {
+export interface RosterSaveResult extends CourseReadVersion {
   readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
@@ -641,7 +651,7 @@ export interface RosterRemoveRequest extends RosterSectionRequest {
   readonly confirmed: boolean;
 }
 
-export interface RosterRemoveResult {
+export interface RosterRemoveResult extends CourseReadVersion {
   readonly status: "success" | "failure";
   readonly path: string;
   readonly diagnostics: readonly CourseSetupDiagnostic[];
@@ -834,7 +844,7 @@ export type {
   GradingReportPublicationOutcome
 } from "./gradingBulkReportPublicationService.js";
 export type { BulkPublishGradingStudentReportsResult } from "./gradingBulkReportPublicationService.js";
-export interface LoadGradingCommentLibraryRequest {
+export interface LoadGradingCommentLibraryRequest extends ExpectedCourseReadVersion {
   readonly courseFolderId: string;
   readonly termCode: string;
 }
@@ -910,7 +920,7 @@ export interface AssignmentDetailJsonResponse {
   readonly actions: unknown;
 }
 
-export interface AssignmentDetailResult {
+export interface AssignmentDetailResult extends CourseReadVersion {
   readonly courseFolderId: string;
   readonly courseFolderPath: string;
   readonly assignmentFile: string;
@@ -1088,6 +1098,8 @@ export interface CombinedDashboardResult {
 }
 
 export interface GraiderUIApi {
+  readonly getCourseOperationalMode?: (folderId: string) => Promise<"legacy" | "managed">;
+  readonly cutoverManagedCourse?: (folderId: string) => Promise<void>;
   readonly updateCourseSource?: (courseFolderId: string) => Promise<void>;
   readonly reloadCourseView?: () => Promise<void>;
   readonly onCourseMutationNotice?: (

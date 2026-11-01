@@ -295,3 +295,31 @@ describe("read-only local origin verification", () => {
     expect(remoteUrl).not.toHaveBeenCalled();
   });
 });
+
+it("rediscovers a cut-over registration by immutable catalog ID without consulting a legacy origin", async () => {
+  const repository = repo(20, "unusual-repository-name");
+  const reader: RemoteRepositoryReader = {
+    list: async () => [],
+    search: async () => ({ ids: [], incomplete: false }),
+    resolve: vi.fn(),
+    resolveId: vi.fn(async () => repository),
+    file: async (_repo, file) => (file === "course.yml" ? courseYaml : termYaml),
+    terms: async () => ["27s1"]
+  };
+  const result = await discoverRemoteCourses({
+    userId: 42,
+    organizations: [org],
+    username: "jones",
+    locals: [],
+    managedRegistrations: [{ repositoryId: 20, organizationId: 10, folderIds: ["registered"] }],
+    reader
+  });
+  expect(result.courses).toHaveLength(1);
+  expect(result.courses[0]).toMatchObject({
+    repositoryId: 20,
+    localFolderIds: ["registered"],
+    localStatus: "registered_local"
+  });
+  expect(reader.resolveId).toHaveBeenCalledWith(20);
+  expect(reader.resolve).not.toHaveBeenCalled();
+});

@@ -55,3 +55,30 @@ describe("getStudentAccessPagesDefaults", () => {
     );
   });
 });
+
+it("keeps the initial managed preview revision when preparing another preview", async () => {
+  const revision = "a".repeat(40);
+  const previewCourseSetup = vi.fn().mockResolvedValue({
+    status: "ready",
+    files: [],
+    diagnostics: [],
+    hasConflicts: true,
+    courseReadRevision: revision
+  });
+  Object.assign(window.graiderUI, { previewCourseSetup });
+  render(
+    createElement(CourseSetupPage, {
+      courseFolderPath: "/course",
+      onBack: vi.fn(),
+      onSaved: vi.fn()
+    })
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Sections and rosters" }));
+  fireEvent.click(screen.getByRole("button", { name: "Preview setup" }));
+  await waitFor(() => expect(previewCourseSetup).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Sections and rosters" }));
+  fireEvent.change(screen.getByLabelText("Section ID"), { target: { value: "002" } });
+  fireEvent.click(screen.getByRole("button", { name: "Preview setup" }));
+  await waitFor(() => expect(previewCourseSetup).toHaveBeenCalledTimes(2));
+  expect(previewCourseSetup.mock.calls[1]?.[0]).toMatchObject({ expectedCourseRevision: revision });
+});

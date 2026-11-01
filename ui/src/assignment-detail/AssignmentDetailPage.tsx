@@ -531,6 +531,9 @@ export const AssignmentDetailPage = ({
     setDeleteError(null);
     try {
       const result = await window.graiderUI.deleteAssignment({
+        ...(loadResult?.courseReadRevision
+          ? { expectedCourseRevision: loadResult.courseReadRevision }
+          : {}),
         courseFolderId: selection.courseFolderId,
         courseFolderPath: selection.courseFolderPath,
         assignmentFile: selection.assignmentFile,
@@ -873,6 +876,9 @@ export const AssignmentDetailPage = ({
     setGroupConfigFeedback(null);
     try {
       const result = await window.graiderUI.saveAssignmentGroupConfig({
+        ...(groupConfig?.courseReadRevision
+          ? { expectedCourseRevision: groupConfig.courseReadRevision }
+          : {}),
         courseFolderId: selection.courseFolderId,
         courseFolderPath: selection.courseFolderPath,
         assignmentFile: selection.assignmentFile,
@@ -947,6 +953,9 @@ export const AssignmentDetailPage = ({
     try {
       const result: StudentAccessPagesConfigResult =
         await window.graiderUI.saveStudentAccessPagesConfig({
+          ...(accessPage?.courseReadRevision
+            ? { expectedCourseRevision: accessPage.courseReadRevision }
+            : {}),
           courseFolderId: selection.courseFolderId,
           courseFolderPath: selection.courseFolderPath,
           repository,

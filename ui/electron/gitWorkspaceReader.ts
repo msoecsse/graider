@@ -85,7 +85,15 @@ export interface GitWorkspaceSynchronizer extends GitWorkspaceInspector {
 
 export interface GitWorkspaceWriter extends GitWorkspaceInspector {
   stage(paths: readonly RelativeGitPath[]): Promise<void>;
-  commit(request: { readonly message: string }): Promise<string>;
+  commit(request: {
+    readonly message: string;
+    readonly author?: { readonly name: string; readonly email: string };
+  }): Promise<string>;
+  pushBranch?(request: {
+    readonly remote: "origin";
+    readonly branch: string;
+    readonly authentication: GitAuthenticationContextRef;
+  }): Promise<{ readonly kind: "pushed" }>;
   pushUpstream(request: {
     readonly authentication: GitAuthenticationContextRef;
   }): Promise<{ readonly kind: "pushed" }>;

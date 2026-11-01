@@ -93,6 +93,8 @@ export const RosterManagerPage = ({
   termTitle,
   onSaved
 }: RosterManagerPageProps): ReactElement => {
+  const [readRevision, setReadRevision] = useState<string>();
+  const [termsRevision, setTermsRevision] = useState<string>();
   const [sections, setSections] = useState<readonly string[]>([]);
   const [summaries, setSummaries] = useState<ReadonlyMap<string, RosterSectionSummary>>(new Map());
   const [sectionId, setSectionId] = useState("");
@@ -181,6 +183,7 @@ export const RosterManagerPage = ({
 
   const applyLoadedSection = useCallback(
     (result: RosterLoadResult): void => {
+      setReadRevision(result.courseReadRevision);
       const loadedRows = result.rows.map((row) => ({ ...row }));
       const loadedFaculty = [...(result.faculty ?? [])];
       setBaselineRows(loadedRows);
@@ -274,6 +277,7 @@ export const RosterManagerPage = ({
             setDiagnosticMessage(`The routed term ${termCode} is not configured for this course.`);
             return;
           }
+          setTermsRevision(result.courseReadRevision);
           setSections(routedTerm.sections);
           const termsMessage = getDiagnosticsMessage(result.diagnostics);
           if (termsMessage !== null) setDiagnosticMessage(termsMessage);
@@ -444,6 +448,9 @@ export const RosterManagerPage = ({
 
   const request = useMemo<RosterSaveRequest>(
     () => ({
+      ...((isCreatingSection ? termsRevision : readRevision)
+        ? { expectedCourseRevision: isCreatingSection ? termsRevision : readRevision }
+        : {}),
       courseFolderId: courseFolder.id,
       courseFolderPath: courseFolder.path,
       termCode,
@@ -461,6 +468,8 @@ export const RosterManagerPage = ({
       courseFolder.path,
       faculty,
       isCreatingSection,
+      readRevision,
+      termsRevision,
       effectivePendingSourceKind,
       rows,
       sectionId,
@@ -501,6 +510,8 @@ export const RosterManagerPage = ({
         throw new Error(getDiagnosticsMessage(result.diagnostics) ?? "Unable to save roster.");
       }
 
+      setReadRevision(result.courseReadRevision);
+      setTermsRevision(result.courseReadRevision);
       const savedRows = rows.map((row) => ({ ...row }));
       const savedFaculty = [...faculty];
       setBaselineRows(savedRows);
@@ -534,6 +545,7 @@ export const RosterManagerPage = ({
       action === "remove_roster" ? window.graiderUI.removeRoster : window.graiderUI.removeSection;
     if (remove === undefined) return;
     const removeRequest: RosterRemoveRequest = {
+      ...(readRevision ? { expectedCourseRevision: readRevision } : {}),
       courseFolderId: courseFolder.id,
       courseFolderPath: courseFolder.path,
       termCode,
@@ -545,6 +557,8 @@ export const RosterManagerPage = ({
     try {
       const result = await remove(removeRequest);
       if (result.status === "success") {
+        setReadRevision(result.courseReadRevision);
+        setTermsRevision(result.courseReadRevision);
         if (action === "remove_roster") {
           setLoadState("ready");
           setIsExisting(false);

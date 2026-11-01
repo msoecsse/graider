@@ -80,6 +80,8 @@ export const CourseSetupPage = ({
   const [rosterUploads, setRosterUploads] = useState<
     readonly { sectionId: string; content: string }[]
   >([]);
+  const [readVersion, setReadVersion] = useState<{ path: string; revision: string | undefined }>();
+  const readRevision = readVersion?.path === courseFolderPath ? readVersion.revision : undefined;
   const [preview, setPreview] = useState<CourseSetupPreviewResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [replaceExisting, setReplaceExisting] = useState(false);
@@ -163,7 +165,12 @@ export const CourseSetupPage = ({
     setIsLoading(true);
     setSaveMessage(null);
     try {
-      setPreview(await previewCourseSetup(request));
+      const result = await previewCourseSetup({
+        ...request,
+        ...(readRevision ? { expectedCourseRevision: readRevision } : {})
+      });
+      setReadVersion({ path: courseFolderPath, revision: result.courseReadRevision });
+      setPreview(result);
       setActiveStep("Preview");
     } catch {
       setSaveMessage("Unable to prepare the course setup preview.");
@@ -177,7 +184,14 @@ export const CourseSetupPage = ({
     if (saveCourseSetup === undefined || preview === null) return;
     setIsLoading(true);
     try {
-      const result = await saveCourseSetup({ ...request, confirmed: true, replaceExisting });
+      const result = await saveCourseSetup({
+        ...request,
+        ...(preview.courseReadRevision
+          ? { expectedCourseRevision: preview.courseReadRevision }
+          : {}),
+        confirmed: true,
+        replaceExisting
+      });
       if (result.status === "success") {
         setSaveMessage(
           `Created ${result.writtenFiles.length} configuration file${result.writtenFiles.length === 1 ? "" : "s"}.`

@@ -1,3 +1,4 @@
+import { courseRuntimePath } from "../core/course-runtime-paths.js";
 import path from "node:path";
 import { toForwardSlashPath } from "../core/paths.js";
 
@@ -31,7 +32,7 @@ const createRelativeReportDirectory = (termCode: string, assignmentSlug: string)
   toForwardSlashPath(path.join(TERMS_DIRECTORY, termCode, REPORTS_DIRECTORY, assignmentSlug));
 
 const createPathPair = (repoRoot: string, relativePath: string) => ({
-  absolutePath: path.join(repoRoot, relativePath),
+  absolutePath: courseRuntimePath(repoRoot, relativePath),
   relativePath: toForwardSlashPath(relativePath)
 });
 

@@ -39,6 +39,7 @@ export const AssignmentEditPage = ({
   readonly onBack: () => void;
   readonly onSaved: () => void;
 }): ReactElement => {
+  const [readRevision, setReadRevision] = useState<string>();
   const [model, setModel] = useState<AssignmentEditModel | null>(null);
   const [terms, setTerms] = useState<
     readonly { readonly code: string; readonly sections: readonly string[] }[]
@@ -77,6 +78,7 @@ export const AssignmentEditPage = ({
       assignmentFile: selection.assignmentFile
     })
       .then((result) => {
+        setReadRevision(result.courseReadRevision);
         setTerms(result.terms);
         setMessage(result.diagnostics.map((item) => item.message).join(" ") || null);
         if (result.model !== null) {
@@ -116,6 +118,7 @@ export const AssignmentEditPage = ({
       model === null
         ? null
         : {
+            ...(readRevision ? { expectedCourseRevision: readRevision } : {}),
             courseFolderId: selection.courseFolderId,
             courseFolderPath: selection.courseFolderPath,
             assignmentFile: model.assignmentFile,
@@ -151,6 +154,7 @@ export const AssignmentEditPage = ({
       latePolicy,
       lmsAssignmentId,
       model,
+      readRevision,
       points,
       requiredFiles,
       repository,

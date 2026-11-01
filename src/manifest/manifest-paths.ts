@@ -1,3 +1,4 @@
+import { courseRuntimePath } from "../core/course-runtime-paths.js";
 import path from "node:path";
 
 const TERMS_DIRECTORY = "terms";
@@ -26,6 +27,6 @@ export const createManifestPath = (
   return {
     relativeDirectory,
     relativePath,
-    absolutePath: path.join(repoRoot, relativePath)
+    absolutePath: courseRuntimePath(repoRoot, relativePath)
   };
 };

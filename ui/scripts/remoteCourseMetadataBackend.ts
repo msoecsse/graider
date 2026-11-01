@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
+import { loadTermRosters } from "../../src/roster/roster-loader.js";
+import { loadCommentLibrary } from "../../src/grading/comment-library.js";
 import { createRosterSummary } from "../../src/roster/roster-models.js";
 import { parseCourseConfig } from "../../src/config/load-course-config.js";
 import { parseTermConfig } from "../../src/config/load-term-config.js";
@@ -93,3 +97,45 @@ export const inspectAssignment = (content: string, slug: string) => {
     return null;
   }
 };
+
+/** Transaction validation deliberately checks shape, not post-edit faculty membership. */
+export const validateTransaction = (root: string, organization: string): void => {
+  const read = (relative: string) => fs.readFileSync(path.join(root, relative), "utf8");
+  const course = inspectCourse(read("course.yml"));
+  if (course.status !== "valid" || course.organization.toLowerCase() !== organization.toLowerCase())
+    throw new Error("Invalid course metadata or organization binding.");
+  for (const term of fs.readdirSync(path.join(root, "terms"))) {
+    if (!/^\d{2}s[123]$/u.test(term)) continue;
+    const termFile = `terms/${term}/term.yml`;
+    const parsed = parseTermConfig(read(termFile), termFile);
+    if (parsed.status !== "success" || validateTermConfig(termFile, parsed.value, term).length)
+      throw new Error("Invalid term metadata.");
+    // Roster paths are validated before the domain loader can traverse them.
+    for (const section of parsed.value.sections) {
+      if (
+        section.roster &&
+        (!/^rosters\/[A-Za-z0-9][A-Za-z0-9._-]*\.csv$/u.test(section.roster) ||
+          section.roster.includes(".."))
+      )
+        throw new Error("Unsafe roster path.");
+    }
+    const rosters = loadTermRosters({
+      repoRoot: root,
+      termConfigPath: termFile,
+      sections: parsed.value.sections,
+      sectionIds: parsed.value.sections.map((s) => s.id)
+    });
+    if (rosters.errors.length) throw new Error("Invalid roster configuration.");
+    const directory = path.join(root, "terms", term, "assignments");
+    if (!fs.existsSync(directory)) continue;
+    for (const slug of fs.readdirSync(directory)) {
+      const assignmentFile = path.join(directory, slug, "assignment.yml");
+      if (!fs.existsSync(assignmentFile)) continue;
+      if (!inspectAssignment(fs.readFileSync(assignmentFile, "utf8"), slug))
+        throw new Error("Invalid assignment metadata.");
+    }
+  }
+  if (loadCommentLibrary(root).status !== "success") throw new Error("Invalid comment library.");
+};
+
+export { registerCourseRuntimeRoot } from "../../src/core/course-runtime-paths.js";

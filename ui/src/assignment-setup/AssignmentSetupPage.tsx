@@ -68,6 +68,7 @@ export const AssignmentSetupPage = ({
   readonly onBack: () => void;
   readonly onOpenAssignment: (selection: AssignmentDetailSelection) => void;
 }): ReactElement => {
+  const [readRevision, setReadRevision] = useState<string>();
   const [terms, setTerms] = useState<readonly AssignmentSetupTerm[]>([]);
   const [termMessage, setTermMessage] = useState<string | null>(null);
   const [assignmentTitle, setAssignmentTitle] = useState("");
@@ -100,6 +101,7 @@ export const AssignmentSetupPage = ({
     }
     void loadTerms({ courseFolderId: courseFolder.id, courseFolderPath: courseFolder.path })
       .then((result) => {
+        setReadRevision(result.courseReadRevision);
         setTerms(result.terms);
         setTermMessage(result.diagnostics.map((item) => item.message).join(" ") || null);
       })
@@ -108,8 +110,9 @@ export const AssignmentSetupPage = ({
 
   const selectedTerm = terms.find((term) => term.code === termCode) ?? null;
   const request = useMemo(
-    () =>
-      createRequest(courseFolder, {
+    () => ({
+      ...(readRevision ? { expectedCourseRevision: readRevision } : {}),
+      ...createRequest(courseFolder, {
         assignmentTitle,
         assignmentSlug,
         termCode,
@@ -128,8 +131,10 @@ export const AssignmentSetupPage = ({
           name,
           points: categoryPoints
         }))
-      }),
+      })
+    }),
     [
+      readRevision,
       assignmentSlug,
       assignmentTitle,
       courseFolder,

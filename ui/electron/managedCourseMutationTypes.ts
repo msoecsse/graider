@@ -2,6 +2,9 @@
 export interface CourseMutationBlock {
   readonly status: "blocked";
   readonly reason:
+    | "remote_version_conflict"
+    | "publication_failed"
+    | "publication_outcome_unknown"
     | "synchronization_retry_required"
     | "managed_cache_review_required"
     | "managed_cache_manual_review_required"
@@ -31,6 +34,6 @@ export interface CourseMutationBlock {
 }
 export type CourseMutationNotice =
   | CourseMutationBlock
-  | { readonly status: "source_updated" | "view_invalidated" }
+  | { readonly status: "source_updated" | "view_invalidated" | "published_refresh_required" }
   | { readonly status: "checking" | "finished" };
 export const COURSE_MUTATION_NOTICE = "graider-ui:course-mutation:notice";

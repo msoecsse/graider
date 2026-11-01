@@ -57,14 +57,16 @@ type GradingCommentLibraryOperationFailure = {
   readonly code: string;
 };
 
-export type GradingCommentLibraryLoadResult =
-  | {
-      readonly status: "success";
-      readonly comments: readonly ReusableCommentDto[];
-      readonly recentCommentIds?: readonly string[];
-    }
-  | GradingCommentLibraryAccessFailure
-  | GradingCommentLibraryOperationFailure;
+export type GradingCommentLibraryLoadResult = import("./ipc.js").CourseReadVersion &
+  (
+    | {
+        readonly status: "success";
+        readonly comments: readonly ReusableCommentDto[];
+        readonly recentCommentIds?: readonly string[];
+      }
+    | GradingCommentLibraryAccessFailure
+    | GradingCommentLibraryOperationFailure
+  );
 
 type GradingCommentLibraryLocalMutationResult =
   | { readonly status: "success"; readonly comment: ReusableCommentDto }
@@ -72,20 +74,22 @@ type GradingCommentLibraryLocalMutationResult =
   | GradingCommentLibraryAccessFailure
   | GradingCommentLibraryOperationFailure;
 
-export type GradingCommentLibraryMutationResult =
-  | {
-      readonly status: "success";
-      readonly comment: ReusableCommentDto;
-      readonly diagnostics: readonly CourseSetupDiagnostic[];
-      readonly publication: CourseMutationPublicationResult;
-    }
-  | {
-      readonly status: "success";
-      readonly diagnostics: readonly CourseSetupDiagnostic[];
-      readonly publication: CourseMutationPublicationResult;
-    }
-  | GradingCommentLibraryAccessFailure
-  | GradingCommentLibraryOperationFailure;
+export type GradingCommentLibraryMutationResult = import("./ipc.js").CourseReadVersion &
+  (
+    | {
+        readonly status: "success";
+        readonly comment: ReusableCommentDto;
+        readonly diagnostics: readonly CourseSetupDiagnostic[];
+        readonly publication: CourseMutationPublicationResult;
+      }
+    | {
+        readonly status: "success";
+        readonly diagnostics: readonly CourseSetupDiagnostic[];
+        readonly publication: CourseMutationPublicationResult;
+      }
+    | GradingCommentLibraryAccessFailure
+    | GradingCommentLibraryOperationFailure
+  );
 
 export type GradingCommentLibraryResult =
   | GradingCommentLibraryLoadResult

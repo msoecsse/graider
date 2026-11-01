@@ -75,7 +75,7 @@ const getAffectedAssignmentFiles = (request: RosterSectionRequest): readonly str
   }
 };
 
-const refreshStudentRepositoryPages = async (
+export const refreshStudentRepositoryPages = async (
   request: RosterSectionRequest,
   options: RosterAccessPageOptions
 ): Promise<readonly CourseSetupDiagnostic[]> => {

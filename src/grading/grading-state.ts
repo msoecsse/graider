@@ -1,3 +1,4 @@
+import { courseRuntimePath } from "../core/course-runtime-paths.js";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -192,14 +193,16 @@ export const createGradingStatePath = (
     };
   return {
     status: "success",
-    value: path.join(
+    value: courseRuntimePath(
       request.courseRoot,
-      ".graider",
-      "grading",
-      request.termCode,
-      request.assignmentSlug,
-      "state",
-      `${request.studentId}.json`
+      path.join(
+        ".graider",
+        "grading",
+        request.termCode,
+        request.assignmentSlug,
+        "state",
+        `${request.studentId}.json`
+      )
     )
   };
 };

@@ -1,3 +1,4 @@
+import { publishManagedCourseTransaction } from "./managedCourseTransaction.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { GithubOAuthSession } from "./githubOAuthSession.js";
@@ -11,14 +12,17 @@ import {
   type GitWorkspaceFactory
 } from "./gitWorkspaceReader.js";
 import { inspectChangedFiles } from "./coursePublishService.js";
-import { parseGithubOrigin } from "./remoteCourseDiscovery.js";
+import { loadMetadata, parseGithubOrigin } from "./remoteCourseDiscovery.js";
 import { createRemoteRepositoryReader } from "./githubRemoteRepositories.js";
 import {
   MANAGED_COURSE_ROOT,
   managedCoursePath,
   validateManagedStorage,
   revalidateManagedRepository,
-  synchronizationFailure
+  synchronizationFailure,
+  loadManagedCatalog,
+  saveEntry,
+  safeDirectories
 } from "./managedCourses.js";
 import type { ManagedOperationInput } from "./githubOAuthSession.js";
 import {
@@ -28,8 +32,16 @@ import {
 } from "./remoteCourseTypes.js";
 import type { CourseMutationBlock } from "./managedCourseMutationTypes.js";
 
-export type CourseMutationMode = "new_mutation" | "publication_retry" | "source_update";
+export type CourseMutationMode =
+  | "new_mutation"
+  | "publication_retry"
+  | "source_update"
+  | "cutover"
+  | "read";
 export interface VerifiedCourseMutationContext {
+  readonly managed?: boolean;
+  readonly sessionGeneration?: number;
+  readonly legacyFolderPath?: string;
   readonly userId: number;
   readonly repositoryId: number;
   readonly authoritativeCommit: string;
@@ -170,9 +182,9 @@ export const validateOperationalCourseSource = async (request: {
   if (state.head.kind !== "attached") return unsafe();
   const changed = [...state.workingTree.trackedChanges, ...state.workingTree.stagedChanges];
   const clean = !changed.length && !state.workingTree.untrackedPaths.length;
-  if (mode === "source_update" && !clean) unsafe();
+  if ((mode === "source_update" || mode === "cutover") && !clean) unsafe();
   if (
-    mode === "source_update" &&
+    (mode === "source_update" || mode === "cutover") &&
     state.upstream.kind === "configured" &&
     (state.upstream.relation === "ahead" || state.upstream.relation === "diverged")
   )
@@ -232,6 +244,133 @@ interface Dependencies {
 export class ManagedCourseMutationGuard {
   private readonly pending = new Map<string, Promise<unknown>>();
   constructor(private readonly deps: Dependencies) {}
+  transaction<T>(
+    context: VerifiedCourseMutationContext,
+    input: ManagedOperationInput,
+    expectedRevision: unknown,
+    allows: (file: string) => boolean,
+    mutate: (root: string) => Promise<T>,
+    changed: () => void
+  ): Promise<T> {
+    const login = this.deps.session.getState().identity?.login ?? `faculty-${context.userId}`;
+    return publishManagedCourseTransaction({
+      userData: this.deps.userData,
+      context,
+      input,
+      expectedRevision,
+      revalidateRepository: async () => {
+        try {
+          const repo = await revalidateManagedRepository({
+            ...input,
+            userData: this.deps.userData,
+            username: this.deps.username(),
+            reader: createRemoteRepositoryReader(input.token, input.signal),
+            authenticate: () =>
+              (this.deps.authenticate ?? createAuthenticatedProductionGitWorkspace)(input.token)
+          });
+          if (repo.defaultBranch !== input.course.defaultBranch)
+            blockMutation(
+              "operational_source_unsafe",
+              "Course default branch changed. Refresh course state before retrying."
+            );
+        } catch (error) {
+          if (error instanceof CourseMutationBlocked) throw error;
+          requireSynchronizedCommit(input.course, synchronizationFailure(error));
+          throw error;
+        }
+      },
+      allows,
+      mutate,
+      changed,
+      authenticate: this.deps.authenticate,
+      factory: this.deps.factory,
+      author: { name: login, email: `${context.userId}+${login}@users.noreply.github.com` }
+    });
+  }
+  isManaged(folderId: unknown): boolean {
+    const state = this.deps.session.getState();
+    const id = state.identity?.id;
+    const catalog = id ? loadManagedCatalog(this.deps.userData, id) : null;
+    return (
+      !!catalog &&
+      Object.values(catalog.courses).some(
+        (entry) =>
+          entry.operationalSource === "managed" &&
+          state.courseDiscovery.courses.some(
+            (course) =>
+              course.repositoryId === entry.repositoryId &&
+              (entry.operationalFolderIds?.includes(String(folderId)) ||
+                course.localFolderIds.includes(String(folderId)))
+          )
+      )
+    );
+  }
+
+  /** A persisted binding prevents signed-out/lost-access reads from reverting to the legacy source. */
+  private hasManagedBinding(folderId: unknown): boolean {
+    const root = path.join(this.deps.userData, MANAGED_COURSE_ROOT);
+    if (!fs.existsSync(root)) return false;
+    for (const id of fs.readdirSync(root).filter((name) => /^[1-9][0-9]*$/u.test(name))) {
+      const catalog = loadManagedCatalog(this.deps.userData, Number(id));
+      if (
+        Object.values(catalog.courses).some(
+          (entry) =>
+            entry.operationalSource === "managed" &&
+            entry.operationalFolderIds?.includes(String(folderId))
+        )
+      )
+        return true;
+    }
+    return false;
+  }
+  async read<T>(
+    folderId: unknown,
+    suppliedPath: unknown,
+    operation: (context?: VerifiedCourseMutationContext) => Promise<T>
+  ): Promise<T> {
+    const folder = this.deps.folders().find((item) => item.id === folderId);
+    if (!folder || (suppliedPath !== undefined && suppliedPath !== folder.path))
+      blockMutation(
+        "operational_source_mismatch",
+        "A matching registered course identity is required."
+      );
+    if (this.isManaged(folderId)) return this.run(folderId, suppliedPath, "read", operation);
+    if (this.hasManagedBinding(folderId))
+      blockMutation(
+        "authorization_required",
+        "Authorize the account that manages this course before opening it.",
+        "authorization"
+      );
+    const managedRoot = path.join(this.deps.userData, MANAGED_COURSE_ROOT);
+    const source = fs.existsSync(folder!.path)
+      ? fs.realpathSync(folder!.path)
+      : path.resolve(folder!.path);
+    const storage = fs.existsSync(managedRoot) ? fs.realpathSync(managedRoot) : managedRoot;
+    const relative = path.relative(storage, source);
+    if (
+      relative === "" ||
+      (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+    )
+      blockMutation(
+        "remote_only_mutation_unavailable",
+        "Managed repositories cannot be selected through a legacy path."
+      );
+    return operation();
+  }
+  async cutover(folderId: unknown): Promise<void> {
+    await this.run(folderId, undefined, "cutover", async (context, input) => {
+      const entry = loadManagedCatalog(this.deps.userData, context.userId).courses[
+        String(context.repositoryId)
+      ];
+      if (!entry || entry.organizationId !== input.course.organizationId)
+        throw new Error("Managed catalog is unavailable.");
+      saveEntry(this.deps.userData, {
+        ...entry,
+        operationalSource: "managed",
+        operationalFolderIds: [...input.course.localFolderIds]
+      });
+    });
+  }
   /** Trusted registry ID only; never resumes the mutation that prompted this operation. */
   updateSource(folderId: unknown, beforeWrite: () => void = () => {}): Promise<void> {
     const faculty = this.deps.username();
@@ -348,8 +487,27 @@ export class ManagedCourseMutationGuard {
         "authorization"
       );
     const folder = this.deps.folders().find((item) => item.id === folderId);
+    const storageRoot = path.join(this.deps.userData, MANAGED_COURSE_ROOT);
+    if (
+      folder &&
+      fs.existsSync(storageRoot) &&
+      fs.lstatSync(storageRoot).isSymbolicLink() &&
+      fs.realpathSync(storageRoot) === fs.realpathSync(folder.path)
+    )
+      blockMutation(
+        "remote_only_mutation_unavailable",
+        "Managed repositories cannot be registered as legacy sources."
+      );
+    const persisted = loadManagedCatalog(this.deps.userData, userId!).courses;
+    const binding = Object.values(persisted).find(
+      (entry) =>
+        entry.operationalSource === "managed" &&
+        entry.operationalFolderIds?.includes(String(folderId))
+    );
     const courses = state.courseDiscovery.courses.filter((item) =>
-      item.localFolderIds.includes(String(folderId))
+      binding
+        ? item.repositoryId === binding.repositoryId
+        : item.localFolderIds.includes(String(folderId))
     );
     if (!folder)
       blockMutation(
@@ -391,16 +549,33 @@ export class ManagedCourseMutationGuard {
             "Course registration changed. Retry after refreshing courses."
           );
         return session.withSynchronizedCourse(course.repositoryId, userId!, async (input, sync) => {
-          if (!input.course.localFolderIds.includes(folder.id))
+          if (
+            !input.course.localFolderIds.includes(folder.id) &&
+            binding?.repositoryId !== input.course.repositoryId
+          )
             blockMutation(
               "operational_source_mismatch",
               "Course registration no longer matches authorized discovery."
             );
           const authoritativeCommit = requireSynchronizedCommit(input.course, sync);
           const managedRoot = path.join(this.deps.userData, MANAGED_COURSE_ROOT);
+          if (
+            fs.existsSync(managedRoot) &&
+            fs.lstatSync(managedRoot).isSymbolicLink() &&
+            fs.realpathSync(managedRoot) === fs.realpathSync(folder.path)
+          )
+            blockMutation(
+              "remote_only_mutation_unavailable",
+              "Managed repositories cannot be registered as legacy sources."
+            );
+          const managed =
+            loadManagedCatalog(this.deps.userData, input.userId).courses[
+              String(course.repositoryId)
+            ]?.operationalSource === "managed";
+          const useManaged = managed && mode !== "source_update";
           const relative = path.relative(
             fs.existsSync(managedRoot) ? fs.realpathSync(managedRoot) : managedRoot,
-            fs.realpathSync(folder.path)
+            useManaged ? folder.path : fs.realpathSync(folder.path)
           );
           if (
             relative === "" ||
@@ -412,21 +587,25 @@ export class ManagedCourseMutationGuard {
               "remote_only_mutation_unavailable",
               "Managed-course editing is not enabled yet. Use a verified registered legacy source."
             );
-          const operationalCommit = await validateOperationalCourseSource({
-            root: folder.path,
-            course: input.course,
-            authoritativeCommit,
-            mode,
-            factory: this.deps.factory ?? getProductionGitWorkspaceFactory(),
-            isAuthoritativeAncestor: async (head, target) => {
-              const oracle = await (this.deps.factory ?? getProductionGitWorkspaceFactory()).open(
-                managedCoursePath(this.deps.userData, input.userId, input.course.repositoryId)
-              );
-              return oracle.isAncestor(head, target);
-            },
-            resolveOrigin: (owner, name) =>
-              createRemoteRepositoryReader(input.token, input.signal).resolve(owner, name)
-          });
+          const operationalCommit = useManaged
+            ? authoritativeCommit
+            : await validateOperationalCourseSource({
+                root: folder.path,
+                course: input.course,
+                authoritativeCommit,
+                mode,
+                factory: this.deps.factory ?? getProductionGitWorkspaceFactory(),
+                isAuthoritativeAncestor: async (head, target) => {
+                  const oracle = await (
+                    this.deps.factory ?? getProductionGitWorkspaceFactory()
+                  ).open(
+                    managedCoursePath(this.deps.userData, input.userId, input.course.repositoryId)
+                  );
+                  return oracle.isAncestor(head, target);
+                },
+                resolveOrigin: (owner, name) =>
+                  createRemoteRepositoryReader(input.token, input.signal).resolve(owner, name)
+              });
           if (!(await input.revalidateSession()))
             blockMutation(
               "authorization_required",
@@ -440,15 +619,34 @@ export class ManagedCourseMutationGuard {
               "operational_source_mismatch",
               "Course registration changed during validation. Retry after refreshing courses."
             );
+          if (useManaged) {
+            const source = managedCoursePath(this.deps.userData, input.userId, course.repositoryId);
+            const runtime = path.join(path.dirname(source), "runtime");
+            safeDirectories(this.deps.userData, runtime, true);
+            loadMetadata().registerCourseRuntimeRoot(source, runtime);
+            const entry = loadManagedCatalog(this.deps.userData, input.userId).courses[
+              String(course.repositoryId)
+            ];
+            if (entry && !entry.operationalFolderIds?.includes(folder.id))
+              saveEntry(this.deps.userData, {
+                ...entry,
+                operationalFolderIds: [...(entry.operationalFolderIds ?? []), folder.id]
+              });
+          }
           operationStarted = true;
           return operation(
             {
+              managed: useManaged,
+              legacyFolderPath: folder.path,
+              sessionGeneration: generation,
               userId: input.userId,
               repositoryId: course.repositoryId,
               authoritativeCommit,
               operationalCommit,
               courseFolderId: folder.id,
-              courseFolderPath: folder.path,
+              courseFolderPath: useManaged
+                ? managedCoursePath(this.deps.userData, input.userId, course.repositoryId)
+                : folder.path,
               mode
             },
             input

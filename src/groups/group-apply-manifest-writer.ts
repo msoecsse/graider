@@ -1,3 +1,4 @@
+import { courseRuntimeRoot } from "../core/course-runtime-paths.js";
 import fs from "node:fs";
 import path from "node:path";
 import { toRepositoryRelativePath } from "../core/paths.js";
@@ -66,7 +67,7 @@ export const writeGroupApplyManifestV2 = (input: {
   const manifestPath = createManifestPath(input.repoRoot, input.termCode, input.assignmentSlug);
   try {
     if (
-      toRepositoryRelativePath(input.repoRoot, manifestPath.absolutePath) !==
+      toRepositoryRelativePath(courseRuntimeRoot(input.repoRoot), manifestPath.absolutePath) !==
       manifestPath.relativePath
     ) {
       return createWriteFailure(null, "Group manifest path is outside the repository root.");

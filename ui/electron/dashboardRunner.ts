@@ -27,6 +27,10 @@ const DEBUG_ENV_NAME = "GRAIDER_UI_DEBUG";
 const DEBUG_ENABLED_VALUE = "1";
 
 interface DashboardRunnerOptions {
+  readonly withCourseSource?: (
+    folder: CourseFolderRecord,
+    perform: (source: CourseFolderRecord) => Promise<DashboardCommandResult>
+  ) => Promise<DashboardCommandResult>;
   readonly runner: ProcessRunner;
   readonly env?: NodeJS.ProcessEnv;
   readonly now?: () => Date;
@@ -282,13 +286,17 @@ const refreshKnownCourseFolder = async (
   options: DashboardRunnerOptions
 ): Promise<CourseFolderDashboardResult> => {
   const refreshedAt = (options.now ?? DEFAULT_NOW)().toISOString();
-  const result = attachRefreshTime(
-    await runDashboardCommand({
-      courseFolder,
+  const perform = (source: CourseFolderRecord) =>
+    runDashboardCommand({
+      courseFolder: source,
       token,
       runner: options.runner,
       ...(options.env === undefined ? {} : { env: options.env })
-    }),
+    });
+  const result = attachRefreshTime(
+    options.withCourseSource
+      ? await options.withCourseSource(courseFolder, perform)
+      : await perform(courseFolder),
     refreshedAt
   );
   const updatedRegistry = updateCourseFolderRefreshState(

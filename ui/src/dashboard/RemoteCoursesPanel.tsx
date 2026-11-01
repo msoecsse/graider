@@ -1,3 +1,4 @@
+import { ManagedOperationalSourceControls } from "./ManagedOperationalSourceControls";
 import { ManagedCacheReview } from "./ManagedCacheReview";
 import { synchronizationLabel } from "../../electron/remoteCourseTypes";
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
@@ -181,6 +182,9 @@ export const RemoteCoursesPanel = ({
                 aria-label={`Managed cache — ${course.code}`}
               >
                 <ManagedCacheReview course={course} />
+                {course.authorization === "authorized" && course.localFolderIds[0] ? (
+                  <ManagedOperationalSourceControls folderId={course.localFolderIds[0]} />
+                ) : null}
               </div>
             ))}
           {visible.map((course) => (

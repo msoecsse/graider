@@ -90,6 +90,39 @@ const getPanel = (name: string): HTMLElement => {
   return heading.parentElement;
 };
 
+it("retains the loaded managed revision and form when a save is rejected", async () => {
+  const revision = "a".repeat(40);
+  const saveAssignmentEdit = vi.fn().mockRejectedValue(new Error("Course changed remotely"));
+  const f = setup({
+    getAssignmentForEdit: vi.fn().mockResolvedValue({
+      status: "ready",
+      model: assignment,
+      terms: [{ code: "27s1", sections: ["001"] }],
+      diagnostics: [],
+      courseReadRevision: revision
+    }),
+    saveAssignmentEdit
+  });
+  const title = await screen.findByLabelText("Assignment title");
+  fireEvent.change(title, { target: { value: "Faculty draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save assignment changes" }));
+  const dialog = await screen.findByRole("dialog", { name: "Save assignment changes?" });
+  expect(f.previewAssignmentEdit).toHaveBeenCalledWith(
+    expect.objectContaining({ expectedCourseRevision: revision })
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save assignment changes" }));
+  await waitFor(() =>
+    expect(saveAssignmentEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedCourseRevision: revision,
+        assignmentTitle: "Faculty draft"
+      })
+    )
+  );
+  expect(title).toHaveValue("Faculty draft");
+  expect(f.onSaved).not.toHaveBeenCalled();
+});
+
 describe("AssignmentEditPage editable rows", () => {
   it("shows human-readable status options while preserving canonical values", async () => {
     setup();

@@ -130,12 +130,12 @@ Phase 1 acceptance is complete:
 - Git transport credentials remain separate from API-client composition.
 - Architecture tests protect both local Git and GitHub host boundaries.
 
-Phase 2 slices 2.1–2.8 are implemented: OAuth identity, organization access, read-only
-course discovery, verified identity-scoped managed bootstrap and startup/explicit-refresh
-clean fast-forward synchronization, explicit cache reconciliation, and trusted pre-mutation
-source validation plus explicit safe legacy fast-forward. Existing mutation credentials and legacy
-operational paths remain transitional. Next is a designed managed-course mutation cutover. See the implementation boundary in
-[remote course discovery](graider-remote-course-discovery.md).
+Phase 2 slices 2.1–2.9 are implemented: OAuth identity, organization access, course
+discovery, account-scoped managed bootstrap/synchronization/reconciliation, safe explicit
+legacy fast-forward, and registered-course managed operational cutover. Managed course-admin
+mutations now validate and publish transactionally with OAuth; unrelated mutation transports
+retain their existing credentials. Remote-only mutation enablement is next. See the
+[Slice 2.9 contract](graider-remote-course-architecture.md#phase-2--slice-29-managed-course-mutation-cutover).
 
 ---
 
@@ -898,11 +898,11 @@ A broader UI redesign should occur after these workflows are understood and impl
 
 # Recommended Immediate Next Work
 
-Phase 2.8 now safely updates eligible legacy sources within the existing mutation boundary. The next course-management boundary is an
-explicit design for managed-course mutation semantics and cutover. Preserve the verified legacy
-operation boundary until that design is implemented; never silently switch write targets.
-Managed-course mutations and OAuth write authentication require their own later slices. Signed
-release/update infrastructure remains necessary before schema-breaking migration reaches Stable.
+Phase 2.9 now supports explicit managed operational cutover for eligible registered courses,
+with expected read revisions and transactional OAuth course-repository publication. The next
+course-management boundary is remote-only mutation/navigation enablement using these proven
+semantics. Schema v2, domain-aware merge, and broader credential migration remain separate.
+Signed release/update infrastructure is still needed before schema-breaking migration reaches Stable.
 
 ## Phase 2 / Slice 2.7: trusted pre-mutation synchronization
 
@@ -990,3 +990,26 @@ See [Slice 2.8 safety and transition details](graider-remote-course-architecture
 
 Next: design managed-course mutation/read-version/publication semantics before cutover. OAuth write
 migration, schema v2, periodic fetch, branch/org migration and student sync remain excluded.
+
+## Slice 2.9 — Managed-course mutation cutover (implemented)
+
+Eligible registered courses can explicitly persist account/repository-scoped managed
+operational mode after proving a clean/current registered legacy source. All course-driven
+configuration reads then use managed state. Editable requests assert their exact loaded SHA;
+main synchronizes and rejects stale versions before mutation. Course-admin changes run in
+an isolated transaction clone, validate metadata and operation-scoped paths, and succeed
+only after an OAuth-authenticated, non-force course-repository push. The shared managed
+queue spans preconditions through publication/activation. Generated manifests, reports, and
+local grading state use account/repository runtime storage outside the clean Git source.
+
+Remote races synchronize the active clean cache to the winner without merge/rebase or
+unpublished active state. Confirmed remote publication survives local activation failures;
+main records the commit and reports refresh attention separately. The 2.8 document
+invalidation boundary also covers managed updates. Legacy folders become optional external
+working copies, with explicit 2.8 fast-forward refresh and no automatic mirroring. Manual
+Publish Course Changes cannot publish a cut-over legacy copy.
+
+This implements the remote-commit invariant described in Slice 5.4 for managed course-admin
+repositories. Student/template/report write authentication remains unchanged. Remote-only
+mutation enablement is the next boundary; schema v2 and domain-aware merge remain deferred.
+See [Slice 2.9 operational and failure contracts](graider-remote-course-architecture.md#phase-2--slice-29-managed-course-mutation-cutover).

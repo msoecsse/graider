@@ -98,6 +98,11 @@ interface Request {
   readonly organizations: readonly GithubOrganization[];
   readonly username: string | null;
   readonly locals: readonly LocalCourseOrigin[];
+  readonly managedRegistrations?: readonly {
+    readonly repositoryId: number;
+    readonly organizationId: number;
+    readonly folderIds: readonly string[];
+  }[];
   readonly reader: RemoteRepositoryReader;
   readonly metadata?: typeof Metadata;
 }
@@ -150,9 +155,31 @@ export const discoverRemoteCourses = async (request: Request): Promise<RemoteCou
         const repos = new Map(listed.map((repo) => [repo.id, repo]));
         const localIds = new Map<string, number>();
         const knownIds = new Set<number>();
+        // Completed cutovers use the immutable catalog identity, independently of the legacy copy.
+        for (const registration of request.managedRegistrations ?? []) {
+          if (registration.organizationId !== org.organizationId) continue;
+          try {
+            const repo = await reader.resolveId(registration.repositoryId);
+            if (
+              !repo ||
+              repo.id !== registration.repositoryId ||
+              repo.organizationId !== org.organizationId ||
+              repo.disabled
+            )
+              continue;
+            repos.set(repo.id, repo);
+            knownIds.add(repo.id);
+            for (const id of registration.folderIds) localIds.set(id, repo.id);
+          } catch (error) {
+            diagnostics.push(diagnostic(org.organizationId, error, registration.repositoryId));
+          }
+        }
         // Resolve old locators through GitHub for immutable-ID reconciliation after renames.
         for (const local of locals.filter(
-          (value) => value.origin?.owner.toLowerCase() === org.login.toLowerCase()
+          (value) =>
+            !request.managedRegistrations?.some((entry) =>
+              entry.folderIds.includes(value.folderId)
+            ) && value.origin?.owner.toLowerCase() === org.login.toLowerCase()
         )) {
           if (local.origin) {
             try {
@@ -272,9 +299,9 @@ export const discoverRemoteCourses = async (request: Request): Promise<RemoteCou
                   if (authorization !== "authorized") authorization = "unavailable";
                 }
               } else attention.push("Set your MSOE username to verify course access.");
-              const matched = locals
-                .filter((local) => localIds.get(local.folderId) === repo.id)
-                .map((local) => local.folderId);
+              const matched = [...localIds.entries()]
+                .filter(([, repositoryId]) => repositoryId === repo.id)
+                .map(([folderId]) => folderId);
               const related = locals.filter(
                 (local) =>
                   !matched.includes(local.folderId) &&

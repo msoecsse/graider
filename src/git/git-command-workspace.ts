@@ -817,12 +817,22 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
   }
 
   async commit(request: CommitRequest): Promise<ObjectId> {
+    if (
+      request.author &&
+      [request.author.name, request.author.email].some(
+        (v) => !v.trim() || /[\r\n<>]/u.test(v) || v.includes("\u0000")
+      )
+    )
+      throw new GitError("operation_rejected", "commit");
     if (request.message.trim() === "" || request.message.includes("\u0000"))
       throw new GitError("operation_rejected", "commit");
     try {
       await this.executor.run(
         this.root,
         [
+          ...(request.author
+            ? ["-c", `user.name=${request.author.name}`, "-c", `user.email=${request.author.email}`]
+            : []),
           "commit",
           ...(request.allowEmpty === true ? ["--allow-empty"] : []),
           "-m",

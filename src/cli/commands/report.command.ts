@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import path from "node:path";
+import { courseRuntimePath } from "../../core/course-runtime-paths.js";
 import { loadGraiderConfig } from "../../config/config-loader.js";
 import {
   type CommonCommandOptions,
@@ -76,7 +76,7 @@ const createReportFiles = (
     );
 
     return {
-      absolutePath: path.join(repoRoot, relativePath),
+      absolutePath: courseRuntimePath(repoRoot, relativePath),
       relativePath,
       content: renderStudentMarkdownReport(report.assignment, student)
     };

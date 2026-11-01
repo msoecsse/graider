@@ -33,7 +33,9 @@ export const commentLibraryPublicationWarning = (
 ): string | undefined =>
   result.publication.status === "failure"
     ? "Comment saved locally, but the shared course repository could not be published. Resolve the repository issue, then use Publish Course Changes to retry."
-    : undefined;
+    : result.publication.refreshRequired
+      ? "Published remotely. Local course refresh needs attention. Refresh courses before continuing."
+      : undefined;
 
 export const updateReusableCommentList = (
   comments: readonly ReusableComment[],

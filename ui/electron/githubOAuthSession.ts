@@ -1,5 +1,5 @@
 import { mapBounded } from "./remoteCourseDiscovery.js";
-import { MANAGED_BOOTSTRAP_CONCURRENCY } from "./managedCourses.js";
+import { MANAGED_BOOTSTRAP_CONCURRENCY, serializeManagedOperation } from "./managedCourses.js";
 import type {
   RemoteCourse,
   ManagedCourseState,
@@ -29,6 +29,7 @@ export const createOAuthProof = () => {
   };
 };
 export interface ManagedOperationInput {
+  readonly resynchronize?: (afterPublication?: boolean) => Promise<ManagedSynchronizationState>;
   readonly token: string;
   readonly userId: number;
   readonly course: RemoteCourse;
@@ -50,6 +51,8 @@ interface Dependencies {
   readonly synchronizeCourse?: (
     input: ManagedOperationInput & {
       readonly onProgress: (state: ManagedSynchronizationState) => void;
+      readonly alreadySerialized?: boolean;
+      readonly requireFacultyAuthorization?: boolean;
     }
   ) => Promise<ManagedSynchronizationState>;
   readonly reconcileCourse?: (
@@ -231,19 +234,29 @@ export class GithubOAuthSession {
           }
         };
     };
-    this.courseOperations.add(controller);
-    try {
-      const synchronization = await this.deps.synchronizeCourse({
+    const synchronize = async (afterPublication = false) => {
+      const result = await this.deps.synchronizeCourse!({
         ...input,
+        alreadySerialized: true,
+        requireFacultyAuthorization: !afterPublication,
         onProgress: updateSynchronization
       });
-      updateSynchronization(synchronization);
-      if (!current()) throw new Error("Account changed. Retry the operation.");
-      return await operation(input, synchronization);
+      updateSynchronization(result);
+      return result;
+    };
+    this.courseOperations.add(controller);
+    try {
+      return await serializeManagedOperation(input, async () => {
+        if (!current()) throw new Error("Account changed. Retry the operation.");
+        const synchronization = await synchronize();
+        if (!current()) throw new Error("Account changed. Retry the operation.");
+        return operation({ ...input, resynchronize: synchronize }, synchronization);
+      });
     } finally {
       this.courseOperations.delete(controller);
     }
   }
+
   private discovery: AbortController | null = null;
   constructor(private readonly deps: Dependencies) {}
   getState(): GithubOAuthState {

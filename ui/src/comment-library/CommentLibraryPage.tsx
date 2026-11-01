@@ -62,6 +62,7 @@ export const CommentLibraryPage = ({
   readonly termCode: string;
   readonly courseTermLabel: string;
 }): ReactElement => {
+  const [readRevision, setReadRevision] = useState<string>();
   const [library, setLibrary] = useState<CommentLibraryLoadState>({ status: "loading" });
   const [search, setSearch] = useState("");
   const [selectedTags, setSelectedTags] = useState<readonly string[]>([]);
@@ -97,6 +98,7 @@ export const CommentLibraryPage = ({
     void load({ courseFolderId, termCode })
       .then((result) => {
         if (!active) return;
+        setReadRevision(result.courseReadRevision);
         if (result.status === "success") {
           setLibrary({ status: "success", comments: result.comments });
         } else {
@@ -150,11 +152,13 @@ export const CommentLibraryPage = ({
       const result =
         currentEditor.operation === "create"
           ? await window.graiderUI.createGradingLibraryComment!({
+              ...(readRevision ? { expectedCourseRevision: readRevision } : {}),
               courseFolderId,
               termCode,
               comment: value
             })
           : await window.graiderUI.editGradingLibraryComment!({
+              ...(readRevision ? { expectedCourseRevision: readRevision } : {}),
               courseFolderId,
               termCode,
               commentId: currentEditor.commentId ?? "",
@@ -163,6 +167,7 @@ export const CommentLibraryPage = ({
       if (result.status !== "success" || !("comment" in result)) {
         setMessage(commentLibraryMutationFailureMessage(result));
       } else {
+        setReadRevision(result.courseReadRevision);
         updateComments(setLibrary, currentEditor.operation, result.comment);
         setEditor(undefined);
         const warning = commentLibraryPublicationWarning(result);
@@ -188,10 +193,16 @@ export const CommentLibraryPage = ({
     setPending(true);
     setMessage(undefined);
     try {
-      const result = await remove({ courseFolderId, termCode, commentId: comment.id });
+      const result = await remove({
+        ...(readRevision ? { expectedCourseRevision: readRevision } : {}),
+        courseFolderId,
+        termCode,
+        commentId: comment.id
+      });
       if (result.status !== "success") {
         setMessage(commentLibraryMutationFailureMessage(result));
       } else {
+        setReadRevision(result.courseReadRevision);
         updateComments(setLibrary, "delete", comment);
         setDeleteConfirmation(undefined);
         const warning = commentLibraryPublicationWarning(result);

@@ -120,6 +120,10 @@ const invoke = async <T>(channel: string, ...args: readonly unknown[]): Promise<
   (await ipcRenderer.invoke(channel, ...args)) as T;
 
 const graiderUI: GraiderUIApi = {
+  getCourseOperationalMode: async (folderId) =>
+    invoke<"legacy" | "managed">(IPC_CHANNELS.getCourseOperationalMode, folderId),
+  cutoverManagedCourse: async (folderId) =>
+    invoke<void>(IPC_CHANNELS.cutoverManagedCourse, folderId),
   updateCourseSource: (courseFolderId) => invoke(IPC_CHANNELS.updateCourseSource, courseFolderId),
   reloadCourseView: () => invoke(IPC_CHANNELS.reloadCourseView),
   onCourseMutationNotice: (listener) => {

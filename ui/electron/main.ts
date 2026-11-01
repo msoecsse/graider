@@ -1,3 +1,8 @@
+import type { CourseFolderRecord } from "./ipc.js";
+import {
+  managedCourseOperation,
+  courseOperationDocument
+} from "./managedCourseOperationContext.js";
 import { createCourseMutationIpc } from "./courseMutationIpc.js";
 import { ManagedCourseMutationGuard } from "./managedCourseMutationGuard.js";
 import {
@@ -10,7 +15,9 @@ import { createAuthenticatedProductionGitWorkspace } from "./gitWorkspaceReader.
 import {
   bootstrapManagedCourse,
   synchronizeManagedCourse,
-  inspectManagedCourse
+  performSynchronization,
+  inspectManagedCourse,
+  loadManagedCatalog
 } from "./managedCourses.js";
 import { createRemoteRepositoryReader } from "./githubRemoteRepositories.js";
 import { discoverRemoteCourses, inspectLocalCourseOrigins } from "./remoteCourseDiscovery.js";
@@ -38,7 +45,7 @@ import { gradeAssignment } from "./assignmentGradeRunner.js";
 import { getAssignmentApplyPreview } from "./assignmentApplyPreviewRunner.js";
 import { getAssignmentGradePreview } from "./assignmentGradePreviewRunner.js";
 import { getAssignmentGradeStatus } from "./assignmentGradeStatusRunner.js";
-import { createNodeProcessRunner } from "./commandRunner.js";
+import { createNodeProcessRunner, type ProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail } from "./assignmentDetailRunner.js";
 import { runAssignmentRepositoryDownload } from "./assignmentRepositoryDownloadRunner.js";
 import { prepareGradingWorkspace } from "./gradingWorkspaceService.js";
@@ -141,10 +148,18 @@ import {
 } from "./studentRepositoryAccessPageService.js";
 import { getStudentRepositoryAccessPagePublishStatus } from "./studentRepositoryAccessPagePublishStatusService.js";
 import { publishStudentRepositoryAccessPage } from "./studentRepositoryAccessPagePublishService.js";
-import { getRosterForSection, loadRosterTerms, previewRosterSave } from "./rosterManagerService.js";
+import {
+  getRosterForSection,
+  loadRosterTerms,
+  previewRosterSave,
+  saveRoster,
+  removeRoster,
+  removeSection
+} from "./rosterManagerService.js";
 import { getRosterSectionSummaries } from "./rosterSectionSummaryService.js";
 import { createRosterSaveDependencies } from "./rosterProvenanceService.js";
 import {
+  refreshStudentRepositoryPages,
   removeRosterWithStudentRepositoryAccessPageRefresh,
   removeSectionWithStudentRepositoryAccessPageRefresh,
   saveRosterWithStudentRepositoryAccessPageRefresh
@@ -491,6 +506,12 @@ const isTemplateManagedWorkflowReplacementRequest = (
 };
 
 let courseMutationGuard: ManagedCourseMutationGuard | undefined;
+let invalidateManagedCourseViews: (
+  userId: number,
+  repositoryId: number,
+  commit: string,
+  excludeId?: number
+) => void = () => {};
 
 export const registerIpcHandlers = (): void => {
   const courseIpc = createCourseMutationIpc(
@@ -510,8 +531,9 @@ export const registerIpcHandlers = (): void => {
     },
     () => BrowserWindow.getAllWindows().map((window) => window.webContents)
   );
+  invalidateManagedCourseViews = courseIpc.invalidateRevision;
   const approvedCourseSetupRoots = new Set<string>();
-  const processRunner = createNodeProcessRunner({
+  const baseProcessRunner = createNodeProcessRunner({
     graiderCli: app.isPackaged
       ? {
           mode: "bundled",
@@ -522,7 +544,27 @@ export const registerIpcHandlers = (): void => {
           mode: "external"
         }
   });
+  const processRunner: ProcessRunner = (request) => {
+    const operation = managedCourseOperation.getStore();
+    return baseProcessRunner(
+      operation?.managed && !operation.transaction
+        ? {
+            ...request,
+            env: {
+              ...(request.env ?? process.env),
+              GRAIDER_MANAGED_COURSE_SOURCE: operation.courseFolderPath,
+              GRAIDER_MANAGED_COURSE_RUNTIME: path.join(
+                path.dirname(operation.courseFolderPath),
+                "runtime"
+              )
+            }
+          }
+        : request
+    );
+  };
   const isRegisteredAssignmentSetupCourse = (request: AssignmentSetupTermsRequest): boolean =>
+    (managedCourseOperation.getStore()?.courseFolderId === request.courseFolderId &&
+      managedCourseOperation.getStore()?.courseFolderPath === request.courseFolderPath) ||
     listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).some(
       (courseFolder) =>
         courseFolder.id === request.courseFolderId && courseFolder.path === request.courseFolderPath
@@ -541,6 +583,8 @@ export const registerIpcHandlers = (): void => {
     )?.pagesRepositoryFolderPath ?? null;
   const getRegisteredCourseFolderPath = (courseFolderId: unknown): string | null => {
     if (typeof courseFolderId !== "string") return null;
+    const context = managedCourseOperation.getStore();
+    if (context?.courseFolderId === courseFolderId) return context.courseFolderPath;
     return (
       listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).find(
         (courseFolder) => courseFolder.id === courseFolderId
@@ -548,8 +592,26 @@ export const registerIpcHandlers = (): void => {
     );
   };
 
-  const publishAuthenticatedCourseChanges = (courseFolderPath: string) =>
-    publishCourseChanges(courseFolderPath, { runner: processRunner, env: process.env });
+  const publishAuthenticatedCourseChanges = async (courseFolderPath: string) =>
+    managedCourseOperation.getStore()?.transaction
+      ? { status: "success" as const, diagnostics: [], commitMessage: null }
+      : publishCourseChanges(courseFolderPath, { runner: processRunner, env: process.env });
+  const withCourseSource = async (
+    folder: CourseFolderRecord,
+    perform: (
+      source: CourseFolderRecord
+    ) => Promise<Omit<import("./ipc.js").CourseFolderDashboardResult, "refreshedAt">>
+  ) =>
+    courseMutationGuard
+      ? courseMutationGuard.read(folder.id, folder.path, async (context) => {
+          const result = context?.managed
+            ? await managedCourseOperation.run(context, () =>
+                perform({ ...folder, path: context.courseFolderPath })
+              )
+            : await perform(folder);
+          return { ...result, courseFolderPath: folder.path };
+        })
+      : perform(folder);
 
   courseIpc.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
   courseIpc.handle(IPC_CHANNELS.getLocalSettings, () =>
@@ -667,16 +729,24 @@ export const registerIpcHandlers = (): void => {
   });
 
   courseIpc.handle(IPC_CHANNELS.previewCourseSetup, (_event, request: unknown) => {
-    if (!isCourseSetupRequest(request) || !approvedCourseSetupRoots.has(request.courseFolderPath))
+    if (
+      !isCourseSetupRequest(request) ||
+      (!approvedCourseSetupRoots.has(request.courseFolderPath) &&
+        !managedCourseOperation.getStore()?.managed)
+    )
       throw new Error("Approved course setup request is required.");
     return previewCourseSetup(request);
   });
 
   courseIpc.handle(IPC_CHANNELS.saveCourseSetup, (_event, request: unknown) => {
-    if (!isCourseSetupRequest(request) || !approvedCourseSetupRoots.has(request.courseFolderPath))
+    if (
+      !isCourseSetupRequest(request) ||
+      (!approvedCourseSetupRoots.has(request.courseFolderPath) &&
+        !managedCourseOperation.getStore()?.managed)
+    )
       throw new Error("Approved course setup request is required.");
     const result = saveCourseSetup(request);
-    if (result.status === "success")
+    if (result.status === "success" && !managedCourseOperation.getStore()?.managed)
       addValidatedCourseFolderToRegistry(
         getCourseRegistryPath(app.getPath("userData")),
         request.courseFolderPath
@@ -686,7 +756,10 @@ export const registerIpcHandlers = (): void => {
   courseIpc.handle(IPC_CHANNELS.saveStudentAccessPagesConfig, (_event, request: unknown) => {
     if (!isStudentAccessPagesConfigRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for Student Access Pages settings.");
-    return saveStudentAccessPagesConfig(request);
+    const result = saveStudentAccessPagesConfig(request);
+    return managedCourseOperation.getStore()?.transaction && result.status === "success"
+      ? { ...result, diagnostics: [] }
+      : result;
   });
 
   courseIpc.handle(IPC_CHANNELS.loadAssignmentSetupTerms, (_event, request: unknown) => {
@@ -971,6 +1044,27 @@ export const registerIpcHandlers = (): void => {
     if (!isRosterSaveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
+    const managed = managedCourseOperation.getStore();
+    if (managed?.transaction) {
+      const result = saveRoster(
+        request,
+        createRosterSaveDependencies(getLocalSettingsPath(app.getPath("userData")))
+      );
+      if (result.status === "success")
+        managed.afterPublication?.push(() =>
+          refreshStudentRepositoryPages(
+            { ...request, courseFolderPath: managed.authoritativePath! },
+            {
+              runner: processRunner,
+              env: process.env,
+              pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(
+                request.courseFolderId
+              )
+            }
+          )
+        );
+      return result;
+    }
     return await publishSuccessfulCourseMutation(
       request.courseFolderPath,
       await saveRosterWithStudentRepositoryAccessPageRefresh(request, {
@@ -988,6 +1082,24 @@ export const registerIpcHandlers = (): void => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
     }
+    const managed = managedCourseOperation.getStore();
+    if (managed?.transaction) {
+      const result = removeRoster(request);
+      if (result.status === "success")
+        managed.afterPublication?.push(() =>
+          refreshStudentRepositoryPages(
+            { ...request, courseFolderPath: managed.authoritativePath! },
+            {
+              runner: processRunner,
+              env: process.env,
+              pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(
+                request.courseFolderId
+              )
+            }
+          )
+        );
+      return result;
+    }
     return await publishSuccessfulCourseMutation(
       request.courseFolderPath,
       await removeRosterWithStudentRepositoryAccessPageRefresh(request, {
@@ -1001,6 +1113,24 @@ export const registerIpcHandlers = (): void => {
   courseIpc.handle(IPC_CHANNELS.removeSection, async (_event, request: unknown) => {
     if (!isRosterRemoveRequest(request) || !isRegisteredAssignmentSetupCourse(request)) {
       throw new Error("A registered course folder is required for roster management.");
+    }
+    const managed = managedCourseOperation.getStore();
+    if (managed?.transaction) {
+      const result = removeSection(request);
+      if (result.status === "success")
+        managed.afterPublication?.push(() =>
+          refreshStudentRepositoryPages(
+            { ...request, courseFolderPath: managed.authoritativePath! },
+            {
+              runner: processRunner,
+              env: process.env,
+              pagesRepositoryFolderPath: getRegisteredPagesRepositoryFolderPath(
+                request.courseFolderId
+              )
+            }
+          )
+        );
+      return result;
     }
     return await publishSuccessfulCourseMutation(
       request.courseFolderPath,
@@ -1050,6 +1180,7 @@ export const registerIpcHandlers = (): void => {
     }
 
     return await refreshCourseFolder(getCourseRegistryPath(app.getPath("userData")), id, {
+      withCourseSource,
       runner: processRunner,
       env: process.env
     });
@@ -1059,6 +1190,7 @@ export const registerIpcHandlers = (): void => {
     IPC_CHANNELS.refreshDashboard,
     async () =>
       await refreshDashboard(getCourseRegistryPath(app.getPath("userData")), {
+        withCourseSource,
         runner: processRunner,
         env: process.env
       })
@@ -1544,8 +1676,18 @@ app.whenReady().then(async () => {
         reader: createRemoteRepositoryReader(token, signal),
         authenticate: () => createAuthenticatedProductionGitWorkspace(token)
       }),
-    synchronizeCourse: async ({ token, userId, course, signal, revalidateSession, onProgress }) =>
-      synchronizeManagedCourse({
+    synchronizeCourse: async ({
+      token,
+      userId,
+      course,
+      signal,
+      revalidateSession,
+      onProgress,
+      alreadySerialized,
+      requireFacultyAuthorization
+    }) =>
+      (alreadySerialized ? performSynchronization : synchronizeManagedCourse)({
+        requireFacultyAuthorization,
         userData: app.getPath("userData"),
         userId,
         course,
@@ -1556,6 +1698,15 @@ app.whenReady().then(async () => {
           .currentFacultyMsoeUsername,
         reader: createRemoteRepositoryReader(token, signal),
         authenticate: () => createAuthenticatedProductionGitWorkspace(token)
+      }).then((synchronization) => {
+        if (synchronization.currentCommit)
+          invalidateManagedCourseViews(
+            userId,
+            course.repositoryId,
+            synchronization.currentCommit,
+            courseOperationDocument.getStore()
+          );
+        return synchronization;
       }),
     reconcileCourse: async ({
       token,
@@ -1577,7 +1728,18 @@ app.whenReady().then(async () => {
         signal,
         revalidateSession,
         sessionGeneration,
-        onProgress,
+        onProgress: (
+          synchronization: import("./remoteCourseTypes.js").ManagedSynchronizationState
+        ) => {
+          onProgress(synchronization);
+          if (synchronization.currentCommit)
+            invalidateManagedCourseViews(
+              userId,
+              course.repositoryId,
+              synchronization.currentCommit,
+              courseOperationDocument.getStore()
+            );
+        },
         onReconciliationProgress,
         username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
           .currentFacultyMsoeUsername,
@@ -1589,13 +1751,27 @@ app.whenReady().then(async () => {
         : reconciliation.apply(request, planId ?? "", confirmed === true);
     },
     discoverCourses: async (token, userId, organizations, signal) => {
+      const registered = listCourseFolders(getCourseRegistryPath(app.getPath("userData")));
+      const managedRegistrations = Object.values(
+        loadManagedCatalog(app.getPath("userData"), userId).courses
+      )
+        .filter((entry) => entry.operationalSource === "managed")
+        .map((entry) => ({
+          repositoryId: entry.repositoryId,
+          organizationId: entry.organizationId,
+          folderIds: (entry.operationalFolderIds ?? []).filter((id) =>
+            registered.some((folder) => folder.id === id)
+          )
+        }));
+      const managedIds = new Set(managedRegistrations.flatMap((entry) => entry.folderIds));
       const discovered = await discoverRemoteCourses({
         userId,
         organizations,
         username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
           .currentFacultyMsoeUsername,
+        managedRegistrations,
         locals: await inspectLocalCourseOrigins(
-          listCourseFolders(getCourseRegistryPath(app.getPath("userData")))
+          registered.filter((folder) => !managedIds.has(folder.id))
         ),
         reader: createRemoteRepositoryReader(token, signal)
       });

@@ -546,6 +546,7 @@ export const GradingWorkspacePage = ({
   const [bulkWorkflowRepairConfirmation, setBulkWorkflowRepairConfirmation] = useState(false);
   const [bulkWorkflowRepairResult, setBulkWorkflowRepairResult] =
     useState<GradingBulkWorkflowRepairResult>();
+  const [libraryReadRevision, setLibraryReadRevision] = useState<string>();
   const [commentLibrary, setCommentLibrary] = useState<CommentLibraryLoadState>({
     status: "loading"
   });
@@ -817,6 +818,7 @@ export const GradingWorkspacePage = ({
       .then((value) => {
         if (!active) return;
         if (value.status === "success" && "comments" in value) {
+          setLibraryReadRevision(value.courseReadRevision);
           setCommentLibrary({ status: "success", comments: value.comments });
           setRecentCommentIds(value.recentCommentIds ?? []);
           return;
@@ -1386,11 +1388,13 @@ export const GradingWorkspacePage = ({
       const result =
         editor.operation === "create"
           ? await window.graiderUI.createGradingLibraryComment!({
+              ...(libraryReadRevision ? { expectedCourseRevision: libraryReadRevision } : {}),
               courseFolderId: request.courseFolderId,
               termCode: request.termCode,
               comment: value
             })
           : await window.graiderUI.editGradingLibraryComment!({
+              ...(libraryReadRevision ? { expectedCourseRevision: libraryReadRevision } : {}),
               courseFolderId: request.courseFolderId,
               termCode: request.termCode,
               commentId: editor.commentId,
@@ -1399,6 +1403,7 @@ export const GradingWorkspacePage = ({
       if (result.status !== "success" || !("comment" in result)) {
         setLibraryMutationMessage(commentLibraryMutationFailureMessage(result));
       } else {
+        setLibraryReadRevision(result.courseReadRevision);
         updateLibraryComments((comments) =>
           updateReusableCommentList(comments, editor.operation, result.comment)
         );
@@ -1435,11 +1440,13 @@ export const GradingWorkspacePage = ({
       const result = await remove({
         courseFolderId: request.courseFolderId,
         termCode: request.termCode,
-        commentId: comment.id
+        commentId: comment.id,
+        ...(libraryReadRevision ? { expectedCourseRevision: libraryReadRevision } : {})
       });
       if (result.status !== "success")
         setLibraryMutationMessage(commentLibraryMutationFailureMessage(result));
       else {
+        setLibraryReadRevision(result.courseReadRevision);
         updateLibraryComments((comments) => updateReusableCommentList(comments, "delete", comment));
         setLibraryDeleteConfirmation(undefined);
         const warning = commentLibraryPublicationWarning(result);

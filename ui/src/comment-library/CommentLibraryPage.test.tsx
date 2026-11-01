@@ -140,3 +140,24 @@ describe("CommentLibraryPage", () => {
     await waitFor(() => expect(screen.queryByText("Loop bounds")).not.toBeInTheDocument());
   });
 });
+
+it("uses the loaded library revision for deletion and preserves state after a stale rejection", async () => {
+  const revision = "b".repeat(40);
+  const remove = vi.fn().mockRejectedValue(new Error("Course changed remotely"));
+  mockGraiderUI({
+    loadGradingCommentLibrary: vi
+      .fn()
+      .mockResolvedValue({ status: "success", comments: [comment], courseReadRevision: revision }),
+    deleteGradingLibraryComment: remove
+  });
+  renderPage();
+  await screen.findByText(comment.title);
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete reusable comment" }));
+  await waitFor(() =>
+    expect(remove).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedCourseRevision: revision, commentId: comment.id })
+    )
+  );
+  expect(screen.getAllByText(comment.title).length).toBeGreaterThan(0);
+});

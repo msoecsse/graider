@@ -108,6 +108,12 @@ export interface ManagedCatalogEntry {
   readonly defaultBranch: string;
   readonly bootstrap: ManagedCourseState;
   readonly lastValidatedAt: string | null;
+  readonly operationalSource?: "managed";
+  readonly operationalFolderIds?: readonly string[];
+  readonly lastPublication?: {
+    readonly status: "published" | "refresh_required" | "outcome_unknown";
+    readonly commit: string;
+  };
 }
 interface Catalog {
   readonly schemaVersion: typeof MANAGED_CATALOG_SCHEMA;
@@ -157,20 +163,50 @@ export const loadManagedCatalog = (userData: string, userId: number): Catalog =>
           "failed",
           "needs_attention"
         ].includes(entry.bootstrap.status) ||
+        (entry.operationalSource !== undefined && entry.operationalSource !== "managed") ||
+        (entry.operationalSource === "managed" &&
+          (!entry.operationalFolderIds || !entry.operationalFolderIds.length)) ||
+        (entry.operationalFolderIds !== undefined &&
+          (!Array.isArray(entry.operationalFolderIds) ||
+            !entry.operationalFolderIds.every((id) => typeof id === "string" && id.length > 0))) ||
         (entry.lastValidatedAt !== null &&
           (typeof entry.lastValidatedAt !== "string" ||
             Number.isNaN(Date.parse(entry.lastValidatedAt))))
       )
         throw new Error();
+      if (
+        entry.lastPublication &&
+        (!["published", "refresh_required", "outcome_unknown"].includes(
+          entry.lastPublication.status
+        ) ||
+          !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(entry.lastPublication.commit))
+      )
+        throw new Error();
       // Explicit whitelist prevents unknown fields (including credentials) from being reserialized.
-      courses[key] = catalogEntry(
-        userData,
-        userId,
-        entry.repositoryId,
-        entry,
-        state(entry.bootstrap.status),
-        entry.lastValidatedAt
-      );
+      courses[key] = {
+        ...catalogEntry(
+          userData,
+          userId,
+          entry.repositoryId,
+          entry,
+          state(entry.bootstrap.status),
+          entry.lastValidatedAt
+        ),
+        ...(entry.lastPublication
+          ? {
+              lastPublication: {
+                status: entry.lastPublication.status,
+                commit: entry.lastPublication.commit
+              }
+            }
+          : {}),
+        ...(entry.operationalSource === "managed"
+          ? {
+              operationalSource: "managed" as const,
+              operationalFolderIds: entry.operationalFolderIds ?? []
+            }
+          : {})
+      };
     }
     return { schemaVersion: MANAGED_CATALOG_SCHEMA, userId, courses };
   } catch {
@@ -209,6 +245,21 @@ export const catalogEntry = (
 });
 export const saveEntry = (userData: string, entry: ManagedCatalogEntry): void => {
   const catalog = loadManagedCatalog(userData, entry.userId);
+  const previous = catalog.courses[String(entry.repositoryId)];
+  if (previous?.lastPublication && !entry.lastPublication)
+    entry = { ...entry, lastPublication: previous.lastPublication };
+  // Synchronization/reconciliation must never silently revert a completed cutover.
+  if (previous?.operationalSource === "managed")
+    entry = {
+      ...entry,
+      operationalSource: "managed",
+      operationalFolderIds: [
+        ...new Set([
+          ...(previous.operationalFolderIds ?? []),
+          ...(entry.operationalFolderIds ?? [])
+        ])
+      ]
+    };
   const root = accountRoot(userData, entry.userId);
   const file = path.join(root, CATALOG_FILE);
   const temporary = path.join(root, `catalog-${randomUUID()}.tmp`);
@@ -237,6 +288,8 @@ export interface BootstrapGitContext {
   };
 }
 export interface ManagedBootstrapRequest {
+  /** Only post-publication activation may omit faculty membership; pre-write authorization is mandatory. */
+  readonly requireFacultyAuthorization?: boolean;
   readonly userData: string;
   readonly userId: number;
   readonly course: RemoteCourse;
@@ -249,7 +302,7 @@ export interface ManagedBootstrapRequest {
   /** Existing caches are structurally checked here, then classified by synchronization. */
   readonly prepareSynchronization?: boolean;
 }
-export const assertActive = (request: ManagedBootstrapRequest): void => {
+export const assertActive = (request: Pick<ManagedBootstrapRequest, "signal">): void => {
   if (request.signal.aborted) throw new Error("stale_session");
 };
 const validateMetadata = async (
@@ -321,7 +374,7 @@ const validateMetadata = async (
       );
     if (faculty === "authorized") authorized = true;
   }
-  if (!authorized)
+  if (!authorized && request.requireFacultyAuthorization !== false)
     throw new Attention(
       "Current faculty authorization could not be verified. Refresh courses after checking faculty settings.",
       "authorization_lost"
@@ -649,7 +702,7 @@ let activeBootstraps = 0;
 const waitingBootstraps: Array<() => void> = [];
 const destinationLocks = new Map<string, Promise<unknown>>();
 export const serializeManagedOperation = async <T>(
-  request: ManagedBootstrapRequest,
+  request: Pick<ManagedBootstrapRequest, "userId" | "course" | "signal">,
   perform: () => Promise<T>
 ): Promise<T> => {
   const key = `${request.userId}:${request.course.repositoryId}`;
@@ -888,10 +941,15 @@ export const performSynchronization = async (
       );
     assertActive(request);
     const timestamp = new Date().toISOString();
-    saveEntry(
-      request.userData,
-      catalogEntry(request.userData, request.userId, repo.id, latest, state("ready"), timestamp)
-    );
+    const previousPublication = loadManagedCatalog(request.userData, request.userId).courses[
+      String(repo.id)
+    ]?.lastPublication;
+    saveEntry(request.userData, {
+      ...catalogEntry(request.userData, request.userId, repo.id, latest, state("ready"), timestamp),
+      ...(previousPublication?.commit === observed.head.commit
+        ? { lastPublication: { status: "published", commit: previousPublication.commit } }
+        : {})
+    });
     return {
       status: updated ? "updated" : "up_to_date",
       diagnostic: null,
