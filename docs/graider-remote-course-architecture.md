@@ -89,7 +89,7 @@ The current configuration schema is version 1. Important existing characteristic
 - assignments have a single `faculty_owner`;
 - assignment deadlines are shared across all sections;
 - assignments list target sections directly;
-- the schema still contains optional grader-team configuration;
+- Schema v1 still parses deprecated grader fields as compatibility data only;
 - faculty authorization is currently resolved from a locally configured institutional username and section faculty lists.
 
 The existing manifest model provides several useful foundations:
@@ -485,7 +485,7 @@ Adding/removing sections and assigning faculty is coordinator-only.
 
 All current faculty assigned to a section share access to all students in that section.
 
-Graider does not assign individual students to individual graders.
+Graider does not assign individual students to individual faculty members for grading.
 
 Shared grading state records attribution and uses grading claims to avoid concurrent edits.
 
@@ -1485,8 +1485,8 @@ Apply state:
 
 Grader configuration:
 
-- legacy `grader_team` / `grader_permission` fields are removed;
-- no grader-specific authorization survives migration;
+- Phase 9.4 removes persisted legacy `grader_team` / `grader_permission` fields;
+- Slice 6.6 already removed grader-specific authorization and active behavior;
 - anyone requiring grading access is assigned as section faculty.
 
 Term coordinators:
@@ -2192,8 +2192,9 @@ Schema v1 remains production-compatible, including managed discovery, synchroniz
 faculty authorization, and course publication. Course Setup still writes schema 1.
 No user course is migrated, upgraded, or rewritten.
 
-Schema v2 initially retains every v1 course field, including grading, reports,
-notifications, and transitional faculty/grader teams, and adds:
+Schema v2 retains grading, reports, notifications, and transitional faculty-team
+configuration, and adds the identity fields below. Slice 6.6 removed the initial
+transitional grader fields from v2; they now parse only in v1 compatibility.
 
 ```yaml
 schema_version: 2
@@ -2506,6 +2507,37 @@ members, unrelated IDs, and unassigned sections. It checks default/expanded scop
 identity metadata spoofing, term/section isolation, role transitions, structured reasons,
 input snapshots, invalid references, and the production gates.
 
-Next slice: **6.6 — Remove Grader Role**. The resolver has no grader capability or
-permission path. Existing v1 grader configuration and operational behavior remain intact
-for that slice to address.
+Slice **6.6 — Remove Grader Role** is complete below. The resolver remains grader-free.
+
+## Phase 6 / Slice 6.6: Remove grader role
+
+The role model is faculty-directory identity → term coordinator and/or section faculty
+→ authorization. Current section faculty is the ordinary grading authority; directory
+membership alone grants nothing. Historical roles and explicit coordinator scope retain
+Slice 6.5 semantics. There is no separate grader identity, team, permission, capability,
+or replacement field. Production services still use v1 faculty scope, and both operational
+course/term schema gates remain **1**. No v2 operational cutover occurs here.
+
+The pre-edit inventory traced these remaining concepts and their callers:
+
+| Reference / consumer                                                        | Slice 6.6 disposition                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config-schemas.ts` shared GitHub shape, v2 fixture                         | Grader fields removed from v2; strict parsing rejects each field. The shared shape is grader-free.                                                                                                                                                                                                                                                                                                               |
+| v1 `grader_team` / `grader_permission`                                      | Deprecated, optional parse-only compatibility fields on the v1 schema. No permission-policy enforcement, authorization, team lookup, or mutations derive from them. Existing files remain untouched.                                                                                                                                                                                                             |
+| `config-validation.ts` and grader permission constant                       | Grader-specific validation/constant removed; faculty/student policy retained.                                                                                                                                                                                                                                                                                                                                    |
+| Course Setup (`courseSetupService.ts`), config writers, setup UI/IPC        | Setup already generated v1 without graders. Regression coverage pins schema 1 and absence of both fields. No separate grader UI setting exists. Other document-based writers preserve existing v1 data rather than migrating it.                                                                                                                                                                                 |
+| `plan-builder.ts`, `operation-models.ts`, `repository-targets.ts`           | New and tracked individual targets generate faculty/student operations only; grader operation type and target permission removed. Apply rebuilds plans from current guarded config, not persisted renderer preview data.                                                                                                                                                                                         |
+| `group-preview-planner.ts`, `group-target-executor.ts`                      | Grader target fields and team mutation removed. Existing faculty team and student admin behavior retained. No Phase 7 team model introduced.                                                                                                                                                                                                                                                                     |
+| `apply-executor.ts`                                                         | Grader constant, dispatch, permission reconciliation, and new manifest grader state removed. Faculty permission updates preserve historical fields through the existing manifest merge.                                                                                                                                                                                                                          |
+| `github-readiness-validation.ts`, diagnostic catalog                        | Faculty team still required. Missing legacy grader teams are never queried and cannot block. Grader-only diagnostic constants retired.                                                                                                                                                                                                                                                                           |
+| Manifest loader/model/renderer                                              | Manifest versions unchanged. V1 optional `permissions.grader_team` / model `graderTeam` remain deprecated historical evidence. Existing records round-trip, with no refresh or desired permission semantics. New manifests do not introduce this field. Manifest v2 target format contains no grader permission field.                                                                                           |
+| Persisted diagnostics/results                                               | Diagnostic codes are parsed as strings; old grader diagnostics remain readable without active catalog constants. No executable persisted-plan loader exists.                                                                                                                                                                                                                                                     |
+| Apply preview normalization/types/merge/page/status labels                  | Grader target fields, displayed grader permission, and active operation label removed. Unknown fields in old JSON remain safely ignored. Grading-work terminology is unchanged.                                                                                                                                                                                                                                  |
+| `AuthorizationResolver`                                                     | Already grader-free; focused regression checks facts/capabilities, current section-faculty mutation basis, directory-only denial, and unchanged production gates.                                                                                                                                                                                                                                                |
+| Backend/UI tests, v1 fixtures                                               | Existing v1 course and legacy manifest fixtures retained as compatibility evidence; current typed target samples and mutation counts updated. Focused tests cover old fields with no grader GitHub team, fresh/repeated Apply, and historical manifest preservation.                                                                                                                                             |
+| Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
+| Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
+
+Phase 6 is complete. The next planned work is **Phase 7 — GitHub Desired-State
+Permission Model**. This slice does not migrate courses, edit the real `csc1120`,
+remove GitHub teams, revoke permissions, change term lifecycle, or activate v2.

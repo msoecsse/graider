@@ -56,7 +56,6 @@ export const DiagnosticCode = {
   TemplateBranchNotDefault: "template_branch_not_default",
   TemplateReadmeMissing: "template_readme_missing",
   FacultyTeamMissing: "faculty_team_missing",
-  GraderTeamMissing: "grader_team_missing",
   GithubUserMissing: "github_user_missing",
   InvalidRepositoryName: "invalid_repository_name",
   RepoNamePatternMissingPlaceholder: "repo_name_pattern_missing_placeholder",
@@ -205,7 +204,6 @@ export const TEMPLATE_BRANCH_MISSING_CODE = DiagnosticCode.TemplateBranchMissing
 export const TEMPLATE_BRANCH_NOT_DEFAULT_CODE = DiagnosticCode.TemplateBranchNotDefault;
 export const TEMPLATE_README_MISSING_CODE = DiagnosticCode.TemplateReadmeMissing;
 export const FACULTY_TEAM_MISSING_CODE = DiagnosticCode.FacultyTeamMissing;
-export const GRADER_TEAM_MISSING_CODE = DiagnosticCode.GraderTeamMissing;
 export const GITHUB_USER_MISSING_CODE = DiagnosticCode.GithubUserMissing;
 export const INVALID_REPOSITORY_NAME_CODE = DiagnosticCode.InvalidRepositoryName;
 export const REPO_NAME_PATTERN_MISSING_PLACEHOLDER_CODE =

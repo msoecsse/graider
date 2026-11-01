@@ -85,6 +85,7 @@ const toRawPermissionState = (permissions: ManifestPermissionState) => ({
       permissions.facultyTeam === undefined
         ? undefined
         : toRawTeamPermission(permissions.facultyTeam),
+    // Round-trip existing historical evidence only. New Apply never creates this state.
     grader_team:
       permissions.graderTeam === undefined ? undefined : toRawTeamPermission(permissions.graderTeam)
   })

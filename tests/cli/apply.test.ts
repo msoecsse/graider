@@ -163,10 +163,7 @@ const createReadyClient = (repositories: GitHubRepository[] = []): FakeGitHubCli
     templateRepositories: [templateRepository],
     repositories,
     users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
-    teams: [
-      { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-      { org: ORGANIZATION, slug: "graders", name: "Graders" }
-    ],
+    teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }],
     workflows: [JONES_REPOSITORY, PATEL_REPOSITORY].map((repo) => ({
       owner: ORGANIZATION,
       repo,
@@ -365,6 +362,61 @@ const writeTrackedManifest = (cwd: string, repositoryName: string): void => {
 };
 
 describe("graider apply command", () => {
+  it.each([false, true])(
+    "creates no grader state and preserves historical evidence only (legacy manifest: %s)",
+    async (historical) => {
+      const cwd = copyFixtureToTemp("grading-disabled");
+      const coursePath = path.join(cwd, "course.yml");
+      const originalCourse = fs.readFileSync(coursePath, "utf8");
+      const manifestPath = createManifestPath(cwd, "27s1", "lab04").absolutePath;
+      const legacyPermission = {
+        teamSlug: "graders",
+        permission: "maintain" as const,
+        lastAppliedAt: "2025-01-01T00:00:00.000Z"
+      };
+      if (historical) {
+        writeTrackedManifest(cwd, JONES_REPOSITORY);
+        const loaded = loadManifest(manifestPath);
+        if (loaded.status !== "loaded" || !loaded.manifest.repositories[0])
+          throw new Error("Expected tracked manifest");
+        loaded.manifest.repositories[0].permissions.graderTeam = legacyPermission;
+        loaded.manifest.warnings.push({
+          code: "grader_team_missing",
+          severity: "warning",
+          message: "Historical missing grader team"
+        });
+        expect(writeManifest(manifestPath, loaded.manifest).status).toBe("success");
+      }
+      const githubClient = createReadyClient(
+        historical ? [createRepository(JONES_REPOSITORY)] : []
+      );
+      const result = await runApplyCommand({
+        cwd,
+        assignmentFile: ASSIGNMENT_FILE,
+        options: yesOptions,
+        githubClient,
+        clock: fixedClock
+      });
+      expect(result.status).toBe("success");
+      expect(githubClient.mutations.teamPermissions).toEqual([
+        expect.objectContaining({ teamSlug: "faculty", permission: "admin" })
+      ]);
+      expect(githubClient.mutations.addedCollaborators).toEqual([
+        expect.objectContaining({ username: "seanjones", permission: "admin" })
+      ]);
+      const loaded = loadManifest(manifestPath);
+      if (loaded.status !== "loaded") throw new Error("Expected readable manifest");
+      expect(loaded.manifest.repositories[0]?.permissions.graderTeam).toEqual(
+        historical ? legacyPermission : undefined
+      );
+      expect(loaded.manifest.repositories[0]?.permissions.facultyTeam).toMatchObject({
+        teamSlug: "faculty",
+        permission: "admin"
+      });
+      if (!historical) expect(fs.readFileSync(manifestPath, "utf8")).not.toMatch(/grader/iu);
+      expect(fs.readFileSync(coursePath, "utf8")).toBe(originalCourse);
+    }
+  );
   it("installs the managed workflow when a template-backed repository omits it", async () => {
     const cwd = copyFixtureToTemp("active-assignment");
     configureAssignmentPresetGrading(cwd);
@@ -480,10 +532,7 @@ describe("graider apply command", () => {
     const client = new FakeGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ],
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }],
       workflows: [PATEL_REPOSITORY].map((repo) => ({
         owner: ORGANIZATION,
         repo,
@@ -655,7 +704,7 @@ describe("graider apply command", () => {
     expect(githubClient.mutations.createdRepositories).toEqual([]);
     expect(githubClient.mutations.createdRepositoriesWithoutTemplate).toHaveLength(1);
     expect(githubClient.mutations.addedCollaborators).toHaveLength(1);
-    expect(githubClient.mutations.teamPermissions).toHaveLength(2);
+    expect(githubClient.mutations.teamPermissions).toHaveLength(1);
     expect(githubClient.mutations.enabledActions).toHaveLength(1);
     expect(githubClient.mutations.fileWrites).toEqual([]);
     expect(manifestResult.status).toBe("loaded");
@@ -884,10 +933,7 @@ describe("graider apply command", () => {
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({
         username
       })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ]
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
     });
 
     const result = await runApplyCommand({
@@ -906,7 +952,7 @@ describe("graider apply command", () => {
     );
     expect(githubClient.manifestWasDurableBeforeBaselineLookup).toBe(true);
     expect(githubClient.mutations.addedCollaborators).toHaveLength(1);
-    expect(githubClient.mutations.teamPermissions).toHaveLength(2);
+    expect(githubClient.mutations.teamPermissions).toHaveLength(1);
     expect(githubClient.mutations.enabledActions).toHaveLength(1);
     expect(manifest.status).toBe("loaded");
     if (manifest.status !== "loaded") throw new Error("Expected written manifest.");
@@ -953,10 +999,7 @@ describe("graider apply command", () => {
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({
         username
       })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ]
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
     });
 
     const result = await runApplyCommand({
@@ -990,10 +1033,7 @@ describe("graider apply command", () => {
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({
         username
       })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ]
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
     });
 
     const sleep = vi.fn(async () => {});
@@ -1089,10 +1129,7 @@ describe("graider apply command", () => {
     const githubClient = new ActionsPropagationGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones"].map((username) => ({ username })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ]
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
     });
     githubClient.failTimes("getActionsState", "api_error", 3, { statusCode: 404 });
 
@@ -1115,10 +1152,7 @@ describe("graider apply command", () => {
     const githubClient = new ActionsPropagationGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones"].map((username) => ({ username })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ]
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
     });
     githubClient.failTimes("getActionsState", "api_error", FRESH_REPOSITORY_ACTIONS_MAX_ATTEMPTS, {
       statusCode: 404
@@ -1197,10 +1231,7 @@ describe("graider apply command", () => {
       templateRepositories: [templateRepository],
       repositories: [createRepository(JONES_REPOSITORY)],
       users: [{ username: "seanjones" }],
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ],
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }],
       collaboratorPermissions: [
         {
           owner: ORGANIZATION,
@@ -1249,10 +1280,7 @@ describe("graider apply command", () => {
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({
         username
       })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ]
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
     });
 
     const result = await runApplyCommand({
@@ -1378,10 +1406,7 @@ describe("graider apply command", () => {
     const githubClient = new CreateResponseOnlyGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ]
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
     });
     const { cwd, result } = await runApply("grading-disabled", githubClient);
     const manifestResult = loadWrittenManifest(cwd);
@@ -1429,10 +1454,7 @@ describe("graider apply command", () => {
       templateRepositories: [templateRepository],
       repositories: [createRepository(JONES_REPOSITORY)],
       users: [{ username: "seanjones" }],
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ],
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }],
       collaboratorPermissions: [
         {
           owner: ORGANIZATION,
@@ -1553,10 +1575,7 @@ describe("graider apply command", () => {
     const githubClient = new NoWorkflowReadinessGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ]
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
     });
     const { cwd, result } = await runApply("grading-disabled", githubClient);
     const manifestResult = loadWrittenManifest(cwd);
@@ -1582,10 +1601,7 @@ describe("graider apply command", () => {
     const githubClient = new FakeGitHubClient({
       templateRepositories: [templateRepository],
       users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
-      teams: [
-        { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-        { org: ORGANIZATION, slug: "graders", name: "Graders" }
-      ],
+      teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }],
       workflows: [
         {
           owner: ORGANIZATION,

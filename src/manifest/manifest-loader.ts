@@ -95,6 +95,7 @@ const permissionStateSchema = z
   .object({
     student: collaboratorPermissionSchema.optional(),
     faculty_team: teamPermissionSchema.optional(),
+    // Historical v1 manifest data; not an active desired permission.
     grader_team: teamPermissionSchema.optional()
   })
   .strict();

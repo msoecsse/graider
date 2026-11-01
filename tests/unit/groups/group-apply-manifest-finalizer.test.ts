@@ -23,8 +23,6 @@ const target = (id: string, students: string[], sectionId = "111"): GroupApplyPr
   plannedStudentPermission: "admin",
   facultyTeam: "faculty",
   facultyTeamPermission: "admin",
-  graderTeam: "graders",
-  graderTeamPermission: "maintain",
   diagnostics: []
 });
 

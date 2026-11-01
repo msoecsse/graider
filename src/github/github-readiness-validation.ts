@@ -349,25 +349,13 @@ const validateTeams = async (
   githubClient: GitHubClient
 ): Promise<Diagnostic[]> => {
   const organization = courseConfig.github.organization;
-  const facultyTeamErrors = await validateTeam(
+  return validateTeam(
     githubClient,
     organization,
     courseConfig.github.faculty_team,
     DiagnosticCode.FacultyTeamMissing,
     "Faculty"
   );
-  const graderTeamErrors =
-    courseConfig.github.grader_team === undefined
-      ? []
-      : await validateTeam(
-          githubClient,
-          organization,
-          courseConfig.github.grader_team,
-          DiagnosticCode.GraderTeamMissing,
-          "Grader"
-        );
-
-  return [...facultyTeamErrors, ...graderTeamErrors];
 };
 
 const createMissingUserDiagnostic = (student: RosterStudent): Diagnostic =>

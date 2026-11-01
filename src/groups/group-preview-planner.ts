@@ -22,8 +22,6 @@ export interface GroupApplyPreviewTarget {
   readonly plannedStudentPermission: "admin";
   readonly facultyTeam: string;
   readonly facultyTeamPermission: string;
-  readonly graderTeam?: string;
-  readonly graderTeamPermission?: string;
   readonly diagnostics: Diagnostic[];
 }
 
@@ -226,13 +224,6 @@ export const buildGroupApplyPreviewPlan = (
       plannedStudentPermission: "admin",
       facultyTeam: config.course.github.faculty_team,
       facultyTeamPermission: config.course.github.faculty_permission,
-      ...(config.course.github.grader_team === undefined ||
-      config.course.github.grader_permission === undefined
-        ? {}
-        : {
-            graderTeam: config.course.github.grader_team,
-            graderTeamPermission: config.course.github.grader_permission
-          }),
       diagnostics: [...repository.warnings]
     });
   }

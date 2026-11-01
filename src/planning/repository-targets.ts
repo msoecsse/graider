@@ -14,7 +14,6 @@ export interface ApplyRepositoryTarget {
   readonly groupId?: string;
   readonly plannedStudentPermission: "admin";
   readonly facultyTeamPermission: string;
-  readonly graderTeamPermission?: string;
   readonly diagnostics: readonly Diagnostic[];
 }
 
@@ -39,9 +38,6 @@ export const createIndividualRepositoryTarget = (
     primaryStudentId: student.studentId,
     plannedStudentPermission: "admin",
     facultyTeamPermission: config.course.github.faculty_permission,
-    ...(config.course.github.grader_permission === undefined
-      ? {}
-      : { graderTeamPermission: config.course.github.grader_permission }),
     diagnostics: [...name.warnings, ...name.errors]
   };
 };

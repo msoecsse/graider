@@ -526,7 +526,7 @@ const GroupTargetsPanel = ({
               </span>
               <span role="cell">{row.studentIds.join(", ") || "—"}</span>
               <span role="cell">{formatNullableValue(row.plannedStudentPermission)}</span>
-              <span role="cell">{`${row.facultyTeam ?? "—"} (${row.facultyTeamPermission ?? "—"}), ${row.graderTeam ?? "—"} (${row.graderTeamPermission ?? "—"})`}</span>
+              <span role="cell">{`${row.facultyTeam ?? "—"} (${row.facultyTeamPermission ?? "—"})`}</span>
               <span role="cell">
                 <span
                   className={

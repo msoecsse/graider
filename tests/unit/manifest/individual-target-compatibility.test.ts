@@ -12,7 +12,6 @@ const individual: ApplyRepositoryTarget = {
   primaryStudentId: "student-a",
   plannedStudentPermission: "admin",
   facultyTeamPermission: "admin",
-  graderTeamPermission: "maintain",
   diagnostics: []
 };
 

@@ -98,8 +98,6 @@ export interface ApplyPreviewGroupTarget {
   readonly plannedStudentPermission: string | null;
   readonly facultyTeam: string | null;
   readonly facultyTeamPermission: string | null;
-  readonly graderTeam: string | null;
-  readonly graderTeamPermission: string | null;
 }
 
 export interface ApplyPreviewFiles {
@@ -232,8 +230,6 @@ export interface ApplyGroupRowState {
   readonly plannedStudentPermission: string | null;
   readonly facultyTeam: string | null;
   readonly facultyTeamPermission: string | null;
-  readonly graderTeam: string | null;
-  readonly graderTeamPermission: string | null;
   readonly previewStatus: ApplyPreviewRepositoryStatus;
   readonly resultStatus: string | null;
   readonly htmlUrl: string | null;

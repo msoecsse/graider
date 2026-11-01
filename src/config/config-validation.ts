@@ -33,7 +33,6 @@ import {
   ENABLED_GRADING_MODES,
   ENABLED_STUDENT_PUBLISH_MODES,
   FACULTY_PERMISSION,
-  GRADER_PERMISSION,
   STUDENT_PERMISSION,
   SUPPORTED_GRADING_PRESETS,
   SUPPORTED_ASSIGNMENT_TYPE,
@@ -500,10 +499,7 @@ export const validateCourseConfig = (filePath: string, config: RawCourseConfig):
         )
       ]),
   ...(config.github.student_permission === STUDENT_PERMISSION &&
-  config.github.faculty_permission === FACULTY_PERMISSION &&
-  (config.github.grader_team === undefined
-    ? config.github.grader_permission === undefined
-    : config.github.grader_permission === GRADER_PERMISSION)
+  config.github.faculty_permission === FACULTY_PERMISSION
     ? []
     : [
         createConfigDiagnostic(
@@ -512,8 +508,7 @@ export const validateCourseConfig = (filePath: string, config: RawCourseConfig):
           {
             filePath,
             studentPermission: config.github.student_permission,
-            facultyPermission: config.github.faculty_permission,
-            graderPermission: config.github.grader_permission
+            facultyPermission: config.github.faculty_permission
           }
         )
       ]),

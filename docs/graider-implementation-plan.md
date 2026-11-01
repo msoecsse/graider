@@ -551,7 +551,7 @@ Validate:
 - template branch is default branch
 - template contains `README.md`
 - configured faculty team exists
-- configured grader team exists
+- missing legacy grader team does not block readiness
 - GitHub usernames exist
 
 ## Tests first
@@ -567,7 +567,7 @@ TC-GH-READY-005 template branch missing fails
 TC-GH-READY-006 template branch not default fails
 TC-GH-READY-007 README missing fails
 TC-GH-READY-008 faculty team missing fails
-TC-GH-READY-009 grader team missing fails
+TC-GH-READY-009 missing legacy grader team is ignored
 ```
 
 ## Requirements covered
@@ -799,7 +799,7 @@ Implement:
 - create repo from template
 - add student collaborator
 - add faculty team permission
-- add grader team permission
+- legacy grader permissions remain untouched
 - enable/verify Actions
 - update manifest incrementally
 - idempotent rerun
@@ -1277,7 +1277,7 @@ Use unit tests with mocked Octokit where possible, plus optional live tests.
 TC-LIVE-001 validate real template repo
 TC-LIVE-002 create one student repo from template
 TC-LIVE-003 add test student collaborator
-TC-LIVE-004 add faculty/grader test teams
+TC-LIVE-004 read the faculty test team
 TC-LIVE-005 trigger workflow dispatch
 TC-LIVE-006 read workflow run/artifact
 TC-LIVE-007 publish student report to sandbox repo

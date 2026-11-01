@@ -206,9 +206,7 @@ const createReadyGroupApplyPreviewJson = (): AssignmentApplyPreviewJsonResponse 
           githubUsernames: ["alpha-gh", "beta-gh"],
           plannedStudentPermission: "admin",
           facultyTeam: "faculty",
-          facultyTeamPermission: "push",
-          graderTeam: "graders",
-          graderTeamPermission: "maintain"
+          facultyTeamPermission: "push"
         },
         {
           targetId: "team-2",
@@ -219,9 +217,7 @@ const createReadyGroupApplyPreviewJson = (): AssignmentApplyPreviewJsonResponse 
           githubUsernames: ["gamma-gh"],
           plannedStudentPermission: "admin",
           facultyTeam: "faculty",
-          facultyTeamPermission: "push",
-          graderTeam: "graders",
-          graderTeamPermission: "maintain"
+          facultyTeamPermission: "push"
         }
       ]
     },
@@ -507,6 +503,8 @@ describe("ApplyPreviewPage", () => {
     expect(screen.getByText("alpha, beta")).toBeInTheDocument();
     expect(screen.queryByText(/alpha-gh/u)).toBeNull();
     expect(screen.getAllByText("admin")).toHaveLength(2);
+    expect(screen.getAllByText("faculty (push)")).toHaveLength(2);
+    expect(screen.queryByText(/grader/iu)).not.toBeInTheDocument();
     expect(screen.getByText("2 group repositories would be affected.")).toBeInTheDocument();
     expect(screen.queryByText("graider-sandbox/csc1120-lab02-alpha")).toBeNull();
 

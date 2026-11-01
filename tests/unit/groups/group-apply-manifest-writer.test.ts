@@ -22,8 +22,6 @@ const target = (id: string, students: string[], sectionId = "111"): GroupApplyPr
   plannedStudentPermission: "admin",
   facultyTeam: "faculty",
   facultyTeamPermission: "admin",
-  graderTeam: "graders",
-  graderTeamPermission: "maintain",
   diagnostics: []
 });
 
@@ -73,6 +71,7 @@ describe("group apply manifest writer", () => {
       diagnostics: []
     });
     expect(fs.existsSync(manifestPath.absolutePath)).toBe(true);
+    expect(fs.readFileSync(manifestPath.absolutePath, "utf8")).not.toMatch(/grader/iu);
 
     const manifest = loadManifest(manifestPath.absolutePath);
     if (manifest.status !== "loaded") {

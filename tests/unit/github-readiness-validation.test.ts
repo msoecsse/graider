@@ -366,15 +366,20 @@ describe("GitHub readiness validation", () => {
     );
   });
 
-  it("TC-GH-READY-009 grader team missing fails", async () => {
-    await expectErrorCode(
-      new FakeGitHubClient({
-        templateRepositories: [createTemplateRepository()],
-        users: [{ username: GITHUB_USERNAME }],
-        teams: [{ org: ORGANIZATION, slug: FACULTY_TEAM, name: "Faculty" }]
-      }),
-      "grader_team_missing"
-    );
+  it("ignores a missing legacy grader team and never queries it", async () => {
+    const client = new FakeGitHubClient({
+      templateRepositories: [createTemplateRepository()],
+      users: [{ username: GITHUB_USERNAME }],
+      teams: [{ org: ORGANIZATION, slug: FACULTY_TEAM, name: "Faculty" }]
+    });
+    const getTeam = client.getTeam.bind(client);
+    const teams: string[] = [];
+    client.getTeam = (org, slug) => {
+      teams.push(slug);
+      return getTeam(org, slug);
+    };
+    expect(await validateWith(client)).toEqual({ warnings: [], errors: [] });
+    expect(teams).toEqual([FACULTY_TEAM]);
   });
 
   it("TC-ROSTER-011 GitHub username not found fails with student context", async () => {

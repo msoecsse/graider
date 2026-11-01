@@ -504,7 +504,7 @@ Useful fields include:
 
 For `repository_mode: group`, Apply runs group preflight, then executes one
 repository target per `group_id`. It creates each shared repository, gives every
-group member `admin` access, applies configured faculty/grader teams, and writes
+group member `admin` access, applies configured faculty team, and writes
 manifest-v2 checkpoints before later operations can orphan an observed target.
 Its top-level JSON shape remains
 the standard command result; group-specific data is in `summary`:

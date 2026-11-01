@@ -134,8 +134,6 @@ github.repo_name_pattern
 github.student_permission
 github.faculty_team
 github.faculty_permission
-github.grader_team
-github.grader_permission
 defaults.timezone
 defaults.assignment_type
 grading.workflow
@@ -490,15 +488,12 @@ The system shall grant the configured faculty team `admin` access to each studen
 - If the faculty team is missing, validation fails.
 - If the faculty team already has `admin`, apply treats it as no-op.
 
-### FR-PERM-003 — Grader team permission
+### FR-PERM-003 — Retired: grader team permission
 
-The system shall grant the configured grader team `maintain` access to each student repository.
-
-**Acceptance criteria**
-
-- Given a student repo, `graider apply` grants the configured grader team `maintain`.
-- If the grader team is missing, validation fails.
-- If the grader team already has `maintain`, apply treats it as no-op.
+Superseded by Phase 6 / Slice 6.6. Anyone who grades is section faculty. No new
+configuration, plan, readiness requirement, or Apply mutation uses a separate grader
+team. Existing v1 fields and manifest records remain deprecated compatibility only;
+Phase 9.4 removes persisted state and reconciles GitHub teams during migration.
 
 ### FR-PERM-004 — Additive permission behavior
 
@@ -616,7 +611,7 @@ The system shall provide `graider archive` to explicitly archive selected studen
 
 - `archive` requires exactly one target selector.
 - `archive` requires confirmation unless `--yes` is provided.
-- `archive` preserves faculty and grader team access.
+- `archive` preserves faculty team access and unrelated existing team permissions.
 - `archive` does not delete repositories.
 - Re-running `archive` on an already archived repo is a no-op.
 
@@ -629,7 +624,7 @@ The system shall provide `graider remove-access` to explicitly remove student co
 - `remove-access` requires exactly one target selector.
 - `remove-access` requires confirmation unless `--yes` is provided.
 - `remove-access` removes only student collaborator access.
-- Faculty and grader team access are preserved.
+- Faculty team access and unrelated existing team permissions are preserved.
 - Re-running `remove-access` after access has already been removed is a no-op.
 
 ---
@@ -876,7 +871,7 @@ The system shall make `graider archive` safe to re-run.
 - Running `archive` on an active repository archives the repository.
 - Running `archive` on an already archived repository is treated as no-op.
 - Running `archive` does not delete the repository.
-- Running `archive` preserves faculty and grader team access.
+- Running `archive` preserves faculty team access and unrelated existing team permissions.
 - Running `archive --remove-student-access` removes student access if present and treats already-removed access as no-op.
 - Archive results are reflected in the manifest.
 
@@ -890,7 +885,7 @@ The system shall make `graider remove-access` safe to re-run.
 
 - Running `remove-access` removes student collaborator access when present.
 - Running `remove-access` when student access is already absent is treated as no-op.
-- Running `remove-access` preserves faculty and grader team access.
+- Running `remove-access` preserves faculty team access and unrelated existing team permissions.
 - Running `remove-access` does not archive or delete repositories.
 - Remove-access results are reflected in the manifest.
 
@@ -1375,16 +1370,14 @@ The system shall create all MVP student repositories as private repositories.
 
 ---
 
-### NFR-SEC-011 — Faculty and grader access through teams
+### NFR-SEC-011 — Faculty access through teams
 
-The system shall manage faculty and grader access through configured GitHub teams.
+The system shall manage faculty access through the configured GitHub team.
 
 **Acceptance criteria**
 
 - Faculty access is applied through the configured faculty team.
-- Grader/TA access is applied through the configured grader team.
 - Faculty team permission is `admin`.
-- Grader team permission is `maintain`.
 - Missing configured teams cause validation failure.
 - Graider does not require individual faculty or TA usernames in assignment configuration for MVP.
 
@@ -1412,7 +1405,7 @@ The system shall restrict MVP operations to the configured GitHub organization.
 
 - Template repositories must be in the configured organization.
 - Generated student repositories are created in the configured organization.
-- Faculty and grader teams are resolved in the configured organization.
+- The faculty team is resolved in the configured organization.
 - Validation fails if the template repository is outside the configured organization.
 - Graider does not create student repositories outside the configured organization in MVP.
 

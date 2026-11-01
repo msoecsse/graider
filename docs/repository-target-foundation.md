@@ -6,7 +6,7 @@ Group configuration, preview, Apply preflight, and public Apply execution exist.
 `src/groups/group-target-executor.ts` is tested only with mocked GitHub
 dependencies. It performs one
 repository operation per group target, never per student; adds deduplicated
-members as `admin` collaborators; applies configured faculty/grader teams; and
+members as `admin` collaborators; applies configured faculty team; and
 returns target identities and URLs for manifest-v2 construction. The public
 Apply orchestrator supplies a checkpoint callback that writes each newly
 observed identity before collaborator, team, Actions, or workflow operations.
@@ -38,7 +38,7 @@ partial checkpoints and still refuses paths outside the course repository.
 Individual Apply continues to create one repository per active student and
 writes manifest-v1 records. Group Apply creates one repository per `group_id`,
 adds every member as an `admin` collaborator, applies the configured
-faculty/grader team permissions, and incrementally writes manifest-v2. Existing
+faculty team permissions, and incrementally writes manifest-v2. Existing
 v1 manifests remain readable; no migration is required.
 
 `normalizeManifestRepositories` provides a repository-centric view over both

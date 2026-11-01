@@ -43,7 +43,6 @@ const PRIVATE_REPOSITORY = true;
 const DEFAULT_ACTIONS_ENABLED = true;
 const STUDENT_PERMISSION: Exclude<GitHubPermission, "none"> = "admin";
 const FACULTY_PERMISSION: Exclude<GitHubPermission, "none"> = "admin";
-const GRADER_PERMISSION: Exclude<GitHubPermission, "none"> = "maintain";
 const CREATE_REPOSITORY_PLAN_TYPE = "create_repository";
 const CREATE_REPOSITORY_FROM_TEMPLATE_PLAN_TYPE = "create_repository_from_template";
 const FIRST_REPOSITORY_POSITION = 1;
@@ -56,7 +55,6 @@ const isRepositoryCreationOperation = (operation: PlanOperation): boolean =>
 const isRepositoryUpdateOperation = (operation: PlanOperation): boolean =>
   operation.type === "add_student_collaborator" ||
   operation.type === "add_faculty_team_permission" ||
-  operation.type === "add_grader_team_permission" ||
   operation.type === "enable_actions" ||
   operation.type === "ensure_managed_grading_workflow";
 
@@ -760,30 +758,17 @@ const executeTeamPermission = async (
         ...nextState,
         manifest: updatePermissionState(nextState.manifest, {
           studentId: operation.student_id ?? "",
-          permissions:
-            operation.type === "add_faculty_team_permission"
-              ? {
-                  facultyTeam: {
-                    teamSlug,
-                    permission:
-                      currentPermission.permission === "none"
-                        ? expectedPermission
-                        : currentPermission.permission,
-                    lastObservedAt: observedAt,
-                    lastAppliedAt: observedAt
-                  }
-                }
-              : {
-                  graderTeam: {
-                    teamSlug,
-                    permission:
-                      currentPermission.permission === "none"
-                        ? expectedPermission
-                        : currentPermission.permission,
-                    lastObservedAt: observedAt,
-                    lastAppliedAt: observedAt
-                  }
-                }
+          permissions: {
+            facultyTeam: {
+              teamSlug,
+              permission:
+                currentPermission.permission === "none"
+                  ? expectedPermission
+                  : currentPermission.permission,
+              lastObservedAt: observedAt,
+              lastAppliedAt: observedAt
+            }
+          }
         })
       },
       input.manifestPath
@@ -1122,19 +1107,6 @@ const executeOperation = async (
       operation,
       input.config.course.github.faculty_team,
       FACULTY_PERMISSION,
-      observedAt
-    );
-  }
-
-  if (operation.type === "add_grader_team_permission") {
-    const graderTeam = input.config.course.github.grader_team;
-    if (graderTeam === undefined) return state;
-    return executeTeamPermission(
-      input,
-      state,
-      operation,
-      graderTeam,
-      GRADER_PERMISSION,
       observedAt
     );
   }

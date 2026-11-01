@@ -32,6 +32,8 @@ describe("course setup service", () => {
     const course = parseDocument(preview.files[0]?.content ?? "").toJS() as Record<string, unknown>;
 
     expect(preview.status).toBe("ready");
+    expect(course.schema_version).toBe(1);
+    expect(preview.files[1]?.content).toContain("schema_version: 1");
     expect(preview.files[0]?.content).toContain('code: "csc1120"');
     expect(preview.files[0]?.content).toContain("student_permission: admin");
     expect(preview.files[0]?.content).toContain("faculty_permission: admin");

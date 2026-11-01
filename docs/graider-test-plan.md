@@ -368,7 +368,7 @@ Test cases:
 | `TC-CLI-ARCHIVE-003` | Confirmation required unless `--yes`      |
 | `TC-CLI-ARCHIVE-004` | Active repo is archived                   |
 | `TC-CLI-ARCHIVE-005` | Already archived repo is no-op            |
-| `TC-CLI-ARCHIVE-006` | Faculty/grader access is preserved        |
+| `TC-CLI-ARCHIVE-006` | Faculty and existing unrelated team access is preserved        |
 | `TC-CLI-ARCHIVE-007` | Draft assignment blocks archive           |
 | `TC-CLI-ARCHIVE-008` | Archive updates manifest lifecycle fields |
 
@@ -385,7 +385,7 @@ Test cases:
 | `TC-CLI-REMOVE-003` | Confirmation required unless `--yes`            |
 | `TC-CLI-REMOVE-004` | Student collaborator is removed                 |
 | `TC-CLI-REMOVE-005` | Already removed access is no-op                 |
-| `TC-CLI-REMOVE-006` | Faculty/grader access is preserved              |
+| `TC-CLI-REMOVE-006` | Faculty and existing unrelated team access is preserved              |
 | `TC-CLI-REMOVE-007` | Draft assignment blocks remove-access           |
 | `TC-CLI-REMOVE-008` | Remove-access updates manifest lifecycle fields |
 
@@ -424,9 +424,9 @@ Mock scenarios:
 - student collaborator has lower permission
 - student collaborator has higher permission
 - faculty team missing
-- grader team missing
+- missing legacy grader team is ignored
 - faculty team has expected permission
-- grader team has expected permission
+- legacy grader permission is never reconciled
 - team has lower permission
 - unexpected team exists
 
@@ -652,7 +652,7 @@ Live tests should use only one or two small sandbox repositories.
 | `TC-LIVE-001` | Validate real template repo                   |
 | `TC-LIVE-002` | Create one student repo from template         |
 | `TC-LIVE-003` | Add test student collaborator or test account |
-| `TC-LIVE-004` | Add faculty/grader test teams                 |
+| `TC-LIVE-004` | Read the faculty test team                 |
 | `TC-LIVE-005` | Trigger workflow dispatch                     |
 | `TC-LIVE-006` | Read workflow run/artifact                    |
 | `TC-LIVE-007` | Publish student report to sandbox repo        |

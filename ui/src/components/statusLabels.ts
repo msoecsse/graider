@@ -134,7 +134,6 @@ const APPLY_OPERATION_LABELS: Readonly<Record<string, string>> = {
   create_repository_from_template: "Create repository from template",
   add_student_collaborator: "Add student collaborator",
   add_faculty_team_permission: "Add faculty team permission",
-  add_grader_team_permission: "Add grader team permission",
   enable_actions: "Enable Actions",
   ensure_managed_grading_workflow: "Install managed grading workflow",
   verify_grading_workflow: "Verify grading workflow",

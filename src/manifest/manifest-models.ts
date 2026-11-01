@@ -110,6 +110,7 @@ export interface ManifestRepositoryIdentity {
 export interface ManifestPermissionState {
   student?: ManifestCollaboratorPermission;
   facultyTeam?: ManifestTeamPermission;
+  /** Deprecated compatibility: historical evidence only, preserved until Phase 9.4; never reconciled. */
   graderTeam?: ManifestTeamPermission;
 }
 

@@ -37,7 +37,8 @@ describe("versioned course configuration", () => {
         ...course,
         schema_version: 1,
         faculty_directory: undefined,
-        fallback_administrator: undefined
+        fallback_administrator: undefined,
+        github: { ...course.github, grader_team: "graders", grader_permission: "maintain" }
       });
     }
   });
@@ -48,9 +49,18 @@ describe("versioned course configuration", () => {
       ["invalid_schema_version"]
     );
     expect(rawCourseConfigV2Schema.parse(course)).toEqual(course);
-    expect(course.github.grader_permission).toBe("maintain");
+    expect(course.github).not.toHaveProperty("grader_team");
+    expect(course.github).not.toHaveProperty("grader_permission");
     expect(course.grading?.enabled).toBe(true);
     expect(course.reports.formats).toEqual(["markdown"]);
+  });
+
+  it.each(["grader_team", "grader_permission"])("rejects legacy %s in strict v2", (field) => {
+    const result = parse({ ...course, github: { ...course.github, [field]: "legacy" } });
+    expect(result.status).toBe("failure");
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "missing_required_field" })
+    ]);
   });
 
   it.each([undefined, []])("defaults omitted history to an empty array (%j)", (history) => {

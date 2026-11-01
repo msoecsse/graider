@@ -62,8 +62,6 @@ const previewGroupTarget = (
   plannedStudentPermission: "admin",
   facultyTeam: "faculty",
   facultyTeamPermission: "push",
-  graderTeam: "graders",
-  graderTeamPermission: "maintain",
   ...overrides
 });
 
@@ -316,8 +314,6 @@ describe("mergeApplyGroupRows", () => {
         plannedStudentPermission: null,
         facultyTeam: null,
         facultyTeamPermission: null,
-        graderTeam: null,
-        graderTeamPermission: null,
         previewStatus: "would_create",
         resultStatus: "failed",
         htmlUrl: null,

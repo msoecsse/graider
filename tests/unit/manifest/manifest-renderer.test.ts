@@ -156,6 +156,35 @@ describe("manifest renderer", () => {
     }
   });
 
+  it("round-trips historical grader permissions and diagnostics without a diagnostic constant", () => {
+    const loaded = loadManifest(
+      path.resolve("tests/fixtures/manifest/valid-manifest/manifest.yml")
+    );
+    if (loaded.status !== "loaded") throw new Error("Expected legacy manifest");
+    const graderPermission = loaded.manifest.repositories[0]?.permissions.graderTeam;
+    expect(graderPermission).toMatchObject({ teamSlug: "graders", permission: "maintain" });
+    loaded.manifest.warnings.push({
+      code: "grader_team_missing",
+      severity: "warning",
+      message: "Historical diagnostic"
+    });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-legacy-grader-"));
+    try {
+      const manifestPath = path.join(root, "manifest.yml");
+      expect(writeManifest(manifestPath, loaded.manifest).status).toBe("success");
+      const roundTrip = loadManifest(manifestPath);
+      expect(roundTrip.status).toBe("loaded");
+      expect(roundTrip.manifest?.repositories[0]?.permissions.graderTeam).toEqual(graderPermission);
+      expect(roundTrip.manifest?.warnings).toContainEqual({
+        code: "grader_team_missing",
+        severity: "warning",
+        message: "Historical diagnostic"
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("loaded valid fixture renders deterministically after normalization", () => {
     const loadResult = loadManifest(
       path.resolve("tests/fixtures/manifest/valid-manifest/manifest.yml")

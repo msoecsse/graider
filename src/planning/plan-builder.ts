@@ -266,9 +266,6 @@ const buildPlannedProvisioningOperations = (
     }),
     createOperation(student, "add_student_collaborator", "planned", sharedInput),
     createOperation(student, "add_faculty_team_permission", "planned", sharedInput),
-    ...(config.course.github.grader_team === undefined
-      ? []
-      : [createOperation(student, "add_grader_team_permission", "planned", sharedInput)]),
     createOperation(student, "enable_actions", "planned", sharedInput),
     ...(deployManagedWorkflow
       ? [
@@ -340,9 +337,6 @@ const buildTrackedRepositoryOperations = (
     }),
     createOperation(student, "add_student_collaborator", "planned", sharedInput),
     createOperation(student, "add_faculty_team_permission", "planned", sharedInput),
-    ...(config.course.github.grader_team === undefined
-      ? []
-      : [createOperation(student, "add_grader_team_permission", "planned", sharedInput)]),
     createOperation(student, "enable_actions", "planned", sharedInput),
     ...(deployManagedWorkflow
       ? [

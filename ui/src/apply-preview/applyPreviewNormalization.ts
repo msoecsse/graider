@@ -84,9 +84,7 @@ const normalizeGroupTarget = (value: unknown): ApplyPreviewGroupTarget => {
     githubUsernames: normalizeStringArray(target.githubUsernames),
     plannedStudentPermission: getString(target, "plannedStudentPermission"),
     facultyTeam: getString(target, "facultyTeam"),
-    facultyTeamPermission: getString(target, "facultyTeamPermission"),
-    graderTeam: getString(target, "graderTeam"),
-    graderTeamPermission: getString(target, "graderTeamPermission")
+    facultyTeamPermission: getString(target, "facultyTeamPermission")
   };
 };
 

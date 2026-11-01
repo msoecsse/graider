@@ -403,15 +403,27 @@ It must answer both:
 
 This should become the shared trust boundary for Electron services.
 
-## Slice 6.6 — Remove grader role
+## Slice 6.6 — Remove grader role (complete)
 
-Remove:
+The grader role is removed from the target model. Schema v2 strictly rejects
+`github.grader_team` and `github.grader_permission`. Anyone who grades is section
+faculty; `AuthorizationResolver` has no grader role fact or capability.
 
-- grader-team configuration;
-- grader permission path;
-- grader-specific planning/execution behavior.
+Course Setup still writes Schema 1 without grader fields. Individual/group planning,
+Apply execution, GitHub readiness, and the Apply preview no longer introduce or act
+on grader state. Existing faculty/student permission mechanisms remain in place.
 
-Anyone who grades is section faculty.
+Schema v1 retains deprecated parsing of old grader fields. Manifest v1 retains
+historical grader permission records and opaque diagnostics, including round-trip
+serialization to preserve evidence; these are never desired permissions. Manifest v2
+and new v1 manifests introduce no grader state. No existing course is rewritten and
+no GitHub team or permission is removed. Both operational schema gates remain **1**;
+production faculty scope remains v1.
+
+Phase 6 is complete. Next: **Phase 7 — GitHub Desired-State Permission Model**.
+Persisted configuration removal and GitHub team reconciliation remain explicitly
+scheduled for **Phase 9.4**. See the
+[Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
 
 ---
 
@@ -536,7 +548,9 @@ Convert:
 
 ## Slice 9.4 — Grader removal
 
-Remove obsolete configuration and reconcile GitHub teams.
+Remove obsolete persisted v1 grader configuration and reconcile existing GitHub
+teams/permissions during explicit migration. Slice 6.6 already removed the active
+role, v2 fields, and new grader planning/execution; it does not perform this cleanup.
 
 ## Slice 9.5 — Publish migrated schema
 

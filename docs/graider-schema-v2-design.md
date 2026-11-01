@@ -443,22 +443,22 @@ a speculative GitLab/provider schema.
 
 ## 16. Superseded schema-v1 concepts
 
-| Schema v1 concept                                                  | Schema v2 treatment                                                                                       |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| Local manually registered course folder                            | Replaced by remote discovery and identity-scoped app-managed course clone; legacy clone is left untouched |
-| `course.repository`/organization/name as identity                  | Immutable course/admin repository ID is canonical; names are locators                                     |
-| Local institutional username as authorization identity             | Persistent faculty directory anchored to immutable GitHub user ID                                         |
-| `sections[].faculty: string[]`                                     | Current/former interval-based section faculty relationships                                               |
-| No coordinator history                                             | Current and former term coordinator relationships with outcome/history                                    |
-| `metadata.faculty_owner`                                           | Multiple assignment owners by immutable faculty identity                                                  |
-| Assignment `sections[]` as operational truth                       | Active assignments are available term-wide; each section stores usage/Apply state                         |
-| Assignment-level `deadline`                                        | Per-section due date and late policy                                                                      |
-| Assignment status including `closed`                               | Draft/Active/Archived lifecycle; exact legacy `closed` migration requires review                          |
-| Template repository name/branch only                               | Immutable repository ID where resolvable plus pinned commit SHA and monitored branch                      |
-| `grader_team` / `grader_permission` and manifest grader permission | Removed; graders must be section faculty                                                                  |
-| Grading identity `assignment + student`                            | `term + assignment + section + student/group`                                                             |
-| Username-only student repository mapping                           | Immutable GitHub user and repository IDs with current-name metadata/history                               |
-| Git history as sufficient audit                                    | Domain-level assignment, grading, publication, identity, and administrative history                       |
+| Schema v1 concept                                                  | Schema v2 treatment                                                                                                                                    |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Local manually registered course folder                            | Replaced by remote discovery and identity-scoped app-managed course clone; legacy clone is left untouched                                              |
+| `course.repository`/organization/name as identity                  | Immutable course/admin repository ID is canonical; names are locators                                                                                  |
+| Local institutional username as authorization identity             | Persistent faculty directory anchored to immutable GitHub user ID                                                                                      |
+| `sections[].faculty: string[]`                                     | Current/former interval-based section faculty relationships                                                                                            |
+| No coordinator history                                             | Current and former term coordinator relationships with outcome/history                                                                                 |
+| `metadata.faculty_owner`                                           | Multiple assignment owners by immutable faculty identity                                                                                               |
+| Assignment `sections[]` as operational truth                       | Active assignments are available term-wide; each section stores usage/Apply state                                                                      |
+| Assignment-level `deadline`                                        | Per-section due date and late policy                                                                                                                   |
+| Assignment status including `closed`                               | Draft/Active/Archived lifecycle; exact legacy `closed` migration requires review                                                                       |
+| Template repository name/branch only                               | Immutable repository ID where resolvable plus pinned commit SHA and monitored branch                                                                   |
+| `grader_team` / `grader_permission` and manifest grader permission | Rejected in v2 course config; grading authority is section faculty. V1 fields and manifest-v1 evidence remain deprecated compatibility until Phase 9.4 |
+| Grading identity `assignment + student`                            | `term + assignment + section + student/group`                                                                                                          |
+| Username-only student repository mapping                           | Immutable GitHub user and repository IDs with current-name metadata/history                                                                            |
+| Git history as sufficient audit                                    | Domain-level assignment, grading, publication, identity, and administrative history                                                                    |
 
 Detailed conversion rules are in the
 [schema-v2 migration decision table](graider-schema-v2-migration.md).

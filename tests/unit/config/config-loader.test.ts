@@ -114,6 +114,26 @@ describe("config loading and validation", () => {
     });
   });
 
+  it("loads legacy grader configuration as compatibility data without rewriting it", () => {
+    const cwd = copyValidFixtureToTemp();
+    const coursePath = path.join(cwd, COURSE_FILE);
+    const before = fs.readFileSync(coursePath, "utf8");
+    const result = expectTempSuccess(cwd);
+    expect(result.config.course.github).toMatchObject({
+      grader_team: "graders",
+      grader_permission: "maintain"
+    });
+    expect(fs.readFileSync(coursePath, "utf8")).toBe(before);
+  });
+
+  it("does not enforce an obsolete grader permission policy", () => {
+    const cwd = copyValidFixtureToTemp();
+    writeCourseConfig(cwd, (content) =>
+      content.replace("grader_permission: maintain", "grader_permission: pull")
+    );
+    expectTempSuccess(cwd);
+  });
+
   it("TC-CONFIG-002 missing course.yml fails with missing_required_file", () => {
     expectFailureCode("missing-course-yml", "missing_required_file");
   });
@@ -180,15 +200,15 @@ describe("config loading and validation", () => {
     expect(result.config.assignment.template).toBeUndefined();
   });
 
-  it("accepts an omitted Graders team without inventing one", () => {
+  it("accepts omitted legacy grader fields without inventing them", () => {
     const cwd = copyValidFixtureToTemp();
     writeCourseConfig(cwd, (content) =>
       content.replace(/^ {2}grader_team: .*\n {2}grader_permission: .*\n/mu, "")
     );
 
     const result = expectTempSuccess(cwd);
-    expect(result.config.course.github.grader_team).toBeUndefined();
-    expect(result.config.course.github.grader_permission).toBeUndefined();
+    expect(result.config.course.github).not.toHaveProperty("grader_team");
+    expect(result.config.course.github).not.toHaveProperty("grader_permission");
   });
 
   it("TC-CONFIG-010 missing required term.yml field fails", () => {

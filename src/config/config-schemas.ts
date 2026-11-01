@@ -13,7 +13,6 @@ export const SUPPORTED_ASSIGNMENT_TYPE = "individual";
 export const SUPPORTED_REPOSITORY_VISIBILITY = "private";
 export const STUDENT_PERMISSION = "admin";
 export const FACULTY_PERMISSION = "admin";
-export const GRADER_PERMISSION = "maintain";
 export const VALID_ASSIGNMENT_STATUSES = ["draft", "active", "closed", "archived"] as const;
 export const ENABLED_GRADING_MODES = ["preset", "custom-workflow", "contract-only"] as const;
 export const DISABLED_GRADING_MODE = "no-grading";
@@ -105,9 +104,7 @@ const courseConfigFields = {
       repo_name_pattern: z.string().min(MINIMUM_LIST_ITEMS),
       student_permission: z.string().min(MINIMUM_LIST_ITEMS),
       faculty_team: z.string().min(MINIMUM_LIST_ITEMS),
-      faculty_permission: z.string().min(MINIMUM_LIST_ITEMS),
-      grader_team: z.string().min(MINIMUM_LIST_ITEMS).optional(),
-      grader_permission: z.string().min(MINIMUM_LIST_ITEMS).optional()
+      faculty_permission: z.string().min(MINIMUM_LIST_ITEMS)
     })
     .strict(),
   defaults: z
@@ -175,7 +172,13 @@ const facultyDirectorySchema = z
 export const rawCourseConfigV1Schema = z
   .object({
     schema_version: z.literal(SUPPORTED_SCHEMA_VERSION),
-    ...courseConfigFields
+    ...courseConfigFields,
+    github: courseConfigFields.github.extend({
+      // Deprecated v1 compatibility data only. Never used for authorization or Apply.
+      // Phase 9.4 removes persisted fields during explicit migration.
+      grader_team: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+      grader_permission: z.string().min(MINIMUM_LIST_ITEMS).optional()
+    })
   })
   .strict();
 

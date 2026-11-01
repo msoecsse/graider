@@ -161,3 +161,9 @@ Before enabling the push action, the analyzer/review must show at least:
 
 Any item that would change authorization, identity, or irreversible lifecycle
 without a reliable source or recorded confirmation blocks publication.
+
+Slice 6.6 removes the active grader role before migration. The operational v1 parser
+still accepts obsolete grader configuration and manifest-v1 readers preserve historical
+permission evidence. Setup and Apply create no grader state. Phase 9.4 owns removal
+of that persisted data and explicit GitHub team/permission reconciliation; migration
+must not infer a section-faculty role from old grader membership.

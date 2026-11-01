@@ -140,7 +140,6 @@ Who would use this feature?
 
 ```text
 [ ] Faculty
-[ ] Graders
 [ ] Course coordinators
 [ ] Students
 [ ] Other:

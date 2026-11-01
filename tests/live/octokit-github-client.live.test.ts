@@ -13,8 +13,7 @@ const requiredLiveEnvNames = [
   "GRAIDER_LIVE_TEMPLATE_BRANCH",
   "GRAIDER_LIVE_SANDBOX_REPO_PREFIX",
   "GRAIDER_LIVE_TEST_USER",
-  "GRAIDER_LIVE_FACULTY_TEAM",
-  "GRAIDER_LIVE_GRADER_TEAM"
+  "GRAIDER_LIVE_FACULTY_TEAM"
 ] as const;
 const tokenEnvNames = ["GRAIDER_GITHUB_TOKEN", "GITHUB_TOKEN"] as const;
 
@@ -43,7 +42,6 @@ describeLive("OctokitGitHubClient live sandbox tests", () => {
   const templateBranch = process.env.GRAIDER_LIVE_TEMPLATE_BRANCH ?? "";
   const testUser = process.env.GRAIDER_LIVE_TEST_USER ?? "";
   const facultyTeam = process.env.GRAIDER_LIVE_FACULTY_TEAM ?? "";
-  const graderTeam = process.env.GRAIDER_LIVE_GRADER_TEAM ?? "";
   const sandboxRepoPrefix = process.env.GRAIDER_LIVE_SANDBOX_REPO_PREFIX ?? "";
 
   beforeAll(() => {
@@ -66,12 +64,9 @@ describeLive("OctokitGitHubClient live sandbox tests", () => {
     expect(user?.username.toLowerCase()).toBe(testUser.toLowerCase());
   });
 
-  it("TC-LIVE-004 reads sandbox faculty and grader teams", async () => {
+  it("TC-LIVE-004 reads the sandbox faculty team", async () => {
     await expect(client.getTeam(org, facultyTeam)).resolves.toMatchObject({
       slug: facultyTeam
-    });
-    await expect(client.getTeam(org, graderTeam)).resolves.toMatchObject({
-      slug: graderTeam
     });
   });
 

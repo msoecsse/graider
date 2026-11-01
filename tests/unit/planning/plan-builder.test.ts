@@ -57,10 +57,7 @@ const createReadyClient = (): FakeGitHubClient =>
   new FakeGitHubClient({
     templateRepositories: [templateRepository],
     users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
-    teams: [
-      { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-      { org: ORGANIZATION, slug: "graders", name: "Graders" }
-    ]
+    teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
   });
 
 const loadFixture = (name: string) => {
@@ -86,6 +83,41 @@ const loadFixture = (name: string) => {
 };
 
 describe("plan builder", () => {
+  it.each([true, false])(
+    "plans faculty/student access without grader operations (legacy fields: %s)",
+    async (legacy) => {
+      const { config, rosterResult } = loadFixture("grading-disabled");
+      if (config.course.schema_version !== 1) throw new Error("Expected a v1 course.");
+      if (!legacy) {
+        delete config.course.github.grader_team;
+        delete config.course.github.grader_permission;
+      }
+      const plan = await buildPlan({
+        config,
+        students: rosterResult.students,
+        rosterSummary: rosterResult.summary,
+        githubClient: createReadyClient(),
+        createdAt: CREATED_AT
+      });
+      expect(plan.errors).toEqual([]);
+      expect(JSON.stringify(plan)).not.toMatch(/grader/iu);
+      expect(plan.operations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "add_student_collaborator", status: "planned" }),
+          expect.objectContaining({ type: "add_faculty_team_permission", status: "planned" })
+        ])
+      );
+      expect(plan.targets).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            plannedStudentPermission: "admin",
+            facultyTeamPermission: "admin"
+          })
+        ])
+      );
+    }
+  );
+
   it("plans direct repository creation when the assignment has no template", async () => {
     const loaded = loadFixture("grading-disabled");
     const config = {
@@ -336,10 +368,7 @@ describe("plan builder", () => {
       githubClient: new FakeGitHubClient({
         templateRepositories: [templateRepository],
         users: [{ username: "seanjones" }],
-        teams: [
-          { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-          { org: ORGANIZATION, slug: "graders", name: "Graders" }
-        ],
+        teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }],
         repositories: [
           {
             owner: ORGANIZATION,

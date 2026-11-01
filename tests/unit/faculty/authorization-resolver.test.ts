@@ -91,6 +91,32 @@ const matrix = [
 ];
 
 describe("v2 authorization permission matrix", () => {
+  it("uses current section faculty for grading authority with no grader fact or capability", () => {
+    const auth = resolver("faculty");
+    expect(auth.roleFacts).toEqual({
+      githubUserId: id("faculty"),
+      termCode: term.term.code,
+      fallbackAdministrator: false,
+      currentCoordinator: false,
+      formerCoordinator: false,
+      currentFacultySectionIds: ["001"],
+      formerFacultySectionIds: ["002"]
+    });
+    expect(auth.canMutateSection("001")).toEqual({
+      allowed: true,
+      basis: "current-section-faculty",
+      effectiveScope: "section"
+    });
+    expect(resolver("directory").canMutateSection("001")).toEqual({
+      allowed: false,
+      basis: "no-authorizing-role",
+      effectiveScope: "none"
+    });
+    expect(JSON.stringify(auth.roleFacts)).not.toMatch(/grader/iu);
+    expect(Object.getOwnPropertyNames(AuthorizationResolver.prototype).join(" ")).not.toMatch(
+      /grader/iu
+    );
+  });
   it.each(matrix)(
     "$name: default visibility and mutation",
     ({ name, visible, mutable, manage, fallback }) => {

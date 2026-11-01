@@ -126,7 +126,6 @@ Recommended structured shape:
 | Code                                      | Severity | Meaning                                                       |
 | ----------------------------------------- | -------- | ------------------------------------------------------------- |
 | `faculty_team_missing`                    | error    | Configured faculty team does not exist or is inaccessible     |
-| `grader_team_missing`                     | error    | Configured grader team does not exist or is inaccessible      |
 | `student_collaborator_added`              | info     | Student collaborator was added                                |
 | `student_collaborator_invited`            | info     | Student collaborator invite is pending                        |
 | `student_collaborator_missing`            | warning  | Expected student collaborator is missing                      |
@@ -136,7 +135,6 @@ Recommended structured shape:
 | `student_access_already_removed`          | info     | Remove-access was no-op                                       |
 | `student_access_remove_failed`            | error    | Student access removal failed                                 |
 | `faculty_team_permission_added`           | info     | Faculty team permission added                                 |
-| `grader_team_permission_added`            | info     | Grader team permission added                                  |
 | `team_permission_lower_than_expected`     | warning  | Team permission is lower than expected                        |
 
 ---
@@ -199,3 +197,7 @@ Recommended structured shape:
 | GitHub API/rate limit errors        |               `4` |
 | Partial success                     |               `2` |
 | Success/info/warnings only          |               `0` |
+
+Grader-team diagnostics are retired as of Slice 6.6. Historical manifests/results may
+retain `grader_team_missing` or `grader_team_permission_added` as opaque diagnostic
+strings; current validation/execution does not emit them or require their constants.

@@ -223,6 +223,7 @@ describe("graider assignment apply-preview command", () => {
       ])
     );
     expect(result.plan?.repositories).toEqual([]);
+    expect(JSON.stringify(result.plan?.groupTargets)).not.toMatch(/grader/iu);
     expect(result.plan?.groupTargets).toEqual([
       expect.objectContaining({
         targetId: "team-one",
@@ -232,8 +233,7 @@ describe("graider assignment apply-preview command", () => {
         studentIds: ["jones"],
         githubUsernames: ["seanjones"],
         plannedStudentPermission: "admin",
-        facultyTeamPermission: "admin",
-        graderTeamPermission: "maintain"
+        facultyTeamPermission: "admin"
       }),
       expect.objectContaining({
         targetId: "team-two",

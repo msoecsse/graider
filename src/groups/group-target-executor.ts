@@ -191,14 +191,6 @@ export const executeGroupTargets = async (input: {
         teamSlug: target.facultyTeam,
         permission: target.facultyTeamPermission as never
       });
-      if (target.graderTeam !== undefined && target.graderTeamPermission !== undefined) {
-        await input.githubClient.addTeamPermission({
-          owner: repository.owner,
-          repo: repository.name,
-          teamSlug: target.graderTeam,
-          permission: target.graderTeamPermission as never
-        });
-      }
       const actionsState = await input.githubClient.getActionsState(
         repository.owner,
         repository.name

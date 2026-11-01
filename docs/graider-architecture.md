@@ -19,7 +19,7 @@ beyond that proposal.
 Graider is a CLI-first tool for managing GitHub-based course assignments. The MVP focuses on:
 
 - creating individual student repositories from GitHub template repositories
-- applying faculty, grader, and student permissions
+- applying faculty and student permissions
 - supporting GitHub Actions based grading workflows
 - generating faculty and student reports
 - archiving repositories and removing student access through explicit commands
@@ -453,7 +453,7 @@ Mutation policy:
 ```text
 Archives repositories.
 Does not delete repositories.
-Preserves faculty/grader access.
+Preserves faculty access and leaves unrelated existing team access unchanged.
 Removes student access only if explicit --remove-student-access is provided.
 ```
 
@@ -475,7 +475,7 @@ Mutation policy:
 
 ```text
 Removes only student collaborator access.
-Does not remove faculty/grader teams.
+Does not remove faculty or other existing teams.
 Does not archive or delete repositories.
 ```
 
@@ -500,8 +500,6 @@ export interface CourseConfig {
     studentPermission: "admin";
     facultyTeam: string;
     facultyPermission: "admin";
-    graderTeam: string;
-    graderPermission: "maintain";
   };
   defaults: {
     timezone: string;
@@ -744,7 +742,6 @@ Recommended operation type order:
 create_repository_from_template
 add_student_collaborator
 add_faculty_team_permission
-add_grader_team_permission
 enable_actions
 verify_grading_workflow
 verify_workflow_dispatch

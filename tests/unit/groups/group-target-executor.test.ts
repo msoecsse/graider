@@ -22,8 +22,6 @@ const target = (
   plannedStudentPermission: "admin",
   facultyTeam: "faculty",
   facultyTeamPermission: "admin",
-  graderTeam: "graders",
-  graderTeamPermission: "maintain",
   diagnostics: []
 });
 
@@ -235,7 +233,9 @@ describe("group target executor", () => {
       })
     ]);
     expect(githubClient.mutations.addedCollaborators).toHaveLength(2);
-    expect(githubClient.mutations.teamPermissions).toHaveLength(2);
+    expect(githubClient.mutations.teamPermissions).toEqual([
+      expect.objectContaining({ teamSlug: "faculty", permission: "admin" })
+    ]);
   });
 
   it("creates once per target, adds all members as admins, and returns manifest-ready data", async () => {
@@ -293,7 +293,7 @@ describe("group target executor", () => {
         })
       ])
     );
-    expect(githubClient.mutations.teamPermissions).toHaveLength(4);
+    expect(githubClient.mutations.teamPermissions).toHaveLength(2);
     const firstTarget = result.targets.find((item) => item.target.targetId === "team-1");
     if (firstTarget === undefined) throw new Error("team-1 result must be present.");
     expect(firstTarget.target.groupId).toBe("team-1");
@@ -452,7 +452,7 @@ describe("group target executor", () => {
     });
   });
 
-  it("stops before the grader team when faculty team permission fails", async () => {
+  it("stops before Actions and later targets when faculty team permission fails", async () => {
     const loaded = loadGraiderConfig({
       cwd: path.resolve("tests/fixtures/plan/active-assignment"),
       assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
@@ -493,7 +493,7 @@ describe("group target executor", () => {
     });
   });
 
-  it("stops after faculty team permission when grader team permission fails", async () => {
+  it("ignores legacy grader configuration and grants only faculty team access", async () => {
     const loaded = loadGraiderConfig({
       cwd: path.resolve("tests/fixtures/plan/active-assignment"),
       assignmentFile: "terms/27s1/assignments/lab04/assignment.yml"
@@ -518,26 +518,33 @@ describe("group target executor", () => {
       ]
     });
     const addTeam = githubClient.addTeamPermission.bind(githubClient);
-    let calls = 0;
     githubClient.addTeamPermission = async (input) => {
-      calls += 1;
-      if (calls === 2) throw new Error("grader failure");
+      if (input.teamSlug !== "faculty") throw new Error("Unexpected obsolete team mutation");
       return addTeam(input);
     };
     const result = await executeGroupTargets({
       config: loaded.config,
       githubClient,
       targets: [
-        target("team-grader", ["alpha"], ["alpha-gh"]),
+        target("team-faculty", ["alpha"], ["alpha-gh"]),
         target("later", ["beta"], ["beta-gh"])
       ]
     });
-    expect(githubClient.mutations.teamPermissions).toHaveLength(1);
-    expect(githubClient.mutations.teamPermissions[0]?.teamSlug).toBe("faculty");
-    expect(githubClient.mutations.createdRepositories).toHaveLength(1);
-    expect(result.errors[0]).toMatchObject({
-      context: { groupId: "team-grader", repositoryName: "27s1-se2030-lab04-team-grader" }
-    });
+    expect(result.errors).toEqual([]);
+    expect(githubClient.mutations.teamPermissions).toEqual([
+      expect.objectContaining({
+        teamSlug: "faculty",
+        permission: "admin",
+        repo: "27s1-se2030-lab04-team-faculty"
+      }),
+      expect.objectContaining({
+        teamSlug: "faculty",
+        permission: "admin",
+        repo: "27s1-se2030-lab04-later"
+      })
+    ]);
+    expect(githubClient.mutations.createdRepositories).toHaveLength(2);
+    expect(githubClient.mutations.addedCollaborators).toHaveLength(2);
   });
 
   it("accepts a detected grading workflow without workflow diagnostics", async () => {
@@ -748,6 +755,6 @@ describe("group target executor", () => {
     expect(githubClient.mutations.addedCollaborators.map((entry) => entry.username)).toEqual([
       "alpha-gh"
     ]);
-    expect(githubClient.mutations.teamPermissions).toHaveLength(2);
+    expect(githubClient.mutations.teamPermissions).toHaveLength(1);
   });
 });

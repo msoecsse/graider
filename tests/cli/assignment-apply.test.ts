@@ -68,10 +68,7 @@ const createReadyClient = (repositories: GitHubRepository[] = []): FakeGitHubCli
     templateRepositories: [templateRepository],
     repositories,
     users: ["seanjones", "janesmith", "alexlee", "mayapatel"].map((username) => ({ username })),
-    teams: [
-      { org: ORGANIZATION, slug: "faculty", name: "Faculty" },
-      { org: ORGANIZATION, slug: "graders", name: "Graders" }
-    ]
+    teams: [{ org: ORGANIZATION, slug: "faculty", name: "Faculty" }]
   });
 
 const configureGroupAssignment = (cwd: string, groups: string): void => {
@@ -197,7 +194,10 @@ describe("graider assignment apply command", () => {
         })
       ])
     );
-    expect(githubClient.mutations.teamPermissions).toHaveLength(4);
+    expect(githubClient.mutations.teamPermissions).toHaveLength(2);
+    expect(
+      githubClient.mutations.teamPermissions.every((item) => item.teamSlug === "faculty")
+    ).toBe(true);
     expect(loadWrittenManifest(cwd)).toMatchObject({
       status: "loaded",
       manifest: { schemaVersion: 2, repositoryMode: "group" }
