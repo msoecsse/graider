@@ -32,7 +32,7 @@ import type {
   CreatePullRequestInput
 } from "./github-models.js";
 
-/** Trusted adapter metadata, consumed only by the faculty OAuth service. */
+/** Trusted backend adapter metadata for OAuth discovery and desired-state reconciliation; never IPC. */
 export interface GitHubOrganizationResponse {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
@@ -76,6 +76,45 @@ export interface GitHubFacultyOrganizationClient extends Pick<
   ): Promise<GitHubOrganizationResponse>;
 }
 
+/** Backend-only managed-team transport. Numeric organization/team IDs prevent slug reuse from redirecting writes. */
+export interface GitHubManagedTeamClient extends Pick<
+  GitHubOAuthOrganizationClient,
+  "getOrganizationScopeResponse" | "getOrganizationMembership"
+> {
+  getUser(username: string): Promise<GitHubUser | null>;
+  listManagedOrganizationTeamsPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  getManagedTeam(
+    organizationId: number,
+    teamId: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  listManagedTeamMembersPage(
+    organizationId: number,
+    teamId: number,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  createManagedTeam(
+    org: string,
+    name: string,
+    description: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  setManagedTeamMembership(
+    organizationId: number,
+    teamId: number,
+    username: string,
+    present: boolean,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+}
+
 /** Read-only transport for trusted remote course discovery; never exposed over IPC. */
 export interface GitHubRemoteCourseClient {
   getCourseRepositoryById(
@@ -112,6 +151,7 @@ export interface GitHubClient
   extends
     Partial<GitHubOAuthOrganizationClient>,
     Partial<GitHubFacultyOrganizationClient>,
+    Partial<GitHubManagedTeamClient>,
     Partial<GitHubRemoteCourseClient> {
   getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser>;
 

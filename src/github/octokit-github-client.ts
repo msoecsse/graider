@@ -209,7 +209,7 @@ export class OctokitGitHubClient implements GitHubClient {
     route: string,
     parameters: OctokitParameters,
     signal: AbortSignal,
-    method: "GET" | "POST" = "GET"
+    method: "GET" | "POST" | "PUT" | "DELETE" = "GET"
   ): Promise<GitHubOrganizationResponse> {
     let response: OctokitResponseLike;
     try {
@@ -239,6 +239,78 @@ export class OctokitGitHubClient implements GitHubClient {
 
   async getOrganizationScopeResponse(signal: AbortSignal): Promise<GitHubOrganizationResponse> {
     return this.organizationResponse("/user", {}, signal);
+  }
+
+  async listManagedOrganizationTeamsPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse("/orgs/{org}/teams", { org, page, per_page: perPage }, signal);
+  }
+
+  async getManagedTeam(
+    organizationId: number,
+    teamId: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/organizations/{org_id}/team/{team_id}",
+      { org_id: organizationId, team_id: teamId },
+      signal
+    );
+  }
+
+  async listManagedTeamMembersPage(
+    organizationId: number,
+    teamId: number,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/organizations/{org_id}/team/{team_id}/members",
+      { org_id: organizationId, team_id: teamId, page, per_page: perPage, role: "all" },
+      signal
+    );
+  }
+
+  async createManagedTeam(
+    org: string,
+    name: string,
+    description: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    this.requireManagedTeamToken();
+    // No generic write retry: the reconciler must observe state after ambiguous outcomes.
+    return this.organizationResponse(
+      "/orgs/{org}/teams",
+      { org, name, description, privacy: "closed" },
+      signal,
+      "POST"
+    );
+  }
+
+  async setManagedTeamMembership(
+    organizationId: number,
+    teamId: number,
+    username: string,
+    present: boolean,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    this.requireManagedTeamToken();
+    return this.organizationResponse(
+      "/organizations/{org_id}/team/{team_id}/memberships/{username}",
+      { org_id: organizationId, team_id: teamId, username, ...(present ? { role: "member" } : {}) },
+      signal,
+      present ? "PUT" : "DELETE"
+    );
+  }
+
+  private requireManagedTeamToken(): void {
+    if (!this.token)
+      throw new GitHubClientError("auth_missing", "An authenticated GitHub session is required.");
   }
 
   async listOrganizationMembersPage(

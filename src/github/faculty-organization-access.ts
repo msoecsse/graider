@@ -132,6 +132,8 @@ const reasonFor = (error: unknown): FacultyOrganizationAttentionReason => {
   return "network_error";
 };
 
+export { reasonFor as facultyOrganizationAttentionReasonFor };
+
 /** Pure classification. Directory identity remains authoritative; access grants no modeled course role. */
 export const classifyFacultyOrganizationAccess = (
   faculty: FacultyDirectoryRecord,

@@ -682,7 +682,7 @@ Both `OPERATIONAL_COURSE_SCHEMA_VERSION` and `OPERATIONAL_TERM_SCHEMA_VERSION` r
 **1**. Existing v1 faculty-team handling is unchanged. No team creation, deletion,
 rename, membership reconciliation, invitations, permission reconciliation, branch
 rules or production-v2 activation occurs in Slice 7.1. Slice 7.2 adds organization
-invitation infrastructure below; 7.3 will reconcile team membership and 7.4/7.5 permissions.
+invitation infrastructure below; 7.3 adds team membership reconciliation and 7.4/7.5 permissions remain deferred.
 
 ### 11.6 Faculty organization access contract (Slice 7.2)
 
@@ -775,12 +775,146 @@ Future term activation must not be blocked solely by Pending. `AuthorizationReso
 remains authoritative for course roles: pending GitHub access does not revoke modeled
 roles, and arbitrary organization membership grants no Graider authorization.
 
-Next: **7.3 — Team Membership Reconciliation** should consume these per-faculty access
+Slice **7.3 — Team Membership Reconciliation** consumes these per-faculty access
 results: Active can proceed to team reconciliation; Pending leaves team access
 incomplete and should be surfaced clearly in eventual UI/workflows. Managed-team
 identities from 7.1 are unchanged. No team mutation, repository permission, branch
 rule, removal, cancellation, migration or term lifecycle is implemented here. Both
 operational schema gates remain **1**, with current v1 behavior preserved.
+
+### 11.7 Managed-team membership contract (Slice 7.3)
+
+`buildDesiredTeamMemberships` is pure Schema v2 domain infrastructure. It validates
+and snapshots the course and exactly the supplied terms, resolves role references
+through `TermCoordinators` / `SectionFaculty` and their `FacultyDirectory`, and emits
+immutable numeric GitHub user ID sets paired with the existing 7.1 team identities.
+Duplicate supplied term/section scopes and unknown faculty references fail closed.
+
+| Managed-team kind             | Desired membership                                               |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `term-current-coordinators`   | That term's `coordinators.current`.                              |
+| `term-former-coordinators`    | That term's `coordinators.former`.                               |
+| `section-current-faculty`     | That exact term/section's `faculty.current`.                     |
+| `section-former-faculty`      | That exact term/section's `faculty.former`.                      |
+| `course-current-coordinators` | Any current coordinator across the supplied terms.               |
+| `course-write`                | Any current section faculty without a current coordinator role.  |
+| `course-read`                 | Any historical/former role without either stronger current role. |
+
+A faculty identity occupies exactly its single strongest applicable **course-wide**
+team: current coordinator, otherwise current section faculty, otherwise former
+coordinator/section faculty. Term and section teams remain independent; the same
+identity can occupy several exact scoped teams. Directory-only faculty receive no
+team membership. Fallback administration is a separate course-recovery identity,
+never an implicit team insertion; an independently assigned role still applies.
+Fallback course-repository admin access belongs to 7.4.
+
+Course-wide roles are the union/strongest role across exactly the supplied term set.
+No Draft/Active/Archived filtering or other Phase 8 lifecycle policy is inferred.
+The caller must supply the complete intended term set before permitting course-wide
+drift removal. Teams for unsupplied terms are left untouched; their cleanup/lifecycle
+is not inferred from omission. Current→former and restored-current transitions update
+the corresponding section/term teams and course-wide strongest role. No reconciliation
+operation modifies course/term metadata.
+
+`ManagedTeamMembershipReconciler` composes 7.1 identities, that desired state, and the
+7.2 `FacultyOrganizationReconciler.inspect` dependency. It remains backend-only,
+with no production CLI/Electron/Apply/Course Setup/discovery/grading wiring. The
+trusted caller must bind canonical course repository ID and validated metadata to
+the selected OAuth session, enforce `AuthorizationResolver` and source-revision
+authorization, provide the complete term set, serialize instances, and invalidate
+contexts when the selected session/account/course changes. Organization/access/team
+claims from the renderer must not construct this service.
+
+Before any writes, the service completes paginated organization-team inventory with
+numeric ID, name, slug, description and parent evidence. It requires an authenticated
+active organization **owner** so secret teams are visible too. A member-visible subset
+cannot establish uniqueness. All records are classified with 7.1, and
+`findDuplicateManagedTeams` blocks each conflicting logical identity, reporting every
+claiming numeric resource. It never chooses a winner. A malformed/unsupported ownership
+marker cannot be proven unrelated using the canonical parser, so conservatively blocks
+all desired teams in that organization. Conflicting numeric IDs/slugs, incomplete pages
+or malformed resources also block writes. Unmanaged, other-course, legacy `faculty`
+and historical grader teams never establish authority through names or slugs.
+
+`GET /orgs/{org}/teams` and team-member reads paginate at 100 records per page, bounded
+at 1000 pages; supplied next-page URLs are never followed. Before each membership
+write, complete inventory is reread, uniqueness is checked again, and the concrete team
+is fetched by numeric organization/team IDs to verify its canonical description and
+organization. The [GitHub numeric team routes](https://docs.github.com/en/rest/teams/members)
+use `/organizations/{org_id}/team/{team_id}` for resource reads, member inventory and
+membership PUT/DELETE. Renames do not redirect writes to a reused slug. Because team
+membership includes descendants, managed teams with a parent or children, or explicit
+inherited members, need attention rather than modifying any related team hierarchy.
+Hierarchy management is deferred.
+
+If a desired team is missing, create a closed team with the exact canonical 7.1
+description and a deterministic human-readable `managedTeamDisplayName`, including a
+short identity digest. Names are presentation only. An unmanaged display-name/slug
+collision yields typed `team_name_conflict`; it is never adopted, overwritten or renamed.
+Creation assigns no repository permissions, parent, faculty or other team membership.
+Any GitHub-supplied initial creator membership enters the ordinary observed drift set.
+After creation, reread the complete inventory, require exactly one matching logical
+team and retain its numeric ID; if creation supplied an ID, it must match. Only then
+may membership reconciliation begin.
+
+Team creation is journaled **before POST**, using the 7.2 awaited journal abstraction
+with distinct keys bound to immutable organization ID and complete logical identity.
+Keys survive account switches. After success or ambiguous failure, reread remote state;
+one unique matching resource recovers the write, while none/multiple yields Needs
+attention. A retained unresolved key forbids another automatic create. Production must
+provide durable journal storage and shared serialization before enabling this service.
+Tests use only in-memory journals and fake/mocked GitHub clients. A journal failure
+prevents sending a create. No write endpoint has adapter-level blind retries.
+
+For each verified team, exact desired IDs are compared to complete observed member IDs:
+
+- Desired plus 7.2 `active`: add if missing; already present causes no write.
+- Desired plus `pending_invitation`: no membership mutation for that faculty; report
+  `pending_organization_access` / `organization_invitation_pending`.
+- Desired plus `invitation_required`: no invitation is sent; report the incomplete
+  `organization_invitation_required` dependency.
+- Desired plus `needs_attention`: no membership mutation for that faculty; preserve
+  its safe typed reason. Missing, duplicate or other-course access results fail closed.
+- Observed but undesired: remove from this proven managed team only, including users
+  outside the faculty directory. Organization membership and unrelated teams remain.
+
+Before a missing desired user is added, refresh 7.2 access again. A membership API
+locator is always verified through current account lookup against the intended numeric
+ID: directory current login for additions, observed member login for removals. The
+resolved current login may change while ID stays stable. Institutional username and
+login history are never fallbacks. Existing members satisfy desired membership by
+immutable ID. No role/maintainer changes are made to an already correct membership.
+
+After PUT/DELETE, reread the complete team inventory, numeric resource and paginated
+membership to verify the expected immutable ID is present/absent. Both successful HTTP
+responses and lost responses require this observable verification. Unobserved results
+are Needs attention, never fabricated success. A later explicit run may repeat an
+idempotent membership PUT/DELETE only after fresh state still shows the drift and all
+identity/access preconditions pass. GitHub offers no atomic conditional mutation over
+metadata ownership, organization access and team membership; concurrent external drift
+can still cause a mutation to fail or remain unverified and must be surfaced accordingly.
+
+Per-team `ManagedTeamOutcome` includes logical identity, numeric team ID when known,
+conflicting IDs when applicable, status and per-faculty ID/desired/observed outcomes.
+Statuses are `up_to_date`, `reconciled`, `pending_organization_access`, `needs_attention`;
+an unknown observation is `null`. User-specific failures do not block independent
+faculty; Pending does not block active faculty or definitively undesired removals.
+Any subsequent ownership or membership snapshot failure stops that affected team.
+Independent logical teams continue where their own complete snapshot is safe.
+Provider bodies and credentials never enter results. Existing Phase 2/7.2 error
+classification is reused for capability, SSO/OAuth policy, rate-limit and transport errors.
+Current OAuth scopes stay unchanged; known read-only grants cannot write, and GitHub
+remains authoritative for endpoint permissions and organization restrictions.
+
+Pending access never invalidates a persisted assignment or changes modeled course
+authorization. `AuthorizationResolver` remains authoritative. Both operational schema
+gates remain **1**; 7.1 metadata format and production v1 behavior remain unchanged.
+No organization-member removal, invitation sending, team rename/deletion, v1 adoption,
+repository permissions, branch rules, migration or term lifecycle is implemented.
+
+Next: **7.4 — Course Repository Permissions**. Consume verified per-team/per-faculty
+results, distinguish incomplete access from modeled roles, and handle fallback
+administration separately when assigning course/admin repository read/write/admin.
 
 ---
 

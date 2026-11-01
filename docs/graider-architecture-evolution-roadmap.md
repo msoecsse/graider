@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phase 6 is complete. Phase 7 has begun; next: **7.3 — Team Membership Reconciliation**.
+Phase 6 is complete. Phase 7 has begun; next: **7.4 — Course Repository Permissions**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -456,8 +456,8 @@ Only the existing GitHub read projection gained description support; no live tea
 membership, invitation, permission or rename reconciliation runs. Both operational
 schema gates remain **1**, and production v1 faculty-team behavior is preserved.
 See [the full metadata contract](graider-remote-course-architecture.md#115-managed-team-identity-contract-slice-71).
-Organization invitation infrastructure is complete in 7.2 below; team membership and
-effective permissions remain deferred to 7.3–7.5, with explicit legacy adoption in Phase 9.
+Organization invitation infrastructure and managed-team membership are complete in
+7.2/7.3 below; repository permissions remain deferred to 7.4/7.5, with explicit legacy adoption in Phase 9.
 
 ## Slice 7.2 — Faculty organization invitation (complete)
 
@@ -485,11 +485,41 @@ permission mutation is introduced. Both operational gates remain **1**. Slice 7.
 should consume these access states to defer team reconciliation for Pending faculty.
 See [the access contract and trust requirements](graider-remote-course-architecture.md#116-faculty-organization-access-contract-slice-72).
 
-Next: **7.3 — Team Membership Reconciliation**.
+Team membership is implemented in 7.3 below. Next: **7.4 — Course Repository Permissions**.
 
-## Slice 7.3 — Team membership reconciliation
+## Slice 7.3 — Team membership reconciliation (complete)
 
-Course config becomes authoritative for managed team membership.
+Pure desired membership uses exact current/former coordinator and section-faculty
+sets per supplied term/section. Course-wide teams use the single strongest role
+across supplied terms: current coordinator → `course-current-coordinators`, otherwise
+current section faculty → `course-write`, otherwise any former role → `course-read`.
+Directory-only faculty and fallback administration do not implicitly enter a team.
+No lifecycle filtering is inferred, and the caller supplies the complete intended term
+set before course-wide removals. Unsupplied-term team cleanup remains deferred.
+
+Backend reconciliation consumes 7.1 canonical managed identities and 7.2 organization
+access. Complete paginated inventory, owner visibility, duplicate detection, numeric
+resource verification and fresh preflight reads precede writes. Malformed/opaque
+ownership and nested membership need attention; other-course, unmanaged and legacy
+teams remain untouched. Missing teams are created with canonical metadata and
+deterministic display names, journaled before POST and verified by rereading inventory.
+An unresolved creation cannot be blindly repeated, including after an account switch.
+
+Active faculty may be added; Pending, Invitation-required and Needs-attention faculty
+remain explicit incomplete dependencies. Extra members are removed **only** from
+proven managed teams. All login mutation locators are checked against immutable IDs.
+PUT/DELETE success and ambiguous outcomes are verified by remote membership rereads;
+idempotent reruns produce no writes once correct. Per-team/per-faculty outcomes
+preserve partial progress and stop affected teams when snapshots become unsafe.
+
+No production v1 workflow is wired to these APIs, and both operational schema gates
+remain **1**. Production activation still requires trusted OAuth/course/repository/
+revision authorization, complete term inputs, shared serialization and a durable
+creation journal. No repository permissions, invitations, organization removal,
+team rename/deletion, adoption, migration or lifecycle is introduced.
+See [the full membership contract](graider-remote-course-architecture.md#117-managed-team-membership-contract-slice-73).
+
+Next: **7.4 — Course Repository Permissions**.
 
 ## Slice 7.4 — Course repository permissions
 
