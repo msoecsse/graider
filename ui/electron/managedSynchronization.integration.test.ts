@@ -188,7 +188,7 @@ describe("bundled Git managed synchronization, real two-clone history", () => {
       const head = await git(f.cache, ["rev-parse", "HEAD"]);
       await f.advance(
         courseYaml.replace("schema_version: 1", `schema_version: ${version}`) +
-          "faculty_directory:\n  - institutional_username: jones\n    github_user_id: 42\n    github_login: current-login\n    github_login_history: []\n"
+          "faculty_directory:\n  - institutional_username: jones\n    github_user_id: 42\n    github_login: current-login\n    github_login_history: []\nfallback_administrator:\n  github_user_id: 42\n"
       );
       expect(await f.sync()).toMatchObject({
         status: "needs_attention",

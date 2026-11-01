@@ -145,7 +145,7 @@ describe("trusted read-only remote course discovery", () => {
     [courseYaml.replace("schema_version: 1", "schema_version: 2"), "unsupported_schema"],
     [
       courseYaml.replace("schema_version: 1", "schema_version: 2") +
-        "faculty_directory:\n  - institutional_username: jones\n    github_user_id: 42\n    github_login: current-login\n    github_login_history: []\n",
+        "faculty_directory:\n  - institutional_username: jones\n    github_user_id: 42\n    github_login: current-login\n    github_login_history: []\nfallback_administrator:\n  github_user_id: 42\n",
       "unsupported_schema"
     ],
     [courseYaml.replace("schema_version: 1", "schema_version: 3"), "unsupported_schema"],

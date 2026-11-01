@@ -33,7 +33,12 @@ describe("versioned course configuration", () => {
     expect(result.status).toBe("success");
     if (result.status === "success") {
       expect(result.value).toEqual(rawCourseConfigV1Schema.parse(result.value));
-      expect(result.value).toEqual({ ...course, schema_version: 1, faculty_directory: undefined });
+      expect(result.value).toEqual({
+        ...course,
+        schema_version: 1,
+        faculty_directory: undefined,
+        fallback_administrator: undefined
+      });
     }
   });
 

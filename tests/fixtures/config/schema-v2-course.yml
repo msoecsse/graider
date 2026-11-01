@@ -33,3 +33,5 @@ faculty_directory:
     github_user_id: 22993126
     github_login: another-login
     github_login_history: []
+fallback_administrator:
+  github_user_id: 22993125

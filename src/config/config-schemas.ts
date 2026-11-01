@@ -123,13 +123,15 @@ const githubLoginSchema = z.string().refine((value) => isGithubUsername(value.to
   message: "Invalid GitHub login."
 });
 
+const githubUserIdSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+
 export const facultyIdentitySchema = z
   .object({
     institutional_username: z
       .string()
       .min(MINIMUM_LIST_ITEMS)
       .regex(/^[^\s\p{C}]+$/u),
-    github_user_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    github_user_id: githubUserIdSchema,
     github_login: githubLoginSchema,
     github_login_history: z.array(githubLoginSchema).default([])
   })
@@ -179,9 +181,20 @@ export const rawCourseConfigV2Schema = z
   .object({
     schema_version: z.literal(COURSE_SCHEMA_VERSION_V2),
     ...courseConfigFields,
-    faculty_directory: facultyDirectorySchema
+    faculty_directory: facultyDirectorySchema,
+    fallback_administrator: z.object({ github_user_id: githubUserIdSchema }).strict()
   })
-  .strict();
+  .strict()
+  .refine(
+    (course) =>
+      course.faculty_directory.some(
+        (faculty) => faculty.github_user_id === course.fallback_administrator.github_user_id
+      ),
+    {
+      path: ["fallback_administrator", "github_user_id"],
+      message: "Fallback administrator must reference an existing faculty directory member."
+    }
+  );
 
 export const rawCourseConfigSchema = z.discriminatedUnion("schema_version", [
   rawCourseConfigV1Schema,

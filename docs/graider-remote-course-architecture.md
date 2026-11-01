@@ -2203,6 +2203,8 @@ faculty_directory:
     github_user_id: 22993125
     github_login: current-login
     github_login_history: []
+fallback_administrator:
+  github_user_id: 22993125
 ```
 
 The [complete development fixture](../tests/fixtures/config/schema-v2-course.yml)
@@ -2246,6 +2248,42 @@ at schema 1, so aggregate `loadGraiderConfig` consumers (including CLI Apply, gr
 reporting, and workflow operations) also refuse v2 before executing. This preserves
 the v1 authorization boundary outside managed remote paths.
 
-Next slice: **6.2 — Fallback Administrator**. It must add transferable recovery
-authority using immutable faculty identity; login history must remain metadata.
-Production activation stays gated until the remaining Phase 6 authorization work is ready.
+## Phase 6 / Slice 6.2: Fallback Administrator
+
+Schema v2 now requires exactly one `fallback_administrator` object containing only
+`github_user_id`, a positive safe integer referencing a member of `faculty_directory`.
+Missing/malformed objects, additional role fields, and unknown IDs fail schema validation.
+The [development fixture](../tests/fixtures/config/schema-v2-course.yml) includes the
+reference. Schema v1 remains unchanged and does not accept this field.
+
+The relationship is `fallback administrator → immutable GitHub user ID → faculty record`.
+No institutional username or login is copied into the role. Current login and login
+history remain metadata; renaming a GitHub account does not change fallback authority.
+
+`FallbackAdministrator` validates and snapshots a v2 course and uses `FacultyDirectory`
+for identity lookup. Its domain API is:
+
+- `getFacultyRecord()`: retrieve the current administrator's immutable faculty snapshot;
+- `isFallbackAdministrator(authenticatedGithubUserId)`: compare immutable IDs only;
+- `transferTo(githubUserId)`: return an independent, validated v2 course value referencing
+  another existing directory member; throw if that member does not exist.
+
+Transfer changes only the fallback-administrator reference. The original course and
+model remain unchanged, the full directory is preserved, and the former administrator
+remains a faculty identity. The returned course's nested values are also independent
+of the source and model snapshot. Nothing is written or published.
+
+This models course-level recovery/administrative identity, not a permanent coordinator
+role. It grants no section visibility or grading rights. Transfer initiation, current
+administrator authorization, and unavailable-administrator recovery involving coordinators
+remain for later authorization slices; this transition does not authorize its caller.
+
+`OPERATIONAL_COURSE_SCHEMA_VERSION` remains **1**. Discovery, synchronization, mutation
+validation, aggregate CLI config loading, Course Setup, and current v1 faculty scope
+retain the 6.1 production boundary. V2 remains schema/domain development material:
+no real course is migrated, no fallback administrator is inferred, and no v2 publication
+or transfer UI is enabled. Term and assignment schemas are unchanged.
+
+Next slice: **6.3 — Term Coordinator Model**. Keep coordinator identities and historical
+roles separate from fallback authority, and preserve the production gate until the
+remaining Phase 6 authorization model is complete.
