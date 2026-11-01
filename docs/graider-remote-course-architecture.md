@@ -681,8 +681,106 @@ when their names look generated. Explicit migration/adoption belongs to Phase 9.
 Both `OPERATIONAL_COURSE_SCHEMA_VERSION` and `OPERATIONAL_TERM_SCHEMA_VERSION` remain
 **1**. Existing v1 faculty-team handling is unchanged. No team creation, deletion,
 rename, membership reconciliation, invitations, permission reconciliation, branch
-rules or production-v2 activation occurs. Next: **7.2 — Faculty Organization Invitation**;
-7.3 will calculate membership and 7.4/7.5 will reconcile permissions.
+rules or production-v2 activation occurs in Slice 7.1. Slice 7.2 adds organization
+invitation infrastructure below; 7.3 will reconcile team membership and 7.4/7.5 permissions.
+
+### 11.6 Faculty organization access contract (Slice 7.2)
+
+Every persistent Schema v2 `faculty_directory` identity represents intended membership
+in the selected course organization. This includes fallback administrators, current
+and former coordinators, section faculty and historical faculty. Course metadata
+records intended identity first; GitHub membership is reconciled external state.
+Role changes never trigger removal or cancellation.
+
+`FacultyOrganizationReconciler` is backend/domain infrastructure only. It snapshots a
+validated v2 course, trusted canonical course repository ID and authenticated GitHub
+account ID. Its operation accepts only a directory GitHub user ID; the organization
+comes from that course snapshot. It rechecks the authenticated account and its active
+organization membership, and rejects mismatched accounts/organizations. No Electron,
+CLI, current Course Setup, discovery or Apply flow invokes it.
+
+The future outer service must obtain metadata from the selected canonical repository,
+bind the client to the selected authenticated OAuth session, enforce modeled course
+mutation authorization and source-revision checks, serialize reconciliation, and
+invalidate the context on session/account/course changes. Renderer-provided account,
+organization, course metadata or arbitrary login must never construct this context.
+The constructor is an internal trust boundary, not an IPC request validator.
+
+The immutable GitHub user ID is canonical. The directory's current login is resolved
+and must yield that ID before classification or invitation. A different returned
+current login with the same ID is accepted, but metadata is never rewritten. A
+recycled login, missing account or lookup failure needs attention. Institutional
+usernames and login history are never lookup or invitation fallbacks.
+
+`FacultyOrganizationAccess` carries faculty ID, canonical course repository ID,
+selected organization and a typed state:
+
+| State                 | Meaning                                                                           |
+| --------------------- | --------------------------------------------------------------------------------- |
+| `active`              | The verified immutable user ID appears in the selected organization's membership. |
+| `pending_invitation`  | A verified invitation awaits acceptance; includes its invitation resource ID.     |
+| `invitation_required` | Neither active membership nor a matching pending invitation exists.               |
+| `needs_attention`     | Typed identity, capability, policy, transport or unexpected-response failure.     |
+
+The reusable inventory keeps active members and pending invitations separate.
+`inspect()` reads all pages (100 records/page, bounded at 1000 pages), then classifies
+each directory identity without mutation. A faculty lookup failure does not stop
+other classifications; inaccessible/incomplete inventory fails closed. Pagination
+uses numbered requests, never provider-supplied destination URLs. Active member IDs
+are checked directly. An invitation's `id` identifies the **invitation**, not its
+invitee: the invitation login is resolved to an immutable user ID, also checked against
+`invitee_id` if supplied. Conflicting claims, duplicate matching invitations and
+non-membership roles need attention. An email-only/unresolvable invitation cannot
+establish identity or safely prove absence for another intended invitation, so missing
+membership remains Needs attention in that inventory. Existing verified active or
+pending access can still be classified.
+
+The [GitHub organization members API](https://docs.github.com/en/rest/orgs/members)
+provides paginated `GET /orgs/{org}/members`, `GET /orgs/{org}/invitations` and
+`POST /orgs/{org}/invitations`. Invitation writes use verified immutable `invitee_id`
+and `role: direct_member`, with no email, mutable-login target or team IDs. GitHub
+requires an organization owner; fine-grained tokens require organization **Members:
+write**. Classic/OAuth organization membership write capability is `write:org` (or the
+encompassing `admin:org` grant); GitHub enforces endpoint-specific permission. The current Phase 2
+OAuth request remains `read:org repo`: it does not silently acquire broader access.
+Reconciliation checks owner role and, where GitHub exposes classic scope evidence,
+`write:org` or `admin:org`. Absent scope headers are not proof of permission; GitHub's endpoint
+remains authoritative for fine-grained credentials. Future OAuth upgrade UX is deferred.
+
+`reconcile(githubUserId)` reads fresh inventory. Active membership and existing pending
+invitations cause no write. Missing verified membership plus sufficient capability
+permits one invitation attempt. The adapter does not retry invitation POSTs. After
+both a successful response and an ambiguous exception, the reconciler rereads session,
+members and pending invitations. Only observed Active/Pending is success; an API
+acknowledgment alone is insufficient. A bounded recovery read can still run after
+the mutation transport was aborted. No observed result yields Needs attention.
+
+An explicitly supplied `FacultyInvitationJournal` records attempts before POST and prevents
+another write after an ambiguous or unobservable result. Retain it across service
+recreation; every journal operation is awaited, and tests use an in-memory `Set`.
+Future production wiring **must persist it durably before sending**, and
+share serialization for the selected session/course. Definitive authorization/policy/
+rate-limit rejection permits a later explicit retry after repair. Verified observable
+success resolves uncertainty. This slice introduces no production persistence/IPC flow.
+
+Failures follow Phase 2 status/header conventions and existing `GitHubClientError`
+kinds: insufficient scope, denied/hidden access, SSO required, OAuth approval policy,
+rate limiting, network failures and unexpected responses remain distinct typed
+Needs-attention reasons. Provider text/credentials are not returned and no alternative
+system or unauthenticated credential is used.
+
+Pending is legitimate incomplete external access. Faculty remain in the directory;
+coordinator and section references and course/term metadata validity are unchanged.
+Future term activation must not be blocked solely by Pending. `AuthorizationResolver`
+remains authoritative for course roles: pending GitHub access does not revoke modeled
+roles, and arbitrary organization membership grants no Graider authorization.
+
+Next: **7.3 — Team Membership Reconciliation** should consume these per-faculty access
+results: Active can proceed to team reconciliation; Pending leaves team access
+incomplete and should be surfaced clearly in eventual UI/workflows. Managed-team
+identities from 7.1 are unchanged. No team mutation, repository permission, branch
+rule, removal, cancellation, migration or term lifecycle is implemented here. Both
+operational schema gates remain **1**, with current v1 behavior preserved.
 
 ---
 

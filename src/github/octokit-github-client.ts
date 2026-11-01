@@ -208,12 +208,13 @@ export class OctokitGitHubClient implements GitHubClient {
   private async organizationResponse(
     route: string,
     parameters: OctokitParameters,
-    signal: AbortSignal
+    signal: AbortSignal,
+    method: "GET" | "POST" = "GET"
   ): Promise<GitHubOrganizationResponse> {
     let response: OctokitResponseLike;
     try {
       response = await this.octokit.request({
-        method: "GET",
+        method,
         url: route,
         ...parameters,
         request: { signal, redirect: "error" }
@@ -238,6 +239,50 @@ export class OctokitGitHubClient implements GitHubClient {
 
   async getOrganizationScopeResponse(signal: AbortSignal): Promise<GitHubOrganizationResponse> {
     return this.organizationResponse("/user", {}, signal);
+  }
+
+  async listOrganizationMembersPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/orgs/{org}/members",
+      { org, page, per_page: perPage, filter: "all", role: "all" },
+      signal
+    );
+  }
+
+  async listPendingOrganizationInvitationsPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/orgs/{org}/invitations",
+      { org, page, per_page: perPage },
+      signal
+    );
+  }
+
+  async createOrganizationInvitation(
+    org: string,
+    githubUserId: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    if (!this.token)
+      throw new GitHubClientError("auth_missing", "An authenticated GitHub session is required.");
+    if (!Number.isSafeInteger(githubUserId) || githubUserId <= 0)
+      throw new Error("Invalid GitHub user ID.");
+    // No write retries: a transport failure may follow a committed invitation.
+    return this.organizationResponse(
+      "/orgs/{org}/invitations",
+      { org, invitee_id: githubUserId, role: "direct_member" },
+      signal,
+      "POST"
+    );
   }
 
   async listOrganizationMembershipsPage(

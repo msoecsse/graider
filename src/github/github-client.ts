@@ -51,6 +51,31 @@ export interface GitHubOAuthOrganizationClient {
   ): Promise<GitHubOrganizationResponse>;
 }
 
+/** Trusted backend transport only. Never expose organization/user locators over IPC. */
+export interface GitHubFacultyOrganizationClient extends Pick<
+  GitHubOAuthOrganizationClient,
+  "getOrganizationScopeResponse" | "getOrganizationMembership"
+> {
+  getUser(username: string): Promise<GitHubUser | null>;
+  listOrganizationMembersPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  listPendingOrganizationInvitationsPage(
+    org: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  createOrganizationInvitation(
+    org: string,
+    githubUserId: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+}
+
 /** Read-only transport for trusted remote course discovery; never exposed over IPC. */
 export interface GitHubRemoteCourseClient {
   getCourseRepositoryById(
@@ -84,7 +109,10 @@ export interface GitHubRemoteCourseClient {
 }
 
 export interface GitHubClient
-  extends Partial<GitHubOAuthOrganizationClient>, Partial<GitHubRemoteCourseClient> {
+  extends
+    Partial<GitHubOAuthOrganizationClient>,
+    Partial<GitHubFacultyOrganizationClient>,
+    Partial<GitHubRemoteCourseClient> {
   getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser>;
 
   getRepository(owner: string, repo: string): Promise<GitHubRepository | null>;

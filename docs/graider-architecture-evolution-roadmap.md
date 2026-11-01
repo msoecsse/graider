@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phase 6 is complete. Phase 7 has begun; next: **7.2 — Faculty Organization Invitation**.
+Phase 6 is complete. Phase 7 has begun; next: **7.3 — Team Membership Reconciliation**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -456,12 +456,36 @@ Only the existing GitHub read projection gained description support; no live tea
 membership, invitation, permission or rename reconciliation runs. Both operational
 schema gates remain **1**, and production v1 faculty-team behavior is preserved.
 See [the full metadata contract](graider-remote-course-architecture.md#115-managed-team-identity-contract-slice-71).
-Next: **7.2 — Faculty Organization Invitation**; membership and effective permissions
-remain deferred to 7.3–7.5, with explicit legacy adoption in Phase 9.
+Organization invitation infrastructure is complete in 7.2 below; team membership and
+effective permissions remain deferred to 7.3–7.5, with explicit legacy adoption in Phase 9.
 
-## Slice 7.2 — Faculty organization invitation
+## Slice 7.2 — Faculty organization invitation (complete)
 
-Adding faculty records intended organization membership and supports Pending invitation.
+Backend-only desired-state infrastructure derives organization membership intent from
+every persistent faculty-directory identity, independently of current/former role.
+Typed access states are Active, Pending invitation, Invitation required and Needs
+attention. Immutable user IDs are verified against current login resolution, member
+inventory and invitation invitees; directory identity is never silently rewritten.
+
+Paginated membership/invitation reads feed read-only directory classification and a
+single-identity reconciler. Verified active/pending access causes no mutation. One
+explicit invitation uses immutable `invitee_id`, then rereads observable state after
+success or ambiguous transport failure. Serialized retries and a caller-retained
+unresolved-write guard prevent duplicate attempts; future production composition must
+persist that guard durably and enforce trusted session/course/repository boundaries.
+
+Owner privilege and appropriate GitHub write capability are required. Existing OAuth
+scopes stay unchanged; missing scope, SSO/OAuth restrictions, forbidden/hidden access,
+rate limiting, network and malformed results become typed Needs attention. Pending
+remains valid intended course participation, preserves modeled authorization and must
+not block future term activation solely due to incomplete GitHub access.
+
+No production v2/IPC/setup invitation flow, team membership, removal, cancellation or
+permission mutation is introduced. Both operational gates remain **1**. Slice 7.3
+should consume these access states to defer team reconciliation for Pending faculty.
+See [the access contract and trust requirements](graider-remote-course-architecture.md#116-faculty-organization-access-contract-slice-72).
+
+Next: **7.3 — Team Membership Reconciliation**.
 
 ## Slice 7.3 — Team membership reconciliation
 
