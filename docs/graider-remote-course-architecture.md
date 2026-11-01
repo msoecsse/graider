@@ -338,6 +338,11 @@ The fallback administrator:
 
 The role is transferable.
 
+Slice 8.2 provides explicit Draft metadata visibility and coordinator setup/handoff
+recovery authority. It grants no ordinary Draft section, roster or assignment access
+from fallback status alone; independently held Draft teaching/coordinator roles still
+apply. See [the Draft authorization contract](#91-draft).
+
 A normal transfer may be performed by the current fallback administrator.
 
 If that administrator is unavailable:
@@ -411,10 +416,10 @@ explicit removal from a role. Faculty/coordinators completing a term normally ma
 remain current after archival, preserving the evidence later grading access needs.
 `TermCoordinators` still requires at least one current coordinator for every status.
 
-Slice 8.1 defines state only. `AuthorizationResolver` retains its Phase 6 decisions,
-and Phase 7 builders/reconcilers still use all supplied terms without lifecycle
-filtering or permission transitions. The policies below are later-slice requirements,
-not newly enforced behavior. Draft permissions begin in 8.2, activation in 8.3,
+Slice 8.1 defines state only. `AuthorizationResolver` retains its Phase 6 decisions;
+Slice 8.2 composes it through a separate Draft-only domain policy described below.
+Phase 7 builders/reconcilers still use all supplied terms without lifecycle
+filtering or permission transitions. Activation begins in 8.3,
 Archived restrictions in 8.4, recovery/deletion in 8.5, and course archive in 8.6.
 Both operational schema gates remain **1**, Course Setup emits v1, and no real course
 migration or production UI/Electron lifecycle controls are introduced.
@@ -441,10 +446,68 @@ Draft terms prohibit student-facing operations:
 
 Draft visibility is limited to:
 
-- faculty assigned to the Draft term;
-- future coordinators of that Draft term;
-- coordinators of the currently Active term;
+- current section faculty assigned to the Draft term;
+- current coordinators of that Draft term;
+- current coordinators of the currently Active term;
 - course fallback administrator.
+
+**Slice 8.2 implementation contract (complete):**
+`DraftTermAuthorizationResolver` in `src/faculty/draft-term-authorization-resolver.ts`
+accepts a validated v2 course, the complete trusted v2 term set, the target Draft
+term code and the authenticated immutable GitHub user ID. It composes
+`CourseTermLifecycle`, the Draft and optional Active term's `AuthorizationResolver`,
+and `FallbackAdministrator`. Inputs are snapshotted; public role facts, decisions and
+section scopes are frozen. The caller must still prove source/course/session
+authenticity and completeness. Missing, Active and Archived targets throw explicit
+construction errors. Duplicate codes and multiple Active terms fail lifecycle
+validation. Existing coordinator/reference validation remains in force.
+
+Zero Active terms is supported through `getActiveTerm()`, without a blanket
+`requireActiveTerm()` call. There is then no cross-term Active-coordinator authority;
+Draft coordinators, current Draft section faculty and fallback setup/recovery keep
+their independent capabilities during initial course setup.
+
+| API                                           | Implemented Draft authority                                                                                                                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `canViewDraftTerm()`                          | Metadata: current Draft coordinator, current Draft section faculty, current Active-term coordinator, or fallback administrator.                                                                                           |
+| `canViewDraftSection(id, scope)`              | Default: only current Draft faculty in that section. Explicit `coordinator-term`: current Draft or current Active-term coordinator.                                                                                       |
+| `canPrepareDraftSection(id, scope)`           | Same scope as Draft section visibility, for preparation only: rosters, section assignment preparation/settings, deadlines/policies and grading-workflow preparation.                                                      |
+| `getDraftSectionScope(scope)`                 | Frozen `visibleSectionIds` and `preparableSectionIds`; these never authorize student-facing execution.                                                                                                                    |
+| `canManageDraftStructure()`                   | Current Draft or current Active-term coordinator may configure sections and faculty. No scope expansion is required for these coordinator-level structure operations.                                                     |
+| `canManageDraftCoordinatorSetup()`            | Narrow setup/handoff recovery: fallback administrator (`course-recovery`) or current Active-term coordinator. Native Draft coordinators retain ordinary Draft structure management; this recovery capability is separate. |
+| `canPerformStudentFacingOperation(operation)` | Always denied with `draft-student-facing-operation-prohibited`, regardless of role.                                                                                                                                       |
+
+A coordinator's ordinary default section scope contains only their independently
+assigned current Draft teaching sections. Both native and cross-term coordinators
+must explicitly request `coordinator-term` to access/prepare every Draft section,
+including unassigned sections. Unknown sections and invalid runtime scopes are denied.
+Fallback status grants Draft metadata and the narrow setup capability without
+injecting section data, student data or assignment content into either section scope.
+
+Former-only Draft coordinators/faculty have no Draft metadata or section visibility,
+including former-coordinator historical reads supported by the Phase 6 primitive.
+Former Active-term coordinators do not get cross-term authority. Another independent
+current role can still authorize the person. Current coordinators of Archived or
+other Draft terms gain no cross-term access. Structured decision bases distinguish
+`draft-current-section-faculty`, `draft-current-coordinator`, `active-term-coordinator`,
+`fallback-administrator`, `former-role-not-authorized`, and `no-authorizing-role`.
+The public `roleFacts` are exactly the selected Draft's Phase 6 facts: no Active-term
+coordinator or fallback role is converted into stored Draft coordination/faculty.
+
+`DRAFT_STUDENT_FACING_OPERATIONS` / `DraftStudentFacingOperation` define a closed
+operation category: `apply` (including provisioning), `grading-dispatch`, `grading`,
+`report-publication`, and `student-repository-mutation`. Every decision denies,
+echoes the category, and identifies lifecycle prohibition rather than a role failure.
+Preparation/structure decisions must never substitute for this execution gate.
+
+This policy performs no I/O or GitHub mutation. Role histories, faculty directory,
+fallback identity and managed-team membership are unchanged. Active-term Phase 6
+behavior and Phase 7 membership, repository permissions and branch policy remain
+unchanged. No production Apply/grading/publication/Setup/Electron IPC calls this
+resolver. Both operational schema gates remain **1**, Course Setup emits v1, and
+no real course is migrated. Archived authorization remains deferred to 8.4.
+Next: **8.3 — Atomic Activation**, including actual lifecycle mutation and the
+authorization/team desired-state transition; 8.2 performs neither.
 
 ### 9.2 Active
 
@@ -525,7 +588,10 @@ Term coordinators:
 
 Coordinator authority is historical to the term.
 
-Coordinating one term does not grant authority over future terms.
+Coordinating one term does not generally grant authority over future terms.
+The current Active term's current coordinators have the explicit Draft preparation
+exception in §9.1, without becoming coordinators of that Draft. Former or Archived
+term coordination does not grant this exception.
 
 The coordinators of the most recently created term, with the fallback administrator as backup, may create the next term.
 
@@ -1364,7 +1430,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slice 8.1 are complete. Next: Phase 8 / Slice 8.2 — Draft-term Preparation Permissions.**
+**Phase 7 and Slices 8.1–8.2 are complete. Next: Phase 8 / Slice 8.3 — Atomic Activation.**
 
 ---
 
@@ -3336,6 +3402,6 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slice 8.1 are complete. The next planned work is **Phase 8 / Slice 8.2 —
-Draft-term Preparation Permissions**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.2 are complete. The next planned work is **Phase 8 / Slice 8.3 —
+Atomic Activation**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.

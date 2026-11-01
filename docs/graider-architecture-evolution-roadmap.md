@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 and Slice 8.1 are complete. Next: **Phase 8 / Slice 8.2 — Draft-term Preparation Permissions**.
+Phases 6 and 7 and Slices 8.1–8.2 are complete. Next: **Phase 8 / Slice 8.3 — Atomic Activation**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -589,7 +589,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Slice 8.1 is complete; next: **Phase 8 / Slice 8.2 — Draft-term Preparation Permissions**.
+Managed branch policy is implemented in 7.6 below. Slices 8.1–8.2 are complete; next: **Phase 8 / Slice 8.3 — Atomic Activation**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -623,7 +623,7 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 and Slice 8.1 are complete. Next: Slice 8.2 — Draft-term Preparation Permissions.**
+**Phase 7 and Slices 8.1–8.2 are complete. Next: Slice 8.3 — Atomic Activation.**
 
 ---
 
@@ -663,12 +663,52 @@ still emits v1. No real course migration or production UI/Electron controls are 
 
 See [architecture §9](graider-remote-course-architecture.md#9-term-lifecycle).
 
-Next: **8.2 — Draft-term Preparation Permissions**: allow Draft preparation, restrict
-visibility appropriately and block student-facing operations. No 8.2 work is included here.
+Slice 8.2 below now applies Draft authorization through a separate policy wrapper.
 
-## Slice 8.2 — Draft-term preparation permissions
+## Slice 8.2 — Draft-term preparation permissions — complete
 
-Allow preparatory configuration while blocking student-facing operations.
+`DraftTermAuthorizationResolver` composes `CourseTermLifecycle`, the selected Draft's
+Phase 6 `AuthorizationResolver`, the optional Active term's resolver and
+`FallbackAdministrator`. It snapshots a validated course, the complete trusted v2
+term set, the target code and authenticated immutable GitHub ID. Missing/non-Draft
+targets, duplicate codes and multiple Active terms fail explicitly. Outer callers
+remain responsible for course/source/session authenticity and term-set completeness.
+
+Draft metadata visibility is limited to current Draft section faculty, current Draft
+coordinators, current Active-term coordinators and fallback administration. Former-only
+Draft roles and former Active coordinators gain no Draft visibility. Independent
+current roles still apply. Zero Active is valid: native Draft roles and fallback
+setup/recovery work normally, with no cross-term coordinator authority.
+
+`canViewDraftSection()` / `canPrepareDraftSection()` allow current Draft faculty only
+in their own sections by default. Draft or Active-term current coordinators can
+explicitly expand via `coordinator-term`, including unassigned sections.
+`getDraftSectionScope()` returns frozen visible/preparable IDs; preparation includes
+rosters, section assignments/settings, deadlines/policies and grading workflows.
+`canManageDraftStructure()` allows native Draft or current Active-term coordinators
+to configure sections/faculty. Cross-term access never rewrites Draft role facts.
+
+Fallback can view Draft metadata and use `canManageDraftCoordinatorSetup()` for
+initial setup or handoff repair; current Active-term coordinators also have that
+narrow recovery capability. It grants no ordinary section/roster/assignment visibility
+or generic structure management to fallback-only administrators. Native Draft
+coordinators retain their separate normal structure authority.
+
+`canPerformStudentFacingOperation()` accepts the typed categories in
+`DRAFT_STUDENT_FACING_OPERATIONS`: Apply/provisioning, grading dispatch, grading,
+report publication and student-repository mutation. All are denied for every role
+with `draft-student-facing-operation-prohibited`. Preparation permission must never
+authorize execution. Decisions distinguish native, cross-term, recovery, former-role
+and absent authority; all public results are immutable.
+
+Phase 6's primitive and Active behavior are unchanged; Phase 7 still uses all supplied
+terms without lifecycle filtering. No GitHub mutation, activation mutation or production
+v1 wiring is added. Both operational schema gates remain **1**; Course Setup emits v1,
+and no real course migrates. Archived policy remains deferred to 8.4.
+
+See [architecture §9.1](graider-remote-course-architecture.md#91-draft).
+Next: **8.3 — Atomic Activation**, including the actual lifecycle and authorization/team
+desired-state transition.
 
 ## Slice 8.3 — Atomic activation
 
