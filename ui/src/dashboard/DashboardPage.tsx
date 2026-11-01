@@ -660,7 +660,9 @@ export const DashboardPage = (): ReactElement => {
                   : []
               }
               cards={visibleCards}
-              courseFolders={courseFolders}
+              courseFolders={courseFolders.filter(
+                (folder) => !folder.id.startsWith("managed-course:")
+              )}
               refreshingId={refreshingId}
               onOpenAssignment={handleOpenAssignmentDetail}
               onManageCommentLibrary={handleManageCommentLibrary}
@@ -705,7 +707,9 @@ export const DashboardPage = (): ReactElement => {
             <details className="dashboard-advanced">
               <summary>Advanced details</summary>
               <CourseFolderList
-                courseFolders={courseFolders}
+                courseFolders={courseFolders.filter(
+                  (folder) => !folder.id.startsWith("managed-course:")
+                )}
                 refreshResults={refreshResults}
                 refreshingId={refreshingId}
                 isRefreshingAll={isRefreshingAll}

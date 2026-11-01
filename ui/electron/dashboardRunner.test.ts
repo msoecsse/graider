@@ -437,3 +437,33 @@ describe("dashboardRunner", () => {
     expect(registry.courseFolders[1]?.lastDashboardStatus).toBe("failure");
   });
 });
+
+it("loads a managed-only selector without persisting a registry record or requiring a legacy token", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-remote-dashboard-"));
+  try {
+    const registryPath = getCourseRegistryPath(root);
+    const selector = { ...COURSE_FOLDER, id: "managed-course:42:20", path: "managed-course:42:20" };
+    const result = await refreshDashboard(registryPath, {
+      remoteSources: [selector],
+      env: {},
+      runner: createRunner([
+        createProcessResult({ exitCode: 1, stdout: "", stderr: "no legacy token" })
+      ]),
+      withCourseSource: async (source, perform) => {
+        expect(source).toEqual(selector);
+        const loaded = await perform({ ...source, path: root }, "trusted-oauth");
+        return {
+          ...loaded,
+          courseFolderPath: selector.path,
+          status: "success",
+          dashboard: createDashboardJson()
+        };
+      }
+    });
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].courseFolderId).toBe(selector.id);
+    expect(loadCourseRegistry(registryPath).courseFolders).toEqual([]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

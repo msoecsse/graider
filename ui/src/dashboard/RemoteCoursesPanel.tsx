@@ -217,6 +217,10 @@ export const RemoteCoursesPanel = ({
                               ? "Needs attention"
                               : "Available remotely"}
                   </p>
+                  {course.bootstrap?.status === "ready" &&
+                  course.synchronization?.status !== "needs_attention" ? (
+                    <p>Open this course from the course dashboard.</p>
+                  ) : null}
                   <ManagedCacheReview
                     key={`${current?.userId}:${course.repositoryId}`}
                     course={course}
@@ -255,7 +259,7 @@ export const RemoteCoursesPanel = ({
                           );
                       }}
                     >
-                      Inspect course
+                      Course details
                     </button>
                   ) : null}
                 </>

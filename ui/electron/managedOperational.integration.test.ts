@@ -823,3 +823,67 @@ it("releases the managed queue before a native import chooser waits for user inp
   }
   await choosing;
 });
+
+describe("managed-only course identity", () => {
+  it("routes reads and transactional publication without registration or cutover, across restart and rename", async () => {
+    const f = await fixture();
+    f.deps.folders().splice(0);
+    Object.assign(f.course, { localFolderIds: [] });
+    const guard = new ManagedCourseMutationGuard(f.deps);
+    const selector = guard.remoteSelectors()[0];
+    expect(selector.id).toBe("managed-course:42:20");
+    expect(selector.path).not.toBe(f.cache);
+    await guard.read(selector.id, selector.path, async (context) => {
+      expect(context).toMatchObject({
+        managed: true,
+        courseFolderPath: f.cache,
+        authoritativeCommit: f.head
+      });
+    });
+    await expect(guard.read(selector.id, f.cache, vi.fn())).rejects.toMatchObject({
+      result: { reason: "operational_source_mismatch" }
+    });
+    await expect(
+      guard.run(selector.id, selector.path, "new_mutation", (context, input) =>
+        guard.transaction(context, input, "stale", () => true, edit, vi.fn())
+      )
+    ).rejects.toThrow();
+    expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(f.head);
+    await guard.run(selector.id, selector.path, "new_mutation", (context, input) =>
+      guard.transaction(context, input, f.head, (file) => file === "course.yml", edit, vi.fn())
+    );
+    expect(fs.readFileSync(path.join(f.cache, "course.yml"), "utf8")).toContain("Managed edit");
+    Object.assign(f.course, { name: "renamed", title: "Renamed" });
+    expect(new ManagedCourseMutationGuard(f.deps).remoteSelectors()[0].id).toBe(selector.id);
+    expect(f.deps.folders()).toEqual([]);
+    expect(loadManagedCatalog(f.root, 42).courses["20"].operationalFolderIds ?? []).toEqual([]);
+    f.switchAccount(43);
+    await expect(guard.read(selector.id, selector.path, vi.fn())).rejects.toThrow();
+  });
+});
+
+it("projects managed-only assignment/roster/grading reads with exact revisions", async () => {
+  const f = await fixture();
+  f.deps.folders().splice(0);
+  Object.assign(f.course, { localFolderIds: [] });
+  const id = f.guard.remoteSelectors()[0].id;
+  const a = adapter(f);
+  for (const channel of [
+    IPC_CHANNELS.getAssignmentDetail,
+    IPC_CHANNELS.getRosterSectionSummaries,
+    IPC_CHANNELS.prepareGradingWorkspace
+  ]) {
+    a.ipc.handle(channel, async (_event, request) => {
+      const context = managedCourseOperation.getStore();
+      expect(context?.courseFolderPath).toBe(f.cache);
+      expect(request.courseFolderPath).toBe(f.cache);
+      return { courseFolderPath: context?.courseFolderPath };
+    });
+    expect(await a.call(channel, { courseFolderId: id, courseFolderPath: id })).toMatchObject({
+      courseFolderPath: id,
+      courseReadRevision: f.head
+    });
+  }
+  await expect(f.guard.read("managed-course:99:20", undefined, vi.fn())).rejects.toThrow();
+  await expect(f.guard.read("managed-course:42:21", undefined, vi.fn())).rejects.toThrow();
+});

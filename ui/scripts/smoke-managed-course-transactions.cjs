@@ -195,11 +195,12 @@ app
         );
       }
     };
+    let remoteOnly = false;
     const guard = new ManagedCourseMutationGuard({
       userData: root,
       session,
       username: () => "jones",
-      folders: () => [{ id: "registered", path: legacy }],
+      folders: () => (remoteOnly ? [] : [{ id: "registered", path: legacy }]),
       authenticate
     });
     const guarded = createCourseMutationIpc(
@@ -402,13 +403,32 @@ app
     assert.equal(await git(legacy, ["rev-parse", "HEAD"]), originalHead);
     await invoke("updateCourseSource", "registered");
     assert.equal(await git(legacy, ["rev-parse", "HEAD"]), await git(cache, ["rev-parse", "HEAD"]));
+    remoteOnly = true;
+    course = { ...course, localFolderIds: [] };
+    await reload();
+    const selector = guard.remoteSelectors()[0];
+    assert.equal(selector.id, "managed-course:42:20");
+    const remoteIdentity = { courseFolderId: selector.id, courseFolderPath: selector.path };
+    const remoteRead = await invoke("loadAssignmentSetupTerms", remoteIdentity);
+    assert.ok(remoteRead.value.courseReadRevision);
+    const remoteSave = await invoke("saveStudentAccessPagesConfig", {
+      ...config,
+      ...remoteIdentity,
+      baseUrl: "https://example.test/remote-only",
+      expectedCourseRevision: remoteRead.value.courseReadRevision
+    });
+    assert.equal(remoteSave.value.publication.status, "success");
+    assert.equal((await invoke("gradeAssignment", remoteIdentity)).value.status, "success");
+    assert.ok(
+      !loadManagedCatalog(root, 42).courses["20"].operationalFolderIds.includes(selector.id)
+    );
     const tokenProjection = await win.webContents.executeJavaScript(
       "window.graiderUI.githubOAuth.get().then(JSON.stringify)"
     );
     assert.ok(!tokenProjection.includes("s29-main-only-oauth-fixture-secret"));
     const evidence = {
       status: "passed",
-      scenarios: 14,
+      scenarios: 17,
       courseDomainWrites: writes,
       coursePushAttempts: pushes,
       legacyPublicationCalls: manualPublications,

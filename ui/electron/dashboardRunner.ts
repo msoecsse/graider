@@ -27,9 +27,10 @@ const DEBUG_ENV_NAME = "GRAIDER_UI_DEBUG";
 const DEBUG_ENABLED_VALUE = "1";
 
 interface DashboardRunnerOptions {
+  readonly remoteSources?: readonly CourseFolderRecord[];
   readonly withCourseSource?: (
     folder: CourseFolderRecord,
-    perform: (source: CourseFolderRecord) => Promise<DashboardCommandResult>
+    perform: (source: CourseFolderRecord, token?: string) => Promise<DashboardCommandResult>
   ) => Promise<DashboardCommandResult>;
   readonly runner: ProcessRunner;
   readonly env?: NodeJS.ProcessEnv;
@@ -286,19 +287,31 @@ const refreshKnownCourseFolder = async (
   options: DashboardRunnerOptions
 ): Promise<CourseFolderDashboardResult> => {
   const refreshedAt = (options.now ?? DEFAULT_NOW)().toISOString();
-  const perform = (source: CourseFolderRecord) =>
+  const perform = (source: CourseFolderRecord, sourceToken = token) =>
     runDashboardCommand({
       courseFolder: source,
-      token,
+      token: sourceToken,
       runner: options.runner,
       ...(options.env === undefined ? {} : { env: options.env })
     });
-  const result = attachRefreshTime(
-    options.withCourseSource
-      ? await options.withCourseSource(courseFolder, perform)
-      : await perform(courseFolder),
-    refreshedAt
-  );
+  const attempt = async () => {
+    try {
+      return options.withCourseSource
+        ? await options.withCourseSource(courseFolder, perform)
+        : await perform(courseFolder);
+    } catch (error) {
+      if (!options.remoteSources?.some((source) => source.id === courseFolder.id)) throw error;
+      return createCommandFailureResult(courseFolder.id, courseFolder.path, {
+        code: "managed_course_attention",
+        message: "Course access needs attention. Review remote course status and retry.",
+        exitCode: null,
+        stdoutSnippet: null,
+        stderrSnippet: null
+      });
+    }
+  };
+  const result = attachRefreshTime(await attempt(), refreshedAt);
+  if (options.remoteSources?.some((source) => source.id === courseFolder.id)) return result;
   const updatedRegistry = updateCourseFolderRefreshState(
     loadCourseRegistry(registryPath),
     courseFolder.id,
@@ -319,7 +332,9 @@ export const refreshCourseFolder = async (
   options: DashboardRunnerOptions
 ): Promise<CourseFolderDashboardResult> => {
   const registry = loadCourseRegistry(registryPath);
-  const courseFolder = registry.courseFolders.find((folder) => folder.id === courseFolderId);
+  const courseFolder = [...registry.courseFolders, ...(options.remoteSources ?? [])].find(
+    (folder) => folder.id === courseFolderId
+  );
 
   if (courseFolder === undefined) {
     return createFailureResult(
@@ -342,6 +357,8 @@ export const refreshCourseFolder = async (
   });
 
   if (tokenResult.status === "failure") {
+    if (options.remoteSources?.some((source) => source.id === courseFolder.id))
+      return refreshKnownCourseFolder(registryPath, courseFolder, "", options);
     return createFailureResult(courseFolder.id, courseFolder.path, tokenResult.error, null);
   }
 
@@ -375,15 +392,19 @@ export const refreshDashboard = async (
       createFailureResult(courseFolder.id, courseFolder.path, tokenResult.error, null)
     );
 
-    return {
-      status: getCombinedStatus(results),
-      results
-    };
+    results.push(
+      ...(await Promise.all(
+        (options.remoteSources ?? []).map((source) =>
+          refreshKnownCourseFolder(registryPath, source, "", options)
+        )
+      ))
+    );
+    return { status: getCombinedStatus(results), results };
   }
 
   const results: CourseFolderDashboardResult[] = [];
 
-  for (const courseFolder of registry.courseFolders) {
+  for (const courseFolder of [...registry.courseFolders, ...(options.remoteSources ?? [])]) {
     const result = await refreshKnownCourseFolder(
       registryPath,
       courseFolder,

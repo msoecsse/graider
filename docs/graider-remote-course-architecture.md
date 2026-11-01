@@ -2141,3 +2141,45 @@ mirroring, generic Git editor, or broad write-credential migration.
   Both smokes use disposable profiles and local bare remotes, never real course write fixtures.
 - Backend/UI typechecks, lint, formatting, root/UI/bundled-CLI production builds, and
   `git diff --check` pass. The production renderer retains its existing large-chunk advisory.
+
+## Phase 2 / Slice 2.10: remote-only managed operation
+
+The trusted main-process guard accepts an account/repository selector in the existing
+`courseFolderId` compatibility field. Its corresponding public source value is the same
+opaque selector, never a cache path. Discovery must resolve that selector under the active
+GitHub user ID and immutable repository ID; supplied filesystem paths are rejected. These
+selectors are transient dashboard inputs and are never written to the course registry.
+
+Three operational source states coexist:
+
+1. Registered, uncut courses retain their legacy operational source.
+2. Registered courses with persisted managed cutover retain the 2.9 managed source.
+3. Authorized managed-only courses use the managed source implicitly, without cutover.
+
+Managed-only dashboard entries feed the normal course/term routing and loaders. Registration
+changes replace dashboard results rather than retaining duplicate cards. Repository renames
+preserve selector identity. Account changes clear the dashboard projection. Local-folder controls
+exclude managed-only selectors; cache remediation remains in the existing remote-course controls.
+
+Reads, exact read revisions, transactional course-admin publication, target-specific operations,
+account/repository runtime storage, and stale-view invalidation reuse the 2.9 operation context
+and guard. Every operation synchronizes and authorizes in main. Cache review never replays a
+mutation. Managed-only courses have no legacy source-update or cutover operation.
+
+The next boundary remains schema v2 and domain-specific stale-edit resolution; student download
+management, polling GitHub, organization migration, and broader write-credential migration remain
+out of scope.
+
+### Slice 2.10 validation evidence
+
+- Full backend: 139 files, 1,514 passed, one skipped.
+- Git/auth focused suites: 11 files, 231 passed.
+- Focused operational identity/dashboard/UI suites: three files, 103 passed.
+- Expanded production Electron transaction smoke: 17 scenarios passed, including
+  managed-only loading, OAuth transaction publication and grading runtime writes after
+  removing the fixture registration. Legacy publication calls remain zero; cache is clean.
+  All write fixtures use disposable profiles and local bare remotes.
+- Final full UI/Electron: 185 files, 1,873 passed, 25 skipped, with isolated
+  OAuth loopback listeners permitted.
+- Backend/UI typechecks, lint, formatting, root/UI/bundled-CLI production builds,
+  and `git diff --check` pass. The existing renderer chunk-size advisory remains.

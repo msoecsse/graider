@@ -111,7 +111,11 @@ export const CourseTermCard = ({
 
         <details className="course-card__advanced">
           <summary>Advanced details</summary>
-          <p className="course-card__source">{combinedCard.sourceFolderPath}</p>
+          <p className="course-card__source">
+            {combinedCard.sourceFolderId.startsWith("managed-course:")
+              ? "Managed course"
+              : combinedCard.sourceFolderPath}
+          </p>
         </details>
 
         <div className="course-card__assignments">

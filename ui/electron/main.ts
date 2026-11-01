@@ -518,9 +518,10 @@ export const registerIpcHandlers = (): void => {
     ipcMain,
     () => courseMutationGuard,
     (setupPath) => {
-      const folder = listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).find(
-        (item) => item.path === setupPath
-      );
+      const folder = [
+        ...listCourseFolders(getCourseRegistryPath(app.getPath("userData"))),
+        ...(courseMutationGuard?.remoteSelectors() ?? [])
+      ].find((item) => item.path === setupPath);
       return {
         folderId: folder?.id,
         isNew:
@@ -599,17 +600,27 @@ export const registerIpcHandlers = (): void => {
   const withCourseSource = async (
     folder: CourseFolderRecord,
     perform: (
-      source: CourseFolderRecord
+      source: CourseFolderRecord,
+      sourceToken?: string
     ) => Promise<Omit<import("./ipc.js").CourseFolderDashboardResult, "refreshedAt">>
   ) =>
     courseMutationGuard
-      ? courseMutationGuard.read(folder.id, folder.path, async (context) => {
+      ? courseMutationGuard.read(folder.id, folder.path, async (context, input) => {
           const result = context?.managed
             ? await managedCourseOperation.run(context, () =>
-                perform({ ...folder, path: context.courseFolderPath })
+                perform({ ...folder, path: context.courseFolderPath }, input?.token)
               )
             : await perform(folder);
-          return { ...result, courseFolderPath: folder.path };
+          const projected = context?.managed
+            ? (JSON.parse(
+                JSON.stringify(result).replaceAll(context.courseFolderPath, folder.path)
+              ) as typeof result)
+            : result;
+          return {
+            ...projected,
+            courseFolderPath: folder.path,
+            ...(context?.managed ? { courseReadRevision: context.authoritativeCommit } : {})
+          };
         })
       : perform(folder);
 
@@ -641,9 +652,10 @@ export const registerIpcHandlers = (): void => {
       })
   );
 
-  courseIpc.handle(IPC_CHANNELS.listCourseFolders, () =>
-    listCourseFolders(getCourseRegistryPath(app.getPath("userData")))
-  );
+  courseIpc.handle(IPC_CHANNELS.listCourseFolders, () => [
+    ...listCourseFolders(getCourseRegistryPath(app.getPath("userData"))),
+    ...(courseMutationGuard?.remoteSelectors() ?? [])
+  ]);
 
   courseIpc.handle(IPC_CHANNELS.removeCourseFolder, (_event, id: unknown) => {
     if (typeof id !== "string") {
@@ -1180,6 +1192,7 @@ export const registerIpcHandlers = (): void => {
     }
 
     return await refreshCourseFolder(getCourseRegistryPath(app.getPath("userData")), id, {
+      remoteSources: courseMutationGuard?.remoteSelectors(),
       withCourseSource,
       runner: processRunner,
       env: process.env
@@ -1190,6 +1203,7 @@ export const registerIpcHandlers = (): void => {
     IPC_CHANNELS.refreshDashboard,
     async () =>
       await refreshDashboard(getCourseRegistryPath(app.getPath("userData")), {
+        remoteSources: courseMutationGuard?.remoteSelectors(),
         withCourseSource,
         runner: processRunner,
         env: process.env

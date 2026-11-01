@@ -185,7 +185,11 @@ export const CourseCardGrid = ({
                   ))}
                 <details className="course-dashboard__advanced">
                   <summary>Advanced details</summary>
-                  <p className="course-dashboard__path">{group.sourceFolderPath}</p>
+                  <p className="course-dashboard__path">
+                    {group.sourceFolderId.startsWith("managed-course:")
+                      ? "Managed course"
+                      : group.sourceFolderPath}
+                  </p>
                 </details>
               </div>
               <div

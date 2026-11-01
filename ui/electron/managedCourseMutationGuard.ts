@@ -287,7 +287,32 @@ export class ManagedCourseMutationGuard {
       author: { name: login, email: `${context.userId}+${login}@users.noreply.github.com` }
     });
   }
+  /** Compatibility selector, never a filesystem path or persisted registry record. */
+  remoteSelectors(): CourseFolderRecord[] {
+    const state = this.deps.session.getState();
+    const userId = state.identity?.id;
+    if (!userId || state.courseDiscovery.userId !== userId) return [];
+    return state.courseDiscovery.courses
+      .filter(
+        (course) => course.authorization === "authorized" && course.localFolderIds.length === 0
+      )
+      .map((course) => {
+        const id = `managed-course:${userId}:${course.repositoryId}`;
+        return {
+          id,
+          path: id,
+          displayAlias: course.title,
+          lastOpenedAt: "",
+          lastRefreshedAt: null,
+          lastDashboardStatus: null
+        };
+      });
+  }
+  private remoteSelector(folderId: unknown): CourseFolderRecord | undefined {
+    return this.remoteSelectors().find((item) => item.id === folderId);
+  }
   isManaged(folderId: unknown): boolean {
+    if (this.remoteSelector(folderId)) return true;
     const state = this.deps.session.getState();
     const id = state.identity?.id;
     const catalog = id ? loadManagedCatalog(this.deps.userData, id) : null;
@@ -326,9 +351,13 @@ export class ManagedCourseMutationGuard {
   async read<T>(
     folderId: unknown,
     suppliedPath: unknown,
-    operation: (context?: VerifiedCourseMutationContext) => Promise<T>
+    operation: (
+      context?: VerifiedCourseMutationContext,
+      input?: ManagedOperationInput
+    ) => Promise<T>
   ): Promise<T> {
-    const folder = this.deps.folders().find((item) => item.id === folderId);
+    const remote = this.remoteSelector(folderId);
+    const folder = remote ?? this.deps.folders().find((item) => item.id === folderId);
     if (!folder || (suppliedPath !== undefined && suppliedPath !== folder.path))
       blockMutation(
         "operational_source_mismatch",
@@ -358,6 +387,8 @@ export class ManagedCourseMutationGuard {
     return operation();
   }
   async cutover(folderId: unknown): Promise<void> {
+    if (this.remoteSelector(folderId))
+      throw new Error("Managed-only courses already use the managed source.");
     await this.run(folderId, undefined, "cutover", async (context, input) => {
       const entry = loadManagedCatalog(this.deps.userData, context.userId).courses[
         String(context.repositoryId)
@@ -373,6 +404,8 @@ export class ManagedCourseMutationGuard {
   }
   /** Trusted registry ID only; never resumes the mutation that prompted this operation. */
   updateSource(folderId: unknown, beforeWrite: () => void = () => {}): Promise<void> {
+    if (this.remoteSelector(folderId))
+      throw new Error("This course has no legacy source to update.");
     const faculty = this.deps.username();
     return this.run(folderId, undefined, "source_update", async (context, input) => {
       const factory = this.deps.factory ?? getProductionGitWorkspaceFactory();
@@ -486,7 +519,8 @@ export class ManagedCourseMutationGuard {
         "Sign in and authorize course access before making changes.",
         "authorization"
       );
-    const folder = this.deps.folders().find((item) => item.id === folderId);
+    const remote = this.remoteSelector(folderId);
+    const folder = remote ?? this.deps.folders().find((item) => item.id === folderId);
     const storageRoot = path.join(this.deps.userData, MANAGED_COURSE_ROOT);
     if (
       folder &&
@@ -505,9 +539,11 @@ export class ManagedCourseMutationGuard {
         entry.operationalFolderIds?.includes(String(folderId))
     );
     const courses = state.courseDiscovery.courses.filter((item) =>
-      binding
-        ? item.repositoryId === binding.repositoryId
-        : item.localFolderIds.includes(String(folderId))
+      remote
+        ? remote.id === `managed-course:${userId}:${item.repositoryId}`
+        : binding
+          ? item.repositoryId === binding.repositoryId
+          : item.localFolderIds.includes(String(folderId))
     );
     if (!folder)
       blockMutation(
@@ -543,13 +579,17 @@ export class ManagedCourseMutationGuard {
             "Account changed. Retry this action after authorizing course access.",
             "authorization"
           );
-        if (!this.deps.folders().some((item) => item.id === folder.id && item.path === folder.path))
+        if (
+          !remote &&
+          !this.deps.folders().some((item) => item.id === folder.id && item.path === folder.path)
+        )
           blockMutation(
             "operational_source_mismatch",
             "Course registration changed. Retry after refreshing courses."
           );
         return session.withSynchronizedCourse(course.repositoryId, userId!, async (input, sync) => {
           if (
+            !remote &&
             !input.course.localFolderIds.includes(folder.id) &&
             binding?.repositoryId !== input.course.repositoryId
           )
@@ -569,6 +609,7 @@ export class ManagedCourseMutationGuard {
               "Managed repositories cannot be registered as legacy sources."
             );
           const managed =
+            !!remote ||
             loadManagedCatalog(this.deps.userData, input.userId).courses[
               String(course.repositoryId)
             ]?.operationalSource === "managed";
@@ -613,6 +654,7 @@ export class ManagedCourseMutationGuard {
               "authorization"
             );
           if (
+            !remote &&
             !this.deps.folders().some((item) => item.id === folder.id && item.path === folder.path)
           )
             blockMutation(
@@ -627,7 +669,7 @@ export class ManagedCourseMutationGuard {
             const entry = loadManagedCatalog(this.deps.userData, input.userId).courses[
               String(course.repositoryId)
             ];
-            if (entry && !entry.operationalFolderIds?.includes(folder.id))
+            if (!remote && entry && !entry.operationalFolderIds?.includes(folder.id))
               saveEntry(this.deps.userData, {
                 ...entry,
                 operationalFolderIds: [...(entry.operationalFolderIds ?? []), folder.id]

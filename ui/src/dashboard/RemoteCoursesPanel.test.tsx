@@ -63,7 +63,7 @@ describe("remote dashboard course discovery", () => {
         courses: [{ ...course, bootstrap: { status: "ready", diagnostic: null, retryable: false } }]
       }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Inspect course" }));
+    fireEvent.click(screen.getByRole("button", { name: "Course details" }));
     expect(await screen.findByText("First lab")).toBeInTheDocument();
     expect(inspectManagedCourse).toHaveBeenCalledWith(course.repositoryId);
     fireEvent.click(screen.getByRole("button", { name: "27s1" }));
@@ -93,7 +93,7 @@ describe("remote dashboard course discovery", () => {
     const { rerender } = render(
       <RemoteCoursesPanel state={ready} onRefresh={() => {}} onSettings={() => {}} />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Inspect course" }));
+    fireEvent.click(screen.getByRole("button", { name: "Course details" }));
     rerender(
       <RemoteCoursesPanel
         state={{
@@ -238,7 +238,7 @@ describe("managed synchronization dashboard state", () => {
       expect(f.onRefresh).toHaveBeenCalledOnce();
     }
     if (status === "needs_attention") {
-      expect(screen.queryByRole("button", { name: "Inspect course" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Course details" })).not.toBeInTheDocument();
       expect(
         screen.queryByRole("button", { name: /Reset|Repair|Discard|Force/ })
       ).not.toBeInTheDocument();
@@ -296,7 +296,7 @@ describe("managed synchronization dashboard state", () => {
     const { rerender } = render(
       <RemoteCoursesPanel state={ready} onRefresh={() => {}} onSettings={() => {}} />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Inspect course" }));
+    fireEvent.click(screen.getByRole("button", { name: "Course details" }));
     expect(await screen.findByText(/Before sync/)).toBeInTheDocument();
     rerender(
       <RemoteCoursesPanel

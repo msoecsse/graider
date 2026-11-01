@@ -773,3 +773,11 @@ before possible worktree writes and cannot submit course mutations until full re
 callbacks are rejected even across reload. Assignment/roster forms and shared dashboard data are
 reloaded together. Updating never replays a blocked save or makes an existing form safe to save.
 See [full semantics, locking, races, UI and remaining boundary](graider-remote-course-architecture.md#phase-2--slice-28-safe-legacy-operational-source-synchronization).
+
+## Phase 2.10 status
+
+Managed-only courses now enter the normal dashboard and faculty routes using trusted
+account/repository selectors, without a registry entry or cutover. The source states are
+legacy operational, registered with managed cutover, and managed-only remote. All managed
+operations reuse the 2.9 synchronization, revision, transaction, and runtime contracts.
+Earlier inspection-only descriptions above record historical slice behavior.

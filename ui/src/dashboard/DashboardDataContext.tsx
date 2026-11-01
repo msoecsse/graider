@@ -67,6 +67,7 @@ export const DashboardDataProvider = ({
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const remoteVersion = useRef("");
   const hasStartedStartupRefresh = useRef(false);
   const isRefreshingAllRef = useRef(false);
 
@@ -93,6 +94,37 @@ export const DashboardDataProvider = ({
 
     return () => {
       isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const check = async () => {
+      const state = await window.graiderUI.githubOAuth?.get();
+      if (!active || !state) return;
+      const version = JSON.stringify([
+        state.identity?.id,
+        state.courseDiscovery.courses.map((course) => [
+          course.repositoryId,
+          course.localFolderIds,
+          course.bootstrap?.status
+        ])
+      ]);
+      if (version === remoteVersion.current) return;
+      remoteVersion.current = version;
+      const folders = await window.graiderUI.listCourseFolders();
+      if (!active) return;
+      setCourseFolders(folders);
+      setRefreshResults({});
+      if (folders.length > 0) await runRefreshDashboard();
+    };
+    const timer = setInterval(() => {
+      void check().catch(() => {});
+    }, 1000);
+    void check().catch(() => {});
+    return () => {
+      active = false;
+      clearInterval(timer);
     };
   }, []);
 
@@ -129,10 +161,7 @@ export const DashboardDataProvider = ({
       {}
     );
 
-    setRefreshResults((currentResults) => ({
-      ...currentResults,
-      ...nextResults
-    }));
+    setRefreshResults(nextResults);
     for (const result of combinedResult.results) {
       applyRefreshResultMetadata(result);
     }
@@ -143,17 +172,20 @@ export const DashboardDataProvider = ({
       return;
     }
 
+    const startedVersion = remoteVersion.current;
     isRefreshingAllRef.current = true;
     setIsRefreshingAll(true);
     setErrorMessage(null);
 
     try {
-      rememberCombinedDashboardResult(await window.graiderUI.refreshDashboard());
+      const result = await window.graiderUI.refreshDashboard();
+      if (startedVersion === remoteVersion.current) rememberCombinedDashboardResult(result);
     } catch (error) {
       setErrorMessage(getSafeErrorMessage(error));
     } finally {
       isRefreshingAllRef.current = false;
       setIsRefreshingAll(false);
+      if (startedVersion !== remoteVersion.current) void runRefreshDashboard();
     }
   };
 
