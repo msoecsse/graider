@@ -32,6 +32,21 @@ const readSourceFiles = (directory: string): string[] =>
   });
 
 describe("UI security boundary", () => {
+  it("projects dashboard and course-read roots structurally at the main-process result boundary", () => {
+    const main = fs.readFileSync(path.join(PROJECT_ROOT, "electron", "main.ts"), "utf8");
+    const reads = fs.readFileSync(
+      path.join(PROJECT_ROOT, "electron", "courseMutationIpc.ts"),
+      "utf8"
+    );
+    expect(main).toContain(
+      "projectManagedCourseResult(result, context.courseFolderPath, folder.path)"
+    );
+    expect(reads).toMatch(
+      /projectManagedCourseResult\(\s*result,\s*root,\s*context\.legacyFolderPath!\s*\)/u
+    );
+    expect(main).not.toContain("JSON.stringify(result).replaceAll");
+  });
+
   it("uses specific IPC channels and no generic command channel", () => {
     const channelNames = Object.values(IPC_CHANNELS);
 

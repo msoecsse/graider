@@ -1,3 +1,4 @@
+import { projectManagedCourseResult } from "./managedCourseResultProjection.js";
 import type { CourseFolderRecord } from "./ipc.js";
 import {
   managedCourseOperation,
@@ -612,9 +613,7 @@ export const registerIpcHandlers = (): void => {
               )
             : await perform(folder);
           const projected = context?.managed
-            ? (JSON.parse(
-                JSON.stringify(result).replaceAll(context.courseFolderPath, folder.path)
-              ) as typeof result)
+            ? projectManagedCourseResult(result, context.courseFolderPath, folder.path)
             : result;
           return {
             ...projected,

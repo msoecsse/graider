@@ -1,3 +1,4 @@
+import { projectManagedCourseResult } from "./managedCourseResultProjection.js";
 import {
   managedCourseOperation,
   courseOperationDocument
@@ -187,16 +188,6 @@ export const createCourseMutationIpc = (
     }
     courses.set(courseKey(context), context.authoritativeCommit);
   };
-  // Results retain compatibility identities; temporary/managed roots never become renderer selectors.
-  const projectResult = (value: unknown, root: string, legacy: string): unknown => {
-    if (typeof value === "string") return value.replaceAll(root, legacy);
-    if (Array.isArray(value)) return value.map((item) => projectResult(item, root, legacy));
-    if (value && typeof value === "object")
-      return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, projectResult(item, root, legacy)])
-      );
-    return value;
-  };
   const documents = new WeakMap<
     WebContents,
     { stale: boolean; epoch: number; revision: number; loadingRevision: number }
@@ -377,7 +368,11 @@ export const createCourseMutationIpc = (
               },
               () => handler(event, ...projectedArgs)
             );
-            const publicResult = projectResult(result, root, context.legacyFolderPath!);
+            const publicResult = projectManagedCourseResult(
+              result,
+              root,
+              context.legacyFolderPath!
+            );
             return publicResult && typeof publicResult === "object" && !Array.isArray(publicResult)
               ? { ...publicResult, courseReadRevision: context.authoritativeCommit }
               : publicResult;
