@@ -182,6 +182,26 @@ afterEach(() => {
 
 describe("bundled Git managed synchronization, real two-clone history", () => {
   it.each([2, 3])(
+    "refuses term schema %s before advancing the v1 managed source",
+    async (version) => {
+      const f = await fixture();
+      const head = await git(f.cache, ["rev-parse", "HEAD"]);
+      fs.writeFileSync(
+        path.join(f.writer, "terms/27s1/term.yml"),
+        termYaml.replace("schema_version: 1", `schema_version: ${version}`) +
+          "coordinators:\n  current: [{github_user_id: 42}]\n  former: []\n"
+      );
+      await f.advance();
+      expect(await f.sync()).toMatchObject({
+        status: "needs_attention",
+        reason: "invalid_remote_metadata"
+      });
+      expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(head);
+      expect(fs.readFileSync(path.join(f.cache, "terms/27s1/term.yml"), "utf8")).toBe(termYaml);
+    }
+  );
+
+  it.each([2, 3])(
     "refuses schema %s before advancing or authorizing the managed source",
     async (version) => {
       const f = await fixture();

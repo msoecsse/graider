@@ -1,0 +1,16 @@
+# Schema development fixture only: not migrated or operational.
+# References the faculty in schema-v2-course.yml.
+schema_version: 2
+term:
+  code: 27s1
+  academic_year: 2027
+  semester: 1
+  display_name: Spring 2027
+coordinators:
+  current:
+    - github_user_id: 22993125
+    - github_user_id: 22993126
+  former: []
+sections:
+  - id: "001"
+    roster: rosters/section-001.csv

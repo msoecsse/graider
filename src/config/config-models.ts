@@ -5,7 +5,9 @@ import type {
   rawCourseConfigV1Schema,
   rawCourseConfigV2Schema,
   facultyIdentitySchema,
-  rawTermConfigSchema
+  rawTermConfigSchema,
+  rawTermConfigV1Schema,
+  rawTermConfigV2Schema
 } from "./config-schemas.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 
@@ -13,6 +15,8 @@ export type FacultyIdentity = z.infer<typeof facultyIdentitySchema>;
 export type RawCourseConfigV1 = z.infer<typeof rawCourseConfigV1Schema>;
 export type RawCourseConfigV2 = z.infer<typeof rawCourseConfigV2Schema>;
 export type RawCourseConfig = z.infer<typeof rawCourseConfigSchema>;
+export type RawTermConfigV1 = z.infer<typeof rawTermConfigV1Schema>;
+export type RawTermConfigV2 = z.infer<typeof rawTermConfigV2Schema>;
 export type RawTermConfig = z.infer<typeof rawTermConfigSchema>;
 export type RawAssignmentConfig = z.infer<typeof rawAssignmentConfigSchema>;
 

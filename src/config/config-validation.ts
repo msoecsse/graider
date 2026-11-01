@@ -39,6 +39,7 @@ import {
   SUPPORTED_ASSIGNMENT_TYPE,
   SUPPORTED_REPOSITORY_VISIBILITY,
   SUPPORTED_SCHEMA_VERSION,
+  OPERATIONAL_TERM_SCHEMA_VERSION,
   TERM_CODE_PATTERN,
   VALID_ASSIGNMENT_STATUSES
 } from "./config-schemas.js";
@@ -114,10 +115,14 @@ export const createInvalidSchemaVersionDiagnostic = (
     }
   );
 
-const validateSchemaVersion = (filePath: string, schemaVersion: number): Diagnostic[] =>
-  schemaVersion === SUPPORTED_SCHEMA_VERSION
+const validateSchemaVersion = (
+  filePath: string,
+  schemaVersion: number,
+  supportedSchemaVersion = SUPPORTED_SCHEMA_VERSION
+): Diagnostic[] =>
+  schemaVersion === supportedSchemaVersion
     ? []
-    : [createInvalidSchemaVersionDiagnostic(filePath, schemaVersion)];
+    : [createInvalidSchemaVersionDiagnostic(filePath, schemaVersion, supportedSchemaVersion)];
 
 type GradingConfig = NonNullable<RawCourseConfig["grading"] | RawAssignmentConfig["grading"]>;
 
@@ -528,12 +533,13 @@ export const validateCourseConfig = (filePath: string, config: RawCourseConfig):
   ...validateStudentPublishConfig(filePath, config.reports)
 ];
 
+/** Production term validation remains explicitly gated to v1, independent of parsing support. */
 export const validateTermConfig = (
   filePath: string,
   config: RawTermConfig,
   expectedTermCode: string
 ): Diagnostic[] => [
-  ...validateSchemaVersion(filePath, config.schema_version),
+  ...validateSchemaVersion(filePath, config.schema_version, OPERATIONAL_TERM_SCHEMA_VERSION),
   ...(config.term.code === expectedTermCode
     ? []
     : [

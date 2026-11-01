@@ -89,6 +89,20 @@ const fixture = (repositories = [repo()]) => {
   return { reader, request, run: () => discoverRemoteCourses(request) };
 };
 describe("trusted read-only remote course discovery", () => {
+  it.each([2, 3])(
+    "does not authorize v1 courses through schema %s term metadata",
+    async (version) => {
+      const f = fixture();
+      const v2Term =
+        termYaml.replace("schema_version: 1", `schema_version: ${version}`) +
+        "coordinators:\n  current: [{github_user_id: 42}]\n  former: []\n";
+      f.reader.file.mockImplementation((_repo, metadataPath) =>
+        Promise.resolve(metadataPath === "course.yml" ? courseYaml : v2Term)
+      );
+      expect((await f.run()).courses[0].authorization).toBe("unavailable");
+    }
+  );
+
   it.each([[[]], [["graider-course"]]])(
     "validates topic and legacy candidates %j with canonical ID and v1 logical repository semantics",
     async (topics) => {

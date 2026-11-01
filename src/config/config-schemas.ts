@@ -5,8 +5,10 @@ const MINIMUM_LIST_ITEMS = 1;
 
 export const SUPPORTED_SCHEMA_VERSION = 1;
 export const COURSE_SCHEMA_VERSION_V2 = 2;
+export const TERM_SCHEMA_VERSION_V2 = 2;
 // Parsing support is independent of production authorization readiness.
 export const OPERATIONAL_COURSE_SCHEMA_VERSION = SUPPORTED_SCHEMA_VERSION;
+export const OPERATIONAL_TERM_SCHEMA_VERSION = SUPPORTED_SCHEMA_VERSION;
 export const SUPPORTED_ASSIGNMENT_TYPE = "individual";
 export const SUPPORTED_REPOSITORY_VISIBILITY = "private";
 export const STUDENT_PERMISSION = "admin";
@@ -201,30 +203,70 @@ export const rawCourseConfigSchema = z.discriminatedUnion("schema_version", [
   rawCourseConfigV2Schema
 ]);
 
-export const rawTermConfigSchema = z
+const termConfigFields = {
+  term: z
+    .object({
+      code: z.string().min(MINIMUM_LIST_ITEMS),
+      academic_year: z.number(),
+      semester: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+      display_name: z.string().min(MINIMUM_LIST_ITEMS)
+    })
+    .strict(),
+  sections: z
+    .array(
+      z
+        .object({
+          id: z.string().min(MINIMUM_LIST_ITEMS),
+          roster: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+          faculty: z.array(z.string().min(MINIMUM_LIST_ITEMS)).optional()
+        })
+        .strict()
+    )
+    .min(MINIMUM_LIST_ITEMS)
+};
+
+const coordinatorReferenceSchema = z.object({ github_user_id: githubUserIdSchema }).strict();
+const coordinatorsSchema = z
   .object({
-    schema_version: z.number(),
-    term: z
-      .object({
-        code: z.string().min(MINIMUM_LIST_ITEMS),
-        academic_year: z.number(),
-        semester: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-        display_name: z.string().min(MINIMUM_LIST_ITEMS)
-      })
-      .strict(),
-    sections: z
-      .array(
-        z
-          .object({
-            id: z.string().min(MINIMUM_LIST_ITEMS),
-            roster: z.string().min(MINIMUM_LIST_ITEMS).optional(),
-            faculty: z.array(z.string().min(MINIMUM_LIST_ITEMS)).optional()
-          })
-          .strict()
-      )
-      .min(MINIMUM_LIST_ITEMS)
+    current: z.array(coordinatorReferenceSchema),
+    former: z.array(coordinatorReferenceSchema)
+  })
+  .strict()
+  .superRefine((coordinators, context) => {
+    const seen = new Set<number>();
+    for (const role of ["current", "former"] as const) {
+      coordinators[role].forEach((reference, index) => {
+        if (seen.has(reference.github_user_id)) {
+          context.addIssue({
+            code: "custom",
+            path: [role, index, "github_user_id"],
+            message: "Coordinator IDs must be unique across current and former roles."
+          });
+        }
+        seen.add(reference.github_user_id);
+      });
+    }
+  });
+
+export const rawTermConfigV1Schema = z
+  .object({
+    schema_version: z.literal(SUPPORTED_SCHEMA_VERSION),
+    ...termConfigFields
   })
   .strict();
+
+export const rawTermConfigV2Schema = z
+  .object({
+    schema_version: z.literal(TERM_SCHEMA_VERSION_V2),
+    ...termConfigFields,
+    coordinators: coordinatorsSchema
+  })
+  .strict();
+
+export const rawTermConfigSchema = z.discriminatedUnion("schema_version", [
+  rawTermConfigV1Schema,
+  rawTermConfigV2Schema
+]);
 
 export const rawAssignmentConfigSchema = z
   .object({

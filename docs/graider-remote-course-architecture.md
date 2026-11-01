@@ -2215,8 +2215,7 @@ is pre-migration/schema-development material, not an operational course template
 sharing existing course fields. `RawCourseConfigV1` and `RawCourseConfigV2` form the
 supported `RawCourseConfig` union. `parseCourseConfig` dispatches on `schema_version`
 before validating shape; malformed v2 cannot fall through to v1. Unsupported numeric
-versions retain the `invalid_schema_version` diagnostic. Term and assignment schema
-support remains at version 1.
+versions retain the `invalid_schema_version` diagnostic. Term parsing support is versioned separately below; assignment schema support remains at version 1.
 
 The directory must be nonempty. Institutional usernames and current GitHub logins
 must be unique case-insensitively; GitHub user IDs must be unique positive safe
@@ -2282,8 +2281,83 @@ remain for later authorization slices; this transition does not authorize its ca
 validation, aggregate CLI config loading, Course Setup, and current v1 faculty scope
 retain the 6.1 production boundary. V2 remains schema/domain development material:
 no real course is migrated, no fallback administrator is inferred, and no v2 publication
-or transfer UI is enabled. Term and assignment schemas are unchanged.
+or transfer UI is enabled. Assignment schema and operational term behavior remain unchanged; development term v2 is described below.
 
-Next slice: **6.3 — Term Coordinator Model**. Keep coordinator identities and historical
-roles separate from fallback authority, and preserve the production gate until the
-remaining Phase 6 authorization model is complete.
+## Phase 6 / Slice 6.3: Term Coordinator Model
+
+Schema v2 terms retain the existing term metadata and section shape and add:
+
+```yaml
+schema_version: 2
+term:
+  code: 27s1
+  academic_year: 2027
+  semester: 1
+  display_name: Spring 2027
+coordinators:
+  current:
+    - github_user_id: 22993125
+    - github_user_id: 22993126
+  former: []
+sections:
+  - id: "001"
+    roster: rosters/section-001.csv
+    faculty: [jones]
+```
+
+The [paired development term fixture](../tests/fixtures/config/schema-v2-term.yml)
+references the [development course directory](../tests/fixtures/config/schema-v2-course.yml).
+These are pre-migration/schema-development examples, not operational templates.
+Section faculty arrays retain their v1 representation until Slice 6.4; no coordinators
+are inferred from those arrays.
+
+`rawTermConfigV1Schema` and `rawTermConfigV2Schema` share existing metadata/section
+fields, with corresponding `RawTermConfigV1`/`RawTermConfigV2` types and the supported
+`RawTermConfig` union. `parseTermConfig` explicitly dispatches on `schema_version`;
+malformed v2 cannot fall through to v1. Unsupported numeric versions retain the
+`invalid_schema_version` diagnostic. Both versioned shapes remain strict.
+
+`coordinators.current` and `coordinators.former` are required arrays of strict
+`{ github_user_id }` references. IDs must be positive safe integers and unique within
+and across both arrays. Institutional usernames, current logins, login history, and
+other fields are not accepted in references. Raw term validation checks syntax only:
+referential validation requires both a validated v2 course and term.
+
+`TermCoordinators(course, term)` snapshots and validates both inputs, resolves every
+current/former reference through `FacultyDirectory`, and rejects unknown faculty IDs.
+Its domain API is:
+
+- `getCurrentCoordinators()` / `getFormerCoordinators()`: immutable faculty snapshots;
+- `isCurrentCoordinator(githubUserId)` / `isFormerCoordinator(githubUserId)`: immutable-ID
+  role checks for this term only;
+- `addCurrentCoordinator(githubUserId)`: add an existing faculty member with no coordinator
+  history in this term;
+- `removeCurrentCoordinator(githubUserId)`: move a current coordinator to former history;
+- `restoreFormerCoordinator(githubUserId)`: move a former coordinator back to current.
+
+Each transition returns an independent, validated v2 term. It changes only the term's
+coordinator references, preserving other current/former identities and all section
+metadata. Invalid/duplicate transitions and unknown faculty targets throw. Former
+coordinators must be restored explicitly rather than added again. Course faculty
+records and fallback administrator identity are never changed or removed.
+
+Raw arrays may be empty because this slice introduces no term lifecycle state. The
+domain model requires at least one current coordinator and refuses removal of the
+last one. This is an explicit domain invariant, not a Draft/Active/Archived policy;
+future lifecycle work can address transitional coordinator-free metadata separately.
+
+Current means the faculty member currently holds the coordinator identity for this
+term. Former means they previously held it; history is retained for later historical
+access resolution. Neither status is inferred from another term or from fallback
+administrator status. GitHub login renames do not change these identities. These
+models grant no section, grading, mutation, or historical-access permissions yet.
+
+`OPERATIONAL_COURSE_SCHEMA_VERSION` remains **1**; the explicit
+`OPERATIONAL_TERM_SCHEMA_VERSION` is also **1**. Production `validateTermConfig` keeps
+aggregate loading, remote faculty inspection, managed synchronization, and transaction
+validation on v1 terms even when the course itself is v1. V2 course inspection stays
+gated independently. Apply, grading, reports, Course Setup output, and current faculty
+scope remain unchanged. No real course is rewritten or migrated.
+
+Next slice: **6.4 — Section Faculty History**. Reuse immutable faculty references and
+preserve coordinator/fallback separation and the production gate.

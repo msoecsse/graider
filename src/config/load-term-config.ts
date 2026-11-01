@@ -1,6 +1,15 @@
 import type { RawTermConfig } from "./config-models.js";
-import { rawTermConfigSchema } from "./config-schemas.js";
-import { validateRawConfigSchema, type SchemaValidationResult } from "./config-validation.js";
+import {
+  rawTermConfigV1Schema,
+  rawTermConfigV2Schema,
+  SUPPORTED_SCHEMA_VERSION,
+  TERM_SCHEMA_VERSION_V2
+} from "./config-schemas.js";
+import {
+  createInvalidSchemaVersionDiagnostic,
+  validateRawConfigSchema,
+  type SchemaValidationResult
+} from "./config-validation.js";
 import { readTextFile } from "../io/file-system.js";
 import { parseYaml } from "../io/stable-yaml.js";
 
@@ -31,5 +40,22 @@ export const parseTermConfig = (
     };
   }
 
-  return validateRawConfigSchema(filePath, rawTermConfigSchema, yamlResult.value);
+  const value = yamlResult.value;
+  const version =
+    value && typeof value === "object" && "schema_version" in value
+      ? value.schema_version
+      : undefined;
+  if (
+    typeof version === "number" &&
+    version !== SUPPORTED_SCHEMA_VERSION &&
+    version !== TERM_SCHEMA_VERSION_V2
+  ) {
+    return {
+      status: "failure",
+      diagnostics: [createInvalidSchemaVersionDiagnostic(filePath, version, TERM_SCHEMA_VERSION_V2)]
+    };
+  }
+  return version === TERM_SCHEMA_VERSION_V2
+    ? validateRawConfigSchema(filePath, rawTermConfigV2Schema, value)
+    : validateRawConfigSchema(filePath, rawTermConfigV1Schema, value);
 };
