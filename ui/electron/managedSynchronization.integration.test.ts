@@ -190,6 +190,7 @@ describe("bundled Git managed synchronization, real two-clone history", () => {
         path.join(f.writer, "terms/27s1/term.yml"),
         termYaml
           .replace("schema_version: 1", `schema_version: ${version}`)
+          .replace("term:\n", "term:\n  status: draft\n")
           .replaceAll(
             "    faculty: [jones]",
             "    faculty:\n      current: [{github_user_id: 42}]\n      former: []"

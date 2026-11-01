@@ -49,7 +49,13 @@ export const users = [
 ];
 export const term: RawTermConfigV2 = {
   schema_version: 2,
-  term: { code: "27s1", academic_year: 2027, semester: 1, display_name: "Spring" },
+  term: {
+    code: "27s1",
+    academic_year: 2027,
+    semester: 1,
+    display_name: "Spring",
+    status: "active"
+  },
   coordinators: {
     current: [{ github_user_id: COORDINATOR }],
     former: [{ github_user_id: FORMER }]
@@ -67,7 +73,7 @@ export const term: RawTermConfigV2 = {
 };
 export const secondTerm: RawTermConfigV2 = {
   ...structuredClone(term),
-  term: { code: "27s2", academic_year: 2027, semester: 2, display_name: "Summer" },
+  term: { code: "27s2", academic_year: 2027, semester: 2, display_name: "Summer", status: "draft" },
   coordinators: { current: [{ github_user_id: FACULTY }], former: [{ github_user_id: FORMER }] },
   sections: [
     {

@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 are complete. Next: **Phase 8 / Slice 8.1 — Draft / Active / Archived Model**.
+Phases 6 and 7 and Slice 8.1 are complete. Next: **Phase 8 / Slice 8.2 — Draft-term Preparation Permissions**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -589,7 +589,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Next: **Phase 8 / Slice 8.1 — Draft / Active / Archived Model**.
+Managed branch policy is implemented in 7.6 below. Slice 8.1 is complete; next: **Phase 8 / Slice 8.2 — Draft-term Preparation Permissions**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -623,15 +623,48 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 is complete. Next: Phase 8 / Slice 8.1 — Draft / Active / Archived Model.**
+**Phase 7 and Slice 8.1 are complete. Next: Slice 8.2 — Draft-term Preparation Permissions.**
 
 ---
 
 # Phase 8 — Term Lifecycle
 
-## Slice 8.1 — Draft / Active / Archived model
+## Slice 8.1 — Draft / Active / Archived model — complete
 
-Implement lifecycle validation and exactly-one-Active invariant.
+Schema v2 requires persisted `term.status`: `draft`, `active`, or `archived`.
+Missing or unknown status fails strict validation. Schema v1 is unchanged; dates,
+academic year, semester, term code and assignment dates never infer lifecycle.
+
+`CourseTermLifecycle` validates and deeply freezes a snapshot of the complete supplied
+v2 term set, rejects duplicate term codes and multiple Active terms, and exposes
+`getDraftTerms()`, `getArchivedTerms()`, `getActiveTerm()`, `requireActiveTerm()`,
+`getTerm(code)` and `getStatus(code)`. Unknown lookups return `undefined`.
+Any valid snapshot has **at most one Active**. Zero Active is valid for initial setup
+before first activation, future course archive and recovery/intermediate inspection.
+Workflows needing exactly one use `requireActiveTerm()`, which fails if none exists.
+Multiple Draft and multiple Archived terms are allowed, including Draft-only,
+Archived-only and mixed collections. Callers are responsible for supplying all terms.
+
+The pure normal-transition contract allows only `draft → active → archived`.
+`canTransitionTermStatus()` returns false for same-state assignment;
+`assertTermStatusTransition()` accepts it as a no-op. Skips and backward transitions
+fail. Slice 8.5 rollback will need a separate recovery-specific operation.
+
+Lifecycle does not change coordinator or section faculty current/former history,
+fallback administration or the faculty directory. Current/former records explicit
+role removal, not the end of a term. The requirement for at least one current
+coordinator is preserved for every status.
+
+No lifecycle authorization or GitHub behavior is applied: Phase 6 decisions and
+Phase 7 desired membership, repository permissions and branch policy remain unchanged
+over all supplied terms. Activation, restrictions, deletion, recovery and course
+archive remain deferred. Both operational schema gates remain **1**; Course Setup
+still emits v1. No real course migration or production UI/Electron controls are added.
+
+See [architecture §9](graider-remote-course-architecture.md#9-term-lifecycle).
+
+Next: **8.2 — Draft-term Preparation Permissions**: allow Draft preparation, restrict
+visibility appropriately and block student-facing operations. No 8.2 work is included here.
 
 ## Slice 8.2 — Draft-term preparation permissions
 

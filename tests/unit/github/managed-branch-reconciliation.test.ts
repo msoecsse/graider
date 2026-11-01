@@ -11,7 +11,8 @@ import {
 } from "../../../src/github/fake-managed-branch-client.js";
 import {
   OPERATIONAL_COURSE_SCHEMA_VERSION,
-  OPERATIONAL_TERM_SCHEMA_VERSION
+  OPERATIONAL_TERM_SCHEMA_VERSION,
+  TERM_LIFECYCLE_STATUSES
 } from "../../../src/config/config-schemas.js";
 import {
   course,
@@ -82,6 +83,20 @@ const fixture = (
 };
 
 describe("minimal managed branch policy", () => {
+  it.each(TERM_LIFECYCLE_STATUSES)("preserves Phase 7 branch policy for %s", async (status) => {
+    const baseline = fixture();
+    const f = fixture();
+    const service = new ManagedBranchReconciler(
+      f.client,
+      {
+        ...f.context,
+        terms: f.context.terms.map((value) => ({ ...value, term: { ...value.term, status } }))
+      },
+      f.journal
+    );
+    expect(await service.reconcile()).toEqual(await baseline.service.reconcile());
+  });
+
   it("protects course, individual and group defaults without restricting ordinary direct pushes", async () => {
     const f = fixture();
     const before = structuredClone({ course, term });

@@ -8,7 +8,8 @@ import { loadGraiderConfig } from "../../../src/config/config-loader.js";
 import {
   rawTermConfigSchema,
   rawTermConfigV1Schema,
-  rawTermConfigV2Schema
+  rawTermConfigV2Schema,
+  TERM_LIFECYCLE_STATUSES
 } from "../../../src/config/config-schemas.js";
 
 const v1File = "tests/fixtures/config/valid-course/terms/27s1/term.yml";
@@ -30,15 +31,43 @@ describe("versioned term parsing", () => {
       status: "success",
       value: {
         schema_version: 1,
-        term: term.term,
+        term: {
+          code: term.term.code,
+          academic_year: term.term.academic_year,
+          semester: term.term.semester,
+          display_name: term.term.display_name
+        },
         sections: term.sections.map(({ id, roster }) => ({ id, roster }))
       }
     });
     if (result.status === "success") {
       expect(result.value).toStrictEqual(rawTermConfigV1Schema.parse(result.value));
       expect(result.value).not.toHaveProperty("coordinators");
+      expect(result.value.term).not.toHaveProperty("status");
+      expect(
+        parse({ ...result.value, term: { ...result.value.term, status: "draft" } }).status
+      ).toBe("failure");
     }
   });
+
+  it.each(TERM_LIFECYCLE_STATUSES)("accepts explicit v2 lifecycle status %s", (status) => {
+    const value = { ...term, term: { ...term.term, status } };
+    expect(parse(value)).toMatchObject({ status: "success", value });
+    expect(rawTermConfigSchema.parse(value)).toEqual(value);
+  });
+
+  it.each([undefined, null, "closed", "Active", "", 1])(
+    "rejects missing or invalid v2 lifecycle status %j",
+    (status) => {
+      const value = { ...term, term: { ...term.term, status } };
+      expect(rawTermConfigV2Schema.safeParse(value).success).toBe(false);
+      const result = parse(value);
+      expect(result.status).toBe("failure");
+      expect(result.diagnostics.map((diagnostic) => diagnostic.context?.field)).toContain(
+        "term.status"
+      );
+    }
+  );
 
   it("parses multiple current coordinators and former history with v2 sections", () => {
     const value = { ...term, coordinators: { current: [first], former: [second] } };

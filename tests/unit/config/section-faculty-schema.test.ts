@@ -79,10 +79,12 @@ describe("v2 section faculty history schema", () => {
   });
 
   it("keeps v1 username arrays valid without interpreting them as history", () => {
+    const v1 = loadTermConfig("tests/fixtures/config/valid-course/terms/27s1/term.yml");
+    if (v1.status !== "success") throw new Error("Invalid v1 development fixture.");
     const result = parseTermConfig(
       stringify({
         schema_version: 1,
-        term: term.term,
+        term: v1.value.term,
         sections: [{ id: "001", faculty: ["jones", "smith"] }]
       }),
       "term.yml"
@@ -95,7 +97,7 @@ describe("v2 section faculty history schema", () => {
       parseTermConfig(
         stringify({
           schema_version: 1,
-          term: term.term,
+          term: v1.value.term,
           sections: [{ id: "001", faculty: { current: [a], former: [] } }]
         }),
         "term.yml"

@@ -354,9 +354,70 @@ Terms have the lifecycle:
 
 **Draft → Active → Archived**
 
-Exactly one term may be Active at a time.
+At most one term may be Active in any valid complete course snapshot. There must
+never be two Active terms. A workflow requiring exactly one Active term must check
+that explicitly; the invariant does not require every possible snapshot to have one.
+
+Zero Active terms is valid during initial setup before first activation, future
+course archive, and recovery/intermediate inspection. Multiple Draft and multiple
+Archived terms are allowed, including Draft-only, Archived-only and mixed snapshots.
+Later lifecycle operations may constrain creation or course archival separately.
 
 A future Draft term may be prepared while the current term remains Active.
+
+Schema v2 persists lifecycle explicitly under the existing `term` object:
+
+```yaml
+schema_version: 2
+term:
+  code: 27s1
+  academic_year: 2027
+  semester: 1
+  display_name: Spring 2027
+  status: draft
+```
+
+Allowed `term.status` values are exactly `draft`, `active`, and `archived`. The field
+is required by strict v2 validation; missing or unknown values fail. Schema v1 has
+no lifecycle field and remains unchanged. Lifecycle is never inferred from dates,
+academic year, semester, term code, assignment dates or current production state.
+A future-dated term may explicitly be Active; a past term may remain Draft.
+There is no automatic activation.
+
+**Slice 8.1 implementation contract (complete):** `CourseTermLifecycle` in
+`src/terms/course-term-lifecycle.ts` validates/snapshots the complete supplied v2 term
+set and rejects duplicate codes or more than one Active term. The caller must supply
+all terms; the model does no I/O to establish completeness. All returned terms and
+collections are deeply frozen, and caller mutation cannot alter the snapshot.
+`TERM_LIFECYCLE_STATUSES` and `TermLifecycleStatus` are the canonical constant/type.
+
+- `getDraftTerms()` / `getArchivedTerms()` classify all supplied terms.
+- `getActiveTerm()` returns the single Active term or `undefined`.
+- `requireActiveTerm()` returns that term or throws a clear error if none exists.
+- `getTerm(code)` / `getStatus(code)` return `undefined` for unknown codes, consistent
+  with faculty directory lookups.
+
+Normal transitions are only `draft → active` and `active → archived`.
+`canTransitionTermStatus(from, to)` rejects skips and all backward transitions.
+Same-state assignment is a no-op, not a transition: the predicate returns false,
+while `assertTermStatusTransition(from, to)` accepts it without changing state.
+These pure helpers perform no mutations. Slice 8.5 exceptional activation rollback
+must use a separate recovery contract; `active → draft` is not a normal transition.
+
+Lifecycle is independent of role history. Changing status, including Active → Archived,
+does not move `coordinators.current` or section `faculty.current` into `former`, or
+change fallback administration or the faculty directory. Current/former records
+explicit removal from a role. Faculty/coordinators completing a term normally may
+remain current after archival, preserving the evidence later grading access needs.
+`TermCoordinators` still requires at least one current coordinator for every status.
+
+Slice 8.1 defines state only. `AuthorizationResolver` retains its Phase 6 decisions,
+and Phase 7 builders/reconcilers still use all supplied terms without lifecycle
+filtering or permission transitions. The policies below are later-slice requirements,
+not newly enforced behavior. Draft permissions begin in 8.2, activation in 8.3,
+Archived restrictions in 8.4, recovery/deletion in 8.5, and course archive in 8.6.
+Both operational schema gates remain **1**, Course Setup emits v1, and no real course
+migration or production UI/Electron lifecycle controls are introduced.
 
 ### 9.1 Draft
 
@@ -1178,8 +1239,9 @@ production/journal gates.
 
 `ManagedBranchReconciler` completes Phase 7 as backend-only desired-state
 infrastructure. No production v1 setup, Apply, grading, discovery or publication
-path invokes it. Both operational schema gates remain **1**. Phase 8.1 is next;
-term/assignment lifecycle and production v2 activation are not implemented here.
+path invokes it. Both operational schema gates remain **1**. Slice 8.1 now defines
+term lifecycle state in §9; this Phase 7 service applies no lifecycle policy and
+does not activate production v2.
 
 The exact managed policy for the course/admin canonical branch and every trusted
 individual/group submission branch is:
@@ -1302,7 +1364,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 is complete. Next: Phase 8 / Slice 8.1 — Draft / Active / Archived Model.**
+**Phase 7 and Slice 8.1 are complete. Next: Phase 8 / Slice 8.2 — Draft-term Preparation Permissions.**
 
 ---
 
@@ -2419,7 +2481,7 @@ The implementation must maintain these invariants:
 
 1. Exactly one GitHub identity is active in Graider at a time.
 2. A course is identified canonically by immutable remote repository ID.
-3. Exactly one term may be Active.
+3. At most one term may be Active in a valid snapshot; workflows requiring exactly one check explicitly.
 4. A Draft term may not perform student-facing operations.
 5. Course/admin GitHub state is authoritative.
 6. A course mutation is not successful until the remote push succeeds.
@@ -3274,6 +3336,6 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 are complete. The next planned work is **Phase 8 / Slice 8.1 — Draft /
-Active / Archived Model**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slice 8.1 are complete. The next planned work is **Phase 8 / Slice 8.2 —
+Draft-term Preparation Permissions**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.

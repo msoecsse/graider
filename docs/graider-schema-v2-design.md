@@ -123,7 +123,7 @@ term:
   display_name: Spring 2027
   academic_year: 2027
   semester: 1
-  lifecycle: draft # draft | active | archived
+  status: draft # draft | active | archived; required persisted field since Slice 8.1
   has_ever_been_active: false
   coordinators:
     - faculty_github_user_id: 24680
@@ -141,7 +141,15 @@ rights differ. An equivalent explicit outcome field is acceptable.
 durable because it prevents a formerly Active term from being treated as a
 deletable Draft after recovery.
 
-Exactly one term is Active. Activation rollback/checkpoint information is
+At most one term is Active in a valid complete snapshot. Initial setup before
+first activation, future course archive and recovery may have zero; callers
+requiring exactly one check explicitly. Multiple Draft and Archived terms are
+allowed. Slice 8.1 implements state validation only, with no authorization or
+GitHub behavior. Current/former coordinator and faculty history records role
+removal independently of lifecycle; normal archival does not remove people.
+See [the implemented state contract](graider-remote-course-architecture.md#9-term-lifecycle).
+
+Activation rollback/checkpoint information is
 durable only while recovery is possible or required; the normal term lifecycle
 does not need a permanent rollback enum. See the
 [lifecycle models](graider-lifecycle-state-models.md).

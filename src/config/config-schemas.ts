@@ -14,6 +14,7 @@ export const SUPPORTED_REPOSITORY_VISIBILITY = "private";
 export const STUDENT_PERMISSION = "admin";
 export const FACULTY_PERMISSION = "admin";
 export const VALID_ASSIGNMENT_STATUSES = ["draft", "active", "closed", "archived"] as const;
+export const TERM_LIFECYCLE_STATUSES = ["draft", "active", "archived"] as const;
 export const ENABLED_GRADING_MODES = ["preset", "custom-workflow", "contract-only"] as const;
 export const DISABLED_GRADING_MODE = "no-grading";
 export const SUPPORTED_GRADING_PRESETS = ["java-junit-checkstyle"] as const;
@@ -266,7 +267,7 @@ export const rawTermConfigV1Schema = z
 export const rawTermConfigV2Schema = z
   .object({
     schema_version: z.literal(TERM_SCHEMA_VERSION_V2),
-    ...termConfigFields,
+    term: termConfigFields.term.extend({ status: z.enum(TERM_LIFECYCLE_STATUSES) }),
     coordinators: facultyRoleHistorySchema("Coordinator"),
     sections: z
       .array(

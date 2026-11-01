@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildDesiredTeamMemberships } from "../../../src/github/desired-team-membership.js";
 import { SectionFaculty } from "../../../src/faculty/section-faculty.js";
 import { renderManagedTeamMetadata } from "../../../src/github/managed-team-identity.js";
+import { TERM_LIFECYCLE_STATUSES } from "../../../src/config/config-schemas.js";
 import {
   course,
   term,
@@ -18,6 +19,20 @@ import {
 const MANAGED_TEAM_KIND_COUNT = 7;
 
 describe("pure desired managed-team membership", () => {
+  it.each(TERM_LIFECYCLE_STATUSES)("keeps the complete supplied term set for %s", (status) => {
+    const terms = [term, secondTerm];
+    expect(
+      buildDesiredTeamMemberships(
+        course,
+        terms.map((value) => ({
+          ...value,
+          term: { ...value.term, status }
+        })),
+        REPOSITORY_ID
+      )
+    ).toEqual(buildDesiredTeamMemberships(course, terms, REPOSITORY_ID));
+  });
+
   it("builds exact term/section and strongest course memberships for all seven kinds", () => {
     const { target, plan } = fixture();
     expect(new Set(plan.map((value) => value.identity.kind)).size).toBe(MANAGED_TEAM_KIND_COUNT);

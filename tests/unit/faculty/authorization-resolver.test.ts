@@ -6,7 +6,8 @@ import {
   rawCourseConfigV2Schema,
   rawTermConfigV2Schema,
   OPERATIONAL_COURSE_SCHEMA_VERSION,
-  OPERATIONAL_TERM_SCHEMA_VERSION
+  OPERATIONAL_TERM_SCHEMA_VERSION,
+  TERM_LIFECYCLE_STATUSES
 } from "../../../src/config/config-schemas.js";
 import {
   AuthorizationResolver,
@@ -91,6 +92,30 @@ const matrix = [
 ];
 
 describe("v2 authorization permission matrix", () => {
+  it.each(TERM_LIFECYCLE_STATUSES)("preserves all Phase 6 decisions for %s terms", (status) => {
+    const capabilities = (auth: AuthorizationResolver) => ({
+      facts: auth.roleFacts,
+      term: auth.canViewTerm(),
+      structure: auth.canManageTermStructure(),
+      fallback: auth.hasFallbackAdministration(),
+      scopes: (["default", "coordinator-term"] as const).map((scope) => ({
+        scope: auth.getSectionScope(scope),
+        sections: [...all, "unknown"].map((sectionId) => ({
+          view: auth.canViewSection(sectionId, scope),
+          mutate: auth.canMutateSection(sectionId, scope)
+        }))
+      }))
+    });
+    for (const name of names) {
+      const auth = new AuthorizationResolver(
+        course,
+        { ...term, term: { ...term.term, status } },
+        id(name)
+      );
+      expect(capabilities(auth)).toEqual(capabilities(resolver(name)));
+    }
+  });
+
   it("uses current section faculty for grading authority with no grader fact or capability", () => {
     const auth = resolver("faculty");
     expect(auth.roleFacts).toEqual({

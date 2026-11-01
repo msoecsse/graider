@@ -96,6 +96,7 @@ describe("trusted read-only remote course discovery", () => {
       const v2Term =
         termYaml
           .replace("schema_version: 1", `schema_version: ${version}`)
+          .replace("term:\n", "term:\n  status: draft\n")
           .replaceAll(
             "    faculty: [jones]",
             "    faculty:\n      current: [{github_user_id: 42}]\n      former: []"

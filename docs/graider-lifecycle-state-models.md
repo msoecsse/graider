@@ -90,6 +90,13 @@ no student-facing activity. An implementation may model activation transaction
 and recovery checkpoints outside the lifecycle enum; it must not expose an
 ordinary “reactivate archived term” command.
 
+Slice 8.1 implements only persisted v2 `term.status` (`draft`, `active`, `archived`)
+and the pure normal-transition graph `draft → active → archived`. Same-state
+assignment is a no-op; skips and backward transitions fail. Recovery-specific
+exceptions in this diagram remain deferred to 8.5 and do not weaken that contract.
+Authorization and GitHub effects below are later-slice requirements. See
+[architecture §9](graider-remote-course-architecture.md#9-term-lifecycle).
+
 ### 3.1 Term transition contract
 
 | Transition                          | Initiator                                                                                          | Guards/preconditions                                                                                      | Reversible                               | Important side effects                                                                                                       |
@@ -103,8 +110,10 @@ ordinary “reactivate archived term” command.
 
 ### 3.2 Term invariants
 
-1. Exactly one term is Active. Activation must never expose an intermediate
-   durable state with two Active terms.
+1. At most one term is Active in a valid snapshot. Initial setup, future course
+   archive and recovery may have zero; workflows requiring exactly one check
+   explicitly. Multiple Draft and Archived terms are allowed. Activation must
+   never expose an intermediate durable state with two Active terms.
 2. Draft terms permit configuration, sections, faculty, rosters, assignments,
    schedules, and grading-workflow preparation, but prohibit Apply,
    student-repository mutations, grading dispatch/grading, and publication.

@@ -17,7 +17,8 @@ import { ManagedTeamMembershipReconciler } from "../../../src/github/managed-tea
 import { renderManagedTeamMetadata } from "../../../src/github/managed-team-identity.js";
 import {
   OPERATIONAL_COURSE_SCHEMA_VERSION,
-  OPERATIONAL_TERM_SCHEMA_VERSION
+  OPERATIONAL_TERM_SCHEMA_VERSION,
+  TERM_LIFECYCLE_STATUSES
 } from "../../../src/config/config-schemas.js";
 import {
   fixture as membershipFixture,
@@ -105,6 +106,24 @@ const fixture = (targets: readonly unknown[] = [target()]) => {
 };
 
 describe("trusted student repository targets", () => {
+  it.each(TERM_LIFECYCLE_STATUSES)(
+    "preserves Phase 7 student permissions for %s",
+    async (status) => {
+      const baseline = fixture();
+      const f = fixture();
+      const service = new StudentRepositoryPermissionReconciler(
+        f.client,
+        {
+          ...f.context,
+          terms: f.context.terms.map((value) => ({ ...value, term: { ...value.term, status } }))
+        },
+        f.inspect
+      );
+      expect(await service.reconcile()).toEqual(await baseline.service.reconcile());
+      expect(f.client.teamPermissionWrites).toEqual(baseline.client.teamPermissionWrites);
+    }
+  );
+
   it("requires an immutable ID and never authorizes by a plausible repository name", async () => {
     const input = {
       ...target(),

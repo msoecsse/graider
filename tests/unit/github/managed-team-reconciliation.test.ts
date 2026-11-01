@@ -5,7 +5,8 @@ import { SectionFaculty } from "../../../src/faculty/section-faculty.js";
 import { renderManagedTeamMetadata } from "../../../src/github/managed-team-identity.js";
 import {
   OPERATIONAL_COURSE_SCHEMA_VERSION,
-  OPERATIONAL_TERM_SCHEMA_VERSION
+  OPERATIONAL_TERM_SCHEMA_VERSION,
+  TERM_LIFECYCLE_STATUSES
 } from "../../../src/config/config-schemas.js";
 import {
   fixture,
@@ -25,6 +26,13 @@ import {
 } from "./team-membership-fixtures.js";
 
 describe("verified managed team membership reconciliation", () => {
+  it.each(TERM_LIFECYCLE_STATUSES)("preserves Phase 7 membership for %s", async (status) => {
+    const baseline = fixture();
+    const f = fixture([{ ...term, term: { ...term.term, status } }]);
+    expect(await f.service.reconcile()).toEqual(await baseline.service.reconcile());
+    expect(f.client.membershipWrites).toEqual(baseline.client.membershipWrites);
+  });
+
   it("adds active desired faculty, removes extras only from managed teams, and reruns without writes", async () => {
     const f = fixture();
     const { team } = f.target("section-current-faculty", "001");
