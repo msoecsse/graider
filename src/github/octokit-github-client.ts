@@ -241,6 +241,153 @@ export class OctokitGitHubClient implements GitHubClient {
     return this.organizationResponse("/user", {}, signal);
   }
 
+  async getManagedBranchRulesPage(
+    repositoryNodeId: string,
+    branch: string,
+    cursor: string | null,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    const query = `query ManagedBranchPolicy($repositoryId: ID!, $qualifiedName: String!, $cursor: String) {
+      node(id: $repositoryId) { ... on Repository {
+        databaseId owner { ... on Organization { databaseId } }
+        defaultBranchRef { name prefix }
+        ref(qualifiedName: $qualifiedName) { id name prefix branchProtectionRule { id } }
+        branchProtectionRules(first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes { id pattern repository { databaseId }
+            allowsForcePushes allowsDeletions isAdminEnforced blocksCreations
+            requiresApprovingReviews requiredApprovingReviewCount requiresCodeOwnerReviews
+            requiresStatusChecks requiresStrictStatusChecks requiredStatusCheckContexts
+            requiresCommitSignatures requiresLinearHistory requiresConversationResolution
+            requiresDeployments requiredDeploymentEnvironments requireLastPushApproval
+            restrictsPushes lockBranch lockAllowsFetchAndMerge dismissesStaleReviews restrictsReviewDismissals
+            bypassForcePushAllowances(first: 1) { totalCount }
+            pushAllowances(first: 1) { totalCount }
+            branchProtectionRuleConflicts(first: 100) {
+              pageInfo { hasNextPage endCursor }
+              nodes { branchProtectionRule { id } conflictingBranchProtectionRule { id } ref { name prefix } }
+            }
+          }
+        }
+      } }
+    }`;
+    return this.organizationResponse(
+      "/graphql",
+      {
+        query,
+        variables: { repositoryId: repositoryNodeId, qualifiedName: `refs/heads/${branch}`, cursor }
+      },
+      signal,
+      "POST"
+    );
+  }
+
+  async getManagedBranchProtection(
+    owner: string,
+    repo: string,
+    branch: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/repos/{owner}/{repo}/branches/{branch}/protection",
+      { owner, repo, branch },
+      signal
+    );
+  }
+
+  async listManagedBranchRulesetsPage(
+    owner: string,
+    repo: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/repos/{owner}/{repo}/rulesets",
+      { owner, repo, page, per_page: perPage, includes_parents: true },
+      signal
+    );
+  }
+
+  async listManagedEffectiveBranchRulesPage(
+    owner: string,
+    repo: string,
+    branch: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/repos/{owner}/{repo}/rules/branches/{branch}",
+      { owner, repo, branch, page, per_page: perPage },
+      signal
+    );
+  }
+
+  async createManagedBranchRule(
+    repositoryNodeId: string,
+    branch: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    this.requireManagedTeamToken();
+    const input = {
+      repositoryId: repositoryNodeId,
+      pattern: branch,
+      allowsForcePushes: false,
+      allowsDeletions: false,
+      isAdminEnforced: true,
+      requiresApprovingReviews: false,
+      requiredApprovingReviewCount: 0,
+      requiresCodeOwnerReviews: false,
+      requiresStatusChecks: false,
+      requiresStrictStatusChecks: false,
+      requiredStatusCheckContexts: [],
+      requiresCommitSignatures: false,
+      requiresLinearHistory: false,
+      requiresConversationResolution: false,
+      requiresDeployments: false,
+      requiredDeploymentEnvironments: [],
+      requireLastPushApproval: false,
+      restrictsPushes: false,
+      lockBranch: false
+    };
+    return this.organizationResponse(
+      "/graphql",
+      {
+        query:
+          "mutation CreateManagedBranchPolicy($input: CreateBranchProtectionRuleInput!) { createBranchProtectionRule(input: $input) { branchProtectionRule { id } } }",
+        variables: { input }
+      },
+      signal,
+      "POST"
+    );
+  }
+
+  async tightenManagedBranchRule(
+    ruleId: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    this.requireManagedTeamToken();
+    // Deliberately partial: never serialize/reconstruct an administrator's full rule.
+    return this.organizationResponse(
+      "/graphql",
+      {
+        query:
+          "mutation TightenManagedBranchPolicy($input: UpdateBranchProtectionRuleInput!) { updateBranchProtectionRule(input: $input) { branchProtectionRule { id } } }",
+        variables: {
+          input: {
+            branchProtectionRuleId: ruleId,
+            allowsForcePushes: false,
+            allowsDeletions: false,
+            isAdminEnforced: true
+          }
+        }
+      },
+      signal,
+      "POST"
+    );
+  }
+
   async listManagedOrganizationTeamsPage(
     org: string,
     page: number,

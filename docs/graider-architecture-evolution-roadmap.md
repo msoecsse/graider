@@ -420,14 +420,14 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phase 6 is complete. Phase 7 has begun; next: **7.6 — Managed Branch Rules**.
+Phases 6 and 7 are complete. Next: **Phase 8 / Slice 8.1 — Draft / Active / Archived Model**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
 
 ---
 
-# Phase 7 — GitHub Desired-State Permission Model
+# Phase 7 — GitHub Desired-State Permission Model (complete)
 
 ## Slice 7.1 — Managed team identities (complete)
 
@@ -486,7 +486,7 @@ permission mutation is introduced. Both operational gates remain **1**. Slice 7.
 should consume these access states to defer team reconciliation for Pending faculty.
 See [the access contract and trust requirements](graider-remote-course-architecture.md#116-faculty-organization-access-contract-slice-72).
 
-Team membership and repository permissions are implemented below. Next: **7.6 — Managed Branch Rules**.
+Team membership, repository permissions and branch policy are implemented below. Phase 7 is complete.
 
 ## Slice 7.3 — Team membership reconciliation (complete)
 
@@ -520,7 +520,7 @@ creation journal. No repository permissions, invitations, organization removal,
 team rename/deletion, adoption, migration or lifecycle is introduced.
 See [the full membership contract](graider-remote-course-architecture.md#117-managed-team-membership-contract-slice-73).
 
-Repository permissions are implemented below. Next: **7.6 — Managed Branch Rules**.
+Repository permissions and branch policy are implemented below. Phase 7 is complete.
 
 ## Slice 7.4 — Course repository permissions (complete)
 
@@ -554,7 +554,7 @@ behavior is unchanged. No student permissions, branch rules, invitations, organi
 removal, migration or lifecycle is activated.
 See [the full permission contract](graider-remote-course-architecture.md#118-courseadmin-repository-permission-contract-slice-74).
 
-Student permissions are implemented in 7.5 below. Next: **7.6 — Managed Branch Rules**.
+Student permissions and branch policy are implemented below. Phase 7 is complete.
 
 ## Slice 7.5 — Student repository permissions (complete)
 
@@ -589,11 +589,41 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Next: **7.6 — Managed Branch Rules**.
+Managed branch policy is implemented in 7.6 below. Next: **Phase 8 / Slice 8.1 — Draft / Active / Archived Model**.
 
-## Slice 7.6 — Managed branch rules
+## Slice 7.6 — Managed branch rules (complete)
 
-Apply course and student branch protections.
+Backend-only protection blocks force pushes and deletion on the canonical course
+default branch and trusted individual/group submission branches, while preserving
+ordinary student pushes and Graider's direct commits. Administrator enforcement is
+enabled because students may hold admin permission; no automatic recovery bypass,
+PR/check/approval/signature/history/deployment/lock/push-restriction policy is introduced.
+
+GraphQL exact rules are tightened by immutable rule ID with only three owned fields:
+`allowsForcePushes: false`, `allowsDeletions: false`, `isAdminEnforced: true`. Existing
+compatible manual settings survive; incompatible/unknown policy fails closed. Complete
+rule inventory, GitHub's effective ref rule ID and REST effective protection verify
+identity and behavior. Compatible wildcards may satisfy policy; a weak minimal wildcard
+may receive a verified exact exception, with no global wildcard edits or guessed winners.
+
+Repository/parent rulesets and branch-effective rules are read only. Applicable active
+rulesets, active push rulesets and unassessed semantics need attention rather than being
+modified, adopted or layered over blindly. No retired/manual branch rule is cleaned up.
+
+Course/student repository IDs and immutable organization/account identity are refreshed
+before writes. 7.5 ID→scope/group validation is reused. Default branches come from fresh
+GitHub state; trusted runtime `submissionBranch` overrides are supported without changing
+assignment schema. Missing refs, transfers, default changes and rule ambiguity block
+mutation. Independent targets continue safely after another branch failure.
+
+Non-idempotent exact creation is journaled durably before POST in future production
+composition; unresolved outcomes cannot automatically create again. Partial updates
+and creations both require complete effective-policy rereads, including after lost
+responses. Admin enforcement is corroborated by REST, and idempotent reruns do no work.
+Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
+See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
+
+**Phase 7 is complete. Next: Phase 8 / Slice 8.1 — Draft / Active / Archived Model.**
 
 ---
 

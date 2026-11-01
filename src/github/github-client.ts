@@ -153,6 +153,49 @@ export interface GitHubCoursePermissionClient extends Pick<
   ): Promise<GitHubOrganizationResponse>;
 }
 
+/** Backend-only branch policy transport. No ruleset, rule-delete, branch or permission mutation capability. */
+export interface GitHubManagedBranchClient extends Pick<
+  GitHubCoursePermissionClient,
+  "getOrganizationScopeResponse" | "getOrganizationMembership" | "getCourseRepositoryById"
+> {
+  getManagedBranchRulesPage(
+    repositoryNodeId: string,
+    branch: string,
+    cursor: string | null,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  getManagedBranchProtection(
+    owner: string,
+    repo: string,
+    branch: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  listManagedBranchRulesetsPage(
+    owner: string,
+    repo: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  listManagedEffectiveBranchRulesPage(
+    owner: string,
+    repo: string,
+    branch: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  createManagedBranchRule(
+    repositoryNodeId: string,
+    branch: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  tightenManagedBranchRule(
+    ruleId: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+}
+
 /** Read-only transport for trusted remote course discovery; never exposed over IPC. */
 export interface GitHubRemoteCourseClient {
   getCourseRepositoryById(
@@ -191,6 +234,7 @@ export interface GitHubClient
     Partial<GitHubFacultyOrganizationClient>,
     Partial<GitHubManagedTeamClient>,
     Partial<GitHubCoursePermissionClient>,
+    Partial<GitHubManagedBranchClient>,
     Partial<GitHubRemoteCourseClient> {
   getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser>;
 

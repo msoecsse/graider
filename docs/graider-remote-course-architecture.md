@@ -1170,8 +1170,139 @@ gates remain **1**, and current v1 individual/group Apply, student permissions, 
 scope, setup, grading and discovery behavior remain unchanged. No branch rules,
 invitations, team creation/membership, adoption, migration or lifecycle is activated.
 
-Next: **7.6 — Managed Branch Rules**. Preserve explicit immutable target/scope proof,
-the direct-collaborator non-ownership boundary and the production/journal gates.
+Managed branch rules are implemented in 7.6 below. Preserve explicit immutable
+target/scope proof, the direct-collaborator non-ownership boundary and the
+production/journal gates.
+
+### 11.10 Managed branch policy contract (Slice 7.6)
+
+`ManagedBranchReconciler` completes Phase 7 as backend-only desired-state
+infrastructure. No production v1 setup, Apply, grading, discovery or publication
+path invokes it. Both operational schema gates remain **1**. Phase 8.1 is next;
+term/assignment lifecycle and production v2 activation are not implemented here.
+
+The exact managed policy for the course/admin canonical branch and every trusted
+individual/group submission branch is:
+
+- ordinary non-force direct pushes remain allowed;
+- force pushes and branch deletion are blocked;
+- administrators and custom bypass roles are subject to the protection;
+- no automatic force-push bypass is created;
+- no PR, approval, status-check, signature, linear-history, conversation-resolution,
+  deployment, merge-queue, lock or push-allowlist requirement is introduced.
+
+The implementation uses [GraphQL branch-protection rules](https://docs.github.com/en/graphql/reference/branches).
+An existing exact rule is updated **by immutable rule ID**, sending only
+`allowsForcePushes: false`, `allowsDeletions: false`, `isAdminEnforced: true`.
+It never reconstructs or PUT-replaces an administrator's full protection object.
+Omitted GraphQL input fields preserve unrelated configuration, including inactive
+review settings and compatible branch-creation restrictions. A new exact rule
+explicitly disables unrelated push requirements instead of relying on API defaults.
+
+Administrator enforcement is intentional: current students can have repository admin
+permission, and GitHub's ordinary [administrator bypass](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
+would otherwise weaken force-push/deletion protection. The effective REST protection
+must corroborate `enforce_admins.enabled: true` as well as disabled force pushes and
+deletions; a GraphQL DTO alone does not establish success. This still permits normal
+student pushes and Graider's non-force direct commits. Exceptional faculty/admin
+recovery requires an authorized administrator to explicitly change/remove protection
+first; the reconciler creates no automatic recovery bypass. Repository admin rights
+to edit protection are not changed by this slice.
+
+The canonical repository/session resolver extracted for 7.4/7.5 is reused, with a
+narrow read-authority client rather than permission/team/collaborator mutation powers.
+It resolves every repository by immutable numeric ID and verifies expected immutable
+organization ID, account, active owner membership and repository admin capability.
+Transfers require migration; renames only refresh runtime locators. Default branch
+is a fresh optional projection from GitHub, with no hardcoded `main`/`master` fallback.
+
+The course target always follows the current default branch, without adding a course
+schema field. Student/group targets reuse 7.5's immutable ID→term/section/assignment/
+target model, duplicate/conflict rejection and complete single-section evidence.
+Cross-section groups, ID-less/name-only targets, wrong context or unknown scope receive
+Needs attention without a branch mutation. A trusted execution-only `submissionBranch`
+may override the student default; no persisted assignment schema field is introduced.
+Without an override, the freshly observed default is the submission branch. Template
+branch names and manifest URLs never select a branch. Literal Git branch names are
+validated conservatively; glob-special targets are not accepted as exact patterns.
+
+GraphQL reads use the canonical repository node ID. They verify repository/org identity,
+the exact existing `refs/heads/` ref and its ID/name, and the server-selected
+`Ref.branchProtectionRule` ID. Missing branches are never recreated or replaced with
+another guess. Complete cursor-paginated rule inventory is paired with full inspected
+policy fields, bypass counts and reported conflicts. REST effective protection provides
+an independent check and rejects unknown/incompatible protection fields. Truncated
+conflict information or contradictory evidence cannot authorize mutation.
+
+Exactly one exact rule may target the branch. Multiple exact rules, unknown effective
+IDs or unresolved conflicts need attention; rule age, response position and names
+never choose a winner. For an exact rule, known wildcard overlaps can be resolved only
+when GitHub reports that exact ID as effective and the complete inventory/conflict
+references establish the other identities. This uses GitHub's [specific-name precedence](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-branch-protection-rule),
+with no local fnmatch or guessed creation-time ordering.
+
+A compatible effective wildcard already satisfying the full policy causes no write.
+A weak otherwise minimal wildcard may be superseded by a new literal exact rule,
+whose effective ID and protection must then be reread and verified. The wildcard and
+other branches remain untouched. A wildcard carrying other manual settings is not
+overridden if that would discard them. Competing wildcard conflicts fail closed.
+Manual PR/check/signature/history/deployment/lock/push-restriction requirements and
+force-push bypass actors produce `incompatible_existing_branch_protection` with safe
+condition codes, rather than weakening administrator policy or claiming normal pushes
+will work. Compatible stricter exact policy is preserved by the three-field patch.
+
+Rulesets are **read-only and unowned**. Complete repository ruleset inventory includes
+parent organization/enterprise policy, and the branch-effective rules endpoint checks
+active applicable branch rules. Active push rulesets also block reconciliation because
+they can constrain ordinary pushes independently of the branch endpoint. Unknown
+enforcement/target semantics and any applicable active ruleset return
+`unassessed_existing_ruleset`; this slice does not claim to prove their bypass/actor
+semantics or layer classic protection over unknown policy. Disabled/evaluate rulesets,
+tag-only policy and branch rulesets proven nonapplicable by the effective endpoint are
+left untouched. There are no ruleset creation/update/delete methods in this transport.
+
+Rule and ruleset inventories paginate at 100 records/page, bounded at 1000 pages.
+No provider-supplied pagination destination is followed. Unknown response shapes,
+partial GraphQL errors, rate limits, SSO/OAuth restrictions or forbidden reads remain
+typed Needs attention; credentials and provider bodies never enter results.
+
+Creation is a non-idempotent GraphQL POST and uses the existing awaited journal
+abstraction. Before sending, record an unresolved key bound to immutable organization
+and repository IDs plus the literal branch. Production composition must commit this
+durably, retain it across service/account changes and serialize writers. A successful
+HTTP acknowledgment or a lost response is followed by complete remote rereads. Exactly
+one compatible exact rule must be effective and satisfy admin/force/deletion checks;
+an acknowledged created ID must match. Otherwise the unresolved key remains and another
+automatic create is forbidden. Observed safe protection resolves uncertainty. There
+is no alternate team/journal/credential fallback and no blind adapter retry.
+
+Updates are separate idempotent partial mutations by immutable rule ID; they use no
+creation journal. Before either mutation the reconciler refreshes repository, branch,
+effective rule and compatibility, including a full refresh after asynchronous journal
+work. Default-based targets must still identify the original freshly selected default;
+a change produces `default_branch_changed` and requires a later explicit run. Explicit
+submission branches are unaffected by a default rename. Missing/changed branch refs
+or rule identities block mutation. GitHub supplies no atomic conditional write across
+repository default, ref and protection configuration; post-mutation rereads must also
+validate them and surface concurrent external changes rather than fabricate success.
+
+After create/update, reread effective GraphQL and REST policy and rulesets. An unobserved
+or ambiguous result is Needs attention; a lost update response recovers only from the
+same observed immutable rule ID and desired policy. Correct reruns produce no writes.
+The course target and each student/group target return independent structured outcomes:
+repository ID/kind, student term/section/assignment/target when applicable, branch name,
+`default`/`explicit` source, desired/observed protection, safe status/reason/conditions,
+and immutable rule ID when known. Statuses are `up_to_date`, `reconciled`, `needs_attention`;
+there is no intrinsic faculty Pending state for branch protection.
+
+No retired branch, manual rule or ruleset cleanup occurs. There is no branch creation,
+deletion, collaborator mutation, invitation, membership or repository permission
+reconciliation. The trusted outer production caller must bind source revision,
+`AuthorizationResolver`, session/course/org identity, complete v2 state and trusted
+7.5 target evidence, retain durable journals and enforce shared serialization before
+enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
+
+**Phase 7 is complete. Next: Phase 8 / Slice 8.1 — Draft / Active / Archived Model.**
 
 ---
 
@@ -1591,6 +1722,17 @@ The course/admin canonical branch similarly blocks:
 - branch deletion;
 
 while continuing to permit Graider's direct commits without a pull-request requirement.
+
+Slice 7.6 implements this backend policy with exact GraphQL partial updates and
+administrator enforcement, preserving ordinary pushes even for current student admin
+collaborators. Recovery requires an explicit authorized protection change; no force-push
+bypass is maintained. Existing incompatible manual policy and unassessed applicable
+rulesets remain Needs attention and are never weakened. The current assignment schema
+has no persisted submission-branch override; an explicit trusted runtime target can
+provide one, otherwise GitHub's freshly observed default is used. See
+[the complete managed branch contract](#1110-managed-branch-policy-contract-slice-76)
+for default-branch race checks, rule precedence, durable creation journaling and continued
+production gates. No production v1 branch protection is activated by this slice.
 
 ---
 
@@ -3132,6 +3274,6 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phase 6 is complete. The next planned work is **Phase 7 — GitHub Desired-State
-Permission Model**. This slice does not migrate courses, edit the real `csc1120`,
-remove GitHub teams, revoke permissions, change term lifecycle, or activate v2.
+Phases 6 and 7 are complete. The next planned work is **Phase 8 / Slice 8.1 — Draft /
+Active / Archived Model**. These backend slices do not migrate courses, edit the real
+`csc1120`, change production permissions or term lifecycle, or activate v2.

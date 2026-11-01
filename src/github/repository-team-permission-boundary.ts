@@ -37,9 +37,14 @@ export type RepositoryPermissionReason =
   | "scoped_team_cleanup_deferred"
   | "permission_unverified"
   | "unsupported_repository_permission";
+export type RepositoryAuthorityClient = Pick<
+  GitHubCoursePermissionClient,
+  "getOrganizationScopeResponse" | "getOrganizationMembership" | "getCourseRepositoryById"
+>;
 export interface PermissionRepository {
   readonly id: number;
   readonly nodeId: string;
+  readonly defaultBranch?: string;
   readonly organizationId: number;
   readonly owner: string;
   readonly name: string;
@@ -88,6 +93,55 @@ export const permission = (value: unknown): GitHubPermission => {
   return fail("unsupported_repository_permission");
 };
 
+/** Canonical read/authority check shared by permissions and managed branch protection. */
+export const resolvePermissionRepository = async (
+  client: RepositoryAuthorityClient,
+  context: { readonly organizationId: number; readonly authenticatedUserId: number },
+  repositoryId: number,
+  signal: AbortSignal
+): Promise<PermissionRepository> => {
+  if (!positiveId(repositoryId)) return fail("repository_identity_mismatch");
+  const userResponse = await client.getOrganizationScopeResponse(signal);
+  if (object(checked(userResponse)).id !== context.authenticatedUserId)
+    return fail("session_mismatch");
+  const value = object(checked(await client.getCourseRepositoryById(repositoryId, signal)));
+  const owner = object(value.owner);
+  if (value.id !== repositoryId || typeof value.node_id !== "string" || !value.node_id)
+    return fail("repository_identity_mismatch");
+  if (owner.id !== context.organizationId || owner.type !== "Organization")
+    return fail("repository_transfer_requires_migration");
+  if (value.archived !== false || value.disabled !== false) return fail("repository_unavailable");
+  if (object(value.permissions).admin !== true) return fail("permission_denied");
+  const login = segment(owner.login);
+  const membership = object(checked(await client.getOrganizationMembership(login, signal)));
+  const organization = object(membership.organization);
+  if (
+    organization.id !== context.organizationId ||
+    typeof organization.login !== "string" ||
+    organization.login.toLowerCase() !== login.toLowerCase()
+  )
+    return fail("identity_mismatch");
+  if (membership.user !== undefined && object(membership.user).id !== context.authenticatedUserId)
+    return fail("session_mismatch");
+  if (membership.state !== "active" || membership.role !== "admin")
+    return fail("permission_denied");
+  const scopes = new Headers(userResponse.headers).get("x-oauth-scopes");
+  if (scopes !== null && !scopes.split(/[ ,]+/).includes("repo")) return fail("insufficient_scope");
+  if (
+    value.default_branch !== undefined &&
+    (typeof value.default_branch !== "string" || !value.default_branch)
+  )
+    return fail("unexpected_response");
+  return Object.freeze({
+    id: repositoryId,
+    ...(typeof value.default_branch === "string" ? { defaultBranch: value.default_branch } : {}),
+    nodeId: value.node_id,
+    organizationId: context.organizationId,
+    owner: login,
+    name: segment(value.name)
+  });
+};
+
 /** Shared read/preflight boundary for v2 course and student team grants. No role calculation or collaborator mutation. */
 export class RepositoryTeamPermissionBoundary {
   private readonly courseRepositoryId: number;
@@ -112,41 +166,13 @@ export class RepositoryTeamPermissionBoundary {
     this.organizationId = context.organizationId;
     this.accountId = context.authenticatedUserId;
   }
-  async repository(repositoryId: number, signal: AbortSignal): Promise<PermissionRepository> {
-    if (!positiveId(repositoryId)) return fail("repository_identity_mismatch");
-    const userResponse = await this.client.getOrganizationScopeResponse(signal);
-    if (object(checked(userResponse)).id !== this.accountId) return fail("session_mismatch");
-    const value = object(checked(await this.client.getCourseRepositoryById(repositoryId, signal)));
-    const owner = object(value.owner);
-    if (value.id !== repositoryId || typeof value.node_id !== "string" || !value.node_id)
-      return fail("repository_identity_mismatch");
-    if (owner.id !== this.organizationId || owner.type !== "Organization")
-      return fail("repository_transfer_requires_migration");
-    if (value.archived !== false || value.disabled !== false) return fail("repository_unavailable");
-    if (object(value.permissions).admin !== true) return fail("permission_denied");
-    const login = segment(owner.login);
-    const membership = object(checked(await this.client.getOrganizationMembership(login, signal)));
-    const organization = object(membership.organization);
-    if (
-      organization.id !== this.organizationId ||
-      typeof organization.login !== "string" ||
-      organization.login.toLowerCase() !== login.toLowerCase()
-    )
-      return fail("identity_mismatch");
-    if (membership.user !== undefined && object(membership.user).id !== this.accountId)
-      return fail("session_mismatch");
-    if (membership.state !== "active" || membership.role !== "admin")
-      return fail("permission_denied");
-    const scopes = new Headers(userResponse.headers).get("x-oauth-scopes");
-    if (scopes !== null && !scopes.split(/[ ,]+/).includes("repo"))
-      return fail("insufficient_scope");
-    return Object.freeze({
-      id: repositoryId,
-      nodeId: value.node_id,
-      organizationId: this.organizationId,
-      owner: login,
-      name: segment(value.name)
-    });
+  repository(repositoryId: number, signal: AbortSignal): Promise<PermissionRepository> {
+    return resolvePermissionRepository(
+      this.client,
+      { organizationId: this.organizationId, authenticatedUserId: this.accountId },
+      repositoryId,
+      signal
+    );
   }
 
   sameLocator(before: PermissionRepository, after: PermissionRepository): void {
