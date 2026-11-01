@@ -313,6 +313,84 @@ export class OctokitGitHubClient implements GitHubClient {
       throw new GitHubClientError("auth_missing", "An authenticated GitHub session is required.");
   }
 
+  async listCourseRepositoryTeamsPage(
+    owner: string,
+    repo: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    return this.organizationResponse(
+      "/repos/{owner}/{repo}/teams",
+      { owner, repo, page, per_page: perPage },
+      signal
+    );
+  }
+
+  async setCourseRepositoryTeamPermission(
+    organizationId: number,
+    teamId: number,
+    owner: string,
+    repo: string,
+    permission: "admin" | "push" | "pull" | "none",
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    this.requireManagedTeamToken();
+    return this.organizationResponse(
+      "/organizations/{org_id}/team/{team_id}/repos/{owner}/{repo}",
+      {
+        org_id: organizationId,
+        team_id: teamId,
+        owner,
+        repo,
+        ...(permission === "none" ? {} : { permission })
+      },
+      signal,
+      permission === "none" ? "DELETE" : "PUT"
+    );
+  }
+
+  async getCourseFallbackPermissionPage(
+    repositoryNodeId: string,
+    login: string,
+    cursor: string | null,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    const query = `query CourseFallbackSources($repositoryId: ID!, $login: String!, $cursor: String) {
+      node(id: $repositoryId) { ... on Repository {
+        databaseId owner { login ... on Organization { databaseId } }
+        collaborators(first: 100, after: $cursor, query: $login, affiliation: DIRECT) {
+          pageInfo { hasNextPage endCursor }
+          edges { node { databaseId login } permissionSources {
+            permission roleName organization { databaseId }
+            source { __typename ... on Repository { databaseId } }
+          } }
+        }
+      } }
+    }`;
+    return this.organizationResponse(
+      "/graphql",
+      { query, variables: { repositoryId: repositoryNodeId, login, cursor } },
+      signal,
+      "POST"
+    );
+  }
+
+  async setCourseFallbackPermission(
+    owner: string,
+    repo: string,
+    login: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    this.requireManagedTeamToken();
+    return this.organizationResponse(
+      "/repos/{owner}/{repo}/collaborators/{username}",
+      { owner, repo, username: login, permission: "admin" },
+      signal,
+      "PUT"
+    );
+  }
+
   async listOrganizationMembersPage(
     org: string,
     page: number,

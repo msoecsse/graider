@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phase 6 is complete. Phase 7 has begun; next: **7.4 — Course Repository Permissions**.
+Phase 6 is complete. Phase 7 has begun; next: **7.5 — Student Repository Permissions**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -457,7 +457,8 @@ membership, invitation, permission or rename reconciliation runs. Both operation
 schema gates remain **1**, and production v1 faculty-team behavior is preserved.
 See [the full metadata contract](graider-remote-course-architecture.md#115-managed-team-identity-contract-slice-71).
 Organization invitation infrastructure and managed-team membership are complete in
-7.2/7.3 below; repository permissions remain deferred to 7.4/7.5, with explicit legacy adoption in Phase 9.
+7.2/7.3 below; course permissions are complete in 7.4 and student permissions remain
+deferred to 7.5, with explicit legacy adoption in Phase 9.
 
 ## Slice 7.2 — Faculty organization invitation (complete)
 
@@ -485,7 +486,7 @@ permission mutation is introduced. Both operational gates remain **1**. Slice 7.
 should consume these access states to defer team reconciliation for Pending faculty.
 See [the access contract and trust requirements](graider-remote-course-architecture.md#116-faculty-organization-access-contract-slice-72).
 
-Team membership is implemented in 7.3 below. Next: **7.4 — Course Repository Permissions**.
+Team membership and course permissions are implemented below. Next: **7.5 — Student Repository Permissions**.
 
 ## Slice 7.3 — Team membership reconciliation (complete)
 
@@ -519,11 +520,41 @@ creation journal. No repository permissions, invitations, organization removal,
 team rename/deletion, adoption, migration or lifecycle is introduced.
 See [the full membership contract](graider-remote-course-architecture.md#117-managed-team-membership-contract-slice-73).
 
-Next: **7.4 — Course Repository Permissions**.
+Course permissions are implemented in 7.4 below. Next: **7.5 — Student Repository Permissions**.
 
-## Slice 7.4 — Course repository permissions
+## Slice 7.4 — Course repository permissions (complete)
 
-Reconcile read/write/admin permissions according to strongest effective course role.
+Backend-only reconciliation maps proven course-wide managed teams exactly:
+`course-current-coordinators` → `admin`, `course-write` → `push`, `course-read` → `pull`.
+It upgrades missing/lower access, reduces excessive access and leaves exact access alone.
+It consumes fresh read-only 7.3 inspection, including safe Pending membership without
+unauthorized extras; unsafe/missing/duplicate team outcomes cannot authorize a grant.
+No parallel team creation or membership implementation is introduced.
+
+Canonical repository and expected organization **IDs** bind every mutation to the
+selected course. Fresh repository/session/team checks supply current locators and
+accept renames; repository transfer is a migration condition. Complete repository-team
+pagination and post-write observations verify both successful and ambiguous writes.
+Later explicit idempotent retries require fresh observed drift, with no blind adapter retries.
+
+Fallback administration receives separate direct admin after 7.2 Active identity
+verification. GraphQL permission-source inventory proves a Repository grant independent
+of team/organization access. Pending remains incomplete. Direct collaborators lack
+ownership metadata and are never swept/revoked; former-fallback transfer cleanup needs
+durable provenance and a future explicit policy.
+
+Proven selected-course term/section course-repository grants may be removed only after
+safe complete scoped membership, all exact course-wide grants with non-Pending membership,
+and verified fallback admin. Other-course grants are surfaced as Needs attention;
+unmanaged/legacy/malformed ownership is never adopted or mutated. 7.3's durable
+creation journal remains a production requirement, with no second creation path.
+
+Both operational gates remain **1** and production v1 Apply/setup/discovery/grading
+behavior is unchanged. No student permissions, branch rules, invitations, organization
+removal, migration or lifecycle is activated.
+See [the full permission contract](graider-remote-course-architecture.md#118-courseadmin-repository-permission-contract-slice-74).
+
+Next: **7.5 — Student Repository Permissions**.
 
 ## Slice 7.5 — Student repository permissions
 

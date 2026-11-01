@@ -115,6 +115,44 @@ export interface GitHubManagedTeamClient extends Pick<
   ): Promise<GitHubOrganizationResponse>;
 }
 
+/** Internal v2 course/admin permission transport; no direct-collaborator removal capability. */
+export interface GitHubCoursePermissionClient extends Pick<
+  GitHubManagedTeamClient,
+  "getOrganizationScopeResponse" | "getOrganizationMembership" | "getUser" | "getManagedTeam"
+> {
+  getCourseRepositoryById(
+    repositoryId: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  listCourseRepositoryTeamsPage(
+    owner: string,
+    repo: string,
+    page: number,
+    perPage: number,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  setCourseRepositoryTeamPermission(
+    organizationId: number,
+    teamId: number,
+    owner: string,
+    repo: string,
+    permission: "admin" | "push" | "pull" | "none",
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  getCourseFallbackPermissionPage(
+    repositoryNodeId: string,
+    login: string,
+    cursor: string | null,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  setCourseFallbackPermission(
+    owner: string,
+    repo: string,
+    login: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+}
+
 /** Read-only transport for trusted remote course discovery; never exposed over IPC. */
 export interface GitHubRemoteCourseClient {
   getCourseRepositoryById(
@@ -152,6 +190,7 @@ export interface GitHubClient
     Partial<GitHubOAuthOrganizationClient>,
     Partial<GitHubFacultyOrganizationClient>,
     Partial<GitHubManagedTeamClient>,
+    Partial<GitHubCoursePermissionClient>,
     Partial<GitHubRemoteCourseClient> {
   getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser>;
 

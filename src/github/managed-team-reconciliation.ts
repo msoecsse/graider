@@ -165,6 +165,72 @@ export class ManagedTeamMembershipReconciler {
     return operation;
   }
 
+  /** Fresh, read-only 7.3 classification for permission composition. No creation or membership writes. */
+  async inspect(signal = AbortSignal.timeout(TIMEOUT_MS)): Promise<readonly ManagedTeamOutcome[]> {
+    try {
+      const session = await this.session(signal);
+      const inventory = await this.inventory(session, signal);
+      const access = await this.organizationAccess.inspect(signal);
+      const results: ManagedTeamOutcome[] = [];
+      for (const desired of this.desired) {
+        let teamId: number | undefined;
+        try {
+          const selected = this.select(desired.identity, inventory);
+          if (!selected) return fail("team_creation_unverified");
+          teamId = selected.team.id;
+          const members = await this.snapshot(desired.identity, teamId, session, signal);
+          const ids = new Set(members.map((value) => value.id));
+          const wanted = new Set(desired.githubUserIds);
+          const faculty: FacultyTeamOutcome[] = desired.githubUserIds.map((id) => {
+            const dependency = this.access(id, access);
+            return Object.freeze(
+              dependency
+                ? { ...dependency, observed: ids.has(id) }
+                : {
+                    githubUserId: id,
+                    desired: true,
+                    observed: ids.has(id),
+                    status: ids.has(id) ? "up_to_date" : "needs_attention",
+                    ...(ids.has(id) ? {} : { reason: "membership_unverified" })
+                  }
+            );
+          });
+          members
+            .filter((value) => !wanted.has(value.id))
+            .forEach((value) =>
+              faculty.push(
+                Object.freeze({
+                  githubUserId: value.id,
+                  desired: false,
+                  observed: true,
+                  status: "needs_attention",
+                  reason: "membership_unverified"
+                })
+              )
+            );
+          const status = faculty.some((value) => value.status === "needs_attention")
+            ? "needs_attention"
+            : faculty.some((value) => value.status === "pending_organization_access")
+              ? "pending_organization_access"
+              : "up_to_date";
+          results.push(
+            Object.freeze({
+              identity: desired.identity,
+              teamId,
+              status,
+              faculty: Object.freeze(faculty)
+            })
+          );
+        } catch (error) {
+          results.push(this.blocked(desired, error, teamId));
+        }
+      }
+      return Object.freeze(results);
+    } catch (error) {
+      return Object.freeze(this.desired.map((desired) => this.blocked(desired, error)));
+    }
+  }
+
   private async session(signal: AbortSignal): Promise<Session> {
     const response = await this.client.getOrganizationScopeResponse(signal);
     if (member(checked(response)).id !== this.accountId) return fail("session_mismatch");

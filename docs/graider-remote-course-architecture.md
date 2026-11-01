@@ -682,7 +682,8 @@ Both `OPERATIONAL_COURSE_SCHEMA_VERSION` and `OPERATIONAL_TERM_SCHEMA_VERSION` r
 **1**. Existing v1 faculty-team handling is unchanged. No team creation, deletion,
 rename, membership reconciliation, invitations, permission reconciliation, branch
 rules or production-v2 activation occurs in Slice 7.1. Slice 7.2 adds organization
-invitation infrastructure below; 7.3 adds team membership reconciliation and 7.4/7.5 permissions remain deferred.
+invitation infrastructure below; 7.3 adds team membership reconciliation, 7.4 course
+repository permissions, and 7.5 student-repository permissions remain deferred.
 
 ### 11.6 Faculty organization access contract (Slice 7.2)
 
@@ -912,9 +913,133 @@ gates remain **1**; 7.1 metadata format and production v1 behavior remain unchan
 No organization-member removal, invitation sending, team rename/deletion, v1 adoption,
 repository permissions, branch rules, migration or term lifecycle is implemented.
 
-Next: **7.4 — Course Repository Permissions**. Consume verified per-team/per-faculty
-results, distinguish incomplete access from modeled roles, and handle fallback
+Slice **7.4 — Course Repository Permissions** below consumes verified per-team/per-faculty
+results, distinguishes incomplete access from modeled roles, and handles fallback
 administration separately when assigning course/admin repository read/write/admin.
+
+### 11.8 Course/admin repository permission contract (Slice 7.4)
+
+`CourseRepositoryPermissionReconciler` is backend-only Schema v2 infrastructure. It
+targets the selected canonical course/admin repository by immutable GitHub repository
+ID, with an independently trusted immutable organization ID and authenticated account
+ID from Phase 2 context. Metadata names, course code, local path and renderer-provided
+owner/repository strings cannot authorize a write.
+
+Every preflight refreshes `/user`, resolves `/repositories/{repository_id}`, verifies
+the exact repository ID and expected organization owner ID/type, and requires current
+repository admin authority plus active organization owner membership. Transfers are
+typed `repository_transfer_requires_migration`; archived/disabled repositories and
+identity mismatches block mutation. Repository/organization renames preserve identity:
+the freshly resolved resource supplies current locators. Locator-based paginated reads
+are bracketed by canonical re-resolution, and a rename during a read fails safely.
+The last canonical resolution immediately before each mutation supplies its locators.
+There is no GitHub atomic conditional write across these separate resources; concurrent
+external changes may still cause failure or an unverified result.
+
+The trusted outer service must bind validated metadata and source revision to this
+canonical repository and OAuth session, enforce `AuthorizationResolver`, provide the
+complete intended term set and share serialization across operations. Read dependencies
+are backend factories/readers for the same course, session and revision. After a
+verified organization rename, they may use an execution-only course snapshot with
+the new organization locator; this never rewrites persisted metadata or faculty identity.
+No production Electron/CLI/Apply/discovery/grading/Course Setup path invokes this service.
+
+| Proven managed course-wide team | Exact repository permission | Concept                |
+| ------------------------------- | --------------------------- | ---------------------- |
+| `course-current-coordinators`   | `admin`                     | Course administration. |
+| `course-write`                  | `push`                      | Course write.          |
+| `course-read`                   | `pull`                      | Course read.           |
+
+Role → membership remains owned by 7.3; team kind → permission is the only 7.4 mapping.
+No permission is inferred from current team members, and `maintain` is not a substitute.
+Missing/lower permissions are granted/upgraded, higher permissions are reduced to the
+exact defined value, and exact access causes no write. GitHub combines independent
+sources so fallback admin plus historical read still yields admin, and coordinator
+plus section-faculty roles retain coordinator admin authority. Custom/unknown or
+inconsistent repository-role evidence fails closed rather than guessing equivalence.
+
+7.3 now exposes a **read-only `inspect()`** using its existing desired state, full
+organization-team inventory, canonical metadata/duplicate checks, numeric resource
+verification and complete member snapshots. Missing teams, extras, inaccessible
+snapshots and ownership ambiguity produce per-team Needs attention without creating
+teams or changing members. 7.4 consumes these fresh outcomes before and after writes;
+it does not recalculate role membership, create teams or invoke membership mutations.
+Missing teams must be reconciled through 7.3 explicitly. Its durable unresolved-create
+journal and shared serialization remain required before production activation; 7.4
+adds no alternate creation path.
+
+Only `up_to_date`/`reconciled` membership or safe `pending_organization_access` may
+receive a team grant. Pending is safe when the verified team has no observed
+unauthorized extras; absent Pending faculty gain access later through 7.2/7.3.
+Needs attention, duplicate/missing outcomes, unknown numeric IDs, unknown observations
+or inconsistent desired/observed membership block changed permission for that team.
+The concrete numeric team resource is refreshed and checked against the exact 7.1
+description and organization before mutation. Numeric organization/team routes avoid
+stale slug authority; owner/repository locators come from the canonical repository.
+
+Repository team associations are fully paginated (100/page, at most 1000 pages),
+retaining numeric ID, current name/slug, description, parent and exact permission.
+Incomplete/conflicting snapshots block writes. Parent/inherited-team ambiguity is
+not reconciled. Another course's managed association is surfaced as Needs attention
+and left untouched. Unmanaged, legacy faculty/grader and malformed/unsupported claims
+are never adopted or mutated based on a name.
+
+Selected-course proven term/section teams are not desired course-repository permission
+holders. Their direct association may be removed only after a complete snapshot,
+fresh safe 7.3 outcome for that exact numeric team, **all three** course-wide teams
+holding exact permissions with complete non-Pending membership, and verified separate
+fallback admin access. Otherwise cleanup remains incomplete/Needs attention. This
+conservative order establishes replacement access before removal. Unsupplied-term
+teams without a safe 7.3 outcome are not cleaned up by inference.
+
+The current `FallbackAdministrator` immutable faculty ID receives a separate direct
+`admin` grant, including fallback-only faculty without team membership. 7.2 must report
+Active for this exact course/organization identity; Pending/Invitation-required remain
+incomplete, and Needs attention preserves its reason. Resolve only the directory's
+current login and verify its immutable ID before using the returned current locator.
+Institutional username and login history never serve as fallbacks. The fallback is
+never inserted into `course-current-coordinators` by this slice.
+
+The [collaborator REST API](https://docs.github.com/en/rest/collaborators/collaborators)
+reports effective permissions across sources. Effective admin through a team does not
+prove an independent fallback grant. A narrowly filtered, cursor-paginated GraphQL
+collaborator query therefore uses the canonical repository node ID and
+[`permissionSources`](https://docs.github.com/en/graphql/reference/repos#permissionsource)
+to require a Repository source for this repository and organization, matched to the
+fallback's immutable user ID. Team/organization sources alone do not satisfy that grant.
+GraphQL errors, missing source evidence, identity mismatch or incomplete pagination
+fail closed; provider error bodies are never exposed. If GitHub cannot expose or
+establish a separate direct source (including account/policy restrictions), the result
+remains Needs attention rather than fabricated independent access.
+
+Direct collaborator grants have **no Graider ownership marker**. There is no direct
+collaborator DELETE capability in this new transport, no arbitrary collaborator sweep,
+and no guessed former-fallback revocation. A future fallback-transfer workflow needs
+durable provenance and a separately authorized cleanup policy; old grants may remain
+until that work is designed. They must not be removed based solely on the new fallback.
+
+After every team permission PUT/DELETE or fallback admin PUT, reread observable access
+and recheck identity/dependencies. An HTTP acknowledgment alone is insufficient.
+Ambiguous transport outcomes recover only if the exact desired permission is observed;
+unchanged or unknown state yields typed Needs attention. A later explicit run may
+repeat idempotent writes only after fresh reads prove drift and authority. No
+adapter-level blind retries or new permission-write journal are added. Existing error
+classification preserves capability, SSO/OAuth policy, rate-limit and network reasons;
+OAuth scopes remain unchanged and no alternate credential is used.
+
+Outcomes include canonical repository ID, logical team/fallback identity, numeric team
+or user ID, exact desired permission, observed permission (`null` when unknown), status
+and safe reason. Statuses are `up_to_date`, `reconciled`, `pending_organization_access`
+and `needs_attention`. Pending never invalidates the course/term model or grants a
+modeled role; `AuthorizationResolver` remains authoritative.
+
+Both operational schema gates remain **1**. Production v1 faculty-team Apply handling
+is unchanged. No student-repository permissions, branch rules, invitations, organization
+removal, team mutation/adoption, migration or term lifecycle is implemented here.
+
+Next: **7.5 — Student Repository Permissions**. Reuse canonical repository identity,
+7.3 verified scoped membership and exact permission verification; preserve incomplete
+access and unowned-grant boundaries rather than inferring authority from team names.
 
 ---
 
