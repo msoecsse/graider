@@ -392,7 +392,9 @@ Replace simple faculty username arrays with current/former assignment history.
 
 ## Slice 6.5 — Unified authorization resolver
 
-Replace grading-only faculty scoping with a reusable authorization service.
+Implement a reusable authorization service to eventually replace grading-only faculty scoping.
+Slice 6.5 is complete as a Schema v2 domain core; production v1 scope and both operational
+schema gates remain unchanged. Activation and Electron service migration are deferred.
 
 It must answer both:
 

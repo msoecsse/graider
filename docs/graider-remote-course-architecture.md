@@ -2438,6 +2438,74 @@ resolution explicitly narrows to v1 before interpreting username arrays. Course 
 continues generating schema 1 with v1 faculty arrays. No real course is modified or
 migrated, and no v2 publication is enabled.
 
-Next slice: **6.5 — Unified Authorization Resolver**. Compose independent section,
-coordinator, and fallback identities without login fallback; historical access and
-permission decisions remain unimplemented, and production activation stays gated.
+### Phase 6 / Slice 6.5: Unified authorization resolver
+
+`src/faculty/authorization-resolver.ts` implements the shared Schema v2 domain policy.
+`AuthorizationResolver(course, term, authenticatedGithubUserId)` validates and snapshots
+its inputs and composes `FallbackAdministrator`, `TermCoordinators`, and `SectionFaculty`,
+which resolve persisted references through `FacultyDirectory`. The authenticated key is
+only the immutable numeric GitHub user ID. Current login, login history, institutional
+username, and directory membership never grant permissions.
+
+The separation is **identity/role facts → authorization policy → decision**.
+`roleFacts` is an immutable snapshot of the selected term code, authenticated ID,
+fallback identity, current/former coordinator membership, and current/former faculty
+section IDs. Roles remain independent; callers do not interpret raw YAML role arrays.
+
+The resolver exposes separate visibility and mutation decisions:
+
+| API                                  | Policy                                                                                                                                                                                             |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `canViewTerm()`                      | Term context/metadata for current/former coordinators or section faculty; does not authorize all-section reads.                                                                                    |
+| `canViewSection(sectionId, scope)`   | Current/former faculty can read their sections. Former coordinators can read the entire selected term. Current coordinators reach other sections only through explicit expanded scope.             |
+| `canMutateSection(sectionId, scope)` | Current section faculty can perform normal section operations in their current sections. Current coordinators can perform section operations across the term only through explicit expanded scope. |
+| `canManageTermStructure()`           | Current coordinators can manage term structure and faculty assignments independently of section scope.                                                                                             |
+| `hasFallbackAdministration()`        | Separate course-level recovery capability; grants no term/student/section visibility, coordinator membership, or general section mutation.                                                         |
+| `getSectionScope(scope)`             | Immutable visible and mutable section IDs, plus effective historical read-only IDs (visible sections lacking independent current mutation authority).                                              |
+
+Each decision contains `allowed`, a typed `basis`, and `effectiveScope`. Denials have
+scope `none`; successful decisions distinguish section, term, term metadata, and course
+recovery. An unknown section is denied even for a coordinator. Unassigned sections are
+valid and are not implicitly visible or mutable to ordinary faculty.
+
+`AuthorizationScope` is either `default` (also the omitted argument) or
+`coordinator-term`. The expanded request is accepted only after proving current
+coordinator membership in this selected term. A renderer-provided flag cannot create
+authority. Invalid runtime scope values and expanded requests by non-current coordinators
+are denied, including for former coordinators; their historical access remains available
+through default scope. Scope requests do not persist or change subsequent default calls.
+
+For example, a current coordinator teaching section 001 sees/mutates only 001 by default;
+explicit `coordinator-term` scope enables 001, 002, and unassigned 003. A coordinator
+without teaching assignments can view term metadata and manage structure but has no
+default section scope.
+
+Former section faculty retain read-only access to their former sections. Former
+coordinators retain read-only access across their former term. Another independent
+current role can still grant mutation in its own scope. No Draft/Active/Archived or
+late-grading/regrading policy is inferred here; lifecycle policy will refine these
+role-derived decisions later. Fallback transfer/recovery and term creation, activation,
+archive, and unarchive actions are not authorized by these general capabilities.
+
+The resolver is intended to become the shared authorization trust boundary for Electron
+services when Schema v2 is activated. It requires trusted authenticated identity and
+validated selected-course/term state; Electron must still enforce session freshness,
+repository identity, source revision, and mutation publication checks. This slice does
+not route existing services through the new resolver or replace the v1
+`faculty-scope-resolver.ts`, `faculty-scope-context.ts`, or Electron faculty-scope service.
+
+Both `OPERATIONAL_COURSE_SCHEMA_VERSION` and `OPERATIONAL_TERM_SCHEMA_VERSION` remain
+**1**. Discovery, synchronization, grading, Apply, reports, roster management, mutation
+guards, Course Setup, and production faculty scope retain v1 behavior. No real course is
+modified and no v2 production operation is activated.
+
+`tests/unit/faculty/authorization-resolver.test.ts` supplies the visibility/mutation
+matrix for current/former section faculty, coordinators with/without teaching sections,
+former coordinators, fallback-only identity, overlapping independent roles, directory-only
+members, unrelated IDs, and unassigned sections. It checks default/expanded scope,
+identity metadata spoofing, term/section isolation, role transitions, structured reasons,
+input snapshots, invalid references, and the production gates.
+
+Next slice: **6.6 — Remove Grader Role**. The resolver has no grader capability or
+permission path. Existing v1 grader configuration and operational behavior remain intact
+for that slice to address.
