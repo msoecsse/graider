@@ -99,9 +99,10 @@ export const validateRawConfigSchema = <T>(
   };
 };
 
-const createInvalidSchemaVersionDiagnostic = (
+export const createInvalidSchemaVersionDiagnostic = (
   filePath: string,
-  schemaVersion: number
+  schemaVersion: number,
+  supportedSchemaVersion = SUPPORTED_SCHEMA_VERSION
 ): Diagnostic =>
   createConfigDiagnostic(
     INVALID_SCHEMA_VERSION_CODE,
@@ -109,7 +110,7 @@ const createInvalidSchemaVersionDiagnostic = (
     {
       filePath,
       schemaVersion,
-      supportedSchemaVersion: SUPPORTED_SCHEMA_VERSION
+      supportedSchemaVersion
     }
   );
 
@@ -476,6 +477,9 @@ const validateStudentPublishConfig = (
     : validateDisabledStudentPublishConfig(filePath, reports.student_publish);
 };
 
+/** Production validation stays at v1 until the v2 authorization model is operational.
+ * Lower-level course parsing deliberately supports v2 for schema/model development.
+ */
 export const validateCourseConfig = (filePath: string, config: RawCourseConfig): Diagnostic[] => [
   ...validateSchemaVersion(filePath, config.schema_version),
   ...(config.github.repository_visibility === SUPPORTED_REPOSITORY_VISIBILITY

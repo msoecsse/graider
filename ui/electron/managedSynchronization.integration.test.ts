@@ -181,6 +181,23 @@ afterEach(() => {
 });
 
 describe("bundled Git managed synchronization, real two-clone history", () => {
+  it.each([2, 3])(
+    "refuses schema %s before advancing or authorizing the managed source",
+    async (version) => {
+      const f = await fixture();
+      const head = await git(f.cache, ["rev-parse", "HEAD"]);
+      await f.advance(
+        courseYaml.replace("schema_version: 1", `schema_version: ${version}`) +
+          "faculty_directory:\n  - institutional_username: jones\n    github_user_id: 42\n    github_login: current-login\n    github_login_history: []\n"
+      );
+      expect(await f.sync()).toMatchObject({
+        status: "needs_attention",
+        reason: "invalid_remote_metadata"
+      });
+      expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(head);
+      expect(fs.readFileSync(path.join(f.cache, "course.yml"), "utf8")).toBe(courseYaml);
+    }
+  );
   it("rejects an unresolved authentication context without falling back to system credentials", async () => {
     const f = await fixture();
     const config = fs.readFileSync(path.join(f.cache, ".git", "config"), "utf8");

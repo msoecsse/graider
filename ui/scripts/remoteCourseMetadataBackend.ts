@@ -12,13 +12,14 @@ import {
 } from "../../src/config/config-validation.js";
 import {
   rawAssignmentConfigSchema,
-  SUPPORTED_SCHEMA_VERSION
+  OPERATIONAL_COURSE_SCHEMA_VERSION
 } from "../../src/config/config-schemas.js";
 import { parseYaml } from "../../src/io/stable-yaml.js";
 import { resolveFacultyScope } from "../../src/faculty/faculty-scope-resolver.js";
 
 const inspectCourseMetadata = (content: string) => {
-  // Check the version before applying the v1 shape, including future shapes.
+  // Production activation gate: parser support does not enable v2 authorization or mutations.
+  // Discovery, synchronization and transaction validation all use this inspector.
   const yaml = parseYaml(content, "course.yml");
   if (
     yaml.status === "success" &&
@@ -26,7 +27,7 @@ const inspectCourseMetadata = (content: string) => {
     typeof yaml.value === "object" &&
     "schema_version" in yaml.value &&
     typeof yaml.value.schema_version === "number" &&
-    yaml.value.schema_version !== SUPPORTED_SCHEMA_VERSION
+    yaml.value.schema_version !== OPERATIONAL_COURSE_SCHEMA_VERSION
   )
     return { status: "unsupported_schema" as const };
   const parsed = parseCourseConfig(content, "course.yml");

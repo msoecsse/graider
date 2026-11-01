@@ -2,10 +2,16 @@ import type { z } from "zod";
 import type {
   rawAssignmentConfigSchema,
   rawCourseConfigSchema,
+  rawCourseConfigV1Schema,
+  rawCourseConfigV2Schema,
+  facultyIdentitySchema,
   rawTermConfigSchema
 } from "./config-schemas.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 
+export type FacultyIdentity = z.infer<typeof facultyIdentitySchema>;
+export type RawCourseConfigV1 = z.infer<typeof rawCourseConfigV1Schema>;
+export type RawCourseConfigV2 = z.infer<typeof rawCourseConfigV2Schema>;
 export type RawCourseConfig = z.infer<typeof rawCourseConfigSchema>;
 export type RawTermConfig = z.infer<typeof rawTermConfigSchema>;
 export type RawAssignmentConfig = z.infer<typeof rawAssignmentConfigSchema>;

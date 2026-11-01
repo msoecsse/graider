@@ -2183,3 +2183,69 @@ out of scope.
   OAuth loopback listeners permitted.
 - Backend/UI typechecks, lint, formatting, root/UI/bundled-CLI production builds,
   and `git diff --check` pass. The existing renderer chunk-size advisory remains.
+
+## Phase 6 / Slice 6.1: Schema v2 persistent faculty directory
+
+This slice implements schema development only, following Phase 6 of the
+[implementation roadmap](graider-architecture-evolution-roadmap.md#phase-6--schema-v2-core-identity-and-authorization-model).
+Schema v1 remains production-compatible, including managed discovery, synchronization,
+faculty authorization, and course publication. Course Setup still writes schema 1.
+No user course is migrated, upgraded, or rewritten.
+
+Schema v2 initially retains every v1 course field, including grading, reports,
+notifications, and transitional faculty/grader teams, and adds:
+
+```yaml
+schema_version: 2
+# Existing course, github, defaults, grading, reports, notifications fields retained.
+faculty_directory:
+  - institutional_username: jones
+    github_user_id: 22993125
+    github_login: current-login
+    github_login_history: []
+```
+
+The [complete development fixture](../tests/fixtures/config/schema-v2-course.yml)
+is pre-migration/schema-development material, not an operational course template.
+`term.yml`, `assignment.yml`, and term section faculty arrays remain unchanged.
+
+`rawCourseConfigV1Schema` and `rawCourseConfigV2Schema` are strict versioned schemas
+sharing existing course fields. `RawCourseConfigV1` and `RawCourseConfigV2` form the
+supported `RawCourseConfig` union. `parseCourseConfig` dispatches on `schema_version`
+before validating shape; malformed v2 cannot fall through to v1. Unsupported numeric
+versions retain the `invalid_schema_version` diagnostic. Term and assignment schema
+support remains at version 1.
+
+The directory must be nonempty. Institutional usernames and current GitHub logins
+must be unique case-insensitively; GitHub user IDs must be unique positive safe
+integers. Required identity values cannot be missing, empty, or malformed.
+Institutional usernames cannot contain whitespace/control characters. GitHub logins
+reuse the roster login validator, case-insensitively, preserving their supplied
+spelling. Login history may be omitted (defaults to `[]`) or empty. Its entries must
+be valid logins, but need not be unique across records: history is metadata only.
+
+`FacultyDirectory` accepts a validated v2 course and exposes immutable snapshots via:
+
+- `resolveByGithubUserId(userId)`: canonical authenticated account identity lookup;
+- `resolveByInstitutionalUsername(username)`: case-insensitive transitional internal lookup.
+
+Current login and login history are exposed as metadata on the returned record.
+A changed current GitHub login with the same immutable user ID represents the same
+faculty identity. Neither current nor historical login is an authentication fallback.
+The model grants no permissions and never calls GitHub or updates YAML on rename.
+
+Parsing support does not activate production v2 authorization. The explicit
+`OPERATIONAL_COURSE_SCHEMA_VERSION` remains 1. The shared production metadata inspector
+rejects v2 and later versions as `unsupported_schema` before faculty authorization.
+Remote discovery, managed synchronization (including checked-out metadata), operational
+source validation, and transaction mutation validation use that inspector. A parsed v2
+course therefore cannot become writable through the managed production paths.
+The lower-level `loadCourseConfig`/`parseCourseConfig` APIs understand v2 for
+model/schema development. Existing `validateCourseConfig` operational validation stays
+at schema 1, so aggregate `loadGraiderConfig` consumers (including CLI Apply, grading,
+reporting, and workflow operations) also refuse v2 before executing. This preserves
+the v1 authorization boundary outside managed remote paths.
+
+Next slice: **6.2 — Fallback Administrator**. It must add transferable recovery
+authority using immutable faculty identity; login history must remain metadata.
+Production activation stays gated until the remaining Phase 6 authorization work is ready.

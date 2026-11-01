@@ -1,6 +1,15 @@
 import type { RawCourseConfig } from "./config-models.js";
-import { rawCourseConfigSchema } from "./config-schemas.js";
-import { validateRawConfigSchema, type SchemaValidationResult } from "./config-validation.js";
+import {
+  rawCourseConfigV1Schema,
+  rawCourseConfigV2Schema,
+  SUPPORTED_SCHEMA_VERSION,
+  COURSE_SCHEMA_VERSION_V2
+} from "./config-schemas.js";
+import {
+  createInvalidSchemaVersionDiagnostic,
+  validateRawConfigSchema,
+  type SchemaValidationResult
+} from "./config-validation.js";
 import { readTextFile } from "../io/file-system.js";
 import { parseYaml } from "../io/stable-yaml.js";
 
@@ -31,5 +40,24 @@ export const parseCourseConfig = (
     };
   }
 
-  return validateRawConfigSchema(filePath, rawCourseConfigSchema, yamlResult.value);
+  const value = yamlResult.value;
+  const version =
+    value && typeof value === "object" && "schema_version" in value
+      ? value.schema_version
+      : undefined;
+  if (
+    typeof version === "number" &&
+    version !== SUPPORTED_SCHEMA_VERSION &&
+    version !== COURSE_SCHEMA_VERSION_V2
+  ) {
+    return {
+      status: "failure",
+      diagnostics: [
+        createInvalidSchemaVersionDiagnostic(filePath, version, COURSE_SCHEMA_VERSION_V2)
+      ]
+    };
+  }
+  return version === COURSE_SCHEMA_VERSION_V2
+    ? validateRawConfigSchema(filePath, rawCourseConfigV2Schema, value)
+    : validateRawConfigSchema(filePath, rawCourseConfigV1Schema, value);
 };

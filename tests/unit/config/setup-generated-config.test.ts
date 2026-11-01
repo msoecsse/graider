@@ -61,6 +61,10 @@ describe("setup-generated grading configuration", () => {
 
     expect(result.status).toBe("success");
     if (result.status === "failure") throw new Error(JSON.stringify(result.diagnostics));
+    expect(result.config.course.schema_version).toBe(1);
+    expect(result.config.term.schema_version).toBe(1);
+    expect(result.config.assignment.schema_version).toBe(1);
+    expect(result.config.course).not.toHaveProperty("faculty_directory");
     expect(result.config.assignment.grading).toEqual({
       enabled: true,
       mode: "preset",

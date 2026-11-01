@@ -1,8 +1,12 @@
 import { z } from "zod";
+import { isGithubUsername } from "../roster/roster-validation.js";
 
 const MINIMUM_LIST_ITEMS = 1;
 
 export const SUPPORTED_SCHEMA_VERSION = 1;
+export const COURSE_SCHEMA_VERSION_V2 = 2;
+// Parsing support is independent of production authorization readiness.
+export const OPERATIONAL_COURSE_SCHEMA_VERSION = SUPPORTED_SCHEMA_VERSION;
 export const SUPPORTED_ASSIGNMENT_TYPE = "individual";
 export const SUPPORTED_REPOSITORY_VISIBILITY = "private";
 export const STUDENT_PERMISSION = "admin";
@@ -84,39 +88,105 @@ const notificationsSchema = z
   })
   .strict();
 
-export const rawCourseConfigSchema = z
+const courseConfigFields = {
+  course: z
+    .object({
+      code: z.string().min(MINIMUM_LIST_ITEMS),
+      title: z.string().min(MINIMUM_LIST_ITEMS),
+      repository: z.string().min(MINIMUM_LIST_ITEMS)
+    })
+    .strict(),
+  github: z
+    .object({
+      organization: z.string().min(MINIMUM_LIST_ITEMS),
+      repository_visibility: z.string().min(MINIMUM_LIST_ITEMS),
+      repo_name_pattern: z.string().min(MINIMUM_LIST_ITEMS),
+      student_permission: z.string().min(MINIMUM_LIST_ITEMS),
+      faculty_team: z.string().min(MINIMUM_LIST_ITEMS),
+      faculty_permission: z.string().min(MINIMUM_LIST_ITEMS),
+      grader_team: z.string().min(MINIMUM_LIST_ITEMS).optional(),
+      grader_permission: z.string().min(MINIMUM_LIST_ITEMS).optional()
+    })
+    .strict(),
+  defaults: z
+    .object({
+      timezone: z.string().min(MINIMUM_LIST_ITEMS),
+      assignment_type: z.string().min(MINIMUM_LIST_ITEMS)
+    })
+    .strict(),
+  grading: gradingSchema.optional(),
+  reports: reportsSchema,
+  notifications: notificationsSchema.optional()
+};
+
+const githubLoginSchema = z.string().refine((value) => isGithubUsername(value.toLowerCase()), {
+  message: "Invalid GitHub login."
+});
+
+export const facultyIdentitySchema = z
   .object({
-    schema_version: z.number(),
-    course: z
-      .object({
-        code: z.string().min(MINIMUM_LIST_ITEMS),
-        title: z.string().min(MINIMUM_LIST_ITEMS),
-        repository: z.string().min(MINIMUM_LIST_ITEMS)
-      })
-      .strict(),
-    github: z
-      .object({
-        organization: z.string().min(MINIMUM_LIST_ITEMS),
-        repository_visibility: z.string().min(MINIMUM_LIST_ITEMS),
-        repo_name_pattern: z.string().min(MINIMUM_LIST_ITEMS),
-        student_permission: z.string().min(MINIMUM_LIST_ITEMS),
-        faculty_team: z.string().min(MINIMUM_LIST_ITEMS),
-        faculty_permission: z.string().min(MINIMUM_LIST_ITEMS),
-        grader_team: z.string().min(MINIMUM_LIST_ITEMS).optional(),
-        grader_permission: z.string().min(MINIMUM_LIST_ITEMS).optional()
-      })
-      .strict(),
-    defaults: z
-      .object({
-        timezone: z.string().min(MINIMUM_LIST_ITEMS),
-        assignment_type: z.string().min(MINIMUM_LIST_ITEMS)
-      })
-      .strict(),
-    grading: gradingSchema.optional(),
-    reports: reportsSchema,
-    notifications: notificationsSchema.optional()
+    institutional_username: z
+      .string()
+      .min(MINIMUM_LIST_ITEMS)
+      .regex(/^[^\s\p{C}]+$/u),
+    github_user_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    github_login: githubLoginSchema,
+    github_login_history: z.array(githubLoginSchema).default([])
   })
   .strict();
+
+const facultyDirectorySchema = z
+  .array(facultyIdentitySchema)
+  .min(MINIMUM_LIST_ITEMS)
+  .superRefine((records, context) => {
+    const usernames = new Set<string>();
+    const ids = new Set<number>();
+    const logins = new Set<string>();
+    records.forEach((record, index) => {
+      const keys = [
+        ["institutional_username", record.institutional_username.toLowerCase(), usernames],
+        ["github_login", record.github_login.toLowerCase(), logins]
+      ] as const;
+      keys.forEach(([field, value, seen]) => {
+        if (seen.has(value)) {
+          context.addIssue({
+            code: "custom",
+            path: [index, field],
+            message: `Duplicate ${field}.`
+          });
+        }
+        seen.add(value);
+      });
+      if (ids.has(record.github_user_id)) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "github_user_id"],
+          message: "Duplicate GitHub user ID."
+        });
+      }
+      ids.add(record.github_user_id);
+    });
+  });
+
+export const rawCourseConfigV1Schema = z
+  .object({
+    schema_version: z.literal(SUPPORTED_SCHEMA_VERSION),
+    ...courseConfigFields
+  })
+  .strict();
+
+export const rawCourseConfigV2Schema = z
+  .object({
+    schema_version: z.literal(COURSE_SCHEMA_VERSION_V2),
+    ...courseConfigFields,
+    faculty_directory: facultyDirectorySchema
+  })
+  .strict();
+
+export const rawCourseConfigSchema = z.discriminatedUnion("schema_version", [
+  rawCourseConfigV1Schema,
+  rawCourseConfigV2Schema
+]);
 
 export const rawTermConfigSchema = z
   .object({

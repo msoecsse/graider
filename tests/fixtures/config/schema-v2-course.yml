@@ -1,0 +1,35 @@
+# Schema development fixture only: not migrated or operational.
+schema_version: 2
+course:
+  code: se2030
+  title: Software Engineering
+  repository: se2030-graider
+github:
+  organization: example-org
+  repository_visibility: private
+  repo_name_pattern: "{term}-{course}-{assignment}-{student}"
+  student_permission: admin
+  faculty_team: faculty
+  faculty_permission: admin
+  grader_team: graders
+  grader_permission: maintain
+defaults:
+  timezone: Asia/Tokyo
+  assignment_type: individual
+grading:
+  enabled: true
+  workflow: grade.yml
+  artifact: grading-results
+  result_file: results.json
+reports:
+  formats:
+    - markdown
+faculty_directory:
+  - institutional_username: jones
+    github_user_id: 22993125
+    github_login: Current-Login
+    github_login_history: [old-login]
+  - institutional_username: smith
+    github_user_id: 22993126
+    github_login: another-login
+    github_login_history: []

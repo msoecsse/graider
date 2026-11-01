@@ -114,18 +114,20 @@ export const validateRosterSection = (
         )
       ];
 
+export const isGithubUsername = (githubUsername: string): boolean =>
+  githubUsername.length > 0 &&
+  githubUsername.length <= GITHUB_USERNAME_MAX_LENGTH &&
+  GITHUB_USERNAME_PATTERN.test(githubUsername) &&
+  !githubUsername.startsWith(HYPHEN) &&
+  !githubUsername.endsWith(HYPHEN) &&
+  !githubUsername.includes(CONSECUTIVE_HYPHENS);
+
 export const validateGithubUsername = (
   rosterPath: string,
   rowNumber: number,
   githubUsername: string
 ): Diagnostic[] => {
-  const isValid =
-    githubUsername.length > 0 &&
-    githubUsername.length <= GITHUB_USERNAME_MAX_LENGTH &&
-    GITHUB_USERNAME_PATTERN.test(githubUsername) &&
-    !githubUsername.startsWith(HYPHEN) &&
-    !githubUsername.endsWith(HYPHEN) &&
-    !githubUsername.includes(CONSECUTIVE_HYPHENS);
+  const isValid = isGithubUsername(githubUsername);
 
   return isValid
     ? []
