@@ -12,7 +12,8 @@ import {
 } from "../../src/config/config-validation.js";
 import {
   rawAssignmentConfigSchema,
-  OPERATIONAL_COURSE_SCHEMA_VERSION
+  OPERATIONAL_COURSE_SCHEMA_VERSION,
+  OPERATIONAL_TERM_SCHEMA_VERSION
 } from "../../src/config/config-schemas.js";
 import { parseYaml } from "../../src/io/stable-yaml.js";
 import { resolveFacultyScope } from "../../src/faculty/faculty-scope-resolver.js";
@@ -48,6 +49,7 @@ const inspectTermFacultyMetadata = (content: string, termCode: string, username:
   const parsed = parseTermConfig(content, metadataPath);
   if (
     parsed.status === "failure" ||
+    parsed.value.schema_version !== OPERATIONAL_TERM_SCHEMA_VERSION ||
     validateTermConfig(metadataPath, parsed.value, termCode).length > 0
   )
     return "invalid_metadata" as const;

@@ -188,8 +188,12 @@ describe("bundled Git managed synchronization, real two-clone history", () => {
       const head = await git(f.cache, ["rev-parse", "HEAD"]);
       fs.writeFileSync(
         path.join(f.writer, "terms/27s1/term.yml"),
-        termYaml.replace("schema_version: 1", `schema_version: ${version}`) +
-          "coordinators:\n  current: [{github_user_id: 42}]\n  former: []\n"
+        termYaml
+          .replace("schema_version: 1", `schema_version: ${version}`)
+          .replaceAll(
+            "    faculty: [jones]",
+            "    faculty:\n      current: [{github_user_id: 42}]\n      former: []"
+          ) + "coordinators:\n  current: [{github_user_id: 42}]\n  former: []\n"
       );
       await f.advance();
       expect(await f.sync()).toMatchObject({

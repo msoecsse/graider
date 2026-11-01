@@ -14,3 +14,8 @@ coordinators:
 sections:
   - id: "001"
     roster: rosters/section-001.csv
+    faculty:
+      current:
+        - github_user_id: 22993125
+      former:
+        - github_user_id: 22993126

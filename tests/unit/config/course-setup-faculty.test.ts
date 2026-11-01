@@ -29,6 +29,7 @@ describe("course setup faculty mappings", () => {
     if (loaded.status === "failure") {
       throw new Error("Expected generated term.yml to load.");
     }
+    expect(loaded.value.schema_version).toBe(1);
     expect(loaded.value.sections).toEqual([
       { id: "001", roster: "rosters/section-001.csv", faculty: ["jones", "smith"] },
       { id: "002", roster: "rosters/section-002.csv", faculty: ["jones"] }

@@ -211,47 +211,52 @@ const termConfigFields = {
       semester: z.union([z.literal(1), z.literal(2), z.literal(3)]),
       display_name: z.string().min(MINIMUM_LIST_ITEMS)
     })
-    .strict(),
-  sections: z
-    .array(
-      z
-        .object({
-          id: z.string().min(MINIMUM_LIST_ITEMS),
-          roster: z.string().min(MINIMUM_LIST_ITEMS).optional(),
-          faculty: z.array(z.string().min(MINIMUM_LIST_ITEMS)).optional()
-        })
-        .strict()
-    )
-    .min(MINIMUM_LIST_ITEMS)
+    .strict()
 };
 
-const coordinatorReferenceSchema = z.object({ github_user_id: githubUserIdSchema }).strict();
-const coordinatorsSchema = z
-  .object({
-    current: z.array(coordinatorReferenceSchema),
-    former: z.array(coordinatorReferenceSchema)
-  })
-  .strict()
-  .superRefine((coordinators, context) => {
-    const seen = new Set<number>();
-    for (const role of ["current", "former"] as const) {
-      coordinators[role].forEach((reference, index) => {
-        if (seen.has(reference.github_user_id)) {
-          context.addIssue({
-            code: "custom",
-            path: [role, index, "github_user_id"],
-            message: "Coordinator IDs must be unique across current and former roles."
-          });
-        }
-        seen.add(reference.github_user_id);
-      });
-    }
-  });
+const sectionConfigFields = {
+  id: z.string().min(MINIMUM_LIST_ITEMS),
+  roster: z.string().min(MINIMUM_LIST_ITEMS).optional()
+};
+
+const facultyReferenceSchema = z.object({ github_user_id: githubUserIdSchema }).strict();
+const facultyRoleHistorySchema = (roleName: string) =>
+  z
+    .object({
+      current: z.array(facultyReferenceSchema),
+      former: z.array(facultyReferenceSchema)
+    })
+    .strict()
+    .superRefine((history, context) => {
+      const seen = new Set<number>();
+      for (const role of ["current", "former"] as const) {
+        history[role].forEach((reference, index) => {
+          if (seen.has(reference.github_user_id)) {
+            context.addIssue({
+              code: "custom",
+              path: [role, index, "github_user_id"],
+              message: `${roleName} IDs must be unique across current and former roles.`
+            });
+          }
+          seen.add(reference.github_user_id);
+        });
+      }
+    });
 
 export const rawTermConfigV1Schema = z
   .object({
     schema_version: z.literal(SUPPORTED_SCHEMA_VERSION),
-    ...termConfigFields
+    ...termConfigFields,
+    sections: z
+      .array(
+        z
+          .object({
+            ...sectionConfigFields,
+            faculty: z.array(z.string().min(MINIMUM_LIST_ITEMS)).optional()
+          })
+          .strict()
+      )
+      .min(MINIMUM_LIST_ITEMS)
   })
   .strict();
 
@@ -259,7 +264,17 @@ export const rawTermConfigV2Schema = z
   .object({
     schema_version: z.literal(TERM_SCHEMA_VERSION_V2),
     ...termConfigFields,
-    coordinators: coordinatorsSchema
+    coordinators: facultyRoleHistorySchema("Coordinator"),
+    sections: z
+      .array(
+        z
+          .object({
+            ...sectionConfigFields,
+            faculty: facultyRoleHistorySchema("Section faculty")
+          })
+          .strict()
+      )
+      .min(MINIMUM_LIST_ITEMS)
   })
   .strict();
 

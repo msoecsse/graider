@@ -94,8 +94,12 @@ describe("trusted read-only remote course discovery", () => {
     async (version) => {
       const f = fixture();
       const v2Term =
-        termYaml.replace("schema_version: 1", `schema_version: ${version}`) +
-        "coordinators:\n  current: [{github_user_id: 42}]\n  former: []\n";
+        termYaml
+          .replace("schema_version: 1", `schema_version: ${version}`)
+          .replaceAll(
+            "    faculty: [jones]",
+            "    faculty:\n      current: [{github_user_id: 42}]\n      former: []"
+          ) + "coordinators:\n  current: [{github_user_id: 42}]\n  former: []\n";
       f.reader.file.mockImplementation((_repo, metadataPath) =>
         Promise.resolve(metadataPath === "course.yml" ? courseYaml : v2Term)
       );

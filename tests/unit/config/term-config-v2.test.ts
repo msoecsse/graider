@@ -28,7 +28,11 @@ describe("versioned term parsing", () => {
     const result = loadTermConfig(v1File);
     expect(result).toMatchObject({
       status: "success",
-      value: { schema_version: 1, term: term.term, sections: term.sections }
+      value: {
+        schema_version: 1,
+        term: term.term,
+        sections: term.sections.map(({ id, roster }) => ({ id, roster }))
+      }
     });
     if (result.status === "success") {
       expect(result.value).toStrictEqual(rawTermConfigV1Schema.parse(result.value));
@@ -36,13 +40,16 @@ describe("versioned term parsing", () => {
     }
   });
 
-  it("parses multiple current coordinators and former history with unchanged sections", () => {
+  it("parses multiple current coordinators and former history with v2 sections", () => {
     const value = { ...term, coordinators: { current: [first], former: [second] } };
     expect(parse(term)).toMatchObject({ status: "success", value: term });
     expect(parse(value)).toMatchObject({ status: "success", value });
     expect(rawTermConfigSchema.parse(value)).toEqual(rawTermConfigV2Schema.parse(value));
     expect(
-      parse({ ...term, sections: [{ ...term.sections[0], faculty: ["jones", "smith"] }] }).status
+      parse({
+        ...term,
+        sections: [{ ...term.sections[0], faculty: { current: [first, second], former: [] } }]
+      }).status
     ).toBe("success");
   });
 

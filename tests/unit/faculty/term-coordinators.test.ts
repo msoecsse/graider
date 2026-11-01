@@ -42,7 +42,12 @@ const course = rawCourseConfigV2Schema.parse({
 });
 const term = rawTermConfigV2Schema.parse({
   ...parsedTerm.value,
-  sections: [{ ...parsedTerm.value.sections[0], faculty: ["jones"] }],
+  sections: [
+    {
+      ...parsedTerm.value.sections[0],
+      faculty: { current: [{ github_user_id: a.github_user_id }], former: [] }
+    }
+  ],
   coordinators: {
     current: [{ github_user_id: a.github_user_id }, { github_user_id: b.github_user_id }],
     former: [{ github_user_id: d.github_user_id }]
@@ -135,7 +140,7 @@ describe("term coordinator identity and history", () => {
     expect(model.getCurrentCoordinators()).toEqual([a, b]);
     expect(rawTermConfigV2Schema.safeParse(added).success).toBe(true);
     // Returned terms and nested section faculty metadata cannot change the source or model snapshot.
-    added.sections[0]?.faculty?.push("later-faculty");
+    added.sections[0]?.faculty.former.push({ github_user_id: c.github_user_id });
     added.coordinators.former.push({ github_user_id: a.github_user_id });
     expect(term).toEqual(originalTerm);
     expect(afterRestore.addCurrentCoordinator(c.github_user_id).coordinators.former).toEqual(

@@ -2285,7 +2285,7 @@ or transfer UI is enabled. Assignment schema and operational term behavior remai
 
 ## Phase 6 / Slice 6.3: Term Coordinator Model
 
-Schema v2 terms retain the existing term metadata and section shape and add:
+Schema v2 terms retain the existing term metadata and section ID/roster fields and add:
 
 ```yaml
 schema_version: 2
@@ -2302,17 +2302,21 @@ coordinators:
 sections:
   - id: "001"
     roster: rosters/section-001.csv
-    faculty: [jones]
+    faculty:
+      current:
+        - github_user_id: 22993125
+      former:
+        - github_user_id: 22993126
 ```
 
 The [paired development term fixture](../tests/fixtures/config/schema-v2-term.yml)
 references the [development course directory](../tests/fixtures/config/schema-v2-course.yml).
 These are pre-migration/schema-development examples, not operational templates.
-Section faculty arrays retain their v1 representation until Slice 6.4; no coordinators
-are inferred from those arrays.
+V1 section faculty arrays remain unchanged. V2 section history is described below;
+no coordinators are inferred from section assignments.
 
-`rawTermConfigV1Schema` and `rawTermConfigV2Schema` share existing metadata/section
-fields, with corresponding `RawTermConfigV1`/`RawTermConfigV2` types and the supported
+`rawTermConfigV1Schema` and `rawTermConfigV2Schema` share metadata and section ID/roster
+fields, with version-specific faculty shapes and corresponding `RawTermConfigV1`/`RawTermConfigV2` types and the supported
 `RawTermConfig` union. `parseTermConfig` explicitly dispatches on `schema_version`;
 malformed v2 cannot fall through to v1. Unsupported numeric versions retain the
 `invalid_schema_version` diagnostic. Both versioned shapes remain strict.
@@ -2359,5 +2363,81 @@ validation on v1 terms even when the course itself is v1. V2 course inspection s
 gated independently. Apply, grading, reports, Course Setup output, and current faculty
 scope remain unchanged. No real course is rewritten or migrated.
 
-Next slice: **6.4 — Section Faculty History**. Reuse immutable faculty references and
-preserve coordinator/fallback separation and the production gate.
+## Phase 6 / Slice 6.4: Section Faculty History
+
+V2 sections now require current/former immutable faculty references:
+
+```yaml
+sections:
+  - id: "001"
+    roster: rosters/section-001.csv
+    faculty:
+      current:
+        - github_user_id: 22993125
+      former:
+        - github_user_id: 22993126
+  - id: "002"
+    roster: rosters/section-002.csv
+    faculty:
+      current:
+        - github_user_id: 22993126
+      former: []
+```
+
+The [development term fixture](../tests/fixtures/config/schema-v2-term.yml) uses the
+new shape. It remains pre-migration/schema-development material. V1 retains optional
+username arrays (`faculty: [jones, smith]`); no arrays are migrated, reinterpreted,
+or used to infer v2 historical assignments. V2 rejects username arrays.
+
+Both v2 `faculty.current` and `faculty.former` arrays are required. References use the
+same strict `{ github_user_id }` shape as coordinators: positive safe integer IDs,
+no copied usernames/logins, no unexpected fields. IDs must be unique within and across
+both lists **for each section**. The same ID can be current in one section and former
+in another. Raw schemas validate reference syntax without consulting course metadata.
+
+`SectionFaculty(course, term, sectionId)` validates and snapshots both v2 inputs,
+selects exactly one matching section, and resolves all section faculty references in
+the term through `FacultyDirectory`. Missing/ambiguous section IDs and unknown faculty
+references fail domain construction. The domain API is:
+
+- `getCurrentFaculty()` / `getFormerFaculty()`: immutable faculty-record snapshots;
+- `isCurrentFaculty(githubUserId)` / `isFormerFaculty(githubUserId)`: membership in the
+  selected section, matched by immutable ID only;
+- `addCurrentFaculty(githubUserId)`: add an existing faculty member without history in
+  this section;
+- `removeCurrentFaculty(githubUserId)`: move current membership into former history;
+- `restoreFormerFaculty(githubUserId)`: move former membership back to current.
+
+Transitions return independent validated v2 terms and change only the selected
+section's faculty lists. They preserve term metadata, rosters, other sections,
+coordinators, fallback administrator, and the entire faculty directory. Unknown IDs,
+already-current additions, additions with former history, removal of non-current
+faculty, and restoration of non-former faculty throw. Former identities must be
+restored explicitly; historical faculty records are never deleted.
+
+Current faculty teach this section now; former faculty previously taught this section.
+The identity relationship is `immutable GitHub user ID → faculty directory → section role`.
+Current login, login history, and institutional username remain metadata and cannot
+serve as role-match fallbacks. Login renames do not change membership or rewrite YAML.
+
+Both raw schema and domain model allow zero current faculty, including removal of the
+last current member. Unassigned sections are valid at this stage. Requiring assignments
+before activation belongs to future lifecycle policy; the coordinator model's minimum
+current-coordinator invariant is not applied to section faculty.
+
+Section membership is independent of coordinator and fallback-administrator roles.
+Holding either role does not add section membership; adding section faculty does not
+make them a coordinator or fallback administrator. One faculty identity may hold
+several roles independently. No permissions or historical-read access are enforced
+by this slice.
+
+`OPERATIONAL_COURSE_SCHEMA_VERSION` and `OPERATIONAL_TERM_SCHEMA_VERSION` remain **1**.
+Production aggregate loading, discovery authorization, managed synchronization and
+transactions, Apply, grading, reports, and Course Setup remain on v1. Production scope
+resolution explicitly narrows to v1 before interpreting username arrays. Course Setup
+continues generating schema 1 with v1 faculty arrays. No real course is modified or
+migrated, and no v2 publication is enabled.
+
+Next slice: **6.5 — Unified Authorization Resolver**. Compose independent section,
+coordinator, and fallback identities without login fallback; historical access and
+permission decisions remain unimplemented, and production activation stays gated.

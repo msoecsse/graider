@@ -1,4 +1,5 @@
 import path from "node:path";
+import { OPERATIONAL_TERM_SCHEMA_VERSION } from "../config/config-schemas.js";
 import { validateTermConfig } from "../config/config-validation.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 import { loadTermConfig } from "../config/load-term-config.js";
@@ -43,7 +44,10 @@ export const resolveFacultyScopeContext = (
   }
 
   const termDiagnostics = validateTermConfig(termConfigPath, termResult.value, request.termCode);
-  if (termDiagnostics.length > 0) {
+  if (
+    termResult.value.schema_version !== OPERATIONAL_TERM_SCHEMA_VERSION ||
+    termDiagnostics.length > 0
+  ) {
     return {
       status: "term_config_error",
       sections: [],
