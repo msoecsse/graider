@@ -109,7 +109,7 @@ describe("v2 authorization permission matrix", () => {
     for (const name of names) {
       const auth = new AuthorizationResolver(
         course,
-        { ...term, term: { ...term.term, status } },
+        { ...term, term: { ...term.term, status, has_ever_been_active: true } },
         id(name)
       );
       expect(capabilities(auth)).toEqual(capabilities(resolver(name)));

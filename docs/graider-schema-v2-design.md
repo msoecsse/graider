@@ -137,9 +137,30 @@ does not erase the former coordinator. `end_reason` must distinguish removal
 during an active term from normal completion/archival because their later
 rights differ. An equivalent explicit outcome field is acceptable.
 
-`has_ever_been_active` (or an equivalent irreversible lifecycle event) is
-durable because it prevents a formerly Active term from being treated as a
-deletable Draft after recovery.
+Slice 8.3 implements required boolean `term.has_ever_been_active` as durable irreversible
+evidence. Active and Archived terms require true; Draft permits false or true so
+future recovery can retain prior activation evidence. New Drafts use false.
+Activation always sets true and never resets it; v1 is unchanged. This prevents a
+formerly Active term from being treated as a never-activated deletable Draft.
+
+Normal activation publishes previous Active → Archived and selected Draft → Active
+in one exact-revision course/admin commit. Initial zero-Active activation requires
+fallback alone and changes only the target. With an Active term, its current
+coordinators or fallback authorize. Draft preparation/setup does not authorize it.
+
+External organization/team/permission state is reconciled after confirmed metadata
+publication, using a lifecycle-aware course role projection: Active current
+coordinators get admin; Draft preparation, Active section work and normally completed
+Archived current roles retain write; remaining former roles retain read. Scoped
+term/section history is unchanged and fallback remains separate. Phase 7 defaults
+remain available without lifecycle projection.
+
+Pending/incomplete external state leaves lifecycle Active and reports Needs
+reconciliation with blocked student-facing readiness. It never triggers automatic
+Git rollback. Reconciliation/readiness is not another lifecycle enum or a new
+persisted checkpoint. Production gates remain 1; recovery checkpoints are deferred
+to 8.5 before activation becomes operational. See
+[the implemented activation contract](graider-remote-course-architecture.md#92-active).
 
 At most one term is Active in a valid complete snapshot. Initial setup before
 first activation, future course archive and recovery may have zero; callers

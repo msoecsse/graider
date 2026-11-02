@@ -13,7 +13,7 @@ import { FallbackAdministrator } from "../../../src/faculty/fallback-administrat
 
 const withStatus = (status: TermLifecycleStatus, code = term.term.code): RawTermConfigV2 => ({
   ...structuredClone(term),
-  term: { ...term.term, code, status }
+  term: { ...term.term, code, status, has_ever_been_active: status !== "draft" }
 });
 
 describe("course term lifecycle snapshots", () => {

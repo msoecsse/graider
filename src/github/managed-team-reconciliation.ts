@@ -1,4 +1,5 @@
 import type { RawCourseConfigV2, RawTermConfigV2 } from "../config/config-models.js";
+import { buildLifecycleTeamMemberships } from "./lifecycle-team-membership.js";
 import { rawCourseConfigV2Schema } from "../config/config-schemas.js";
 import { FacultyDirectory } from "../faculty/faculty-directory.js";
 import { isGithubUsername } from "../roster/roster-validation.js";
@@ -143,14 +144,15 @@ export class ManagedTeamMembershipReconciler {
     },
     private readonly organizationAccess: Pick<FacultyOrganizationReconciler, "inspect">,
     /** All calls are awaited. Production must commit this journal durably before POST. */
-    private readonly creationJournal: FacultyInvitationJournal
+    private readonly creationJournal: FacultyInvitationJournal,
+    membershipProjection: "all-terms" | "term-lifecycle" = "all-terms"
   ) {
     this.course = rawCourseConfigV2Schema.parse(context.course);
-    this.desired = buildDesiredTeamMemberships(
-      this.course,
-      context.terms,
-      context.courseRepositoryId
-    );
+    this.desired = (
+      membershipProjection === "term-lifecycle"
+        ? buildLifecycleTeamMemberships
+        : buildDesiredTeamMemberships
+    )(this.course, context.terms, context.courseRepositoryId);
     this.directory = new FacultyDirectory(this.course);
     if (!positiveId(context.authenticatedUserId))
       throw new Error("Invalid authenticated account ID.");

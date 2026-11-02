@@ -74,7 +74,7 @@ const draft = rawTermConfigV2Schema.parse({
 });
 const active: RawTermConfigV2 = {
   ...structuredClone(draft),
-  term: { ...draft.term, code: "26s3", status: "active" },
+  term: { ...draft.term, code: "26s3", status: "active", has_ever_been_active: true },
   coordinators: {
     current: [ref("active-coordinator")],
     former: [ref("active-former-coordinator")]
@@ -88,7 +88,7 @@ const archived: RawTermConfigV2 = {
 };
 const otherDraft: RawTermConfigV2 = {
   ...structuredClone(active),
-  term: { ...active.term, code: "27s2", status: "draft" },
+  term: { ...active.term, code: "27s2", status: "draft", has_ever_been_active: false },
   coordinators: { current: [ref("other-draft-coordinator")], former: [] }
 };
 const terms = [archived, draft, otherDraft, active];

@@ -380,6 +380,7 @@ term:
   semester: 1
   display_name: Spring 2027
   status: draft
+  has_ever_been_active: false
 ```
 
 Allowed `term.status` values are exactly `draft`, `active`, and `archived`. The field
@@ -506,8 +507,8 @@ behavior and Phase 7 membership, repository permissions and branch policy remain
 unchanged. No production Apply/grading/publication/Setup/Electron IPC calls this
 resolver. Both operational schema gates remain **1**, Course Setup emits v1, and
 no real course is migrated. Archived authorization remains deferred to 8.4.
-Next: **8.3 — Atomic Activation**, including actual lifecycle mutation and the
-authorization/team desired-state transition; 8.2 performs neither.
+Slice 8.3 below implements actual lifecycle mutation and the authorization/team
+desired-state transition; 8.2 itself performs neither.
 
 ### 9.2 Active
 
@@ -522,14 +523,114 @@ Activation authority belongs to:
 
 For the initial term, the fallback administrator provides activation authority.
 
-Activation is atomic:
+The authoritative lifecycle metadata transition is atomic in the course/admin
+repository. External GitHub organization/team/permission changes follow it as desired
+state reconciliation; Git and organization APIs are not a distributed transaction.
+
+Activation performs:
 
 1. the previous Active term becomes Archived;
 2. the selected Draft term becomes Active;
-3. new coordinator/faculty permissions take effect;
-4. dashboards and normal workflows switch to the new Active term.
+3. the single metadata commit is non-force pushed and remote acceptance verified;
+4. derived coordinator/faculty team and permission state is reconciled afterward.
+
+Future dashboards select the authoritative Active term; student-facing readiness is
+separate from lifecycle status and remains blocked while required reconciliation is
+incomplete. No current v1 dashboard/workflow switch is introduced.
 
 There must never be two Active terms.
+
+**Slice 8.3 implementation contract (complete):**
+
+`TermActivationAuthorizationResolver` authorizes only a current coordinator of the
+existing Active term or the course fallback administrator. With zero Active terms,
+only fallback may activate. Target Draft coordination, teaching, former roles,
+directory membership and 8.2 preparation/setup capabilities never imply activation
+authority. Immutable decisions distinguish `current-active-term-coordinator`,
+`fallback-administrator`, `initial-activation-fallback-required` and
+`no-activation-authority`. Every term's coordinator/section-faculty references and
+current-coordinator invariant are validated against the directory.
+
+V2 requires explicit boolean `term.has_ever_been_active`. Active and Archived require
+`true`; Draft allows `false` (new term) or `true` (future recovery compatibility).
+Activation sets the target to `active`/`true`, archives the predecessor while
+retaining `true`, and never resets history. V1 is unchanged. Dates never authorize
+or trigger activation. `planTermActivation()` produces deeply frozen before/after
+complete term snapshots, target/predecessor codes and changed codes; a successful
+plan has exactly one Active, the target. All other domain fields and current/former
+role histories are preserved.
+
+`activateManagedTerm()` is an internal, uncalled v2 adapter over
+`publishManagedCourseTransaction()`. The future trusted caller must hold the existing
+account/repository lease, establish an exact synchronized revision and bind the
+immutable course/organization/account identities. The adapter replans/authorizes
+inside the exact transaction clone, edits all affected term YAML files, and validates
+the complete post-edit v2 state. The transaction's operation-scoped allowlist stages
+both lifecycle files in one commit (one target file for zero Active), then uses the
+existing session/repository revalidation, freshness fetch, non-force push and remote
+commit/ancestry verification for lost responses. No intermediate lifecycle snapshot
+is committed or published. Stale views, clone races and remote changes before push
+fail without merge, rebase, force, automatic replanning or retry.
+
+The transaction gains only a trusted internal metadata-validator hook; existing
+production callers retain their v1 validator and operational gates. The adapter
+refuses v1 contexts and has no IPC/button/current production entry point. Metadata
+is read from every canonical term directory, with folder/code and directory/role
+validation. Changed YAML preserves unrelated domain fields and role records.
+
+After confirmed publication, the adapter revalidates repository/session and pins the
+refreshed revision to the published commit before any external reconciliation. If
+the source has advanced or freshness cannot be established, activation remains
+committed, reconciliation is skipped, and readiness is blocked pending explicit
+fresh inspection. A confirmed publication is never undone because refresh or
+reconciliation fails.
+The same revision/session/repository boundary is checked again after external work
+before reporting readiness; a concurrent remote change requires fresh reconciliation.
+
+`buildLifecycleTeamMemberships()` is the explicit lifecycle projection consumed by
+activation. Phase 7's `buildDesiredTeamMemberships()` and reconciler defaults retain
+their original lifecycle-neutral behavior. `ManagedTeamMembershipReconciler` accepts
+the opt-in `term-lifecycle` projection, using the existing team identity, creation,
+membership verification and durable-journal machinery.
+
+| Course-wide team              | Lifecycle-derived effective members                                                                                                                      |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `course-current-coordinators` | Current coordinators of the one Active term only.                                                                                                        |
+| `course-write`                | Current Draft coordinators/faculty, Active section faculty, and normally completed Archived current coordinators/faculty, excluding Active coordinators. |
+| `course-read`                 | Remaining former coordinator/faculty historical roles without independent write/admin.                                                                   |
+
+Strongest role wins: Active coordinator > write > read. Fallback is never inserted
+merely for being fallback; its direct administration remains separate. On successor
+activation, the previous current coordinator normally moves from course admin to
+write and the new Active coordinator moves from write to admin. Every term/section
+current/former team retains its identity and membership. Archival does not turn
+current people into former people or remove normally completed late-grading access.
+Archived authorization restrictions remain for 8.4.
+
+`reconcileTermActivation()` composes 7.2 organization access, 7.3 membership with the
+lifecycle projection, 7.4 course permissions, and 7.5 permissions for existing trusted
+student repository evidence. Its permission readers use fresh observation and the
+same projection, including verified renamed locators. It never provisions student
+repositories or changes branch policy. Draft-scoped repository grants are rejected.
+Relevant faculty and fallback organization access is reconciled with the existing
+invitation journal; directory-only faculty are not automatically invited.
+
+The activation result is `activated_reconciled` or
+`activated_needs_reconciliation`, with commit, before/after plan, refresh status,
+reconciliation outcomes and `studentFacingReady`. Pending faculty invitations are
+permitted after activation: they make reconciliation incomplete, not metadata
+publication a failure. Pending/Needs-attention organization, team or permission
+outcomes block readiness. Scope/rate-limit/unverified/ambiguous write failures also
+leave the activation committed and report Needs reconciliation. No blind retry or
+automatic lifecycle rollback occurs. Explicit reconciliation can converge from fresh
+authoritative metadata, observed GitHub state and retained durable journals.
+
+No new lifecycle enum or persisted reconciliation/recovery checkpoint is introduced.
+`has_ever_been_active`, Git history and the structured predecessor/target result retain
+activation evidence. Exceptional rollback/checkpoints remain for 8.5 before production
+activation is enabled; ordinary backward transitions remain forbidden. Both operational
+schema gates remain **1**; Course Setup emits v1 and no real course migrates.
+Next: **8.4 — Term Archival Restrictions**.
 
 ### 9.3 Archived
 
@@ -1430,7 +1531,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slices 8.1–8.2 are complete. Next: Phase 8 / Slice 8.3 — Atomic Activation.**
+**Phase 7 and Slices 8.1–8.3 are complete. Next: Phase 8 / Slice 8.4 — Term Archival Restrictions.**
 
 ---
 
@@ -3402,6 +3503,6 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slices 8.1–8.2 are complete. The next planned work is **Phase 8 / Slice 8.3 —
-Atomic Activation**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.3 are complete. The next planned work is **Phase 8 / Slice 8.4 —
+Term Archival Restrictions**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.

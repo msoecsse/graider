@@ -7,6 +7,7 @@ term:
   semester: 1
   display_name: Spring 2027
   status: draft
+  has_ever_been_active: false
 coordinators:
   current:
     - github_user_id: 22993125

@@ -115,7 +115,10 @@ describe("trusted student repository targets", () => {
         f.client,
         {
           ...f.context,
-          terms: f.context.terms.map((value) => ({ ...value, term: { ...value.term, status } }))
+          terms: f.context.terms.map((value) => ({
+            ...value,
+            term: { ...value.term, status, has_ever_been_active: true }
+          }))
         },
         f.inspect
       );

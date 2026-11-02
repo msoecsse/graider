@@ -28,7 +28,7 @@ import {
 describe("verified managed team membership reconciliation", () => {
   it.each(TERM_LIFECYCLE_STATUSES)("preserves Phase 7 membership for %s", async (status) => {
     const baseline = fixture();
-    const f = fixture([{ ...term, term: { ...term.term, status } }]);
+    const f = fixture([{ ...term, term: { ...term.term, status, has_ever_been_active: true } }]);
     expect(await f.service.reconcile()).toEqual(await baseline.service.reconcile());
     expect(f.client.membershipWrites).toEqual(baseline.client.membershipWrites);
   });

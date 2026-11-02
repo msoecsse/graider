@@ -49,6 +49,8 @@ export interface ManagedTransactionRequest<T> {
   readonly revalidateRepository?: () => Promise<void>;
   readonly author: { readonly name: string; readonly email: string };
   readonly allows: (file: string) => boolean;
+  /** Internal backend policy only. Production callers retain the operational v1 default. */
+  readonly validateMetadata?: (root: string, organization: string) => void;
   readonly mutate: (transactionPath: string) => Promise<T>;
   readonly changed: () => void;
   readonly authenticate?: (token: string) => AuthenticatedGitWorkspaceContext;
@@ -171,7 +173,10 @@ export const publishManagedCourseTransaction = async <T>(
       return result;
     if (validateManagedStorage(request.userData, root).length)
       throw new Error("Unsafe transaction storage.");
-    loadMetadata().validateTransaction(root, input.course.organizationLogin);
+    (request.validateMetadata ?? loadMetadata().validateTransaction)(
+      root,
+      input.course.organizationLogin
+    );
     const state = await workspace.inspect();
     if (
       state.head.kind !== "attached" ||

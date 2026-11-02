@@ -51,7 +51,7 @@ describe("versioned term parsing", () => {
   });
 
   it.each(TERM_LIFECYCLE_STATUSES)("accepts explicit v2 lifecycle status %s", (status) => {
-    const value = { ...term, term: { ...term.term, status } };
+    const value = { ...term, term: { ...term.term, status, has_ever_been_active: true } };
     expect(parse(value)).toMatchObject({ status: "success", value });
     expect(rawTermConfigSchema.parse(value)).toEqual(value);
   });
@@ -59,7 +59,7 @@ describe("versioned term parsing", () => {
   it.each([undefined, null, "closed", "Active", "", 1])(
     "rejects missing or invalid v2 lifecycle status %j",
     (status) => {
-      const value = { ...term, term: { ...term.term, status } };
+      const value = { ...term, term: { ...term.term, status, has_ever_been_active: true } };
       expect(rawTermConfigV2Schema.safeParse(value).success).toBe(false);
       const result = parse(value);
       expect(result.status).toBe("failure");

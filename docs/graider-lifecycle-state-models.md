@@ -94,7 +94,8 @@ Slice 8.1 implements only persisted v2 `term.status` (`draft`, `active`, `archiv
 and the pure normal-transition graph `draft → active → archived`. Same-state
 assignment is a no-op; skips and backward transitions fail. Recovery-specific
 exceptions in this diagram remain deferred to 8.5 and do not weaken that contract.
-Authorization and GitHub effects below are later-slice requirements. See
+Draft authorization is implemented in 8.2, and normal activation in 8.3 as described
+below. Archived restrictions and recovery remain later-slice requirements. See
 [architecture §9](graider-remote-course-architecture.md#9-term-lifecycle).
 
 ### 3.1 Term transition contract
@@ -125,6 +126,37 @@ Authorization and GitHub effects below are later-slice requirements. See
    grading/regrading/publication rights; faculty removed mid-term do not.
 6. Remote manual deletion of old Archived term data is authoritative; a stale
    local cache must not recreate it.
+
+### 3.3 Implemented activation boundary (Slice 8.3)
+
+Activation requires the existing Active term's current coordinator or fallback;
+with zero Active, only fallback. Draft preparation/setup authority is insufficient.
+V2 persists explicit `term.has_ever_been_active`: Active/Archived require true;
+Draft accepts false or true for future recovery. Normal activation never resets it.
+
+The complete transition is planned/validated and published in one course/admin Git
+commit through the existing managed exact-revision transaction, staging both old/new
+term files together. There is no intermediate published snapshot, stale-state retry,
+merge/rebase or force push. Remote-accepted/lost-response publication is verified
+using the existing commit/ancestry semantics.
+
+Only then does external GitHub reconciliation run. Active current coordinators form
+course admin; Draft preparation and normally completed Archived current roles retain
+write; remaining former roles retain read, with strongest effective role winning.
+Scoped current/former team identities/history do not change. The projection is opt-in;
+Phase 7 defaults are unchanged. Branch policy and provisioning are unaffected.
+
+Pending faculty do not invalidate activation. Incomplete/failed external state yields
+`activated_needs_reconciliation`, preserving the authoritative commit and blocking
+student-facing readiness. `activated_reconciled` means required observed state is
+complete. Unknown or superseded post-publication revision also blocks reconciliation
+and readiness. Explicit fresh-state reconciliation can converge later; no automatic
+Git rollback or blind retry is performed. Readiness is separate from the persisted
+lifecycle enum.
+
+Git activation history and irreversible evidence are retained for 8.5; exceptional
+recovery/checkpoint policy is not implemented. Both operational schema gates remain
+1, with no production activation/IPC or real course changes. Next: 8.4 Archived policy.
 
 ## 4. Assignment lifecycle
 

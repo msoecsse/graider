@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 and Slices 8.1–8.2 are complete. Next: **Phase 8 / Slice 8.3 — Atomic Activation**.
+Phases 6 and 7 and Slices 8.1–8.3 are complete. Next: **Phase 8 / Slice 8.4 — Term Archival Restrictions**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -589,7 +589,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Slices 8.1–8.2 are complete; next: **Phase 8 / Slice 8.3 — Atomic Activation**.
+Managed branch policy is implemented in 7.6 below. Slices 8.1–8.3 are complete; next: **Phase 8 / Slice 8.4 — Term Archival Restrictions**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -623,7 +623,7 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 and Slices 8.1–8.2 are complete. Next: Slice 8.3 — Atomic Activation.**
+**Phase 7 and Slices 8.1–8.3 are complete. Next: Slice 8.4 — Term Archival Restrictions.**
 
 ---
 
@@ -707,16 +707,52 @@ v1 wiring is added. Both operational schema gates remain **1**; Course Setup emi
 and no real course migrates. Archived policy remains deferred to 8.4.
 
 See [architecture §9.1](graider-remote-course-architecture.md#91-draft).
-Next: **8.3 — Atomic Activation**, including the actual lifecycle and authorization/team
-desired-state transition.
+Slice 8.3 below now implements the metadata and desired-state transition as separate ordered steps.
 
-## Slice 8.3 — Atomic activation
+## Slice 8.3 — Atomic activation — complete
 
 Activation performs:
 
-- old Active → Archived;
-- new Draft → Active;
-- authorization/team desired-state transition.
+- authorize through `TermActivationAuthorizationResolver`: current existing Active
+  coordinator or fallback; zero-Active initial activation requires fallback alone;
+- plan with `planTermActivation()`: previous Active → Archived, selected Draft → Active,
+  exactly one final Active and immutable before/after snapshots/codes;
+- require durable boolean v2 `term.has_ever_been_active`: Active/Archived must be true,
+  Draft can be false or true; activation sets true and never clears history;
+- publish all changed term files in one exact-revision course/admin commit through
+  `activateManagedTerm()` and the existing managed transaction semantics;
+- reconcile external organization/team/permission desired state only after confirmed
+  remote acceptance and refreshed revision/session/repository checks.
+
+The metadata commit is atomic; GitHub organization/team APIs are external desired
+state. A stale/rejected publication does no reconciliation. Lost push responses use
+the existing remote commit/ancestry proof, without duplicate commits or blind retry.
+No merge, rebase, force push or automatic replanning is added.
+
+`buildLifecycleTeamMemberships()` explicitly projects course admin from Active current
+coordinators; Draft preparation, Active section work and normally completed Archived
+current roles grant course write; remaining former roles grant read. Admin > write >
+read, with fallback separate. Term/section team identities and current/former histories
+are unchanged. The membership reconciler's opt-in `term-lifecycle` strategy preserves
+all existing Phase 7 default behavior.
+
+`reconcileTermActivation()` composes Phase 7 organization access, team membership,
+course permissions and existing trusted student-repository permissions, retaining
+durable invitation/creation journals. No provisioning or branch-policy change occurs.
+Pending faculty are allowed: activation remains committed, with incomplete access
+reported. Results distinguish `activated_reconciled` and
+`activated_needs_reconciliation`; student-facing readiness is blocked for incomplete
+reconciliation, unknown freshness, or external failures. No lifecycle rollback occurs.
+Explicit fresh-state reconciliation can converge later; no additional persisted enum
+or checkpoint is invented. Recovery/rollback remains deferred to 8.5.
+
+The transaction's internal validation hook is used only by the uncalled v2 adapter;
+v1 production callers keep the operational validator. Both operational gates remain
+**1**, Course Setup emits v1, and no production v1 workflow, UI/IPC or real course is
+changed. Archived restrictions are not implemented in this slice.
+
+See [the activation contract](graider-remote-course-architecture.md#92-active).
+Next: **8.4 — Term Archival Restrictions**.
 
 ## Slice 8.4 — Term archival restrictions
 

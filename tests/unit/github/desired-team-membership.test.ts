@@ -26,7 +26,7 @@ describe("pure desired managed-team membership", () => {
         course,
         terms.map((value) => ({
           ...value,
-          term: { ...value.term, status }
+          term: { ...value.term, status, has_ever_been_active: true }
         })),
         REPOSITORY_ID
       )

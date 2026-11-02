@@ -267,7 +267,15 @@ export const rawTermConfigV1Schema = z
 export const rawTermConfigV2Schema = z
   .object({
     schema_version: z.literal(TERM_SCHEMA_VERSION_V2),
-    term: termConfigFields.term.extend({ status: z.enum(TERM_LIFECYCLE_STATUSES) }),
+    term: termConfigFields.term
+      .extend({
+        status: z.enum(TERM_LIFECYCLE_STATUSES),
+        has_ever_been_active: z.boolean()
+      })
+      .refine((term) => term.status === "draft" || term.has_ever_been_active, {
+        path: ["has_ever_been_active"],
+        message: "Active and Archived terms must retain activation history."
+      }),
     coordinators: facultyRoleHistorySchema("Coordinator"),
     sections: z
       .array(
