@@ -111,6 +111,7 @@ await build({
 
 await build({
   entry: {
+    migrationReviewBackend: fileURLToPath(new URL("./migrationReviewBackend.ts", import.meta.url)),
     remoteCourseMetadataBackend: fileURLToPath(
       new URL("./remoteCourseMetadataBackend.ts", import.meta.url)
     ),

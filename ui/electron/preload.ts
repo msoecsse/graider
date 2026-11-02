@@ -298,6 +298,13 @@ const graiderUI: GraiderUIApi = {
     await invoke<CombinedDashboardResult>(IPC_CHANNELS.refreshDashboard),
   getAssignmentDetail: async (request: AssignmentDetailRequest): Promise<AssignmentDetailResult> =>
     await invoke<AssignmentDetailResult>(IPC_CHANNELS.getAssignmentDetail, request),
+  migrationReview: {
+    load: (request) => invoke(IPC_CHANNELS.loadMigrationReviewAnalysis, request),
+    refresh: (request) => invoke(IPC_CHANNELS.refreshMigrationReview, request),
+    verify: (request) => invoke(IPC_CHANNELS.verifyMigrationFacultyIdentity, request),
+    complete: (request) => invoke(IPC_CHANNELS.completeMigrationReview, request),
+    close: () => invoke(IPC_CHANNELS.closeMigrationReview)
+  },
   chooseReviewImport: (request) => invoke(IPC_CHANNELS.chooseReviewImport, request),
   applyReviewImport: (request) => invoke(IPC_CHANNELS.applyReviewImport, request),
   closeReviewImport: () => invoke(IPC_CHANNELS.closeReviewImport),

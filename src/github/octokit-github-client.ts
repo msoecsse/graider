@@ -668,6 +668,51 @@ export class OctokitGitHubClient implements GitHubClient {
     );
   }
 
+  async getMigrationCommit(
+    owner: string,
+    repo: string,
+    commitSha: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(commitSha))
+      throw new Error("An exact commit SHA is required.");
+    return this.organizationResponse(
+      "/repos/{owner}/{repo}/git/commits/{commit_sha}",
+      { owner, repo, commit_sha: commitSha },
+      signal
+    );
+  }
+
+  async getMigrationTree(
+    owner: string,
+    repo: string,
+    commitSha: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(commitSha))
+      throw new Error("An exact commit SHA is required.");
+    return this.organizationResponse(
+      "/repos/{owner}/{repo}/git/trees/{tree_sha}",
+      { owner, repo, tree_sha: commitSha, recursive: "1" },
+      signal
+    );
+  }
+
+  async getMigrationBlob(
+    owner: string,
+    repo: string,
+    blobSha: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse> {
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(blobSha))
+      throw new Error("An exact blob SHA is required.");
+    return this.organizationResponse(
+      "/repos/{owner}/{repo}/git/blobs/{file_sha}",
+      { owner, repo, file_sha: blobSha },
+      signal
+    );
+  }
+
   async getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser> {
     const data = await this.run(() =>
       options === undefined

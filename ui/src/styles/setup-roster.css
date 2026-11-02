@@ -463,3 +463,19 @@
   background: var(--info-soft);
   padding: var(--space-2);
 }
+
+/* The review uses the existing setup layout and panel/form styles. */
+.migration-review-fields {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.migration-review-fields label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}

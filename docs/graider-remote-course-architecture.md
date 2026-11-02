@@ -417,7 +417,7 @@ Both operational schema gates remain **1**, Course Setup emits Schema 1 and no
 production v1 workflow/UI/IPC or discovery behavior is wired to these new APIs.
 No normal permanent Delete course operation or real course migration is introduced.
 
-**Slice 8.6 and Phase 8 are complete. Slice 9.1 is complete. Next: Phase 9 / Slice 9.2 — Migration Review UI.**
+**Slice 8.6 and Phase 8 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Next: Phase 9 / Slice 9.3 — Assignment Migration.**
 
 ---
 
@@ -1845,7 +1845,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Slice 9.1 is complete. Next: Phase 9 / Slice 9.2 — Migration Review UI.**
+**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Next: Phase 9 / Slice 9.3 — Assignment Migration.**
 
 ---
 
@@ -2846,7 +2846,126 @@ reader tests compare complete source/runtime/Git storage before/after, spy on fi
 and restrict observed commands to read operations. There are zero analyzer writes, commits,
 pushes, GitHub/team/member/invitation/permission mutations or journal writes. Both operational
 gates remain **1**, Course Setup emits v1 and no production UI, approval persistence, real
-migration or v2 activation is added. **Next: 9.2 — Migration Review UI.**
+migration or v2 activation is added. **Next: 9.3 — Assignment Migration; review is implemented below.**
+
+### Implemented review contract (Slice 9.2 — complete)
+
+The portable `src/migration/migration-review-models.ts` and
+`migration-review-validation.ts` define `MigrationReviewSubmission`,
+`validateMigrationReview(trustedContext, submission)` and deeply immutable
+`MigrationReviewResult`. The result discriminator is `schema-v1-migration-review`;
+statuses are `incomplete`, `complete`, `blocked`, `stale` and `not_applicable`.
+**Complete means every decision owned by this human review is supplied and valid for
+this exact analysis. It never means migration can publish.** `publicationReady` is
+always false. Assignment conversion, grader reconciliation, organization conditions
+and final checkpoint/publication remain later work.
+
+`ui/electron/migrationReviewService.ts` retains one ephemeral session per Electron
+renderer owner, independently bound to authenticated user/account generation and the
+immutable course selector. The review source contains course/admin repository ID,
+exact analyzed source commit SHA, 9.1 `reportId` and authenticated GitHub user ID.
+Renderer-returned IDs/fingerprints are compared against that retained source, never
+adopted as trusted context. Strict DTO validation rejects arbitrary fields, paths,
+owner spoofing, numeric faculty assertions and unknown acknowledgement kinds/keys.
+No token, service instance, provider response or executable capability crosses IPC.
+
+`GithubOAuthSession.withReadOnlyCourse()` reuses current account/discovered-course
+and capability checks without invoking bootstrap, synchronization, catalog saves or
+Git transactions. Review opens via `managed-course:<userId>:<repositoryId>`, including
+authorized remote-only discovered courses with no registered legacy folder. The
+source adapter resolves the immutable repository ID, observes the remote default
+branch SHA, reads the exact Git commit/tree/blob objects and validates blob checksums.
+A truncated, unsafe or incomplete source fails closed. Current v1 faculty scope is
+checked at that exact snapshot and again against trusted current settings/context;
+review does not grant new migration-execution authority. Optional existing local Git
+history and machine-local runtime manifests use the 9.1 read-only evidence helpers.
+Runtime routing/seeding and cache preparation are never called. The catalog loader's
+explicit `readOnly` option avoids its ordinary directory-creation side effect while
+preserving all existing callers' behavior. Remote-only missing history requires manual
+order review; academic/code/directory order never substitutes for creation evidence.
+
+Faculty enter/select a GitHub login, then explicitly verify it. The main process
+performs read-only `getUser` lookup and observes immutable numeric ID/current login,
+validates `facultyIdentitySchema` and issues an opaque verification receipt. Suggestions
+only prefill a login after an explicit click; they never resolve an identity. Verified
+institutional mappings become separate trusted evidence, and 9.1 is re-run on the
+same retained source snapshot. Faculty directory, section-current proposals and
+assignment-owner proposals therefore refresh together through the analyzer, without
+patching report fields in the UI. Same-ID renames retain valid trusted login history;
+conflicting immutable IDs and case-insensitive institutional/current-login or numeric-ID
+collisions block completion. Account replacement is never silently treated as rename.
+
+Explicit Add faculty requires institutional username plus remotely verified login/ID.
+It adds a review-owned directory identity, even when absent from v1 references, and may
+support fallback/coordinator selection. Added identities remain visible as explicit
+additions and invent no historical roles or section assignments. Their evidence is
+included in the analyzer fingerprint. Changed identity evidence replaces the view/session
+binding and resets security-sensitive selections rather than preserving them blindly.
+
+Typed semantic choices cover:
+
+- verified institutional mappings through main-issued receipts;
+- exactly one explicitly selected verified-directory fallback administrator;
+- the complete oldest-created-first term creation order plus explicit confirmation;
+- at least one distinct current coordinator for every term, allowing multiple and
+  allowing any verified directory identity, not just section-faculty candidates;
+- an explicit `draft | active | archived` status for each term; and
+- explicit yes/no activation history unless 9.1 proves true, which remains locked true.
+
+Neither authenticated/sole faculty nor organization owner becomes fallback/coordinator
+automatically. No former roles are invented. The main validator independently enforces
+at most one Active, Active/Archived history true and Draft history true or false. Zero
+Active and zero terms are valid domain results. Order must contain every existing
+canonical term exactly once, without unknown or duplicate terms; zero terms uses `[]`.
+The accessible ordering UI uses manual append and Move up/Move down. A proven Git
+candidate may prefill order but never its confirmation. Course lifecycle remains the
+separately documented derived `unarchived` compatibility default, not a historical
+claim, and no course-archive choice is added.
+
+The six-step light-mode page shows original faculty spellings/references, suggestions,
+verification status, section mappings, term metadata and activity evidence. Assignment
+findings show legacy status/type, owner/proposed owner, shared deadlines and exact fan-out
+destinations, grading, repository/group evidence and manifest/Apply observations with
+source versus machine-local provenance. Grader debt and organization conditions remain
+visible. The only deferred acknowledgements are the closed known kinds
+`ownerless_assignment`, `legacy_closed` and `group_targets`, matched to exact decisions
+in this analysis. Ownerless stays repair-required/read-only; `closed` is not remapped;
+group/partial/failed/conflicting Apply evidence never becomes proven Complete through
+acknowledgement. Unknown analyzer decision keys fail closed.
+
+The immutable review artifact retains `remainingIssues`, `publicationBlockers`,
+`conversionNeedsAttention`, `deferredMigrationWork`, `organizationCondition`,
+`graderDebtPresent` and assignment-owner/legacy-status/Apply summaries separately from
+`missingDecisions` and validation errors. It can be Complete with organization binding
+unknown/organization migration required, grader debt or technical conversion findings
+still carried forward. Those blockers are never confirmed away. Organization-migration
+execution authority remains unresolved as specified in the authorization matrix;
+review exposes no execution control.
+
+Before main reports completion it revalidates current OAuth account/capabilities,
+legacy faculty authorization, immutable repository/organization identity and the
+current **remote** revision. Changed source returns latched `stale` with refresh guidance,
+never an automatic merge of decisions onto new analysis. Refresh re-analyzes the new
+exact source, invalidates old session/receipt bindings and clears security decisions.
+Account/repository/organization mismatch fails closed. 9.5 must repeat final remote
+identity/revision checks immediately before publication; 9.2 freshness cannot replace it.
+
+The completed artifact is retained in main-process memory with its analysis. The
+main-only `getCompleted()` handoff rechecks context/freshness for a future 9.3 consumer;
+it is absent from IPC and must replace any temptation to trust a renderer-returned
+completed object. Identity re-verification, refresh, closure, account changes and stale
+source invalidate access to old approvals. Reopening requires fresh review. No durable
+approval file or mutable migration checkpoint is introduced.
+
+Narrow load/verify/refresh/complete/close IPC/preload methods expose only DTOs. The final
+UI action is **Complete migration review** and produces only this review artifact.
+Focused domain, service, IPC, OAuth/read adapter, preload and page tests cover binding,
+identity verification/collisions, every semantic decision, stale refresh and read-only
+safety. There are zero review config/migration-file writes, commits, pushes, GitHub
+team/invitation/permission/branch mutations or journal writes. Operational gates remain
+**1**, Course Setup still emits Schema 1 and v1 workflows retain their existing behavior.
+**Slice 9.2 is complete. Next: 9.3 — Assignment Migration.** No assignment conversion,
+Schema v2 file generation, checkpoint or migration publication is implemented here.
 
 ### Required migration behavior
 
@@ -3931,6 +4050,6 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slices 8.1–8.6 are complete. The next planned work is **Phase 9 / Slice 9.2 —
-Migration Review UI**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.6 are complete. The next planned work is **Phase 9 / Slice 9.3 —
+Assignment Migration**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.

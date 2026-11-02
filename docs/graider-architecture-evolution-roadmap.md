@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 and Slices 8.1–8.6 are complete. Next: **Phase 9 / Slice 9.2 — Migration Review UI**.
+Phases 6 and 7 and Slices 8.1–8.6 are complete. Next: **Phase 9 / Slice 9.3 — Assignment Migration**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -589,7 +589,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Slices 8.1–8.6 are complete; next: **Phase 9 / Slice 9.2 — Migration Review UI**.
+Managed branch policy is implemented in 7.6 below. Slices 8.1–8.6 are complete; next: **Phase 9 / Slice 9.3 — Assignment Migration**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -623,7 +623,7 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 and Slices 8.1–8.6 are complete. Slice 9.1 is complete. Next: Phase 9 / Slice 9.2 — Migration Review UI.**
+**Phase 7 and Slices 8.1–8.6 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Next: Phase 9 / Slice 9.3 — Assignment Migration.**
 
 ---
 
@@ -913,7 +913,7 @@ implements that model. No migration machinery is invented now. Both operational
 gates remain **1**, Setup emits v1, no production v2/UI/IPC is wired and no real course
 or GitHub resource is changed. No Delete course operation is added.
 
-**Phase 8 is complete. Slice 9.1 is complete. Next: Phase 9 / Slice 9.2 — Migration Review UI.**
+**Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Next: Phase 9 / Slice 9.3 — Assignment Migration.**
 The analyzer must report missing lifecycle/creation-order facts and require a reviewed
 authoritative order rather than guessing from academic chronology or local files.
 
@@ -987,16 +987,68 @@ commits, pushes, GitHub/team/member/permission/invitation changes or journal wri
 checkpoint, final YAML/write model, UI, approval persistence or publication is introduced.
 Both operational schema gates remain **1**, and Course Setup still emits Schema 1.
 
-**Slice 9.1 is complete. Next: 9.2 — Migration Review UI.** It consumes this report and
-requires explicit faculty decisions before any migration write becomes possible.
+**Slices 9.1 and 9.2 are complete. Next: 9.3 — Assignment Migration.** The implemented
+review below requires explicit faculty decisions before any migration write becomes possible.
 
-## Slice 9.2 — Migration review UI
+## Slice 9.2 — Migration review UI — COMPLETE
 
-Require explicit confirmation for:
+`MigrationReviewSubmission` / `validateMigrationReview()` turn an exact immutable 9.1
+analysis plus trusted identity-verification receipts into a deeply immutable
+`schema-v1-migration-review` result. Status is `incomplete`, `complete`, `blocked`,
+`stale` or `not_applicable`. **Complete means human review decisions are internally
+valid, never publication readiness** (`publicationReady` remains literal false).
 
-- fallback administrator;
-- ambiguous faculty identities;
-- coordinators where not inferable.
+- Source assertions bind repository ID, exact authoritative source SHA, analyzer
+  fingerprint and authenticated GitHub user ID. Electron retains its own analysis;
+  returning those values from the renderer never makes them trusted. Session IDs and
+  faculty receipts are main-process issued, owner/account/generation bound and ephemeral.
+- Login verification uses read-only GitHub lookup to observe current login and immutable
+  numeric user ID. The UI cannot type numeric identity authority. Each explicit mapping
+  re-runs 9.1 at the same exact source with trusted evidence, refreshing faculty, section
+  and assignment-owner proposals together. Same-ID renames retain verified login history;
+  differing trusted IDs and directory case/ID/current-login collisions block completion.
+  Explicitly added verified faculty may be chosen as fallback/coordinators without
+  inventing v1 section assignments or former roles.
+- Fallback requires exactly one explicit verified-directory selection. Every term requires
+  at least one explicitly selected current coordinator, explicit Draft/Active/Archived
+  status and an explicit yes/no activation-history decision when 9.1 cannot prove true.
+  Source-proven history is locked true. At most one Active is independently enforced;
+  Active/Archived require true and Draft allows either. Section faculty are candidates,
+  never automatically selected coordinators.
+- Creation order always requires explicit confirmation. Proven Git candidates may prefill
+  it; otherwise terms must be appended manually. Accessible Move up/Move down controls
+  preserve the chosen order without academic/code/date inference. Every canonical term
+  occurs exactly once; zero terms permits the empty order. Course `unarchived` remains
+  the documented compatibility default, with no course-archive selection added.
+- Closed typed acknowledgements cover exact analyzer-owned ownerless, legacy `closed`
+  and group-target decisions only. Ownerless assignments remain repair-required/read-only;
+  no `closed` lifecycle mapping or group/Apply conversion occurs. Unknown keys fail closed.
+  Manifest conflicts, partial/failed evidence, machine-local completeness, grader debt
+  and unknown/required organization migration remain separate later-phase findings.
+  Faculty acknowledgement never converts technical uncertainty into Complete evidence.
+- Main-process completion observes the current remote default-branch revision through
+  immutable repository lookup and current OAuth/legacy faculty authorization. Local HEAD
+  is never remote authority. Advancement returns latched `stale`; refresh replaces the
+  session and clears security decisions rather than merging them onto new evidence.
+  Account/repository/organization mismatch fails closed. 9.5 must still revalidate again.
+- The light-mode six-step page (Overview, Faculty, Course authority, Terms, Assignments &
+  Apply evidence, Review) is reached via **Review migration** for authorized discovered
+  Schema 1 courses using `managed-course:<userId>:<repositoryId>`. Remote-only review
+  needs no legacy registration or cache bootstrap. Exact remote commit/tree/blob GETs
+  and blob checksum checks feed the existing analyzer; existing local Git history and
+  runtime evidence are read separately where available. A read-only catalog option avoids
+  creating account directories. No cache synchronization/branch update is invoked.
+
+Narrow load/verify/refresh/complete/close IPC methods expose DTOs only. Main retains the
+completed artifact for a trusted 9.3 handoff through `getCompleted()`, never accepting a
+renderer-returned artifact. No durable approval, checkpoint, config/assignment/manifest
+write, Git commit/push, team/invitation/permission/branch mutation or journal write occurs.
+The final action is **Complete migration review**; there is no migration/publication action.
+Both operational schema gates remain **1** and Course Setup continues emitting Schema 1.
+
+**Slice 9.2 is complete. Next: 9.3 — Assignment Migration.** It consumes the analyzer and
+trusted completed review to plan assignment/section Apply conversion, retaining technical
+Needs attention conditions. No assignment migration writes begin in 9.2.
 
 ## Slice 9.3 — Assignment migration
 

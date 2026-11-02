@@ -66,3 +66,7 @@ const FALLBACK_SLUG = "unknown";
 
 /** `AssignmentDetailSelection`'s slug fields are nullable; route paths are not. */
 export const toRouteSlug = (slug: string | null): string => slug ?? FALLBACK_SLUG;
+
+/** Immutable managed selector; never a local folder path or course-code key. */
+export const getMigrationReviewPath = (selector: string): string =>
+  `/migration-review/${encodeURIComponent(selector)}`;

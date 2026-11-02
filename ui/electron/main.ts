@@ -1,3 +1,9 @@
+import {
+  createMigrationReviewService,
+  loadMigrationReviewBackend
+} from "./migrationReviewService.js";
+import { createMigrationReviewReader } from "./migrationReviewReader.js";
+import { registerMigrationReviewIpc } from "./migrationReviewIpc.js";
 import { projectManagedCourseResult } from "./managedCourseResultProjection.js";
 import type { CourseFolderRecord } from "./ipc.js";
 import {
@@ -1811,6 +1817,36 @@ app.whenReady().then(async () => {
       };
     }
   });
+  registerMigrationReviewIpc(
+    ipcMain,
+    createMigrationReviewService({
+      backend: loadMigrationReviewBackend,
+      withCourse: async (selector, operation) => {
+        const match = /^managed-course:([1-9][0-9]*):([1-9][0-9]*)$/.exec(selector);
+        if (!match) throw new Error("A managed course selector is required.");
+        const userId = Number(match[1]);
+        const repositoryId = Number(match[2]);
+        if (!Number.isSafeInteger(userId) || !Number.isSafeInteger(repositoryId))
+          throw new Error("Invalid managed identity.");
+        const generation = facultyAuth.mutationGeneration;
+        return facultyAuth.withReadOnlyCourse(repositoryId, userId, async (input) =>
+          operation({
+            userId: input.userId,
+            institutionalUsername: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+              .currentFacultyMsoeUsername,
+            generation,
+            reader: createMigrationReviewReader(
+              input,
+              app.getPath("userData"),
+              loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+                .currentFacultyMsoeUsername,
+              loadMigrationReviewBackend()
+            )
+          })
+        );
+      }
+    })
+  );
   courseMutationGuard = new ManagedCourseMutationGuard({
     userData: app.getPath("userData"),
     session: facultyAuth,

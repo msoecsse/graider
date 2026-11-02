@@ -123,9 +123,13 @@ interface Catalog {
 export const accountRoot = (userData: string, userId: number): string =>
   path.join(userData, MANAGED_COURSE_ROOT, identityComponent(userId));
 /** Catalog is a hint. Paths are always reconstructed from IDs, never taken from JSON. */
-export const loadManagedCatalog = (userData: string, userId: number): Catalog => {
+export const loadManagedCatalog = (
+  userData: string,
+  userId: number,
+  options: { readonly readOnly?: boolean } = {}
+): Catalog => {
   const root = accountRoot(userData, userId);
-  safeDirectories(userData, root, true);
+  safeDirectories(userData, root, options.readOnly !== true);
   const file = path.join(root, CATALOG_FILE);
   if (!fs.existsSync(file)) return { schemaVersion: MANAGED_CATALOG_SCHEMA, userId, courses: {} };
   if (!fs.lstatSync(file).isFile() || fs.lstatSync(file).isSymbolicLink())

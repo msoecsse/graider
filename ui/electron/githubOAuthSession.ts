@@ -257,6 +257,63 @@ export class GithubOAuthSession {
     }
   }
 
+  /** Same account/discovery/capability boundary as synchronized operations, without cache writes. */
+  async withReadOnlyCourse<T>(
+    repositoryId: number,
+    expectedUserId: number,
+    operation: (input: ManagedOperationInput) => Promise<T>
+  ): Promise<T> {
+    const token = this.token;
+    const generation = this.accountGeneration;
+    const course = this.state.courseDiscovery.courses.find(
+      (item) => item.repositoryId === repositoryId
+    );
+    if (
+      !token ||
+      !course ||
+      course.authorization !== "authorized" ||
+      this.state.identity?.id !== expectedUserId ||
+      this.state.courseDiscovery.userId !== expectedUserId ||
+      this.active !== null ||
+      this.stopped
+    )
+      throw new Error("Current authorized course is required.");
+    const controller = new AbortController();
+    const current = () =>
+      !this.stopped &&
+      !controller.signal.aborted &&
+      this.active === null &&
+      generation === this.accountGeneration &&
+      token === this.token &&
+      this.state.identity?.id === expectedUserId &&
+      this.state.courseDiscovery.userId === expectedUserId &&
+      this.state.courseDiscovery.courses.some(
+        (item) => item.repositoryId === repositoryId && item.authorization === "authorized"
+      );
+    const input: ManagedOperationInput = {
+      token,
+      userId: expectedUserId,
+      course,
+      signal: controller.signal,
+      revalidateSession: async () =>
+        current() &&
+        (await this.deps.network.identity(token, controller.signal)).id === expectedUserId &&
+        (await this.deps.network.repositoryCapability(token, controller.signal)) &&
+        (await this.deps.network.organizationCapability(token, controller.signal)) &&
+        current()
+    };
+    this.courseOperations.add(controller);
+    try {
+      if (!(await input.revalidateSession()))
+        throw new Error("Course account authorization changed.");
+      const result = await operation(input);
+      if (!current()) throw new Error("Course account authorization changed.");
+      return result;
+    } finally {
+      this.courseOperations.delete(controller);
+    }
+  }
+
   private discovery: AbortController | null = null;
   constructor(private readonly deps: Dependencies) {}
   getState(): GithubOAuthState {

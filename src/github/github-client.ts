@@ -228,6 +228,28 @@ export interface GitHubRemoteCourseClient {
   ): Promise<GitHubOrganizationResponse>;
 }
 
+/** Exact-object GETs for migration review; carries no write capability. */
+export interface GitHubMigrationReadClient {
+  getMigrationCommit(
+    owner: string,
+    repo: string,
+    commitSha: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  getMigrationTree(
+    owner: string,
+    repo: string,
+    commitSha: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+  getMigrationBlob(
+    owner: string,
+    repo: string,
+    blobSha: string,
+    signal: AbortSignal
+  ): Promise<GitHubOrganizationResponse>;
+}
+
 export interface GitHubClient
   extends
     Partial<GitHubOAuthOrganizationClient>,
@@ -235,7 +257,8 @@ export interface GitHubClient
     Partial<GitHubManagedTeamClient>,
     Partial<GitHubCoursePermissionClient>,
     Partial<GitHubManagedBranchClient>,
-    Partial<GitHubRemoteCourseClient> {
+    Partial<GitHubRemoteCourseClient>,
+    Partial<GitHubMigrationReadClient> {
   getAuthenticatedUser(options?: { readonly signal: AbortSignal }): Promise<GitHubUser>;
 
   getRepository(owner: string, repo: string): Promise<GitHubRepository | null>;

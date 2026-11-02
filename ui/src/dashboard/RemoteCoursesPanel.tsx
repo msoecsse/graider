@@ -1,3 +1,4 @@
+import { getMigrationReviewPath } from "./routePaths";
 import { ManagedOperationalSourceControls } from "./ManagedOperationalSourceControls";
 import { ManagedCacheReview } from "./ManagedCacheReview";
 import { synchronizationLabel } from "../../electron/remoteCourseTypes";
@@ -164,6 +165,18 @@ export const RemoteCoursesPanel = ({
               />
             </div>
           ) : null}
+          {current?.courses
+            .filter((course) => course.authorization === "authorized" && course.schemaVersion === 1)
+            .map((course) => (
+              <p key={`migration-${course.repositoryId}`}>
+                <a
+                  className="secondary-action"
+                  href={`#${getMigrationReviewPath(`managed-course:${current.userId}:${course.repositoryId}`)}`}
+                >
+                  Review migration — {course.code}
+                </a>
+              </p>
+            ))}
           {current?.courses
             .filter(
               (course) =>

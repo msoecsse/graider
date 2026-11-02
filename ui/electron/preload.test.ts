@@ -339,3 +339,39 @@ it("reconciliation exposes only course/plan/recovery identities and explicit con
     ["graider-ui:managed-course:reveal-recovery", 20, "opaque-recovery"]
   ]);
 });
+
+it("exposes only narrow migration review DTO operations", async () => {
+  const api = electron.exposedApi?.migrationReview;
+  if (!api) throw new Error("Missing migration review API.");
+  const source = {
+    repositoryId: 700,
+    sourceCommitSha: "a".repeat(40),
+    reportId: "fingerprint",
+    authenticatedGithubUserId: 101
+  };
+  await api.load({ selector: "managed-course:101:700" });
+  await api.verify({
+    sessionId: "session",
+    source,
+    institutionalUsername: "prof",
+    githubLogin: "faculty",
+    addFaculty: false
+  });
+  await api.refresh({ sessionId: "session", source });
+  await api.close();
+  expect(electron.invoke).toHaveBeenCalledWith("graider-ui:migration-review:load", {
+    selector: "managed-course:101:700"
+  });
+  expect(electron.invoke).toHaveBeenCalledWith("graider-ui:migration-review:verify-faculty", {
+    sessionId: "session",
+    source,
+    institutionalUsername: "prof",
+    githubLogin: "faculty",
+    addFaculty: false
+  });
+  expect(electron.invoke).toHaveBeenCalledWith("graider-ui:migration-review:refresh", {
+    sessionId: "session",
+    source
+  });
+  expect(electron.invoke).toHaveBeenCalledWith("graider-ui:migration-review:close");
+});

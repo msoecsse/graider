@@ -23,6 +23,11 @@ import type {
 } from "./assignmentGradingLifecycleService.js";
 
 export const IPC_CHANNELS = {
+  loadMigrationReviewAnalysis: "graider-ui:migration-review:load",
+  refreshMigrationReview: "graider-ui:migration-review:refresh",
+  verifyMigrationFacultyIdentity: "graider-ui:migration-review:verify-faculty",
+  completeMigrationReview: "graider-ui:migration-review:complete",
+  closeMigrationReview: "graider-ui:migration-review:close",
   getCourseOperationalMode: "graider-ui:managed-course:source-mode",
   cutoverManagedCourse: "graider-ui:managed-course:cutover",
   updateCourseSource: "graider-ui:course-source:update",
@@ -1098,6 +1103,7 @@ export interface CombinedDashboardResult {
 }
 
 export interface GraiderUIApi {
+  readonly migrationReview?: import("./migrationReviewService.js").MigrationReviewApi;
   readonly getCourseOperationalMode?: (folderId: string) => Promise<"legacy" | "managed">;
   readonly cutoverManagedCourse?: (folderId: string) => Promise<void>;
   readonly updateCourseSource?: (courseFolderId: string) => Promise<void>;

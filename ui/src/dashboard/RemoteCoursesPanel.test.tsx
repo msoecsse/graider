@@ -326,3 +326,25 @@ describe("managed synchronization dashboard state", () => {
     expect(screen.getByRole("button", { name: "27s2" })).toBeInTheDocument();
   });
 });
+
+it("offers review for authorized v1 remote-only courses without legacy registration", () => {
+  show(state);
+  expect(screen.getByRole("link", { name: "Review migration — CSC1020" })).toHaveAttribute(
+    "href",
+    "#/migration-review/managed-course%3A42%3A123"
+  );
+});
+it("does not expose migration review for unauthorized or v2/newer courses", () => {
+  show({
+    ...state,
+    courseDiscovery: {
+      ...state.courseDiscovery,
+      courses: [
+        { ...course, authorization: "not_authorized" },
+        { ...course, repositoryId: 124, schemaVersion: 2 },
+        { ...course, repositoryId: 125, schemaVersion: 3 }
+      ]
+    }
+  });
+  expect(screen.queryByRole("link", { name: /Review migration/ })).not.toBeInTheDocument();
+});
