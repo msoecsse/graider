@@ -417,7 +417,7 @@ Both operational schema gates remain **1**, Course Setup emits Schema 1 and no
 production v1 workflow/UI/IPC or discovery behavior is wired to these new APIs.
 No normal permanent Delete course operation or real course migration is introduced.
 
-**Slice 8.6 and Phase 8 are complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
+**Slice 8.6 and Phase 8 are complete. Slice 9.1 is complete. Next: Phase 9 / Slice 9.2 — Migration Review UI.**
 
 ---
 
@@ -1845,7 +1845,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
+**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Slice 9.1 is complete. Next: Phase 9 / Slice 9.2 — Migration Review UI.**
 
 ---
 
@@ -2733,6 +2733,120 @@ Migration must:
 - derive only information that can be inferred safely;
 - require confirmation for ambiguous information;
 - validate the complete new model before publishing it.
+
+### Implemented read-only analysis contract (Slice 9.1 — complete)
+
+`src/migration/schema-v1-migration-analyzer.ts` exposes the pure
+`analyzeSchemaV1Migration(MigrationSnapshot): CourseMigrationAnalysis` API.
+`src/migration/migration-snapshot-reader.ts` exposes
+`readSchemaV1MigrationAnalysis(MigrationReadRequest)` for exact-revision source reads.
+Trusted outer code must authenticate, establish the immutable course/admin repository ID,
+resolve current remote organization identity where available, synchronize and supply the
+exact authoritative commit SHA plus trusted source/runtime roots. A renderer/local path,
+repository name, organization login or course code cannot establish canonical identity.
+The reader performs no synchronization, checkout or production integration itself.
+
+The existing bundled GitWorkspace reads the requested commit's blobs, independent of dirty
+working-tree files. Shallow/incomplete/ambiguous history cannot prove chronology. Replacement
+objects and lazy fetch are disabled, grafted source is blocked and replacement history cannot
+propose order. Runtime manifests are read separately with explicit machine-local provenance.
+The analyzer deliberately avoids `createManifestPath` / `courseRuntimePath`: current output
+routing may seed source artifacts into runtime storage even when obtaining a path. No seeding,
+copying, directory creation, runtime registration or process-state mutation happens here.
+
+The deeply frozen report has an analysis-only discriminator, immutable source binding and
+opaque deterministic report fingerprint over the supplied source/evidence. Public results are
+read-only at both type and runtime levels. It contains inventories and provisional facts, not
+serializable authoritative v2 course/term files. No approval record or migration checkpoint is
+created. 9.2 must bind faculty decisions to repository ID and SHA (and report fingerprint);
+9.5 must compare with the authoritative remote revision again before publication and reject
+advancement. A report ID alone does not authorize writes or make a stale snapshot current.
+
+| Result             | Meaning                                                                                                                           |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `ready_for_review` | Valid v1 evidence is available; explicit human review remains mandatory.                                                          |
+| `needs_attention`  | Validated inventory has unresolved identities, runtime/Apply ambiguity, locator drift or unknown organization continuity.         |
+| `not_applicable`   | Valid Schema v2 course is already migrated.                                                                                       |
+| `blocked`          | Invalid binding/configuration, unsupported schema, conflicting immutable identities or proven unreconciled organization transfer. |
+
+All canonical term directories and assignments must parse and pass existing semantic
+validators before any migration facts are labeled validated. Mismatched term/assignment codes,
+duplicate sections, invalid section references and malformed/missing referenced rosters block.
+A malformed v1 course never produces a partial apparently safe migration proposal. Diagnostics
+remain readable. Production v1 and v2 Phase 6–8 models retain their behavior.
+
+Every proposal distinguishes `derived`, `requires_confirmation`, `unresolved` and `blocking`,
+with provenance such as `v1-term-section-faculty`, `assignment-faculty-owner`, trusted identity
+mapping, course config, source/runtime manifest and Git history. Raw provider responses are
+not accepted or exposed. The provisional faculty directory includes only exact trusted
+institutional-username-to-immutable-GitHub-ID mappings with valid current login/history.
+V1 institutional references use exact string equality: spellings/case are preserved and repeated
+references deduplicated only exactly. Case collisions in v2's case-insensitive directory require
+resolution. Login resemblance, names/email similarity, organization membership and single-member
+legacy teams never resolve identities. Authentication without an explicitly verified institutional
+mapping also cannot resolve them. Different numeric IDs conflict; same-ID renames are one person,
+with competing current-login observations requiring review unless explicit history disambiguates.
+
+Fallback administrator always requires explicit selection, including single-faculty courses.
+Every term requires explicit selection of at least one current coordinator. Section faculty are
+candidates only and never become coordinator authority automatically. Resolved section faculty
+supply provisional current relationships; unresolved identities prevent final migration of that
+relationship. Former coordinators/faculty are never invented from v1 absence.
+
+Each term retains academic/display/section/assignment inventory and review requirements for
+`draft | active | archived` and `has_ever_been_active`. Authoritative source manifest repository
+activity may prove the positive history fact true. Lack of evidence never proves false; local
+runtime evidence alone cannot establish shared history. No status is chosen from dates, codes
+or assignment lifecycle. 9.2 must enforce at most one Active over the complete reviewed model.
+Course `unarchived` is a derived compatibility migration default, explicitly distinguished from
+a historical archive claim; machine-local hiding and inactivity are never consulted.
+
+Creation order requires a complete reachable Git DAG with genuine roots, one introduction for
+each existing term and a unique ancestor ordering between introductions. Ties, incomparable
+branches, deletion/reintroduction, missing/shallow/replaced history or mismatched revision yield
+no proposed order. Proven candidates and their introduction SHAs still require explicit 9.2
+confirmation before `course.term_creation_order` becomes v2 authority. Presentation sorts by
+canonical term code independently of security-relevant creation order. Zero terms is valid.
+
+Assignments retain validated v1 configuration evidence, including owner/type/status/sections,
+grading, repository mode/groups and exact deadline values. A resolved `metadata.faculty_owner`
+proposes a one-entry ID list; unresolved owners remain unresolved, and missing owners produce
+an empty proposal plus required coordinator repair/read-only handling. Shared deadlines list the
+exact section destinations for later 9.3 fan-out; missing deadlines remain missing. `closed` and
+group target conversion require review. No assignment file or deadline is converted here.
+
+Manifest evidence uses the existing v1/v2 loader's shared parsing/normalization, retaining
+source/runtime origin, repository records and immutable IDs, sections, v2 targets/student
+mappings and operation history. Per-section evidence is `not_observed`, `complete_evidence`,
+`partial_incomplete` or `ambiguous`. Complete evidence requires matching source anchors,
+expected roster coverage, unique immutable repository records, completed successful Apply and
+consistent student mappings. Failures, partial success, missing expected records, pending
+invitations, unresolved target mapping and inconsistencies never become false Complete.
+Manifest v2/group targets lack the full v1 anchors/history/immutable IDs and remain ambiguous
+for later review/conversion. Source/runtime disagreement is Needs attention without choosing a
+winner. Machine-local or unavailable runtime storage cannot prove completeness across machines;
+even identical source/runtime files do not establish that completeness. Orphan manifests remain
+visible for review rather than silently losing Apply or grader history.
+
+Course `github.grader_team` / `github.grader_permission` and manifest `permissions.grader_team`
+are inventoried as historical debt only. Grader is not an active v2 role. Phase 9.4 owns persisted
+removal and GitHub reconciliation; 9.1 performs no team/member/permission cleanup and never
+turns grader membership into section faculty.
+
+Organization assessment compares trusted immutable historical/current organization evidence
+within the immutable repository binding: `organization_reconciled`,
+`organization_migration_required` or `organization_binding_unknown`. Same-repository rename
+and proven same-ID organization-login rename retain identity; locator drift is reported without
+rewriting configuration. Insufficient immutable history yields unknown, never a guessed transfer
+or continuity claim. Required/unknown organization migration must block later schema publication.
+This assessment composes with future 9.5; it executes no transfer or reconciliation.
+
+Focused tests prove deterministic output, deep immutability and exact source binding. Real Git
+reader tests compare complete source/runtime/Git storage before/after, spy on filesystem writes
+and restrict observed commands to read operations. There are zero analyzer writes, commits,
+pushes, GitHub/team/member/invitation/permission mutations or journal writes. Both operational
+gates remain **1**, Course Setup emits v1 and no production UI, approval persistence, real
+migration or v2 activation is added. **Next: 9.2 — Migration Review UI.**
 
 ### Required migration behavior
 
@@ -3817,6 +3931,6 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slices 8.1–8.6 are complete. The next planned work is **Phase 9 / Slice 9.1 —
-Migration Analyzer**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.6 are complete. The next planned work is **Phase 9 / Slice 9.2 —
+Migration Review UI**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.

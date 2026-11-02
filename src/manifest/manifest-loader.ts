@@ -580,7 +580,12 @@ export const loadManifest = (
     return createFailure([fileResult.diagnostic]);
   }
 
-  const yamlResult = parseYaml(fileResult.content, manifestPath);
+  return parseManifest(fileResult.content, manifestPath);
+};
+
+/** Uses exactly the same v1/v2 validation and normalization as loadManifest. */
+export const parseManifest = (content: string, manifestPath: string): ManifestLoadResult => {
+  const yamlResult = parseYaml(content, manifestPath);
 
   if (yamlResult.status === "failure") {
     return createFailure([yamlResult.diagnostic]);

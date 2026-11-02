@@ -16,7 +16,15 @@ export const loadAssignmentConfig = (
     };
   }
 
-  const yamlResult = parseYaml(fileResult.content, filePath);
+  return parseAssignmentConfig(fileResult.content, filePath);
+};
+
+/** Shared parser for working files and exact-revision read-only analysis. */
+export const parseAssignmentConfig = (
+  content: string,
+  filePath: string
+): SchemaValidationResult<RawAssignmentConfig> => {
+  const yamlResult = parseYaml(content, filePath);
 
   if (yamlResult.status === "failure") {
     return {

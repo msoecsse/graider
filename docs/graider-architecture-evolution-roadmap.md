@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 and Slices 8.1–8.6 are complete. Next: **Phase 9 / Slice 9.1 — Migration Analyzer**.
+Phases 6 and 7 and Slices 8.1–8.6 are complete. Next: **Phase 9 / Slice 9.2 — Migration Review UI**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -589,7 +589,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Slices 8.1–8.6 are complete; next: **Phase 9 / Slice 9.1 — Migration Analyzer**.
+Managed branch policy is implemented in 7.6 below. Slices 8.1–8.6 are complete; next: **Phase 9 / Slice 9.2 — Migration Review UI**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -623,7 +623,7 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 and Slices 8.1–8.6 are complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
+**Phase 7 and Slices 8.1–8.6 are complete. Slice 9.1 is complete. Next: Phase 9 / Slice 9.2 — Migration Review UI.**
 
 ---
 
@@ -913,7 +913,7 @@ implements that model. No migration machinery is invented now. Both operational
 gates remain **1**, Setup emits v1, no production v2/UI/IPC is wired and no real course
 or GitHub resource is changed. No Delete course operation is added.
 
-**Phase 8 is complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
+**Phase 8 is complete. Slice 9.1 is complete. Next: Phase 9 / Slice 9.2 — Migration Review UI.**
 The analyzer must report missing lifecycle/creation-order facts and require a reviewed
 authoritative order rather than guessing from academic chronology or local files.
 
@@ -930,20 +930,65 @@ Now that:
 
 migration can safely ship.
 
-## Slice 9.1 — Migration analyzer
+## Slice 9.1 — Migration analyzer — COMPLETE
 
-Read schema-v1 course and produce a non-mutating migration report.
+`analyzeSchemaV1Migration(snapshot)` produces a deterministic, deeply immutable
+`CourseMigrationAnalysis`. `readSchemaV1MigrationAnalysis(request)` reads exact commit
+blobs through the bundled GitWorkspace, with read-only Git DAG inspection and separately
+supplied trusted source/runtime roots. It never reads working-tree configuration as
+source authority or calls generated-output routing helpers, which may seed runtime files.
 
-Identify:
+The report preserves immutable course/admin repository ID, exact source commit SHA,
+authenticated GitHub user ID and available immutable organization evidence. Its opaque
+fingerprint additionally covers source contents, runtime observations and trusted evidence.
+Future review/publication must revalidate repository ID and authoritative SHA and reject
+stale review; the fingerprint does not replace that remote check.
 
-- faculty identities;
-- unresolved identities;
-- terms;
-- required coordinator selections;
-- assignment owners;
-- deadlines;
-- manifests;
-- grader configuration.
+Results distinguish `ready_for_review`, `needs_attention`, `not_applicable` (valid v2)
+and `blocked` (including malformed v1, unsupported schemas and identity conflicts).
+`ready_for_review` never means ready to migrate. Config parsing and semantic validation
+must succeed for the complete v1 inventory before any validated migration facts appear.
+
+- Facts use `derived`, `requires_confirmation`, `unresolved` or `blocking`, with concise
+  provenance. V1 faculty references retain exact case/spelling because v1 scope uses exact
+  matching. Section faculty and assignment-only owners are included; v2 directory case/ID/
+  current-login collisions block. Trusted exact username-to-numeric-ID evidence alone can
+  resolve identities. Login similarity, authenticated ID alone and team membership cannot.
+  Same-ID renames retain login history; unproven current-login ordering requires review.
+- Only safely resolved faculty enter the provisional directory. Unresolved identities and
+  section relationships remain explicit. Fallback selection is always required. Each term
+  requires at least one explicitly selected current coordinator; no former history is invented.
+- Every term requires lifecycle review with at most one reviewed Active. Source manifest
+  operational repository evidence can prove prior activity true; absence and machine-local
+  evidence never prove false. Course `unarchived` is a documented compatibility migration
+  default, not a historical fact; local hide state is never consulted.
+- Creation-order candidates require a complete Git DAG with unique, ancestrally ordered
+  introductions and no deletion/reintroduction, ties or incomparable introductions. Missing,
+  shallow, replaced, incomplete or ambiguous history supplies no order. Even proven order
+  requires explicit 9.2 confirmation. Zero terms is supported.
+- Assignment evidence preserves owner, sections, status/type, grading, repository mode/groups
+  and exact shared deadline fan-out destinations. Ownerless assignments remain repair-required/
+  read-only until coordinator repair. No assignment conversion occurs.
+- Existing manifest-v1/v2 parsers inventory source/runtime repositories, immutable IDs where
+  available, group targets/mappings, operation history and section evidence. Roster coverage,
+  input anchors, failures, missing records, pending invitations and ambiguous targets prevent
+  false Complete evidence. Group manifests remain review-required. Conflicts and unproven
+  runtime completeness across machines are Needs attention; no evidence source is preferred.
+  Orphan manifests and their grader debt remain visible.
+- Course and manifest grader configuration is historical debt, never an active v2 role.
+  Persisted removal and GitHub reconciliation belong to 9.4; no faculty role is synthesized.
+- Organization assessment distinguishes reconciled immutable continuity, proven transfer
+  requiring migration and unknown historical binding. Locator drift alone never proves
+  transfer. Unresolved organization migration must block later schema publication.
+
+The analyzer has no write/provider/journal capability. Reader tests inspect the complete
+filesystem before/after, spy on writes and assert only read Git commands: zero writes,
+commits, pushes, GitHub/team/member/permission/invitation changes or journal writes. No
+checkpoint, final YAML/write model, UI, approval persistence or publication is introduced.
+Both operational schema gates remain **1**, and Course Setup still emits Schema 1.
+
+**Slice 9.1 is complete. Next: 9.2 — Migration Review UI.** It consumes this report and
+requires explicit faculty decisions before any migration write becomes possible.
 
 ## Slice 9.2 — Migration review UI
 
