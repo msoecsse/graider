@@ -51,6 +51,8 @@ export interface ManagedTransactionRequest<T> {
   readonly allows: (file: string) => boolean;
   /** Internal backend policy only. Production callers retain the operational v1 default. */
   readonly validateMetadata?: (root: string, organization: string) => void;
+  /** Trusted internal path policy for v2 lifecycle/checkpoint transactions; v1 defaults remain unchanged. */
+  readonly validateChangedPaths?: (paths: readonly string[]) => void;
   readonly mutate: (transactionPath: string) => Promise<T>;
   readonly changed: () => void;
   readonly authenticate?: (token: string) => AuthenticatedGitWorkspaceContext;
@@ -199,7 +201,10 @@ export const publishManagedCourseTransaction = async <T>(
         ...filesystemChanges
       ])
     ];
-    if (inspectChangedFiles(paths).unrelated.length || paths.some((file) => !request.allows(file)))
+    if (request.validateChangedPaths) request.validateChangedPaths(paths);
+    else if (inspectChangedFiles(paths).unrelated.length)
+      throw new Error("Unexpected files in course transaction.");
+    if (paths.some((file) => !request.allows(file)))
       throw new Error("Unexpected files in course transaction.");
     if (!paths.length) return result;
     const stage = paths.map(createRelativeGitPath);

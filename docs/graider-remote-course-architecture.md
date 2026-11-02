@@ -625,9 +625,9 @@ leave the activation committed and report Needs reconciliation. No blind retry o
 automatic lifecycle rollback occurs. Explicit reconciliation can converge from fresh
 authoritative metadata, observed GitHub state and retained durable journals.
 
-No new lifecycle enum or persisted reconciliation/recovery checkpoint is introduced.
-`has_ever_been_active`, Git history and the structured predecessor/target result retain
-activation evidence. Exceptional rollback/checkpoints remain for 8.5 before production
+No new lifecycle enum or persisted reconciliation state is introduced. Slice 8.5 adds
+the activation recovery checkpoint alongside irreversible history and the structured
+predecessor/target result. Exceptional recovery is implemented below before production
 activation is enabled; ordinary backward transitions remain forbidden. Both operational
 schema gates remain **1**; Course Setup emits v1 and no real course migrates.
 Slice 8.4 below implements Archived authorization without changing this desired state.
@@ -731,27 +731,150 @@ This overlay performs no I/O, role-history mutation or GitHub reconciliation. Ph
 policy are unchanged. Both operational schema gates remain **1**, Course Setup emits
 v1, and no production workflow/UI/IPC or real course is changed. Future execution
 must still enforce source/session/reconciliation readiness independently of these
-operation decisions. Deletion, activity guards and activation rollback remain for
-8.5; exceptional correction does not imply lifecycle recovery authority.
-Next: **8.5 — Draft Deletion and Activation Recovery**.
+operation decisions. Slice 8.5 below adds deletion, activity guards and activation rollback; exceptional
+correction does not imply lifecycle recovery authority.
 
 ### 9.4 Delete and rollback
 
-A Draft term that has never been Active may be deleted.
+Slice 8.5 implements backend-only deletion, write-ahead activity marking and explicit
+activation recovery. Both operational schema gates remain **1**; Course Setup emits
+Schema 1 and no production workflow, UI/IPC or real course uses these services.
 
-Deletion authority:
+#### Authority and Draft deletion guards
 
-- current-term coordinator;
-- fallback administrator;
-- if no Active term exists, a coordinator of the Draft term.
+`DraftDeletionAuthorizationResolver.canDeleteDraft()` requires a complete valid v2
+term set and a never-Active Draft. With an Active term, only its current coordinators
+or fallback may delete. With zero Active, the target Draft's current coordinators or
+fallback may delete. Former roles and ordinary faculty cannot delete; Draft
+preparation/setup authority is insufficient.
 
-A term that has ever been Active is normally Archived, not deleted.
+`planDraftDeletion()` and `recoverManagedTerm({ operation: "delete-draft", ... })`
+require `status: draft`, `has_ever_been_active: false`, no checkpoint and complete
+trusted remote activity-absence evidence. Evidence is strict version 1, bound to
+repository ID, exact authoritative revision, term code and authenticated GitHub ID;
+all five student-facing categories must explicitly be absent. Unknown, incomplete,
+contradictory or present evidence fails closed. The caller must establish the remote
+inventory's completeness and source/session authenticity. Empty local runtime files,
+cached manifests, dates, repository names and observed GitHub permissions cannot
+prove absence. Trusted student targets and tracked activity corroborate presence.
 
-Advanced users may manually delete old archived term data from GitHub as intentional permanent cleanup. Graider treats that remote deletion as authoritative.
+Deletion removes the canonical `terms/<code>/` preparatory directory in one managed
+commit, including metadata, rosters and assignments. Unexpected files, recovery files,
+symlinks or runtime/activity artifacts block deletion instead of being erased. No
+unrelated external runtime data is removed. A previously Active Draft is never
+eligible, even after safe rollback. Intentional remote deletion of old Archived data
+remains authoritative; recovery never recreates a missing predecessor from cache.
 
-A mistaken activation may be rolled back through a special recovery action only if the newly activated term has had no student-facing activity.
+#### Durable activation checkpoint
 
-Once student-facing activity exists, a more explicit recovery workflow is required.
+Every future internal v2 activation writes this strict versioned record at
+`terms/<target>/activation-recovery.yml` in the same commit as old/new lifecycle
+metadata. This file is recovery metadata, separate from `term.status`:
+
+```yaml
+schema_version: 1
+activation_id: 2a57e327-5760-432b-90dd-9a3abe687a10
+course_repository_id: 123456
+activated_from_revision: 0123456789abcdef0123456789abcdef01234567
+target_term_code: 27s1
+previous_active_term_code: 26s2 # null for initial activation
+activating_github_user_id: 24680
+state: rollback_available
+```
+
+The UUID identifies the particular activation; source revision must be an ancestor
+of the exact trusted course revision. The target must be current Active and a named
+predecessor must still exist as Archived. Only one unresolved checkpoint is allowed;
+activation cannot bypass it. Unsupported/malformed records, wrong binding, unknown
+actors, missing checkpoints for recovery/first activity, or contradictory lifecycle
+fail closed. Ordinary metadata inspection still permits earlier v2 fixtures with no
+checkpoint; absence never establishes rollback eligibility.
+
+#### Student-facing write-ahead barrier
+
+Before first `apply`, `grading-dispatch`, `grading`, `report-publication` or
+`student-repository-mutation`, a future trusted caller uses
+`markManagedStudentActivity()` to publish:
+
+```yaml
+state: recovery_required
+first_activity:
+  category: grading-dispatch
+  actor_github_user_id: 24680
+  recorded_at: 2026-11-02T15:00:00.000Z
+```
+
+The remote marker must be confirmed before execution.
+`runAfterManagedActivityMarker()` enforces this order for an independently authorized
+callback. The marker is a necessary safety barrier, not operation authorization or
+reconciliation readiness. Repeated marking is idempotent and preserves the first
+record. Failed, stale or unconfirmed marking blocks execution; callback failure
+never clears the marker. Recording intent conservatively blocks rollback even if
+the subsequent operation fails before producing student artifacts.
+
+All marker, activation and recovery calls share the existing outer account/course
+serialization lease, held through the already-authorized operation or reconciliation.
+The lease is not nested. Cross-machine exclusion uses the existing exact-revision
+clone/freshness/non-force push boundary. A marker and rollback from the same base
+cannot both publish; either winner makes the other stale. Accepted-but-lost push
+responses use existing remote commit verification, without duplicate commits or
+blind retries. No local runtime absence is consulted as authoritative evidence.
+
+#### Safe rollback and explicit post-activity recovery
+
+`TermActivationRecoveryAuthorizationResolver.canRecoverActivation()` allows fallback
+or a current coordinator of the currently Active target. Former roles, Draft
+preparation and Archived exceptional correction do not confer recovery authority.
+`planActivationRecovery()` validates the entire lifecycle and immutable activation ID.
+
+With `rollback_available` and complete trusted absence evidence, `safe-rollback`
+restores the predecessor Archived → Active and target Active → Draft. Initial
+activation rolls back to zero Active. Both retain `has_ever_been_active: true`;
+coordinator/faculty history is untouched. These are explicit recovery exceptions,
+never ordinary transitions. Checkpoint resolution and all lifecycle edits publish
+in one commit without an intermediate zero/two-Active successor snapshot.
+
+With `recovery_required`, simple rollback returns a typed `recovery_required`
+outcome. Corroborated activity also blocks it; inconsistent evidence requires
+attention. No student repositories, manifests, grading, reports or role history are
+deleted to manufacture eligibility. After the durable activity marker, authorized
+actors explicitly choose:
+
+- `accept-current`: keep current lifecycle and remove the checkpoint.
+- `restore-predecessor`: archive the mistaken Active and restore the existing
+  Archived predecessor to Active, removing the checkpoint in the same commit.
+
+The mistaken term remains Archived with activation history and all student data,
+consuming the 8.4 late-work/history policy. Initial activation has no predecessor
+resolution. A missing remote predecessor yields Needs attention, never recreation.
+Resolved checkpoints are removed, not retained as a permanent recovery state; Git
+history and `has_ever_been_active` preserve durable evidence. Missing resolved
+checkpoints do not grant future rollback or first-operation authority.
+
+#### Metadata first, reconciliation afterward
+
+All changes use the existing isolated managed transaction: exact SHA, scoped paths,
+one commit, non-force push and remote acceptance verification; no merge, rebase,
+force push or automatic retry. `recoverManagedTerm()` returns committed plans and
+publication hashes, followed by `reconcileCourseTermLifecycle()` using the unchanged
+8.3 lifecycle projection. Restored Active coordinators regain course admin; current
+Archived/Draft roles retain write and former-only roles read; fallback stays separate.
+
+Draft deletion supplies the retired never-Active snapshot for empty scoped-team
+membership plans in the existing Phase 7 engine. Missing retired teams are not
+created; ambiguous creation journals remain Needs attention. Fresh reconciliation
+may use the committed result or authoritative Git parent to identify retired scope.
+No student repository cleanup is performed for a valid deleted Draft. Recovery
+preserves trusted existing student permissions. Branch policy is unchanged.
+
+External failure returns `deleted_needs_reconciliation` or
+`recovered_needs_reconciliation`, preserving authoritative metadata. Successful
+reconciliation never implies student readiness when zero Active remains. No external
+GitHub write precedes publication and no external failure reverts its commit.
+Pending organization invitations remain incomplete reconciliation, not metadata
+failure. Explicit reconciliation uses fresh authoritative state.
+
+Slice 8.5 is complete. Next: **8.6 — Course Archive / Unarchive**.
 
 ---
 
@@ -1623,7 +1746,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slices 8.1–8.4 are complete. Next: Phase 8 / Slice 8.5 — Draft Deletion and Activation Recovery.**
+**Phase 7 and Slices 8.1–8.5 are complete. Next: Phase 8 / Slice 8.6 — Course Archive / Unarchive.**
 
 ---
 
@@ -3595,6 +3718,6 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slices 8.1–8.4 are complete. The next planned work is **Phase 8 / Slice 8.5 —
-Draft Deletion and Activation Recovery**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.5 are complete. The next planned work is **Phase 8 / Slice 8.6 —
+Course Archive / Unarchive**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.

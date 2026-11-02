@@ -158,8 +158,8 @@ remain available without lifecycle projection.
 Pending/incomplete external state leaves lifecycle Active and reports Needs
 reconciliation with blocked student-facing readiness. It never triggers automatic
 Git rollback. Reconciliation/readiness is not another lifecycle enum or a new
-persisted checkpoint. Production gates remain 1; recovery checkpoints are deferred
-to 8.5 before activation becomes operational. See
+persisted reconciliation state. Production gates remain 1; Slice 8.5 adds the
+separate recovery checkpoint before activation becomes operational. See
 [the implemented activation contract](graider-remote-course-architecture.md#92-active).
 
 At most one term is Active in a valid complete snapshot. Initial setup before
@@ -197,6 +197,44 @@ Activation rollback/checkpoint information is
 durable only while recovery is possible or required; the normal term lifecycle
 does not need a permanent rollback enum. See the
 [lifecycle models](graider-lifecycle-state-models.md).
+
+Slice 8.5 implements the strict version-1 recovery record at
+`terms/<target>/activation-recovery.yml`, created in the activation commit alongside
+all lifecycle edits. It contains `activation_id` (UUID), `course_repository_id`,
+`activated_from_revision`, `target_term_code`, nullable `previous_active_term_code`,
+`activating_github_user_id` and `state` (`rollback_available` or `recovery_required`).
+The latter requires `first_activity` with closed category, actor GitHub ID and ISO
+`recorded_at`; the former forbids it. Unknown fields/versions, invalid bindings,
+missing recovery records and contradictory lifecycle fail closed. Only one unresolved
+checkpoint exists, anchored to authoritative Git history.
+
+Before first student-facing work, an exact-revision managed commit changes the
+checkpoint to `recovery_required`; only confirmed remote marking permits an
+independently authorized operation. Categories are Apply, grading dispatch, grading,
+report publication and student-repository mutation. Repeated markers preserve first
+intent; local file absence is never proof. Complete trusted remote absence evidence
+must bind repository/revision/term/authenticated identity and explicitly cover every
+category for deletion or safe rollback. Unknown or present evidence blocks safety.
+
+A Draft is deletable only with `has_ever_been_active: false`, no checkpoint and no
+student activity/evidence. Current Active coordinators/fallback authorize, or target
+Draft coordinators/fallback when zero Active. Safe rollback preserves true, restores
+an existing predecessor and returns the mistaken term to Draft; initial rollback may
+leave zero Active. Post-activity recovery never returns the mistaken term to Draft:
+accept-current leaves lifecycle unchanged, or restore-predecessor archives the
+mistaken term while restoring its predecessor. Student repositories, manifests,
+grading, reports and role histories survive. Missing predecessors are not recreated.
+Recovery requires fallback or current Active target coordinators.
+
+Resolution removes the checkpoint atomically with lifecycle changes. Permanent
+evidence remains in Git and irreversible `has_ever_been_active`, without another
+lifecycle enum. Existing exact-revision serialization/non-force publication prevents
+marker/rollback races; external desired-state reconciliation follows confirmed
+metadata and never causes Git rollback. Deleted Draft scoped-team membership is
+cleared using the retired authoritative snapshot. Empty/zero-Active sets are valid
+but not student-ready. Both operational gates remain 1, Setup remains Schema 1 and
+no production v2 wiring or migration is added. See
+[the implemented recovery contract](graider-remote-course-architecture.md#94-delete-and-rollback).
 
 ### 5.2 Section and faculty relationships
 

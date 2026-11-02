@@ -12,6 +12,8 @@ import {
 export interface DesiredTeamMembership {
   readonly identity: ManagedTeamIdentity;
   readonly githubUserIds: readonly number[];
+  /** Explicit deletion cleanup only: empty an existing team, never create a missing one. */
+  readonly retired?: true;
 }
 
 /** Roles across exactly the supplied terms. No lifecycle filtering, fallback insertion or GitHub I/O. */

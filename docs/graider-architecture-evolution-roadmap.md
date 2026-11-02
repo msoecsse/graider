@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 and Slices 8.1–8.4 are complete. Next: **Phase 8 / Slice 8.5 — Draft Deletion and Activation Recovery**.
+Phases 6 and 7 and Slices 8.1–8.5 are complete. Next: **Phase 8 / Slice 8.6 — Course Archive / Unarchive**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -589,7 +589,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Slices 8.1–8.4 are complete; next: **Phase 8 / Slice 8.5 — Draft Deletion and Activation Recovery**.
+Managed branch policy is implemented in 7.6 below. Slices 8.1–8.5 are complete; next: **Phase 8 / Slice 8.6 — Course Archive / Unarchive**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -623,7 +623,7 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 and Slices 8.1–8.4 are complete. Next: Slice 8.5 — Draft Deletion and Activation Recovery.**
+**Phase 7 and Slices 8.1–8.5 are complete. Next: Slice 8.6 — Course Archive / Unarchive.**
 
 ---
 
@@ -648,7 +648,7 @@ Archived-only and mixed collections. Callers are responsible for supplying all t
 The pure normal-transition contract allows only `draft → active → archived`.
 `canTransitionTermStatus()` returns false for same-state assignment;
 `assertTermStatusTransition()` accepts it as a no-op. Skips and backward transitions
-fail. Slice 8.5 rollback will need a separate recovery-specific operation.
+fail. Slice 8.5 rollback uses a separate recovery-specific operation.
 
 Lifecycle does not change coordinator or section faculty current/former history,
 fallback administration or the faculty directory. Current/former records explicit
@@ -744,7 +744,7 @@ reported. Results distinguish `activated_reconciled` and
 `activated_needs_reconciliation`; student-facing readiness is blocked for incomplete
 reconciliation, unknown freshness, or external failures. No lifecycle rollback occurs.
 Explicit fresh-state reconciliation can converge later; no additional persisted enum
-or checkpoint is invented. Recovery/rollback remains deferred to 8.5.
+or checkpoint was introduced in 8.3. Slice 8.5 below adds the required recovery checkpoint.
 
 The transaction's internal validation hook is used only by the uncalled v2 adapter;
 v1 production callers keep the operational validator. Both operational gates remain
@@ -798,15 +798,67 @@ Both operational gates remain **1**, Course Setup emits v1, and no production
 workflow/UI/IPC or real course is changed. Future callers must combine authorization
 with source/session/reconciliation-readiness checks. See
 [architecture §9.3](graider-remote-course-architecture.md#93-archived).
-Next: **8.5 — Draft Deletion and Activation Recovery**.
+Slice 8.5 below implements Draft deletion and activation recovery.
 
-## Slice 8.5 — Draft deletion and activation recovery
+## Slice 8.5 — Draft deletion and activation recovery — complete
 
-Implement:
+Dedicated `DraftDeletionAuthorizationResolver` and
+`TermActivationRecoveryAuthorizationResolver` compose the existing immutable role
+resolver and complete lifecycle snapshot. With an Active term, only its current
+coordinators or fallback may delete a never-Active Draft. With zero Active, the
+target Draft's current coordinators or fallback may delete it. Recovery requires
+fallback or the current Active target's current coordinator. Preparation and
+Archived correction capabilities do not confer either authority.
 
-- safe Draft deletion;
-- pre-student-activity activation rollback;
-- explicit recovery once student-facing state exists.
+Every future internal v2 activation writes strict version-1
+`terms/<code>/activation-recovery.yml` in the same commit as both lifecycle edits.
+The checkpoint binds a UUID activation, repository ID, source revision, target,
+nullable predecessor and actor. Its state is `rollback_available` or
+`recovery_required`, with first category/actor/time required for the latter.
+Malformed, unsupported, missing or contradictory recovery metadata fails closed;
+recovery verifies the source revision belongs to authoritative Git history.
+
+Before first student-facing Apply, dispatch, grading, publication or repository
+mutation, `markManagedStudentActivity()` commits the write-ahead transition to
+`recovery_required`. `runAfterManagedActivityMarker()` calls an independently
+authorized operation only after confirmed remote marking. Repeated marking preserves
+the first evidence. Marker and recovery use the existing outer per-course lease and
+exact-revision publication boundary; stale requests cannot both publish. No blind
+retry, merge, rebase, force push or second Git transaction engine is introduced.
+
+Safe rollback returns the target to Draft, restores an existing predecessor to
+Active, and removes the checkpoint in one commit. Initial rollback legitimately
+leaves zero Active. Every activated term retains `has_ever_been_active: true` and can
+never be deleted through Draft deletion. Once activity is marked or corroborated,
+simple rollback returns `recovery_required`. Explicit post-marker resolutions are
+`accept-current` (unchanged lifecycle) or `restore-predecessor` (archive the mistaken
+Active, restore its Archived predecessor). Neither removes student/history data.
+Initial activation has no restore-predecessor resolution. Missing remotely deleted
+predecessors produce Needs attention and are never recreated from cache.
+
+Deletion and safe rollback require complete trusted remote absence evidence for all
+five activity categories, bound to exact repository/revision/term/session identity.
+Local file absence, dates and GitHub permissions prove nothing. Present, incomplete,
+unknown or contradictory evidence blocks the operation. Deletion also rejects any
+checkpoint, prior activation, trusted student target or unexpected/runtime file.
+It removes the canonical preparatory term directory atomically; it never deletes
+unrelated runtime/recovery data.
+
+Metadata publication precedes lifecycle-aware Phase 7 reconciliation. Recovery uses
+the unchanged 8.3 strongest-role projection. Deleted Draft scoped teams are emptied
+through the existing membership engine, never recreated when absent; ambiguous
+creation journals remain Needs attention. Fresh reconciliation can consume the
+retired Draft snapshot from the committed result/Git parent. Empty and zero-Active
+sets are supported with student-facing readiness false. External failure reports
+`deleted_needs_reconciliation` or `recovered_needs_reconciliation` and never restores
+or reverts published metadata. Checkpoints are removed on resolution; irreversible
+history remains in Git and `has_ever_been_active`, without a recovery lifecycle enum.
+
+Both operational gates remain **1**, Setup emits Schema 1, and no production v2
+workflow, UI/IPC, real course migration or live GitHub mutation is enabled. See
+[architecture §9.4](graider-remote-course-architecture.md#94-delete-and-rollback).
+
+Next: **8.6 — Course Archive / Unarchive**.
 
 ## Slice 8.6 — Course archive/unarchive
 

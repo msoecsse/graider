@@ -78,24 +78,23 @@ stateDiagram-v2
     Draft --> Active: explicit activation
     Draft --> [*]: delete (never Active)
     Active --> Archived: successor activation or explicit archival
-    Archived --> Active: safe activation rollback only
-    Active --> RecoveryRequired: mistaken activation after student-facing activity
-    RecoveryRequired --> Active: explicit recovery completes
-    RecoveryRequired --> Archived: explicit recovery chooses successor
+    Active --> Draft: explicit safe activation rollback
+    Archived --> Active: explicit predecessor recovery only
 ```
 
-The `Archived → Active` arrow is not ordinary reactivation. It represents the
-special rollback of a mistaken activation while the newly activated term has
-no student-facing activity. An implementation may model activation transaction
-and recovery checkpoints outside the lifecycle enum; it must not expose an
-ordinary “reactivate archived term” command.
+The backward arrows are explicit recovery exceptions, never ordinary reactivation.
+Checkpoint state is separate from the lifecycle enum: `rollback_available` permits
+safe rollback with trusted absence evidence; `recovery_required` prohibits returning
+the mistaken Active to Draft. Explicit predecessor restoration after activity archives
+the mistaken term, preserving student data. There is no `RecoveryRequired` lifecycle
+value or ordinary “reactivate archived term” command.
 
 Slice 8.1 implements only persisted v2 `term.status` (`draft`, `active`, `archived`)
 and the pure normal-transition graph `draft → active → archived`. Same-state
 assignment is a no-op; skips and backward transitions fail. Recovery-specific
-exceptions in this diagram remain deferred to 8.5 and do not weaken that contract.
+exceptions in this diagram are implemented separately in 8.5 and do not weaken that contract.
 Draft authorization is implemented in 8.2, and normal activation in 8.3 as described
-below. Archived authorization is implemented in 8.4; recovery remains deferred to 8.5. See
+below. Archived authorization is implemented in 8.4 and explicit recovery in 8.5. See
 [architecture §9](graider-remote-course-architecture.md#9-term-lifecycle).
 
 ### 3.1 Term transition contract
@@ -107,7 +106,7 @@ below. Archived authorization is implemented in 8.4; recovery remains deferred t
 | Active → Archived during activation | Same actor as activation                                                                           | Happens in same logical transaction as successor Draft → Active                                           | Only as part of safe activation rollback | Preserves history and eligible late grading/regrading rights                                                                 |
 | Draft → Deleted                     | Current-term coordinator, fallback administrator, or—if no Active term—a coordinator of that Draft | Term has never been Active                                                                                | No normal recovery except Git checkpoint | Removes only Draft data; student repos cannot exist from Draft operations                                                    |
 | Mistaken activation rollback        | Authorized activation/recovery actor                                                               | Newly activated term has no student-facing activity                                                       | Special one-time recovery                | Restores one Active term and prior authorization desired state without erasing activation history                            |
-| Active → Recovery required          | Recovery workflow                                                                                  | Student-facing activity exists, so safe rollback guard fails                                              | Resolved only explicitly                 | Blocks simplistic rollback and preserves all activity for deliberate recovery                                                |
+| Checkpoint → recovery_required      | Write-ahead marker                                                                                 | Student-facing activity exists, so safe rollback guard fails                                              | Resolved only explicitly                 | Blocks simplistic rollback and preserves all activity for deliberate recovery                                                |
 
 ### 3.2 Term invariants
 
@@ -154,8 +153,8 @@ and readiness. Explicit fresh-state reconciliation can converge later; no automa
 Git rollback or blind retry is performed. Readiness is separate from the persisted
 lifecycle enum.
 
-Git activation history and irreversible evidence are retained for 8.5; exceptional
-recovery/checkpoint policy is not implemented. Both operational schema gates remain
+Git activation history and irreversible evidence are retained; Slice 8.5 adds the
+checkpoint and explicit recovery policy below. Both operational schema gates remain
 1, with no production activation/IPC or real course changes. Slice 8.4 adds the
 separate Archived authorization overlay below.
 
@@ -191,8 +190,63 @@ scoped current teams and student admin/read grants remain unchanged. GitHub perm
 are infrastructure capability, not Graider operation authorization. This pure overlay
 does no GitHub reconciliation or corrective mutation. Both production gates remain 1;
 v1 Setup/workflows remain unchanged, with no production UI/IPC or real course changes.
-Next: 8.5 Draft deletion and activation recovery, including durable history/activity
-guards. Exceptional correction does not authorize reactivation or rollback.
+Slice 8.5 below adds deletion and activity guards. Exceptional correction does not
+authorize reactivation or rollback.
+
+### 3.5 Implemented deletion and activation recovery (Slice 8.5)
+
+Every future activation atomically adds strict version-1
+`terms/<target>/activation-recovery.yml`: activation UUID, immutable repository ID,
+source revision, target, nullable predecessor, activating GitHub ID and checkpoint
+state. `rollback_available` has no activity record; `recovery_required` requires the
+first typed activity category/actor/time. Unknown versions, malformed/missing recovery
+records, contradictory lifecycle/history or missing predecessors fail closed.
+
+```mermaid
+stateDiagram-v2
+    [*] --> rollback_available: activation commit
+    rollback_available --> recovery_required: confirmed write-ahead activity commit
+    rollback_available --> [*]: safe rollback resolves checkpoint
+    recovery_required --> [*]: accept current or restore predecessor
+```
+
+Before first Apply/provisioning, dispatch, grading, publication or student-repository
+mutation, the durable marker must be remotely confirmed. Marker/rollback share the
+existing account/course lease and exact-revision non-force transaction; one winner
+makes same-base competing operations stale. Repeated marking is idempotent and no
+operation proceeds on an unconfirmed marker. This barrier does not supply operation
+authorization; the future trusted caller must separately enforce role/scope/readiness.
+
+Deletion requires never-Active Draft, no checkpoint and complete exact-source remote
+absence evidence for every student-facing category. With an Active, its current
+coordinators or fallback authorize; with zero Active, target Draft current
+coordinators or fallback authorize. Unknown evidence/files, provisioning targets,
+activity or irreversible history block deletion. Only canonical preparatory data is
+removed, in one commit. Local/runtime absence cannot establish safety.
+
+Safe rollback requires `rollback_available` plus complete trusted absence evidence:
+current target returns to Draft, predecessor returns to Active, and checkpoint is
+removed together. Initial rollback leaves zero Active. Activation history stays true
+and such a Draft can never be deleted. Roles and student/history files are untouched.
+With `recovery_required`, simple rollback returns an explicit recovery-required result.
+Only fallback or the current Active target's current coordinator may recover.
+
+After the durable marker, explicit accept-current removes the checkpoint without
+lifecycle change. Restore-predecessor archives the mistaken term and reactivates its
+existing Archived predecessor atomically; all student/history state survives. Initial
+activation has no predecessor to restore. Remote deletion is authoritative and missing
+predecessors are never recreated. Checkpoints exist only while unresolved; Git history
+and `has_ever_been_active` preserve permanent evidence.
+
+Confirmed metadata always precedes lifecycle-aware reconciliation. Deleted scoped
+teams are emptied through the existing engine without creating absent teams. Recovery
+uses the unchanged 8.3 course-wide projection and scoped role history. Pending or failed
+external state reports Needs reconciliation, never Git rollback. Empty/zero-Active
+snapshots remain valid with student-facing readiness false. Gates remain 1, Setup emits
+v1, and no production v2/UI/IPC or real resource is enabled. See
+[architecture §9.4](graider-remote-course-architecture.md#94-delete-and-rollback).
+
+Next: **8.6 — Course Archive / Unarchive**.
 
 ## 4. Assignment lifecycle
 

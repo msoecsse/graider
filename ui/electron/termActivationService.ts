@@ -26,7 +26,7 @@ interface PublishedActivation {
 }
 export interface TermActivationRequest extends Omit<
   ManagedTransactionRequest<PublishedActivation>,
-  "allows" | "mutate" | "validateMetadata"
+  "allows" | "mutate" | "validateMetadata" | "validateChangedPaths"
 > {
   readonly targetTermCode: string;
   readonly revalidateRepository: () => Promise<void>;
@@ -74,8 +74,11 @@ export const activateManagedTerm = async (
   let prepared: ReturnType<typeof backend.prepareTermActivation> | undefined;
   const result = await publishManagedCourseTransaction<PublishedActivation>({
     ...request,
-    allows: (file) =>
-      prepared?.plan.changedTermCodes.some((code) => file === `terms/${code}/term.yml`) ?? false,
+    allows: (file) => prepared?.changedPaths.includes(file) ?? false,
+    validateChangedPaths: (paths) => {
+      if (paths.some((file) => !prepared?.changedPaths.includes(file)))
+        throw new Error("Unexpected activation paths.");
+    },
     validateMetadata: (root, organization) => {
       backend.readActivationMetadata(root, organization);
     },
@@ -84,7 +87,11 @@ export const activateManagedTerm = async (
         root,
         request.input.course.organizationLogin,
         request.targetTermCode,
-        request.input.userId
+        request.input.userId,
+        {
+          courseRepositoryId: request.context.repositoryId,
+          revision: request.context.authoritativeCommit
+        }
       );
       return { status: "success", plan: prepared.plan };
     }

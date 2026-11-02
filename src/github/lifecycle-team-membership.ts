@@ -1,4 +1,5 @@
 import type { RawCourseConfigV2, RawTermConfigV2 } from "../config/config-models.js";
+import { rawTermConfigV2Schema } from "../config/config-schemas.js";
 import { CourseTermLifecycle } from "../terms/course-term-lifecycle.js";
 import {
   buildDesiredTeamMemberships,
@@ -44,5 +45,34 @@ export const buildLifecycleTeamMemberships = (
         ? Object.freeze({ identity: team.identity, githubUserIds: ids(members) })
         : team;
     })
+  );
+};
+
+/** Caller proves these never-Active Draft snapshots came from the published deletion's parent. */
+export const buildDeletedDraftTeamCleanup = (
+  course: RawCourseConfigV2,
+  remaining: readonly RawTermConfigV2[],
+  retiredInputs: readonly RawTermConfigV2[],
+  courseRepositoryId: number
+): readonly DesiredTeamMembership[] => {
+  const retired = retiredInputs.map((term) => rawTermConfigV2Schema.parse(term));
+  for (const term of retired) {
+    if (
+      term.term.status !== "draft" ||
+      term.term.has_ever_been_active ||
+      remaining.some((value) => value.term.code === term.term.code)
+    )
+      throw new Error("Invalid retired Draft scope.");
+  }
+  return Object.freeze(
+    buildDesiredTeamMemberships(course, retired, courseRepositoryId)
+      .filter((team) => "termCode" in team.identity)
+      .map((team) =>
+        Object.freeze({
+          identity: team.identity,
+          githubUserIds: Object.freeze([]),
+          retired: true as const
+        })
+      )
   );
 };

@@ -1,135 +1,19 @@
 // @vitest-environment node
 import fs from "node:fs";
-import path from "node:path";
-import { parse, stringify } from "yaml";
+import { parse } from "yaml";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateManagedTerm, type TermActivationRequest } from "./termActivationService";
-import type { GitWorkspaceSynchronizer } from "./gitWorkspaceReader";
-import {
-  managedOperationalFixture,
-  fixtureGit as git,
-  fixtureCourseYaml
-} from "./managedOperationalFixtures";
+import { fixtureGit as git } from "./managedOperationalFixtures";
+import { termLifecycleFixture } from "./termLifecycleFixtures";
 
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 const fixture = async (initial = false) => {
-  const f = await managedOperationalFixture();
+  const f = await termLifecycleFixture(initial);
   roots.push(f.root);
-  const course = {
-    ...parse(fixtureCourseYaml),
-    schema_version: 2,
-    faculty_directory: [42, 43, 44].map((id) => ({
-      institutional_username: `faculty-${id}`,
-      github_user_id: id,
-      github_login: `faculty-${id}`,
-      github_login_history: []
-    })),
-    fallback_administrator: { github_user_id: 42 }
-  };
-  const term = (code: string, status: string, coordinator: number) => ({
-    schema_version: 2,
-    term: {
-      code,
-      academic_year: 2027,
-      semester: 1,
-      display_name: code,
-      status,
-      has_ever_been_active: status !== "draft"
-    },
-    coordinators: { current: [{ github_user_id: coordinator }], former: [] },
-    sections: [{ id: "001", faculty: { current: [{ github_user_id: 44 }], former: [] } }]
-  });
-  fs.writeFileSync(path.join(f.writer, "course.yml"), stringify(course));
-  fs.writeFileSync(
-    path.join(f.writer, "terms/27s1/term.yml"),
-    stringify(term("27s1", initial ? "archived" : "active", 42))
-  );
-  fs.mkdirSync(path.join(f.writer, "terms/27s2"));
-  fs.writeFileSync(
-    path.join(f.writer, "terms/27s2/term.yml"),
-    stringify(term("27s2", "draft", 43))
-  );
-  await git(f.writer, ["add", "."]);
-  await git(f.writer, ["commit", "-m", "Isolated v2 fixture"]);
-  await git(f.writer, ["push", "origin", "main"]);
-  const head = await git(f.remote, ["rev-parse", "main"]);
-  const synchronize = async () => {
-    const workspace = (await f.auth.factory.open(f.cache)) as unknown as GitWorkspaceSynchronizer;
-    await workspace.fetchOrigin({ authentication: f.auth.authentication });
-    const currentCommit = await git(f.remote, ["rev-parse", "main"]);
-    const state = await workspace.inspect();
-    if (state.head.kind !== "attached") throw new Error("Detached fixture cache.");
-    if (state.head.commit !== currentCommit)
-      await workspace.fastForwardToCommit({
-        expectedHead: state.head.commit,
-        expectedBranch: "main",
-        targetCommit: currentCommit
-      });
-    return { status: "up_to_date" as const, diagnostic: null, retryable: false, currentCommit };
-  };
-  await synchronize();
-  const observed = {
-    status: "reconciled" as const,
-    studentFacingReady: true,
-    organization: [],
-    teams: [],
-    coursePermissions: [],
-    studentPermissions: []
-  };
-  const reconcile = vi.fn<NonNullable<TermActivationRequest["reconcile"]>>(async () => {
-    expect(await git(f.remote, ["rev-parse", "main"])).not.toBe(head);
-    return Object.freeze(observed);
-  });
-  const input: TermActivationRequest["input"] = {
-    token: "oauth-fixture-secret",
-    userId: 42,
-    course: { ...f.course, schemaVersion: 2 },
-    signal: new AbortController().signal,
-    revalidateSession: async () => true,
-    resynchronize: synchronize
-  };
-  const request: TermActivationRequest = {
-    userData: f.root,
-    input,
-    context: {
-      userId: 42,
-      repositoryId: 20,
-      authoritativeCommit: head,
-      operationalCommit: head,
-      courseFolderId: "fixture",
-      courseFolderPath: f.cache,
-      mode: "new_mutation"
-    },
-    expectedRevision: head,
-    author: { name: "Fixture", email: "fixture@example.test" },
-    changed: vi.fn(),
-    authenticate: f.authenticate,
-    revalidateRepository: vi.fn(async () => {}),
-    targetTermCode: "27s2",
-    reconcile,
-    reconciliation: {
-      client: {} as never,
-      studentTargets: [],
-      invitationJournal: new Set(),
-      teamCreationJournal: new Set()
-    }
-  };
-  const remoteTerm = async (code: string) =>
-    parse(await git(f.remote, ["show", `main:terms/${code}/term.yml`]));
-  const advance = async () => {
-    const file = path.join(f.writer, "course.yml");
-    fs.writeFileSync(
-      file,
-      fs.readFileSync(file, "utf8").replace("Original title", "Remote winner")
-    );
-    await git(f.writer, ["commit", "-am", "Remote winner"]);
-    await git(f.writer, ["push", "origin", "main"]);
-    return git(f.remote, ["rev-parse", "main"]);
-  };
-  return { ...f, head, request, reconcile, remoteTerm, advance, observed };
+  return f;
 };
 
 describe("future v2 atomic activation publication", () => {
@@ -144,6 +28,17 @@ describe("future v2 atomic activation publication", () => {
     expect(result.status).toBe("activated_reconciled");
     expect(result.studentFacingReady).toBe(true);
     expect(result.plan.previousActiveTermCode).toBe("27s1");
+    const checkpoint = parse(
+      await git(f.remote, ["show", "main:terms/27s2/activation-recovery.yml"])
+    );
+    expect(checkpoint).toMatchObject({
+      schema_version: 1,
+      target_term_code: "27s2",
+      previous_active_term_code: "27s1",
+      state: "rollback_available",
+      activating_github_user_id: 42,
+      activated_from_revision: f.head
+    });
     expect((await f.remoteTerm("27s1")).term).toMatchObject({
       status: "archived",
       has_ever_been_active: true
@@ -157,7 +52,7 @@ describe("future v2 atomic activation publication", () => {
       (
         await git(f.remote, ["diff-tree", "--no-commit-id", "--name-only", "-r", result.commit])
       ).split("\n")
-    ).toEqual(["terms/27s1/term.yml", "terms/27s2/term.yml"]);
+    ).toEqual(["terms/27s1/term.yml", "terms/27s2/activation-recovery.yml", "terms/27s2/term.yml"]);
     expect(f.push).toHaveBeenCalledOnce();
     expect(f.reconcile).toHaveBeenCalledOnce();
     await expect(activateManagedTerm(f.request)).rejects.toMatchObject({
@@ -170,10 +65,14 @@ describe("future v2 atomic activation publication", () => {
     const f = await fixture(true);
     const result = await activateManagedTerm(f.request);
     expect(result.plan.previousActiveTermCode).toBeNull();
+    expect(
+      parse(await git(f.remote, ["show", "main:terms/27s2/activation-recovery.yml"]))
+        .previous_active_term_code
+    ).toBeNull();
     expect(result.plan.changedTermCodes).toEqual(["27s2"]);
     expect(
       await git(f.remote, ["diff-tree", "--no-commit-id", "--name-only", "-r", result.commit])
-    ).toBe("terms/27s2/term.yml");
+    ).toBe("terms/27s2/activation-recovery.yml\nterms/27s2/term.yml");
   }, 20_000);
 
   it("blocks stale views before clone and remote races after planning before push", async () => {

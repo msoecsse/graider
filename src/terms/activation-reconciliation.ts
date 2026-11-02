@@ -24,7 +24,10 @@ import {
   type StudentRepositoryPermissionOutcome
 } from "../github/student-repository-permissions.js";
 import { validateStudentRepositoryTargets } from "../github/student-repository-target.js";
-import { buildLifecycleTeamMemberships } from "../github/lifecycle-team-membership.js";
+import {
+  buildLifecycleTeamMemberships,
+  buildDeletedDraftTeamCleanup
+} from "../github/lifecycle-team-membership.js";
 import { CourseTermLifecycle } from "./course-term-lifecycle.js";
 
 export interface ActivationReconciliationInput {
@@ -50,20 +53,27 @@ export interface ActivationReconciliation {
   readonly coursePermissions: readonly CourseRepositoryPermissionOutcome[];
   readonly studentPermissions: readonly StudentRepositoryPermissionOutcome[];
 }
+export interface CourseTermLifecycleReconciliationInput extends Omit<
+  ActivationReconciliationInput,
+  "activeTermCode"
+> {
+  readonly activeTermCode: string | null;
+  readonly retiredDraftTerms?: readonly RawTermConfigV2[];
+}
 
 /**
  * Explicit reconciliation from already published, authoritative metadata. Caller holds the
  * same course/session/revision lease and supplies durable journals and trusted repository evidence.
  * This does not activate, provision, change branch rules, retry ambiguous writes or roll back Git.
  */
-export const reconcileTermActivation = async (
-  input: ActivationReconciliationInput,
+export const reconcileCourseTermLifecycle = async (
+  input: CourseTermLifecycleReconciliationInput,
   signal?: AbortSignal
 ): Promise<ActivationReconciliation> => {
   const course = rawCourseConfigV2Schema.parse(input.course);
   const terms = input.terms.map((term) => rawTermConfigV2Schema.parse(term));
   const lifecycle = new CourseTermLifecycle(terms);
-  if (lifecycle.requireActiveTerm().term.code !== input.activeTermCode)
+  if ((lifecycle.getActiveTerm()?.term.code ?? null) !== input.activeTermCode)
     throw new Error("Activation reconciliation requires the authoritative Active term.");
   const targets = structuredClone(input.studentTargets);
   for (const value of validateStudentRepositoryTargets(targets)) {
@@ -76,9 +86,24 @@ export const reconcileTermActivation = async (
     terms,
     courseRepositoryId: input.courseRepositoryId,
     organizationId: input.organizationId,
-    authenticatedUserId: input.authenticatedUserId
+    authenticatedUserId: input.authenticatedUserId,
+    ...(input.retiredDraftTerms
+      ? {
+          retiredDraftTerms: input.retiredDraftTerms.map((term) =>
+            rawTermConfigV2Schema.parse(term)
+          )
+        }
+      : {})
   };
-  const desired = buildLifecycleTeamMemberships(course, terms, input.courseRepositoryId);
+  const desired = [
+    ...buildLifecycleTeamMemberships(course, terms, input.courseRepositoryId),
+    ...buildDeletedDraftTeamCleanup(
+      course,
+      terms,
+      context.retiredDraftTerms ?? [],
+      input.courseRepositoryId
+    )
+  ];
   const relevantIds = new Set(desired.flatMap((team) => team.githubUserIds));
   relevantIds.add(course.fallback_administrator.github_user_id);
   const access = new FacultyOrganizationReconciler(input.client, context, input.invitationJournal);
@@ -134,10 +159,16 @@ export const reconcileTermActivation = async (
     );
   return Object.freeze({
     status: complete ? "reconciled" : "needs_reconciliation",
-    studentFacingReady: complete,
+    studentFacingReady: complete && lifecycle.getActiveTerm() !== undefined,
     organization: Object.freeze(organization),
     teams,
     coursePermissions,
     studentPermissions
   });
 };
+
+/** Existing 8.3 API retains its exactly-one-Active expectation. */
+export const reconcileTermActivation = (
+  input: ActivationReconciliationInput,
+  signal?: AbortSignal
+): Promise<ActivationReconciliation> => reconcileCourseTermLifecycle(input, signal);

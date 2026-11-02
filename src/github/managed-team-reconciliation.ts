@@ -1,5 +1,8 @@
 import type { RawCourseConfigV2, RawTermConfigV2 } from "../config/config-models.js";
-import { buildLifecycleTeamMemberships } from "./lifecycle-team-membership.js";
+import {
+  buildLifecycleTeamMemberships,
+  buildDeletedDraftTeamCleanup
+} from "./lifecycle-team-membership.js";
 import { rawCourseConfigV2Schema } from "../config/config-schemas.js";
 import { FacultyDirectory } from "../faculty/faculty-directory.js";
 import { isGithubUsername } from "../roster/roster-validation.js";
@@ -141,6 +144,7 @@ export class ManagedTeamMembershipReconciler {
       readonly terms: readonly RawTermConfigV2[];
       readonly courseRepositoryId: number;
       readonly authenticatedUserId: number;
+      readonly retiredDraftTerms?: readonly RawTermConfigV2[];
     },
     private readonly organizationAccess: Pick<FacultyOrganizationReconciler, "inspect">,
     /** All calls are awaited. Production must commit this journal durably before POST. */
@@ -153,6 +157,16 @@ export class ManagedTeamMembershipReconciler {
         ? buildLifecycleTeamMemberships
         : buildDesiredTeamMemberships
     )(this.course, context.terms, context.courseRepositoryId);
+    if (context.retiredDraftTerms?.length)
+      this.desired = Object.freeze([
+        ...this.desired,
+        ...buildDeletedDraftTeamCleanup(
+          this.course,
+          context.terms,
+          context.retiredDraftTerms,
+          context.courseRepositoryId
+        )
+      ]);
     this.directory = new FacultyDirectory(this.course);
     if (!positiveId(context.authenticatedUserId))
       throw new Error("Invalid authenticated account ID.");
@@ -178,6 +192,10 @@ export class ManagedTeamMembershipReconciler {
         let teamId: number | undefined;
         try {
           const selected = this.select(desired.identity, inventory);
+          if (!selected && desired.retired) {
+            results.push(await this.retiredAbsent(desired, session));
+            continue;
+          }
           if (!selected) return fail("team_creation_unverified");
           teamId = selected.team.id;
           const members = await this.snapshot(desired.identity, teamId, session, signal);
@@ -651,6 +669,20 @@ export class ManagedTeamMembershipReconciler {
     });
   }
 
+  private async retiredAbsent(
+    desired: DesiredTeamMembership,
+    session: Session
+  ): Promise<ManagedTeamOutcome> {
+    const key = `managed-team-create:${String(session.organizationId)}:${renderManagedTeamMetadata(desired.identity)}`;
+    if (await this.journal(() => this.creationJournal.has(key)))
+      return fail("team_creation_unverified");
+    return Object.freeze({
+      identity: desired.identity,
+      status: "up_to_date",
+      faculty: Object.freeze([])
+    });
+  }
+
   private async reconcileTeam(
     desired: DesiredTeamMembership,
     session: Session,
@@ -660,7 +692,16 @@ export class ManagedTeamMembershipReconciler {
     let teamId: number | undefined;
     const faculty: FacultyTeamOutcome[] = [];
     try {
-      const { observed, created } = await this.ensureTeam(desired, session, signal);
+      let existingRetired: ObservedManagedTeam | undefined;
+      if (desired.retired) {
+        const fresh = await this.session(signal);
+        if (fresh.organizationId !== session.organizationId) return fail("identity_mismatch");
+        existingRetired = this.select(desired.identity, await this.inventory(fresh, signal));
+        if (!existingRetired) return await this.retiredAbsent(desired, fresh);
+      }
+      const { observed, created } = existingRetired
+        ? { observed: existingRetired, created: false }
+        : await this.ensureTeam(desired, session, signal);
       teamId = observed.team.id;
       const members = await this.snapshot(desired.identity, teamId, session, signal);
       const wanted = new Set(desired.githubUserIds);
