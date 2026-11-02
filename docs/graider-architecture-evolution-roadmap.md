@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 and Slices 8.1–8.3 are complete. Next: **Phase 8 / Slice 8.4 — Term Archival Restrictions**.
+Phases 6 and 7 and Slices 8.1–8.4 are complete. Next: **Phase 8 / Slice 8.5 — Draft Deletion and Activation Recovery**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -589,7 +589,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Slices 8.1–8.3 are complete; next: **Phase 8 / Slice 8.4 — Term Archival Restrictions**.
+Managed branch policy is implemented in 7.6 below. Slices 8.1–8.4 are complete; next: **Phase 8 / Slice 8.5 — Draft Deletion and Activation Recovery**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -623,7 +623,7 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 and Slices 8.1–8.3 are complete. Next: Slice 8.4 — Term Archival Restrictions.**
+**Phase 7 and Slices 8.1–8.4 are complete. Next: Slice 8.5 — Draft Deletion and Activation Recovery.**
 
 ---
 
@@ -704,7 +704,7 @@ and absent authority; all public results are immutable.
 Phase 6's primitive and Active behavior are unchanged; Phase 7 still uses all supplied
 terms without lifecycle filtering. No GitHub mutation, activation mutation or production
 v1 wiring is added. Both operational schema gates remain **1**; Course Setup emits v1,
-and no real course migrates. Archived policy remains deferred to 8.4.
+and no real course migrates. Archived policy is implemented separately in 8.4 below.
 
 See [architecture §9.1](graider-remote-course-architecture.md#91-draft).
 Slice 8.3 below now implements the metadata and desired-state transition as separate ordered steps.
@@ -752,11 +752,53 @@ v1 production callers keep the operational validator. Both operational gates rem
 changed. Archived restrictions are not implemented in this slice.
 
 See [the activation contract](graider-remote-course-architecture.md#92-active).
-Next: **8.4 — Term Archival Restrictions**.
+Slice 8.4 below applies the Archived domain restrictions without changing desired state.
 
-## Slice 8.4 — Term archival restrictions
+## Slice 8.4 — Term archival restrictions — complete
 
-Freeze ordinary structural edits while preserving grading/regrading.
+`ArchivedTermAuthorizationResolver` validates/snapshots a v2 course, the complete
+trusted term set, target Archived code and immutable authenticated GitHub ID. It
+composes `CourseTermLifecycle`, the target's Phase 6 role resolver and fallback
+identity. Wrong/missing targets, invalid activation history, duplicate codes,
+multiple Active terms and invalid role/directory state anywhere fail explicitly.
+Zero Active remains valid and dates never infer lifecycle.
+
+Archived current roles mean normal completion; former roles mean explicit removal
+and historical read only. `canViewArchivedTerm()` allows current/former coordinators
+and section faculty, plus fallback. Default inspection preserves current/former
+teaching scope and former-coordinator term-wide historical read. Only current
+coordinators of the target may explicitly expand via `coordinator-term`; no Active
+or other Draft coordinator cross-term authority is invented.
+
+`canPerformArchivedSectionOperation()` accepts closed typed categories: inspection,
+grading/regrading, grading dispatch, report publication/republication, Apply and
+generic student-repository mutation. Late work requires current target section
+faculty in their own section, or current target coordinators with explicit expansion;
+former-only and fallback-only identities cannot perform it. `getArchivedSectionScope()`
+returns immutable visible/gradable/historical-read-only IDs, not generic mutable scope.
+Apply and generic student-repository mutation are always denied with lifecycle-specific
+bases, including for coordinators/fallback. Historical reads do not imply grading.
+
+`canEditArchivedStructure()` always freezes ordinary section/roster/assignment
+structure, deadline/late policy and faculty-assignment changes. The separate
+`canPerformArchivedAdministrativeCorrection()` allows only current target coordinators
+or fallback for those closed categories. This explicit exceptional path grants no
+ordinary student visibility, grading, dispatch, publication, Apply, generic repository
+mutation or reactivation to fallback-only administrators. Independent term roles
+remain independent; no role facts are synthesized and unknown operations fail closed.
+
+The 8.3 lifecycle projection and reconciliation need no change: current Archived
+scoped teams and course write remain, former-only read remains, and current-role
+student repository admin is not downgraded by structural freeze. GitHub permissions
+are infrastructure capability, not domain authority. No role arrays, schema fields,
+GitHub state or Phase 6–8.3 behavior are changed. All results are immutable and no
+corrective mutation service, deletion, rollback or activity guard is introduced.
+
+Both operational gates remain **1**, Course Setup emits v1, and no production
+workflow/UI/IPC or real course is changed. Future callers must combine authorization
+with source/session/reconciliation-readiness checks. See
+[architecture §9.3](graider-remote-course-architecture.md#93-archived).
+Next: **8.5 — Draft Deletion and Activation Recovery**.
 
 ## Slice 8.5 — Draft deletion and activation recovery
 

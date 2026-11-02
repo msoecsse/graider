@@ -170,6 +170,29 @@ GitHub behavior. Current/former coordinator and faculty history records role
 removal independently of lifecycle; normal archival does not remove people.
 See [the implemented state contract](graider-remote-course-architecture.md#9-term-lifecycle).
 
+Slice 8.4 consumes the existing serialized coordinator/section-faculty `current` and
+`former` lists without adding intervals or end reasons. In an Archived term, current
+means normal completion and retains scoped late grading/regrading, dispatch and
+report publication/republication. Former means explicit removal and historical read
+only, unless an independent current role grants stronger rights in its own scope.
+Archival and authorization never move people from current to former.
+
+Historical inspection preserves section history and former-coordinator term-wide read;
+current coordinators explicitly expand via `coordinator-term`. Fallback alone receives
+metadata and narrow exceptional administrative correction without ordinary section,
+repository, grading or publication access. Ordinary structural workflows remain frozen
+even for coordinators/fallback, and Apply/provisioning and generic student repository
+mutation always deny. Corrections use a separate closed operation capability and do
+not authorize reactivation or rollback.
+
+The 8.3 team/permission projection is unchanged: normally completed Archived current
+roles retain course write and current scoped teams, former-only roles retain read,
+and current-role student repository admin remains infrastructure for eligible late
+work. GitHub permissions do not authorize a Graider operation. No schema redesign,
+corrective mutation, reconciliation change or production v2 wiring is added; both
+operational gates remain 1 and v1 Setup is unchanged. See
+[the implemented Archived contract](graider-remote-course-architecture.md#93-archived).
+
 Activation rollback/checkpoint information is
 durable only while recovery is possible or required; the normal term lifecycle
 does not need a permanent rollback enum. See the

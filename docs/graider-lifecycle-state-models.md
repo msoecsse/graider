@@ -95,7 +95,7 @@ and the pure normal-transition graph `draft → active → archived`. Same-state
 assignment is a no-op; skips and backward transitions fail. Recovery-specific
 exceptions in this diagram remain deferred to 8.5 and do not weaken that contract.
 Draft authorization is implemented in 8.2, and normal activation in 8.3 as described
-below. Archived restrictions and recovery remain later-slice requirements. See
+below. Archived authorization is implemented in 8.4; recovery remains deferred to 8.5. See
 [architecture §9](graider-remote-course-architecture.md#9-term-lifecycle).
 
 ### 3.1 Term transition contract
@@ -156,7 +156,43 @@ lifecycle enum.
 
 Git activation history and irreversible evidence are retained for 8.5; exceptional
 recovery/checkpoint policy is not implemented. Both operational schema gates remain
-1, with no production activation/IPC or real course changes. Next: 8.4 Archived policy.
+1, with no production activation/IPC or real course changes. Slice 8.4 adds the
+separate Archived authorization overlay below.
+
+### 3.4 Implemented Archived authorization (Slice 8.4)
+
+`ArchivedTermAuthorizationResolver` validates the complete trusted v2 term set and
+requires an Archived target with activation history. It composes the target's
+Phase 6 role resolver and fallback identity; caller inputs are snapshotted and
+decisions/scopes frozen. No Active term is required and dates infer nothing.
+
+Current Archived coordinator/faculty records represent normal completion; former
+records represent explicit removal. Historical inspection preserves current/former
+section scope and former-coordinator term-wide read. Metadata is visible to those
+roles and fallback. Current target coordinators can explicitly expand via
+`coordinator-term`; ordinary defaults never automatically expand. Coordinating
+another Active/Draft term grants no Archived access.
+
+Late grading/regrading, grading dispatch and report publication/republication require
+current target section faculty in their own section, or current target coordinators
+after explicit expansion. Former-only roles retain read only. Fallback alone gets
+metadata and exceptional correction, without ordinary student/repository inspection
+or late-work rights. Independently held current roles still apply.
+
+Ordinary section/roster/assignment structure, deadline/late-policy and faculty changes
+always deny with `archived-structure-frozen`, even for coordinators/fallback. A separate
+closed correction capability authorizes only current target coordinators or fallback
+for explicit exceptional repair. It implies neither student access nor lifecycle
+recovery. Apply/provisioning and generic student-repository mutations always deny;
+only the named late-work operations may mutate within their authorized scope.
+
+No current role is converted to former on archival. The 8.3 effective course-write,
+scoped current teams and student admin/read grants remain unchanged. GitHub permissions
+are infrastructure capability, not Graider operation authorization. This pure overlay
+does no GitHub reconciliation or corrective mutation. Both production gates remain 1;
+v1 Setup/workflows remain unchanged, with no production UI/IPC or real course changes.
+Next: 8.5 Draft deletion and activation recovery, including durable history/activity
+guards. Exceptional correction does not authorize reactivation or rollback.
 
 ## 4. Assignment lifecycle
 

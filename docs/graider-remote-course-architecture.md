@@ -506,7 +506,7 @@ fallback identity and managed-team membership are unchanged. Active-term Phase 6
 behavior and Phase 7 membership, repository permissions and branch policy remain
 unchanged. No production Apply/grading/publication/Setup/Electron IPC calls this
 resolver. Both operational schema gates remain **1**, Course Setup emits v1, and
-no real course is migrated. Archived authorization remains deferred to 8.4.
+no real course is migrated. Archived authorization is implemented separately in §9.3.
 Slice 8.3 below implements actual lifecycle mutation and the authorization/team
 desired-state transition; 8.2 itself performs neither.
 
@@ -605,7 +605,7 @@ activation, the previous current coordinator normally moves from course admin to
 write and the new Active coordinator moves from write to admin. Every term/section
 current/former team retains its identity and membership. Archival does not turn
 current people into former people or remove normally completed late-grading access.
-Archived authorization restrictions remain for 8.4.
+Archived authorization restrictions are applied separately by the §9.3 overlay.
 
 `reconcileTermActivation()` composes 7.2 organization access, 7.3 membership with the
 lifecycle projection, 7.4 course permissions, and 7.5 permissions for existing trusted
@@ -630,16 +630,18 @@ No new lifecycle enum or persisted reconciliation/recovery checkpoint is introdu
 activation evidence. Exceptional rollback/checkpoints remain for 8.5 before production
 activation is enabled; ordinary backward transitions remain forbidden. Both operational
 schema gates remain **1**; Course Setup emits v1 and no real course migrates.
-Next: **8.4 — Term Archival Restrictions**.
+Slice 8.4 below implements Archived authorization without changing this desired state.
 
 ### 9.3 Archived
 
 An Archived term is structurally frozen for ordinary faculty.
 
-Faculty who taught the term may still:
+Faculty/coordinators whose term/section role remains `current` completed the term
+normally. In their authorized scope they may still:
 
 - grade;
 - regrade;
+- dispatch grading workflows for late grading/regrading;
 - publish/re-publish reports;
 - inspect historical repositories and state.
 
@@ -651,7 +653,87 @@ Ordinary faculty may not change:
 - deadlines;
 - faculty assignments.
 
-Term coordinators or the fallback administrator may make exceptional corrective administrative changes.
+Current coordinators of that Archived term or the fallback administrator may make
+exceptional corrective administrative changes through an explicit corrective path.
+Ordinary structural requests remain denied even for those identities.
+
+**Slice 8.4 implementation contract (complete):**
+`ArchivedTermAuthorizationResolver` composes `CourseTermLifecycle`, the target's
+Phase 6 `AuthorizationResolver` and `FallbackAdministrator`. It accepts a validated
+v2 course, the complete trusted term set, the target code and authenticated immutable
+GitHub ID. Missing/non-Archived targets, invalid activation history, duplicate codes,
+multiple Active terms, and invalid directory/role state anywhere in the supplied set
+fail construction. Zero Active is valid; dates are never consulted. The caller still
+proves complete course/source/session authenticity outside this domain model.
+
+The existing serialized role history is sufficient: Archived `current` records mean
+normal completion, and `former` records mean explicit removal before completion.
+No current/former relationships, timestamps, end reasons or lifecycle fields are
+rewritten. Public `roleFacts` are exactly the target's Phase 6 facts, with no
+synthetic fallback/coordinator role. Inputs are snapshotted and all decisions/scopes
+are immutable.
+
+| API                                                        | Archived policy                                                                                                                                                       |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `canViewArchivedTerm()`                                    | Metadata for current/former target coordinators or section faculty, plus fallback. No directory-only or unrelated access.                                             |
+| `canPerformArchivedSectionOperation(operation, id, scope)` | Closed operation categories distinguish historical inspection, permitted late work, and absolute lifecycle prohibitions.                                              |
+| `getArchivedSectionScope(scope)`                           | Frozen visible, gradable and historical-read-only section IDs. Gradable means late work only, never generic mutation.                                                 |
+| `canEditArchivedStructure(operation)`                      | Always denies ordinary structural workflows with `archived-structure-frozen`, including for coordinators/fallback.                                                    |
+| `canPerformArchivedAdministrativeCorrection(operation)`    | Explicit exceptional correction for the target's current coordinator or fallback, separate from ordinary structural editing. No corrective mutation service is added. |
+
+`ARCHIVED_SECTION_OPERATIONS` / `ArchivedSectionOperation` are closed categories:
+
+- `inspect`: follows Phase 6 historical visibility. Current and former section
+  faculty inspect their own current/former sections; former coordinators have
+  historical term-wide read in default scope.
+- `grading`, `grading-dispatch`, `report-publication`: permit grading/regrading,
+  workflow dispatch and publication/republication only for current target section
+  faculty in their own sections, or current target coordinators after explicit
+  `coordinator-term` expansion. A current coordinator's default scope contains only
+  independently held teaching sections; no automatic whole-term expansion occurs.
+  Former-only roles are historical read-only. An independent current section role
+  still authorizes its own section even when the person is a former coordinator.
+- `apply`: always denies provisioning with `archived-provisioning-prohibited`.
+- `student-repository-mutation`: always denies generic mutation with
+  `archived-student-repository-mutation-prohibited`. Late-work authority does not
+  authorize template redistribution, restructuring or arbitrary source updates.
+
+Former coordinators' default term-wide historical read does not grant
+`coordinator-term` mutation scope. Only current coordinators of this Archived term
+can expand. Current coordinators of a different Active or Draft term gain no
+cross-term Archived authority. Unknown sections, invalid runtime scopes and unknown
+operations fail safely.
+
+`ARCHIVED_STRUCTURAL_OPERATIONS` / `ArchivedStructuralOperation` enumerate
+`section-structure`, `roster-structure`, `assignment-structure`, `deadline` (including
+late policy), and `faculty-assignment`. The same closed category is used by two
+deliberately separate ordinary/exceptional APIs. Correction is available to the
+target's current coordinator (`term`) or fallback (`course-recovery`), and denied
+to ordinary section faculty, former-only roles and unrelated identities. A caller
+must deliberately choose that exceptional repair path for future warning/audit
+behavior. Correction grants no Apply, generic repository mutation, or reactivation.
+
+Fallback alone gets term metadata and narrow corrective administration, without
+ordinary section/student/repository inspection, grading workspace, dispatch or report
+publication access. Its independent teaching/coordinator roles still apply normally.
+Structured bases distinguish Archived current/former roles, `historical-read-only`,
+fallback recovery, lifecycle prohibitions, invalid requests and absent authority.
+
+The 8.3 GitHub projection and reconciliation remain unchanged: normally completed
+Archived current coordinators/faculty keep course write and current scoped team
+membership; former-only roles keep read unless independently stronger. Student
+repository current-role admin/former-role read grants remain sufficient for late
+work. GitHub write/admin access is infrastructure capability, never Graider
+authorization truth. Domain restrictions do not downgrade those grants.
+
+This overlay performs no I/O, role-history mutation or GitHub reconciliation. Phase
+6, Draft preparation, activation authorization/planning/reconciliation and branch
+policy are unchanged. Both operational schema gates remain **1**, Course Setup emits
+v1, and no production workflow/UI/IPC or real course is changed. Future execution
+must still enforce source/session/reconciliation readiness independently of these
+operation decisions. Deletion, activity guards and activation rollback remain for
+8.5; exceptional correction does not imply lifecycle recovery authority.
+Next: **8.5 — Draft Deletion and Activation Recovery**.
 
 ### 9.4 Delete and rollback
 
@@ -727,6 +809,11 @@ If faculty are removed from a section during an Active term:
 
 If they remain assigned through the normal end of the term, Archived-term grading/regrading rights remain available.
 
+Slice 8.4 interprets persisted Archived `faculty.current` as normal completion and
+`faculty.former` as explicit removal. Former faculty may inspect their old section
+but cannot grade, dispatch or publish merely from that former role. No role arrays
+are changed by archival or by the authorization overlay.
+
 ### 10.5 Former coordinators
 
 A coordinator removed during an Active term:
@@ -734,6 +821,11 @@ A coordinator removed during an Active term:
 - immediately loses coordinator mutation authority;
 - retains read-only historical access to the entire term they previously coordinated;
 - retains stronger rights only where another active role independently grants them.
+
+For an Archived term, `coordinators.current` retains eligible late-work and explicit
+scope-expansion authority. `coordinators.former` retains historical term-wide read,
+without coordinator mutation scope or late-work rights from that former role. An
+independent current faculty role may still grade its own section.
 
 ---
 
@@ -1531,7 +1623,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slices 8.1–8.3 are complete. Next: Phase 8 / Slice 8.4 — Term Archival Restrictions.**
+**Phase 7 and Slices 8.1–8.4 are complete. Next: Phase 8 / Slice 8.5 — Draft Deletion and Activation Recovery.**
 
 ---
 
@@ -3503,6 +3595,6 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slices 8.1–8.3 are complete. The next planned work is **Phase 8 / Slice 8.4 —
-Term Archival Restrictions**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.4 are complete. The next planned work is **Phase 8 / Slice 8.5 —
+Draft Deletion and Activation Recovery**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.
