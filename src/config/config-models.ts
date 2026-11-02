@@ -8,7 +8,8 @@ import type {
   rawTermConfigSchema,
   rawTermConfigV1Schema,
   rawTermConfigV2Schema,
-  TERM_LIFECYCLE_STATUSES
+  TERM_LIFECYCLE_STATUSES,
+  COURSE_LIFECYCLE_STATUSES
 } from "./config-schemas.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 
@@ -19,6 +20,7 @@ export type RawCourseConfig = z.infer<typeof rawCourseConfigSchema>;
 export type RawTermConfigV1 = z.infer<typeof rawTermConfigV1Schema>;
 export type RawTermConfigV2 = z.infer<typeof rawTermConfigV2Schema>;
 export type TermLifecycleStatus = (typeof TERM_LIFECYCLE_STATUSES)[number];
+export type CourseLifecycleStatus = (typeof COURSE_LIFECYCLE_STATUSES)[number];
 export type RawTermConfig = z.infer<typeof rawTermConfigSchema>;
 export type RawAssignmentConfig = z.infer<typeof rawAssignmentConfigSchema>;
 

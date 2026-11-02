@@ -4,6 +4,8 @@ course:
   code: se2030
   title: Software Engineering
   repository: se2030-graider
+  lifecycle: unarchived
+  term_creation_order: [27s1]
 github:
   organization: example-org
   repository_visibility: private

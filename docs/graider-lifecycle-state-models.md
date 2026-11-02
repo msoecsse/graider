@@ -35,12 +35,47 @@ stateDiagram-v2
 | Transition            | Initiator                                                     | Guards                                                                                             | Reversible                | Important side effects                                                                                                                                                                          |
 | --------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Create → Unarchived   | Authenticated course creator                                  | Existing organization selected; required repository/team privileges validated before partial setup | No normal course deletion | Creator enters faculty directory and becomes fallback administrator; private admin repository, initial Draft term, managed teams, branch protection, topic, and synchronization are established |
-| Unarchived → Archived | Fallback administrator or coordinator of the most recent term | No Active term and no unresolved Draft term; no migration block                                    | Yes                       | Shared remote archive flag changes; course remains synchronized and available through Show archived                                                                                             |
+| Unarchived → Archived | Fallback administrator or coordinator of the most recent term | No Active/Draft term, no unresolved activation checkpoint; no migration block                      | Yes                       | Shared remote archive flag changes; course remains synchronized and available through Show archived                                                                                             |
 | Archived → Unarchived | Same authorities                                              | Authentication, sync, valid schema, no migration block                                             | Yes                       | Enables creation of terms/assignments; does not reactivate an old term                                                                                                                          |
 
 Course archive is shared remote state. Machine-local hide/show is not a course
 state and never controls whether the managed clone exists or synchronizes.
 There is no normal permanent Delete course transition.
+
+Slice 8.6 implements required v2 `course.lifecycle: unarchived | archived` and
+`CourseLifecycle` / `CourseLifecycleAuthorizationResolver`. V1 is unchanged. Archive
+requires complete valid course/term/checkpoint state, no Active, no Draft (including
+rolled-back ever-Active Drafts), and no unresolved checkpoint. Unknown/malformed or
+contradictory state fails closed. Empty or all-Archived term sets may archive; no
+term/checkpoint is automatically resolved. Same-state authorized requests are no-ops.
+
+Authority is fallback or a current coordinator of the most recently created existing
+term, with current Archived coordinators representing normal completion. Former,
+ordinary faculty, assignment-only and older-term roles do not qualify. Required v2
+`course.term_creation_order` lists every existing canonical code exactly once, oldest
+created first. Its last entry identifies that term without date, academic, code,
+filesystem or caller-array inference. A list is needed to identify the next latest
+when deleting the latest Draft; deletion removes its entry in the same commit as the
+directory. Future creation appends atomically. With no terms the list is `[]` and
+only fallback has lifecycle authority. Missing/dangling references require attention.
+
+Archive/unarchive uses the existing exact-revision isolated managed transaction,
+course.yml-only scope, non-force publication and lost-response verification. Races
+require a fresh explicit invocation. Unarchive creates/reactivates nothing, preserves
+all term/role/history/assignment/recovery state, and does not change readiness.
+The closed course-creation gate blocks term/assignment creation only while Archived;
+passing still requires independent role/ownership authorization. Historical 8.4
+inspection/grading/regrading/dispatch/publication remain available in scope.
+
+Pure future dashboard projection excludes shared Archived courses normally and
+includes them with Show archived; local hiding is separate. Discovery, sync and
+bootstrap remain eligible. The 8.3 GitHub desired roles/permissions are unchanged;
+no team/permission/branch/organization/repository archive API mutation occurs.
+Production gates remain 1, Setup emits v1 and production UI/IPC is untouched. The
+future outer trust/revalidation boundary must also prove no unresolved Phase 9
+organization migration once that model exists; it is not implemented here.
+
+**Phase 8 is complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
 
 ### 2.2 Organization migration condition
 
@@ -246,7 +281,7 @@ snapshots remain valid with student-facing readiness false. Gates remain 1, Setu
 v1, and no production v2/UI/IPC or real resource is enabled. See
 [architecture §9.4](graider-remote-course-architecture.md#94-delete-and-rollback).
 
-Next: **8.6 — Course Archive / Unarchive**.
+Slice 8.6 above completes Phase 8; next is Phase 9 / Slice 9.1 — Migration Analyzer.
 
 ## 4. Assignment lifecycle
 

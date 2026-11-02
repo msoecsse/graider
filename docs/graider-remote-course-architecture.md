@@ -295,7 +295,8 @@ An archived course:
 A course can be archived only when:
 
 - there is no Active term;
-- there is no unresolved Draft term.
+- there is no Draft term, including an ever-Active recovery Draft;
+- there is no unresolved activation-recovery checkpoint; complete recovery state must validate.
 
 Graider exposes no normal permanent **Delete course** operation.
 
@@ -314,11 +315,109 @@ This preference:
 The course may be archived by:
 
 - the course fallback administrator; or
-- coordinators of the most recent term.
+- current coordinators of the most recently created existing term, including normally completed Archived coordinators.
 
 The same authorities may unarchive it.
 
 Unarchiving does not reactivate an old term.
+
+### Implemented shared course lifecycle (Slice 8.6)
+
+Schema v2 strictly requires shared persisted `course.lifecycle`:
+
+```yaml
+schema_version: 2
+course:
+  code: CSC1120
+  title: Software Development II
+  repository: csc1120-admin
+  lifecycle: unarchived # unarchived | archived
+  term_creation_order: [26s2, 27s1] # oldest-created existing term first
+```
+
+V1 has neither field. Course lifecycle is never inferred from terms, dates, local
+visibility/cache placement or GitHub repository archive state. Archive/unarchive
+never archives the GitHub repository itself. The shared course remains discoverable,
+synchronizable and bootstrap-eligible for authorized faculty; no unregister/delete
+or managed-cache removal occurs.
+
+`CourseLifecycle` validates/snapshots the course, complete trusted term set, all
+role/directory invariants and the explicit creation-order reference. Its status,
+most-recent term and archive-guard decisions are immutable. At most one Active is
+still valid; zero terms, zero Active and all-Archived sets remain representable.
+An Archived course containing Draft/Active terms is contradictory and fails closed.
+`canArchiveState()` / `assertArchiveGuards()` require a complete checkpoint inventory,
+no unresolved recovery, no Active and no Draft. Missing/incomplete, malformed,
+unsupported or contradictory checkpoint state blocks archive. The exact-revision
+backend enumerates the canonical checkpoint namespace using the existing 8.5 reader.
+No operation automatically clears another lifecycle's guard.
+
+#### Authoritative most-recent-term identity
+
+Earlier schemas contain no trusted term creation-order fact. V2 now requires
+`course.term_creation_order`, an explicit oldest-to-newest list of **existing** exact
+canonical codes. Complete-course validation requires a one-to-one match with the
+trusted term set: no duplicates, missing or nonexistent entries. `[]` is valid only
+for zero terms. The last entry, never term metadata or input/filesystem ordering,
+identifies the most recently created existing term.
+
+A latest-only pointer cannot determine which remaining term becomes latest after
+that term is deleted. Persisting this narrow order avoids timestamps or guessed
+academic chronology. Future creation must append in the same exact-revision commit
+as the new term. 8.5 deletion now removes the entry in the same commit as the term
+directory, including deleting the last Draft to leave `[]`. Returned reconciliation
+uses the updated course. Intentional manual remote deletion must also maintain this
+explicit reference; incomplete source state requires attention and is never repaired
+by reviving stale terms. Migration must establish a reviewed authoritative order.
+
+#### Authority, persistence and operation gates
+
+`CourseLifecycleAuthorizationResolver.canArchiveCourse()` requires Unarchived plus
+all archive guards and either fallback or a current coordinator of the most recent
+existing term. `canUnarchiveCourse()` requires Archived and the same authority; no
+Active is required. Former/removed coordinators retain historical reads but no course
+lifecycle authority. Ordinary section faculty, assignment roles, directory-only faculty
+and older-term coordinators cannot authorize. With zero terms, only fallback qualifies.
+Same-state mutation requests validate authority but return `up_to_date` without a
+commit; they never create authority for unrelated faculty.
+
+`changeManagedCourseLifecycle()` is an uncalled future v2 adapter under the same
+existing account/course lease and trusted repository/session boundary as 8.3–8.5.
+It clones/validates the exact source, authorizes there, edits only `course.lifecycle`
+in `course.yml`, validates the full post-edit set and publishes one scoped commit
+with the established non-force/remote acceptance verification. Stale requests or
+races fail without retry, merge or rebase. Accepted-but-lost responses do not cause
+duplicate commits. Results are immutable and identify status (`archived`, `unarchived`,
+`up_to_date`, `needs_attention`), before/after, authorization basis and publication
+revision/refresh state when known. Existing transaction failures retain their standard
+structured stale/publication errors; source/guard failures return Needs attention.
+
+Unarchive changes no term, role, assignment, activation-history bit or recovery file;
+it creates/restores nothing and changes no student-facing readiness. A later explicit
+term-creation workflow may prepare the next Draft. The closed
+`checkCourseCreationLifecycle()` gate denies `create-term` and `create-assignment`
+with `course-archived`. When unarchived it removes only this prohibition and reports
+that role/ownership authorization is still required. This is not a blanket mutation
+gate: 8.4 historical inspection, late grading/regrading, dispatch and report
+publication/republication retain their existing operation/scope decisions.
+
+The 8.3 lifecycle-derived team/permission projection is identical across course
+archive state. No Phase 7 reconciliation, membership removal, permission downgrade,
+branch change, organization removal or GitHub repository archive API is triggered.
+Historical work remains accessible. `projectCourseLifecycle()` supplies pure future
+UI semantics: archived hidden normally, shown with Show archived, subject separately
+to local hide/show. Discovery/sync/bootstrap remain eligible regardless of either
+visibility setting. Local preferences never enter `course.yml`.
+
+Future production composition must additionally reject unresolved organization
+migration (`migration_required`, `migration_in_progress`, `migration_incomplete`).
+The existing outer repository revalidation hook is the composition boundary when
+Phase 9 owns those states; this slice introduces no migration model or bypass claim.
+Both operational schema gates remain **1**, Course Setup emits Schema 1 and no
+production v1 workflow/UI/IPC or discovery behavior is wired to these new APIs.
+No normal permanent Delete course operation or real course migration is introduced.
+
+**Slice 8.6 and Phase 8 are complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
 
 ---
 
@@ -874,7 +973,7 @@ GitHub write precedes publication and no external failure reverts its commit.
 Pending organization invitations remain incomplete reconciliation, not metadata
 failure. Explicit reconciliation uses fresh authoritative state.
 
-Slice 8.5 is complete. Next: **8.6 — Course Archive / Unarchive**.
+Slice 8.5 is complete. Slice 8.6 above completes Phase 8.
 
 ---
 
@@ -1746,7 +1845,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slices 8.1–8.5 are complete. Next: Phase 8 / Slice 8.6 — Course Archive / Unarchive.**
+**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
 
 ---
 
@@ -3718,6 +3817,6 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slices 8.1–8.5 are complete. The next planned work is **Phase 8 / Slice 8.6 —
-Course Archive / Unarchive**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.6 are complete. The next planned work is **Phase 9 / Slice 9.1 —
+Migration Analyzer**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.

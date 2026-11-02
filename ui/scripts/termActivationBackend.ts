@@ -13,3 +13,4 @@ export {
 } from "../../src/terms/term-recovery-metadata.js";
 export { TermRecoveryNeedsAttention } from "../../src/terms/activation-recovery-checkpoint.js";
 export { rawTermConfigV2Schema } from "../../src/config/config-schemas.js";
+export { prepareCourseLifecycleChange } from "../../src/courses/course-lifecycle-metadata.js";

@@ -23,6 +23,11 @@ export const termLifecycleFixture = async (initial = false): Promise<TermLifecyc
   const course = {
     ...parse(fixtureCourseYaml),
     schema_version: 2,
+    course: {
+      ...parse(fixtureCourseYaml).course,
+      lifecycle: "unarchived",
+      term_creation_order: ["27s1", "27s2"]
+    },
     faculty_directory: [42, 43, 44].map((id) => ({
       institutional_username: `faculty-${id}`,
       github_user_id: id,

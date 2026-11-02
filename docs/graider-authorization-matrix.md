@@ -125,7 +125,7 @@ not retain that authority.
 | Normally completed historical faculty     | Not allowed                                                                                    | Not allowed                                                  | Not allowed                                                                        | Not allowed                                                                       | Not allowed                                             |
 | Former coordinator, removed mid-term      | Not allowed                                                                                    | Not allowed                                                  | Not allowed                                                                        | Not allowed                                                                       | Not allowed                                             |
 | Normally completed historical coordinator | Conditional only if coordinator of the most recently created term                              | Not allowed unless also current Active-term coordinator      | Not allowed by historical role                                                     | Conditional only when coordinator of most recent term                             | Historical term scope only; no future-term authority    |
-| Course fallback administrator             | Allowed                                                                                        | Allowed; initial-term authority and recovery authority       | Archive only as part of successor activation; unarchive only through safe rollback | Allowed when no Active term and no unresolved Draft term                          | Administrative recovery only; no implicit student scope |
+| Course fallback administrator             | Allowed                                                                                        | Allowed; initial-term authority and recovery authority       | Archive only as part of successor activation; unarchive only through safe rollback | Allowed when no Active/Draft term and no unresolved activation checkpoint         | Administrative recovery only; no implicit student scope |
 | Draft-term faculty                        | Not allowed                                                                                    | Not allowed                                                  | Not allowed                                                                        | Not allowed                                                                       | Not allowed                                             |
 | Draft-term coordinator                    | Conditional only if this is the most recently created term and creating the next term is valid | Not allowed by Draft role alone while another term is Active | Not allowed; a never-Active Draft may instead be deleted under its separate guard  | Conditional only if also coordinator of most recent term and course guards pass   | Allowed within Draft term after explicit expansion      |
 | Unrelated historical faculty              | Not allowed                                                                                    | Not allowed                                                  | Not allowed                                                                        | Not allowed                                                                       | Not allowed                                             |
@@ -133,11 +133,51 @@ not retain that authority.
 
 Term archival normally occurs as part of atomic successor activation. The
 approved architecture defines no ordinary unarchive/reactivate operation; the
-only Archived → Active path is safe activation rollback before the newly
-activated term has student-facing activity. A Draft term that has never been
+Archived → Active recovery paths are the explicit 8.5 safe rollback or
+post-activity predecessor restoration; they never imply ordinary reactivation. A Draft term that has never been
 Active may be deleted by a current-term coordinator, the fallback
 administrator, or—when no Active term exists—a coordinator of that Draft. A
 term that has ever been Active is retained as Archived.
+
+### Implemented course archive/unarchive policy (Slice 8.6)
+
+`CourseLifecycleAuthorizationResolver` requires complete validated Schema v2
+course/terms and immutable authenticated GitHub ID. Authority is fallback or a
+**current** coordinator of the most recently created existing term. Current Archived
+coordinators represent normal completion; former/removed coordinators retain read
+without this authority. A coordinator of any older term, ordinary faculty, assignment
+owner/editor and directory-only identity cannot authorize the course transition.
+Independent qualifying roles compose normally. With zero terms only fallback qualifies.
+
+Most recent means the final canonical code in required persisted
+`course.term_creation_order` (oldest-created first). The list must match every existing
+term exactly once, independent of input/filesystem/date/academic/code ordering.
+Missing/dangling references fail closed. Future term creation appends atomically;
+8.5 Draft deletion removes the entry atomically, leaving `[]` for no terms. This
+explicit order is required because a latest-only pointer cannot identify its successor
+after deletion. V1 has no new fields and grants no new production authority.
+
+Archive additionally requires `course.lifecycle: unarchived`, no Active, no Draft
+(including ever-Active recovery Drafts), and complete valid evidence of no unresolved
+activation checkpoint. Unknown/malformed/contradictory recovery blocks it. Unarchive
+requires Archived and the same authority, without needing an Active term. Same-state
+requests are authorized no-ops. Neither operation automatically fixes terms/recovery.
+
+The separate closed course creation gate denies create-term/create-assignment while
+Archived with `course-archived`. An unarchived course only clears that lifecycle gate;
+coordinator/ownership rules still apply. Shared course archive preserves the 8.4
+historical inspection, scoped grading/regrading, dispatch and report publication
+matrix. Unarchive creates/reactivates no term and changes no role/history/readiness.
+
+Exact-revision course.yml-only publication reuses managed transaction semantics and
+makes no team/permission/branch/repository-archive API calls. Shared archive projects
+to normal-dashboard vs Show archived visibility; local hiding is orthogonal and
+never affects discovery/sync/bootstrap eligibility. No production v2 UI/IPC or normal
+Delete course is enabled; both operational gates remain 1 and Setup remains v1.
+Future production composition must also prove no required/in-progress/incomplete
+organization migration when Phase 9 defines that model.
+
+**Phase 8 is complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
 
 ## 6. Shared assignment authority
 

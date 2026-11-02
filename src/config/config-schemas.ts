@@ -15,6 +15,7 @@ export const STUDENT_PERMISSION = "admin";
 export const FACULTY_PERMISSION = "admin";
 export const VALID_ASSIGNMENT_STATUSES = ["draft", "active", "closed", "archived"] as const;
 export const TERM_LIFECYCLE_STATUSES = ["draft", "active", "archived"] as const;
+export const COURSE_LIFECYCLE_STATUSES = ["unarchived", "archived"] as const;
 export const ENABLED_GRADING_MODES = ["preset", "custom-workflow", "contract-only"] as const;
 export const DISABLED_GRADING_MODE = "no-grading";
 export const SUPPORTED_GRADING_PRESETS = ["java-junit-checkstyle"] as const;
@@ -187,6 +188,13 @@ export const rawCourseConfigV2Schema = z
   .object({
     schema_version: z.literal(COURSE_SCHEMA_VERSION_V2),
     ...courseConfigFields,
+    course: courseConfigFields.course.extend({
+      lifecycle: z.enum(COURSE_LIFECYCLE_STATUSES),
+      // Authoritative creation order of existing terms, oldest first; never inferred from dates.
+      term_creation_order: z
+        .array(z.string().regex(TERM_CODE_PATTERN))
+        .refine((codes) => new Set(codes).size === codes.length, "Duplicate term creation entry.")
+    }),
     faculty_directory: facultyDirectorySchema,
     fallback_administrator: z.object({ github_user_id: githubUserIdSchema }).strict()
   })

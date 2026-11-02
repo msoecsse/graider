@@ -11,6 +11,7 @@ import { AuthorizationResolver } from "../faculty/authorization-resolver.js";
 import { CourseTermLifecycle } from "./course-term-lifecycle.js";
 import { planTermActivation } from "./term-activation.js";
 import type { TermLifecycleSnapshot } from "./course-term-lifecycle.js";
+import { validateTermCreationOrder } from "../courses/course-lifecycle.js";
 import {
   activationRecoveryCheckpointSchema,
   TermRecoveryNeedsAttention
@@ -54,6 +55,7 @@ export const readActivationMetadata = (root: string, organization: string) => {
     )
       throw new TermRecoveryNeedsAttention("checkpoint_invalid");
   }
+  validateTermCreationOrder(course, terms);
   return { course, terms };
 };
 

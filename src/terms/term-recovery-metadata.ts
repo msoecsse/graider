@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { parseDocument } from "yaml";
 import { z } from "zod";
 import { FacultyDirectory } from "../faculty/faculty-directory.js";
 import { readActivationMetadata, writeLifecycleTerms } from "./term-activation-metadata.js";
@@ -106,14 +107,22 @@ export const prepareDraftDeletion = (
     checkpoints.some((record) => record.target_term_code === context.termCode)
   );
   assertNoTrackedActivity(root, context.termCode);
-  const changedPaths = draftFiles(root, context.termCode);
+  const changedPaths = Object.freeze([...draftFiles(root, context.termCode), "course.yml"]);
   const target = state.terms.find((term) => term.term.code === context.termCode);
   if (!target) throw new Error("Missing Draft target.");
+  const coursePath = path.join(root, "course.yml");
+  const courseDocument = parseDocument(fs.readFileSync(coursePath, "utf8"), { strict: true });
+  if (courseDocument.errors.length) throw new Error("Invalid course YAML.");
+  courseDocument.setIn(
+    ["course", "term_creation_order"],
+    state.course.course.term_creation_order.filter((code) => code !== context.termCode)
+  );
+  fs.writeFileSync(coursePath, courseDocument.toString());
   fs.rmSync(path.join(root, "terms", context.termCode), { recursive: true });
   const after = readActivationMetadata(root, organization);
   if (JSON.stringify(after.terms) !== JSON.stringify(plan.after))
     throw new Error("Draft deletion changed unrelated term fields.");
-  return { course: state.course, plan, changedPaths, retiredDraftTerms: [target] };
+  return { course: after.course, plan, changedPaths, retiredDraftTerms: [target] };
 };
 
 export const prepareActivationRecovery = (

@@ -420,7 +420,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 and Slices 8.1–8.5 are complete. Next: **Phase 8 / Slice 8.6 — Course Archive / Unarchive**.
+Phases 6 and 7 and Slices 8.1–8.6 are complete. Next: **Phase 9 / Slice 9.1 — Migration Analyzer**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -589,7 +589,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Slices 8.1–8.5 are complete; next: **Phase 8 / Slice 8.6 — Course Archive / Unarchive**.
+Managed branch policy is implemented in 7.6 below. Slices 8.1–8.6 are complete; next: **Phase 9 / Slice 9.1 — Migration Analyzer**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -623,7 +623,7 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 and Slices 8.1–8.5 are complete. Next: Slice 8.6 — Course Archive / Unarchive.**
+**Phase 7 and Slices 8.1–8.6 are complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
 
 ---
 
@@ -858,11 +858,64 @@ Both operational gates remain **1**, Setup emits Schema 1, and no production v2
 workflow, UI/IPC, real course migration or live GitHub mutation is enabled. See
 [architecture §9.4](graider-remote-course-architecture.md#94-delete-and-rollback).
 
-Next: **8.6 — Course Archive / Unarchive**.
+Slice 8.6 below completes Phase 8 with shared course archive state.
 
-## Slice 8.6 — Course archive/unarchive
+## Slice 8.6 — Course archive/unarchive — complete
 
-Require no Active or Draft terms before archive.
+Required v2 `course.lifecycle` persists `unarchived | archived`; strict parsing rejects
+missing/unknown state. V1 remains unchanged. `CourseLifecycle` snapshots the validated
+course and complete term set; `CourseLifecycleAuthorizationResolver` composes existing
+immutable identity/role facts with archive guards. Archive requires no Active, no
+Draft (including ever-Active recovery Drafts), and complete valid evidence of no
+unresolved activation checkpoint. Nothing is automatically activated, deleted,
+archived or resolved. Empty/all-Archived term sets are valid.
+
+No authoritative term-creation order previously existed. Required v2
+`course.term_creation_order` explicitly lists **existing** canonical term codes,
+oldest-created first. Complete-set validation requires every term exactly once;
+empty is valid only with zero terms. The final entry identifies the most recently
+created existing term, independently of directory/input order, code/date/academic
+ordering and local timestamps. A latest-only pointer could not safely select the
+predecessor after deletion; this compact list supplies exactly that missing fact.
+Future creation appends atomically. 8.5 deletion now removes the deleted entry in
+the same commit as its preparatory directory, returning the updated course for
+reconciliation. Dangling/missing entries fail closed, never infer replacements.
+
+Fallback or a **current** coordinator of that most recent existing term may archive
+or unarchive. Current Archived coordinators represent normal completion; former
+coordinators, ordinary faculty, assignment owners, directory-only identities and
+coordinators of older terms gain no lifecycle authority. With zero terms only
+fallback qualifies. Same-state requests remain authorized no-ops without commits.
+
+`changeManagedCourseLifecycle()` uses the existing isolated exact-revision managed
+transaction under its caller's existing course lease: validate/authorize at the exact
+source, change only `course.yml`, validate, scoped stage, one commit, non-force push
+and lost-response remote verification. Stale/racing requests require a new invocation;
+no merge, rebase, force push or blind retry. Immutable results identify before/after,
+authority, revision and guard/attention reason. Unarchive changes only course state,
+without creating/reactivating terms, changing history or student-facing readiness.
+
+`checkCourseCreationLifecycle()` blocks only `create-term` / `create-assignment`
+while archived. Passing the gate still requires role/ownership authorization.
+Archived historical inspection/grading/regrading/dispatch/publication consume 8.4
+unchanged. The 8.3 team/permission projection is unchanged and archive/unarchive
+performs no organization, team, repository permission, branch or repository-archive
+API mutation. The course/admin repository remains accessible and synchronized.
+
+`projectCourseLifecycle()` is a pure future dashboard/discovery projection: archived
+courses are omitted normally and included with Show archived, with local hide/show
+orthogonal. Discovery, synchronization and bootstrap eligibility remain true for
+already-authorized courses. No production v1 dashboard/discovery refactor is made.
+
+The future outer trust/revalidation boundary must additionally prove no
+`migration_required`, `migration_in_progress` or `migration_incomplete` once Phase 9
+implements that model. No migration machinery is invented now. Both operational
+gates remain **1**, Setup emits v1, no production v2/UI/IPC is wired and no real course
+or GitHub resource is changed. No Delete course operation is added.
+
+**Phase 8 is complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
+The analyzer must report missing lifecycle/creation-order facts and require a reviewed
+authoritative order rather than guessing from academic chronology or local files.
 
 ---
 

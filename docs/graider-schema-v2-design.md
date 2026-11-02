@@ -59,6 +59,7 @@ course:
     organization: msoe-example # mutable locator metadata
     name: csc1120-admin
   lifecycle: unarchived # unarchived | archived
+  term_creation_order: [26s2, 27s1] # existing canonical codes, oldest-created first
   fallback_administrator_github_user_id: 24680
   organization_binding:
     organization_id: 97531 # when available from GitHub
@@ -71,6 +72,45 @@ and must not appear here.
 Organization migration is orthogonal to course archive state. A course may
 also have durable reconciliation state such as `migration_required` or
 `migration_incomplete`; this must not replace its archive lifecycle field.
+
+### Implemented course lifecycle contract (Slice 8.6)
+
+The executable v2 schema requires `course.lifecycle` (`unarchived | archived`) and
+`course.term_creation_order`, without defaults or inference. V1 is unchanged. The
+latter is the smallest explicit ordering fact needed for authority plus safe deletion:
+a latest-only pointer cannot select the next latest after deletion. It lists every
+existing canonical term exactly once, oldest-created first; empty only with zero
+terms. Complete-course validation rejects dangling/missing/duplicate entries. Future
+creation appends atomically; 8.5 deletion removes its entry in the term-deletion commit.
+No date/code/academic/directory/input-array order defines creation chronology.
+
+`CourseLifecycle` snapshots complete trusted v2 course/terms and checkpoint evidence.
+Archive requires Unarchived, no Active or Draft and complete valid evidence of no
+unresolved activation checkpoint. Ever-Active Drafts also block. Nothing is repaired
+automatically. Fallback or a current coordinator of the most recent existing term
+may archive/unarchive; former and older-term coordinators do not qualify. Zero terms
+is valid and grants coordinator authority to nobody, while fallback still qualifies.
+An Archived course with non-Archived terms is contradictory. No-op requests create
+no commit and still require authority.
+
+Shared state is persisted through the existing exact-revision managed transaction,
+one scoped course.yml commit, non-force push and remote lost-response verification;
+no automatic stale retry/merge/rebase. Unarchive only changes the course lifecycle:
+no term activation/creation/restoration, history/assignment/recovery change or readiness
+change. The archived creation gate blocks term/assignment creation, while unarchived
+still requires role/ownership authorization. Historical 8.4 late work remains valid.
+The 8.3 desired roles/permissions and GitHub repository archive state do not change.
+
+Pure dashboard projection keeps shared archive independent from machine-local hiding;
+Show archived exposes authorized archived courses, discovery/sync/bootstrap continue.
+No normal course deletion is added. Production gates remain 1, Setup emits v1 and no
+production v2 workflow/UI/IPC is enabled. Future outer repository revalidation must
+also reject required/in-progress/incomplete organization migration once Phase 9
+implements it; no migration machinery is introduced here. Phase 9.1 must report
+missing lifecycle/ordering facts and establish a reviewed authoritative creation
+order rather than inventing one from v1 academic metadata.
+
+**Phase 8 is complete. Next: Phase 9 / Slice 9.1 — Migration Analyzer.**
 
 ### Fallback administrator
 

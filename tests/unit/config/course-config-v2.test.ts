@@ -35,6 +35,11 @@ describe("versioned course configuration", () => {
       expect(result.value).toEqual(rawCourseConfigV1Schema.parse(result.value));
       expect(result.value).toEqual({
         ...course,
+        course: {
+          code: course.course.code,
+          title: course.course.title,
+          repository: course.course.repository
+        },
         schema_version: 1,
         faculty_directory: undefined,
         fallback_administrator: undefined,
