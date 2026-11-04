@@ -1,8 +1,12 @@
+import {
+  describeGitIntegration,
+  removeGitFixture
+} from "../../support/git/integration-fixtures.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createDugiteGitWorkspaceFactory } from "../../../src/git/dugite-git-workspace-context.js";
 import {
   loadGradingState,
@@ -17,8 +21,8 @@ import {
 } from "../../../src/grading/grading-state-operations.js";
 
 const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(removeGitFixture));
 });
 const git = (root: string, ...args: string[]): string =>
   execFileSync("git", ["-C", root, ...args], {
@@ -105,7 +109,7 @@ const fixture = async () => {
 const rubric = [{ id: "code", name: "Code", points: 20 }];
 const finderMetadata = Buffer.from("000000014275643100001000", "hex");
 
-describe("authorized student repository update", () => {
+describeGitIntegration("authorized student repository update", () => {
   it.each([
     "managed",
     "externally pulled",
@@ -283,8 +287,10 @@ describe("authorized student repository update", () => {
     f.advance();
     git(f.local, "pull");
     fs.mkdirSync(path.dirname(path.join(f.local, file)), { recursive: true });
-    if (mode === "Finder symlink") fs.symlinkSync("Main.java", path.join(f.local, file));
-    else
+    if (mode === "Finder symlink") {
+      fs.symlinkSync("Main.java", path.join(f.local, file));
+      expect(fs.lstatSync(path.join(f.local, file)).isSymbolicLink()).toBe(true);
+    } else
       fs.writeFileSync(
         path.join(f.local, file),
         mode === "staged Finder file" ? finderMetadata : "local edits"

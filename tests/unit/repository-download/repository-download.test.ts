@@ -26,6 +26,7 @@ vi.mock("../../../src/git/dugite-git-workspace-context.js", async (importOrigina
   };
 });
 
+const DOWNLOAD_ROOT = path.resolve("downloads", "lab04");
 const ASSIGNMENT_FILE = "terms/27s1/assignments/lab04/assignment.yml";
 const downloadAssignmentRepositories = (request: Parameters<typeof download>[0]) =>
   download({ token: "unit-download-token", ...request });
@@ -79,7 +80,7 @@ describe("downloadAssignmentRepositories", () => {
       const result = await downloadAssignmentRepositories({
         cwd: copyFixture(),
         assignmentFile: ASSIGNMENT_FILE,
-        destination: "/downloads/lab04",
+        destination: DOWNLOAD_ROOT,
         dependencies: filesystem
       });
       expect(factory).toHaveBeenCalledTimes(1);
@@ -98,7 +99,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await download({
       cwd: copyFixture(),
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DOWNLOAD_ROOT,
       dependencies: createDependencies(git)
     });
     expect(result).toMatchObject({ status: "failure", exitCode: 1, targets: [] });
@@ -116,7 +117,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await download({
       cwd: copyFixture(),
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DOWNLOAD_ROOT,
       token,
       dependencies: createDependencies(git)
     });
@@ -131,7 +132,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DOWNLOAD_ROOT,
       dependencies: createDependencies(createGitFactory({ clone }))
     });
 
@@ -153,25 +154,25 @@ describe("downloadAssignmentRepositories", () => {
     expect(clone.mock.calls.map(([request]) => request as CloneRequest)).toEqual([
       {
         remote: "https://github.com/example-org/27s1-se2030-lab04-seanjones",
-        destination: "/downloads/lab04/27s1-se2030-lab04-seanjones",
+        destination: path.join(DOWNLOAD_ROOT, "27s1-se2030-lab04-seanjones"),
         checkout: "default",
         authentication: expect.any(Object) as GitAuthenticationContext
       },
       {
         remote: "https://github.com/example-org/27s1-se2030-lab04-janesmith",
-        destination: "/downloads/lab04/27s1-se2030-lab04-janesmith",
+        destination: path.join(DOWNLOAD_ROOT, "27s1-se2030-lab04-janesmith"),
         checkout: "default",
         authentication: expect.any(Object) as GitAuthenticationContext
       },
       {
         remote: "https://github.com/example-org/27s1-se2030-lab04-kimstudent",
-        destination: "/downloads/lab04/27s1-se2030-lab04-kimstudent",
+        destination: path.join(DOWNLOAD_ROOT, "27s1-se2030-lab04-kimstudent"),
         checkout: "default",
         authentication: expect.any(Object) as GitAuthenticationContext
       },
       {
         remote: "https://github.com/example-org/27s1-se2030-lab04-leehold",
-        destination: "/downloads/lab04/27s1-se2030-lab04-leehold",
+        destination: path.join(DOWNLOAD_ROOT, "27s1-se2030-lab04-leehold"),
         checkout: "default",
         authentication: expect.any(Object) as GitAuthenticationContext
       }
@@ -246,7 +247,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DOWNLOAD_ROOT,
       dependencies: createDependencies(createGitFactory({ clone }))
     });
 
@@ -267,7 +268,7 @@ describe("downloadAssignmentRepositories", () => {
     expect(clone).toHaveBeenCalledTimes(2);
     expect(clone).toHaveBeenNthCalledWith(2, {
       remote: "https://github.com/example-org/27s1-se2030-lab04-team-2",
-      destination: "/downloads/lab04/27s1-se2030-lab04-team-2",
+      destination: path.join(DOWNLOAD_ROOT, "27s1-se2030-lab04-team-2"),
       checkout: "default",
       authentication: expect.any(Object) as GitAuthenticationContext
     });
@@ -281,7 +282,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DOWNLOAD_ROOT,
       dependencies: createDependencies(
         createGitFactory({
           verifyAvailable: vi
@@ -319,7 +320,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DOWNLOAD_ROOT,
       dependencies
     });
 
@@ -340,7 +341,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DOWNLOAD_ROOT,
       dependencies: createDependencies(createGitFactory({ clone }))
     });
 
@@ -359,7 +360,7 @@ describe("downloadAssignmentRepositories", () => {
     const result = await downloadAssignmentRepositories({
       cwd,
       assignmentFile: ASSIGNMENT_FILE,
-      destination: "/downloads/lab04",
+      destination: DOWNLOAD_ROOT,
       dependencies: createDependencies(createGitFactory({ clone }))
     });
 

@@ -1,10 +1,14 @@
+import {
+  describeGitIntegration,
+  removeGitFixture
+} from "../../support/git/integration-fixtures.js";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { resolveGitBinary } from "dugite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import {
   createBranchName,
   createExactCommitRevision,
@@ -29,6 +33,7 @@ const BYTE_NINE = 9;
 const BYTE_EIGHT = 8;
 const BYTE_SEVEN = 7;
 const OBJECT_ID_LENGTH = 40;
+const COMMIT_AUTHOR = { name: "Faculty", email: "faculty@example.test" };
 
 const git = async (cwd: string, args: readonly string[]): Promise<string> =>
   (await executeFile("git", ["-C", cwd, ...args])).stdout;
@@ -69,12 +74,12 @@ const createRepository = async (
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map(async (directory) => {
-      await rm(directory, { force: true, recursive: true });
+      await removeGitFixture(directory);
     })
   );
 });
 
-describe("Dugite command workspace transport conformance", () => {
+describeGitIntegration("Dugite command workspace transport conformance", () => {
   it("uses embedded Git with no PATH lookup across creation, inspection, mutation, and push", async () => {
     const root = await createRoot();
     const source = await createRepository(root, "source with spaces");
@@ -129,12 +134,23 @@ describe("Dugite command workspace transport conformance", () => {
       workingTree: { trackedChanges: [{ kind: "modified", path: "course file.txt" }] }
     });
     await workspace.stage([courseFile]);
-    await workspace.commit({ message: "Dugite staged change" });
-    await workspace.commit({ message: "Dugite empty change", allowEmpty: true });
+    await workspace.commit({ author: COMMIT_AUTHOR, message: "Dugite staged change" });
+    await workspace.commit({
+      author: COMMIT_AUTHOR,
+      message: "Dugite empty change",
+      allowEmpty: true
+    });
     await workspace.pushUpstream();
     await workspace.createBranch(feature);
-    await workspace.commit({ message: "Dugite branch change", allowEmpty: true });
+    await workspace.commit({
+      author: COMMIT_AUTHOR,
+      message: "Dugite branch change",
+      allowEmpty: true
+    });
     await workspace.pushBranch({ remote: origin, branch: feature });
+    expect(
+      (await git(noCheckoutClone, ["log", "-3", "--format=%an <%ae>"])).trim().split("\n")
+    ).toEqual(Array.from({ length: 3 }, () => `${COMMIT_AUTHOR.name} <${COMMIT_AUTHOR.email}>`));
     await workspace.switchBranch(main);
     await workspace.deleteRemoteBranch({ remote: origin, branch: feature });
     await workspace.restoreDisposableAttempt({

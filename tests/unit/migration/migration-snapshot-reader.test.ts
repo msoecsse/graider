@@ -1,7 +1,12 @@
+import {
+  describeGitIntegration,
+  removeGitFixture
+} from "../../support/git/integration-fixtures.js";
 import fs from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createDugiteGitRunners } from "../../../src/git/dugite-git-runners.js";
 import {
   readSchemaV1MigrationAnalysis,
@@ -18,14 +23,20 @@ import {
   term
 } from "./migration-fixtures.js";
 
+// Runtime evidence rejects symlinked ancestors; macOS tmpdir() may traverse /var.
+const TEMP_DIRECTORY = fs.realpathSync(tmpdir());
 const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(removeGitFixture));
 });
-const git = (root: string, args: string[]) =>
-  execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+const git = (root: string, args: string[], input?: string) =>
+  execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    ...(input === undefined ? {} : { input })
+  }).trim();
 const createRepo = () => {
-  const root = fs.mkdtempSync("/private/tmp/graider-migration-read-");
+  const root = fs.mkdtempSync(path.join(TEMP_DIRECTORY, "graider-migration-read-"));
   roots.push(root);
   const sourceRoot = path.join(root, "source");
   fs.mkdirSync(sourceRoot);
@@ -55,7 +66,7 @@ const treeBytes = (root: string): Record<string, string> => {
   return result;
 };
 
-describe("exact-revision migration reader", () => {
+describeGitIntegration("exact-revision migration reader", () => {
   it("ignores dirty working files and proves zero filesystem/Git/provider/journal mutations", async () => {
     const f = createRepo();
     const runtimeRoot = path.join(f.root, "runtime");
@@ -160,7 +171,7 @@ describe("exact-revision migration reader", () => {
     const f = createRepo();
     const runtimeRoot = path.join(f.root, "runtime");
     fs.mkdirSync(runtimeRoot);
-    fs.symlinkSync(f.sourceRoot, path.join(runtimeRoot, "terms"));
+    fs.symlinkSync(f.sourceRoot, path.join(runtimeRoot, "terms"), "dir");
     const report = await readSchemaV1MigrationAnalysis({
       binding: { ...f.input.binding, sourceCommitSha: f.sha },
       sourceRoot: f.sourceRoot,
@@ -197,9 +208,12 @@ describe("exact-revision migration reader", () => {
         })
       ).status
     ).toBe("blocked");
-    fs.symlinkSync("course.yml", path.join(f.sourceRoot, "link.yml"));
-    git(f.sourceRoot, ["add", "."]);
+    // The contract rejects a non-regular Git tree entry, even on a host that
+    // cannot check out symlinks. Create that object/index state without checkout.
+    const linkBlob = git(f.sourceRoot, ["hash-object", "-w", "--stdin"], "course.yml");
+    git(f.sourceRoot, ["update-index", "--add", "--cacheinfo", `120000,${linkBlob},link.yml`]);
     git(f.sourceRoot, ["commit", "--quiet", "-m", "symlink"]);
+    expect(git(f.sourceRoot, ["ls-tree", "HEAD", "--", "link.yml"])).toMatch(/^120000 blob /u);
     const report = await readSchemaV1MigrationAnalysis({
       binding: { ...f.input.binding, sourceCommitSha: git(f.sourceRoot, ["rev-parse", "HEAD"]) },
       sourceRoot: f.sourceRoot,
@@ -237,12 +251,12 @@ describe("exact-revision migration reader", () => {
     expect(history?.complete).toBe(false);
     expect(Object.isFrozen(history)).toBe(true);
     expect(Object.isFrozen(history?.commits)).toBe(true);
-    const root = fs.mkdtempSync("/private/tmp/graider-migration-frozen-");
+    const root = fs.mkdtempSync(path.join(TEMP_DIRECTORY, "graider-migration-frozen-"));
     roots.push(root);
     expect(Object.isFrozen(readRuntimeMigrationManifests(root))).toBe(true);
   });
   it("missing runtime root remains missing and is never created", () => {
-    const root = fs.mkdtempSync("/private/tmp/graider-migration-runtime-");
+    const root = fs.mkdtempSync(path.join(TEMP_DIRECTORY, "graider-migration-runtime-"));
     roots.push(root);
     const target = path.join(root, "missing");
     expect(readRuntimeMigrationManifests(target)).toEqual({});

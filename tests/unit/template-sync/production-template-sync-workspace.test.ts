@@ -1,7 +1,11 @@
+import {
+  describeGitIntegration,
+  removeGitFixture
+} from "../../support/git/integration-fixtures.js";
 import { execFile as executeFile } from "node:child_process";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
@@ -42,7 +46,7 @@ const temporaryDirectories: string[] = [];
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map(async (directory) => {
-      await rm(directory, { force: true, recursive: true });
+      await removeGitFixture(directory);
     })
   );
 });
@@ -155,8 +159,12 @@ describe("production template-sync semantic preparation", () => {
       checkout: "none",
       authentication: fixture.context
     });
-    expect(templateRequest?.destination).toMatch(/graider-template-sync-.*\/template$/u);
-    expect(studentRequest?.destination).toMatch(/graider-template-sync-.*\/student$/u);
+    if (templateRequest === undefined || studentRequest === undefined)
+      throw new Error("Both workspace clone requests are required.");
+    expect(basename(templateRequest.destination)).toBe("template");
+    expect(basename(studentRequest.destination)).toBe("student");
+    expect(dirname(templateRequest.destination)).toBe(dirname(studentRequest.destination));
+    expect(basename(dirname(templateRequest.destination))).toMatch(/^graider-template-sync-/u);
     expect(JSON.stringify([templateRequest, studentRequest])).not.toContain(TOKEN);
     expect(fixture.context.id).not.toContain(TOKEN);
     expect(fixture.template.checkoutDetached).toHaveBeenCalledWith(TEMPLATE_SHA);
@@ -422,7 +430,7 @@ const realFixture = async (studentBranch: string) => {
   };
 };
 
-describe("production template-sync local integration", () => {
+describeGitIntegration("production template-sync local integration", () => {
   it("uses bundled Git for the default production workspace when PATH is unavailable", async () => {
     const { template, student } = await realFixture("release/course");
     const originalPath = process.env.PATH;
@@ -464,8 +472,10 @@ describe("production template-sync local integration", () => {
     }
 
     expect(prepared.studentDefaultBranch).toBe("release/course");
-    expect(prepared.templateRoot).toMatch(/graider-template-sync-.*\/template$/u);
-    expect(prepared.studentRoot).toMatch(/graider-template-sync-.*\/student$/u);
+    expect(basename(prepared.templateRoot)).toBe("template");
+    expect(basename(prepared.studentRoot)).toBe("student");
+    expect(dirname(prepared.templateRoot)).toBe(dirname(prepared.studentRoot));
+    expect(basename(dirname(prepared.templateRoot))).toMatch(/^graider-template-sync-/u);
   });
 
   it.each([

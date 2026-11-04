@@ -1,5 +1,6 @@
+import { removeGitFixture } from "../../support/git/integration-fixtures.js";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -96,11 +97,7 @@ const createTemporaryDirectory = async (prefix: string): Promise<string> => {
 };
 
 afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map(async (directory) => rm(directory, { force: true, recursive: true }))
-  );
+  await Promise.all(temporaryDirectories.splice(0).map(removeGitFixture));
 });
 
 describe("Git authentication context contract", () => {
@@ -422,8 +419,8 @@ describe("Command workspace authenticated execution contract", () => {
     ]);
 
     const cloneRequests = requests.filter((request) => request.args[0] === "clone");
-    const requestA = cloneRequests.find((request) => lastValue(request.args)?.endsWith("/a"));
-    const requestB = cloneRequests.find((request) => lastValue(request.args)?.endsWith("/b"));
+    const requestA = cloneRequests.find((request) => lastValue(request.args) === join(parent, "a"));
+    const requestB = cloneRequests.find((request) => lastValue(request.args) === join(parent, "b"));
     expect(requestA?.env?.GIT_CONFIG_VALUE_1).toContain(encodedCredential(TOKEN_A));
     expect(requestA?.env?.GIT_CONFIG_VALUE_1).not.toContain(TOKEN_B);
     expect(requestB?.env?.GIT_CONFIG_VALUE_1).toContain(encodedCredential(TOKEN_B));

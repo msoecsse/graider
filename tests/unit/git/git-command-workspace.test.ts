@@ -1,9 +1,13 @@
+import {
+  describeGitIntegration,
+  removeGitFixture
+} from "../../support/git/integration-fixtures.js";
 import { execFile } from "node:child_process";
-import { access, chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GitError,
   createBranchName,
@@ -16,6 +20,8 @@ import {
 } from "../../../src/git/git-workspace.js";
 import { GitCommandWorkspaceFactory } from "../../../src/git/git-command-workspace.js";
 
+import { createDugiteGitRunners } from "../../support/git/dugite-git-runners.js";
+
 import { createDugiteGitWorkspaceFactory } from "../../../src/git/dugite-git-workspace-context.js";
 
 const executeFile = promisify(execFile);
@@ -24,7 +30,6 @@ const SHA_1_LENGTH = 40;
 const SHA_256_LENGTH = 64;
 const SHORT_SHA_LENGTH = SHA_1_LENGTH - 1;
 const HISTORY_LIMIT = 2;
-const EXECUTABLE_FILE_MODE = 0o755;
 const BYTE_SIX = 6;
 const BYTE_SEVEN = 7;
 const BYTE_EIGHT = 8;
@@ -78,11 +83,7 @@ const createBareRemoteFixture = async (branch: string) => {
 };
 
 afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map(async (directory) => rm(directory, { force: true, recursive: true }))
-  );
+  await Promise.all(temporaryDirectories.splice(0).map(removeGitFixture));
 });
 
 describe("GitCommandWorkspaceFactory reader contract", () => {
@@ -293,7 +294,7 @@ describe("GitCommandWorkspaceFactory reader contract", () => {
   });
 });
 
-describe("GitCommandWorkspace template tree and history contract", () => {
+describeGitIntegration("GitCommandWorkspace template tree and history contract", () => {
   const origin = createRemoteName("origin");
   if (origin === null) throw new Error("The origin remote must be trusted.");
 
@@ -302,8 +303,9 @@ describe("GitCommandWorkspace template tree and history contract", () => {
     await mkdir(join(fixture.repository, "nested folder"));
     await writeFile(join(fixture.repository, "nested folder", "path with spaces.txt"), "nested\n");
     await writeFile(join(fixture.repository, "executable.sh"), "#!/bin/sh\nexit 0\n");
-    await chmod(join(fixture.repository, "executable.sh"), EXECUTABLE_FILE_MODE);
+    await git(fixture.repository, "config", "core.filemode", "false");
     await git(fixture.repository, "add", ".");
+    await git(fixture.repository, "update-index", "--chmod=+x", "executable.sh");
     await git(fixture.repository, "commit", "-m", "Tree fixtures");
     const commit = await (
       await createDugiteGitWorkspaceFactory().open(fixture.repository)
@@ -323,12 +325,16 @@ describe("GitCommandWorkspace template tree and history contract", () => {
       mode: "100755",
       objectType: "blob"
     });
+    expect(entries.find((entry) => entry.path === "submission.txt")).toMatchObject({
+      mode: "100644",
+      objectType: "blob"
+    });
     expect(entries.every((entry) => entry.objectId.length === SHA_1_LENGTH)).toBe(true);
   });
 
-  it("parses unusual valid filenames without line or space splitting", async () => {
+  it("reads portable filenames containing spaces, quoting and Unicode", async () => {
     const fixture = await createRepository("unusual tree paths");
-    const unusualPath = "line break\nand tab\tand backslash\\name.txt";
+    const unusualPath = "spaces and 'quotes' and Unicode-é.txt";
     await writeFile(join(fixture.repository, unusualPath), "unusual\n");
     await git(fixture.repository, "add", ".");
     await git(fixture.repository, "commit", "-m", "Unusual path");
@@ -337,6 +343,37 @@ describe("GitCommandWorkspace template tree and history contract", () => {
     const entries = await workspace.listTree(await workspace.resolveHead());
 
     expect(entries.map((entry) => entry.path)).toContain(unusualPath);
+  });
+
+  it("parses NUL-delimited Git names that Win32 cannot materialize without splitting records", async () => {
+    const fixture = await createRepository("synthetic tree output");
+    const runners = createDugiteGitRunners();
+    const names = [
+      "line break\nand tab\tand backslash\\name.txt",
+      'double "quoted".txt',
+      "last record.txt"
+    ];
+    const runGit = vi.fn<typeof runners.runGit>(async (request) =>
+      request.args[0] === "ls-tree"
+        ? names.map((name) => `100644 blob ${fixture.second}\t${name}\u0000`).join("")
+        : await runners.runGit(request)
+    );
+    const workspace = await new GitCommandWorkspaceFactory({ ...runners, runGit }).open(
+      fixture.repository
+    );
+    const commit = await workspace.resolveHead();
+    expect(await workspace.listTree(commit)).toEqual(
+      names.map((name) => ({
+        path: name,
+        mode: "100644",
+        objectType: "blob",
+        objectId: fixture.second
+      }))
+    );
+    expect(runGit).toHaveBeenCalledWith({
+      cwd: workspace.root,
+      args: ["ls-tree", "-r", "-z", "--full-tree", commit]
+    });
   });
 
   it("returns commit and tree IDs from first-parent history only", async () => {

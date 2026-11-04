@@ -1,16 +1,19 @@
+import {
+  describeGitIntegration,
+  removeGitFixture
+} from "../../support/git/integration-fixtures.js";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import { createDugiteGitWorkspaceFactory } from "../../../src/git/dugite-git-workspace-context.js";
 import { LocalGitTemplateSyncGateway } from "../../../src/template-sync/local-git-template-sync-gateway.js";
 import { getTemplateSyncFailure } from "../../../src/template-sync/template-sync-failure.js";
 
 const run = promisify(execFile);
 const temporaryDirectories: string[] = [];
-const EXECUTABLE_FILE_MODE = 0o755;
 const template = { owner: "course", name: "template" };
 const student = { owner: "course", name: "student", defaultBranch: "main" };
 
@@ -80,14 +83,10 @@ const gatewayFor = async (fixture: {
 };
 
 afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map(async (directory) => rm(directory, { force: true, recursive: true }))
-  );
+  await Promise.all(temporaryDirectories.splice(0).map(removeGitFixture));
 });
 
-describe("LocalGitTemplateSyncGateway", () => {
+describeGitIntegration("LocalGitTemplateSyncGateway", () => {
   it("recovers both anchors from the sole exact full-tree first-parent history match", async () => {
     const fixture = await setup("main", true);
     await writeFile(join(fixture.templateDirectory, "shared.txt"), "faculty update\n");
@@ -242,11 +241,22 @@ describe("LocalGitTemplateSyncGateway", () => {
 
   it("does not treat matching blob contents with a different executable mode as equal", async () => {
     const fixture = await setup("main", true);
-    await chmod(join(fixture.templateDirectory, "shared.txt"), EXECUTABLE_FILE_MODE);
-    await git(fixture.templateDirectory, "add", "shared.txt");
+    await git(fixture.templateDirectory, "config", "core.filemode", "false");
+    await git(fixture.templateDirectory, "update-index", "--chmod=+x", "shared.txt");
     await git(fixture.templateDirectory, "commit", "-m", "Make shared executable");
     const executableTemplate = (await git(fixture.templateDirectory, "rev-parse", "HEAD")).trim();
     const gateway = await gatewayFor(fixture);
+    expect(
+      (
+        await git(fixture.templateDirectory, "ls-tree", executableTemplate, "--", "shared.txt")
+      ).trim()
+    ).toMatch(/^100755 blob /u);
+    expect(
+      (await git(fixture.studentDirectory, "ls-tree", "HEAD", "--", "shared.txt")).trim()
+    ).toMatch(/^100644 blob /u);
+    expect(
+      (await git(fixture.templateDirectory, "rev-parse", `${executableTemplate}:shared.txt`)).trim()
+    ).toBe((await git(fixture.studentDirectory, "rev-parse", "HEAD:shared.txt")).trim());
 
     await expect(
       gateway.recoverStudentBaseline({
