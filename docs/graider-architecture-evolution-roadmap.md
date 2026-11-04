@@ -244,6 +244,21 @@ Automate tagged releases with:
 
 Preserve older releases.
 
+### Temporary precursor — Windows Preview Build Artifact
+
+A manual-only `Windows Preview Build` workflow validates the selected commit on a
+native Windows x64 runner and uses the existing portable packaging command with
+the repository OAuth secret scoped to packaging. It uploads only `Graider.exe`
+and its SHA-256 checksum as a commit-identified artifact retained for 7 days;
+loose generated OAuth configuration is explicitly removed before upload.
+See the [Preview handoff instructions](electron-packaging.md#windows-preview-build-artifact-phase-33-precursor).
+
+This is unsigned Preview/testing software, not completion of Slice 3.3. Signing
+and the Windows installer remain Slice 3.1; permanent GitHub Releases remain full
+Slice 3.3. No release tags, update channels or auto-update are added. After this
+temporary detour, return to Phase 9 / Slice 9.2 — Migration Review UI review;
+the existing Slice 9.2 completion record below is preserved.
+
 ## Slice 3.4 — Stable and Preview channels
 
 Add update-channel metadata and channel selection.

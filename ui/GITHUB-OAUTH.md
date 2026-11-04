@@ -13,6 +13,12 @@ Faculty settings on the dashboard contains GitHub sign-in, sign-out, and account
 
 ## Flow and boundaries
 
+For the manual Windows Preview artifact, repository-secret setup, local packaging
+and tester handoff, see the [Windows Preview packaging guide](../docs/electron-packaging.md#windows-preview-build-artifact-phase-33-precursor).
+The workflow supplies the secret only to packaging and deletes the loose generated
+configuration before uploading the executable and checksum. Testers configure no
+secret; the packaged OAuth runtime and PKCE/state requirements are unchanged.
+
 `GithubOAuthSession` coordinates injected browser, network, callback, and credential-store boundaries entirely in Electron main. It generates independent 32-byte cryptographic random PKCE verifier and state values per attempt; the verifier uses base64url and the challenge is SHA-256 (`S256`). They exist only in memory. Trusted code constructs `https://github.com/login/oauth/authorize` and opens it with `shell.openExternal`, using the system default browser. No login BrowserWindow is created.
 
 The callback binds only `127.0.0.1` with port zero, allowing the OS to select an available port. Its exact runtime redirect URI is reused in the code exchange. Only GET `/callback` is accepted; unrelated requests receive 404. Duplicate/mismatched state, duplicate/missing/malformed code, and denial responses fail the flow. A callback is single-use. The named timeout is 180 seconds. Success, terminal failure, timeout, cancellation, and app shutdown close the listener. Static completion HTML has no reflected parameters, assets, or JavaScript. One flow can run at a time. Token exchange refuses redirects. Token exchange and identity requests have a 30-second timeout. Identity lookup reuses the existing GitHub client adapter with explicit OAuth credentials, preserving the operational credential resolver.

@@ -1,0 +1,127 @@
+name: Windows Preview Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-preview:
+    name: Native Windows x64 Preview package
+    if: github.repository == 'msoecsse/graider'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PREVIEW_ARTIFACT_NAME: graider-windows-preview-${{ github.sha }}
+
+    steps:
+      - name: Check out selected commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: Verify native Windows x64 host
+        run: |
+          node -e "if (process.platform !== 'win32' || process.arch !== 'x64') { throw new Error('A GitHub-hosted native Windows x64 runner is required.'); }"
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install native Windows UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Typecheck root
+        run: npm run typecheck
+
+      - name: Typecheck UI
+        run: npm --prefix ui run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check root formatting
+        run: npm run format:check
+
+      - name: Check UI formatting
+        run: npm --prefix ui run format:check
+
+      - name: Test root
+        run: npm test
+
+      - name: Test UI
+        run: npm --prefix ui test
+
+      - name: Build root
+        run: npm run build
+
+      - name: Package Windows portable Preview
+        env:
+          GRAIDER_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.GRAIDER_GITHUB_OAUTH_CLIENT_SECRET }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GRAIDER_GITHUB_OAUTH_CLIENT_SECRET)) {
+            Write-Output 'GRAIDER_GITHUB_OAUTH_CLIENT_SECRET is not configured.'
+            exit 1
+          }
+          npm --prefix ui run package:win
+
+      - name: Remove loose OAuth release configuration
+        if: always()
+        run: |
+          $config = 'ui/dist-electron/github-oauth.release.json'
+          if (Test-Path -LiteralPath $config) {
+            Remove-Item -LiteralPath $config -Force -ErrorAction Stop
+          }
+
+      - name: Verify portable package and generate SHA-256
+        id: package
+        run: |
+          $executables = @(Get-ChildItem -LiteralPath 'ui/release' -Filter '*.exe' -File -ErrorAction Stop)
+          if ($executables.Count -ne 1 -or $executables[0].Name -cne 'Graider.exe') {
+            throw 'Expected exactly one portable distributable: Graider.exe.'
+          }
+          if ($executables[0].Length -eq 0) {
+            throw 'The portable distributable is empty.'
+          }
+          $hash = (Get-FileHash -LiteralPath $executables[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  Graider.exe" | Set-Content -LiteralPath 'ui/release/Graider.exe.sha256' -Encoding ascii
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Upload Windows Preview
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PREVIEW_ARTIFACT_NAME }}
+          path: |
+            ui/release/Graider.exe
+            ui/release/Graider.exe.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Summarize Windows Preview
+        env:
+          PREVIEW_COMMIT: ${{ github.sha }}
+          PREVIEW_SHA256: ${{ steps.package.outputs.sha256 }}
+        run: |
+          @"
+          Windows Preview Build
+
+          - Commit: $env:PREVIEW_COMMIT
+          - Artifact: $env:PREVIEW_ARTIFACT_NAME
+          - SHA-256 (Graider.exe): $env:PREVIEW_SHA256
+          - Unsigned Preview/testing build. Windows may display a security/SmartScreen warning.
+          - Artifact expires after 7 days.
+          "@ >> $env:GITHUB_STEP_SUMMARY

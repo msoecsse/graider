@@ -101,6 +101,69 @@ Expected output:
 ui/release/Graider-<version>-<arch>.dmg
 ```
 
+## Windows Preview build artifact (Phase 3.3 precursor)
+
+For a local Windows x64 package, configure the secret securely in PowerShell and
+run from the repository root (after installing both sets of dependencies):
+
+```powershell
+$env:GRAIDER_GITHUB_OAUTH_CLIENT_SECRET = "<configured securely>"
+npm run package:win
+```
+
+The root command delegates to `npm --prefix ui run package:win`. The existing
+`beforePack` guard still fails release packaging when the secret is absent.
+For native Windows dependencies, use a Windows x64 packaging host.
+
+Testers do **not** build from source. Before the first workflow run, a repository
+administrator must configure the repository Actions secret
+`GRAIDER_GITHUB_OAUTH_CLIENT_SECRET` under **Settings → Secrets and variables →
+Actions → New repository secret**.
+
+GitHub exposes **Run workflow** only after the workflow file is present on the
+repository's default branch (`master`). Integrate this workflow there through the
+normal review process before using the Actions UI; then select `remote-course-v2`
+or the intended branch. This precursor is committed to `remote-course-v2` and does
+not change the default branch.
+
+An authorized repository contributor:
+
+1. Opens GitHub Actions and selects **Windows Preview Build**.
+2. Chooses the intended branch/commit context through GitHub's workflow UI (the
+   selected branch's current commit is checked out by its exact SHA).
+3. Runs the workflow and waits for validation and packaging to pass.
+4. Downloads `graider-windows-preview-<full-commit-sha>` from the run's artifacts.
+5. Extracts `Graider.exe` and `Graider.exe.sha256`, then provides the executable
+   to the tester or directs the tester to the artifact before its 7-day expiry.
+
+The checksum file records SHA-256 for `Graider.exe`; the workflow summary also
+reports the commit, artifact name and checksum. To verify a downloaded executable:
+
+```powershell
+Get-FileHash .\Graider.exe -Algorithm SHA256
+```
+
+Compare that hash with `Graider.exe.sha256` and the run summary. The tester launches
+`Graider.exe`, opens **Faculty settings → Sign in with GitHub**, and completes the
+normal browser OAuth + PKCE flow and loopback callback. Windows secure credential
+persistence uses the existing runtime behavior. The tester needs no client secret,
+Node.js, npm, system Git or GitHub CLI and is never prompted to configure a secret.
+
+This is **unsigned Preview/testing software**; Windows security/SmartScreen
+warnings are expected for now. Phase 3.1 will replace this portable handoff with a
+signed Windows installer. Full Phase 3.3 will replace short-lived workflow
+artifacts with the formal GitHub Release pipeline and permanent release archive.
+This precursor does not complete Phase 3.3 or add update channels or auto-update.
+
+The workflow is manual (`workflow_dispatch`) only, restricted to the upstream
+repository, with no push, pull-request or automatic fork builds. All required
+checks run on the selected commit before packaging. The secret is scoped only to
+the packaging step; the loose generated OAuth configuration is deleted in an
+`always()` cleanup step before upload. Only `Graider.exe` and its checksum are
+uploaded. The embedded configuration remains in the application, as for a local
+release package. Native applications cannot cryptographically hide it; PKCE and
+state remain the OAuth security boundary. See [GitHub OAuth](../ui/GITHUB-OAUTH.md).
+
 ## RC1 Faculty Release Package
 
 Maintainers can assemble the repeatable RC1 faculty package from the UI package:
