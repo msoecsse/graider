@@ -27,11 +27,14 @@ jobs:
       - name: Install UI dependencies
         run: npm ci --prefix ui
 
+      - name: Generate Electron backend bridges
+        run: npm run build:electron-backends
+
       - name: Typecheck
-        run: npm run typecheck
+        run: npm run typecheck:prepared
 
       - name: UI typecheck
-        run: npm --prefix ui run typecheck
+        run: npm --prefix ui run typecheck:prepared
 
       - name: Lint
         run: npm run lint

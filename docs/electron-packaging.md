@@ -46,6 +46,43 @@ quoted, split, or passed as a dashboard argument.
 When `VITE_DEV_SERVER_URL` is unset, the app loads `dist/index.html`. The Vite
 dev server is used only by `npm run dev:electron`.
 
+## Clean typecheck contract
+
+Install both dependency trees with `npm ci` and `npm ci --prefix ui` from the
+repository root before validating Electron services. The generated backend
+bridges and their declarations live in ignored `ui/dist-electron`; they must
+never be committed or assumed to exist from a previous build/test run.
+
+Both developer commands are self-contained, even when that directory is absent:
+
+```bash
+npm run typecheck
+npm --prefix ui run typecheck
+```
+
+Root typecheck invokes `build:electron-backends`, which delegates to the existing
+UI `build:template-sync` generator, then runs `typecheck:prepared`. UI typecheck
+invokes the same generator directly before its own `typecheck:prepared`. The
+prepared scripts retain the original strict TypeScript commands; they require
+fresh generation first and are intended for a composed validation sequence.
+No generator implementation or declarations are duplicated.
+
+Normal CI and Windows Preview Build explicitly generate once after installing
+both dependency trees, then share that output between the prepared typechecks:
+
+```bash
+npm run build:electron-backends
+npm run typecheck:prepared
+npm --prefix ui run typecheck:prepared
+```
+
+This avoids repeated generation within each CI run. A fresh checkout in both
+workflows exercises the clean-state contract. To reproduce it locally, remove
+only ignored `ui/dist-electron`, install both lockfiles, and run the sequence
+above. Each direct developer typecheck can also be verified independently after
+removing that directory. Backend generation needs no OAuth secret; the Preview
+secret remains scoped only to packaging.
+
 ## Build And Package
 
 Install root dependencies for the CLI bundle, then install UI dependencies:

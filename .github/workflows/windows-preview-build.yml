@@ -44,6 +44,9 @@ jobs:
       - name: Install native Windows UI dependencies
         run: npm ci --prefix ui
 
+      - name: Generate Electron backend bridges
+        run: npm run build:electron-backends
+
       - name: Audit root dependencies (high and critical)
         run: npm audit --audit-level=high
 
@@ -51,10 +54,10 @@ jobs:
         run: npm audit --prefix ui --audit-level=high
 
       - name: Typecheck root
-        run: npm run typecheck
+        run: npm run typecheck:prepared
 
       - name: Typecheck UI
-        run: npm --prefix ui run typecheck
+        run: npm --prefix ui run typecheck:prepared
 
       - name: Lint
         run: npm run lint
