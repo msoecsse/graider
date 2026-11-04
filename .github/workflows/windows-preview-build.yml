@@ -19,6 +19,10 @@ jobs:
       PREVIEW_ARTIFACT_NAME: graider-windows-preview-${{ github.sha }}
 
     steps:
+      # Preserve committed LF text for Prettier on Windows hosts with autocrlf enabled.
+      - name: Preserve repository line endings
+        run: git config --global core.autocrlf false
+
       - name: Check out selected commit
         uses: actions/checkout@v4
         with:
