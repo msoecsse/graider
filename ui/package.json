@@ -47,11 +47,11 @@
     "@types/react-dom": "latest",
     "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-react": "latest",
-    "electron": "latest",
+    "electron": "^44.10.2",
     "electron-builder": "^26.15.3",
     "jsdom": "latest",
     "typescript": "~5.9.0",
-    "vite": "latest",
+    "vite": "^8.3.5",
     "vitest": "latest"
   },
   "allowScripts": {

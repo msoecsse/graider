@@ -164,6 +164,70 @@ uploaded. The embedded configuration remains in the application, as for a local
 release package. Native applications cannot cryptographically hide it; PKCE and
 state remain the OAuth security boundary. See [GitHub OAuth](../ui/GITHUB-OAUTH.md).
 
+### Preview dependency audit gate
+
+Before packaging, Windows Preview Build runs both `npm audit --audit-level=high`
+and `npm audit --prefix ui --audit-level=high`, including development tooling.
+High/critical findings fail the build. The gate uses neither force, legacy peer
+resolution nor dependency omissions.
+
+The security refresh after precursor commit `5b2c63f` updates:
+
+| Package       | Root lockfile   | UI lockfile                      |
+| ------------- | --------------- | -------------------------------- |
+| Zod           | 4.4.3 → 4.6.7   | Not present                      |
+| Vite          | 8.3.1 → 8.3.5   | 8.0.16 → 8.3.5                   |
+| source-map-js | 1.2.1 → 1.2.2   | 1.2.1 → 1.2.2                    |
+| PostCSS       | 8.5.28 → 8.5.32 | 8.5.26 → 8.5.32                  |
+| Electron      | Not present     | 44.1.0 → 44.10.2                 |
+| Undici        | Not present     | 6.29.0 → 6.29.1; 7.30.0 → 7.30.1 |
+| fast-uri      | Not present     | 3.1.8 → 3.1.9                    |
+
+Zod uses `^4.6.7`; Vite uses `^8.3.5` in both packages. Root now declares Vite
+explicitly as the Vitest peer so its supported major and patched floor are clear.
+UI Electron uses `^44.10.2`, preserving the existing major. Existing Vitest 5.0.3
+and React plugin 6.0.2 accept Vite 8, so neither needs an upgrade. Lockfiles retain
+exact resolutions; unchanged `latest` declarations are outside this refresh.
+
+source-map-js originally entered root through `tsup@8.5.1 → postcss@8.5.28` and UI
+through `vite@8.0.16 → postcss@8.5.26` and `jsdom@29.1.1 → css-tree@3.2.1`.
+Both PostCSS and css-tree accepted `^1.2.1`. Normal targeted lockfile refreshes
+resolve 1.2.2 without overrides; refreshed PostCSS explicitly requires `^1.2.2`.
+Vite is also consumed by Vitest and, in UI, the React plugin. Additional audited
+high findings required the compatible Electron 44 and Undici updates above:
+UI `electron → @electron/get` and `jsdom` use Undici 7, while
+`electron-builder → app-builder-lib → @electron/rebuild → node-gyp` uses Undici 6.
+The compatible fast-uri patch belongs to `electron-builder → app-builder-lib → ajv`.
+
+As of this refresh, the remaining minimatch advisory is
+[moderate GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249),
+with patched floor **11.0.1**. The affected locked paths are:
+
+- Root: `eslint@10.4.0 → minimatch@10.2.5`;
+  `eslint@10.4.0 → @eslint/config-array@0.23.5 → minimatch@10.2.5`;
+  `typescript-eslint@8.60.0 → @typescript-eslint/typescript-estree@8.60.0 → minimatch@10.2.5`
+  (also reached through its parser/plugin/utils).
+- UI: `electron-builder@26.15.3 → app-builder-lib@26.15.3 → minimatch@10.2.5`;
+  `electron-builder@26.15.3 → app-builder-lib@26.15.3 → @electron/universal@2.0.3 → minimatch@9.0.9`.
+
+These are development-only lint and packaging dependencies (lockfile `dev: true`),
+not application runtime dependencies. Current upstream ESLint 10.14.0 still
+requires minimatch `^10.2.6`; current @eslint/js 10.0.1 peers with ESLint 10;
+current typescript-eslint 8.72.1's typescript-estree still requires `^10.2.2`.
+Current electron-builder 26.18.0's app-builder-lib still requires `^10.2.5` and
+pins universal 2.0.3 (`^9.0.3`). None offers a supported path to 11.0.1 within
+these ranges. Upgrading those tools cannot remove the advisory, so their existing
+versions remain. Major overrides, ESLint 9 downgrades and forced audit fixes were
+rejected to preserve the supported lint/packaging contracts. Keep the high gate;
+revisit this moderate finding when the upstream ranges support the patched line.
+
+The UI audit also retains moderate React Router 6 findings
+[GHSA-wrjc-x8rr-h8h6](https://github.com/advisories/GHSA-wrjc-x8rr-h8h6) and
+[GHSA-337j-9hxr-rhxg](https://github.com/advisories/GHSA-337j-9hxr-rhxg).
+The reported fix requires React Router 7.18.0 or newer; an application router major
+migration is outside this high-severity dependency refresh. These are runtime
+dependencies and are not classified as development-only minimatch findings.
+
 ## RC1 Faculty Release Package
 
 Maintainers can assemble the repeatable RC1 faculty package from the UI package:

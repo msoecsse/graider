@@ -44,6 +44,12 @@ jobs:
       - name: Install native Windows UI dependencies
         run: npm ci --prefix ui
 
+      - name: Audit root dependencies (high and critical)
+        run: npm audit --audit-level=high
+
+      - name: Audit UI dependencies (high and critical)
+        run: npm audit --prefix ui --audit-level=high
+
       - name: Typecheck root
         run: npm run typecheck
 
