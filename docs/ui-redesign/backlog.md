@@ -1447,6 +1447,75 @@ canonical lowercase values while displaying the shared humanized labels.
 
 ---
 
+## 53. Windows development startup, section clone scripts, and machine-dependent UI tests — **Resolved**
+
+Resolved on `fix/dev-electron-windows`. `npm run dev:electron` failed on Windows
+because the script set `VITE_DEV_SERVER_URL` with POSIX inline syntax; the
+launch now goes through `ui/scripts/dev-electron.cjs`. The development app also
+spawned a bare `graider`, which shows "Graider CLI not found" unless a global
+install is on the GUI process's PATH; the CLI is now resolved through
+`GRAIDER_CLI_PATH`, then the build shipped with the app (repository
+`dist/index.js` in development, the bundled copy when packaged), then a PATH
+lookup that follows npm's Windows shim layout. Generating the student repository
+access page now also writes one Python clone script per section,
+`clone-<course>-<assignment-slug>-<section>.py`, linked from each section
+heading; it clones every included repository into a folder named after the MSOE
+username, skips existing folders, and uses SSH when a non-interactive
+`git ls-remote` succeeds, falling back to HTTPS. Stale `clone-*.py` files are removed
+on regeneration, **Publish Student Access Page** stages the scripts with the
+page, and the publish review shows "Clone scripts: N changed" when any script
+changed. Two UI tests that passed only on particular machines were fixed:
+`commandRunner.test.ts` used a hard-coded `C:\apps` root that is not absolute on
+macOS, and `coursePublishService.test.ts` was defeated by a global `*.bak`
+ignore rule. The full UI suite now passes on macOS; the Windows paths have not
+yet been run on Windows.
+
+---
+
+## 54. Git-backed tests depend on the developer's global git configuration — **Should fix**
+
+Eight test files outside `tests/live` create real git repositories: three
+backend (`tests/unit/grading/grading-comment-library-service.test.ts`,
+`tests/unit/template-sync/local-git-template-sync-gateway.test.ts`,
+`tests/unit/template-sync/production-template-sync-workspace.test.ts`) and five
+UI (`assignmentApplyWithAccessPageService`, `coursePublishService`,
+`rosterStudentRepositoryAccessPageService`,
+`studentRepositoryAccessPagePublishService`, and
+`studentRepositoryAccessPagePublishStatusService` tests under `ui/electron/`).
+Git applies the developer's global `.gitignore` and `.gitconfig` inside those
+repositories, so results can differ between machines: item 53 found a global
+`*.bak` ignore rule that hid a file `coursePublishService.test.ts` expected to
+see. Settings such as `init.defaultBranch`, `commit.gpgsign`, or `core.autocrlf`
+could cause similar failures. Only `coursePublishService.test.ts` is guarded
+today, and only against the excludes file. Fix: make every git-backed test
+ignore global and system git configuration, for example by setting
+`GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM` in both vitest setups so the code
+under test inherits them, then remove the per-file workaround. This spans
+backend and UI tests.
+
+---
+
+## 55. Student access pages are not linked together — **Should fix**
+
+Placeholder; direction to follow. Each Apply generates a standalone
+`terms/<term-code>/notifications/<assignment-slug>/student-repositories.html` in
+the Pages repository, and nothing links them: there is no index or landing
+page, and assignment pages do not link to one another.
+
+---
+
+## 56. Students cannot open student access pages without permission changes — **Should fix**
+
+Placeholder; direction to follow. A private Pages repository publishes its
+Pages site privately, so only people with read access to the repository can
+view the pages. The working assumption is that the pages stay non-public, which
+requires infrastructure changes to how students are given access. The docs
+imply a public Pages repository (`docs/faculty-ui-user-guide.md:59-60`), and
+the access-page configuration error calls the result a "public access page"
+(`ui/electron/studentRepositoryAccessPageService.ts:463`).
+
+---
+
 ## Suggested order
 
 ## WORKFLOW-FX-2. Add JavaFX Swing support to the canonical workflow — **Resolved**
@@ -1476,10 +1545,10 @@ The next planned slice is ITEM-36.
 Items 1, 2, 3, 4, 6, 7, 9, 29, 30, 31, 32, and 50 are resolved and no longer part
 of this sequence.
 
-Actionable open items are 8, 12, 27, 28, 33, 34, and 35.
+Actionable open items are 8, 12, 27, 28, 33, 34, 35, 54, 55, and 56.
 Items 19 and 26 are accepted
 limitations, not actionable open work. Items 17, 23, 37, 38, 44, 45, 46, 47,
-48, 49, 50, 51, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
+48, 49, 50, 51, 53, WORKFLOW-FX-1, WORKFLOW-FX-2, ITEM-10, ITEM-15, and
 ITEM-51-BUG-1 are resolved.
 ITEM-36 is resolved.
 

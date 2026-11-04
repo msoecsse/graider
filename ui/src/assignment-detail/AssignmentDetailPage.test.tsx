@@ -388,6 +388,7 @@ const createAccessPagePublishResult = (overrides = {}) => ({
     isGitRepository: true,
     currentBranch: "main",
     hasUncommittedAccessPage: true,
+    changedCloneScriptCount: 0,
     hasUncommittedOtherChanges: false,
     upstreamBranch: "origin/main",
     aheadCount: 0,

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { StudentRepositoryAccessPageRequest } from "./ipc";
 import {
   generateStudentRepositoryAccessPage,
+  getStudentRepositoryAccessPageCloneScriptPattern,
   getStudentRepositoryAccessPagePath,
   getStudentRepositoryAccessPageStatus
 } from "./studentRepositoryAccessPageService";
@@ -107,7 +108,9 @@ describe("studentRepositoryAccessPageService", () => {
     expect(content).toContain("a001");
     expect(content).toContain("z002");
     expect(content).toContain('<section class="repository-section" aria-labelledby="section-001">');
-    expect(content).toContain('<h2 id="section-001">Section 001</h2>');
+    expect(content).toContain(
+      '<h2 id="section-001"><a class="clone-script-link" href="clone-csc1120-lab02-001.py" download>Section 001</a></h2>'
+    );
     expect(content).toContain(
       '<a class="student-repository-link" href="https://github.com/org/a-repo">a001</a>'
     );
@@ -131,6 +134,77 @@ describe("studentRepositoryAccessPageService", () => {
     expect(fs.readFileSync(output, "utf8")).not.toBe("old");
     expect(fs.existsSync(path.join(root, assignmentFile))).toBe(true);
     expect(fs.existsSync(path.join(root, "terms/27s1/manifests/lab02/manifest.yml"))).toBe(true);
+  });
+
+  it("writes a per-section Python clone script named after the course, assignment, and section", async () => {
+    const root = createRoot();
+    writeFixture(root);
+    const result = await generateStudentRepositoryAccessPage(request(root), mappings);
+    const directory = path.dirname(path.join(root, "pages repo", result.outputPath));
+    const script = fs.readFileSync(path.join(directory, "clone-csc1120-lab02-001.py"), "utf8");
+    expect(script.startsWith("#!/usr/bin/env python3\n")).toBe(true);
+    expect(script).toContain(
+      "# (MSOE username, URL to clone using HTTPS, URL to clone using SSH)\n"
+    );
+    expect(script).toContain(
+      [
+        "    (",
+        '        "a001",',
+        '        "https://github.com/org/a-repo",',
+        '        "git@github.com:org/a-repo.git",',
+        "    ),"
+      ].join("\n")
+    );
+    expect(script).toContain(
+      [
+        "    (",
+        '        "z002",',
+        '        "https://github.com/org/z-repo?x=<unsafe>",',
+        '        "git@github.com:org/z-repo.git",',
+        "    ),"
+      ].join("\n")
+    );
+    expect(script).not.toContain("m001");
+    expect(script).not.toContain("d001");
+    expect(script).toContain('["git", "ls-remote", "--heads", ssh_url]');
+    expect(script).toContain("ssh -o BatchMode=yes");
+    expect(script).toContain("already exists, skipped");
+    expect(script.indexOf("a001")).toBeLessThan(script.indexOf("z002"));
+    expect(getStudentRepositoryAccessPageCloneScriptPattern(result.outputPath)).toBe(
+      "terms/27s1/notifications/lab02/clone-*.py"
+    );
+  });
+
+  it("removes stale Python clone scripts but leaves other files alone", async () => {
+    const root = createRoot();
+    writeFixture(root);
+    const directory = path.join(root, "pages repo", "terms/27s1/notifications/lab02");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, "clone-csc1120-lab02-999.py"), "stale", "utf8");
+    fs.writeFileSync(path.join(directory, "clone-csc1120-001.sh"), "legacy", "utf8");
+    fs.writeFileSync(path.join(directory, "notes.txt"), "keep", "utf8");
+    await generateStudentRepositoryAccessPage(request(root), mappings);
+    expect(fs.readdirSync(directory).sort()).toEqual([
+      "clone-csc1120-001.sh",
+      "clone-csc1120-lab02-001.py",
+      "notes.txt",
+      "student-repositories.html"
+    ]);
+  });
+
+  it("omits the clone script link when the course code cannot name a script", async () => {
+    const root = createRoot();
+    writeFixture(root);
+    const coursePath = path.join(root, "course.yml");
+    fs.writeFileSync(
+      coursePath,
+      fs.readFileSync(coursePath, "utf8").replace("code: CSC1120", 'code: "CSC 1120"'),
+      "utf8"
+    );
+    const result = await generateStudentRepositoryAccessPage(request(root), mappings);
+    const output = path.join(root, "pages repo", result.outputPath);
+    expect(fs.readFileSync(output, "utf8")).toContain('<h2 id="section-001">Section 001</h2>');
+    expect(fs.readdirSync(path.dirname(output))).toEqual(["student-repositories.html"]);
   });
 
   it("displays the MSOE username while retaining the GitHub repository URL", async () => {

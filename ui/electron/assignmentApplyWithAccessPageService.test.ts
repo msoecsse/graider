@@ -11,6 +11,7 @@ const assignmentFile = "terms/27s1/assignments/lab02/assignment.yml";
 const createRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-apply-page-"));
 const pagesRoot = (root: string): string => path.join(root, "pages");
 const outputPath = "terms/27s1/notifications/lab02/student-repositories.html";
+const cloneScriptPath = "terms/27s1/notifications/lab02/clone-csc1120-lab02-001.py";
 const git = (root: string, arguments_: readonly string[]): string =>
   execFileSync("git", arguments_, { cwd: root, encoding: "utf8" }).trim();
 
@@ -111,10 +112,12 @@ describe("assignmentApplyWithAccessPageService", () => {
 
     expect(result.status).toBe("success");
     expect(fs.existsSync(path.join(pagesRoot(root), outputPath))).toBe(true);
-    expect(git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"])).toBe(outputPath);
+    expect(
+      git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"]).split("\n").sort()
+    ).toEqual([cloneScriptPath, outputPath]);
   });
 
-  it("replaces an existing generated page without creating another file", async () => {
+  it("replaces an existing generated page without creating files beyond the clone script", async () => {
     const root = createRoot();
     writeFixture(root);
     fs.mkdirSync(path.dirname(path.join(pagesRoot(root), outputPath)), { recursive: true });
@@ -130,6 +133,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     expect(result.status).toBe("success");
     expect(fs.readFileSync(path.join(pagesRoot(root), outputPath), "utf8")).not.toBe("old page");
     expect(fs.readdirSync(path.join(pagesRoot(root), "terms/27s1/notifications/lab02"))).toEqual([
+      "clone-csc1120-lab02-001.py",
       "student-repositories.html"
     ]);
   });
@@ -148,7 +152,7 @@ describe("assignmentApplyWithAccessPageService", () => {
     expect(git(pagesRoot(root), ["rev-parse", "HEAD"])).toBe(firstHead);
   });
 
-  it("publishes only the generated page and leaves unrelated page-repository files untouched", async () => {
+  it("publishes only the generated page and clone script and leaves unrelated page-repository files untouched", async () => {
     const root = createRoot();
     writeFixture(root);
     initializePagesRepository(root);
@@ -164,7 +168,9 @@ describe("assignmentApplyWithAccessPageService", () => {
     expect(fs.readFileSync(path.join(pagesRoot(root), "unrelated.txt"), "utf8")).toBe(
       "leave me alone"
     );
-    expect(git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"])).toBe(outputPath);
+    expect(
+      git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"]).split("\n").sort()
+    ).toEqual([cloneScriptPath, outputPath]);
     expect(git(pagesRoot(root), ["status", "--porcelain"])).toContain("unrelated.txt");
   });
 

@@ -18,6 +18,11 @@ const ASSIGNMENT_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const ASSIGNMENT_FILE_PATTERN =
   /^terms\/(\d{2}s[123])\/assignments\/([A-Za-z0-9][A-Za-z0-9._-]*)\/assignment\.yml$/u;
 const HTML_FILE_NAME = "student-repositories.html";
+const CLONE_SCRIPT_PREFIX = "clone-";
+const CLONE_SCRIPT_SUFFIX = ".py";
+const CLONE_SCRIPT_MODE = 0o755;
+const SCRIPT_NAME_PART_PATTERN = /^[a-z0-9._-]+$/u;
+const REPOSITORY_PATH_PATTERN = /^\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/u;
 
 interface CourseContext {
   readonly code: string | null;
@@ -64,6 +69,150 @@ export const getStudentRepositoryAccessPagePath = (
   TERM_CODE_PATTERN.test(termCode) && ASSIGNMENT_SLUG_PATTERN.test(assignmentSlug)
     ? `terms/${termCode}/notifications/${assignmentSlug}/${HTML_FILE_NAME}`
     : null;
+
+export const getStudentRepositoryAccessPageCloneScriptPattern = (outputPath: string): string =>
+  `${path.posix.dirname(outputPath)}/${CLONE_SCRIPT_PREFIX}*${CLONE_SCRIPT_SUFFIX}`;
+
+const getSectionCloneScriptFileName = (
+  courseCode: string | null,
+  assignmentSlug: string,
+  section: string
+): string | null => {
+  const nameParts = [courseCode?.trim() ?? "", assignmentSlug.trim(), section.trim()].map((part) =>
+    part.toLowerCase()
+  );
+  return nameParts.every((part) => SCRIPT_NAME_PART_PATTERN.test(part))
+    ? `${CLONE_SCRIPT_PREFIX}${nameParts.join("-")}${CLONE_SCRIPT_SUFFIX}`
+    : null;
+};
+
+const isCloneScriptFileName = (fileName: string): boolean =>
+  fileName.startsWith(CLONE_SCRIPT_PREFIX) && fileName.endsWith(CLONE_SCRIPT_SUFFIX);
+
+const groupIncludedRowsBySection = (
+  rows: readonly StudentRepositoryAccessPageRow[]
+): Map<string, StudentRepositoryAccessPageRow[]> => {
+  const rowsBySection = new Map<string, StudentRepositoryAccessPageRow[]>();
+  rows
+    .filter((row) => row.status === "included" && row.repositoryUrl !== null)
+    .forEach((row) => {
+      rowsBySection.set(row.section, [...(rowsBySection.get(row.section) ?? []), row]);
+    });
+  return rowsBySection;
+};
+
+const toSshCloneUrl = (repositoryUrl: string): string | null => {
+  try {
+    const url = new URL(repositoryUrl);
+    const match = REPOSITORY_PATH_PATTERN.exec(url.pathname);
+    return url.protocol === "https:" && url.port === "" && match !== null
+      ? `git@${url.hostname}:${match[1]}/${match[2]}.git`
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const pythonString = (value: string | null): string =>
+  value === null ? "None" : JSON.stringify(value);
+
+const buildCloneScript = (
+  section: string,
+  fileName: string,
+  sectionRows: readonly StudentRepositoryAccessPageRow[]
+): string => {
+  const repositories = sectionRows
+    .map(
+      (row) =>
+        `    (\n        ${pythonString(row.studentId)},\n        ${pythonString(row.repositoryUrl)},\n        ${pythonString(toSshCloneUrl(row.repositoryUrl ?? ""))},\n    ),`
+    )
+    .join("\n");
+  return `#!/usr/bin/env python3
+"""Clone every student repository for section ${section}.
+
+Run this script from the folder that should hold the repositories:
+
+    python3 ${fileName}
+
+On Windows, use \`python\` or \`py\` if \`python3\` is not available.
+
+Each repository is cloned into a folder named after the student's MSOE username.
+Existing folders are skipped. SSH is used when it works; HTTPS otherwise.
+"""
+
+import os
+import subprocess
+import sys
+
+SSH_CHECK_TIMEOUT_SECONDS = 30
+
+# (MSOE username, URL to clone using HTTPS, URL to clone using SSH)
+REPOSITORIES = [
+${repositories}
+]
+
+
+def ssh_works(ssh_url):
+    if ssh_url is None:
+        return False
+    environment = dict(os.environ)
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    if "GIT_SSH_COMMAND" not in environment:
+        environment["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--heads", ssh_url],
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=SSH_CHECK_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def is_safe_folder_name(name):
+    return name not in ("", ".", "..") and os.path.basename(name) == name and "/" not in name
+
+
+def clone(name, url):
+    if not is_safe_folder_name(name):
+        print(f"{name}: not a usable folder name, skipped")
+        return "failed"
+    if os.path.exists(name):
+        print(f"{name}: already exists, skipped")
+        return "skipped"
+    print(f"{name}: cloning {url}")
+    result = subprocess.run(["git", "clone", url, name])
+    if result.returncode != 0:
+        print(f"{name}: clone failed")
+        return "failed"
+    return "cloned"
+
+
+def main():
+    sys.stdout.reconfigure(line_buffering=True)
+    if not REPOSITORIES:
+        print("No repositories to clone.")
+        return 0
+    use_ssh = ssh_works(REPOSITORIES[0][2])
+    print("Using SSH." if use_ssh else "SSH is unavailable; using HTTPS.")
+    outcomes = [
+        clone(name, ssh_url if use_ssh and ssh_url is not None else https_url)
+        for name, https_url, ssh_url in REPOSITORIES
+    ]
+    print(
+        f"Cloned {outcomes.count('cloned')}, skipped {outcomes.count('skipped')}, "
+        f"failed {outcomes.count('failed')}."
+    )
+    return 1 if "failed" in outcomes else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+`;
+};
 
 const readCourseContext = (courseFolderPath: string): CourseContext | null => {
   try {
@@ -154,23 +303,22 @@ const renderPage = (
       .filter((value) => value !== "")
       .join(" ")
       .trim() || assignmentSlug;
-  const rowsBySection = new Map<string, StudentRepositoryAccessPageRow[]>();
-  for (const row of rows) {
-    if (row.status !== "included" || row.repositoryUrl === null) continue;
-    const sectionRows = rowsBySection.get(row.section) ?? [];
-    sectionRows.push(row);
-    rowsBySection.set(row.section, sectionRows);
-  }
+  const rowsBySection = groupIncludedRowsBySection(rows);
   const sectionContent = [...rowsBySection.entries()]
     .map(([section, sectionRows]) => {
       const sectionId = `section-${escapeHtml(section)}`;
+      const scriptFileName = getSectionCloneScriptFileName(course.code, assignmentSlug, section);
+      const heading =
+        scriptFileName === null
+          ? `Section ${escapeHtml(section)}`
+          : `<a class="clone-script-link" href="${escapeHtml(scriptFileName)}" download>Section ${escapeHtml(section)}</a>`;
       const studentRows = sectionRows
         .map(
           (row) =>
             `            <li><a class="student-repository-link" href="${escapeHtml(row.repositoryUrl ?? "")}">${escapeHtml(row.studentId)}</a></li>`
         )
         .join("\n");
-      return `        <section class="repository-section" aria-labelledby="${sectionId}">\n          <h2 id="${sectionId}">Section ${escapeHtml(section)}</h2>\n          <ul class="student-repository-list">\n${studentRows}\n          </ul>\n        </section>`;
+      return `        <section class="repository-section" aria-labelledby="${sectionId}">\n          <h2 id="${sectionId}">${heading}</h2>\n          <ul class="student-repository-list">\n${studentRows}\n          </ul>\n        </section>`;
     })
     .join("\n");
   return `<!doctype html>
@@ -187,6 +335,9 @@ const renderPage = (
       h1, h2, p { margin-top: 0; }
       h1 { margin-bottom: 0.75rem; font-size: clamp(1.75rem, 5vw, 2.25rem); letter-spacing: -0.025em; }
       h2 { margin-bottom: 1rem; font-size: 1.125rem; }
+      .clone-script-link { color: inherit; text-decoration: none; border-bottom: 1px dashed #aebddb; }
+      .clone-script-link:hover { border-bottom-color: #2d6cdf; }
+      .clone-script-link:focus-visible { outline: 3px solid #2d6cdf; outline-offset: 3px; }
       p { color: #526078; line-height: 1.6; }
       .repository-sections { display: grid; gap: 1.25rem; margin-top: 2rem; }
       .repository-section { padding: 1.25rem; border: 1px solid #dce3ef; border-radius: 0.875rem; background: #ffffff; box-shadow: 0 1px 2px rgb(23 32 51 / 0.04); }
@@ -203,6 +354,7 @@ const renderPage = (
       <p>Term: ${escapeHtml(termCode)}. Assignment: ${escapeHtml(assignmentTitle)} (${escapeHtml(assignmentSlug)}).</p>
       <p>Find your MSOE username below and open your repository.</p>
       <p>If you do not see your username or cannot access your repository, contact your instructor.</p>
+      <p>Instructors: click a section heading to download a Python script that clones every repository in that section into the folder where you run it.</p>
       <div class="repository-sections">
 ${sectionContent}
       </div>
@@ -210,6 +362,35 @@ ${sectionContent}
   </body>
 </html>
 `;
+};
+
+const writeCloneScripts = (
+  directory: string,
+  courseCode: string | null,
+  assignmentSlug: string,
+  rows: readonly StudentRepositoryAccessPageRow[],
+  now: () => Date
+): void => {
+  const scripts = [...groupIncludedRowsBySection(rows).entries()].flatMap(
+    ([section, sectionRows]) => {
+      const fileName = getSectionCloneScriptFileName(courseCode, assignmentSlug, section);
+      return fileName === null
+        ? []
+        : [{ fileName, content: buildCloneScript(section, fileName, sectionRows) }];
+    }
+  );
+  scripts.forEach(({ fileName, content }) => {
+    const scriptPath = path.join(directory, fileName);
+    const temporaryPath = `${scriptPath}.${process.pid}.${now().getTime()}.tmp`;
+    fs.writeFileSync(temporaryPath, content, { encoding: "utf8", mode: CLONE_SCRIPT_MODE });
+    fs.renameSync(temporaryPath, scriptPath);
+  });
+  const expectedFileNames = new Set(scripts.map((script) => script.fileName));
+  fs.readdirSync(directory)
+    .filter((entry) => isCloneScriptFileName(entry) && !expectedFileNames.has(entry))
+    .forEach((entry) => {
+      fs.unlinkSync(path.join(directory, entry));
+    });
 };
 
 const buildResult = (
@@ -489,6 +670,13 @@ export const generateStudentRepositoryAccessPage = (
       "utf8"
     );
     fs.renameSync(temporaryPath, absolutePath);
+    writeCloneScripts(
+      path.dirname(absolutePath),
+      course.code,
+      result.assignmentSlug,
+      result.rows,
+      now
+    );
     return Promise.resolve({
       ...result,
       exists: true,
