@@ -782,11 +782,13 @@ describe("App routing — reached from the dashboard", () => {
     fireEvent.click(within(confirmation).getByRole("button", { name: "Create assignment" }));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Lab 03" })).toBeInTheDocument();
-    expect(getAssignmentDetail).toHaveBeenCalledWith({
-      courseFolderId: COURSE_FOLDER.id,
-      courseFolderPath: COURSE_FOLDER.path,
-      assignmentFile: "terms/27s1/assignments/lab03/assignment.yml"
-    });
+    await waitFor(() =>
+      expect(getAssignmentDetail).toHaveBeenCalledWith({
+        courseFolderId: COURSE_FOLDER.id,
+        courseFolderPath: COURSE_FOLDER.path,
+        assignmentFile: "terms/27s1/assignments/lab03/assignment.yml"
+      })
+    );
   });
 
   it("shows a loading state, never RouteNotFound, while a just-created assignment's refresh is still in flight", async () => {

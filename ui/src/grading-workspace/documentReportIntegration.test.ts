@@ -13,6 +13,10 @@ import { buildGradingReportModel } from "../../../src/grading/grading-report-mod
 import { renderGradingReportHtml } from "../../../src/grading/grading-report-html.js";
 import type { DocumentContent, ReportDocument } from "../../../src/shared/document-content.js";
 
+// Cold DOCX/PDF parser imports, filesystem reads and worker startup can exceed
+// the unit-test budget on hosted Windows runners. Keep this integration bounded.
+const DOCUMENT_REPORT_INTEGRATION_TIMEOUT_MS = 30_000;
+
 const fixtures = path.resolve("test-fixtures/repository-documents");
 const roots: string[] = [];
 const createRepository = async (): Promise<string> => {
@@ -72,7 +76,7 @@ const render = async (
   return renderGradingReportHtml(model.value);
 };
 
-describe("required document reports", () => {
+describe("required document reports", { timeout: DOCUMENT_REPORT_INTEGRATION_TIMEOUT_MS }, () => {
   it("includes required structured DOCX and PDF beside unchanged source, excluding other documents and preserving numbered anchors", async () => {
     const root = await createRepository();
     const html = await render(root, ["src/Main.java", "./structured.docx", "./normal.pdf"]);

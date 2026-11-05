@@ -691,6 +691,10 @@ describe("AssignmentDetailPage", () => {
     const action = await screen.findByRole("button", {
       name: "Update Student Repositories"
     });
+    // The button is already present while asynchronous preparation is pending.
+    expect(
+      await screen.findByText("Apply this assignment before updating student repositories.")
+    ).toBeInTheDocument();
     expect(action).toBeDisabled();
     expect(prepareAssignmentTemplateSync).toHaveBeenCalledTimes(1);
     expect(prepareAssignmentTemplateSync).toHaveBeenCalledWith({
@@ -698,9 +702,6 @@ describe("AssignmentDetailPage", () => {
       courseFolderPath: SELECTION.courseFolderPath,
       assignmentFile: SELECTION.assignmentFile
     });
-    expect(
-      await screen.findByText("Apply this assignment before updating student repositories.")
-    ).toBeInTheDocument();
   });
 
   it("treats partially applied assignments as eligible for template-sync preparation", async () => {
