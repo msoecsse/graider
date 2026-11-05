@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { itGitIntegration, removeGitFixture } from "./gitIntegrationFixtures";
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
@@ -32,8 +33,8 @@ const fixture = async () => {
   remote.reader = f.reader;
   return f;
 };
-afterEach(() => {
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(removeGitFixture));
 });
 const sender = (id = 1) =>
   Object.assign(new EventEmitter(), {
@@ -113,22 +114,25 @@ describe("managed operational-source cutover", () => {
     f.switchAccount(42);
     expect(guard.isManaged("registered")).toBe(true);
   });
-  it("requires explicit 2.8 fast-forward before cutover, and can optionally update the legacy mirror after a managed publication", async () => {
-    const f = await fixture();
-    const next = await f.advance();
-    await expect(f.guard.cutover("registered")).rejects.toMatchObject({
-      result: { reason: "operational_source_updateable", action: "update_source" }
-    });
-    await f.guard.updateSource("registered");
-    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(next);
-    await f.guard.cutover("registered");
-    await transact(f, edit, next);
-    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(next);
-    await f.guard.updateSource("registered");
-    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(
-      await git(f.cache, ["rev-parse", "HEAD"])
-    );
-  });
+  itGitIntegration(
+    "requires explicit 2.8 fast-forward before cutover, and can optionally update the legacy mirror after a managed publication",
+    async () => {
+      const f = await fixture();
+      const next = await f.advance();
+      await expect(f.guard.cutover("registered")).rejects.toMatchObject({
+        result: { reason: "operational_source_updateable", action: "update_source" }
+      });
+      await f.guard.updateSource("registered");
+      expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(next);
+      await f.guard.cutover("registered");
+      await transact(f, edit, next);
+      expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(next);
+      await f.guard.updateSource("registered");
+      expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(
+        await git(f.cache, ["rev-parse", "HEAD"])
+      );
+    }
+  );
   it.each(["dirty", "staged", "untracked", "ahead", "diverged", "unsafe", "conflicted"])(
     "blocks %s legacy state without changing its evidence",
     async (kind) => {
@@ -479,96 +483,101 @@ describe("course admin transaction inventory", () => {
       expect(f.clone).not.toHaveBeenCalled();
     }
   );
-  it("uses existing assignment create/edit/delete and roster validators in isolated transactions", async () => {
-    const f = await fixture();
-    await f.guard.cutover("registered");
-    const { saveAssignmentSetup } = await import("./assignmentSetupService");
-    const { getAssignmentForEdit, saveAssignmentEdit } = await import("./assignmentEditService");
-    const { deleteAssignment } = await import("./assignmentDeleteService");
-    const { saveRoster } = await import("./rosterManagerService");
-    const { allowedCourseMutationPath } = await import("./courseMutationIpc");
-    const run = async (
-      channel: string,
-      fields: Record<string, unknown>,
-      mutate: (root: string) => unknown
-    ) =>
-      f.guard.run("registered", f.legacy, "new_mutation", async (context, input) =>
-        f.guard.transaction(
-          context,
-          input,
-          context.authoritativeCommit,
-          (file) => allowedCourseMutationPath(channel, fields, file),
-          async (root) => mutate(root),
-          vi.fn()
+  itGitIntegration(
+    "uses existing assignment create/edit/delete and roster validators in isolated transactions",
+    async () => {
+      const f = await fixture();
+      await f.guard.cutover("registered");
+      const { saveAssignmentSetup } = await import("./assignmentSetupService");
+      const { getAssignmentForEdit, saveAssignmentEdit } = await import("./assignmentEditService");
+      const { deleteAssignment } = await import("./assignmentDeleteService");
+      const { saveRoster } = await import("./rosterManagerService");
+      const { allowedCourseMutationPath } = await import("./courseMutationIpc");
+      const run = async (
+        channel: string,
+        fields: Record<string, unknown>,
+        mutate: (root: string) => unknown
+      ) =>
+        f.guard.run("registered", f.legacy, "new_mutation", async (context, input) =>
+          f.guard.transaction(
+            context,
+            input,
+            context.authoritativeCommit,
+            (file) => allowedCourseMutationPath(channel, fields, file),
+            async (root) => mutate(root),
+            vi.fn()
+          )
+        );
+      const setup = {
+        courseFolderId: "registered",
+        courseFolderPath: f.legacy,
+        assignmentTitle: "Lab 1",
+        assignmentSlug: "lab01",
+        termCode: "27s1",
+        sectionIds: ["001"],
+        templateRepository: "",
+        templateBranch: "",
+        dueAt: "2027-06-15T23:59:00-05:00",
+        gradingEnabled: false,
+        points: null,
+        facultyOwner: "jones",
+        lmsAssignmentId: "",
+        gradingCategory: "labs",
+        requiredFiles: [],
+        rubric: [],
+        confirmed: true,
+        replaceExisting: false
+      };
+      expect(
+        await run(IPC_CHANNELS.saveAssignmentSetup, setup, (root) =>
+          saveAssignmentSetup({ ...setup, courseFolderPath: root })
         )
-      );
-    const setup = {
-      courseFolderId: "registered",
-      courseFolderPath: f.legacy,
-      assignmentTitle: "Lab 1",
-      assignmentSlug: "lab01",
-      termCode: "27s1",
-      sectionIds: ["001"],
-      templateRepository: "",
-      templateBranch: "",
-      dueAt: "2027-06-15T23:59:00-05:00",
-      gradingEnabled: false,
-      points: null,
-      facultyOwner: "jones",
-      lmsAssignmentId: "",
-      gradingCategory: "labs",
-      requiredFiles: [],
-      rubric: [],
-      confirmed: true,
-      replaceExisting: false
-    };
-    expect(
-      await run(IPC_CHANNELS.saveAssignmentSetup, setup, (root) =>
-        saveAssignmentSetup({ ...setup, courseFolderPath: root })
-      )
-    ).toMatchObject({ status: "success", publication: { status: "success" } });
-    const file = "terms/27s1/assignments/lab01/assignment.yml";
-    const original = getAssignmentForEdit(f.cache, file).model!;
-    expect(
-      await run(IPC_CHANNELS.saveAssignmentEdit, { assignmentFile: file }, (root) =>
-        saveAssignmentEdit({
-          ...original,
-          courseFolderId: "registered",
-          courseFolderPath: root,
-          confirmed: true,
-          lmsAssignmentId: original.lmsAssignmentId ?? "",
-          assignmentTitle: "Updated title"
-        })
-      )
-    ).toMatchObject({ status: "success", publication: { status: "success" } });
-    expect(
-      await run(IPC_CHANNELS.saveRoster, { termCode: "27s1", sectionId: "001" }, (root) =>
-        saveRoster({
-          courseFolderId: "registered",
-          courseFolderPath: root,
-          termCode: "27s1",
-          sectionId: "001",
-          rows: [{ studentId: "s1", githubUsername: "student", section: "001", status: "active" }],
-          faculty: ["jones"],
-          sourceKind: "manual_edit",
-          confirmed: true
-        })
-      )
-    ).toMatchObject({ status: "success", publication: { status: "success" } });
-    expect(
-      await run(IPC_CHANNELS.deleteAssignment, { assignmentFile: file }, (root) =>
-        deleteAssignment({
-          courseFolderId: "registered",
-          courseFolderPath: root,
-          assignmentFile: file,
-          confirmed: true
-        })
-      )
-    ).toMatchObject({ status: "success", publication: { status: "success" } });
-    expect(f.push).toHaveBeenCalledTimes(4);
-    expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
-    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(f.head);
-  });
+      ).toMatchObject({ status: "success", publication: { status: "success" } });
+      const file = "terms/27s1/assignments/lab01/assignment.yml";
+      const original = getAssignmentForEdit(f.cache, file).model!;
+      expect(
+        await run(IPC_CHANNELS.saveAssignmentEdit, { assignmentFile: file }, (root) =>
+          saveAssignmentEdit({
+            ...original,
+            courseFolderId: "registered",
+            courseFolderPath: root,
+            confirmed: true,
+            lmsAssignmentId: original.lmsAssignmentId ?? "",
+            assignmentTitle: "Updated title"
+          })
+        )
+      ).toMatchObject({ status: "success", publication: { status: "success" } });
+      expect(
+        await run(IPC_CHANNELS.saveRoster, { termCode: "27s1", sectionId: "001" }, (root) =>
+          saveRoster({
+            courseFolderId: "registered",
+            courseFolderPath: root,
+            termCode: "27s1",
+            sectionId: "001",
+            rows: [
+              { studentId: "s1", githubUsername: "student", section: "001", status: "active" }
+            ],
+            faculty: ["jones"],
+            sourceKind: "manual_edit",
+            confirmed: true
+          })
+        )
+      ).toMatchObject({ status: "success", publication: { status: "success" } });
+      expect(
+        await run(IPC_CHANNELS.deleteAssignment, { assignmentFile: file }, (root) =>
+          deleteAssignment({
+            courseFolderId: "registered",
+            courseFolderPath: root,
+            assignmentFile: file,
+            confirmed: true
+          })
+        )
+      ).toMatchObject({ status: "success", publication: { status: "success" } });
+      expect(f.push).toHaveBeenCalledTimes(4);
+      expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
+      expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(f.head);
+    }
+  );
   it("rejects a dirty managed cache before cutover or mutation", async () => {
     const f = await fixture();
     fs.writeFileSync(path.join(f.cache, "untracked.txt"), "keep");

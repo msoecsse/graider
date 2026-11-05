@@ -218,7 +218,11 @@ describe("revalidation and safe clone transaction", () => {
     f.factory.clone.mockImplementationOnce(
       async ({ destination, remote, authentication, checkout }) => {
         expect(fs.existsSync(f.final)).toBe(false);
-        expect(destination).toContain(".bootstrap/course-bootstrap-");
+        expect(path.dirname(path.dirname(destination))).toBe(
+          path.join(path.dirname(path.dirname(f.final)), ".bootstrap")
+        );
+        expect(path.basename(path.dirname(destination))).toMatch(/^course-bootstrap-/);
+        expect(path.basename(destination)).toBe("repo");
         expect(remote).toBe(f.repo.url + ".git");
         expect(authentication).toEqual({ id: "operation-context" });
         expect(checkout).toBe("default");

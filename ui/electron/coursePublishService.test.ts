@@ -1,9 +1,10 @@
+import { itGitIntegration, removeGitFixture } from "./gitIntegrationFixtures";
 import { localPublicationOptions } from "./gitPublicationFixtures";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { publishSuccessfulCourseMutation } from "./courseMutationPublicationService";
 import { getCoursePublishStatus, publishCourseChanges } from "./coursePublishService";
@@ -19,8 +20,18 @@ import { removeRoster } from "./rosterManagerService";
 const git = (root: string, arguments_: readonly string[]): string =>
   execFileSync("git", arguments_, { cwd: root, encoding: "utf8" }).trim();
 
+const temporaryRoots: string[] = [];
+const temporaryRoot = (prefix: string): string => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  temporaryRoots.push(root);
+  return root;
+};
+afterEach(async () => {
+  await Promise.all(temporaryRoots.splice(0).map(removeGitFixture));
+});
+
 const fixture = (withUpstream = true): string => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-course-publish-"));
+  const root = temporaryRoot("graider-course-publish-");
   fs.mkdirSync(path.join(root, "terms", "27s1", "rosters"), { recursive: true });
   fs.writeFileSync(path.join(root, "course.yml"), "course:\n  code: CSC1120\n", "utf8");
   fs.writeFileSync(path.join(root, "terms", "27s1", "term.yml"), "term: 27s1\n", "utf8");
@@ -287,36 +298,39 @@ describe("coursePublishService", () => {
     expect(fs.readFileSync(libraryPath, "utf8")).toContain("Saved locally");
   });
 
-  it("preserves a stale faculty clone's local comment commit when push diverges", async () => {
-    const staleFaculty = fixture();
-    const remote = path.join(staleFaculty, "remote");
-    const currentFaculty = fs.mkdtempSync(path.join(os.tmpdir(), "graider-course-faculty-a-"));
-    execFileSync("git", ["clone", remote, currentFaculty], { encoding: "utf8" });
-    git(currentFaculty, ["config", "user.email", "faculty-a@example.invalid"]);
-    git(currentFaculty, ["config", "user.name", "Faculty A"]);
-    writeCommentLibrary(currentFaculty, "Faculty A comment");
-    git(currentFaculty, ["add", ".graider/grading/comments.json"]);
-    git(currentFaculty, ["commit", "-m", "Add faculty A comment"]);
-    git(currentFaculty, ["push"]);
+  itGitIntegration(
+    "preserves a stale faculty clone's local comment commit when push diverges",
+    async () => {
+      const staleFaculty = fixture();
+      const remote = path.join(staleFaculty, "remote");
+      const currentFaculty = temporaryRoot("graider-course-faculty-a-");
+      execFileSync("git", ["clone", remote, currentFaculty], { encoding: "utf8" });
+      git(currentFaculty, ["config", "user.email", "faculty-a@example.invalid"]);
+      git(currentFaculty, ["config", "user.name", "Faculty A"]);
+      writeCommentLibrary(currentFaculty, "Faculty A comment");
+      git(currentFaculty, ["add", ".graider/grading/comments.json"]);
+      git(currentFaculty, ["commit", "-m", "Add faculty A comment"]);
+      git(currentFaculty, ["push"]);
 
-    const staleLibraryPath = writeCommentLibrary(staleFaculty, "Faculty B comment");
-    const before = git(staleFaculty, ["rev-parse", "HEAD"]);
-    const result = await publishCourseChanges(staleFaculty, localPublicationOptions());
-    const status = await getCoursePublishStatus(staleFaculty);
+      const staleLibraryPath = writeCommentLibrary(staleFaculty, "Faculty B comment");
+      const before = git(staleFaculty, ["rev-parse", "HEAD"]);
+      const result = await publishCourseChanges(staleFaculty, localPublicationOptions());
+      const status = await getCoursePublishStatus(staleFaculty);
 
-    expect(result.status).toBe("failure");
-    expect(result.diagnostics[0]?.message).toMatch(/push/u);
-    expect(git(staleFaculty, ["rev-parse", "HEAD"])).not.toBe(before);
-    expect(status.status).toBe("unpushed");
-    expect(status.aheadCount).toBe(1);
-    expect(fs.readFileSync(staleLibraryPath, "utf8")).toContain("Faculty B comment");
-    expect(git(remote, ["show", "main:.graider/grading/comments.json"])).toContain(
-      "Faculty A comment"
-    );
-    expect(git(remote, ["show", "main:.graider/grading/comments.json"])).not.toContain(
-      "Faculty B comment"
-    );
-  });
+      expect(result.status).toBe("failure");
+      expect(result.diagnostics[0]?.message).toMatch(/push/u);
+      expect(git(staleFaculty, ["rev-parse", "HEAD"])).not.toBe(before);
+      expect(status.status).toBe("unpushed");
+      expect(status.aheadCount).toBe(1);
+      expect(fs.readFileSync(staleLibraryPath, "utf8")).toContain("Faculty B comment");
+      expect(git(remote, ["show", "main:.graider/grading/comments.json"])).toContain(
+        "Faculty A comment"
+      );
+      expect(git(remote, ["show", "main:.graider/grading/comments.json"])).not.toContain(
+        "Faculty B comment"
+      );
+    }
+  );
 
   it("retries an existing unpushed commit successfully when the upstream permits it", async () => {
     const root = fixture();
@@ -338,7 +352,7 @@ describe("coursePublishService", () => {
 });
 
 describe("course publish semantic status projection", () => {
-  const existingFolder = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "graider-status-"));
+  const existingFolder = (): string => temporaryRoot("graider-status-");
   const changedPath = (value: string) => {
     const trusted = createRelativeGitPath(value);
     if (trusted === null) throw new Error("Expected a trusted fixture path.");
