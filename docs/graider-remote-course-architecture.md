@@ -417,7 +417,7 @@ Both operational schema gates remain **1**, Course Setup emits Schema 1 and no
 production v1 workflow/UI/IPC or discovery behavior is wired to these new APIs.
 No normal permanent Delete course operation or real course migration is introduced.
 
-**Slice 8.6 and Phase 8 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Next: Phase 9 / Slice 9.3 — Assignment Migration.**
+**Slice 8.6 and Phase 8 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3A is implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff.**
 
 ---
 
@@ -1845,7 +1845,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Next: Phase 9 / Slice 9.3 — Assignment Migration.**
+**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3A is implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff.**
 
 ---
 
@@ -2846,7 +2846,44 @@ reader tests compare complete source/runtime/Git storage before/after, spy on fi
 and restrict observed commands to read operations. There are zero analyzer writes, commits,
 pushes, GitHub/team/member/invitation/permission mutations or journal writes. Both operational
 gates remain **1**, Course Setup emits v1 and no production UI, approval persistence, real
-migration or v2 activation is added. **Next: 9.3 — Assignment Migration; review is implemented below.**
+migration or v2 activation is added. **9.3A is implemented; 9.3 remains incomplete. Next: trusted 9.3 composition/handoff.**
+
+### Implemented pure assignment planner (Slice 9.3A)
+
+`src/migration/assignment-migration-models.ts` and `assignment-migration-planner.ts`
+define `planAssignmentMigration(analysis, review)`. The pure, portable projection
+requires trusted complete review with `publicationReady: false` and exact repository
+ID/source SHA/report ID/authenticated user binding. It does not redo review decisions.
+Matching non-applicable inputs remain non-applicable. The deeply frozen, detached plan
+has `ready | needs_attention | blocked | not_applicable` status; even `ready` means
+only deterministic assignment conversion, never publication readiness.
+
+Resolved `faculty_owner` becomes the exact reviewed-directory GitHub ID array.
+Ownerless remains `[]` with repair required; unresolved/conflicting ownership never
+selects fallback, coordinator, current user or section faculty. Review/analysis owner
+disagreement blocks planning. Exact shared deadline values fan out to canonical
+applicable sections; absent deadlines remain absent, and conflicting scope remains
+Needs attention without broadening/narrowing destinations.
+
+Per-section Apply uses validated analyzer states: `not_observed`, `complete_evidence`,
+`partial_incomplete`, `ambiguous`. Reliable absence means available, never Not using.
+Incomplete work preserves successful records; complete section evidence is required
+for completion. Structured manifest provenance retains source versus machine-local
+runtime, location/fingerprint/state, section states, repository IDs (including null),
+target/group records, operations, mappings, diagnostics and prior-activity evidence.
+Source/runtime conflicts, missing immutable repository IDs and group ambiguity remain
+Needs attention. Acknowledgements confer no authoritative grouping or lifecycle choice.
+Legacy status survives: pristine Draft and consistent Active are straightforward,
+Archived retains operational history, Draft activity contradictions and `closed` remain
+unresolved. Findings use typed codes and canonical analyzer order. No time, random ID,
+local filesystem path or ambient platform/Git value is generated.
+
+Grader evidence remains deferred to 9.4; organization conditions/publication blockers
+are carried from review independently of assignment determinism. There are **zero
+writes** or checkpoints, no executor/publication, UI/IPC/Electron changes, or operational
+v2 cutover. Both schema gates remain **1** and Setup emits Schema 1. **9.3A is
+implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff** via
+the existing main-process `getCompleted()` seam. 9.5 owns writes and final publication.
 
 ### Implemented review contract (Slice 9.2 — complete)
 
@@ -2964,7 +3001,7 @@ identity verification/collisions, every semantic decision, stale refresh and rea
 safety. There are zero review config/migration-file writes, commits, pushes, GitHub
 team/invitation/permission/branch mutations or journal writes. Operational gates remain
 **1**, Course Setup still emits Schema 1 and v1 workflows retain their existing behavior.
-**Slice 9.2 is complete. Next: 9.3 — Assignment Migration.** No assignment conversion,
+**Slice 9.2 is complete. Slice 9.3A is implemented; 9.3 remains incomplete.** No assignment conversion,
 Schema v2 file generation, checkpoint or migration publication is implemented here.
 
 ### Required migration behavior
@@ -4050,6 +4087,5 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slices 8.1–8.6 are complete. The next planned work is **Phase 9 / Slice 9.3 —
-Assignment Migration**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.6 are complete. The next planned work is **trusted 9.3 composition/handoff**; 9.3A is implemented and 9.3 remains incomplete. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.

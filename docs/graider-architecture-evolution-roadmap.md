@@ -435,7 +435,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 and Slices 8.1–8.6 are complete. Next: **Phase 9 / Slice 9.3 — Assignment Migration**.
+Phases 6 and 7 and Slices 8.1–8.6 are complete. Next: **trusted 9.3 composition/handoff (9.3A implemented; 9.3 incomplete)**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -604,7 +604,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Slices 8.1–8.6 are complete; next: **Phase 9 / Slice 9.3 — Assignment Migration**.
+Managed branch policy is implemented in 7.6 below. Slices 8.1–8.6 are complete; next: **trusted 9.3 composition/handoff (9.3A implemented; 9.3 incomplete)**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -638,7 +638,7 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 and Slices 8.1–8.6 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Next: Phase 9 / Slice 9.3 — Assignment Migration.**
+**Phase 7 and Slices 8.1–8.6 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3A is implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff.**
 
 ---
 
@@ -928,7 +928,7 @@ implements that model. No migration machinery is invented now. Both operational
 gates remain **1**, Setup emits v1, no production v2/UI/IPC is wired and no real course
 or GitHub resource is changed. No Delete course operation is added.
 
-**Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Next: Phase 9 / Slice 9.3 — Assignment Migration.**
+**Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3A is implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff.**
 The analyzer must report missing lifecycle/creation-order facts and require a reviewed
 authoritative order rather than guessing from academic chronology or local files.
 
@@ -1061,7 +1061,7 @@ write, Git commit/push, team/invitation/permission/branch mutation or journal wr
 The final action is **Complete migration review**; there is no migration/publication action.
 Both operational schema gates remain **1** and Course Setup continues emitting Schema 1.
 
-**Slice 9.2 is complete. Next: 9.3 — Assignment Migration.** It consumes the analyzer and
+**Slice 9.2 is complete. Slice 9.3A is implemented; 9.3 remains incomplete.** It consumes the analyzer and
 trusted completed review to plan assignment/section Apply conversion, retaining technical
 Needs attention conditions. No assignment migration writes begin in 9.2.
 
@@ -1073,6 +1073,30 @@ Convert:
 - shared deadline → per-section deadline;
 - existing manifest → section apply state;
 - incomplete Apply → Needs attention.
+
+### Slice 9.3A — Pure assignment migration planner — IMPLEMENTED
+
+`planAssignmentMigration(analysis, review)` in `src/migration/assignment-migration-planner.ts`
+returns a deterministic, recursively frozen `AssignmentMigrationPlan`. It accepts only
+validated v1 analysis and a trusted completed review bound to the same repository ID,
+source SHA, report ID and authenticated GitHub user ID. Matching non-applicable inputs
+remain non-applicable. Status is `ready`, `needs_attention`, `blocked` or `not_applicable`;
+`publicationReady` remains false even for a ready plan.
+
+The planner preserves reviewed immutable owner IDs, keeps ownerless assignments empty
+and repair-required, fans out exact shared deadlines to canonical applicable sections,
+and projects analyzer per-section Apply evidence. Partial/conflicting Apply, missing
+repository IDs, group ambiguity, section conflicts, unresolved owners, legacy `closed`
+and Draft activity contradictions remain typed Needs attention findings. Successful
+repository/target records and source versus machine-local provenance survive. Archived
+operational history is retained. Grader evidence stays deferred to 9.4 and review
+organization/publication conditions remain visible without resolving them.
+
+There are **zero writes**, checkpoints, Git/GitHub calls, UI/Electron composition or
+operational v2 changes. Both schema gates remain **1**; Setup still emits Schema 1.
+**Slice 9.3 is not yet complete. Next: the trusted 9.3 composition/handoff slice**, using
+the existing main-process `getCompleted()` boundary. 9.4 owns grader cleanup; 9.5 owns
+checkpoint/write/final validation/publication.
 
 ## Slice 9.4 — Grader removal
 
