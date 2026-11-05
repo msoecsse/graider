@@ -1,3 +1,4 @@
+import { describeGitIntegration as describe, removeGitFixture } from "./gitIntegrationFixtures";
 import {
   ManagedReconciliationService,
   fingerprintManagedCache,
@@ -13,7 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { exec, resolveGitBinary } from "dugite";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { synchronizeManagedCourse, managedCoursePath } from "./managedCourses.js";
 import type { ManagedSynchronizationRequest } from "./managedCourses.js";
 import type { GitWorkspaceSynchronizer } from "./gitWorkspaceReader.js";
@@ -169,8 +170,8 @@ const fixture = async () => {
     sync: () => synchronizeManagedCourse(request)
   };
 };
-afterEach(() => {
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(removeGitFixture));
 });
 
 const reviewed = async (f: Awaited<ReturnType<typeof fixture>>) => {

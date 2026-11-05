@@ -1,3 +1,4 @@
+import { describeGitIntegration as describe, removeGitFixture } from "./gitIntegrationFixtures";
 import {
   requireSynchronizedCommit,
   validateOperationalCourseSource,
@@ -11,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { exec, resolveGitBinary } from "dugite";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { GithubOAuthSession } from "./githubOAuthSession";
 import type { RemoteCourse } from "./remoteCourseTypes";
 import type { RemoteRepositoryReader } from "./githubRemoteRepositories";
@@ -176,8 +177,8 @@ const fixture = async () => {
     sync: () => synchronizeManagedCourse(request)
   };
 };
-afterEach(() => {
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(removeGitFixture));
 });
 
 describe("bundled Git managed synchronization, real two-clone history", () => {

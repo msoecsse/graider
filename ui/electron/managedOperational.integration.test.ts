@@ -1,9 +1,13 @@
 // @vitest-environment node
-import { itGitIntegration, removeGitFixture } from "./gitIntegrationFixtures";
+import {
+  describeGitIntegration as describe,
+  itGitIntegration,
+  removeGitFixture
+} from "./gitIntegrationFixtures";
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   fixtureGit as git,
   managedOperationalFixture,

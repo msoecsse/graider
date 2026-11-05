@@ -1,11 +1,15 @@
 import { rm } from "node:fs/promises";
-import { it } from "vitest";
+import { describe, it } from "vitest";
 
 // Multi-repository Git transactions can exceed the unit-test budget on hosted
-// Windows runners. Keep their timeout bounded and opt in only measured cases.
+// Windows runners. Keep their timeout bounded and opt in only Git integration cases.
 const GIT_INTEGRATION_TIMEOUT_MS = 30_000;
 const CLEANUP_MAX_RETRIES = 5;
 const CLEANUP_RETRY_DELAY_MS = 100;
+
+export const describeGitIntegration = (name: string, tests: () => void): void => {
+  describe(name, { timeout: GIT_INTEGRATION_TIMEOUT_MS }, tests);
+};
 
 export const itGitIntegration = (name: string, test: () => Promise<void>): void => {
   it(name, { timeout: GIT_INTEGRATION_TIMEOUT_MS }, test);
