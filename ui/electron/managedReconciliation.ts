@@ -1,3 +1,4 @@
+import { sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -154,7 +155,7 @@ const inspectReview = async (request: ReconciliationRequest): Promise<Review> =>
   const root = managedCoursePath(request.userData, request.userId, repo.id);
   const operations = validateManagedStorage(request.userData, root);
   const workspace = await request.authenticate().factory.open(root);
-  if (fs.realpathSync(workspace.root) !== fs.realpathSync(root))
+  if (!sameFilesystemRoot(workspace.root, root))
     throw new Attention("Manual review required: invalid worktree root.");
   const locator = parseGithubOrigin(await workspace.remoteUrl("origin"));
   if (!locator)

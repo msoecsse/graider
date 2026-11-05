@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { GitHubClient } from "./githubClientProvider.js";
 import { describe, expect, it, vi } from "vitest";
 import { createGradingStudentWorkflowRepairService } from "./gradingStudentWorkflowRepairService.js";
@@ -125,7 +126,7 @@ describe("grading student workflow repair Electron service", () => {
 
     await expect(service({ ...request, runAfterReplacement: true })).resolves.toEqual(ready);
     expect(resolveLocalRepository).toHaveBeenCalledWith(
-      "/trusted/user-data/student-repository-locators.json",
+      path.join(request.userDataPath, "student-repository-locators.json"),
       {
         courseFolderId: "course",
         termCode: "27s1",

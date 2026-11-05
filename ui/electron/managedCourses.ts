@@ -1,3 +1,4 @@
+import { sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -462,7 +463,7 @@ const validateStructure = async (
       "interrupted_operation"
     );
   const workspace = await context.factory.open(localPath);
-  if (fs.realpathSync(workspace.root) !== fs.realpathSync(localPath))
+  if (!sameFilesystemRoot(workspace.root, localPath))
     throw new Attention("Managed destination is not a course Git worktree.");
   const locator = parseGithubOrigin(await workspace.remoteUrl("origin"));
   if (!locator)

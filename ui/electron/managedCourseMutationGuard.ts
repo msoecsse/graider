@@ -1,3 +1,4 @@
+import { canonicalFilesystemRoot, sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import { publishManagedCourseTransaction } from "./managedCourseTransaction.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -153,7 +154,7 @@ export const validateOperationalCourseSource = async (request: {
   // Reuse the self-contained Git-storage checks, anchored at the legacy directory's parent.
   if (validateManagedStorage(path.dirname(root), root).length) unsafe();
   const workspace = await factory.open(root);
-  if (fs.realpathSync(workspace.root) !== fs.realpathSync(root)) unsafe();
+  if (!sameFilesystemRoot(workspace.root, root)) unsafe();
   const locator = parseGithubOrigin(await workspace.remoteUrl("origin"));
   if (!locator) unsafe();
   const repo = locator ? await request.resolveOrigin(locator.owner, locator.name) : null;
@@ -372,9 +373,9 @@ export class ManagedCourseMutationGuard {
       );
     const managedRoot = path.join(this.deps.userData, MANAGED_COURSE_ROOT);
     const source = fs.existsSync(folder!.path)
-      ? fs.realpathSync(folder!.path)
+      ? canonicalFilesystemRoot(folder!.path)
       : path.resolve(folder!.path);
-    const storage = fs.existsSync(managedRoot) ? fs.realpathSync(managedRoot) : managedRoot;
+    const storage = fs.existsSync(managedRoot) ? canonicalFilesystemRoot(managedRoot) : managedRoot;
     const relative = path.relative(storage, source);
     if (
       relative === "" ||
@@ -526,7 +527,7 @@ export class ManagedCourseMutationGuard {
       folder &&
       fs.existsSync(storageRoot) &&
       fs.lstatSync(storageRoot).isSymbolicLink() &&
-      fs.realpathSync(storageRoot) === fs.realpathSync(folder.path)
+      sameFilesystemRoot(storageRoot, folder.path)
     )
       blockMutation(
         "remote_only_mutation_unavailable",
@@ -602,7 +603,7 @@ export class ManagedCourseMutationGuard {
           if (
             fs.existsSync(managedRoot) &&
             fs.lstatSync(managedRoot).isSymbolicLink() &&
-            fs.realpathSync(managedRoot) === fs.realpathSync(folder.path)
+            sameFilesystemRoot(managedRoot, folder.path)
           )
             blockMutation(
               "remote_only_mutation_unavailable",
@@ -615,8 +616,8 @@ export class ManagedCourseMutationGuard {
             ]?.operationalSource === "managed";
           const useManaged = managed && mode !== "source_update";
           const relative = path.relative(
-            fs.existsSync(managedRoot) ? fs.realpathSync(managedRoot) : managedRoot,
-            useManaged ? folder.path : fs.realpathSync(folder.path)
+            fs.existsSync(managedRoot) ? canonicalFilesystemRoot(managedRoot) : managedRoot,
+            useManaged ? folder.path : canonicalFilesystemRoot(folder.path)
           );
           if (
             relative === "" ||

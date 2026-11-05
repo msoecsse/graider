@@ -1,3 +1,5 @@
+import { canonicalFilesystemRoot } from "./canonicalFilesystemRoot.js";
+import os from "node:os";
 // @vitest-environment node
 import fs from "node:fs";
 import path from "node:path";
@@ -74,7 +76,9 @@ const setup = (snapshot = migrationSnapshotFixture(false)) => {
     createOrganizationInvitation: vi.fn(),
     createManagedBranchRule: vi.fn()
   };
-  const userData = fs.mkdtempSync("/private/tmp/graider-review-reader-");
+  const userData = fs.mkdtempSync(
+    path.join(canonicalFilesystemRoot(os.tmpdir()), "graider-review-reader-")
+  );
   directories.push(userData);
   const actual = loadMigrationReviewBackend();
   const backend = {

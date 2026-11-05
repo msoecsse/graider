@@ -27,7 +27,7 @@ const FIXED_REFRESH_DATE = new Date("2026-06-10T12:00:00.000Z");
 
 const COURSE_FOLDER: CourseFolderRecord = {
   id: "course-folder-csc1120",
-  path: "/Users/sean/dev/csc1120",
+  path: path.resolve("/Users/sean/dev/csc1120"),
   displayAlias: null,
   lastOpenedAt: "2026-06-09T19:30:00.000Z",
   lastRefreshedAt: null,
@@ -36,7 +36,7 @@ const COURSE_FOLDER: CourseFolderRecord = {
 
 const SPACE_COURSE_FOLDER: CourseFolderRecord = {
   ...COURSE_FOLDER,
-  path: "/Users/sean/Box Sync/WebstormProjects/graider-sandbox/csc1120"
+  path: path.resolve("/Users/sean/Box Sync/WebstormProjects/graider-sandbox/csc1120")
 };
 
 const createDashboardJson = (status: string = "success"): DashboardJsonResponse => ({

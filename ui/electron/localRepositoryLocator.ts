@@ -1,3 +1,4 @@
+import { canonicalFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -67,7 +68,7 @@ export const resolveLocalStudentRepository = (
   const locator = registry.locators.find((entry) => same(entry, key));
   if (locator === undefined) return { status: "repository_not_recorded" };
   try {
-    const localPath = fs.realpathSync(locator.localPath);
+    const localPath = canonicalFilesystemRoot(locator.localPath);
     return fs.statSync(localPath).isDirectory()
       ? { status: "success", localPath }
       : { status: "repository_unavailable" };

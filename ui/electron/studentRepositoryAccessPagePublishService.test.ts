@@ -1,4 +1,10 @@
-import { localPublicationOptions } from "./gitPublicationFixtures";
+import {
+  localPublicationOptions,
+  configurePagesFixtureOrigin,
+  redirectPagesFixtureTransport,
+  pagesFixtureRemote,
+  PAGES_FIXTURE_ORIGIN
+} from "./gitPublicationFixtures";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -46,13 +52,11 @@ const createFixture = (withUpstream = true): string => {
   git(pagesRoot(root), ["config", "user.name", "Test User"]);
   git(pagesRoot(root), ["add", "."]);
   git(pagesRoot(root), ["commit", "-m", "Initial"]);
-  if (withUpstream) {
-    const remote = path.join(root, "remotes", "csc1120", "csc1120pages");
-    fs.mkdirSync(remote, { recursive: true });
-    git(remote, ["init", "--bare"]);
-    git(pagesRoot(root), ["remote", "add", "origin", remote]);
-    git(pagesRoot(root), ["push", "-u", "origin", "HEAD"]);
-  }
+  const remote = pagesFixtureRemote(root);
+  fs.mkdirSync(remote, { recursive: true });
+  git(remote, ["init", "--bare"]);
+  configurePagesFixtureOrigin(git, pagesRoot(root), root);
+  if (withUpstream) git(pagesRoot(root), ["push", "-u", "origin", "HEAD"]);
   fs.writeFileSync(
     path.join(pagesRoot(root), outputPath),
     "<!doctype html><title>Updated</title>\n"
@@ -61,7 +65,7 @@ const createFixture = (withUpstream = true): string => {
 };
 
 const advanceUpstream = (root: string): void => {
-  const remote = path.join(root, "remotes", "csc1120", "csc1120pages");
+  const remote = pagesFixtureRemote(root);
   const upstreamClone = path.join(root, "upstream clone");
   git(root, ["clone", "--branch", "main", remote, upstreamClone]);
   git(upstreamClone, ["config", "user.email", "test@example.invalid"]);
@@ -77,6 +81,8 @@ describe("studentRepositoryAccessPagePublishService", () => {
   it("stages, commits, and pushes only the generated access page", async () => {
     const root = createFixture();
     fs.writeFileSync(path.join(pagesRoot(root), "unrelated.txt"), "do not publish\n", "utf8");
+    const workspace = await getProductionGitWorkspaceFactory().open(pagesRoot(root));
+    expect(await workspace.remoteUrl("origin")).toBe(PAGES_FIXTURE_ORIGIN);
 
     const result = await publishStudentRepositoryAccessPage(
       request(root),
@@ -86,6 +92,9 @@ describe("studentRepositoryAccessPagePublishService", () => {
 
     expect(result.status).toBe("success");
     expect(result.commitMessage).toBe("Publish student access page for lab02");
+    expect(git(pagesFixtureRemote(root), ["rev-parse", "refs/heads/main"])).toBe(
+      git(pagesRoot(root), ["rev-parse", "HEAD"])
+    );
     expect(git(pagesRoot(root), ["show", "--format=", "--name-only", "HEAD"])).toBe(outputPath);
     expect(git(pagesRoot(root), ["status", "--porcelain"])).toContain("unrelated.txt");
   });
@@ -229,7 +238,7 @@ describe("studentRepositoryAccessPagePublishService", () => {
   it("returns a fixed safe diagnostic when the push fails", async () => {
     const root = createFixture();
     const privateRemotePath = path.join(root, "missing", "csc1120", "csc1120pages");
-    git(pagesRoot(root), ["remote", "set-url", "origin", privateRemotePath]);
+    redirectPagesFixtureTransport(git, pagesRoot(root), root, privateRemotePath);
 
     const result = await publishStudentRepositoryAccessPage(
       request(root),

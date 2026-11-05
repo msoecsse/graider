@@ -80,7 +80,7 @@ describe("course registry", () => {
 
     expect(addResult.courseFolder).toMatchObject({
       id: expect.stringMatching(/^course-folder-[a-f0-9]+$/),
-      path: "/Users/sean/dev/csc1120",
+      path: path.resolve("/Users/sean/dev/csc1120"),
       displayAlias: null,
       lastOpenedAt: "2026-06-09T19:30:00.000Z",
       lastRefreshedAt: null,

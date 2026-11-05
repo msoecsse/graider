@@ -1,4 +1,9 @@
-import { localPublicationOptions } from "./gitPublicationFixtures";
+import {
+  localPublicationOptions,
+  configurePagesFixtureOrigin,
+  redirectPagesFixtureTransport,
+  pagesFixtureRemote
+} from "./gitPublicationFixtures";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -61,7 +66,7 @@ const writeFixture = (root: string, configured = true): void => {
 
 const initializePagesRepository = (root: string): void => {
   const pages = pagesRoot(root);
-  const remote = path.join(root, "remotes", "csc1120", "csc1120pages");
+  const remote = pagesFixtureRemote(root);
   fs.mkdirSync(remote, { recursive: true });
   git(pages, ["init"]);
   git(pages, ["symbolic-ref", "HEAD", "refs/heads/main"]);
@@ -69,7 +74,7 @@ const initializePagesRepository = (root: string): void => {
   git(pages, ["config", "user.name", "Test User"]);
   git(pages, ["commit", "--allow-empty", "-m", "Initial"]);
   git(remote, ["init", "--bare"]);
-  git(pages, ["remote", "add", "origin", remote]);
+  configurePagesFixtureOrigin(git, pages, root);
   git(pages, ["push", "-u", "origin", "HEAD"]);
 };
 
@@ -228,12 +233,12 @@ describe("roster student repository access page lifecycle", () => {
     const root = createRoot();
     writeFixture(root);
     initializePagesRepository(root);
-    git(pagesRoot(root), [
-      "remote",
-      "set-url",
-      "origin",
+    redirectPagesFixtureTransport(
+      git,
+      pagesRoot(root),
+      root,
       path.join(root, "missing", "csc1120", "csc1120pages")
-    ]);
+    );
 
     const result = await saveRosterWithStudentRepositoryAccessPageRefresh(
       saveRequest(root, [
@@ -286,12 +291,12 @@ describe("roster student repository access page lifecycle", () => {
     const root = createRoot();
     writeFixture(root);
     initializePagesRepository(root);
-    git(pagesRoot(root), [
-      "remote",
-      "set-url",
-      "origin",
+    redirectPagesFixtureTransport(
+      git,
+      pagesRoot(root),
+      root,
       path.join(root, "missing", "csc1120", "csc1120pages")
-    ]);
+    );
     const request: RosterRemoveRequest = {
       courseFolderId: "course",
       courseFolderPath: root,

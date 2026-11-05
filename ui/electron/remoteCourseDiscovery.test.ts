@@ -12,6 +12,8 @@ import { GithubOAuthError } from "./githubOAuthCallback.js";
 import type { GitWorkspaceInspectionFactory } from "./gitWorkspaceReader.js";
 import type { CourseFolderRecord } from "./ipc.js";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const org: GithubOrganization = {
   organizationId: 10,
@@ -307,18 +309,39 @@ describe("read-only local origin verification", () => {
     "file:///tmp/course",
     "https://github.com/org/.."
   ])("rejects unsafe origin %s", (origin) => expect(parseGithubOrigin(origin)).toBeNull());
-  it("uses bundled Git inspection only and rejects enclosing roots", async () => {
-    const remoteUrl = vi.fn().mockResolvedValue("git@github.com:csc1120/course.git");
-    const factory = {
-      open: vi.fn().mockResolvedValue({ root: "/tmp/enclosing", remoteUrl })
-    } as unknown as GitWorkspaceInspectionFactory;
-    const result = await inspectLocalCourseOrigins(
-      [{ id: "local", path: "/tmp/enclosing/nested" } as CourseFolderRecord],
-      factory
-    );
-    expect(result[0].origin).toBeNull();
-    expect(remoteUrl).not.toHaveBeenCalled();
-  });
+  it.each(["exact", "alias", "nested", "sibling"])(
+    "uses native exact-root identity for a registered %s path",
+    async (kind) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-origin-root-"));
+      const repo = path.join(root, "repo");
+      const nested = path.join(repo, "nested");
+      const sibling = path.join(root, "sibling");
+      const alias = path.join(root, "alias");
+      fs.mkdirSync(nested, { recursive: true });
+      fs.mkdirSync(sibling);
+      fs.symlinkSync(repo, alias, "dir");
+      const remoteUrl = vi.fn().mockResolvedValue("git@github.com:csc1120/course.git");
+      const factory = {
+        open: vi.fn().mockResolvedValue({ root: await fs.promises.realpath(repo), remoteUrl })
+      } as unknown as GitWorkspaceInspectionFactory;
+      try {
+        const folder = { exact: repo, alias, nested, sibling }[kind];
+        const result = await inspectLocalCourseOrigins(
+          [{ id: "local", path: folder } as CourseFolderRecord],
+          factory
+        );
+        if (kind === "exact" || kind === "alias") {
+          expect(result[0].origin).toEqual({ owner: "csc1120", name: "course" });
+          expect(remoteUrl).toHaveBeenCalledExactlyOnceWith("origin");
+        } else {
+          expect(result[0].origin).toBeNull();
+          expect(remoteUrl).not.toHaveBeenCalled();
+        }
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+  );
 });
 
 it("rediscovers a cut-over registration by immutable catalog ID without consulting a legacy origin", async () => {

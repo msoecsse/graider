@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { getAssignmentRepositoryMappings } from "./assignmentRepositoryMappingsRunner.js";
 
@@ -23,7 +24,7 @@ describe("assignment repository mappings runner", () => {
       .fn()
       .mockResolvedValue({ stdout: response, stderr: "", exitCode: 0, error: null });
     const result = await getAssignmentRepositoryMappings({
-      courseFolderPath: "/tmp/Course Folder",
+      courseFolderPath: path.resolve("course fixtures", "Course Folder"),
       assignmentFile: "terms/27s1/assignments/lab/assignment.yml",
       runner
     });
@@ -36,7 +37,7 @@ describe("assignment repository mappings runner", () => {
           "terms/27s1/assignments/lab/assignment.yml",
           "--json"
         ],
-        cwd: "/tmp/Course Folder"
+        cwd: path.resolve("course fixtures", "Course Folder")
       })
     );
     expect(result.mappings[0]?.repositoryUrl).toContain("lab-ada");
@@ -45,14 +46,14 @@ describe("assignment repository mappings runner", () => {
   it("rejects traversal and invalid JSON without exposing runner output", async () => {
     const runner = vi.fn();
     const traversal = await getAssignmentRepositoryMappings({
-      courseFolderPath: "/tmp/course",
+      courseFolderPath: path.resolve("course fixtures", "course"),
       assignmentFile: "../outside.yml",
       runner
     });
     expect(runner).not.toHaveBeenCalled();
     expect(traversal.diagnostics[0]?.message).toContain("outside");
     const malformed = await getAssignmentRepositoryMappings({
-      courseFolderPath: "/tmp/course",
+      courseFolderPath: path.resolve("course fixtures", "course"),
       assignmentFile: "terms/27s1/assignments/lab/assignment.yml",
       runner: vi
         .fn()

@@ -1,3 +1,4 @@
+import { sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { CourseFolderRecord } from "./ipc.js";
@@ -84,10 +85,9 @@ export const inspectLocalCourseOrigins = async (
       return {
         folderId: folder.id,
         configuredCourse,
-        origin:
-          path.resolve(workspace.root) === path.resolve(folder.path)
-            ? parseGithubOrigin(await workspace.remoteUrl("origin"))
-            : null
+        origin: sameFilesystemRoot(workspace.root, folder.path)
+          ? parseGithubOrigin(await workspace.remoteUrl("origin"))
+          : null
       };
     } catch {
       return { folderId: folder.id, configuredCourse, origin: null };

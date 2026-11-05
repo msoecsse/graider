@@ -36,7 +36,7 @@ describe("local repository locator", () => {
     recordLocalRepository(file, { ...key(), localPath: directory });
     expect(resolveLocalStudentRepository(file, key())).toEqual({
       status: "success",
-      localPath: fs.realpathSync(directory)
+      localPath: fs.realpathSync.native(directory)
     });
     fs.rmSync(directory, { recursive: true });
     expect(resolveLocalStudentRepository(file, key())).toEqual({
@@ -64,11 +64,11 @@ describe("local repository locator", () => {
     recordLocalRepository(file, { ...key(), localPath: paths[1]! });
     expect(resolveLocalStudentRepository(file, key())).toMatchObject({
       status: "success",
-      localPath: fs.realpathSync(paths[1]!)
+      localPath: fs.realpathSync.native(paths[1]!)
     });
     expect(resolveLocalStudentRepository(file, key({ assignmentSlug: "lab2" }))).toMatchObject({
       status: "success",
-      localPath: fs.realpathSync(paths[2]!)
+      localPath: fs.realpathSync.native(paths[2]!)
     });
     expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({
       schemaVersion: 1,
@@ -94,7 +94,7 @@ describe("successful download locator integration", () => {
     );
     expect(resolveLocalStudentRepository(file, key())).toMatchObject({
       status: "success",
-      localPath: fs.realpathSync(good)
+      localPath: fs.realpathSync.native(good)
     });
     expect(resolveLocalStudentRepository(file, key({ studentId: "smith" }))).toMatchObject({
       status: "success"
@@ -121,7 +121,7 @@ describe("successful download locator integration", () => {
     );
     expect(resolveLocalStudentRepository(file, key())).toMatchObject({
       status: "success",
-      localPath: fs.realpathSync(second)
+      localPath: fs.realpathSync.native(second)
     });
   });
 });
