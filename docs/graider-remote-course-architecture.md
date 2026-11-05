@@ -417,7 +417,7 @@ Both operational schema gates remain **1**, Course Setup emits Schema 1 and no
 production v1 workflow/UI/IPC or discovery behavior is wired to these new APIs.
 No normal permanent Delete course operation or real course migration is introduced.
 
-**Slice 8.6 and Phase 8 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3A is implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff.**
+**Slice 8.6 and Phase 8 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3 is complete (9.3A planner + 9.3B trusted handoff). Next: Phase 9 / Slice 9.4 — Grader Removal.**
 
 ---
 
@@ -1845,7 +1845,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3A is implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff.**
+**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3 is complete (9.3A planner + 9.3B trusted handoff). Next: Phase 9 / Slice 9.4 — Grader Removal.**
 
 ---
 
@@ -2846,7 +2846,7 @@ reader tests compare complete source/runtime/Git storage before/after, spy on fi
 and restrict observed commands to read operations. There are zero analyzer writes, commits,
 pushes, GitHub/team/member/invitation/permission mutations or journal writes. Both operational
 gates remain **1**, Course Setup emits v1 and no production UI, approval persistence, real
-migration or v2 activation is added. **9.3A is implemented; 9.3 remains incomplete. Next: trusted 9.3 composition/handoff.**
+migration or v2 activation is added. **Slice 9.3 is complete. Next: Phase 9 / Slice 9.4 — Grader Removal.**
 
 ### Implemented pure assignment planner (Slice 9.3A)
 
@@ -2881,9 +2881,39 @@ local filesystem path or ambient platform/Git value is generated.
 Grader evidence remains deferred to 9.4; organization conditions/publication blockers
 are carried from review independently of assignment determinism. There are **zero
 writes** or checkpoints, no executor/publication, UI/IPC/Electron changes, or operational
-v2 cutover. Both schema gates remain **1** and Setup emits Schema 1. **9.3A is
-implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff** via
-the existing main-process `getCompleted()` seam. 9.5 owns writes and final publication.
+v2 cutover. Both schema gates remain **1** and Setup emits Schema 1. **Slice 9.3 is complete: 9.3A planning plus the 9.3B trusted main-process handoff** via
+the existing `getCompleted()` seam. 9.5 owns writes and final publication.
+
+### Implemented trusted assignment planning handoff (Slice 9.3B — complete)
+
+`ui/electron/assignmentMigrationPlanningService.ts` provides
+`createAssignmentMigrationPlanningService({ reviewService })` for later main-process
+migration work. Its only operation is `getPlan(owner, MigrationReviewSessionRequest)`;
+it accepts no analysis, review or precomputed plan. It awaits the existing 9.2
+`getCompleted()` boundary and passes exactly its main-retained analysis/completed review
+to the 9.3A planner. The existing `migrationReviewBackend.cjs` entry exports the planner
+and assignment-migration types; generated artifacts are not committed.
+
+Session ownership, renderer source assertions, account/generation/faculty authorization,
+course identity and current authoritative revision remain checked by `getCompleted()`.
+The planning service duplicates none of those checks and does not rebuild analysis or
+re-run review decisions. Each request re-enters that boundary; no plan cache, session
+or durable planning state exists. Source advance, refresh, re-verification, closure,
+account/generation change or replacement invalidates old completion. Unavailable
+completion returns `null`; boundary rejections remain rejections. Planner outputs pass
+through unchanged, preserving all statuses, technical Needs attention, deep immutability
+and `publicationReady: false`. Plans remain non-publication-authoritative artifacts.
+
+Tests exercise real review sessions, generated-backend default loading, exact retained
+object identity, freshness/invalidation, status propagation and absence of writes.
+The module remains a tested main-only seam for 9.5; no fake executor, IPC channel,
+preload API, renderer page, route or Dashboard composition is introduced. There are
+zero course/term/assignment/manifest/checkpoint writes, Git/GitHub mutations or journal
+writes. No real course is migrated; schema gates stay **1** and Setup stays Schema 1.
+
+**Slice 9.3 is complete:** 9.3A pure assignment migration planner plus 9.3B trusted
+handoff. **Next: Phase 9 / Slice 9.4 — Grader Removal.** Grader debt is still deferred;
+9.5 still owns checkpoint/write/final validation/publication.
 
 ### Implemented review contract (Slice 9.2 — complete)
 
@@ -2988,7 +3018,7 @@ Account/repository/organization mismatch fails closed. 9.5 must repeat final rem
 identity/revision checks immediately before publication; 9.2 freshness cannot replace it.
 
 The completed artifact is retained in main-process memory with its analysis. The
-main-only `getCompleted()` handoff rechecks context/freshness for a future 9.3 consumer;
+main-only `getCompleted()` handoff rechecks context/freshness for the main-only 9.3B planning service;
 it is absent from IPC and must replace any temptation to trust a renderer-returned
 completed object. Identity re-verification, refresh, closure, account changes and stale
 source invalidate access to old approvals. Reopening requires fresh review. No durable
@@ -3001,8 +3031,8 @@ identity verification/collisions, every semantic decision, stale refresh and rea
 safety. There are zero review config/migration-file writes, commits, pushes, GitHub
 team/invitation/permission/branch mutations or journal writes. Operational gates remain
 **1**, Course Setup still emits Schema 1 and v1 workflows retain their existing behavior.
-**Slice 9.2 is complete. Slice 9.3A is implemented; 9.3 remains incomplete.** No assignment conversion,
-Schema v2 file generation, checkpoint or migration publication is implemented here.
+**Slices 9.2 and 9.3 are complete. Next: Phase 9 / Slice 9.4 — Grader Removal.** Slice 9.2 itself performs no assignment conversion,
+Schema v2 file generation, checkpoint or migration publication.
 
 ### Required migration behavior
 
@@ -4087,5 +4117,5 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slices 8.1–8.6 are complete. The next planned work is **trusted 9.3 composition/handoff**; 9.3A is implemented and 9.3 remains incomplete. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.6 are complete. Slice 9.3 is complete. Next: **Phase 9 / Slice 9.4 — Grader Removal**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.

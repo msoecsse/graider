@@ -435,7 +435,7 @@ and new v1 manifests introduce no grader state. No existing course is rewritten 
 no GitHub team or permission is removed. Both operational schema gates remain **1**;
 production faculty scope remains v1.
 
-Phases 6 and 7 and Slices 8.1–8.6 are complete. Next: **trusted 9.3 composition/handoff (9.3A implemented; 9.3 incomplete)**.
+Phases 6 and 7 and Slices 8.1–8.6 are complete. Next: **Phase 9 / Slice 9.4 — Grader Removal**.
 Persisted configuration removal and GitHub team reconciliation remain explicitly
 scheduled for **Phase 9.4**. See the
 [Slice 6.6 inventory and compatibility boundary](graider-remote-course-architecture.md#phase-6--slice-66-remove-grader-role).
@@ -604,7 +604,7 @@ Future composition still requires trusted session/source/authorization/scope bin
 complete intended term state, shared serialization and 7.3's durable creation journal.
 See [the complete student/group permission contract](graider-remote-course-architecture.md#119-studentgroup-repository-permission-contract-slice-75).
 
-Managed branch policy is implemented in 7.6 below. Slices 8.1–8.6 are complete; next: **trusted 9.3 composition/handoff (9.3A implemented; 9.3 incomplete)**.
+Managed branch policy is implemented in 7.6 below. Slices 8.1–8.6 are complete; next: **Phase 9 / Slice 9.4 — Grader Removal**.
 
 ## Slice 7.6 — Managed branch rules (complete)
 
@@ -638,7 +638,7 @@ responses. Admin enforcement is corroborated by REST, and idempotent reruns do n
 Both operational gates remain **1**, with no production v1 workflow wiring or Phase 8 work.
 See [the full managed branch contract](graider-remote-course-architecture.md#1110-managed-branch-policy-contract-slice-76).
 
-**Phase 7 and Slices 8.1–8.6 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3A is implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff.**
+**Phase 7 and Slices 8.1–8.6 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3 is complete (9.3A planner + 9.3B trusted handoff). Next: Phase 9 / Slice 9.4 — Grader Removal.**
 
 ---
 
@@ -928,7 +928,7 @@ implements that model. No migration machinery is invented now. Both operational
 gates remain **1**, Setup emits v1, no production v2/UI/IPC is wired and no real course
 or GitHub resource is changed. No Delete course operation is added.
 
-**Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3A is implemented; Slice 9.3 is not yet complete. Next: trusted 9.3 composition/handoff.**
+**Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3 is complete (9.3A planner + 9.3B trusted handoff). Next: Phase 9 / Slice 9.4 — Grader Removal.**
 The analyzer must report missing lifecycle/creation-order facts and require a reviewed
 authoritative order rather than guessing from academic chronology or local files.
 
@@ -1002,7 +1002,7 @@ commits, pushes, GitHub/team/member/permission/invitation changes or journal wri
 checkpoint, final YAML/write model, UI, approval persistence or publication is introduced.
 Both operational schema gates remain **1**, and Course Setup still emits Schema 1.
 
-**Slices 9.1 and 9.2 are complete. Next: 9.3 — Assignment Migration.** The implemented
+**Slices 9.1–9.3 are complete. Next: Phase 9 / Slice 9.4 — Grader Removal.** The implemented
 review below requires explicit faculty decisions before any migration write becomes possible.
 
 ## Slice 9.2 — Migration review UI — COMPLETE
@@ -1061,11 +1061,11 @@ write, Git commit/push, team/invitation/permission/branch mutation or journal wr
 The final action is **Complete migration review**; there is no migration/publication action.
 Both operational schema gates remain **1** and Course Setup continues emitting Schema 1.
 
-**Slice 9.2 is complete. Slice 9.3A is implemented; 9.3 remains incomplete.** It consumes the analyzer and
+**Slices 9.2 and 9.3 are complete. Next: Phase 9 / Slice 9.4 — Grader Removal.** Slice 9.3 consumes the analyzer and
 trusted completed review to plan assignment/section Apply conversion, retaining technical
 Needs attention conditions. No assignment migration writes begin in 9.2.
 
-## Slice 9.3 — Assignment migration
+## Slice 9.3 — Assignment migration — COMPLETE
 
 Convert:
 
@@ -1094,9 +1094,32 @@ organization/publication conditions remain visible without resolving them.
 
 There are **zero writes**, checkpoints, Git/GitHub calls, UI/Electron composition or
 operational v2 changes. Both schema gates remain **1**; Setup still emits Schema 1.
-**Slice 9.3 is not yet complete. Next: the trusted 9.3 composition/handoff slice**, using
-the existing main-process `getCompleted()` boundary. 9.4 owns grader cleanup; 9.5 owns
-checkpoint/write/final validation/publication.
+9.3B below supplies the trusted main-process `getCompleted()` handoff. 9.4 owns grader
+cleanup; 9.5 owns checkpoint/write/final validation/publication.
+
+### Slice 9.3B — Trusted assignment migration handoff — COMPLETE
+
+`ui/electron/assignmentMigrationPlanningService.ts` exposes the main-only
+`getPlan(owner, MigrationReviewSessionRequest)` seam. Each call awaits the existing
+9.2 `MigrationReviewService.getCompleted()` boundary, which validates retained session
+ownership/source assertions and current account, generation, faculty authorization,
+course identity and authoritative revision. Only the exact retained analysis and
+completed review reach `planAssignmentMigration`, exported with its types from the
+existing generated migration backend. Generated artifacts are not committed.
+
+When no valid trusted completion is available, the service returns `null`; invalid, closed or replaced sessions retain
+the existing rejection behavior. Plans are generated on demand, never cached. Source
+advance, refresh, identity re-verification, session closure, account/generation changes
+and review replacement cannot reuse prior completion. Planner results pass through
+unchanged, including `needs_attention`, `blocked`, `not_applicable` and always
+`publicationReady: false`. Tests exercise the real review service and generated backend.
+
+**Slice 9.3 is complete:** 9.3A is the pure deterministic planner; 9.3B is its trusted
+main-process handoff. Assignment migration planning is complete with zero migration
+writes, checkpoints, Git/GitHub mutations or journal writes. No IPC/preload/renderer/UI
+planning authority is added, and no real course has migrated. Operational gates remain
+**1** and Setup emits Schema 1. Grader cleanup remains 9.4; checkpoint/write/final
+validation/publication remain 9.5. **Next: Phase 9 / Slice 9.4 — Grader Removal.**
 
 ## Slice 9.4 — Grader removal
 

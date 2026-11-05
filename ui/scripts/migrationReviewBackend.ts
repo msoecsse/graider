@@ -1,4 +1,6 @@
 export { analyzeSchemaV1Migration } from "../../src/migration/schema-v1-migration-analyzer.js";
+export { planAssignmentMigration } from "../../src/migration/assignment-migration-planner.js";
+export type * from "../../src/migration/assignment-migration-models.js";
 export {
   readSchemaV1MigrationAnalysis,
   readRuntimeMigrationManifests
