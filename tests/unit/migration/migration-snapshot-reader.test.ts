@@ -181,6 +181,36 @@ describeGitIntegration("exact-revision migration reader", () => {
     expect(report.runtimeCoverage).toBe("unavailable");
     expect(report.status).toBe("needs_attention");
   });
+  it("uses the same native canonical root as the workspace when legacy realpath retains an alias", async () => {
+    const f = createRepo();
+    // Model Windows' legacy 8.3 path spelling without requiring Win32 on this host.
+    const legacy = vi.spyOn(fs, "realpathSync").mockReturnValue(path.join(f.root, "SOURCE~1"));
+    try {
+      const report = await readSchemaV1MigrationAnalysis({
+        binding: { ...f.input.binding, sourceCommitSha: f.sha },
+        sourceRoot: f.sourceRoot,
+        runtimeCoverage: "not_applicable"
+      });
+      expect(report.validatedMigrationFacts).toBe(true);
+    } finally {
+      legacy.mockRestore();
+    }
+  });
+  it("still rejects a source directory below the exact repository root", async () => {
+    const f = createRepo();
+    const nested = path.join(f.sourceRoot, "nested");
+    fs.mkdirSync(nested);
+    const report = await readSchemaV1MigrationAnalysis({
+      binding: { ...f.input.binding, sourceCommitSha: f.sha },
+      sourceRoot: nested,
+      runtimeCoverage: "not_applicable"
+    });
+    expect(report.status).toBe("blocked");
+    expect(report.validatedMigrationFacts).toBe(false);
+    expect(report.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "source_read_failure" })])
+    );
+  });
   it("does not inspect a source if the exact SHA is invalid", async () => {
     const runGit = vi.fn();
     const runGitBinary = vi.fn();

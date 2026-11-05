@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { GitCommandWorkspaceFactory, type GitCommandRunner } from "../git/git-command-workspace.js";
 import { createDugiteGitRunners } from "../git/dugite-git-runners.js";
@@ -168,7 +169,8 @@ export const readSchemaV1MigrationAnalysis = async (
       runGitBinary: (command) => runners.runGitBinary({ ...command, env })
     });
     const workspace = await factory.open(request.sourceRoot);
-    if (fs.realpathSync(request.sourceRoot) !== workspace.root)
+    // Match the factory's native canonicalization, including Windows short-path aliases.
+    if ((await realpath(request.sourceRoot)) !== workspace.root)
       throw new Error("Source root must be the exact repository root.");
     const graftPath = (
       await runReadGit({ cwd: workspace.root, args: ["rev-parse", "--git-path", "info/grafts"] })
