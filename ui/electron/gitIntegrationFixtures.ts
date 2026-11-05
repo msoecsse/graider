@@ -3,7 +3,7 @@ import { describe, it } from "vitest";
 
 // Multi-repository Git transactions can exceed the unit-test budget on hosted
 // Windows runners. Keep their timeout bounded and opt in only Git integration cases.
-const GIT_INTEGRATION_TIMEOUT_MS = 30_000;
+export const GIT_INTEGRATION_TIMEOUT_MS = 30_000;
 const CLEANUP_MAX_RETRIES = 5;
 const CLEANUP_RETRY_DELAY_MS = 100;
 

@@ -1,6 +1,7 @@
 // @vitest-environment node
 import {
   describeGitIntegration as describe,
+  GIT_INTEGRATION_TIMEOUT_MS,
   itGitIntegration,
   removeGitFixture
 } from "./gitIntegrationFixtures";
@@ -606,53 +607,61 @@ describe("course admin transaction inventory", () => {
   });
 });
 
-it("invalidates open managed views when an independent synchronization observes a new authoritative revision", async () => {
-  const f = await fixture();
-  await f.guard.cutover("registered");
-  const a = adapter(f);
-  a.ipc.handle(IPC_CHANNELS.getAssignmentForEdit, () => ({ status: "success" }));
-  await a.call(IPC_CHANNELS.getAssignmentForEdit, {
-    courseFolderId: "registered",
-    courseFolderPath: f.legacy
-  });
-  const winner = await f.advance();
-  a.ipc.invalidateRevision(42, 20, winner);
-  expect(a.views[0].send).toHaveBeenCalledWith(expect.any(String), { status: "view_invalidated" });
-  const mutate = vi.fn();
-  a.ipc.handle(IPC_CHANNELS.saveRoster, mutate);
-  await expect(
-    a.call(IPC_CHANNELS.saveRoster, {
+itGitIntegration(
+  "invalidates open managed views when an independent synchronization observes a new authoritative revision",
+  async () => {
+    const f = await fixture();
+    await f.guard.cutover("registered");
+    const a = adapter(f);
+    a.ipc.handle(IPC_CHANNELS.getAssignmentForEdit, () => ({ status: "success" }));
+    await a.call(IPC_CHANNELS.getAssignmentForEdit, {
       courseFolderId: "registered",
-      courseFolderPath: f.legacy,
-      expectedCourseRevision: winner
-    })
-  ).rejects.toMatchObject({ result: { reason: "view_refresh_required" } });
-  expect(mutate).not.toHaveBeenCalled();
-});
+      courseFolderPath: f.legacy
+    });
+    const winner = await f.advance();
+    a.ipc.invalidateRevision(42, 20, winner);
+    expect(a.views[0].send).toHaveBeenCalledWith(expect.any(String), {
+      status: "view_invalidated"
+    });
+    const mutate = vi.fn();
+    a.ipc.handle(IPC_CHANNELS.saveRoster, mutate);
+    await expect(
+      a.call(IPC_CHANNELS.saveRoster, {
+        courseFolderId: "registered",
+        courseFolderPath: f.legacy,
+        expectedCourseRevision: winner
+      })
+    ).rejects.toMatchObject({ result: { reason: "view_refresh_required" } });
+    expect(mutate).not.toHaveBeenCalled();
+  }
+);
 
-it("invalidates an editor's old account generation even when the repository SHA is unchanged", async () => {
-  const f = await fixture();
-  await f.guard.cutover("registered");
-  const a = adapter(f);
-  a.ipc.handle(IPC_CHANNELS.getAssignmentForEdit, () => ({ status: "success" }));
-  await a.call(IPC_CHANNELS.getAssignmentForEdit, {
-    courseFolderId: "registered",
-    courseFolderPath: f.legacy
-  });
-  f.switchAccount(42);
-  const mutate = vi.fn();
-  a.ipc.handle(IPC_CHANNELS.saveRoster, mutate);
-  await expect(
-    a.call(IPC_CHANNELS.saveRoster, {
+itGitIntegration(
+  "invalidates an editor's old account generation even when the repository SHA is unchanged",
+  async () => {
+    const f = await fixture();
+    await f.guard.cutover("registered");
+    const a = adapter(f);
+    a.ipc.handle(IPC_CHANNELS.getAssignmentForEdit, () => ({ status: "success" }));
+    await a.call(IPC_CHANNELS.getAssignmentForEdit, {
       courseFolderId: "registered",
-      courseFolderPath: f.legacy,
-      expectedCourseRevision: f.head
-    })
-  ).rejects.toMatchObject({ result: { reason: "view_refresh_required" } });
-  expect(mutate).not.toHaveBeenCalled();
-});
+      courseFolderPath: f.legacy
+    });
+    f.switchAccount(42);
+    const mutate = vi.fn();
+    a.ipc.handle(IPC_CHANNELS.saveRoster, mutate);
+    await expect(
+      a.call(IPC_CHANNELS.saveRoster, {
+        courseFolderId: "registered",
+        courseFolderPath: f.legacy,
+        expectedCourseRevision: f.head
+      })
+    ).rejects.toMatchObject({ result: { reason: "view_refresh_required" } });
+    expect(mutate).not.toHaveBeenCalled();
+  }
+);
 
-it("rejects a renderer-selected managed path even before cutover", async () => {
+itGitIntegration("rejects a renderer-selected managed path even before cutover", async () => {
   const f = await fixture(),
     read = vi.fn();
   await expect(f.guard.read("registered", f.cache, read)).rejects.toMatchObject({
@@ -661,60 +670,69 @@ it("rejects a renderer-selected managed path even before cutover", async () => {
   expect(read).not.toHaveBeenCalled();
 });
 
-it("uses managed state for another registration of the same cut-over repository and persists that binding", async () => {
-  const f = await fixture();
-  await f.guard.cutover("registered");
-  Object.assign(f.course, { localFolderIds: ["registered", "second"] });
-  const second = {
-    ...f.deps.folders()[0],
-    id: "second",
-    path: path.join(f.root, "unavailable-external-copy")
-  };
-  const guard = new ManagedCourseMutationGuard({
-    ...f.deps,
-    folders: () => [...f.deps.folders(), second]
-  });
-  await guard.read("second", second.path, async (context) =>
-    expect(context?.courseFolderPath).toBe(f.cache)
-  );
-  expect(loadManagedCatalog(f.root, 42).courses["20"].operationalFolderIds).toEqual([
-    "registered",
-    "second"
-  ]);
-});
+itGitIntegration(
+  "uses managed state for another registration of the same cut-over repository and persists that binding",
+  async () => {
+    const f = await fixture();
+    await f.guard.cutover("registered");
+    Object.assign(f.course, { localFolderIds: ["registered", "second"] });
+    const second = {
+      ...f.deps.folders()[0],
+      id: "second",
+      path: path.join(f.root, "unavailable-external-copy")
+    };
+    const guard = new ManagedCourseMutationGuard({
+      ...f.deps,
+      folders: () => [...f.deps.folders(), second]
+    });
+    await guard.read("second", second.path, async (context) =>
+      expect(context?.courseFolderPath).toBe(f.cache)
+    );
+    expect(loadManagedCatalog(f.root, 42).courses["20"].operationalFolderIds).toEqual([
+      "registered",
+      "second"
+    ]);
+  }
+);
 
-it("recognizes server acceptance after a transport error without publishing twice", async () => {
-  const f = await fixture();
-  await f.guard.cutover("registered");
-  f.setAfterPush(async () => {
-    throw new Error("Connection closed after server accepted push");
-  });
-  expect(await transact(f, edit)).toMatchObject({
-    status: "success",
-    publication: { status: "success", refreshRequired: false }
-  });
-  expect(f.push).toHaveBeenCalledOnce();
-  expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(
-    await git(f.remote, ["rev-parse", "main"])
-  );
-  expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
-});
+itGitIntegration(
+  "recognizes server acceptance after a transport error without publishing twice",
+  async () => {
+    const f = await fixture();
+    await f.guard.cutover("registered");
+    f.setAfterPush(async () => {
+      throw new Error("Connection closed after server accepted push");
+    });
+    expect(await transact(f, edit)).toMatchObject({
+      status: "success",
+      publication: { status: "success", refreshRequired: false }
+    });
+    expect(f.push).toHaveBeenCalledOnce();
+    expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(
+      await git(f.remote, ["rev-parse", "main"])
+    );
+    expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
+  }
+);
 
-it("can establish remote success through cache recovery when transaction outcome fetch fails", async () => {
-  const f = await fixture();
-  await f.guard.cutover("registered");
-  f.setAfterPush(async () => {
-    f.failTransactionFetches(1);
-    throw new Error("Connection closed after push");
-  });
-  expect(await transact(f, edit)).toMatchObject({
-    status: "success",
-    publication: { status: "success", refreshRequired: false }
-  });
-  expect(f.push).toHaveBeenCalledOnce();
-  expect(loadManagedCatalog(f.root, 42).courses["20"].lastPublication?.status).toBe("published");
-  expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
-});
+itGitIntegration(
+  "can establish remote success through cache recovery when transaction outcome fetch fails",
+  async () => {
+    const f = await fixture();
+    await f.guard.cutover("registered");
+    f.setAfterPush(async () => {
+      f.failTransactionFetches(1);
+      throw new Error("Connection closed after push");
+    });
+    expect(await transact(f, edit)).toMatchObject({
+      status: "success",
+      publication: { status: "success", refreshRequired: false }
+    });
+    expect(f.push).toHaveBeenCalledOnce();
+    expect(loadManagedCatalog(f.root, 42).courses["20"].lastPublication?.status).toBe("published");
+    expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
+  }
+);
 
 it.each(["notes.txt", ".graider/grading/comments.json"])(
   "rejects ignored transaction output %s instead of silently reporting publication",
@@ -751,91 +769,103 @@ it.each(["notes.txt", ".graider/grading/comments.json"])(
     expect(f.push).not.toHaveBeenCalled();
     expect(await git(f.remote, ["rev-parse", "main"])).toBe(base);
     expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
+
+itGitIntegration(
+  "revalidates repository organization before publication after a network-waiting mutation",
+  async () => {
+    const f = await fixture();
+    await f.guard.cutover("registered");
+    await expect(
+      transact(f, async (root) => {
+        const result = await edit(root);
+        remote.reader = {
+          ...f.reader,
+          resolveId: async () => ({ ...(await f.reader.resolveId(20))!, organizationId: 99 })
+        };
+        return result;
+      })
+    ).rejects.toMatchObject({ result: { reason: "organization_migration_required" } });
+    expect(f.push).not.toHaveBeenCalled();
+    expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(f.head);
+    expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
   }
 );
 
-it("revalidates repository organization before publication after a network-waiting mutation", async () => {
-  const f = await fixture();
-  await f.guard.cutover("registered");
-  await expect(
-    transact(f, async (root) => {
-      const result = await edit(root);
-      remote.reader = {
-        ...f.reader,
-        resolveId: async () => ({ ...(await f.reader.resolveId(20))!, organizationId: 99 })
-      };
-      return result;
-    })
-  ).rejects.toMatchObject({ result: { reason: "organization_migration_required" } });
-  expect(f.push).not.toHaveBeenCalled();
-  expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(f.head);
-  expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
-});
-
-it("keeps real grading-state writes outside the managed Git source across synchronization and course publication", async () => {
-  const f = await fixture();
-  await f.guard.cutover("registered");
-  const backend = require(path.resolve("dist-electron/gradingStudentViewStateBackend.cjs")) as {
-    saveGradingStudentViewStateContext(request: object): { status: string };
-    loadGradingStudentViewStateContext(request: object): { status: string; viewState?: object };
-  };
-  const viewState = { scrollTop: 12, cursor: { file: "src/Main.java", line: 1, column: 1 } };
-  const request = {
-    courseFolderPath: f.cache,
-    termCode: "27s1",
-    assignmentSlug: "lab01",
-    studentId: "s1",
-    currentSubmissionCommitSha: "a".repeat(40),
-    viewState
-  };
-  await f.guard.read("registered", f.legacy, async () =>
-    expect(backend.saveGradingStudentViewStateContext(request)).toMatchObject({ status: "success" })
-  );
-  expect(
-    fs.existsSync(
-      path.join(path.dirname(f.cache), "runtime/.graider/grading/27s1/lab01/state/s1.json")
-    )
-  ).toBe(true);
-  expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
-  await transact(f, edit);
-  expect(backend.loadGradingStudentViewStateContext(request)).toMatchObject({
-    status: "success",
-    viewState
-  });
-  expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
-});
-
-it("releases the managed queue before a native import chooser waits for user input", async () => {
-  const f = await fixture();
-  await f.guard.cutover("registered");
-  const a = adapter(f);
-  let enter!: () => void, release!: () => void;
-  const entered = new Promise<void>((resolve) => {
-      enter = resolve;
-    }),
-    chosen = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-  a.ipc.handle(IPC_CHANNELS.chooseReviewImport, async (_event, request) => {
-    expect(request.courseFolderPath).toBe(f.cache);
-    enter();
-    await chosen;
-    return { status: "canceled" };
-  });
-  const choosing = a.call(IPC_CHANNELS.chooseReviewImport, {
-    courseFolderId: "registered",
-    courseFolderPath: f.legacy
-  });
-  await entered;
-  try {
-    await f.guard.read("registered", f.legacy, async (context) =>
-      expect(context?.courseFolderPath).toBe(f.cache)
+itGitIntegration(
+  "keeps real grading-state writes outside the managed Git source across synchronization and course publication",
+  async () => {
+    const f = await fixture();
+    await f.guard.cutover("registered");
+    const backend = require(path.resolve("dist-electron/gradingStudentViewStateBackend.cjs")) as {
+      saveGradingStudentViewStateContext(request: object): { status: string };
+      loadGradingStudentViewStateContext(request: object): { status: string; viewState?: object };
+    };
+    const viewState = { scrollTop: 12, cursor: { file: "src/Main.java", line: 1, column: 1 } };
+    const request = {
+      courseFolderPath: f.cache,
+      termCode: "27s1",
+      assignmentSlug: "lab01",
+      studentId: "s1",
+      currentSubmissionCommitSha: "a".repeat(40),
+      viewState
+    };
+    await f.guard.read("registered", f.legacy, async () =>
+      expect(backend.saveGradingStudentViewStateContext(request)).toMatchObject({
+        status: "success"
+      })
     );
-  } finally {
-    release();
+    expect(
+      fs.existsSync(
+        path.join(path.dirname(f.cache), "runtime/.graider/grading/27s1/lab01/state/s1.json")
+      )
+    ).toBe(true);
+    expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
+    await transact(f, edit);
+    expect(backend.loadGradingStudentViewStateContext(request)).toMatchObject({
+      status: "success",
+      viewState
+    });
+    expect(await git(f.cache, ["status", "--porcelain"])).toBe("");
   }
-  await choosing;
-});
+);
+
+itGitIntegration(
+  "releases the managed queue before a native import chooser waits for user input",
+  async () => {
+    const f = await fixture();
+    await f.guard.cutover("registered");
+    const a = adapter(f);
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      }),
+      chosen = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    a.ipc.handle(IPC_CHANNELS.chooseReviewImport, async (_event, request) => {
+      expect(request.courseFolderPath).toBe(f.cache);
+      enter();
+      await chosen;
+      return { status: "canceled" };
+    });
+    const choosing = a.call(IPC_CHANNELS.chooseReviewImport, {
+      courseFolderId: "registered",
+      courseFolderPath: f.legacy
+    });
+    await entered;
+    try {
+      await f.guard.read("registered", f.legacy, async (context) =>
+        expect(context?.courseFolderPath).toBe(f.cache)
+      );
+    } finally {
+      release();
+    }
+    await choosing;
+  }
+);
 
 describe("managed-only course identity", () => {
   it("routes reads and transactional publication without registration or cutover, across restart and rename", async () => {
@@ -875,28 +905,31 @@ describe("managed-only course identity", () => {
   });
 });
 
-it("projects managed-only assignment/roster/grading reads with exact revisions", async () => {
-  const f = await fixture();
-  f.deps.folders().splice(0);
-  Object.assign(f.course, { localFolderIds: [] });
-  const id = f.guard.remoteSelectors()[0].id;
-  const a = adapter(f);
-  for (const channel of [
-    IPC_CHANNELS.getAssignmentDetail,
-    IPC_CHANNELS.getRosterSectionSummaries,
-    IPC_CHANNELS.prepareGradingWorkspace
-  ]) {
-    a.ipc.handle(channel, async (_event, request) => {
-      const context = managedCourseOperation.getStore();
-      expect(context?.courseFolderPath).toBe(f.cache);
-      expect(request.courseFolderPath).toBe(f.cache);
-      return { courseFolderPath: context?.courseFolderPath };
-    });
-    expect(await a.call(channel, { courseFolderId: id, courseFolderPath: id })).toMatchObject({
-      courseFolderPath: id,
-      courseReadRevision: f.head
-    });
+itGitIntegration(
+  "projects managed-only assignment/roster/grading reads with exact revisions",
+  async () => {
+    const f = await fixture();
+    f.deps.folders().splice(0);
+    Object.assign(f.course, { localFolderIds: [] });
+    const id = f.guard.remoteSelectors()[0].id;
+    const a = adapter(f);
+    for (const channel of [
+      IPC_CHANNELS.getAssignmentDetail,
+      IPC_CHANNELS.getRosterSectionSummaries,
+      IPC_CHANNELS.prepareGradingWorkspace
+    ]) {
+      a.ipc.handle(channel, async (_event, request) => {
+        const context = managedCourseOperation.getStore();
+        expect(context?.courseFolderPath).toBe(f.cache);
+        expect(request.courseFolderPath).toBe(f.cache);
+        return { courseFolderPath: context?.courseFolderPath };
+      });
+      expect(await a.call(channel, { courseFolderId: id, courseFolderPath: id })).toMatchObject({
+        courseFolderPath: id,
+        courseReadRevision: f.head
+      });
+    }
+    await expect(f.guard.read("managed-course:99:20", undefined, vi.fn())).rejects.toThrow();
+    await expect(f.guard.read("managed-course:42:21", undefined, vi.fn())).rejects.toThrow();
   }
-  await expect(f.guard.read("managed-course:99:20", undefined, vi.fn())).rejects.toThrow();
-  await expect(f.guard.read("managed-course:42:21", undefined, vi.fn())).rejects.toThrow();
-});
+);

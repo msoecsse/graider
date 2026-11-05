@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { GIT_INTEGRATION_TIMEOUT_MS, removeGitFixture } from "./gitIntegrationFixtures";
 import fs from "node:fs";
 import path from "node:path";
 import { parse, stringify } from "yaml";
@@ -12,8 +13,8 @@ import { termLifecycleFixture } from "./termLifecycleFixtures";
 import { fixtureGit as git } from "./managedOperationalFixtures";
 
 const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(removeGitFixture));
 });
 const fixture = async (
   options: {
@@ -79,41 +80,47 @@ const fixture = async (
 };
 
 describe("future v2 shared course lifecycle publication", () => {
-  it("archives/unarchives in separate single scoped commits without changing terms, histories, checkpoints, or GitHub state", async () => {
-    const f = await fixture();
-    const before = await Promise.all([f.remoteTerm("27s1"), f.remoteTerm("27s2")]);
-    const request = await f.fresh(43);
-    const source = request.context.authoritativeCommit;
-    f.setOnPush(async () => {
-      expect((await f.remoteCourse()).course.lifecycle).toBe("unarchived");
+  it(
+    "archives/unarchives in separate single scoped commits without changing terms, histories, checkpoints, or GitHub state",
+    async () => {
+      const f = await fixture();
+      const before = await Promise.all([f.remoteTerm("27s1"), f.remoteTerm("27s2")]);
+      const request = await f.fresh(43);
+      const source = request.context.authoritativeCommit;
+      f.setOnPush(async () => {
+        expect((await f.remoteCourse()).course.lifecycle).toBe("unarchived");
+        expect(f.reconcile).not.toHaveBeenCalled();
+      });
+      const archived = await changeManagedCourseLifecycle(request);
+      expect(archived).toMatchObject({
+        status: "archived",
+        beforeStatus: "unarchived",
+        afterStatus: "archived",
+        authorizationBasis: "most-recent-term-current-coordinator"
+      });
+      if (archived.status !== "archived") throw new Error("Expected archive.");
+      expect(await git(f.remote, ["log", "--format=%H", `${source}..main`])).toBe(
+        archived.revision
+      );
+      expect(
+        await git(f.remote, ["diff-tree", "--no-commit-id", "--name-only", "-r", archived.revision])
+      ).toBe("course.yml");
+      expect(Object.isFrozen(archived)).toBe(true);
+      f.setOnPush(async () => {});
+      const unarchived = await changeManagedCourseLifecycle({
+        ...(await f.fresh(43)),
+        targetStatus: "unarchived"
+      });
+      expect(unarchived.status).toBe("unarchived");
+      expect(await Promise.all([f.remoteTerm("27s1"), f.remoteTerm("27s2")])).toEqual(before);
+      expect(await git(f.remote, ["ls-tree", "-r", "--name-only", "main"])).not.toContain(
+        "activation-recovery.yml"
+      );
       expect(f.reconcile).not.toHaveBeenCalled();
-    });
-    const archived = await changeManagedCourseLifecycle(request);
-    expect(archived).toMatchObject({
-      status: "archived",
-      beforeStatus: "unarchived",
-      afterStatus: "archived",
-      authorizationBasis: "most-recent-term-current-coordinator"
-    });
-    if (archived.status !== "archived") throw new Error("Expected archive.");
-    expect(await git(f.remote, ["log", "--format=%H", `${source}..main`])).toBe(archived.revision);
-    expect(
-      await git(f.remote, ["diff-tree", "--no-commit-id", "--name-only", "-r", archived.revision])
-    ).toBe("course.yml");
-    expect(Object.isFrozen(archived)).toBe(true);
-    f.setOnPush(async () => {});
-    const unarchived = await changeManagedCourseLifecycle({
-      ...(await f.fresh(43)),
-      targetStatus: "unarchived"
-    });
-    expect(unarchived.status).toBe("unarchived");
-    expect(await Promise.all([f.remoteTerm("27s1"), f.remoteTerm("27s2")])).toEqual(before);
-    expect(await git(f.remote, ["ls-tree", "-r", "--name-only", "main"])).not.toContain(
-      "activation-recovery.yml"
-    );
-    expect(f.reconcile).not.toHaveBeenCalled();
-    expect(f.push).toHaveBeenCalledTimes(2);
-  }, 20_000);
+      expect(f.push).toHaveBeenCalledTimes(2);
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
 
   it.each(["unarchived", "archived"] as const)(
     "same-state %s is authorized and creates no commit",
@@ -138,7 +145,7 @@ describe("future v2 shared course lifecycle publication", () => {
         ).status
       ).toBe("needs_attention");
     },
-    20_000
+    GIT_INTEGRATION_TIMEOUT_MS
   );
 
   it.each(["draft", "active"] as const)(
@@ -154,7 +161,7 @@ describe("future v2 shared course lifecycle publication", () => {
       expect((await f.remoteTerm("27s2")).term.status).toBe(terms);
       expect(f.push).not.toHaveBeenCalled();
     },
-    20_000
+    GIT_INTEGRATION_TIMEOUT_MS
   );
 
   it.each(["schema_version: 99\n", "not: [valid\n"])(
@@ -167,101 +174,131 @@ describe("future v2 shared course lifecycle publication", () => {
       });
       expect(f.push).not.toHaveBeenCalled();
     },
-    20_000
+    GIT_INTEGRATION_TIMEOUT_MS
   );
 
-  it("takes authority from persisted creation order rather than sorted directory names", async () => {
-    const f = await fixture({ order: ["27s2", "27s1"] });
-    expect(await changeManagedCourseLifecycle(await f.fresh(43))).toMatchObject({
-      status: "needs_attention",
-      reason: "no-course-lifecycle-authority"
-    });
-    expect((await changeManagedCourseLifecycle(await f.fresh())).status).toBe("archived");
-  }, 20_000);
+  it(
+    "takes authority from persisted creation order rather than sorted directory names",
+    async () => {
+      const f = await fixture({ order: ["27s2", "27s1"] });
+      expect(await changeManagedCourseLifecycle(await f.fresh(43))).toMatchObject({
+        status: "needs_attention",
+        reason: "no-course-lifecycle-authority"
+      });
+      expect((await changeManagedCourseLifecycle(await f.fresh())).status).toBe("archived");
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
 
-  it("refuses dangling or incomplete references without inferring a replacement", async () => {
-    const f = await fixture({ order: ["99s1"] });
-    expect(await changeManagedCourseLifecycle(await f.fresh())).toMatchObject({
-      status: "needs_attention",
-      reason: "invalid-course-state"
-    });
-    expect((await f.remoteCourse()).course.term_creation_order).toEqual(["99s1"]);
-    expect(f.push).not.toHaveBeenCalled();
-  }, 20_000);
+  it(
+    "refuses dangling or incomplete references without inferring a replacement",
+    async () => {
+      const f = await fixture({ order: ["99s1"] });
+      expect(await changeManagedCourseLifecycle(await f.fresh())).toMatchObject({
+        status: "needs_attention",
+        reason: "invalid-course-state"
+      });
+      expect((await f.remoteCourse()).course.term_creation_order).toEqual(["99s1"]);
+      expect(f.push).not.toHaveBeenCalled();
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
 
-  it("zero-term archive/unarchive creates no terms and only fallback has authority", async () => {
-    const f = await fixture({ terms: "empty" });
-    expect((await changeManagedCourseLifecycle(await f.fresh(43))).status).toBe("needs_attention");
-    expect((await changeManagedCourseLifecycle(await f.fresh())).status).toBe("archived");
-    expect(
-      (await changeManagedCourseLifecycle({ ...(await f.fresh()), targetStatus: "unarchived" }))
-        .status
-    ).toBe("unarchived");
-    expect(await git(f.remote, ["ls-tree", "-r", "--name-only", "main", "terms"])).toBe("");
-    expect((await f.remoteCourse()).course.term_creation_order).toEqual([]);
-  }, 20_000);
-
-  it("rejects stale source and remote races without retries or publication", async () => {
-    const f = await fixture();
-    const request = await f.fresh();
-    await expect(
-      changeManagedCourseLifecycle({ ...request, expectedRevision: "stale" })
-    ).rejects.toMatchObject({ result: { reason: "remote_version_conflict" } });
-    let winner = "";
-    await expect(
-      changeManagedCourseLifecycle({
-        ...request,
-        revalidateRepository: async () => {
-          winner = await f.advance();
-        }
-      })
-    ).rejects.toMatchObject({ result: { reason: "remote_version_conflict" } });
-    expect(await git(f.remote, ["rev-parse", "main"])).toBe(winner);
-    expect((await f.remoteCourse()).course.lifecycle).toBe("unarchived");
-    expect(f.push).not.toHaveBeenCalled();
-  }, 20_000);
-
-  it("retains a remotely accepted commit when the push response is lost, without another commit", async () => {
-    const f = await fixture();
-    const request = await f.fresh();
-    f.setAfterPush(async () => {
-      throw new Error("Lost response");
-    });
-    const result = await changeManagedCourseLifecycle(request);
-    expect(result.status).toBe("archived");
-    if (result.status !== "archived") throw new Error("Expected authoritative archive.");
-    expect(
-      await git(f.remote, ["log", "--format=%H", `${request.context.authoritativeCommit}..main`])
-    ).toBe(result.revision);
-    expect(f.push).toHaveBeenCalledOnce();
-  }, 20_000);
-
-  it("rejected publication preserves authoritative state without GitHub desired-state writes", async () => {
-    const f = await fixture();
-    const request = await f.fresh();
-    f.setOnPush(async () => {
-      throw new Error("Rejected");
-    });
-    await expect(changeManagedCourseLifecycle(request)).rejects.toMatchObject({
-      result: { reason: "publication_failed" }
-    });
-    expect(await git(f.remote, ["rev-parse", "main"])).toBe(request.context.authoritativeCommit);
-    expect(f.reconcile).not.toHaveBeenCalled();
-  }, 20_000);
-
-  it("refuses production v1 and mismatched immutable identity contexts", async () => {
-    const f = await fixture();
-    const request = await f.fresh();
-    for (const input of [
-      { ...request.input, course: { ...request.input.course, schemaVersion: 1 } },
-      { ...request.input, userId: 44 }
-    ]) {
-      await expect(changeManagedCourseLifecycle({ ...request, input })).rejects.toThrow(
-        "trusted v2"
+  it(
+    "zero-term archive/unarchive creates no terms and only fallback has authority",
+    async () => {
+      const f = await fixture({ terms: "empty" });
+      expect((await changeManagedCourseLifecycle(await f.fresh(43))).status).toBe(
+        "needs_attention"
       );
-    }
-    expect(f.push).not.toHaveBeenCalled();
-  }, 20_000);
+      expect((await changeManagedCourseLifecycle(await f.fresh())).status).toBe("archived");
+      expect(
+        (await changeManagedCourseLifecycle({ ...(await f.fresh()), targetStatus: "unarchived" }))
+          .status
+      ).toBe("unarchived");
+      expect(await git(f.remote, ["ls-tree", "-r", "--name-only", "main", "terms"])).toBe("");
+      expect((await f.remoteCourse()).course.term_creation_order).toEqual([]);
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
+
+  it(
+    "rejects stale source and remote races without retries or publication",
+    async () => {
+      const f = await fixture();
+      const request = await f.fresh();
+      await expect(
+        changeManagedCourseLifecycle({ ...request, expectedRevision: "stale" })
+      ).rejects.toMatchObject({ result: { reason: "remote_version_conflict" } });
+      let winner = "";
+      await expect(
+        changeManagedCourseLifecycle({
+          ...request,
+          revalidateRepository: async () => {
+            winner = await f.advance();
+          }
+        })
+      ).rejects.toMatchObject({ result: { reason: "remote_version_conflict" } });
+      expect(await git(f.remote, ["rev-parse", "main"])).toBe(winner);
+      expect((await f.remoteCourse()).course.lifecycle).toBe("unarchived");
+      expect(f.push).not.toHaveBeenCalled();
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
+
+  it(
+    "retains a remotely accepted commit when the push response is lost, without another commit",
+    async () => {
+      const f = await fixture();
+      const request = await f.fresh();
+      f.setAfterPush(async () => {
+        throw new Error("Lost response");
+      });
+      const result = await changeManagedCourseLifecycle(request);
+      expect(result.status).toBe("archived");
+      if (result.status !== "archived") throw new Error("Expected authoritative archive.");
+      expect(
+        await git(f.remote, ["log", "--format=%H", `${request.context.authoritativeCommit}..main`])
+      ).toBe(result.revision);
+      expect(f.push).toHaveBeenCalledOnce();
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
+
+  it(
+    "rejected publication preserves authoritative state without GitHub desired-state writes",
+    async () => {
+      const f = await fixture();
+      const request = await f.fresh();
+      f.setOnPush(async () => {
+        throw new Error("Rejected");
+      });
+      await expect(changeManagedCourseLifecycle(request)).rejects.toMatchObject({
+        result: { reason: "publication_failed" }
+      });
+      expect(await git(f.remote, ["rev-parse", "main"])).toBe(request.context.authoritativeCommit);
+      expect(f.reconcile).not.toHaveBeenCalled();
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
+
+  it(
+    "refuses production v1 and mismatched immutable identity contexts",
+    async () => {
+      const f = await fixture();
+      const request = await f.fresh();
+      for (const input of [
+        { ...request.input, course: { ...request.input.course, schemaVersion: 1 } },
+        { ...request.input, userId: 44 }
+      ]) {
+        await expect(changeManagedCourseLifecycle({ ...request, input })).rejects.toThrow(
+          "trusted v2"
+        );
+      }
+      expect(f.push).not.toHaveBeenCalled();
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
 });
 
 describe("atomic creation-order maintenance on Draft deletion", () => {
@@ -320,6 +357,6 @@ describe("atomic creation-order maintenance on Draft deletion", () => {
       );
       expect((await changeManagedCourseLifecycle(await f.fresh())).status).toBe("archived");
     },
-    20_000
+    GIT_INTEGRATION_TIMEOUT_MS
   );
 });

@@ -1,4 +1,8 @@
-import { describeGitIntegration as describe, removeGitFixture } from "./gitIntegrationFixtures";
+import {
+  describeGitIntegration as describe,
+  itGitIntegration,
+  removeGitFixture
+} from "./gitIntegrationFixtures";
 import {
   ManagedReconciliationService,
   fingerprintManagedCache,
@@ -620,49 +624,55 @@ describe("reconciliation transaction failures and realistic operation state", ()
   });
 });
 
-it("cancellation during cloning waits for clone completion and leaves old state untouched", async () => {
-  const f = await fixture();
-  dirty(f);
-  const r = await reviewed(f);
-  const controller = new AbortController();
-  const clone = f.clone.getMockImplementation()!;
-  f.clone.mockImplementationOnce(async (input) => {
-    await clone(input);
-    controller.abort();
-  });
-  const result = await r.service.apply(
-    { ...f.request, signal: controller.signal },
-    r.plan.planId!,
-    true
-  );
-  expect(result.status).not.toBe("completed");
-  expect(f.clone).toHaveBeenCalledOnce();
-  expect(fs.readFileSync(path.join(f.cache, "course.yml"), "utf8")).toContain("local evidence");
-  expect(latestPreservedCopy(f.root, 42, 20)).toBeUndefined();
-});
-it("reviews normalized added/deleted/renamed paths and excludes Git internals", async () => {
-  const f = await fixture();
-  fs.mkdirSync(path.join(f.cache, "notes"));
-  fs.writeFileSync(path.join(f.cache, "notes", "new.txt"), "local notes");
-  await git(f.cache, ["add", "notes/new.txt"]);
-  await git(f.cache, ["mv", "course.yml", "renamed-course.yml"]);
-  fs.unlinkSync(path.join(f.cache, "terms", "27s1", "term.yml"));
-  const r = await reviewed(f);
-  expect(r.plan.evidence?.files).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ category: "Added", path: "notes/new.txt" }),
-      expect.objectContaining({ category: "Deleted", path: "terms/27s1/term.yml" }),
-      expect.objectContaining({
-        category: "Renamed",
-        path: "renamed-course.yml",
-        originalPath: "course.yml"
-      })
-    ])
-  );
-  expect(
-    r.plan.evidence?.files.every(
-      (file) =>
-        !file.path.startsWith("/") && !file.path.startsWith(".git/") && !file.path.includes("\\")
-    )
-  ).toBe(true);
-});
+itGitIntegration(
+  "cancellation during cloning waits for clone completion and leaves old state untouched",
+  async () => {
+    const f = await fixture();
+    dirty(f);
+    const r = await reviewed(f);
+    const controller = new AbortController();
+    const clone = f.clone.getMockImplementation()!;
+    f.clone.mockImplementationOnce(async (input) => {
+      await clone(input);
+      controller.abort();
+    });
+    const result = await r.service.apply(
+      { ...f.request, signal: controller.signal },
+      r.plan.planId!,
+      true
+    );
+    expect(result.status).not.toBe("completed");
+    expect(f.clone).toHaveBeenCalledOnce();
+    expect(fs.readFileSync(path.join(f.cache, "course.yml"), "utf8")).toContain("local evidence");
+    expect(latestPreservedCopy(f.root, 42, 20)).toBeUndefined();
+  }
+);
+itGitIntegration(
+  "reviews normalized added/deleted/renamed paths and excludes Git internals",
+  async () => {
+    const f = await fixture();
+    fs.mkdirSync(path.join(f.cache, "notes"));
+    fs.writeFileSync(path.join(f.cache, "notes", "new.txt"), "local notes");
+    await git(f.cache, ["add", "notes/new.txt"]);
+    await git(f.cache, ["mv", "course.yml", "renamed-course.yml"]);
+    fs.unlinkSync(path.join(f.cache, "terms", "27s1", "term.yml"));
+    const r = await reviewed(f);
+    expect(r.plan.evidence?.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: "Added", path: "notes/new.txt" }),
+        expect.objectContaining({ category: "Deleted", path: "terms/27s1/term.yml" }),
+        expect.objectContaining({
+          category: "Renamed",
+          path: "renamed-course.yml",
+          originalPath: "course.yml"
+        })
+      ])
+    );
+    expect(
+      r.plan.evidence?.files.every(
+        (file) =>
+          !file.path.startsWith("/") && !file.path.startsWith(".git/") && !file.path.includes("\\")
+      )
+    ).toBe(true);
+  }
+);

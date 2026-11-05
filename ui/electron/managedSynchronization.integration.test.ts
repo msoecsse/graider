@@ -1,4 +1,9 @@
-import { describeGitIntegration as describe, removeGitFixture } from "./gitIntegrationFixtures";
+import {
+  describeGitIntegration as describe,
+  GIT_INTEGRATION_TIMEOUT_MS,
+  itGitIntegration,
+  removeGitFixture
+} from "./gitIntegrationFixtures";
 import {
   requireSynchronizedCommit,
   validateOperationalCourseSource,
@@ -780,109 +785,125 @@ it.each(["repository", "organization", "default branch", "metadata", "faculty"])
     expect(f.ff).not.toHaveBeenCalled();
     expect(f.snapshot()).toEqual(before);
     expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(f.original);
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
+
+itGitIntegration(
+  "serializes legacy update, a second update and mutation through the same per-course boundary",
+  async () => {
+    const f = await legacyFixture();
+    await f.advance();
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const fetch = f.fetchOrigin;
+    f.fetch.mockImplementationOnce(async (request) => {
+      entered();
+      await held;
+      await fetch(request);
+    });
+    const first = f.guard.updateSource("legacy");
+    await started;
+    const second = f.guard.updateSource("legacy");
+    const mutation = vi.fn(async () => {});
+    const third = f.guard.run("legacy", undefined, "new_mutation", mutation);
+    expect(f.session.withSynchronizedCourse).toHaveBeenCalledTimes(1);
+    expect(mutation).not.toHaveBeenCalled();
+    release();
+    await Promise.all([first, second, third]);
+    expect(f.ff).toHaveBeenCalledOnce();
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+    expect(mutation).toHaveBeenCalledOnce();
   }
 );
 
-it("serializes legacy update, a second update and mutation through the same per-course boundary", async () => {
-  const f = await legacyFixture();
-  await f.advance();
-  let release!: () => void;
-  let entered!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const started = new Promise<void>((resolve) => {
-    entered = resolve;
-  });
-  const fetch = f.fetchOrigin;
-  f.fetch.mockImplementationOnce(async (request) => {
-    entered();
-    await held;
-    await fetch(request);
-  });
-  const first = f.guard.updateSource("legacy");
-  await started;
-  const second = f.guard.updateSource("legacy");
-  const mutation = vi.fn(async () => {});
-  const third = f.guard.run("legacy", undefined, "new_mutation", mutation);
-  expect(f.session.withSynchronizedCourse).toHaveBeenCalledTimes(1);
-  expect(mutation).not.toHaveBeenCalled();
-  release();
-  await Promise.all([first, second, third]);
-  expect(f.ff).toHaveBeenCalledOnce();
-  expect(f.fetch).toHaveBeenCalledTimes(2);
-  expect(mutation).toHaveBeenCalledOnce();
-});
+itGitIntegration(
+  "uses OAuth HTTPS transport for a verified SSH origin without rewriting its configuration",
+  async () => {
+    const f = await legacyFixture();
+    await git(f.legacy, ["remote", "set-url", "origin", "git@github.com:fixture/course.git"]);
+    const config = fs.readFileSync(path.join(f.legacy, ".git", "config"), "utf8");
+    const target = await f.advance();
+    await f.guard.updateSource("legacy");
+    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(target);
+    expect(fs.readFileSync(path.join(f.legacy, ".git", "config"), "utf8")).toBe(config);
+  }
+);
 
-it("uses OAuth HTTPS transport for a verified SSH origin without rewriting its configuration", async () => {
-  const f = await legacyFixture();
-  await git(f.legacy, ["remote", "set-url", "origin", "git@github.com:fixture/course.git"]);
-  const config = fs.readFileSync(path.join(f.legacy, ".git", "config"), "utf8");
-  const target = await f.advance();
-  await f.guard.updateSource("legacy");
-  expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(target);
-  expect(fs.readFileSync(path.join(f.legacy, ".git", "config"), "utf8")).toBe(config);
-});
+itGitIntegration(
+  "fails completion if concurrent managed synchronization moved the oracle; never advances to that unselected commit",
+  async () => {
+    const f = await legacyFixture();
+    const target = await f.advance();
+    const ff = f.fastForward;
+    let newer = "";
+    f.ff.mockImplementationOnce(async (request) => {
+      newer = await f.advance(courseYaml.replace("Original title", "Concurrent managed state"));
+      await f.sync();
+      await ff(request);
+    });
+    await expect(f.guard.updateSource("legacy")).rejects.toMatchObject({
+      result: { reason: "operational_source_stale" }
+    });
+    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(target);
+    expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(newer);
+  }
+);
 
-it("fails completion if concurrent managed synchronization moved the oracle; never advances to that unselected commit", async () => {
-  const f = await legacyFixture();
-  const target = await f.advance();
-  const ff = f.fastForward;
-  let newer = "";
-  f.ff.mockImplementationOnce(async (request) => {
-    newer = await f.advance(courseYaml.replace("Original title", "Concurrent managed state"));
-    await f.sync();
-    await ff(request);
-  });
-  await expect(f.guard.updateSource("legacy")).rejects.toMatchObject({
-    result: { reason: "operational_source_stale" }
-  });
-  expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(target);
-  expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(newer);
-});
+itGitIntegration(
+  "source update excludes pending publication files and local commits; publication retry still recovers them",
+  async () => {
+    const f = await legacyFixture();
+    fs.writeFileSync(
+      path.join(f.legacy, "course.yml"),
+      courseYaml.replace("Original title", "Unpublished faculty title")
+    );
+    const pending = f.snapshot();
+    await expect(f.guard.updateSource("legacy")).rejects.toThrow();
+    expect(f.snapshot()).toEqual(pending);
+    await git(f.legacy, ["commit", "-am", "Publish Graider course changes"]);
+    const committed = await git(f.legacy, ["rev-parse", "HEAD"]);
+    await expect(f.guard.updateSource("legacy")).rejects.toThrow();
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.ff).not.toHaveBeenCalled();
+    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(committed);
+    const publication = await f.guard.run("legacy", undefined, "publication_retry", async () =>
+      publishCourseChanges(f.legacy, localPublicationOptions())
+    );
+    expect(publication.status).toBe("success");
+    expect(await git(f.remote, ["rev-parse", "main"])).toBe(committed);
+    const next = vi.fn(async () => {});
+    await f.guard.run("legacy", undefined, "new_mutation", next);
+    expect(next).toHaveBeenCalledOnce();
+  }
+);
 
-it("source update excludes pending publication files and local commits; publication retry still recovers them", async () => {
-  const f = await legacyFixture();
-  fs.writeFileSync(
-    path.join(f.legacy, "course.yml"),
-    courseYaml.replace("Original title", "Unpublished faculty title")
-  );
-  const pending = f.snapshot();
-  await expect(f.guard.updateSource("legacy")).rejects.toThrow();
-  expect(f.snapshot()).toEqual(pending);
-  await git(f.legacy, ["commit", "-am", "Publish Graider course changes"]);
-  const committed = await git(f.legacy, ["rev-parse", "HEAD"]);
-  await expect(f.guard.updateSource("legacy")).rejects.toThrow();
-  expect(f.fetch).not.toHaveBeenCalled();
-  expect(f.ff).not.toHaveBeenCalled();
-  expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(committed);
-  const publication = await f.guard.run("legacy", undefined, "publication_retry", async () =>
-    publishCourseChanges(f.legacy, localPublicationOptions())
-  );
-  expect(publication.status).toBe("success");
-  expect(await git(f.remote, ["rev-parse", "main"])).toBe(committed);
-  const next = vi.fn(async () => {});
-  await f.guard.run("legacy", undefined, "new_mutation", next);
-  expect(next).toHaveBeenCalledOnce();
-});
-
-it("remote publication conflict blocks update and retry before any publication writes", async () => {
-  const f = await legacyFixture();
-  fs.writeFileSync(
-    path.join(f.legacy, "course.yml"),
-    courseYaml.replace("Original title", "Local unpublished title")
-  );
-  await git(f.legacy, ["commit", "-am", "Publish Graider course changes"]);
-  const local = await git(f.legacy, ["rev-parse", "HEAD"]);
-  const remote = await f.advance();
-  const before = f.snapshot();
-  await expect(f.guard.updateSource("legacy")).rejects.toThrow();
-  const publish = vi.fn(async () => {});
-  await expect(f.guard.run("legacy", undefined, "publication_retry", publish)).rejects.toThrow();
-  expect(publish).not.toHaveBeenCalled();
-  expect(f.fetch).not.toHaveBeenCalled();
-  expect(f.ff).not.toHaveBeenCalled();
-  expect(f.snapshot()).toEqual(before);
-  expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(local);
-  expect(await git(f.remote, ["rev-parse", "main"])).toBe(remote);
-});
+itGitIntegration(
+  "remote publication conflict blocks update and retry before any publication writes",
+  async () => {
+    const f = await legacyFixture();
+    fs.writeFileSync(
+      path.join(f.legacy, "course.yml"),
+      courseYaml.replace("Original title", "Local unpublished title")
+    );
+    await git(f.legacy, ["commit", "-am", "Publish Graider course changes"]);
+    const local = await git(f.legacy, ["rev-parse", "HEAD"]);
+    const remote = await f.advance();
+    const before = f.snapshot();
+    await expect(f.guard.updateSource("legacy")).rejects.toThrow();
+    const publish = vi.fn(async () => {});
+    await expect(f.guard.run("legacy", undefined, "publication_retry", publish)).rejects.toThrow();
+    expect(publish).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.ff).not.toHaveBeenCalled();
+    expect(f.snapshot()).toEqual(before);
+    expect(await git(f.legacy, ["rev-parse", "HEAD"])).toBe(local);
+    expect(await git(f.remote, ["rev-parse", "main"])).toBe(remote);
+  }
+);
