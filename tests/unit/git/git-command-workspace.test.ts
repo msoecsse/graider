@@ -7,7 +7,7 @@ import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   GitError,
   createBranchName,
@@ -86,7 +86,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(removeGitFixture));
 });
 
-describe("GitCommandWorkspaceFactory reader contract", () => {
+describeGitIntegration("GitCommandWorkspaceFactory reader contract", () => {
   it("reports selected Git engine availability without exposing a version string", async () => {
     await createDugiteGitWorkspaceFactory().verifyAvailable();
   });
@@ -424,7 +424,7 @@ describeGitIntegration("GitCommandWorkspace template tree and history contract",
   });
 });
 
-describe("GitCommandWorkspace binary revision diff contract", () => {
+describeGitIntegration("GitCommandWorkspace binary revision diff contract", () => {
   it("returns binary-safe patch bytes between exact commits and represents an empty diff", async () => {
     const fixture = await createRepository();
     await writeFile(join(fixture.repository, "binary.dat"), Buffer.from([0, 1, 2, 3, MAX_BYTE]));
@@ -450,7 +450,7 @@ describe("GitCommandWorkspace binary revision diff contract", () => {
   });
 });
 
-describe("GitCommandWorkspace three-way indexed patch contract", () => {
+describeGitIntegration("GitCommandWorkspace three-way indexed patch contract", () => {
   const createPatchFixture = async () => {
     const fixture = await createRepository("template source");
     await writeFile(join(fixture.repository, "deleted.txt"), "remove me\n");
@@ -553,7 +553,7 @@ describe("GitCommandWorkspace three-way indexed patch contract", () => {
   });
 });
 
-describe("GitCommandWorkspace structured inspection contract", () => {
+describeGitIntegration("GitCommandWorkspace structured inspection contract", () => {
   const createTrackedRepository = async (name = "repository") => {
     const fixture = await createRepository(name);
     const remote = join(fixture.parent, "upstream.git");
@@ -742,7 +742,7 @@ describe("GitCommandWorkspace structured inspection contract", () => {
   });
 });
 
-describe("GitCommandWorkspace template preparation contract", () => {
+describeGitIntegration("GitCommandWorkspace template preparation contract", () => {
   const origin = createRemoteName("origin");
   if (origin === null) throw new Error("The origin remote must be trusted.");
 
@@ -941,7 +941,7 @@ describe("GitCommandWorkspace template preparation contract", () => {
   });
 });
 
-describe("GitCommandWorkspace exact-path staging contract", () => {
+describeGitIntegration("GitCommandWorkspace exact-path staging contract", () => {
   const trustedPath = (value: string) => {
     const relativePath = createRelativeGitPath(value);
     if (relativePath === null) throw new Error("The test path must be trusted.");
@@ -1181,7 +1181,7 @@ describeGitIntegration("GitCommandWorkspace upstream push contract", () => {
   });
 });
 
-describe("GitCommandWorkspace explicit branch push contract", () => {
+describeGitIntegration("GitCommandWorkspace explicit branch push contract", () => {
   it("pushes current HEAD non-forcibly to the requested remote branch without requiring upstream", async () => {
     const fixture = await createRepository("explicit push repository");
     const remote = join(fixture.parent, "explicit remote.git");
@@ -1235,7 +1235,7 @@ describe("GitCommandWorkspace explicit branch push contract", () => {
   });
 });
 
-describe("GitCommandWorkspace disposable-attempt restoration contract", () => {
+describeGitIntegration("GitCommandWorkspace disposable-attempt restoration contract", () => {
   it("restores exact HEAD, discards index/worktree changes, removes untracked content, and preserves siblings", async () => {
     const fixture = await createRepository("disposable repository");
     const outside = join(fixture.parent, "outside sibling.txt");
@@ -1271,7 +1271,7 @@ describe("GitCommandWorkspace disposable-attempt restoration contract", () => {
   });
 });
 
-describe("GitCommandWorkspace managed branch deletion contract", () => {
+describeGitIntegration("GitCommandWorkspace managed branch deletion contract", () => {
   const origin = createRemoteName("origin");
   if (origin === null) throw new Error("The origin remote must be trusted.");
 
