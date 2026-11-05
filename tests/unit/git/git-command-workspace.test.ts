@@ -1020,7 +1020,7 @@ describe("GitCommandWorkspace exact-path staging contract", () => {
   });
 });
 
-describe("GitCommandWorkspace commit contract", () => {
+describeGitIntegration("GitCommandWorkspace commit contract", () => {
   const trustedPath = (value: string) => {
     const relativePath = createRelativeGitPath(value);
     if (relativePath === null) throw new Error("The test path must be trusted.");
@@ -1106,7 +1106,7 @@ describe("GitCommandWorkspace commit contract", () => {
   });
 });
 
-describe("GitCommandWorkspace upstream push contract", () => {
+describeGitIntegration("GitCommandWorkspace upstream push contract", () => {
   const createUpstreamRepository = async () => {
     const fixture = await createRepository("faculty repository");
     const remote = join(fixture.parent, "private upstream.git");
