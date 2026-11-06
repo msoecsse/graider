@@ -2073,7 +2073,7 @@ describe("GradingWorkspacePage comment application", () => {
     expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:");
   });
 
-  it.skip("blocks further mutation after submission_changed while navigation remains usable", async () => {
+  it("blocks further mutation after submission_changed while navigation remains usable", async () => {
     const addComment = vi
       .fn()
       .mockResolvedValue({ status: "submission_changed", studentId: "ada" });
@@ -2093,6 +2093,9 @@ describe("GradingWorkspacePage comment application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("different local submission");
     expect(screen.getByRole("button", { name: "Apply comment" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+    expect(addComment).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("grace:");
@@ -2610,7 +2613,7 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     );
   });
 
-  it.skip("keeps a pending edit bound to its original student and blocks later mutations on submission change", async () => {
+  it("keeps a pending edit bound to its original student and blocks later mutations on submission change", async () => {
     const edit = deferred<{ status: "submission_changed"; studentId: string }>();
     const editComment = vi.fn((_request: unknown) => edit.promise);
     setApis(
@@ -2629,19 +2632,28 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     );
     render(<GradingWorkspacePage request={REQUEST} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "Ada pending feedback" }
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
     await waitFor(() => expect(editComment).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("grace:");
     await act(async () => edit.resolve({ status: "submission_changed", studentId: "ada" }));
     expect(editComment.mock.calls[0]?.[0]).toMatchObject({
       studentId: "ada",
-      commentId: "applied-one"
+      commentId: "applied-one",
+      replacement: expect.objectContaining({ text: "Ada pending feedback" })
     });
     expect(
       screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:");
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent("[]");
+    expect(screen.queryByText("Ada pending feedback")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
     expect(await screen.findByRole("alert")).toHaveTextContent("different local submission");
     expect(
