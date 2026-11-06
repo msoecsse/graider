@@ -1997,7 +1997,7 @@ describe("GradingWorkspacePage comment application", () => {
     );
   });
 
-  it.skip("flushes view state before add and saves changes made during the mutation afterward", async () => {
+  it("flushes view state before add and saves changes made during the mutation afterward", async () => {
     const firstSave = deferred<{
       status: "success";
       studentId: string;
@@ -2024,25 +2024,61 @@ describe("GradingWorkspacePage comment application", () => {
         })
       );
     const addComment = vi.fn(() => add.promise);
+    const savedComment = {
+      id: "saved-id",
+      text: reusableComment.text,
+      deduction: -2,
+      rubricCategoryId: "quality",
+      sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+    };
+    const loadSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(snapshot("ada"))
+      .mockImplementation(({ studentId }: { studentId: string }) =>
+        Promise.resolve(
+          studentId === "ada"
+            ? {
+                ...snapshot("ada", "in_progress"),
+                appliedComments: [savedComment],
+                grade: {
+                  ...refreshedSnapshot().grade,
+                  totalScore: 98,
+                  categories: refreshedSnapshot().grade.categories.map((category) => ({
+                    ...category,
+                    score: 98,
+                    categorizedCommentAdjustmentTotal: -2
+                  }))
+                }
+              }
+            : snapshot(studentId, "complete")
+        )
+      );
     setApis(
       vi.fn().mockResolvedValue(rubricWorkspace()),
-      vi.fn().mockResolvedValue(source("ada")),
+      vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId))),
       undefined,
       saveView,
-      vi.fn().mockResolvedValue(snapshot("ada", "in_progress")),
+      loadSnapshot,
       vi.fn().mockResolvedValue({ status: "success", comments: [reusableComment] }),
       addComment
     );
     render(<GradingWorkspacePage request={REQUEST} />);
-    await screen.findByText("Loop clarity");
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Move ada once" }));
-    fireEvent.click(screen.getByRole("button", { name: "Apply Loop clarity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browse comment library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
     await waitFor(() => expect(saveView).toHaveBeenCalledTimes(1));
     expect(addComment).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Move ada latest" }));
-    expect(saveView).toHaveBeenCalledTimes(1);
+    expect(saveView).toHaveBeenNthCalledWith(1, {
+      ...REQUEST,
+      studentId: "ada",
+      viewState: {
+        scrollTop: 10,
+        cursor: { file: "src/Main.java", line: 1, column: 2 }
+      }
+    });
     await act(async () =>
       firstSave.resolve({
         status: "success",
@@ -2056,6 +2092,20 @@ describe("GradingWorkspacePage comment application", () => {
       })
     );
     await waitFor(() => expect(addComment).toHaveBeenCalledTimes(1));
+    expect(addComment).toHaveBeenCalledWith({
+      ...REQUEST,
+      studentId: "ada",
+      comment: expect.objectContaining({
+        text: reusableComment.text,
+        sourceLocation: savedComment.sourceLocation
+      })
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move ada latest" }));
+    await showAllStudents();
+    fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
+    expect(saveView).toHaveBeenCalledTimes(1);
     await act(async () =>
       add.resolve({
         status: "success",
@@ -2065,10 +2115,27 @@ describe("GradingWorkspacePage comment application", () => {
       })
     );
     await waitFor(() => expect(saveView).toHaveBeenCalledTimes(2));
-    expect(saveView.mock.calls[1]?.[0]).toMatchObject({
+    expect(saveView).toHaveBeenNthCalledWith(2, {
+      ...REQUEST,
       studentId: "ada",
-      viewState: { scrollTop: 20 }
+      viewState: {
+        scrollTop: 20,
+        cursor: { file: "src/Main.java", line: 1, column: 4 }
+      }
     });
+    expect(loadSnapshot).toHaveBeenNthCalledWith(3, { ...REQUEST, studentId: "ada" });
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:");
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent("[]");
+    fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+    expect(
+      await screen.findByText("98 / 100", { selector: ".grading-score-total" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(savedComment.text)).toBeInTheDocument();
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent(
+      JSON.stringify(savedComment.sourceLocation)
+    );
+    expect(addComment).toHaveBeenCalledTimes(1);
+    expect(saveView).toHaveBeenCalledTimes(2);
     expect(saveView.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER).toBeLessThan(
       addComment.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
     );
@@ -2473,52 +2540,124 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     ).toBeInTheDocument();
   });
 
-  it.skip("retains an anchored target until Use current selection explicitly replaces it", async () => {
+  it("retains an anchored target until Use current selection explicitly replaces it", async () => {
     const anchored = {
       ...appliedComment,
       sourceLocation: { file: "src/Main.java", startLine: 7, endLine: 7 }
     };
+    const retained = { ...anchored, text: "Updated feedback at original location" };
     const moved = {
-      ...anchored,
+      ...retained,
       sourceLocation: { file: "src/Main.java", startLine: 2, endLine: 5 }
     };
+    // Deliberately stale mutation responses: saved comments must come from the snapshot.
     const editComment = vi.fn().mockResolvedValue({
       status: "success",
       studentId: "ada",
       gradingStatus: "in_progress",
-      appliedComments: [moved]
+      appliedComments: [anchored]
     });
+    const loadSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(gradingSnapshot("in_progress", [anchored]))
+      .mockResolvedValueOnce(gradingSnapshot("in_progress", [retained]))
+      .mockResolvedValueOnce(gradingSnapshot("in_progress", [moved]));
+    const sourceText = [
+      "class Ada {",
+      "  void run() {",
+      "    work();",
+      "    work();",
+      "  }",
+      "",
+      "}"
+    ].join("\n");
+    const sourceModel = source("ada", sourceText);
+    const sourceLineCount = sourceText.split("\n").length;
     setApis(
       vi.fn().mockResolvedValue(rubricWorkspace()),
-      vi.fn().mockResolvedValue(source("ada")),
+      vi.fn().mockResolvedValue({
+        ...sourceModel,
+        sections: sourceModel.sections.map((section) => ({
+          ...section,
+          sourceLineCount,
+          combinedEndLine: sourceLineCount
+        }))
+      }),
       undefined,
       undefined,
-      vi
-        .fn()
-        .mockResolvedValueOnce(gradingSnapshot("in_progress", [anchored]))
-        .mockResolvedValueOnce(gradingSnapshot("in_progress", [moved])),
+      loadSnapshot,
       undefined,
       undefined,
       editComment
     );
     render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
     expect(screen.getByText("Source target: src/Main.java: 7")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Use current selection" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Select ada range" }));
+    act(() => updateCanonicalSourceSelection?.(moved.sourceLocation));
+    expect(screen.getByRole("button", { name: "Use current selection" })).toBeEnabled();
+    expect(screen.getByText("Source target: src/Main.java: 7")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: retained.text }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
+    await screen.findByRole("button", { name: `Edit comment: ${retained.text}` });
+    expect(editComment).toHaveBeenNthCalledWith(1, {
+      ...REQUEST,
+      studentId: "ada",
+      commentId: anchored.id,
+      replacement: {
+        text: retained.text,
+        deduction: Math.abs(anchored.deduction),
+        rubricCategoryId: anchored.rubricCategoryId,
+        sourceLocation: anchored.sourceLocation
+      }
+    });
+    expect(loadSnapshot).toHaveBeenNthCalledWith(2, { ...REQUEST, studentId: "ada" });
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent(retained.text);
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent(
+      JSON.stringify(anchored.sourceLocation)
+    );
+    expect(screen.getByTestId("mock-annotations")).not.toHaveTextContent(
+      JSON.stringify(moved.sourceLocation)
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: `Edit comment: ${retained.text}` }));
+    expect(screen.getByText("Source target: src/Main.java: 7")).toBeInTheDocument();
+    act(() => updateCanonicalSourceSelection?.(undefined));
+    expect(screen.getByRole("button", { name: "Use current selection" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Use current selection" }));
+    expect(screen.getByText("Source target: src/Main.java: 7")).toBeInTheDocument();
+    expect(editComment).toHaveBeenCalledTimes(1);
+    act(() => updateCanonicalSourceSelection?.(moved.sourceLocation));
     expect(screen.getByText("Source target: src/Main.java: 7")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Use current selection" }));
     expect(screen.getByText("Source target: src/Main.java: 2-5")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
-
-    await waitFor(() => expect(editComment).toHaveBeenCalledTimes(1));
-    expect(editComment.mock.calls[0]?.[0].replacement.sourceLocation).toEqual({
-      file: "src/Main.java",
-      startLine: 2,
-      endLine: 5
+    await screen.findByRole("button", { name: `Edit comment: ${moved.text}` });
+    expect(editComment).toHaveBeenNthCalledWith(2, {
+      ...REQUEST,
+      studentId: "ada",
+      commentId: anchored.id,
+      replacement: {
+        text: moved.text,
+        deduction: Math.abs(anchored.deduction),
+        rubricCategoryId: anchored.rubricCategoryId,
+        sourceLocation: moved.sourceLocation
+      }
     });
-    expect(await screen.findByTestId("mock-annotations")).toHaveTextContent('"startLine":2');
-    expect(screen.getByTestId("mock-annotations")).not.toHaveTextContent('"startLine":7');
+    expect(editComment).toHaveBeenCalledTimes(2);
+    expect(loadSnapshot).toHaveBeenNthCalledWith(3, { ...REQUEST, studentId: "ada" });
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent(moved.text);
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent(
+      JSON.stringify(moved.sourceLocation)
+    );
+    expect(screen.getByTestId("mock-annotations")).not.toHaveTextContent(
+      JSON.stringify(anchored.sourceLocation)
+    );
+    fireEvent.click(screen.getByRole("button", { name: `Edit comment: ${moved.text}` }));
+    expect(screen.getByText("Source target: src/Main.java: 2-5")).toBeInTheDocument();
   });
 
   it("supports Source to General and requires a canonical target for General to Source", async () => {
