@@ -8,7 +8,7 @@ requirements live in GitHub issues.
 
 Before editing, read:
 
-- `docs/agent-workflow-contract.md`
+- `agent-workflow-contract.md`
 - `docs/codex-development-contract.md`
 - `docs/graider-cross-platform-compatibility.md`
 
