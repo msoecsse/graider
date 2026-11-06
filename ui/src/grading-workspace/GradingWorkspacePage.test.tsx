@@ -1641,22 +1641,36 @@ describe("GradingWorkspacePage comment application", () => {
     ).not.toBeInTheDocument();
   });
 
-  it.skip("does not attach a late one-shot promotion offer to a different student", async () => {
+  it("does not attach a late one-shot promotion offer to a different student", async () => {
     const mutation = deferred<{
       status: "success";
       studentId: string;
       gradingStatus: "in_progress";
       appliedComments: readonly [];
     }>();
+    const oneShot = {
+      id: "00000000-0000-4000-8000-000000000004",
+      title: "Late feedback",
+      text: "Saved after navigation.",
+      deduction: 0,
+      sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+    };
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000004"
+    );
+    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve({
+        ...snapshot(studentId, studentId === "ada" ? "in_progress" : "complete"),
+        appliedComments: studentId === "ada" && addComment.mock.calls.length > 0 ? [oneShot] : []
+      })
+    );
     const addComment = vi.fn(() => mutation.promise);
     setApis(
       vi.fn().mockResolvedValue(workspace()),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId))),
       undefined,
       undefined,
-      vi.fn(({ studentId }: { studentId: string }) =>
-        Promise.resolve(snapshot(studentId, studentId === "ada" ? "in_progress" : "complete"))
-      ),
+      loadSnapshot,
       undefined,
       addComment
     );
@@ -1671,12 +1685,17 @@ describe("GradingWorkspacePage comment application", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
       target: { value: "Saved after navigation." }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add to Library" }));
     await waitFor(() => expect(addComment).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
     await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
 
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+      target: { value: "Grace draft" }
+    });
     await act(async () =>
       mutation.resolve({
         status: "success",
@@ -1685,9 +1704,28 @@ describe("GradingWorkspacePage comment application", () => {
         appliedComments: []
       })
     );
-    expect(
-      screen.queryByRole("button", { name: "Save to course library" })
-    ).not.toBeInTheDocument();
+    expect(addComment).toHaveBeenCalledExactlyOnceWith({
+      ...REQUEST,
+      studentId: "ada",
+      comment: oneShot
+    });
+    expect(loadSnapshot).toHaveBeenLastCalledWith({ ...REQUEST, studentId: "ada" });
+    expect(screen.getByRole("heading", { name: "Comments · grace" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Grace draft");
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("");
+    expect(screen.queryByRole("textbox", { name: "Comment text" })).not.toBeInTheDocument();
+    expect(screen.queryByText(oneShot.text)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard comment" }));
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:class grace {}");
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent("[]");
+    fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+    fireEvent.click(await screen.findByRole("button", { name: `Edit comment: ${oneShot.text}` }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue(oneShot.title);
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue(oneShot.text);
+    expect(screen.getByRole("button", { name: "Add to Library" })).toBeEnabled();
+    expect(addComment).toHaveBeenCalledTimes(1);
   });
 
   it("uses the selected canonical range for a direct comment and clears stale selection on student switch", async () => {
@@ -2011,14 +2049,34 @@ describe("GradingWorkspacePage comment application", () => {
     );
   });
 
-  it.skip("keeps a pending student's refresh from replacing the student selected afterward", async () => {
+  it("keeps a pending student's refresh from replacing the student selected afterward", async () => {
     const add = deferred<{
       status: "success";
       studentId: string;
       gradingStatus: "in_progress";
       appliedComments: readonly [];
     }>();
-    const adaRefresh = deferred<ReturnType<typeof snapshot>>();
+    const adaSnapshot = refreshedSnapshot();
+    const graceComment = {
+      id: "grace-comment",
+      text: "Grace feedback",
+      deduction: -20,
+      sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
+    };
+    const graceSnapshot = {
+      ...snapshot("grace", "complete"),
+      appliedComments: [graceComment],
+      grade: {
+        ...adaSnapshot.grade,
+        totalScore: 80,
+        categories: adaSnapshot.grade.categories.map((category) => ({
+          ...category,
+          score: 80,
+          categorizedCommentAdjustmentTotal: -20
+        }))
+      }
+    };
+    const adaRefresh = deferred<typeof adaSnapshot>();
     const saveView = vi.fn().mockImplementation(({ studentId, viewState }) =>
       Promise.resolve({
         status: "success",
@@ -2031,8 +2089,10 @@ describe("GradingWorkspacePage comment application", () => {
     const loadSnapshot = vi
       .fn()
       .mockResolvedValueOnce(snapshot("ada"))
-      .mockResolvedValueOnce(snapshot("grace", "complete"))
-      .mockImplementationOnce(() => adaRefresh.promise);
+      .mockResolvedValueOnce(graceSnapshot)
+      .mockImplementationOnce(() => adaRefresh.promise)
+      .mockResolvedValue(adaSnapshot);
+    const addComment = vi.fn(() => add.promise);
     setApis(
       vi.fn().mockResolvedValue(rubricWorkspace()),
       vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId))),
@@ -2040,13 +2100,23 @@ describe("GradingWorkspacePage comment application", () => {
       saveView,
       loadSnapshot,
       vi.fn().mockResolvedValue({ status: "success", comments: [reusableComment] }),
-      vi.fn(() => add.promise)
+      addComment
     );
     render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
+    fireEvent.click(screen.getByRole("button", { name: "Select ada range" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browse comment library" }));
     fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), {
+      target: { value: "Customized feedback" }
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Deduction" }), {
+      target: { value: "4" }
+    });
     fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Applying…" })).toBeDisabled());
+    await waitFor(() => expect(addComment).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Back to grading" }));
     fireEvent.click(screen.getByRole("button", { name: "Move ada latest" }));
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
@@ -2061,16 +2131,67 @@ describe("GradingWorkspacePage comment application", () => {
         appliedComments: []
       })
     );
-    await act(async () => adaRefresh.resolve(snapshot("ada", "in_progress")));
+    expect(loadSnapshot).toHaveBeenNthCalledWith(3, { ...REQUEST, studentId: "ada" });
+    expect(saveView).not.toHaveBeenCalled();
+    expect(screen.getByText("80 / 100", { selector: ".grading-score-total" })).toBeInTheDocument();
+    expect(screen.getByText(graceComment.text)).toBeInTheDocument();
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent(
+      JSON.stringify([graceComment])
+    );
+    await act(async () => adaRefresh.resolve(adaSnapshot));
     await waitFor(() => expect(saveView).toHaveBeenCalledTimes(1));
-    expect(saveView.mock.calls[0]?.[0]).toMatchObject({
+    expect(saveView).toHaveBeenCalledExactlyOnceWith({
+      ...REQUEST,
       studentId: "ada",
-      viewState: { scrollTop: 20 }
+      viewState: {
+        scrollTop: 20,
+        cursor: { file: "src/Main.java", line: 1, column: 4 }
+      }
+    });
+    expect(addComment).toHaveBeenCalledExactlyOnceWith({
+      ...REQUEST,
+      studentId: "ada",
+      comment: {
+        id: expect.any(String),
+        sourceCommentId: reusableComment.id,
+        tags: reusableComment.tags,
+        title: reusableComment.title,
+        text: "Customized feedback",
+        deduction: 4,
+        rubricCategoryId: "quality",
+        sourceLocation: { file: "src/Main.java", startLine: 2, endLine: 5 }
+      }
     });
     expect(
       screen.getByText("Complete", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
-    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:");
+    expect(screen.getByText("80 / 100", { selector: ".grading-score-total" })).toBeInTheDocument();
+    expect(screen.getByText(graceComment.text)).toBeInTheDocument();
+    expect(screen.queryByText("Customized feedback")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent(
+      JSON.stringify([graceComment])
+    );
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:class grace {}");
+    fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+    expect(
+      await screen.findByText("91.5 / 100", { selector: ".grading-score-total" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Customized feedback")).toBeInTheDocument();
+    expect(screen.queryByText(graceComment.text)).not.toBeInTheDocument();
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent(
+      JSON.stringify([
+        {
+          id: "applied-id",
+          text: "Customized feedback",
+          deduction: -4,
+          rubricCategoryName: "Code Quality",
+          sourceLocation: { file: "src/Main.java", startLine: 2, endLine: 5 }
+        }
+      ])
+    );
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:class ada {}");
+    expect(addComment).toHaveBeenCalledTimes(1);
+    expect(saveView).toHaveBeenCalledTimes(1);
   });
 
   it("blocks further mutation after submission_changed while navigation remains usable", async () => {
