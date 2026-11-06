@@ -1,320 +1,54 @@
-# CLAUDE.md
+# Graider Claude Code Instructions
 
-Guidance for Claude Code working in this repository.
+This is the Claude Code entry point for Graider. Keep it concise. Shared
+workflow and engineering rules live in canonical contracts; task-specific
+requirements live in GitHub issues.
 
----
+## Required reading
 
-## 1. The rule that matters most
+Before editing, read:
 
-**Ask. Do not invent.**
+- `docs/agent-workflow-contract.md`
+- `docs/codex-development-contract.md`
+- `docs/graider-cross-platform-compatibility.md`
 
-This codebase was built quickly and has grown features faster than it has grown
-specifications. That means you will regularly hit places where the intended
-behaviour is genuinely unclear. When that happens, the correct action is to stop
-and ask, not to choose something plausible and continue.
+Despite its filename, `docs/codex-development-contract.md` is the shared Graider
+engineering contract and applies to Claude Code too.
 
-Inventing a requirement is worse than pausing, because a plausible guess gets
-committed, tested against itself, and becomes the de facto spec. Nobody catches
-it in review, because the tests pass.
+For bug fixes, also read:
 
-### Stop and ask when any of these is true
+- `docs/codex-bugfix-contract.md`
 
-- The task does not say what should happen in an edge case you have hit.
-- Two documents, or a document and the code, disagree.
-- You need a value that is not specified: a threshold, a default, a sort order,
-  a date format, a limit, an error message, a label.
-- The change would alter data, GitHub repositories, workflows, rosters, or
-  student-visible output, and the instruction is not explicit about it.
-- A term in the task maps to more than one thing in the code.
-- The obvious implementation would require touching files outside the stated
-  scope.
-- The task appears already done, or partly done, in a way you did not expect.
-- You cannot run a required validation command.
-
-### How to ask
-
-State the question and stop. Do not ask and then proceed on an assumption in the
-same turn.
-
-```
-BLOCKED: <one-line description>
-
-What I found:      <the specific code, doc, or test, with file:line>
-Why it's ambiguous: <the two or more readings>
-Options:
-  A. <option, and what it implies>
-  B. <option, and what it implies>
-Recommendation:    <which you'd pick and why — but do not act on it>
-```
-
-One question at a time where possible. If several are genuinely independent,
-list them all at once rather than blocking repeatedly.
-
-### When you must proceed under uncertainty
-
-If told to keep going despite an unresolved question, record the assumption in
-the code as a comment and in your final summary under **Assumptions Made**.
-Never bury it silently.
-
----
-
-## 2. Scope discipline
-
-**Do only the task you were given.**
-
-- Do not fix unrelated bugs you notice. Report them at the end instead.
-- Do not refactor code you are merely reading.
-- Do not rename things for consistency unless that is the task.
-- Do not add dependencies, scripts, commands, config files, or abstractions that
-  the task did not ask for.
-- Do not "improve" behaviour that is working as documented.
-- Do not delete tests to make a change pass.
-
-If a cleanup is genuinely required to complete the task, say so before doing it.
-
-When you finish, list anything you deliberately left alone under **Deferred**.
-That list is valuable; it is how the backlog gets written.
-
----
-
-## 3. What this project is
-
-Graider is GitHub-based assignment management for university courses. Faculty
-create assignments, apply them to student repositories, grade submissions, and
-publish reports back to those repositories.
-
-It ships as two cooperating entry points from one repository:
-
-- A **CLI** (`src/cli`, built with tsup to `dist/`) that exposes the command and
-  JSON contracts. The shared `src/` backend contains the CLI's business logic
-  and GitHub paths.
-- An **Electron desktop app** (`ui/`), with a React + Vite renderer and an
-  Electron main/preload layer. Most dashboard, assignment, apply, grade, and
-  report flows invoke the CLI through the main process; substantial grading,
-  roster-summary, comment-library, and workflow-repair paths use bundled
-  in-process context modules from `src/`, loaded by Electron services.
-
-The renderer never talks to GitHub, the filesystem, or backend modules directly.
-It calls narrow methods on `window.graiderUI`, exposed by
-`ui/electron/preload.ts`; the main process validates requests and owns the
-backend or CLI call. Keep that renderer → preload/IPC → Electron/backend trust
-boundary intact.
-
-Users are faculty, not developers. Roughly four today, growing toward twenty,
-including people who use it a few times a term.
-
----
-
-## 4. Repository map
-
-```
-src/                     CLI and backend logic
-  cli/index.ts           CLI entry point
-tests/                   backend tests (vitest)
-  live/                  live GitHub tests — never run automatically
-ui/                      Electron desktop app
-  electron/              main process, preload, IPC contract
-  src/                   React renderer
-    AppRoutes.tsx         HashRouter route table and routed screen entry points
-    dashboard/           dashboard, route resolution, and shared dashboard data
-    assignment-detail/   assignment screen
-    grading-workspace/   grading screen
-    roster-manager/      roster editing
-    apply-preview/  grade-preview/  grade-status/  faculty-report/
-    course-setup/  assignment-setup/  assignment-edit/
-    components/          shared components
-    styles/globals.css   all application styling
-    test/setup.ts        vitest setup
-docs/                    contracts, command specs, developer guides
-  bugs/  features/  prompts/  release/  examples/
-examples/                sample course data
-eslint.config.mjs        the only eslint config; it covers the repo root
-```
-
-### Things about this codebase that surprise people
-
-- `ui/src/App.tsx` provides dashboard data, a `HashRouter`, and the shared route
-  error boundary. `ui/src/AppRoutes.tsx` owns routes for the dashboard, roster
-  manager, comment library, assignment detail/edit, apply and grade previews,
-  grading workspace, grade status, and faculty report.
-- Routed screen wrappers resolve course/term/assignment slugs from the shared
-  dashboard-data context and render breadcrumbs. The large screen orchestrators
-  remain, but panels and route-specific concerns have been extracted into
-  focused components and services.
-- `ui/src/components/PageHeader.tsx` supports an optional `titleId`; its
-  blocked primary-action styling is still handled by the assignment-detail
-  screen rather than a PageHeader variant.
-- Styling remains centralized in `ui/src/styles/globals.css`; there is no
-  CSS-in-JS or CSS module system.
-- There is **no lint script in `ui/`**. ESLint is configured at the repo root
-  only. `npm run lint` from inside `ui/` will fail.
-
----
-
-## 5. Commands
-
-Node 24 is required (`engines: >=24 <25`). Use npm.
-
-### Backend or shared code
-
-```bash
-npm run typecheck
-npm run lint
-npm run format:check
-npm test
-npm run build
-```
-
-`npm run check` runs typecheck, lint, format:check, and test together.
-
-### UI code
-
-```bash
-cd ui
-npm run typecheck      # runs both tsconfig.json and tsconfig.node.json
-npm test               # vitest
-npm run build
-```
-
-There is no `lint` in `ui/`. Run `npm run lint` from the repo root, which covers
-the whole tree.
-
-`npm run format:check` exists in both packages.
-
-### Do not run without being asked
-
-- `npm run test:live` or anything under `tests/live` — these hit real GitHub.
-- `npm run package`, `package:mac`, `package:win`, `make`, `release:rc1`.
-- branch deletion, force operations, or opening pull requests.
-- Anything that mutates a real GitHub organization, repository, or roster.
-
-### Test health
-
-Use the repository's validation commands and compare failures with the current
-baseline for the branch. Do not treat any historical test count in this guide
-as a permanent architectural fact; the UI and backend suites are expected to
-grow as features are added.
-
----
-
-## 6. Read these before editing
-
-`docs/codex-development-contract.md` is the authoritative baseline for all work
-in this repository. It predates Claude Code and is written as "Codex" guidance,
-but it applies to any agent, including you. Read it before your first edit in a
-session.
-
-Then read whichever of these matches your task:
+Then read only the additional canonical documents named by the current GitHub
+issue. Do not scan broad documentation trees unless the issue requires it.
 
-| Task area                    | Document                                                                   |
-| ---------------------------- | -------------------------------------------------------------------------- |
-| Any change                   | `docs/codex-development-contract.md`                                       |
-| Bug fix                      | `docs/codex-bugfix-contract.md`                                            |
-| CLI JSON output              | `docs/cli-json-contract.md`, `docs/codex-backend-json-command-contract.md` |
-| Electron / renderer boundary | `docs/codex-electron-ui-contract.md`                                       |
-| A specific screen            | the matching `docs/electron-*-dev.md`                                      |
-| A specific command           | the matching `docs/*-command.md`                                           |
-| Errors and warnings          | `docs/error-warning-catalog.md`                                            |
-| Architecture                 | `docs/graider-architecture.md`                                             |
-| Tests                        | `docs/graider-test-plan.md`                                                |
-| UI redesign work             | `docs/ui-redesign/README.md`                                               |
+## Ask; do not invent
 
-If your change contradicts one of these documents, that is a **stop and ask**
-condition, not a licence to update the document.
+The shared workflow contract's human-decision rule is mandatory. When intended
+behavior is genuinely unclear, stop and ask rather than choosing a plausible
+behavior and turning it into de facto specification.
 
----
+Do not ask and then proceed on an assumption in the same task.
 
-## 7. Coding standards
+## Graider-specific engineering reminders
 
-Section 3 of the development contract governs. The rules below are repeated here
-because they are unusual and easy to violate without noticing:
+The shared development contract is authoritative. In particular:
 
-- Strict TypeScript. Do not loosen compiler settings.
-- **Do not use `break`.**
-- **Do not use `continue`.**
-- **Do not use `while (true)`.**
-- Do not return values from `void` methods.
-- No magic numbers — use named constants.
-- Small modular functions with explicit typed boundaries.
-- Prefer existing helpers, patterns, and validators over new ones.
-- Do not add dependencies.
+- strict TypeScript;
+- no `break`;
+- no `continue`;
+- no `while (true)`;
+- no returns from `void` methods;
+- no unexplained numeric literals; use descriptive constants;
+- no unnecessary dependencies;
+- never expose or persist GitHub tokens or authorization headers;
+- never require real credentials in automated tests;
+- no live GitHub tests unless explicitly requested.
 
-### Security
+macOS Apple Silicon/arm64 and Windows x64 are first-class production targets.
+Follow `docs/graider-cross-platform-compatibility.md` for platform-sensitive
+work. Production Git operations must use Graider's bundled Git infrastructure.
 
-- Never log, render, persist, or serialize GitHub tokens.
-- No secrets, authorization headers, raw `process.env`, or raw stack traces in
-  JSON output, UI output, logs, diagnostics, tests, or snapshots.
-- Never require a real token in an automated test. Mock the GitHub client.
-
-### Tests
-
-- Update existing tests to match new behaviour. Do not delete them.
-- New behaviour gets new tests.
-- Deterministic and local. No live GitHub calls.
-- Follow the existing test style in the directory you are working in.
-
----
-
-## 8. UI work
-
-If the task is part of the redesign, `docs/ui-redesign/README.md` is the
-specification. Section 2 of that document (action hierarchy, plain language,
-hiding implementation detail, modals, accessibility) is non-negotiable, and
-section 7 is the definition of done.
-
-Additionally, for any renderer change:
-
-- Keep the IPC boundary. The renderer calls `window.graiderUI`; it does not
-  reach GitHub, the filesystem, or `child_process` directly.
-- Interactive elements are real `<button>`, `<a href>`, or labelled `<input>`.
-  Never `onClick` on a `div` or `span`.
-- Icon-only buttons need `aria-label`.
-- No raw status enums, ISO timestamps, exit codes, or filesystem paths in
-  faculty-facing text.
-- New styles go in `globals.css` following the existing naming. Do not introduce
-  a second styling mechanism.
-
----
-
-## 9. Working rhythm
-
-- When validation passes, commit with a descriptive message and push
-  to the current branch. Never force-push, never push to main or
-  master, and never commit files you did not change — if `git status`
-  shows unrelated modified files, stage your own files explicitly
-  rather than using `git add -A`, and say so in your report.
-- If validation fails, do not commit. Report and stop.
-
----
-
-## 10. Final response format
-
-Unless the task specifies otherwise:
-
-```markdown
-## Summary
-
-## Files Changed
-
-## Tests Added or Updated
-
-## Documentation
-
-## Validation Commands Run
-
-## Assumptions Made
-
-## Result
-
-## Deferred
-```
-
-Under **Validation Commands Run**, list each command and whether it passed,
-failed, or was skipped with a reason.
-
-**Assumptions Made** should be empty. If it is not empty, each entry is a
-question you should have asked. Say so plainly rather than presenting the
-assumption as a decision.
-
-**Deferred** is where unrelated problems you noticed go. Describe them well
-enough to become tickets.
+Preserve the renderer -> preload/IPC -> Electron/backend trust boundary.
+Renderer code must not directly access GitHub, filesystem APIs, child processes,
+environment variables, or backend modules.
