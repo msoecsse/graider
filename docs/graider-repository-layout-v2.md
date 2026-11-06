@@ -240,7 +240,16 @@ existing clean clones; dirty clones remain in place.
 - Graider does not automatically clone all student repositories.
 - Before repository-dependent work, a clean clone may fetch and fast-forward
   automatically.
-- A dirty clone is not modified and shows **Local changes detected**.
+- Automatic refresh leaves a dirty clone untouched and shows **Local changes detected**.
+- A dirty student repository does not automatically block an explicit fast-forward
+  update. Graider may update only when the exact incoming commit is a proven
+  fast-forward and its changed paths are provably non-overlapping with local
+  working-tree changes. Any overlap or uncertainty remains blocked.
+  Staged changes remain blocked, including unrelated staged changes. The explicit
+  recovery checks the previous expected SHA, current HEAD, branch, upstream identity,
+  repository metadata, and local file contents before mutation, then verifies the
+  target HEAD and preservation of local changes afterward. It never stashes,
+  stages, commits, resets, or discards local grading work.
 - A divergent or conflicting clone shows **Needs attention**.
 - Graider never automatically resets, discards, or overwrites faculty changes.
 

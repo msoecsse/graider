@@ -171,6 +171,7 @@ describe("Command workspace authenticated execution contract", () => {
     "authenticates pull only to a trusted upstream: $remote, recovery: $recover",
     async ({ remote, recover }) => {
       const root = await createTemporaryDirectory("graider-auth-pull-");
+      await mkdir(join(root, ".git"));
       const requests: GitCommandExecutionRequest[] = [];
       const context = authenticationContext("pull-context");
       const factory = new GitCommandWorkspaceFactory({
@@ -179,21 +180,24 @@ describe("Command workspace authenticated execution contract", () => {
         runGit: async (request) => {
           await Promise.resolve();
           requests.push(request);
-          if (request.args[0] === "rev-parse")
-            return request.args.includes("--show-toplevel")
+          const args = request.args.filter((argument) => argument !== "--no-optional-locks");
+          if (args[0] === "rev-parse")
+            return args.includes("--show-toplevel")
               ? `${root}\n`
               : `${"a".repeat(COMMIT_SHA_LENGTH)}\n`;
-          if (request.args[0] === "status")
+          if (args[0] === "status")
             return `# branch.oid ${"a".repeat(COMMIT_SHA_LENGTH)}\0# branch.head main\0# branch.upstream origin/main\0# branch.ab +0 -0\0`;
-          if (request.args[0] === "for-each-ref")
-            return request.args.includes("--format=%(upstream:remoteref)")
+          if (args[0] === "for-each-ref")
+            return args.includes("--format=%(upstream:remoteref)")
               ? "refs/heads/main\n"
               : "origin\n";
-          if (request.args[0] === "config") return `${remote}\n`;
+          if (args[0] === "config") return `${remote}\n`;
           if (
-            request.args[0] === "fetch" ||
-            request.args[0] === "merge" ||
-            request.args[0] === "merge-base"
+            args[0] === "fetch" ||
+            args[0] === "merge" ||
+            args[0] === "merge-base" ||
+            args[0] === "ls-files" ||
+            args[0] === "diff"
           )
             return "";
           throw new Error("Unexpected operation");

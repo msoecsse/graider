@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
-import { lstat, open, realpath, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync } from "node:fs";
+import { lstat, open, readFile, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   GitError,
@@ -586,6 +587,107 @@ const unsafeWorkingTreeDetails = async (
   return details.length === 0 ? null : details.join("; ");
 };
 
+// These states invalidate the ancestry/index evidence used by a fast-forward.
+const UNSAFE_FAST_FORWARD_METADATA = [
+  "MERGE_HEAD",
+  "CHERRY_PICK_HEAD",
+  "REVERT_HEAD",
+  "rebase-merge",
+  "rebase-apply",
+  "sequencer",
+  "BISECT_LOG",
+  "commondir",
+  "gitdir",
+  "objects/info/alternates",
+  "objects/info/http-alternates"
+];
+const hasUnsafeFastForwardMetadata = (root: string): boolean => {
+  try {
+    const metadata = lstatSync(join(root, ".git"));
+    return (
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink() ||
+      UNSAFE_FAST_FORWARD_METADATA.some((name) => existsSync(join(root, ".git", name)))
+    );
+  } catch {
+    return true;
+  }
+};
+
+// Git output must round-trip through the portable path boundary. Ambiguous native
+// paths and lossy decoding cannot establish safety on both supported platforms.
+const parseSafetyPaths = (output: string): readonly RelativeGitPath[] => {
+  if (output === "") return [];
+  const records = output.split("\u0000");
+  if (records.pop() !== "") throw new GitError("operation_rejected", "pull");
+  return records.map((value) => {
+    const path = createRelativeGitPath(value);
+    if (
+      path === null ||
+      path !== value ||
+      /[\\:\ufffd]/u.test(value) ||
+      value.split("/").some((part) => /[. ]$/u.test(part))
+    )
+      throw new GitError("operation_rejected", "pull");
+    return path;
+  });
+};
+
+const pathsCollide = (left: RelativeGitPath, right: RelativeGitPath): boolean => {
+  // Refuse aliases even on case-sensitive hosts: Windows and macOS checkouts
+  // may identify case/Unicode variants as the same filesystem entry.
+  const a = left.normalize("NFC").toLowerCase();
+  const b = right.normalize("NFC").toLowerCase();
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+};
+
+// Attribute/filter and ignore rules can change the meaning of local changes
+// without naming those files in the tree diff. Do not guess at their effects.
+const incomingRulesAffectLocalPaths = (
+  incoming: RelativeGitPath,
+  localPaths: readonly RelativeGitPath[]
+): boolean => {
+  const parts = incoming.normalize("NFC").toLowerCase().split("/");
+  const name = parts.pop();
+  if (name === ".gitmodules") return localPaths.length > 0;
+  if (name !== ".gitattributes" && name !== ".gitignore") return false;
+  const scope = parts.length === 0 ? "" : `${parts.join("/")}/`;
+  return localPaths.some((path) => path.normalize("NFC").toLowerCase().startsWith(scope));
+};
+
+// Include empty directories and ambiguous ancestor types, which porcelain status
+// cannot report. Recheck this immediately before mutation as well as at analysis.
+const hasUnsafeIncomingFilesystemPaths = async (
+  root: string,
+  paths: readonly RelativeGitPath[]
+): Promise<boolean> => {
+  try {
+    for (const path of paths) {
+      const parts = path.split("/");
+      for (let length = 1; length <= parts.length; length += 1) {
+        try {
+          const entry = await lstat(join(root, ...parts.slice(0, length)));
+          if (
+            entry.isSymbolicLink() ||
+            (length === parts.length ? !entry.isFile() : !entry.isDirectory())
+          )
+            return true;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+    }
+    return false;
+  } catch {
+    return true;
+  }
+};
+
+interface LocalFastForwardEvidence {
+  readonly paths: readonly RelativeGitPath[];
+  readonly fingerprint: string;
+}
+
 class GitCommandWorkspace implements GitWorkspacePreparer {
   readonly root: string;
 
@@ -717,20 +819,7 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
         origin === null
       )
         throw new GitError("operation_rejected", "fast_forward");
-      const unsafeState = [
-        "MERGE_HEAD",
-        "CHERRY_PICK_HEAD",
-        "REVERT_HEAD",
-        "rebase-merge",
-        "rebase-apply",
-        "sequencer",
-        "BISECT_LOG",
-        "commondir",
-        "gitdir",
-        "objects/info/alternates",
-        "objects/info/http-alternates"
-      ];
-      if (unsafeState.some((name) => existsSync(join(this.root, ".git", name))))
+      if (hasUnsafeFastForwardMetadata(this.root))
         throw new GitError("operation_rejected", "fast_forward");
       const target = request.targetCommit;
       const remoteCommit = await this.resolveRemoteBranch(origin, branch);
@@ -864,12 +953,76 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
     }
   }
 
+  private async localFastForwardEvidence(
+    tree: RepositoryState["workingTree"]
+  ): Promise<LocalFastForwardEvidence | null> {
+    try {
+      // Include ignored files too: Git may otherwise overwrite an ignored file
+      // when an incoming tracked addition occupies its path.
+      const others = parseSafetyPaths(
+        await this.executor.run(this.root, ["ls-files", "--others", "-z", "--"], "pull")
+      );
+      const paths = [
+        ...new Set([
+          ...tree.trackedChanges.flatMap((change) =>
+            change.originalPath === undefined ? [change.path] : [change.path, change.originalPath]
+          ),
+          ...tree.untrackedPaths,
+          ...others
+        ])
+      ].sort();
+      parseSafetyPaths(paths.length === 0 ? "" : `${paths.join("\u0000")}\u0000`);
+      const contents: string[] = [];
+      for (const path of paths) {
+        const parts = path.split("/");
+        // Never follow a local symlink/directory replacement to inspect content.
+        for (let length = 1; length < parts.length; length += 1) {
+          const parent = await lstat(join(this.root, ...parts.slice(0, length)));
+          if (!parent.isDirectory() || parent.isSymbolicLink()) return null;
+        }
+        try {
+          const file = await lstat(join(this.root, ...parts));
+          if (!file.isFile() || file.isSymbolicLink()) return null;
+          contents.push(
+            JSON.stringify([
+              path,
+              file.mode,
+              createHash("sha256")
+                .update(await readFile(join(this.root, ...parts)))
+                .digest("hex")
+            ])
+          );
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          contents.push(JSON.stringify([path, "missing"]));
+        }
+      }
+      const diff = await this.executor.run(
+        this.root,
+        [
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--ignore-submodules=none",
+          "--no-renames",
+          "--binary",
+          "HEAD",
+          "--"
+        ],
+        "pull"
+      );
+      return { paths, fingerprint: JSON.stringify([tree, contents, diff]) };
+    } catch {
+      return null;
+    }
+  }
+
   async pullUpstream(request: PullUpstreamRequest = {}): Promise<PullUpstreamResult> {
     try {
       const state = await this.inspect();
       const dirtyDetails = await unsafeWorkingTreeDetails(this.root, state.workingTree);
       const dirtyMessage = (details: string): string =>
-        `Automatic adoption requires a clean working tree. Unsafe uncommitted changes — ${details}. Commit or move local changes and review them manually. The expected SHA and grading work were preserved.`;
+        `Review local changes manually — ${details}. The expected SHA and grading work were preserved.`;
       if (state.workingTree.conflicts.length > 0)
         return { kind: "conflict", message: dirtyMessage(dirtyDetails ?? "unmerged paths") };
       if (
@@ -881,10 +1034,23 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
       const expectedHead = request.expectedHead ?? state.head.commit;
       const external = state.head.commit !== expectedHead;
       const refuse = (message: string): PullUpstreamResult => ({ kind: "refused", message });
+      let localEvidence: LocalFastForwardEvidence | null = null;
       if (external) {
         if (request.externalFastForward === undefined)
           throw new GitError("operation_rejected", "pull");
-        if (dirtyDetails !== null) return refuse(dirtyMessage(dirtyDetails));
+        if (state.workingTree.stagedChanges.length > 0)
+          return refuse(
+            `Staged changes require manual review; automatic adoption preserves the index. ${dirtyMessage(dirtyDetails ?? "staged files")}`
+          );
+        if (hasUnsafeFastForwardMetadata(this.root))
+          return refuse(
+            "Unsafe repository metadata requires manual review. Local changes were preserved."
+          );
+        localEvidence = await this.localFastForwardEvidence(state.workingTree);
+        if (localEvidence === null)
+          return refuse(
+            `Local working-tree safety could not be established. ${dirtyMessage(dirtyDetails ?? "Uncertain local files")}`
+          );
         if (!isObjectId(expectedHead))
           return refuse(
             "The previous expected revision is unavailable. Manual recovery is required."
@@ -935,8 +1101,13 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
           ? {}
           : { authentication: request.authentication, remote }
       );
-      if ((await this.resolveHead()) !== state.head.commit)
+      if ((await this.resolveHead()) !== state.head.commit) {
+        if (external)
+          return refuse(
+            "The repository changed during inspection. Local changes were preserved; retry after review."
+          );
         throw new GitError("operation_rejected", "pull");
+      }
       let mergeTarget = "FETCH_HEAD";
       if (external) {
         // Freeze the fetched commit: later FETCH_HEAD writes cannot change our evidence.
@@ -959,13 +1130,71 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
             "Local HEAD contains commits outside the freshly fetched upstream history. Local-only commits, divergence, or rewritten remote history require manual recovery."
           );
         }
-        const current = await this.inspect();
-        const currentDirtyDetails = await unsafeWorkingTreeDetails(this.root, current.workingTree);
-        if (currentDirtyDetails !== null) return refuse(dirtyMessage(currentDirtyDetails));
+        let incoming: readonly RelativeGitPath[];
+        try {
+          // Disabling rename detection exposes both rename endpoints as deletion
+          // and addition, including type changes, without heuristic similarity.
+          incoming = parseSafetyPaths(
+            await this.executor.run(
+              this.root,
+              [
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+                "--ignore-submodules=none",
+                "--name-only",
+                "-z",
+                state.head.commit,
+                mergeTarget,
+                "--"
+              ],
+              "pull"
+            )
+          );
+        } catch {
+          return refuse(
+            "Incoming paths could not be verified safely. Local changes were preserved; manual review is required."
+          );
+        }
+        const dirtyPaths = localEvidence?.paths;
+        const filesystemCollision = await hasUnsafeIncomingFilesystemPaths(this.root, incoming);
         if (
+          dirtyPaths === undefined ||
+          filesystemCollision ||
+          incoming.some(
+            (path) =>
+              incomingRulesAffectLocalPaths(path, dirtyPaths) ||
+              dirtyPaths.some((local) => pathsCollide(path, local))
+          )
+        )
+          return refuse(
+            `Local changes overlap incoming remote changes or their safety cannot be established, and were preserved. ${dirtyDetails ?? "Locally present files require manual review."}`
+          );
+        const current = await this.inspect();
+        const currentEvidence = await this.localFastForwardEvidence(current.workingTree);
+        const currentRemote = await this.remoteUrl(remoteName);
+        const currentFilesystemCollision = await hasUnsafeIncomingFilesystemPaths(
+          this.root,
+          incoming
+        );
+        const finalInspection = await this.inspect({ readOnly: true });
+        if (
+          currentRemote !== remote ||
+          currentFilesystemCollision ||
+          JSON.stringify(finalInspection.head) !== JSON.stringify(current.head) ||
+          JSON.stringify(finalInspection.workingTree) !== JSON.stringify(current.workingTree) ||
+          JSON.stringify(finalInspection.upstream) !== JSON.stringify(current.upstream) ||
           current.head.kind !== "attached" ||
           current.head.commit !== state.head.commit ||
-          current.head.branch !== state.head.branch
+          current.head.branch !== state.head.branch ||
+          current.upstream.kind !== "configured" ||
+          current.upstream.remote !== state.upstream.remote ||
+          current.upstream.branch !== state.upstream.branch ||
+          current.workingTree.conflicts.length > 0 ||
+          currentEvidence === null ||
+          currentEvidence.fingerprint !== localEvidence?.fingerprint ||
+          hasUnsafeFastForwardMetadata(this.root)
         )
           return refuse(
             "The repository changed during inspection. Review local changes before retrying."
@@ -994,6 +1223,28 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
             )
           };
         throw error;
+      }
+      if (external) {
+        let preserved = false;
+        try {
+          const after = await this.inspect();
+          const afterEvidence = await this.localFastForwardEvidence(after.workingTree);
+          preserved =
+            after.head.kind === "attached" &&
+            after.head.commit === mergeTarget &&
+            after.head.branch === state.head.branch &&
+            after.workingTree.conflicts.length === 0 &&
+            afterEvidence !== null &&
+            afterEvidence.fingerprint === localEvidence?.fingerprint;
+        } catch {
+          // The merge already completed. Failed verification must never trigger
+          // destructive rollback or advance the grading-state authority.
+          preserved = false;
+        }
+        if (!preserved)
+          return refuse(
+            "The fast-forward completed but local-state preservation could not be verified. Manual review is required; no rollback was attempted."
+          );
       }
       return { kind: "updated" };
     } catch (error) {

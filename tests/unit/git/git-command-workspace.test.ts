@@ -1311,3 +1311,252 @@ describeGitIntegration("GitCommandWorkspace managed branch deletion contract", (
     });
   });
 });
+
+describeGitIntegration("explicit external fast-forward with local grading work", () => {
+  const fixture = async () => {
+    const f = await createBareRemoteFixture("student-main");
+    const branch = createBranchName("student-main");
+    const remote = createRemoteName("origin");
+    if (branch === null || remote === null) throw new Error("Invalid fixture branch or remote.");
+    await f.workspace.createOrResetBranch({
+      branch,
+      startPoint: { remote, branch }
+    });
+    await writeFile(join(f.repository, "local.txt"), "baseline\n");
+    await git(f.repository, "add", ".");
+    await git(f.repository, "commit", "-m", "Managed file");
+    await git(f.repository, "push", "-u", "origin", "student-main");
+    await git(f.destination, "pull", "--ff-only");
+    const head = await f.workspace.resolveHead();
+    const publish = async () => {
+      await git(f.repository, "add", "-A");
+      await git(f.repository, "commit", "-m", "Incoming changes");
+      await git(f.repository, "push", "-u", "origin", "student-main");
+      return (await git(f.repository, "rev-parse", "HEAD")).trim();
+    };
+    const request = { expectedHead: f.second, externalFastForward: { expectedRemote: f.remote } };
+    return { ...f, head, publish, request };
+  };
+
+  it.each(["tracked", "untracked", "ignored"])(
+    "preserves unrelated %s bytes without staging",
+    async (mode) => {
+      const f = await fixture();
+      const file = mode === "tracked" ? "local.txt" : "notes.txt";
+      if (mode === "ignored")
+        await writeFile(join(f.destination, ".git", "info", "exclude"), "notes.txt\n");
+      const bytes = Buffer.from([BYTE_SIX, BYTE_SEVEN, MAX_BYTE]);
+      await writeFile(join(f.destination, file), bytes);
+      await writeFile(join(f.repository, "submission.txt"), "incoming\n");
+      const target = await f.publish();
+      expect(await f.workspace.pullUpstream(f.request)).toEqual({ kind: "updated" });
+      expect(await f.workspace.resolveHead()).toBe(target);
+      expect(await readFile(join(f.destination, file))).toEqual(bytes);
+      expect(await git(f.destination, "diff", "--cached")).toBe("");
+      expect(await git(f.destination, "stash", "list")).toBe("");
+    }
+  );
+
+  it.each([
+    "modified",
+    "deleted",
+    "untracked",
+    "prefix",
+    "reverse prefix",
+    "renamed",
+    "type changed",
+    "rename destination",
+    "staged",
+    "staged unrelated",
+    "case alias",
+    "empty directory",
+    "ignored collision",
+    "ignore rules",
+    "attribute rules"
+  ])("refuses %s collision or conservative boundary and preserves state", async (mode) => {
+    const f = await fixture();
+    let localPath = "submission.txt";
+    if (mode === "deleted") await rm(join(f.repository, "submission.txt"));
+    else if (mode === "renamed") await git(f.repository, "mv", "submission.txt", "renamed.txt");
+    else if (mode === "type changed") {
+      await rm(join(f.repository, "submission.txt"));
+      await mkdir(join(f.repository, "submission.txt"));
+      await writeFile(join(f.repository, "submission.txt", "nested.txt"), "remote\n");
+    } else if (mode === "rename destination") {
+      localPath = "renamed.txt";
+      await git(f.repository, "mv", "submission.txt", localPath);
+    } else if (mode === "prefix") {
+      localPath = "config";
+      await mkdir(join(f.repository, "config"));
+      await writeFile(join(f.repository, "config", "settings.yml"), "remote\n");
+    } else if (mode === "reverse prefix") {
+      localPath = "config/settings.yml";
+      await mkdir(join(f.destination, "config"));
+      await writeFile(join(f.repository, "config"), "remote\n");
+    } else if (mode === "ignore rules" || mode === "attribute rules") {
+      localPath = "notes.txt";
+      await writeFile(
+        join(f.repository, mode === "ignore rules" ? ".gitignore" : ".gitattributes"),
+        mode === "ignore rules" ? "notes.txt\n" : "notes.txt text eol=crlf\n"
+      );
+    } else if (mode === "empty directory") {
+      localPath = "config";
+      await mkdir(join(f.destination, localPath));
+      await writeFile(join(f.repository, localPath), "incoming\n");
+    } else {
+      if (mode === "ignored collision") {
+        localPath = "notes.txt";
+        await writeFile(join(f.destination, ".git", "info", "exclude"), "notes.txt\n");
+      }
+      if (mode === "untracked") localPath = "new.txt";
+      if (mode === "staged unrelated") localPath = "local.txt";
+      if (mode === "case alias") localPath = "NEW.txt";
+      await writeFile(
+        join(
+          f.repository,
+          mode === "case alias"
+            ? "new.txt"
+            : mode === "staged unrelated"
+              ? "submission.txt"
+              : localPath
+        ),
+        "remote\n"
+      );
+    }
+    await f.publish();
+    if (mode !== "empty directory")
+      await writeFile(join(f.destination, localPath), "grading bytes\n");
+    if (mode.startsWith("staged")) await git(f.destination, "add", localPath);
+    const status = await git(f.destination, "status", "--porcelain=v2");
+    const index = await git(f.destination, "diff", "--cached", "--binary");
+    const result = await f.workspace.pullUpstream(f.request);
+    expect(result.kind).toBe("refused");
+    expect(result.message).toMatch(/preserved/iu);
+    expect(await f.workspace.resolveHead()).toBe(f.head);
+    if (mode === "empty directory")
+      await expect(access(join(f.destination, localPath))).resolves.toBeUndefined();
+    else expect(await readFile(join(f.destination, localPath), "utf8")).toBe("grading bytes\n");
+    expect(await git(f.destination, "status", "--porcelain=v2")).toBe(status);
+    expect(await git(f.destination, "diff", "--cached", "--binary")).toBe(index);
+    expect(await git(f.destination, "stash", "list")).toBe("");
+  });
+
+  it.each(["content", "head", "branch", "new file", "empty directory"])(
+    "refuses concurrent %s changes after analysis",
+    async (mode) => {
+      const f = await fixture();
+      await writeFile(join(f.destination, "local.txt"), "before\n");
+      await writeFile(join(f.repository, "submission.txt"), "incoming\n");
+      if (mode === "empty directory") await writeFile(join(f.repository, "config"), "incoming\n");
+      await f.publish();
+      const inspect = f.workspace.inspect.bind(f.workspace);
+      vi.spyOn(f.workspace, "inspect")
+        .mockImplementationOnce(inspect)
+        .mockImplementationOnce(async () => {
+          if (mode === "empty directory") await mkdir(join(f.destination, "config"));
+          if (mode === "content") await writeFile(join(f.destination, "local.txt"), "after\n");
+          if (mode === "new file") await writeFile(join(f.destination, "new.txt"), "new\n");
+          if (mode === "head")
+            await git(
+              f.destination,
+              "-c",
+              "user.name=Faculty",
+              "-c",
+              "user.email=faculty@example.test",
+              "commit",
+              "--allow-empty",
+              "-m",
+              "Concurrent"
+            );
+          if (mode === "branch") await git(f.destination, "checkout", "-b", "concurrent");
+          return inspect();
+        });
+      const result = await f.workspace.pullUpstream(f.request);
+      expect(result.kind).toBe("refused");
+      expect(result.message).toMatch(/changed during/iu);
+      expect(await git(f.destination, "stash", "list")).toBe("");
+    }
+  );
+  it.each(["invalid", "f".repeat(SHA_1_LENGTH)])(
+    "refuses invalid or missing expected ancestry: %s",
+    async (expectedHead) => {
+      const f = await fixture();
+      await writeFile(join(f.destination, "local.txt"), "grading bytes\n");
+      const result = await f.workspace.pullUpstream({ ...f.request, expectedHead });
+      expect(result.kind).toBe("refused");
+      expect(await f.workspace.resolveHead()).toBe(f.head);
+      expect(await readFile(join(f.destination, "local.txt"), "utf8")).toBe("grading bytes\n");
+      expect(await git(f.destination, "diff", "--cached")).toBe("");
+    }
+  );
+
+  it("freezes FETCH_HEAD before path analysis and merges only that target", async () => {
+    const f = await fixture();
+    await writeFile(join(f.destination, "local.txt"), "grading bytes\n");
+    await writeFile(join(f.repository, "submission.txt"), "incoming\n");
+    const target = await f.publish();
+    const runners = createDugiteGitRunners();
+    const workspace = await new GitCommandWorkspaceFactory({
+      ...runners,
+      runGit: async (request) => {
+        const result = await runners.runGit(request);
+        if (request.args.includes("--name-only"))
+          await writeFile(join(f.destination, ".git", "FETCH_HEAD"), `${f.head}\n`);
+        return result;
+      }
+    }).open(f.destination);
+    expect(await workspace.pullUpstream(f.request)).toEqual({ kind: "updated" });
+    expect(await workspace.resolveHead()).toBe(target);
+    expect(await readFile(join(f.destination, "local.txt"), "utf8")).toBe("grading bytes\n");
+  });
+
+  it("reports manual review without rollback when preservation verification fails", async () => {
+    const f = await fixture();
+    await writeFile(join(f.destination, "local.txt"), "grading bytes\n");
+    await writeFile(join(f.repository, "submission.txt"), "incoming\n");
+    const target = await f.publish();
+    const runners = createDugiteGitRunners();
+    const observed: string[][] = [];
+    const workspace = await new GitCommandWorkspaceFactory({
+      ...runners,
+      runGit: async (request) => {
+        observed.push([...request.args]);
+        const result = await runners.runGit(request);
+        if (request.args[0] === "merge")
+          await writeFile(join(f.destination, "local.txt"), "concurrent edit\n");
+        return result;
+      }
+    }).open(f.destination);
+    const result = await workspace.pullUpstream(f.request);
+    expect(result.kind).toBe("refused");
+    expect(result.message).toMatch(/manual review/iu);
+    expect(await workspace.resolveHead()).toBe(target);
+    expect(await readFile(join(f.destination, "local.txt"), "utf8")).toBe("concurrent edit\n");
+    expect(
+      observed.some((args) =>
+        args.some((arg) => ["reset", "stash", "add", "commit", "rebase"].includes(arg))
+      )
+    ).toBe(false);
+    expect(observed.find((args) => args[0] === "merge")).toContain("--no-autostash");
+    expect(observed.find((args) => args[0] === "merge")).toContain("--ff-only");
+  });
+
+  it.each(["before fetch", "before merge"])("blocks unsafe sequencer metadata %s", async (when) => {
+    const f = await fixture();
+    await writeFile(join(f.repository, "submission.txt"), "incoming\n");
+    await f.publish();
+    const marker = join(f.destination, ".git", "CHERRY_PICK_HEAD");
+    if (when === "before fetch") await writeFile(marker, `${f.head}\n`);
+    else {
+      const inspect = f.workspace.inspect.bind(f.workspace);
+      vi.spyOn(f.workspace, "inspect")
+        .mockImplementationOnce(inspect)
+        .mockImplementationOnce(async () => {
+          await writeFile(marker, `${f.head}\n`);
+          return inspect();
+        });
+    }
+    expect((await f.workspace.pullUpstream(f.request)).kind).toBe("refused");
+    expect(await f.workspace.resolveHead()).toBe(f.head);
+  });
+});

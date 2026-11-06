@@ -114,6 +114,8 @@ describeGitIntegration("authorized student repository update", () => {
     "managed",
     "externally pulled",
     "externally pulled then advanced again",
+    "externally pulled with unrelated tracked changes",
+    "externally pulled with unrelated untracked changes",
     "externally pulled with Finder metadata",
     "externally pulled with ignored files"
   ])(
@@ -134,6 +136,14 @@ describeGitIntegration("authorized student repository update", () => {
           untrackedPaths: [],
           conflicts: []
         });
+        if (mode === "externally pulled with unrelated tracked changes")
+          fs.writeFileSync(path.join(f.local, "feedback.txt"), "Local grading feedback");
+        if (mode === "externally pulled with unrelated untracked changes")
+          fs.writeFileSync(path.join(f.local, "notes.txt"), "Local grading notes");
+        if (mode.includes("unrelated"))
+          f.advance(
+            "remote advanced again\ninserted\nheader\nunique source\nrepeat\nrepeat\nfooter\n"
+          );
         if (mode === "externally pulled with Finder metadata") {
           fs.mkdirSync(path.join(f.local, "src"));
           fs.writeFileSync(path.join(f.local, ".DS_Store"), finderMetadata);
@@ -200,8 +210,10 @@ describeGitIntegration("authorized student repository update", () => {
       }
       expect(updated.appliedComments[0]).toMatchObject({
         sourceLocation: {
-          startLine: mode === "externally pulled then advanced again" ? 4 : 3,
-          endLine: mode === "externally pulled then advanced again" ? 4 : 3
+          startLine:
+            mode === "externally pulled then advanced again" || mode.includes("unrelated") ? 4 : 3,
+          endLine:
+            mode === "externally pulled then advanced again" || mode.includes("unrelated") ? 4 : 3
         },
         sourceAnchor: {
           status: "relocated",
@@ -219,6 +231,13 @@ describeGitIntegration("authorized student repository update", () => {
       if (mode === "externally pulled with Finder metadata") {
         expect(fs.readFileSync(path.join(f.local, ".DS_Store"))).toEqual(finderMetadata);
         expect(fs.readFileSync(path.join(f.local, "src/.DS_Store"))).toEqual(finderMetadata);
+      }
+      if (mode.includes("unrelated")) {
+        const file = mode.includes("untracked") ? "notes.txt" : "feedback.txt";
+        expect(fs.readFileSync(path.join(f.local, file), "utf8")).toBe(
+          mode.includes("untracked") ? "Local grading notes" : "Local grading feedback"
+        );
+        expect(git(f.local, "diff", "--cached")).toBe("");
       }
       if (mode === "managed") {
         expect(fs.readFileSync(path.join(f.local, "feedback.txt"), "utf8")).toBe(
@@ -251,6 +270,27 @@ describeGitIntegration("authorized student repository update", () => {
       expect(f.read().appliedComments[1]?.sourceAnchor?.status).toBe("stale");
     }
   );
+
+  it("preserves unrelated dirty source bytes and relocates comments using committed source only", async () => {
+    const f = await fixture();
+    f.advance();
+    git(f.local, "pull", "--ff-only");
+    const localSource = "Local grading source; not comment authority\n";
+    fs.writeFileSync(path.join(f.local, "Main.java"), localSource);
+    fs.writeFileSync(path.join(f.student, "feedback.txt"), "Incoming managed feedback");
+    git(f.student, "commit", "-am", "Remote managed file");
+    git(f.student, "push");
+    const target = git(f.student, "rev-parse", "HEAD");
+    expect(await f.update()).toEqual({ status: "success" });
+    expect(f.read().submissionCommitSha).toBe(target);
+    expect(f.read().appliedComments[0]).toMatchObject({
+      sourceLocation: { startLine: 3, endLine: 3 },
+      sourceAnchor: { status: "relocated", originalText: "unique source" }
+    });
+    expect(f.read().repositoryUpdates?.[0]).toMatchObject({ previousSha: f.sha, newSha: target });
+    expect(fs.readFileSync(path.join(f.local, "Main.java"), "utf8")).toBe(localSource);
+    expect(git(f.local, "diff", "--cached")).toBe("");
+  });
 
   it("leaves an up-to-date repository and grading state unchanged", async () => {
     const f = await fixture();
@@ -296,6 +336,12 @@ describeGitIntegration("authorized student repository update", () => {
         mode === "staged Finder file" ? finderMetadata : "local edits"
       );
     if (mode === "staged" || mode === "staged Finder file") git(f.local, "add", file);
+    // Create an actual incoming overlap; unrelated dirty files are now allowed.
+    fs.mkdirSync(path.dirname(path.join(f.student, file)), { recursive: true });
+    fs.writeFileSync(path.join(f.student, file), "incoming overlapping changes");
+    git(f.student, "add", "-f", file);
+    git(f.student, "commit", "-m", "Overlapping incoming file");
+    git(f.student, "push");
     const head = await f.workspace.resolveHead();
     const before = git(f.local, "status", "--porcelain=v2");
     const result = await f.update();
@@ -352,7 +398,13 @@ describeGitIntegration("authorized student repository update", () => {
       const f = await fixture();
       f.advance();
       git(f.local, "pull", "--ff-only");
-      if (mode === "dirty") fs.writeFileSync(path.join(f.local, "notes.txt"), "unsaved");
+      if (mode === "dirty") {
+        fs.writeFileSync(path.join(f.local, "notes.txt"), "unsaved");
+        fs.writeFileSync(path.join(f.student, "notes.txt"), "incoming");
+        git(f.student, "add", "notes.txt");
+        git(f.student, "commit", "-m", "Overlapping notes");
+        git(f.student, "push");
+      }
       if (mode === "local-only" || mode === "divergent" || mode === "conflicted") {
         fs.writeFileSync(path.join(f.local, "Main.java"), "instructor changes\n");
         git(f.local, "commit", "-am", "Manual changes");
