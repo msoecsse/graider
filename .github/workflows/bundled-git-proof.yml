@@ -57,6 +57,9 @@ jobs:
         run: npm --prefix ui run build
 
       - name: Package native Windows x64 directory app
+        env:
+          # Nonfunctional CI-only value; this proof never signs in or publishes an app.
+          GRAIDER_GITHUB_OAUTH_CLIENT_SECRET: ci-only-nonfunctional-packaged-git-proof
         run: npm --prefix ui run package:git-proof:win
 
       - name: Run packaged Electron-as-Node proof

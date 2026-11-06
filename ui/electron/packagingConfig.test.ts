@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 const { getConfig, validateConfiguration } = nodeRequire(
@@ -16,6 +18,75 @@ const { getConfig, validateConfiguration } = nodeRequire(
 };
 
 describe("packaging configuration", () => {
+  it("scopes nonfunctional OAuth configuration to the CI proof packaging step", () => {
+    const workflow = parse(
+      fs.readFileSync(
+        path.join(process.cwd(), "..", ".github/workflows/bundled-git-proof.yml"),
+        "utf8"
+      )
+    ) as {
+      env?: Record<string, string>;
+      jobs: Record<
+        string,
+        { env?: Record<string, string>; steps: { run?: string; env?: Record<string, string> }[] }
+      >;
+    };
+    const job = workflow.jobs["windows-x64-packaged-proof"];
+    const packagingStep = job.steps.find(
+      (step) => step.run === "npm --prefix ui run package:git-proof:win"
+    );
+    const secretVariable = "GRAIDER_GITHUB_OAUTH_CLIENT_SECRET";
+
+    expect(packagingStep?.env?.[secretVariable]).toBe("ci-only-nonfunctional-packaged-git-proof");
+    expect(workflow.env?.[secretVariable]).toBeUndefined();
+    expect(job.env?.[secretVariable]).toBeUndefined();
+    for (const step of job.steps.filter((step) => step !== packagingStep)) {
+      expect(step.env?.[secretVariable]).toBeUndefined();
+    }
+  });
+
+  it("requires OAuth configuration for release packaging and accepts a nonfunctional proof value", () => {
+    const hookSource = fs.readFileSync(
+      path.join(process.cwd(), "scripts/write-oauth-release-config.cjs"),
+      "utf8"
+    );
+    const writes: { file: string; content: string; options: { mode: number } }[] = [];
+    const runHook = (clientSecret?: string): void => {
+      const hookExports: { default?: () => void } = {};
+      runInNewContext(hookSource, {
+        __dirname: path.join(process.cwd(), "scripts"),
+        exports: hookExports,
+        process: { env: { GRAIDER_GITHUB_OAUTH_CLIENT_SECRET: clientSecret } },
+        require: (name: string): unknown =>
+          name === "node:fs"
+            ? {
+                writeFileSync: (file: string, content: string, options: { mode: number }): void => {
+                  writes.push({ file, content, options });
+                }
+              }
+            : nodeRequire(name)
+      });
+      expect(hookExports.default).toBeTypeOf("function");
+      hookExports.default?.();
+    };
+
+    for (const missingSecret of [undefined, "", "   "]) {
+      expect(() => runHook(missingSecret)).toThrow(
+        "Release packaging requires GRAIDER_GITHUB_OAUTH_CLIENT_SECRET."
+      );
+    }
+    expect(writes).toEqual([]);
+    const proofValue = "ci-only-nonfunctional-packaged-git-proof";
+    runHook(proofValue);
+    expect(writes).toEqual([
+      {
+        file: path.join(process.cwd(), "dist-electron/github-oauth.release.json"),
+        content: JSON.stringify({ clientSecret: proofValue }),
+        options: { mode: 0o600 }
+      }
+    ]);
+  });
+
   it("builds renderer assets with relative paths for file loading", () => {
     const viteConfigSource = fs.readFileSync(path.join(process.cwd(), "vite.config.ts"), "utf8");
 
