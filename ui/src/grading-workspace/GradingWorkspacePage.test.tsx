@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GradingEditorViewState, GradingWorkspacePrepareRequest } from "../../electron/ipc";
 
 let updateCanonicalSourceSelection:
-  | ((target: { file: string; startLine: number; endLine: number }) => void)
+  | ((target: { file: string; startLine: number; endLine: number } | undefined) => void)
   | undefined;
 
 vi.mock("./MonacoSourceViewer", () => ({
@@ -1914,7 +1914,7 @@ describe("GradingWorkspacePage comment application", () => {
     expect(addComment.mock.calls[0]?.[0].comment).not.toHaveProperty("rubricCategoryId");
   });
 
-  it.skip("clears a category, prevents invalid-source submission, and cancels without mutation", async () => {
+  it("clears a category, prevents invalid-source submission, and cancels without mutation", async () => {
     const addComment = vi.fn();
     setApis(
       vi.fn().mockResolvedValue(rubricWorkspace()),
@@ -1926,18 +1926,46 @@ describe("GradingWorkspacePage comment application", () => {
       addComment
     );
     render(<GradingWorkspacePage request={REQUEST} />);
-    await screen.findByText("Loop clarity");
     await screen.findByTestId("mock-monaco");
     fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
-    fireEvent.click(screen.getByRole("button", { name: "Apply Loop clarity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browse comment library" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply Loop clarity" }));
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue(
+      "quality"
+    );
     fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Select ada invalid" }));
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue("");
+    act(() => updateCanonicalSourceSelection?.(undefined));
+    expect(screen.getByRole("radio", { name: "Source" })).toBeChecked();
     expect(screen.getByRole("button", { name: "Apply comment" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
+    expect(
+      screen.getByText("Select a valid source line or range, or choose General.")
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply comment" }));
+    // Exercise the submit guard too, independently of the disabled button.
+    fireEvent.submit(screen.getByRole("form", { name: "Apply Loop clarity" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Select a valid source line or range"
+    );
     expect(addComment).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
+    expect(
+      screen.getByRole("dialog", { name: "Discard the unsaved comment?" })
+    ).toBeInTheDocument();
+    expect(addComment).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Discard comment" }));
     expect(screen.queryByRole("form", { name: "Apply Loop clarity" })).not.toBeInTheDocument();
+    expect(screen.getByText("No comments applied.")).toBeInTheDocument();
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent("[]");
+    expect(addComment).not.toHaveBeenCalled();
+    expect(window.graiderUI.editGradingStudentComment).not.toHaveBeenCalled();
+    expect(window.graiderUI.deleteGradingStudentComment).not.toHaveBeenCalled();
+    expect(window.graiderUI.addGradingStudentManualAdjustment).not.toHaveBeenCalled();
+    expect(window.graiderUI.editGradingStudentManualAdjustment).not.toHaveBeenCalled();
+    expect(window.graiderUI.deleteGradingStudentManualAdjustment).not.toHaveBeenCalled();
+    expect(window.graiderUI.markGradingStudentComplete).not.toHaveBeenCalled();
   });
 
   it("prevents duplicate apply while pending and retains the prior score on failure", async () => {
@@ -2493,30 +2521,45 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
     expect(screen.getByTestId("mock-annotations")).not.toHaveTextContent('"startLine":7');
   });
 
-  it.skip("supports Source to General and requires a canonical target for General to Source", async () => {
-    const anchored = {
+  it("supports Source to General and requires a canonical target for General to Source", async () => {
+    const { rubricCategoryId: initialCategory, ...general } = {
       ...appliedComment,
+      title: "Loop feedback",
+      tags: ["loops"]
+    };
+    const anchored = {
+      ...general,
+      rubricCategoryId: initialCategory,
       sourceLocation: { file: "src/Main.java", startLine: 1, endLine: 1 }
     };
+    const restoredSource = { ...general, sourceLocation: anchored.sourceLocation };
+    // Mutation responses deliberately retain the old classification. Only the
+    // authoritative snapshot should determine saved comments and annotations.
     const editComment = vi
       .fn()
       .mockResolvedValueOnce({
         status: "success",
         studentId: "ada",
         gradingStatus: "in_progress",
-        appliedComments: [appliedComment]
+        appliedComments: [anchored]
       })
       .mockResolvedValueOnce({
         status: "success",
         studentId: "ada",
         gradingStatus: "in_progress",
-        appliedComments: [anchored]
+        appliedComments: [general]
       });
     const loadSnapshot = vi
       .fn()
       .mockResolvedValueOnce(gradingSnapshot("in_progress", [anchored]))
-      .mockResolvedValueOnce(gradingSnapshot("in_progress", [appliedComment]))
-      .mockResolvedValueOnce(gradingSnapshot("in_progress", [anchored]));
+      .mockResolvedValueOnce({
+        ...gradingSnapshot("in_progress"),
+        appliedComments: [general]
+      })
+      .mockResolvedValueOnce({
+        ...gradingSnapshot("in_progress"),
+        appliedComments: [restoredSource]
+      });
     setApis(
       vi.fn().mockResolvedValue(rubricWorkspace()),
       vi.fn().mockResolvedValue(source("ada")),
@@ -2528,31 +2571,76 @@ describe("GradingWorkspacePage applied comment editing and deletion", () => {
       editComment
     );
     render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent("Original feedback");
     fireEvent.click(await screen.findByRole("button", { name: "Edit comment: Original feedback" }));
+    expect(screen.getByRole("radio", { name: "Source" })).toBeChecked();
     fireEvent.change(screen.getByRole("combobox", { name: "Comment rubric category" }), {
       target: { value: "" }
     });
     fireEvent.click(screen.getByRole("radio", { name: "General" }));
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
-    await waitFor(() => expect(editComment).toHaveBeenCalledTimes(1));
+    await screen.findByRole("button", { name: "Edit comment: Original feedback" });
+    expect(editComment).toHaveBeenNthCalledWith(1, {
+      ...REQUEST,
+      studentId: "ada",
+      commentId: general.id,
+      replacement: {
+        title: general.title,
+        text: general.text,
+        deduction: Math.abs(general.deduction)
+      }
+    });
     expect(editComment.mock.calls[0]?.[0].replacement).not.toHaveProperty("sourceLocation");
     expect(editComment.mock.calls[0]?.[0].replacement).not.toHaveProperty("rubricCategoryId");
-    expect(await screen.findByTestId("mock-annotations")).toHaveTextContent("[]");
+    expect(loadSnapshot).toHaveBeenNthCalledWith(2, { ...REQUEST, studentId: "ada" });
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent("[]");
 
     fireEvent.click(screen.getByRole("button", { name: "Edit comment: Original feedback" }));
+    expect(screen.getByRole("radio", { name: "General" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue(general.title);
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue(general.text);
+    expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(
+      Math.abs(general.deduction)
+    );
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue("");
     expect(screen.getByRole("radio", { name: "Source" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Source" }));
+    expect(screen.getByRole("radio", { name: "General" })).toBeChecked();
+    expect(editComment).toHaveBeenCalledTimes(1);
+    act(() => updateCanonicalSourceSelection?.(anchored.sourceLocation));
+    expect(screen.getByRole("radio", { name: "Source" })).toBeEnabled();
     fireEvent.click(screen.getByRole("radio", { name: "Source" }));
     expect(screen.getByText("Source target: src/Main.java: 1")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }));
-    await waitFor(() => expect(editComment).toHaveBeenCalledTimes(2));
-    expect(editComment.mock.calls[1]?.[0].replacement.sourceLocation).toEqual({
-      file: "src/Main.java",
-      startLine: 1,
-      endLine: 1
+    await screen.findByRole("button", { name: "Edit comment: Original feedback" });
+    expect(editComment).toHaveBeenNthCalledWith(2, {
+      ...REQUEST,
+      studentId: "ada",
+      commentId: general.id,
+      replacement: {
+        title: general.title,
+        text: general.text,
+        deduction: Math.abs(general.deduction),
+        sourceLocation: anchored.sourceLocation
+      }
     });
-    expect(await screen.findByTestId("mock-annotations")).toHaveTextContent("Original feedback");
+    expect(loadSnapshot).toHaveBeenNthCalledWith(3, { ...REQUEST, studentId: "ada" });
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent("Original feedback");
+    expect(screen.getByTestId("mock-annotations")).toHaveTextContent(
+      JSON.stringify(anchored.sourceLocation)
+    );
     expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:class ada {}");
+    fireEvent.click(screen.getByRole("button", { name: "Edit comment: Original feedback" }));
+    expect(screen.getByRole("radio", { name: "Source" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue(general.title);
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue(general.text);
+    expect(screen.getByRole("spinbutton", { name: "Deduction" })).toHaveValue(
+      Math.abs(general.deduction)
+    );
+    expect(screen.getByRole("combobox", { name: "Comment rubric category" })).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel comment" }));
+    expect(editComment).toHaveBeenCalledTimes(2);
   });
 
   it("requires deletion confirmation, honors cancel, and refreshes status and annotations after confirm", async () => {
