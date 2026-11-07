@@ -417,7 +417,7 @@ Both operational schema gates remain **1**, Course Setup emits Schema 1 and no
 production v1 workflow/UI/IPC or discovery behavior is wired to these new APIs.
 No normal permanent Delete course operation or real course migration is introduced.
 
-**Slice 8.6 and Phase 8 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3 is complete (9.3A planner + 9.3B trusted handoff). Next: Phase 9 / Slice 9.4 — Grader Removal.**
+**Slice 8.6 and Phase 8 are complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3 is complete (9.3A planner + 9.3B trusted handoff). Next: Phase 9 / Slice 9.5 — Publish migrated schema.**
 
 ---
 
@@ -1845,7 +1845,7 @@ reconciliation. The trusted outer production caller must bind source revision,
 7.5 target evidence, retain durable journals and enforce shared serialization before
 enabling these paths. Persisted metadata and current v1 behavior remain unchanged.
 
-**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3 is complete (9.3A planner + 9.3B trusted handoff). Next: Phase 9 / Slice 9.4 — Grader Removal.**
+**Phase 7 and Slices 8.1–8.6 are complete. Phase 8 is complete. Slice 9.1 is complete. Slice 9.2 is complete. Slice 9.3 is complete (9.3A planner + 9.3B trusted handoff). Next: Phase 9 / Slice 9.5 — Publish migrated schema.**
 
 ---
 
@@ -2848,7 +2848,7 @@ reader tests compare complete source/runtime/Git storage before/after, spy on fi
 and restrict observed commands to read operations. There are zero analyzer writes, commits,
 pushes, GitHub/team/member/invitation/permission mutations or journal writes. Both operational
 gates remain **1**, Course Setup emits v1 and no production UI, approval persistence, real
-migration or v2 activation is added. **Slice 9.3 is complete. Next: Phase 9 / Slice 9.4 — Grader Removal.**
+migration or v2 activation is added. **Slice 9.3 is complete. Next: Phase 9 / Slice 9.5 — Publish migrated schema.**
 
 ### Implemented pure assignment planner (Slice 9.3A)
 
@@ -2914,8 +2914,8 @@ zero course/term/assignment/manifest/checkpoint writes, Git/GitHub mutations or 
 writes. No real course is migrated; schema gates stay **1** and Setup stays Schema 1.
 
 **Slice 9.3 is complete:** 9.3A pure assignment migration planner plus 9.3B trusted
-handoff. **Next: Phase 9 / Slice 9.4 — Grader Removal.** Grader debt is still deferred;
-9.5 still owns checkpoint/write/final validation/publication.
+handoff. **Next: Phase 9 / Slice 9.5 — Publish migrated schema.** Grader cleanup is planned through 9.4;
+9.5 still owns checkpoint/write/final validation/publication and orchestration.
 
 ### Implemented legacy grader inventory (Slice 9.4A)
 
@@ -2936,7 +2936,7 @@ remain local evidence and cannot authorize remote repository scope; unknown
 coverage remains explicit. Grader membership never becomes section-faculty
 authorization. Existing GitHub read capabilities are reused without exposing
 mutation methods. No permission/team/member changes or student identity/grading
-conversion occur. Phase 9.4 cleanup and Phase 9.5 publication remain unfinished,
+conversion occur. Slice 9.4 is complete; Phase 9.5 publication/orchestration remain unfinished,
 under the staged publication boundary above; production schema gates stay **1**.
 
 ### Explicit legacy grader access review (Slice 9.4B)
@@ -2957,8 +2957,31 @@ history or timestamps. No roles derive from team membership. The faculty page ad
 **Legacy grader access** after the base review; see the
 [faculty guide](faculty-ui-user-guide.md#reviewing-legacy-grader-access-during-migration).
 Results remain ephemeral, main-owned and `publicationReady: false`. No cleanup,
-permission mutation, checkpoint or publication occurs. Slice 9.4 remains incomplete
-and operational schema gates remain **1**.
+permission mutation, checkpoint or publication occurs in this review. Slice 9.4 is
+complete with the trusted handoff below; operational schema gates remain **1**.
+
+### Trusted grader-removal handoff (Slice 9.4E — complete)
+
+`ui/electron/graderRemovalHandoffService.ts` follows the 9.3B pattern through
+`getCompleted()`, then `getCompletedGraderHandoff()`. Only exact main-retained
+analysis, completed migration review, current inventory and completed access review
+reach the assignment/removal planners. Plans are generated on demand; all statuses
+and `publicationReady: false` pass through unchanged. No renderer authority or new
+IPC/preload API is added.
+
+The [canonical handoff contract](graider-schema-v2-migration.md#implemented-trusted-grader-removal-handoff-slice-94e)
+defines retained-object revalidation and the independently verified publication
+boundary. Source/account/generation/authorization changes, re-verification,
+session/inventory/review replacement or closure, and repository/organization
+mismatches invalidate authority. The handoff accepts a main-only trusted publication
+reader dependency for 9.5, with no production reader installed. Every reconciliation
+invocation/checkpoint requires fresh synchronized v2 proof and exact current revision;
+no publication authority is cached. The handoff itself performs zero migration or
+GitHub mutations and adds no production migration/reconciliation controls.
+
+**Slice 9.4 is complete. Next: Slice 9.5 — Publish migrated schema.** Checkpointing,
+candidate generation/writing/validation, commit/push, enabling v2 and post-publication
+orchestration remain 9.5. Both operational gates stay **1**; Setup emits Schema 1.
 
 ### Implemented review contract (Slice 9.2 — complete)
 
@@ -3076,7 +3099,7 @@ identity verification/collisions, every semantic decision, stale refresh and rea
 safety. There are zero review config/migration-file writes, commits, pushes, GitHub
 team/invitation/permission/branch mutations or journal writes. Operational gates remain
 **1**, Course Setup still emits Schema 1 and v1 workflows retain their existing behavior.
-**Slices 9.2 and 9.3 are complete. Next: Phase 9 / Slice 9.4 — Grader Removal.** Slice 9.2 itself performs no assignment conversion,
+**Slices 9.2 and 9.3 are complete. Next: Phase 9 / Slice 9.5 — Publish migrated schema.** Slice 9.2 itself performs no assignment conversion,
 Schema v2 file generation, checkpoint or migration publication.
 
 ### Required migration behavior
@@ -4162,7 +4185,7 @@ The pre-edit inventory traced these remaining concepts and their callers:
 | Examples, configuration/JSON/architecture/requirements/test/diagnostic docs | New config example omits grader fields; current contracts describe faculty access. Historical feature requests and UI redesign summaries remain historical records, not active role requirements. External autograders, grading tools, `GradeResult`/`GradeRow` names, and grading-work examples are unrelated and retained. Live-test setup no longer requires a grader team; no live tests run for this slice. |
 | Phase 9.4 migration                                                         | Explicitly deferred: remove obsolete persisted config/manifest desired-state remnants, reconcile existing GitHub teams/permissions, and review needed faculty assignments. Never infer section authorization from legacy grader membership.                                                                                                                                                                      |
 
-Phases 6 and 7 and Slices 8.1–8.6 are complete. Slice 9.3 is complete. Next: **Phase 9 / Slice 9.4 — Grader Removal**. These backend slices do not migrate courses, edit the real
+Phases 6 and 7 and Slices 8.1–8.6 are complete. Slice 9.3 is complete. Next: **Phase 9 / Slice 9.5 — Publish migrated schema**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.
 
 ### Unwired legacy grant retirement (Slice 9.4D)
@@ -4174,5 +4197,6 @@ replacement access and requires fresh numeric identity and permission observatio
 before retiring a reviewed legacy repository grant. Pending/ambiguous targets remain
 Needs attention; successful independent work is preserved and retries start from
 remote observations. Legacy teams/members and direct collaborators are untouched.
-This capability has no production wiring. Slice 9.4 remains incomplete and operational
+The main-only 9.4E handoff composes this capability behind independent publication
+proof; production controls remain unwired. Slice 9.4 is complete and operational
 schema gates remain **1**; no 9.5 orchestration or publication is introduced.

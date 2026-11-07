@@ -74,3 +74,12 @@ export {
   graderAccessSubmissionSchema
 } from "../../src/migration/grader-access-review.js";
 export type * from "../../src/migration/grader-access-review.js";
+export { planGraderRemoval } from "../../src/migration/grader-removal-planner.js";
+export type * from "../../src/migration/grader-removal-models.js";
+export { LegacyGraderReconciler } from "../../src/migration/legacy-grader-reconciliation.js";
+export type * from "../../src/migration/legacy-grader-reconciliation.js";
+export { rawCourseConfigV2Schema, rawTermConfigV2Schema } from "../../src/config/config-schemas.js";
+export type {
+  GitHubCoursePermissionClient,
+  GitHubManagedTeamClient
+} from "../../src/github/github-client.js";

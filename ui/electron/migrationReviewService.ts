@@ -197,7 +197,8 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
   };
   const current = async (
     session: ReviewSession,
-    context: MigrationReviewTrustedContext
+    context: MigrationReviewTrustedContext,
+    expectedRevision = session.source.binding.sourceCommitSha
   ): Promise<"current" | "stale"> => {
     if (context.userId !== session.userId || context.generation !== session.generation) {
       clearGrader(session);
@@ -225,7 +226,7 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
       session.completedResult = null;
       throw new Error("Immutable repository or organization changed. Refresh courses.");
     }
-    session.stale = observed.sourceCommitSha !== session.source.binding.sourceCommitSha;
+    session.stale = observed.sourceCommitSha !== expectedRevision;
     if (session.stale) clearGrader(session);
     return session.stale ? "stale" : "current";
   };
@@ -452,6 +453,45 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
       } finally {
         session.busy = false;
       }
+    },
+    /** Main-only exact retained handoff; no renderer artifact can become authority. */
+    async getCompletedGraderHandoff(owner: number, request: MigrationReviewSessionRequest) {
+      if (!isMigrationReviewSessionRequest(request)) throw new Error("Invalid review binding.");
+      const session = owned(owner, request);
+      const analysis = session.view.analysis;
+      const review = session.completedResult;
+      const context = session.graderContext;
+      const access = session.graderResult;
+      if (!review || !context || !access || context.review !== review) return null;
+      const retained = (): void => {
+        if (
+          sessions.get(owner) !== session ||
+          session.busy ||
+          session.view.analysis !== analysis ||
+          session.completedResult !== review ||
+          session.graderContext !== context ||
+          session.graderResult !== access
+        )
+          throw new Error("Grader handoff was replaced. Reopen review.");
+      };
+      /** Main-only: a different revision is allowed solely after independent publication proof.
+       * This checks retained authority, never proves publication or caches it.
+       */
+      const revalidate = async (publishedRevision?: string): Promise<void> => {
+        retained();
+        try {
+          await deps.withCourse(session.selector, async (trusted) => {
+            if ((await current(session, trusted, publishedRevision)) !== "current")
+              throw new Error("Grader handoff source changed. Reopen review.");
+            retained();
+          });
+        } catch (error) {
+          clearGrader(session);
+          throw error;
+        }
+      };
+      await revalidate();
+      return { analysis, review, inventory: context.inventory, access, revalidate };
     },
     /** Main-only exact retained handoff; no renderer artifact can become authority. */
     async getCompletedGrader(owner: number, request: MigrationReviewSessionRequest) {

@@ -262,14 +262,15 @@ Only complete source-owned repository observations correlated to the exact numer
 legacy team can produce conditional grant-removal intents. Findings, unknown
 identities and incomplete observations remain Needs attention with no unsafe cleanup
 targets. Each intent carries the reviewed replacement faculty/coordinator/fallback
-policy and member dispositions. After v2 publication, a future reconciler must
+policy and member dispositions. After v2 publication, the 9.4D reconciler must
 establish and verify managed replacement grants and effective access for that exact
 repository before removing any legacy grant. Failed or ambiguous verification leaves
 it untouched. Team deletion and membership deletion are always disabled.
 
 This is a pure plan: no I/O, clock, randomness, writes, checkpoints, publication or
-GitHub execution. `publicationReady` remains false. Slice 9.4 remains incomplete;
-future handoff/execution and 9.5 candidate generation/publication are separate work.
+GitHub execution. `publicationReady` remains false. Slice 9.4 is complete with the
+9.4D capability and 9.4E handoff below; 9.5 candidate generation/publication and
+production orchestration remain separate work.
 Operational schema gates remain **1**, and Setup still emits Schema 1.
 
 ### Implemented post-publication capability (Slice 9.4D)
@@ -300,6 +301,38 @@ intended state is observed, reruns perform no writes. Legacy teams and their mem
 are never deleted; after all inventoried candidate grants are verified absent, the
 report identifies the team only as a manual-cleanup candidate.
 
-No production import, IPC, button, migration orchestration or schema publication is
-installed. Slice 9.4 remains incomplete; 9.5 owns publication/orchestration. Both
-operational schema gates remain **1**.
+The 9.4E main-only handoff composes this capability only after independently verified
+publication. No production control, IPC, button, migration orchestration or schema
+publication is installed. Slice 9.4 is complete; 9.5 owns publication/orchestration.
+Both operational schema gates remain **1**.
+
+### Implemented trusted grader-removal handoff (Slice 9.4E)
+
+`createGraderRemovalHandoffService` re-enters the completed migration-review boundary
+and receives exact retained analysis, completed review, inventory and access-review
+objects. It constructs the assignment/removal plans without re-reading or replacing
+the retained inventory. Missing completions return no handoff; invalid bindings and
+replaced authority reject. Planner statuses are preserved without granting publication
+authority.
+
+The main-only `getCompletedGraderHandoff()` supplies a retained-object revalidation
+closure. Source, immutable repository/organization, account/generation and faculty
+authority are checked through the existing trusted course boundary. Identity
+re-verification, session refresh/replacement/closure and inventory/access/base-review
+replacement invalidate the closure, including changes during awaited observations.
+
+The returned reconciliation operation rejects until a separately injected trusted
+reader proves synchronized v2 publication from that exact reviewed source/session.
+No such reader is wired to production. Each operation and backend checkpoint obtains
+fresh proof, validates v2 schemas and exact repository/organization/account/session
+bindings, and rechecks the authoritative revision. The independently proven published
+revision is the only permitted source transition; stale or unverified revisions cannot
+authorize reconciliation. Publication authority is never cached across calls.
+The caller must serialize this work with other course/session mutations, as required
+by the 9.4D capability.
+
+The handoff itself writes no migration files, checkpoints, commits or pushes and
+performs no GitHub mutations. No new IPC or renderer authority exists. **Slice 9.4
+is complete; Slice 9.5 is next** and owns candidate generation, validation, publication
+and post-publication orchestration. Operational gates stay **1** and Setup emits
+Schema 1.
