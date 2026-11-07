@@ -2917,6 +2917,28 @@ writes. No real course is migrated; schema gates stay **1** and Setup stays Sche
 handoff. **Next: Phase 9 / Slice 9.4 — Grader Removal.** Grader debt is still deferred;
 9.5 still owns checkpoint/write/final validation/publication.
 
+### Implemented legacy grader inventory (Slice 9.4A)
+
+`src/migration/legacy-grader-inventory.ts` provides `inventoryLegacyGraders` as a
+backend-only read seam over trusted retained analysis/completed review objects.
+The exact repository ID, authoritative source SHA, report ID and account must
+match; organization continuity must have an immutable reconciled binding. The
+caller retains the existing `getCompleted()` responsibility for current revision,
+session ownership and faculty authorization. No renderer assertions or new IPC,
+main-service composition, UI, checkpoint or publication authority are introduced.
+
+The [Slice 9.4A boundary](graider-architecture-evolution-roadmap.md#slice-94a--read-only-legacy-resource-inventory--implemented)
+defines complete paginated team/member/repository-grant reads, exact configured
+legacy-team resolution, numeric identity verification, provenance correlation and
+typed failures. Results and nested evidence are detached and deeply immutable,
+with deterministic ordering and `publicationReady: false`. Runtime-only records
+remain local evidence and cannot authorize remote repository scope; unknown
+coverage remains explicit. Grader membership never becomes section-faculty
+authorization. Existing GitHub read capabilities are reused without exposing
+mutation methods. No permission/team/member changes or student identity/grading
+conversion occur. Phase 9.4 cleanup and Phase 9.5 publication remain unfinished,
+under the staged publication boundary above; production schema gates stay **1**.
+
 ### Implemented review contract (Slice 9.2 — complete)
 
 The portable `src/migration/migration-review-models.ts` and

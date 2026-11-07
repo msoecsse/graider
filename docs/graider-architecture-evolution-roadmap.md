@@ -1127,6 +1127,33 @@ Remove obsolete persisted v1 grader configuration and reconcile existing GitHub
 teams/permissions during explicit migration. Slice 6.6 already removed the active
 role, v2 fields, and new grader planning/execution; it does not perform this cleanup.
 
+### Slice 9.4A — Read-only legacy resource inventory — IMPLEMENTED
+
+`inventoryLegacyGraders` in `src/migration/legacy-grader-inventory.ts` accepts trusted
+validated analysis and a completed review of the exact repository ID, source SHA,
+report ID and authenticated account. It produces a deterministic, deeply frozen
+inventory bound additionally to the immutable organization ID. Its backend-only
+client type contains existing GitHub GET interfaces exclusively; no IPC or UI
+composition is installed. Callers must obtain retained inputs through the trusted
+completed-review boundary, which owns source freshness and faculty authorization.
+
+Only the exact configured organization/team slug can identify a legacy candidate.
+Complete organization-team pagination and numeric-ID verification precede member
+reads; similar names, manifest-only locators and managed-team descriptions confer
+no authority. Membership retains immutable user IDs and current logins without
+proposing faculty assignments. Repository association reads use immutable course
+and source-manifest repository IDs, with source/runtime evidence retained separately.
+Machine-local records cannot expand remote scope or prove shared completeness.
+
+Missing/ambiguous teams, numeric identity conflicts, incomplete pagination, unknown
+runtime coverage and contradictory historical/current grant evidence are typed
+Needs attention/blocking findings. Account/team/repository identities are checked
+again around observations; incomplete reads never claim complete membership/grants.
+No migration writes, checkpoints, Git operations, GitHub mutations, canonical student
+identity or grading conversion are introduced. `publicationReady` is always false.
+**Slice 9.4 remains incomplete**: cleanup decisions and execution belong to later
+issues. Both operational schema gates remain **1** and Setup still emits Schema 1.
+
 ## Slice 9.5 — Publish migrated schema
 
 Checkpoint old state, write/validate the complete staged Phase 9 candidate, push,
