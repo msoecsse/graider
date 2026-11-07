@@ -1,3 +1,4 @@
+import type { PreservationInventory, StudentIdentityObservation } from "./preservation-models.js";
 import type {
   FacultyIdentity,
   RawAssignmentConfig,
@@ -66,9 +67,12 @@ export interface MigrationSnapshot {
   /** Complete regular-file inventory at binding.sourceCommitSha, never a working tree. */
   sourceFiles: Readonly<Record<string, string>>;
   runtime: {
+    bytesBase64?: Readonly<Record<string, string>>;
     coverage: "not_applicable" | "machine_local" | "unavailable";
     files: Readonly<Record<string, string>>;
   };
+  sourceBytesBase64?: Readonly<Record<string, string>>;
+  studentObservations?: readonly StudentIdentityObservation[];
   history?: MigrationHistoryEvidence;
   trustedIdentities?: readonly TrustedFacultyIdentityEvidence[];
   suggestions?: readonly FacultyIdentitySuggestion[];
@@ -227,6 +231,7 @@ export interface CourseMigrationAnalysisData {
     "organization_reconciled" | "organization_migration_required" | "organization_binding_unknown"
   >;
   locatorDrift: string[];
+  preservation: PreservationInventory;
   runtimeCoverage: MigrationSnapshot["runtime"]["coverage"];
 }
 export type CourseMigrationAnalysis = Immutable<CourseMigrationAnalysisData>;

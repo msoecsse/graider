@@ -131,13 +131,17 @@ export const validateMigrationReview = (
     remainingIssues: structuredClone(
       analysis.issues
     ) as MigrationReviewResultData["remainingIssues"],
-    publicationBlockers: [],
+    publicationBlockers: analysis.issues
+      .filter((issue) => issue.classification === "blocking")
+      .map((issue) => `${issue.code}: ${issue.message}`),
     conversionNeedsAttention: [],
     deferredMigrationWork: [
       "9.3 assignment and Apply conversion",
       "9.4 grader debt reconciliation",
-      "9.5 checkpoint, final validation and publication"
+      "9.5 checkpoint, final validation and publication",
+      ...analysis.preservation.deferredWork
     ],
+    preservation: structuredClone(analysis.preservation),
     organizationCondition: analysis.organization.value,
     graderDebtPresent: analysis.grader.evidence.length > 0,
     assignmentReviewSummary: analysis.assignments.map((assignment) => ({

@@ -64,6 +64,7 @@ export interface MigrationReviewResultData {
   publicationBlockers: string[];
   conversionNeedsAttention: string[];
   deferredMigrationWork: string[];
+  preservation: CourseMigrationAnalysis["preservation"];
   organizationCondition: CourseMigrationAnalysis["organization"]["value"];
   graderDebtPresent: boolean;
   assignmentReviewSummary: Array<{

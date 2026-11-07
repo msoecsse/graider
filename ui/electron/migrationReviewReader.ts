@@ -125,6 +125,7 @@ export const createMigrationReviewReader = (
       const sourceProblems: string[] = [];
       const paths = new Set<string>();
       let total = 0;
+      const sourceBytesBase64: Record<string, string> = {};
       const files = await mapBounded(entries, async (entry): Promise<[string, string] | null> => {
         if (
           !safePath(entry.path) ||
@@ -160,6 +161,12 @@ export const createMigrationReviewReader = (
         total += bytes.length;
         if (bytes.length !== entry.size || total > MAX_SNAPSHOT_BYTES)
           throw new Error("Source snapshot exceeds review limits or is incomplete.");
+        if (
+          entry.path.startsWith(".graider/grading/") ||
+          entry.path.includes("/grading/") ||
+          entry.path.includes("/reports/")
+        )
+          sourceBytesBase64[entry.path] = bytes.toString("base64");
         return [entry.path, bytes.toString("utf8")];
       });
       const known = loadManagedCatalog(userData, input.userId, { readOnly: true }).courses[
@@ -192,6 +199,7 @@ export const createMigrationReviewReader = (
             .sort(([a], [b]) => a.localeCompare(b))
         ),
         sourceProblems,
+        sourceBytesBase64,
         ...local
       };
       // Faculty authorization must remain independent of unrelated inventory errors.

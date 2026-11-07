@@ -3,7 +3,8 @@ export { planAssignmentMigration } from "../../src/migration/assignment-migratio
 export type * from "../../src/migration/assignment-migration-models.js";
 export {
   readSchemaV1MigrationAnalysis,
-  readRuntimeMigrationManifests
+  readRuntimeMigrationManifests,
+  readRuntimeMigrationEvidence
 } from "../../src/migration/migration-snapshot-reader.js";
 export {
   validateMigrationReview,
@@ -14,6 +15,7 @@ export {
 } from "../../src/migration/migration-review-validation.js";
 export { facultyIdentitySchema } from "../../src/config/config-schemas.js";
 export type * from "../../src/migration/migration-models.js";
+export type * from "../../src/migration/preservation-models.js";
 export type * from "../../src/migration/migration-review-models.js";
 
 import fs from "node:fs";
@@ -22,7 +24,7 @@ import { createDugiteGitRunners } from "../../src/git/dugite-git-runners.js";
 import { GitCommandWorkspaceFactory } from "../../src/git/git-command-workspace.js";
 import {
   readMigrationGitHistory,
-  readRuntimeMigrationManifests
+  readRuntimeMigrationEvidence
 } from "../../src/migration/migration-snapshot-reader.js";
 import type { MigrationSnapshot } from "../../src/migration/migration-models.js";
 
@@ -60,7 +62,7 @@ export const readLocalMigrationReviewEvidence = async (
   }
   let runtime: MigrationSnapshot["runtime"];
   try {
-    runtime = { coverage: "machine_local", files: readRuntimeMigrationManifests(runtimeRoot) };
+    runtime = readRuntimeMigrationEvidence(runtimeRoot);
   } catch {
     runtime = { coverage: "unavailable", files: {} };
   }

@@ -336,3 +336,44 @@ performs no GitHub mutations. No new IPC or renderer authority exists. **Slice 9
 is complete; Slice 9.5 is next** and owns candidate generation, validation, publication
 and post-publication orchestration. Operational gates stay **1** and Setup emits
 Schema 1.
+
+### Implemented staged evidence inventory (Slice 9.5A)
+
+The exact trusted analysis and review now retain `preservation` inventory under
+Decision A (§1.1). This inventory is read only: originals stay in place, no
+checkpoint is created, completeness across machines is unknown, and
+`publicationReady` remains false. Existing repository/account/SHA/report and
+main-process session checks also bind this inventory; renderer decisions cannot
+supply student observations or replace preserved records.
+
+Roster observations retain institutional IDs, usernames, enrollment status,
+section and source fingerprints. Trusted immutable GitHub ID observations remain
+separate evidence (including conflicting observations), never faculty authority
+or canonical roster identity. Phase 13 owns identity resolution and persistence.
+
+Individual/group grading inventory retains source/runtime locations, exact bytes,
+SHA-256 fingerprints, selected commits, recorded status, decisions and independent
+applied-comment snapshots. Roster and manifest section evidence is retained without
+selecting a winner for conflicts, cross-section groups or unmapped targets. Commit
+reachability and publication verification remain explicitly unknown; available
+report artifacts are preserved without proving Published. Phase 14 owns canonical
+placement and remote durability. Damaged grading is Needs attention when safely
+preserved; existing required identity, authorization, lifecycle and other critical
+validation still blocks. Valid source grading activity with exact placement also
+protects the term’s positive activation history from being cleared during review;
+machine-local grading alone cannot prove shared lifecycle history. Inconsistent
+preservation bytes/paths block as well.
+
+Comment libraries preserve original content (including invalid/duplicate entries),
+validated IDs/defaults/tags where available, and explicit missing-library and unknown
+ownership/history states. No owner/history is invented and missing library entries
+never remove or relink applied snapshots. The runtime reader collects existing
+manifests and grading artifacts without seeding, relocating or writing files, and
+rejects unsafe filesystem entries. Exact bytes are retained even for malformed UTF-8.
+
+Shared fictional test builders in
+`tests/unit/migration/synthetic-migration-fixtures.ts` provide BasicCourse,
+MultiSectionCourse, HistoricalCourse, IncompleteCourse and ConflictCourse, with
+controlled SHA, authorization, lifecycle, identity and source/runtime variations.
+These snapshots can be materialized by the existing local Git fixture helper;
+they require no network or real identities.

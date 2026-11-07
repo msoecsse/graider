@@ -1,3 +1,7 @@
+import {
+  emptyPreservationInventory,
+  inventoryPreservationEvidence
+} from "./preservation-evidence.js";
 import path from "node:path";
 import type {
   RawAssignmentConfig,
@@ -74,6 +78,9 @@ export const analyzeSchemaV1Migration = (input: MigrationSnapshot): CourseMigrat
       trustedIdentities: [...(input.trustedIdentities ?? [])].sort((a, b) =>
         compare(stableJson(a), stableJson(b))
       ),
+      studentObservations: [...(input.studentObservations ?? [])].sort((a, b) =>
+        compare(stableJson(a), stableJson(b))
+      ),
       suggestions: [...(input.suggestions ?? [])].sort((a, b) =>
         compare(stableJson(a), stableJson(b))
       ),
@@ -128,6 +135,7 @@ export const analyzeSchemaV1Migration = (input: MigrationSnapshot): CourseMigrat
       "immutable-organization-history-unavailable"
     ),
     locatorDrift: [],
+    preservation: emptyPreservationInventory(),
     runtimeCoverage: input.runtime.coverage
   };
   const issue = (
@@ -153,6 +161,7 @@ export const analyzeSchemaV1Migration = (input: MigrationSnapshot): CourseMigrat
     });
   };
   const finish = (): CourseMigrationAnalysis => {
+    inventoryPreservationEvidence(input, report);
     report.issues.sort((a, b) => compare(stableJson(a), stableJson(b)));
     report.reviewDecisions.sort((a, b) => compare(a.key, b.key));
     report.grader.evidence.sort((a, b) => compare(stableJson(a), stableJson(b)));
@@ -275,6 +284,18 @@ export const analyzeSchemaV1Migration = (input: MigrationSnapshot): CourseMigrat
       });
       diagnostics(parsedRoster.errors);
       roster.push(...parsedRoster.records);
+      for (const student of parsedRoster.records)
+        report.preservation.students.push({
+          termCode: code,
+          sectionId: section.id,
+          location: rosterPath,
+          rosterFingerprint: textHash(content),
+          studentId: student.studentId,
+          githubUsername: student.githubUsername,
+          status: student.status,
+          identityState: "unknown",
+          observations: []
+        });
     }
     if (
       new Set(roster.map((student) => student.studentId)).size !== roster.length ||

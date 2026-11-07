@@ -1,3 +1,4 @@
+import { BasicCourse, gradingPath } from "./synthetic-migration-fixtures.js";
 import {
   describeGitIntegration,
   removeGitFixture
@@ -24,6 +25,8 @@ import {
 } from "./migration-fixtures.js";
 
 // Runtime evidence rejects symlinked ancestors; macOS tmpdir() may traverse /var.
+const INVALID_UTF8_LEAD = 0xff;
+const INVALID_UTF8_TAIL = 0xfe;
 const TEMP_DIRECTORY = fs.realpathSync(tmpdir());
 const roots: string[] = [];
 afterEach(async () => {
@@ -130,6 +133,40 @@ describeGitIntegration("exact-revision migration reader", () => {
         write.mockRestore();
       });
     }
+  });
+  it("preserves malformed UTF-8 bytes from exact Git and runtime with zero writes", async () => {
+    const f = createRepo();
+    const input = BasicCourse();
+    copyFixtureFiles(input, f.sourceRoot);
+    const damaged = Buffer.from([INVALID_UTF8_LEAD, 0x00, INVALID_UTF8_TAIL]);
+    fs.writeFileSync(path.join(f.sourceRoot, gradingPath), damaged);
+    git(f.sourceRoot, ["add", "."]);
+    git(f.sourceRoot, ["commit", "--quiet", "-m", "damaged fictional evidence"]);
+    const sha = git(f.sourceRoot, ["rev-parse", "HEAD"]);
+    const runtimeRoot = path.join(f.root, "runtime");
+    fs.mkdirSync(path.dirname(path.join(runtimeRoot, gradingPath)), { recursive: true });
+    fs.writeFileSync(path.join(runtimeRoot, gradingPath), damaged);
+    const reportPath = "terms/27s1/reports/lab04/students/001/student001.md";
+    fs.mkdirSync(path.dirname(path.join(runtimeRoot, reportPath)), { recursive: true });
+    fs.writeFileSync(path.join(runtimeRoot, reportPath), "Fictional available report");
+    const before = treeBytes(f.root);
+    const report = await readSchemaV1MigrationAnalysis({
+      binding: { ...input.binding, sourceCommitSha: sha },
+      sourceRoot: f.sourceRoot,
+      runtimeRoot,
+      runtimeCoverage: "machine_local"
+    });
+    expect(report.preservation.grading).toHaveLength(2);
+    expect(
+      report.preservation.artifacts.some(
+        (entry) => entry.location === reportPath && entry.provenance === "runtime"
+      )
+    ).toBe(true);
+    for (const record of report.preservation.grading) {
+      expect(record.originalBytesBase64).toBe(damaged.toString("base64"));
+      expect(record.state).toBe("invalid");
+    }
+    expect(treeBytes(f.root)).toEqual(before);
   });
   it("collects real Git introduction evidence as a proposed order", async () => {
     const f = createRepo();

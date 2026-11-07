@@ -25,6 +25,7 @@ export interface MigrationReadRequest {
   readonly runtimeRoot?: string;
   readonly runtimeCoverage: MigrationSnapshot["runtime"]["coverage"];
   readonly trustedIdentities?: MigrationSnapshot["trustedIdentities"];
+  readonly studentObservations?: MigrationSnapshot["studentObservations"];
   readonly suggestions?: MigrationSnapshot["suggestions"];
 }
 const termCodesFromPaths = (files: readonly { readonly path: string }[]) =>
@@ -36,7 +37,10 @@ const termCodesFromPaths = (files: readonly { readonly path: string }[]) =>
   );
 
 /** Deliberately does not call courseRuntimePath/createManifestPath: both may seed files. */
-export const readRuntimeMigrationManifests = (root: string): Readonly<Record<string, string>> => {
+export const readRuntimeMigrationManifests = (
+  root: string,
+  bytesBase64?: Record<string, string>
+): Readonly<Record<string, string>> => {
   const files: Record<string, string> = {};
   const readDirectory = (relative: string): string[] => {
     const absolute = path.join(root, relative);
@@ -73,13 +77,45 @@ export const readRuntimeMigrationManifests = (root: string): Readonly<Record<str
         const stat = fs.lstatSync(absolute);
         if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1)
           throw new Error("Unsafe runtime manifest.");
-        files[file] = fs.readFileSync(absolute, "utf8");
+        const bytes = fs.readFileSync(absolute);
+        files[file] = bytes.toString("utf8");
+        if (bytesBase64) bytesBase64[file] = bytes.toString("base64");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
     }
   }
+  // Collect existing grading artifacts only; never call runtime routing helpers.
+  const visitGrading = (relative: string): void => {
+    for (const name of readDirectory(relative)) {
+      const file = `${relative}/${name}`;
+      if (!isSafeRelativePath(file)) throw new Error("Unsafe runtime grading path.");
+      const absolute = path.join(root, file);
+      const stat = fs.lstatSync(absolute);
+      if (stat.isSymbolicLink()) throw new Error("Unsafe runtime grading entry.");
+      if (stat.isDirectory()) visitGrading(file);
+      else {
+        if (!stat.isFile() || stat.nlink !== 1) throw new Error("Unsafe runtime grading file.");
+        const bytes = fs.readFileSync(absolute);
+        files[file] = bytes.toString("utf8");
+        if (bytesBase64) bytesBase64[file] = bytes.toString("base64");
+      }
+    }
+  };
+  readDirectory(".graider");
+  visitGrading(".graider/grading");
+  for (const term of readDirectory("terms")) visitGrading(`terms/${term}/reports`);
   return Object.freeze(files);
+};
+
+/** Keeps exact bytes beside decoded text for damaged evidence. */
+export const readRuntimeMigrationEvidence = (root: string): MigrationSnapshot["runtime"] => {
+  const bytesBase64: Record<string, string> = {};
+  return {
+    coverage: "machine_local",
+    files: readRuntimeMigrationManifests(root, bytesBase64),
+    bytesBase64
+  };
 };
 
 /** Only read methods of the existing GitWorkspace are used; no checkout/fetch is performed. */
@@ -131,6 +167,9 @@ export const readSchemaV1MigrationAnalysis = async (
   request = {
     binding: structuredClone(request.binding),
     sourceRoot: request.sourceRoot,
+    ...(request.studentObservations === undefined
+      ? {}
+      : { studentObservations: structuredClone(request.studentObservations) }),
     runtimeCoverage: request.runtimeCoverage,
     ...(request.runtimeRoot === undefined ? {} : { runtimeRoot: request.runtimeRoot }),
     ...(request.trustedIdentities === undefined
@@ -142,9 +181,14 @@ export const readSchemaV1MigrationAnalysis = async (
   };
   const sourceProblems: string[] = [];
   const sourceFiles: Record<string, string> = {};
+  const sourceBytesBase64: Record<string, string> = {};
   const snapshot: MigrationSnapshot = {
     binding: structuredClone(request.binding),
     sourceFiles,
+    sourceBytesBase64,
+    ...(request.studentObservations === undefined
+      ? {}
+      : { studentObservations: request.studentObservations }),
     runtime: { coverage: request.runtimeCoverage, files: {} },
     sourceProblems,
     ...(request.trustedIdentities === undefined
@@ -192,7 +236,23 @@ export const readSchemaV1MigrationAnalysis = async (
       }
       const content = await workspace.readRevisionFile(resolved, entry.path);
       if (content === null) sourceProblems.push(`Source blob unavailable: ${entry.path}`);
-      else sourceFiles[entry.path] = content;
+      else {
+        sourceFiles[entry.path] = content;
+        if (
+          entry.path.startsWith(".graider/grading/") ||
+          entry.path.includes("/grading/") ||
+          entry.path.includes("/reports/")
+        ) {
+          const result = await runners.runGitBinary({
+            cwd: workspace.root,
+            args: ["show", `${resolved}:${entry.path}`],
+            env
+          });
+          const bytes = Buffer.from(result.stdout);
+          sourceBytesBase64[entry.path] = bytes.toString("base64");
+          sourceFiles[entry.path] = bytes.toString("utf8");
+        }
+      }
     }
     const history = await readMigrationGitHistory(workspace, resolved, runReadGit);
     if (history !== undefined) snapshot.history = history;
@@ -208,10 +268,7 @@ export const readSchemaV1MigrationAnalysis = async (
       sourceProblems.push("Runtime evidence root must be outside the source repository.");
     } else {
       try {
-        snapshot.runtime = {
-          coverage: "machine_local",
-          files: readRuntimeMigrationManifests(request.runtimeRoot)
-        };
+        snapshot.runtime = readRuntimeMigrationEvidence(request.runtimeRoot);
       } catch {
         snapshot.runtime = { coverage: "unavailable", files: {} };
       }
