@@ -1197,6 +1197,12 @@ evidence, blockers and deferred work are defined authoritatively in the
 [migration publication boundary](graider-schema-v2-migration.md#11-phase-9-publication-boundary);
 apply its safety protocol and report acceptance criteria before enabling push.
 
+Slice 9.5A evidence inventory and 9.5B pure deterministic candidate are implemented.
+The [9.5B contract](graider-schema-v2-migration.md#implemented-pure-migration-candidate-slice-95b)
+defines the complete file proposal and strict staged serialization. Candidate
+generation grants no publication authority and installs no writer or executor;
+operational gates remain 1. Final validation and publication remain separate work.
+
 ---
 
 # Phase 10 — Assignment Lifecycle and Ownership

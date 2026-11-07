@@ -124,6 +124,15 @@ order rather than inventing one from v1 academic metadata.
 
 ### Fallback administrator
 
+Slice 9.5B requires `course.repository_id` and
+`course.organization_binding.{organization_id,organization_login}` in its strict
+migration course schema, populated only from the exact trusted source binding.
+The general unwired v2 parser accepts these fields optionally for compatibility
+with existing Phase 6–8 snapshots; migration candidates require them. This does
+not change operational Schema 1 gates. The staged assignment/section migration
+serialization is defined in the [9.5B contract](graider-schema-v2-migration.md#implemented-pure-migration-candidate-slice-95b);
+it does not implement the future Phase 10–14 workflows below.
+
 The fallback administrator is a reference to exactly one persistent faculty
 identity. Transfers must retain a domain-level history event with actor,
 timestamp, previous administrator, new administrator, and recovery/normal

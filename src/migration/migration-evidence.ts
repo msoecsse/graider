@@ -25,6 +25,8 @@ export const stableJson = (value: unknown): string => {
 export const fingerprint = (value: unknown): string =>
   createHash("sha256").update(stableJson(value)).digest("hex");
 export const textHash = (value: string): string => createHash("sha256").update(value).digest("hex");
+export const bytesHash = (value: Uint8Array): string =>
+  createHash("sha256").update(value).digest("hex");
 const BEFORE = -1;
 export const compare = (a: string, b: string): number => (a < b ? BEFORE : a > b ? 1 : 0);
 export const sortedUnique = (values: readonly string[]): string[] =>

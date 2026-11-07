@@ -165,7 +165,7 @@ const operationRecordSchema = z
   })
   .strict();
 
-const rawManifestSchema = z
+export const rawManifestSchema = z
   .object({
     schema_version: z.number(),
     assignment: z

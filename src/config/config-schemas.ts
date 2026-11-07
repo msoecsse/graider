@@ -189,6 +189,15 @@ export const rawCourseConfigV2Schema = z
     schema_version: z.literal(COURSE_SCHEMA_VERSION_V2),
     ...courseConfigFields,
     course: courseConfigFields.course.extend({
+      // Older unwired v2 fixtures predate migration. Candidate generation requires both.
+      repository_id: githubUserIdSchema.optional(),
+      organization_binding: z
+        .object({
+          organization_id: githubUserIdSchema,
+          organization_login: z.string().min(MINIMUM_LIST_ITEMS)
+        })
+        .strict()
+        .optional(),
       lifecycle: z.enum(COURSE_LIFECYCLE_STATUSES),
       // Authoritative creation order of existing terms, oldest first; never inferred from dates.
       term_creation_order: z

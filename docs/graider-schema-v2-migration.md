@@ -377,3 +377,71 @@ MultiSectionCourse, HistoricalCourse, IncompleteCourse and ConflictCourse, with
 controlled SHA, authorization, lifecycle, identity and source/runtime variations.
 These snapshots can be materialized by the existing local Git fixture helper;
 they require no network or real identities.
+
+### Implemented pure migration candidate (Slice 9.5B)
+
+`buildMigrationCandidate` in `src/migration/migration-candidate.ts` builds a proposed
+complete repository file set under Decision A. Its main-only caller supplies the
+exact retained 9.1 read snapshot and analysis, completed 9.2 review, and exact 9.3
+assignment/9.4 removal plans obtained through their trusted handoffs. The snapshot
+remains separate from the renderer-visible analysis. Replaying analysis must match
+the entire retained report, including its source/evidence fingerprint; both plans
+are independently reprojected and compared, including inventory/access-review
+bindings. The boundary must match the accepted decision and reference exactly.
+This is a pure API, without a new handoff service, IPC or production composition.
+The outer caller still owns current session, authority and remote freshness checks.
+
+Each detached, deeply frozen file entry contains its canonical portable relative
+path, kind, serialized text, authoritative base64 bytes and exact byte SHA-256.
+The set includes every source file, including unrelated data. Generated YAML/JSON
+uses strict schemas, sorted object keys, LF and a final newline; history arrays
+and reviewed creation chronology retain their meaning. Unsafe paths, Windows
+device names, case aliases, file/directory conflicts and generated-file collisions
+reject the entire proposal, with no partial file set. Invalid UTF-8 evidence keeps
+its original bytes; decoded text is never a substitute for them.
+
+Generated files are:
+
+- `course.yml`: required immutable `course.repository_id` and organization binding,
+  reviewed lifecycle/creation order, faculty directory/login history and confirmed
+  fallback. Existing validated defaults, grading, reports, notifications and GitHub
+  configuration survive except obsolete grader desired fields. Trusted current
+  locators replace drift, with original source retained in the audit.
+- Every `terms/<term>/term.yml`: reviewed lifecycle and irreversible activation
+  evidence, current coordinators and section faculty including explicit 9.4 additions.
+  Former lists remain empty because these review artifacts prove no former roles;
+  missing earlier history is explicit, with no invented intervals or timestamps.
+- `terms/<term>/assignments/<slug>/assignment.yml`: a strict staged migration
+  definition carrying existing content/template configuration, reviewed immutable
+  owners, repair-required ownerless state and original lifecycle evidence. Legacy
+  `closed` and contradictory Draft activity use unresolved lifecycle (`null`).
+  No assignment revision, owner-management workflow or template pin is invented.
+- `terms/<term>/assignments/<slug>/sections/<section>.yml`: exact 9.3 schedule,
+  usage and provisioning **evidence** states plus source/runtime manifest references.
+  These retain `not_observed | complete_evidence | partial_incomplete | ambiguous`
+  without claiming an applied v2 revision or an intentional Not using choice.
+- Loaded source manifest-v1 files: strict serialization removes only repository
+  `permissions.grader_team`, retaining repositories, IDs, operations, source anchors,
+  template baselines and unrelated valid fields. Manifest-v2 and damaged/orphan
+  evidence remain preserved; invalid files are evidence, never desired authority.
+- `.graider/migration.json`: strict version-1 migration metadata, accepted decision,
+  exact source binding, review acknowledgements/member decisions, source originals
+  for replaced files, findings, deferred evidence references/observations and
+  conditional post-publication reconciliation intents. No checkpoint, publication
+  verification or external reconciliation is claimed.
+
+Source grading, rosters, comments and other deferred files remain byte-identical at
+their original locations. Runtime originals remain in place and are retained in the
+candidate's non-executable audit, outside the proposed repository file set. The
+metadata records their locations/fingerprints, placement evidence and explicit
+identity, ownership, history, reachability/publication and cross-machine completeness
+unknowns. It does not upload runtime grading contents, relocate records, select an
+ambiguous section/group destination, repair damaged content or persist canonical
+student GitHub identity. Original grader fields survive only as historical evidence.
+
+Candidate generation performs zero filesystem, Git, GitHub, journal or UI operations,
+and uses no clock/randomness. `publicationReady` is always false; unknown preservation
+completeness remains Needs attention. A blocked result contains no proposed files.
+The later validator alone may authorize publication after all required checks.
+Operational course/term gates remain **1** and Setup still emits Schema 1. No writer,
+checkpoint, commit/push, migration executor or publication control is installed here.

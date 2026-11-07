@@ -1,4 +1,10 @@
 import { reviewFixture, completeSubmission } from "./migration-review-fixtures.js";
+import { validateMigrationReview } from "../../../src/migration/migration-review-validation.js";
+import { planAssignmentMigration } from "../../../src/migration/assignment-migration-planner.js";
+import { planGraderRemoval } from "../../../src/migration/grader-removal-planner.js";
+import { reviewGraderAccess } from "../../../src/migration/grader-access-review.js";
+import type { LegacyGraderInventoryData } from "../../../src/migration/legacy-grader-models.js";
+import { freeze } from "../../../src/migration/migration-evidence.js";
 import { stringify } from "yaml";
 import type { MigrationSnapshot } from "../../../src/migration/migration-models.js";
 import {
@@ -118,4 +124,70 @@ export const historicalCourseReview = (options: SyntheticCourseOptions = {}) => 
     }))
   };
   return { input, context, submission };
+};
+
+/** Exact synthetic trusted pipeline artifacts; no live resource observations. */
+export const completeSyntheticMigration = (
+  input: MigrationSnapshot,
+  statuses?: readonly ("draft" | "active" | "archived")[]
+) => {
+  const base = reviewFixture(input);
+  const context = {
+    ...base,
+    verifiedFaculty:
+      base.verifiedFaculty.length > 0
+        ? base.verifiedFaculty
+        : (input.trustedIdentities ?? []).map((entry) => ({
+            identity: {
+              institutional_username: entry.institutionalUsername,
+              github_user_id: entry.githubUserId,
+              github_login: entry.githubLogin,
+              github_login_history: [...(entry.githubLoginHistory ?? [])]
+            },
+            verificationId: `verified:${entry.institutionalUsername}`,
+            origin: "explicit_addition" as const
+          }))
+  };
+  const submission = completeSubmission(context);
+  const review = validateMigrationReview(context, {
+    ...submission,
+    creationOrder: {
+      termCodes: [...submission.creationOrder.termCodes].reverse(),
+      confirmed: true
+    },
+    terms: submission.terms.map((entry, index) => {
+      const status = statuses?.[index] ?? entry.status;
+      return {
+        ...entry,
+        status,
+        hasEverBeenActive: status === "draft" ? entry.hasEverBeenActive : true
+      };
+    })
+  });
+  const analysis = context.analysis;
+  const assignmentPlan = planAssignmentMigration(analysis, review);
+  const inventory: LegacyGraderInventoryData = {
+    kind: "schema-v1-legacy-grader-inventory",
+    status: "not_applicable",
+    publicationReady: false,
+    source: { ...analysis.source, reportId: analysis.reportId },
+    runtimeCoverage: analysis.runtimeCoverage,
+    evidence: structuredClone(analysis.grader.evidence) as LegacyGraderInventoryData["evidence"],
+    repositoryEvidence: [],
+    candidate: null,
+    repositories: [],
+    findings: []
+  };
+  const access = reviewGraderAccess(
+    { inventoryId: "fictional-inventory", inventory, review },
+    { inventoryId: "fictional-inventory", decisions: [] }
+  );
+  const graderRemovalPlan = planGraderRemoval(analysis, review, assignmentPlan, inventory, access);
+  return {
+    snapshot: freeze(structuredClone(input)),
+    analysis,
+    review,
+    assignmentPlan,
+    graderRemovalPlan
+  };
 };
