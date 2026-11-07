@@ -144,13 +144,14 @@ const fixture = async () => {
     }),
     onProgress: () => {},
     reader: {
+      revision: async () => git(remote, ["rev-parse", "refs/heads/main"]),
       resolveId: async () => repository,
       resolve: async () => repository,
       list: async () => [repository],
       search: async () => ({ ids: [20], incomplete: false }),
       terms: async () => ["27s1"],
-      file: async (_repo, file) => {
-        const result = await exec(["show", `main:${file}`], remote);
+      file: async (_repo, file, revision = "main") => {
+        const result = await exec(["show", `${revision}:${file}`], remote);
         return result.exitCode === 0 ? result.stdout : null;
       }
     }

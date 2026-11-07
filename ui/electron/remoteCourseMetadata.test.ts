@@ -37,7 +37,9 @@ describe("production course schema activation boundary", () => {
     "refuses newer schemas in inspection and mutation validation",
     (content) => {
       const metadata = loadMetadata();
-      expect(metadata.inspectCourse(content)).toEqual({ status: "unsupported_schema" });
+      expect(metadata.inspectCourse(content)).toEqual({
+        status: content.includes("schema_version: 3") ? "unsupported_schema" : "invalid_metadata"
+      });
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-schema-gate-"));
       try {
         fs.writeFileSync(path.join(root, "course.yml"), content);

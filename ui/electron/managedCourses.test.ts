@@ -88,6 +88,7 @@ const fixture = () => {
     diagnostics: []
   };
   const reader = {
+    revision: vi.fn().mockResolvedValue("a".repeat(40)),
     list: vi.fn(),
     search: vi.fn(),
     resolveId: vi.fn().mockResolvedValue(repo),
@@ -238,7 +239,7 @@ describe("revalidation and safe clone transaction", () => {
     );
     expect((await f.run()).status).toBe("ready");
     expect(f.reader.resolveId).toHaveBeenCalledWith(f.repo.id);
-    expect(f.revalidateSession).toHaveBeenCalledTimes(3);
+    expect(f.revalidateSession).toHaveBeenCalledTimes(4);
     expect(fs.existsSync(path.join(f.final, "course.yml"))).toBe(true);
     expect(fs.readdirSync(path.join(path.dirname(path.dirname(f.final)), ".bootstrap"))).toEqual(
       []
@@ -458,15 +459,15 @@ describe("existing destination and clone validation", () => {
   it("read-only inspection resolves trusted IDs and exposes no paths", async () => {
     const f = fixture();
     const bootstrap = await f.run();
-    const result = inspectManagedCourse(f.request.userData, f.request.userId, {
-      ...f.request.course,
-      bootstrap
+    const result = await inspectManagedCourse({
+      ...f.request,
+      course: { ...f.request.course, bootstrap }
     });
     expect(result).toMatchObject({ repositoryId: f.repo.id, code: "csc1020", terms: ["27s1"] });
     expect(JSON.stringify(result)).not.toContain(f.request.userData);
-    expect(() =>
-      inspectManagedCourse(f.request.userData, 99, { ...f.request.course, bootstrap })
-    ).toThrow();
+    await expect(
+      inspectManagedCourse({ ...f.request, userId: 99, course: { ...f.request.course, bootstrap } })
+    ).rejects.toThrow();
   });
   it("exposes no remote mutation, arbitrary clone IPC or legacy registry writes", () => {
     const source = fs.readFileSync("electron/managedCourses.ts", "utf8");

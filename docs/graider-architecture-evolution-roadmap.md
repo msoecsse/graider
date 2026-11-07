@@ -1245,6 +1245,16 @@ Remaining production dependencies are #22/#23/#25 safeguards/acknowledgement and
 compatible signed/distributed releases and updates for both supported platforms; #24
 retains reconciliation orchestration. Operational gates remain 1. Stop after #21.
 
+Slice 9.5F / #22 implements mixed Schema 1/2 discovery, synchronization and trusted
+metadata access, including immutable-ID v2 roles/history, lifecycle visibility and
+exact authoritative revision/cache checks. Generic operations remain Schema 1-only
+and safely refuse v2 before legacy domain work. See the
+[9.5F contract](graider-schema-v2-migration.md#implemented-schema-discriminated-discovery-and-access-slice-95f).
+#23 retains the managed-operation authorization/compatibility bridge; #24 retains
+reconciliation and #25 the warning/acknowledgement UI. Production publication remains
+disabled, Setup remains Schema 1, and Phase 3 plus verified compatible releases on both
+supported platforms remain prerequisites. Stop after #22; do not begin #23 here.
+
 ---
 
 # Phase 10 — Assignment Lifecycle and Ownership

@@ -1,3 +1,4 @@
+import { readRemoteCourseAccess } from "./remoteCourseAccess.js";
 import { sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -313,87 +314,55 @@ export const assertActive = (request: Pick<ManagedBootstrapRequest, "signal">): 
 const validateMetadata = async (
   request: ManagedBootstrapRequest,
   repo: CourseRepository,
-  localPath?: string
-): Promise<{ readonly code: string; readonly title: string }> => {
-  const metadata = loadMetadata();
-  const readLocal = (file: string): string => {
-    try {
-      return fs.readFileSync(file, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT")
-        throw new Attention(
-          "Checked-out course metadata is missing. Refresh courses after repair.",
-          "invalid_remote_metadata"
-        );
-      throw error;
-    }
-  };
-  const content = localPath
-    ? readLocal(path.join(localPath, "course.yml"))
-    : await request.reader.file(repo, "course.yml");
-  if (localPath && content !== (await request.reader.file(repo, "course.yml")))
+  localPath?: string,
+  expectedCommit?: string
+) => {
+  const access = await readRemoteCourseAccess(
+    request.reader,
+    repo,
+    request.userId,
+    request.username
+  );
+  if (access.status === "identity_mismatch")
     throw new Attention(
-      "Course metadata changed during synchronization. Refresh courses and retry.",
-      "invalid_remote_metadata"
-    );
-  const course = content === null ? null : metadata.inspectCourse(content);
-  if (!course || course.status !== "valid")
-    throw new Attention(
-      "Course metadata is missing or invalid. Refresh courses after repair.",
-      "invalid_remote_metadata"
-    );
-  if (course.organization.toLowerCase() !== repo.owner.toLowerCase())
-    throw new Attention(
-      "Organization binding changed. Migration/reconciliation is required.",
+      "Repository/organization binding changed. Migration/reconciliation is required.",
       "organization_transfer"
     );
-  const terms = localPath
-    ? fs.readdirSync(path.join(localPath, "terms")).filter((term) => TERM_PATTERN.test(term))
-    : await request.reader.terms(repo);
-  if (
-    localPath &&
-    JSON.stringify([...terms].sort()) !== JSON.stringify((await request.reader.terms(repo)).sort())
-  )
+  if (access.status !== "valid" || access.incomplete)
     throw new Attention(
-      "Term metadata changed during synchronization. Refresh courses and retry.",
+      access.status === "unsupported_schema" || access.status === "client_incompatible"
+        ? "This client cannot operate the authoritative course schema. Update Graider."
+        : "Authoritative course metadata is missing, invalid or unavailable. Refresh courses.",
       "invalid_remote_metadata"
     );
-  let authorized = false;
-  for (const term of terms) {
-    const termContent = localPath
-      ? readLocal(path.join(localPath, "terms", term, "term.yml"))
-      : await request.reader.file(repo, `terms/${term}/term.yml`);
-    if (localPath && termContent !== (await request.reader.file(repo, `terms/${term}/term.yml`)))
-      throw new Attention(
-        "Faculty metadata changed during synchronization. Refresh courses and retry.",
-        "invalid_remote_metadata"
-      );
-    const faculty =
-      termContent !== null && request.username
-        ? metadata.inspectTermFaculty(termContent, term, request.username)
-        : "invalid_metadata";
-    if (faculty === "invalid_metadata")
-      throw new Attention(
-        "Term metadata is missing or invalid. Refresh courses after repair.",
-        "invalid_remote_metadata"
-      );
-    if (faculty === "authorized") authorized = true;
-  }
-  if (!authorized && request.requireFacultyAuthorization !== false)
+  if (access.authorization !== "authorized" && request.requireFacultyAuthorization !== false)
     throw new Attention(
-      "Current faculty authorization could not be verified. Refresh courses after checking faculty settings.",
+      "Current faculty authorization could not be verified. Refresh course access.",
       "authorization_lost"
     );
-  return { code: course.code, title: course.title };
+  if (localPath) {
+    const read = (relative: string) => fs.readFileSync(path.join(localPath, relative), "utf8");
+    const localTerms = fs.existsSync(path.join(localPath, "terms"))
+      ? fs.readdirSync(path.join(localPath, "terms")).filter((term) => TERM_PATTERN.test(term))
+      : [];
+    if (
+      expectedCommit !== access.revision ||
+      read("course.yml") !== access.content ||
+      JSON.stringify([...localTerms].sort()) !==
+        JSON.stringify(Object.keys(access.termContents).sort()) ||
+      localTerms.some((term) => read(`terms/${term}/term.yml`) !== access.termContents[term])
+    )
+      throw new Attention(
+        "Cached course source/revision is stale. Synchronize before opening.",
+        "invalid_remote_metadata"
+      );
+  }
+  return access;
 };
 export const revalidateManagedRepository = async (
   request: ManagedBootstrapRequest
 ): Promise<CourseRepository> => {
-  if (
-    request.course.authorization !== "authorized" ||
-    !request.username ||
-    !(await request.revalidateSession())
-  )
+  if (request.course.authorization !== "authorized" || !(await request.revalidateSession()))
     throw new Attention(
       "Current course authorization could not be verified. Refresh courses.",
       "authorization_lost"
@@ -413,6 +382,11 @@ export const revalidateManagedRepository = async (
   )
     throw new Attention("Organization migration/reconciliation required.", "organization_transfer");
   await validateMetadata(request, repo);
+  if (!(await request.revalidateSession()))
+    throw new Attention(
+      "Course account authorization changed. Refresh courses.",
+      "authorization_lost"
+    );
   assertActive(request);
   return repo;
 };
@@ -509,7 +483,7 @@ export const validateClone = async (
     throw new Attention(
       "Managed cache has changes or an unexpected HEAD. Review is required; no files were reset."
     );
-  await validateMetadata(request, repo, localPath);
+  await validateMetadata(request, repo, localPath, inspection.head.commit);
 };
 const failure = (error: unknown): ManagedCourseState => {
   if (error instanceof Attention)
@@ -653,11 +627,10 @@ const performBootstrap = async (request: ManagedBootstrapRequest): Promise<Manag
 };
 
 /** Read-only view: trusted IDs resolve paths; managed caches never enter the legacy registry. */
-export const inspectManagedCourse = (
-  userData: string,
-  userId: number,
-  course: RemoteCourse
-): ManagedCourseInspection => {
+export const inspectManagedCourse = async (
+  request: ManagedBootstrapRequest
+): Promise<ManagedCourseInspection> => {
+  const { userData, userId, course } = request;
   if (
     course.authorization !== "authorized" ||
     course.bootstrap?.status !== "ready" ||
@@ -665,16 +638,25 @@ export const inspectManagedCourse = (
     course.synchronization?.reason === "authorization_lost"
   )
     throw new Error("Course cache is not ready.");
+  const repo = await revalidateManagedRepository(request);
   const localPath = managedCoursePath(userData, userId, course.repositoryId);
-  safeDirectories(userData, localPath);
-  rejectLinks(localPath);
-  const metadata = loadMetadata().inspectCourse(
-    fs.readFileSync(path.join(localPath, "course.yml"), "utf8")
-  );
-  if (metadata.status !== "valid") throw new Error("Course metadata is invalid.");
-  const terms = fs
-    .readdirSync(path.join(localPath, "terms"))
-    .filter((term) => TERM_PATTERN.test(term));
+  const workspace = await validateStructure(request, repo, localPath, request.authenticate());
+  const inspection = await workspace.inspect();
+  if (
+    inspection.head.kind !== "attached" ||
+    inspection.head.branch !== repo.defaultBranch ||
+    inspection.workingTree.trackedChanges.length ||
+    inspection.workingTree.stagedChanges.length ||
+    inspection.workingTree.untrackedPaths.length ||
+    inspection.workingTree.conflicts.length
+  )
+    throw new Error("Course cache HEAD or working tree requires attention.");
+  const access = await validateMetadata(request, repo, localPath, inspection.head.commit);
+  const metadata = access.course;
+  const terms =
+    metadata.schemaVersion === 1
+      ? Object.keys(access.termContents)
+      : access.terms.map((term) => term.code);
   const assignments: ManagedCourseInspection["assignments"][number][] = [];
   for (const term of terms) {
     const directory = path.join(localPath, "terms", term, "assignments");
@@ -693,6 +675,10 @@ export const inspectManagedCourse = (
       }
     }
   }
+  if (!(await request.revalidateSession())) throw new Error("Course session changed.");
+  if ((await request.reader.revision(repo)) !== access.revision)
+    throw new Error("Course source changed. Refresh courses.");
+  assertActive(request);
   return {
     repositoryId: course.repositoryId,
     code: metadata.code,
@@ -918,7 +904,12 @@ export const performSynchronization = async (
         "Managed cache changed during synchronization. Refresh courses to re-inspect."
       );
     // Remote authoritative changes are never rolled back, even when this validation fails.
-    const metadata = await validateMetadata(request, repo, localPath);
+    const access = await validateMetadata(
+      request,
+      repo,
+      localPath,
+      observed.head.kind === "attached" ? observed.head.commit : undefined
+    );
     const validatedHead = observed.head;
     const latest = await revalidateManagedRepository(request);
     if (latest.defaultBranch !== repo.defaultBranch)
@@ -944,6 +935,7 @@ export const performSynchronization = async (
         "unsafe_repository",
         "Managed cache changed during validation. Refresh courses to re-inspect."
       );
+    await validateMetadata(request, latest, localPath, observed.head.commit);
     assertActive(request);
     const timestamp = new Date().toISOString();
     const previousPublication = loadManagedCatalog(request.userData, request.userId).courses[
@@ -964,7 +956,12 @@ export const performSynchronization = async (
       ahead: 0,
       behind: 0,
       lastSuccessfulAt: timestamp,
-      metadata
+      metadata: {
+        code: access.course.code,
+        title: access.course.title,
+        schemaVersion: access.course.schemaVersion,
+        ...(access.course.lifecycle ? { lifecycle: access.course.lifecycle } : {})
+      }
     };
   } catch (error) {
     return { ...synchronizationFailure(error), localCommit: before };

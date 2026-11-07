@@ -80,6 +80,21 @@ authentication.
 If the folder is rejected, confirm that `course.yml` is at its root and that
 the expected `terms/` folder is inside it.
 
+For discovered courses, use **Refresh courses** and **Course details**. Existing
+Schema 1 courses still use your configured MSOE username and remain eligible for
+**Review migration**. Schema 2 course access uses your signed-in GitHub account's
+immutable identity and recorded faculty roles; changing your local username cannot
+grant access. Course details include only terms authorized for that account. Former
+faculty retain their permitted historical views; fallback administration alone does
+not grant student or section access.
+
+Shared archived Schema 2 courses appear through **Show archived** and continue to
+synchronize. Course editing and student operations for Schema 2 are unavailable in
+this version. Production course upgrades remain disabled. An incompatible or newer
+schema requires an update; Graider will not open a stale Schema 1 cache as a workaround.
+If the remote course changed or freshness cannot be verified, refresh courses before
+opening its details. Your local files are preserved.
+
 ## Course Dashboard Overview
 
 The dashboard groups available courses, terms, and assignments. Select an

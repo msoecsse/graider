@@ -3169,8 +3169,12 @@ Schema v2. Graider never automatically downgrades course schemas. Unsupported ne
 schemas receive the same refusal. Parser support alone does not establish operational
 compatibility, and renderer assertions cannot establish trusted readiness.
 
-Current operational gates remain 1. This policy records required behavior, not its
-implementation or release completion. Missing required technical evidence blocks
+Slice 9.5F implements schema-discriminated discovery, synchronization and metadata access
+for Schemas 1 and 2, with exact authoritative revision checks and immutable-ID v2
+authorization. Generic operation gates remain 1 and refuse v2 until #23 supplies the
+operation bridge. See the [implemented access contract](graider-schema-v2-migration.md#implemented-schema-discriminated-discovery-and-access-slice-95f).
+This access cutover does not establish full operational compatibility or release
+completion. Missing required technical evidence blocks
 publication with an actionable finding. Production-release availability is a separate
 enablement condition; the Phase 3 signing/distribution/update dependencies remain
 pending until verified, and a Preview artifact does not satisfy them. See the

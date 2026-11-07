@@ -107,8 +107,9 @@ Before publication:
    to satisfy this policy.
 
 Implementation readiness and production-release availability are separate facts.
-Current operational course/term gates remain **1**; existing v2 parsing and pure
-migration artifacts do not prove operational v2 support. Validator development may
+Discovery, synchronization and metadata access explicitly support **1 and 2** after
+Slice 9.5F; generic course/term operation gates remain **1** pending #23. Access support,
+v2 parsing and pure migration artifacts do not prove full operational v2 support. Validator development may
 use synthetic evidence, but production publication remains disabled while any
 required technical condition, acknowledgement or release availability is unproven.
 No new release service or proof mechanism is authorized by this decision.
@@ -672,3 +673,56 @@ credentials with real local/bare repositories. There is no production synthetic-
 flag or readiness override. Passing tests does not make migration operationally available.
 Post-publication reconciliation orchestration remains #24; this capability does not execute
 it. Operational gates stay **1**, Setup stays Schema 1, and no real course is migrated.
+
+### Implemented schema-discriminated discovery and access (Slice 9.5F)
+
+The backend declares discovery/access support independently from parsing and from the
+legacy operation bridge. `remoteCourseMetadataBackend.inspectCourse` accepts Schema 1
+and authoritative Schema 2; missing/unknown operational support produces
+`client_incompatible`, and newer schemas produce `unsupported_schema`. Neither outcome
+permits legacy fallback. `inspectOperationCourse` and default transaction validation
+still accept only Schema 1. Setup and the #20/#21 production-publication refusal are
+unchanged; this is not evidence of a compatible production release or full mutation support.
+
+`readRemoteCourseAccess` observes the authenticated default-branch SHA, reads course and
+term metadata at that exact commit, and rechecks the authoritative SHA before returning
+access. Discovery never chooses authorization from a managed cache. Synchronization
+validates authoritative metadata before fetching/fast-forwarding; successful cache
+validation additionally requires exact HEAD, course bytes, term inventory and term bytes
+to match the current remote observation. Stale assumptions fail rather than authorizing a
+legacy route. No stale cache can hide a valid newly published v2 course from discovery.
+
+Schema 1 retains its institutional-username resolver, discovery identity-required state,
+valid operations and migration-review eligibility. No v2 faculty identity is inferred.
+Schema 2 requires immutable course repository and organization IDs, a complete valid term
+set/creation order/lifecycle and valid faculty/fallback/role references. Mutable organization
+locators may be stale after a rename under the same immutable ID; contradictory stored
+organization locators fail validation. Transfers/identity mismatches require reconciliation.
+Unknown root migration conditions cannot pass the strict schema. Migration audit findings
+and deferred reconciliation do not manufacture operational readiness or mutation authority.
+
+The immutable authenticated GitHub ID is mapped through `FacultyDirectory`; the existing
+`AuthorizationResolver`, Draft/Archived overlays, `FallbackAdministrator` and
+`CourseLifecycle` determine metadata visibility. Current/former historical scope survives;
+Draft visibility follows the Draft overlay. Current coordinator scope is never implicitly
+expanded, and fallback alone grants term/recovery metadata without students or sections.
+Directory membership, usernames, renderer assertions and local settings grant no v2 role.
+Fresh main-owned Course details inspection returns only authorized term and assignment
+metadata, with no roster, grading data or executable authorization ticket. Shared archive
+is shown through **Show archived**, independently of synchronization eligibility.
+
+Managed operation entry points inspect the freshly synchronized schema before invoking
+legacy domain code. Default isolated transactions refuse non-v1 sources before calling
+their mutator and retain exact-base/pre-push revision checks. Previously discovered uncut
+legacy reads also revalidate authoritative access before using their local source.
+Discovery refusals retain trusted folder-ID bindings so excluded incompatible or ambiguous
+courses cannot silently revert to a registered legacy cache. These transient bindings
+contain no filesystem paths or authorization capability. V2
+generic operations remain safely unavailable; #23 owns their authorization/compatibility
+bridge and broader managed-operation routing. #24 retains reconciliation orchestration;
+#25 retains the production warning/acknowledgement UI. No migration is enabled here.
+
+Deterministic mixed-schema, role/lifecycle/identity/compatibility tests and real local/bare
+Git tests cover immediate rediscovery, stale-v1 inspection refusal, synchronization to v2,
+authorization loss and zero stale mutation/overwrite/downgrade. macOS arm64/Windows x64
+release and CI prerequisites remain independent of local test success.

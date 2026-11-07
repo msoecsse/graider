@@ -153,13 +153,14 @@ const fixture = async () => {
     authenticate: () => context,
     onProgress: () => {},
     reader: {
+      revision: async () => git(remote, ["rev-parse", "refs/heads/main"]),
       resolveId: async () => repository,
       resolve: async () => repository,
       list: async () => [repository],
       search: async () => ({ ids: [20], incomplete: false }),
       terms: async () => ["27s1"],
-      file: async (_repo, file) => {
-        const result = await exec(["show", `main:${file}`], remote);
+      file: async (_repo, file, revision = "main") => {
+        const result = await exec(["show", `${revision}:${file}`], remote);
         return result.exitCode === 0 ? result.stdout : null;
       }
     }
@@ -296,9 +297,12 @@ describe("bundled Git managed synchronization, real two-clone history", () => {
     expect(result.diagnostic).toBeNull();
     expect(result).toMatchObject({ status: "updated", currentCommit: target });
     expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(target);
-    const metadata = inspectManagedCourse(f.root, 42, {
-      ...f.request.course,
-      bootstrap: { status: "ready", retryable: false, diagnostic: null }
+    const metadata = await inspectManagedCourse({
+      ...f.request,
+      course: {
+        ...f.request.course,
+        bootstrap: { status: "ready", retryable: false, diagnostic: null }
+      }
     });
     expect(metadata.title).toBe("Updated remotely");
     expect(metadata.assignments).toEqual([

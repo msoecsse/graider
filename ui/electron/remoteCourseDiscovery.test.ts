@@ -70,6 +70,7 @@ sections:
 `;
 const fixture = (repositories = [repo()]) => {
   const reader = {
+    revision: vi.fn().mockResolvedValue("a".repeat(40)),
     list: vi.fn().mockResolvedValue(repositories),
     search: vi.fn().mockResolvedValue({ ids: [], incomplete: false }),
     resolveId: vi.fn().mockResolvedValue(repositories[0]),
@@ -163,11 +164,11 @@ describe("trusted read-only remote course discovery", () => {
   it.each([
     [null, "missing_metadata"],
     ["course: [invalid", "invalid_metadata"],
-    [courseYaml.replace("schema_version: 1", "schema_version: 2"), "unsupported_schema"],
+    [courseYaml.replace("schema_version: 1", "schema_version: 2"), "invalid_metadata"],
     [
       courseYaml.replace("schema_version: 1", "schema_version: 2") +
         "faculty_directory:\n  - institutional_username: jones\n    github_user_id: 42\n    github_login: current-login\n    github_login_history: []\nfallback_administrator:\n  github_user_id: 42\n",
-      "unsupported_schema"
+      "invalid_metadata"
     ],
     [courseYaml.replace("schema_version: 1", "schema_version: 3"), "unsupported_schema"],
     [courseYaml.replace("organization: csc1120", "organization: other"), "migration_required"],
@@ -190,7 +191,11 @@ describe("trusted read-only remote course discovery", () => {
     const f = fixture([repo(20, "historical-custom-name")]);
     f.reader.search.mockResolvedValue({ ids: [20], incomplete: false });
     expect((await f.run()).courses[0].discoveryHints).toContain("code_search");
-    expect(f.reader.file).toHaveBeenCalledWith(expect.objectContaining({ id: 20 }), "course.yml");
+    expect(f.reader.file).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 20 }),
+      "course.yml",
+      "a".repeat(40)
+    );
   });
   it("reports ambiguity even if only one candidate authorizes the faculty", async () => {
     const f = fixture([repo(), repo(21, "other-admin", ["graider-course"])]);
@@ -347,6 +352,7 @@ describe("read-only local origin verification", () => {
 it("rediscovers a cut-over registration by immutable catalog ID without consulting a legacy origin", async () => {
   const repository = repo(20, "unusual-repository-name");
   const reader: RemoteRepositoryReader = {
+    revision: async () => "a".repeat(40),
     list: async () => [],
     search: async () => ({ ids: [], incomplete: false }),
     resolve: vi.fn(),

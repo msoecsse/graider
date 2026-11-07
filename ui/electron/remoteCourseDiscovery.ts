@@ -1,3 +1,4 @@
+import { readRemoteCourseAccess } from "./remoteCourseAccess.js";
 import { sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,7 +10,6 @@ import {
   type RemoteRepositoryReader
 } from "./githubRemoteRepositories.js";
 import type {
-  CourseAuthorization,
   CourseDiscoveryDiagnostic,
   RemoteCourse,
   RemoteCourseDiscovery
@@ -230,75 +230,48 @@ export const discoverRemoteCourses = async (request: Request): Promise<RemoteCou
           );
         const valid = (
           await mapBounded(candidates, async (repo): Promise<RemoteCourse | null> => {
+            const localFolderIds = [...localIds.entries()]
+              .filter(([, repositoryId]) => repositoryId === repo.id)
+              .map(([folderId]) => folderId);
             try {
               if (repo.disabled)
                 throw new GithubOAuthError(
                   "repository_inaccessible",
                   "Candidate course repository is disabled."
                 );
-              const content = await reader.file(repo, "course.yml");
-              if (content === null) {
+              const access = await readRemoteCourseAccess(
+                reader,
+                repo,
+                request.userId,
+                request.username,
+                metadata
+              );
+              if (access.status !== "valid") {
                 diagnostics.push({
                   organizationId: org.organizationId,
                   repositoryId: repo.id,
-                  status: "missing_metadata",
-                  message: "A course discovery hint did not contain root course.yml."
-                });
-                return null;
-              }
-              const course = metadata.inspectCourse(content);
-              if (course.status !== "valid") {
-                diagnostics.push({
-                  organizationId: org.organizationId,
-                  repositoryId: repo.id,
-                  status: course.status,
+                  localFolderIds,
+                  status:
+                    access.status === "identity_mismatch" ? "migration_required" : access.status,
                   message:
-                    course.status === "unsupported_schema"
-                      ? "course.yml uses an unsupported schema version."
-                      : "course.yml failed Graider course validation."
+                    access.status === "unsupported_schema" ||
+                    access.status === "client_incompatible"
+                      ? "This client cannot operate the authoritative course schema. Update Graider."
+                      : "Authoritative course metadata or identity could not be validated. Refresh after repair."
                 });
                 return null;
               }
-              if (course.organization.toLowerCase() !== org.login.toLowerCase()) {
-                diagnostics.push({
-                  organizationId: org.organizationId,
-                  repositoryId: repo.id,
-                  status: "migration_required",
-                  message:
-                    "Configured organization does not match repository. Manual reconciliation is required."
-                });
-                return null;
-              }
-              // v1 course.repository is a logical string, not an owner/name or immutable remote identity.
-              let authorization: CourseAuthorization = "faculty_identity_required";
+              const course = access.course;
+              const authorization = access.authorization;
               const attention: string[] = repo.archived
                 ? ["GitHub repository is archived and read-only."]
                 : [];
-              if (request.username !== null) {
-                authorization = "not_authorized";
-                let incomplete = false;
-                try {
-                  const termCodes = await reader.terms(repo);
-                  for (const termCode of termCodes) {
-                    const term = await reader.file(repo, `terms/${termCode}/term.yml`);
-                    const result =
-                      term === null
-                        ? "invalid_metadata"
-                        : metadata.inspectTermFaculty(term, termCode, request.username);
-                    if (result === "authorized") authorization = "authorized";
-                    if (result === "invalid_metadata") incomplete = true;
-                  }
-                } catch (error) {
-                  incomplete = true;
-                  diagnostics.push(diagnostic(org.organizationId, error, repo.id));
-                }
-                if (incomplete) {
-                  attention.push(
-                    "Some term faculty metadata could not be validated. Refresh after repair or reconnection."
-                  );
-                  if (authorization !== "authorized") authorization = "unavailable";
-                }
-              } else attention.push("Set your MSOE username to verify course access.");
+              if (access.incomplete)
+                attention.push(
+                  "Some term faculty metadata could not be validated. Refresh after repair or reconnection."
+                );
+              if (authorization === "faculty_identity_required")
+                attention.push("Set your MSOE username to verify course access.");
               const matched = [...localIds.entries()]
                 .filter(([, repositoryId]) => repositoryId === repo.id)
                 .map(([folderId]) => folderId);
@@ -334,6 +307,7 @@ export const discoverRemoteCourses = async (request: Request): Promise<RemoteCou
                 code: course.code,
                 title: course.title,
                 schemaVersion: course.schemaVersion,
+                ...(course.lifecycle ? { lifecycle: course.lifecycle } : {}),
                 discoveryHints: [
                   ...(repo.topics.includes("graider-course") ? ["topic"] : []),
                   ...(nameHint(repo) ? ["legacy_name"] : []),
@@ -346,7 +320,10 @@ export const discoverRemoteCourses = async (request: Request): Promise<RemoteCou
                 diagnostics: attention
               };
             } catch (error) {
-              diagnostics.push(diagnostic(org.organizationId, error, repo.id));
+              diagnostics.push({
+                ...diagnostic(org.organizationId, error, repo.id),
+                localFolderIds
+              });
               return null;
             }
           })
@@ -356,6 +333,7 @@ export const discoverRemoteCourses = async (request: Request): Promise<RemoteCou
           diagnostics.push({
             organizationId: org.organizationId,
             status: "ambiguous",
+            localFolderIds: valid.flatMap((course) => [...course.localFolderIds]),
             message:
               "Multiple valid Graider course repositories found in organization. No course was selected."
           });

@@ -9,6 +9,12 @@ export const TERM_SCHEMA_VERSION_V2 = 2;
 // Parsing support is independent of production authorization readiness.
 export const OPERATIONAL_COURSE_SCHEMA_VERSION = SUPPORTED_SCHEMA_VERSION;
 export const OPERATIONAL_TERM_SCHEMA_VERSION = SUPPORTED_SCHEMA_VERSION;
+// Discovery/access support is independent of the legacy operation bridge above.
+// Never derive operational support from the parser's maximum accepted version.
+export const OPERATIONAL_DISCOVERY_SCHEMA_VERSIONS: readonly number[] = Object.freeze([
+  SUPPORTED_SCHEMA_VERSION,
+  COURSE_SCHEMA_VERSION_V2
+]);
 export const SUPPORTED_ASSIGNMENT_TYPE = "individual";
 export const SUPPORTED_REPOSITORY_VISIBILITY = "private";
 export const STUDENT_PERMISSION = "admin";

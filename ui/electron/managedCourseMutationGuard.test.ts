@@ -13,6 +13,7 @@ import { createCourseMutationIpc, COURSE_MUTATION_CHANNELS } from "./courseMutat
 import type { RemoteCourse, ManagedSynchronizationState } from "./remoteCourseTypes";
 import type { GithubOAuthSession } from "./githubOAuthSession";
 import { getProductionGitWorkspaceFactory } from "./gitWorkspaceReader";
+import { managedCoursePath } from "./managedCourses";
 
 const sha = "a".repeat(40);
 const course: RemoteCourse = {
@@ -286,13 +287,27 @@ const deferred = () => {
   });
   return { promise, release };
 };
+const prepareSynchronizedMetadata = (userData: string, repositoryId: number) => {
+  // This unit fixture shares the app profile and legacy root; keep simulated
+  // managed storage out of the legacy working-tree evidence, as in production.
+  fs.appendFileSync(path.join(userData, ".git", "info", "exclude"), "\n/managed-courses/\n");
+  const cache = managedCoursePath(userData, 42, repositoryId);
+  fs.mkdirSync(cache, { recursive: true });
+  fs.writeFileSync(
+    path.join(cache, "course.yml"),
+    fs
+      .readFileSync("../tests/fixtures/config/valid-course/course.yml", "utf8")
+      .replaceAll("example-org", "fixture")
+  );
+};
 describe("guard execution and account isolation", () => {
   const execution = async () => {
     const f = await fixture();
     let generation = 1;
     let signedIn = true;
-    const sync = vi.fn(async (_repo, _user, operation) =>
-      operation(
+    const sync = vi.fn(async (_repo, _user, operation) => {
+      prepareSynchronizedMetadata(f.root, _repo);
+      return operation(
         {
           userId: 42,
           token: "never-rendered",
@@ -301,8 +316,8 @@ describe("guard execution and account isolation", () => {
           revalidateSession: async () => signedIn
         },
         { ...ready, currentCommit: f.head }
-      )
-    );
+      );
+    });
     const session = {
       get mutationGeneration() {
         return generation;
@@ -360,6 +375,8 @@ describe("guard execution and account isolation", () => {
         "https://github.com/fixture/other.git"
       ]);
       const other = { ...course, repositoryId: 21, localFolderIds: ["other"] };
+      prepareSynchronizedMetadata(f.root, course.repositoryId);
+      prepareSynchronizedMetadata(f.root, other.repositoryId);
       f.sync.mockImplementation(async (_repo, _user, operation) =>
         operation(
           { course: other, userId: 42, token: "test", revalidateSession: async () => true },

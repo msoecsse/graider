@@ -481,11 +481,15 @@ const validateStudentPublishConfig = (
     : validateDisabledStudentPublishConfig(filePath, reports.student_publish);
 };
 
-/** Production validation stays at v1 until the v2 authorization model is operational.
- * Lower-level course parsing deliberately supports v2 for schema/model development.
+/** Legacy operations default to v1. A schema-discriminated access caller must explicitly
+ * select an operational version after checking its independently declared support.
  */
-export const validateCourseConfig = (filePath: string, config: RawCourseConfig): Diagnostic[] => [
-  ...validateSchemaVersion(filePath, config.schema_version),
+export const validateCourseConfig = (
+  filePath: string,
+  config: RawCourseConfig,
+  operationalSchemaVersion = SUPPORTED_SCHEMA_VERSION
+): Diagnostic[] => [
+  ...validateSchemaVersion(filePath, config.schema_version, operationalSchemaVersion),
   ...(config.github.repository_visibility === SUPPORTED_REPOSITORY_VISIBILITY
     ? []
     : [
@@ -532,9 +536,10 @@ export const validateCourseConfig = (filePath: string, config: RawCourseConfig):
 export const validateTermConfig = (
   filePath: string,
   config: RawTermConfig,
-  expectedTermCode: string
+  expectedTermCode: string,
+  operationalSchemaVersion = OPERATIONAL_TERM_SCHEMA_VERSION
 ): Diagnostic[] => [
-  ...validateSchemaVersion(filePath, config.schema_version, OPERATIONAL_TERM_SCHEMA_VERSION),
+  ...validateSchemaVersion(filePath, config.schema_version, operationalSchemaVersion),
   ...(config.term.code === expectedTermCode
     ? []
     : [

@@ -178,6 +178,15 @@ export const publishManagedCourseTransaction = async <T>(
     )
       throw new Error("Unsafe transaction repository.");
     await active();
+    if (
+      !request.validateMetadata &&
+      loadMetadata().inspectOperationCourse(fs.readFileSync(path.join(root, "course.yml"), "utf8"))
+        .status !== "valid"
+    )
+      blockMutation(
+        "remote_only_mutation_unavailable",
+        "This client cannot mutate the authoritative course schema."
+      );
     const beforeFiles = snapshot(root);
     const result = await request.mutate(root);
     mutationResult = result;

@@ -148,19 +148,34 @@ export const createRemoteRepositoryReader = (
     if (response.status < 200 || response.status >= 300) return fail("error");
     return body;
   };
-  const metadata = async (repo: CourseRepository, metadataPath: string) =>
+  const metadata = async (repo: CourseRepository, metadataPath: string, revision?: string) =>
     request(
       (bounded) =>
         client.getCourseMetadataPath!(
           repo.owner,
           repo.name,
           metadataPath,
-          repo.defaultBranch,
+          revision ?? repo.defaultBranch,
           bounded
         ),
       true
     );
   return {
+    async revision(repo: CourseRepository): Promise<string> {
+      try {
+        const branch = await client.getRepositoryBranch(repo.owner, repo.name, repo.defaultBranch);
+        if (
+          signal.aborted ||
+          !branch ||
+          branch.name !== repo.defaultBranch ||
+          !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(branch.commitSha)
+        )
+          return fail("error");
+        return branch.commitSha;
+      } catch {
+        return fail("network_unavailable");
+      }
+    },
     async list(org: string): Promise<CourseRepository[]> {
       const repos = new Map<number, CourseRepository>();
       let page = 1;
@@ -217,10 +232,14 @@ export const createRemoteRepositoryReader = (
       );
       return body === null ? null : normalize(body);
     },
-    async file(repo: CourseRepository, metadataPath: string): Promise<string | null> {
+    async file(
+      repo: CourseRepository,
+      metadataPath: string,
+      revision?: string
+    ): Promise<string | null> {
       if (!/^(?:course\.yml|terms\/[A-Za-z0-9._-]+\/term\.yml)$/.test(metadataPath))
         return fail("error");
-      const body = await metadata(repo, metadataPath);
+      const body = await metadata(repo, metadataPath, revision);
       if (body === null) return null;
       const file = object(body);
       if (
@@ -235,8 +254,8 @@ export const createRemoteRepositoryReader = (
         return fail("error");
       return Buffer.from(file.content, "base64").toString("utf8");
     },
-    async terms(repo: CourseRepository): Promise<string[]> {
-      const body = await metadata(repo, "terms");
+    async terms(repo: CourseRepository, revision?: string): Promise<string[]> {
+      const body = await metadata(repo, "terms", revision);
       if (body === null) return [];
       // Contents API directories are capped at 1000; never claim a complete negative at the cap.
       if (!Array.isArray(body) || body.length >= SEARCH_RESULT_LIMIT) return fail("error");

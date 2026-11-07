@@ -110,10 +110,11 @@ export const managedOperationalFixture = async () => {
     topics: []
   };
   const reader: RemoteRepositoryReader = {
+    revision: async () => git(remote, ["rev-parse", "refs/heads/main"]),
     resolveId: async () => repository,
     resolve: async () => repository,
-    file: async (_repo, file) => {
-      const result = await exec(["show", `refs/heads/main:${file}`], remote);
+    file: async (_repo, file, revision = "refs/heads/main") => {
+      const result = await exec(["show", `${revision}:${file}`], remote);
       return result.exitCode === 0 ? result.stdout : null;
     },
     terms: async () => ["27s1"],
@@ -191,8 +192,22 @@ export const managedOperationalFixture = async () => {
     },
     getState: () => ({
       identity: userId ? { id: userId, login: "faculty" } : null,
-      courseDiscovery: { userId, courses: [course] }
+      courseDiscovery: { userId, courses: [course], diagnostics: [] }
     }),
+    withReadOnlyCourse: async <T>(
+      _id: number,
+      expected: number,
+      operation: (input: ManagedOperationInput) => Promise<T>
+    ) => {
+      if (userId !== expected) throw new Error("Account changed.");
+      return operation({
+        token: "oauth-fixture-secret",
+        userId: expected,
+        course,
+        signal: controller.signal,
+        revalidateSession: async () => userId === expected
+      });
+    },
     withSynchronizedCourse: async <T>(
       _id: number,
       expected: number,

@@ -79,6 +79,7 @@ export const RemoteCoursesPanel = ({
   const [inspectionUserId, setInspectionUserId] = useState<number | null>(null);
   const [selectedTerm, setSelectedTerm] = useState<string | null>(null);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   useEffect(() => {
     setInspection(null);
     setInspectionError(null);
@@ -88,7 +89,8 @@ export const RemoteCoursesPanel = ({
   const visible =
     current?.courses.filter(
       (course) =>
-        course.localStatus !== "registered_local" &&
+        (course.localStatus !== "registered_local" || course.schemaVersion === 2) &&
+        (course.lifecycle !== "archived" || showArchived) &&
         (course.authorization === "authorized" ||
           course.authorization === "faculty_identity_required")
     ) ?? [];
@@ -137,6 +139,17 @@ export const RemoteCoursesPanel = ({
           >
             Refresh courses
           </button>
+          {current?.courses.some(
+            (course) => course.lifecycle === "archived" && course.authorization === "authorized"
+          ) ? (
+            <button
+              type="button"
+              aria-pressed={showArchived}
+              onClick={() => setShowArchived((value) => !value)}
+            >
+              {showArchived ? "Hide archived" : "Show archived"}
+            </button>
+          ) : null}
           {state.repositoryPermission === "required" ? (
             <>
               <p>GitHub authorization needs updating for private course discovery.</p>
@@ -180,7 +193,9 @@ export const RemoteCoursesPanel = ({
           {current?.courses
             .filter(
               (course) =>
-                course.localStatus === "registered_local" && course.synchronization?.retryable
+                course.localStatus === "registered_local" &&
+                course.schemaVersion === 1 &&
+                course.synchronization?.retryable
             )
             .map((course) => (
               <button type="button" key={course.repositoryId} onClick={onRefresh}>
@@ -188,7 +203,9 @@ export const RemoteCoursesPanel = ({
               </button>
             ))}
           {current?.courses
-            .filter((course) => course.localStatus === "registered_local")
+            .filter(
+              (course) => course.localStatus === "registered_local" && course.schemaVersion === 1
+            )
             .map((course) => (
               <div
                 key={`${current.userId}:${course.repositoryId}`}
@@ -232,7 +249,11 @@ export const RemoteCoursesPanel = ({
                   </p>
                   {course.bootstrap?.status === "ready" &&
                   course.synchronization?.status !== "needs_attention" ? (
-                    <p>Open this course from the course dashboard.</p>
+                    <p>
+                      {course.schemaVersion === 2
+                        ? "Course details are available. Course editing and student operations are unavailable in this version."
+                        : "Open this course from the course dashboard."}
+                    </p>
                   ) : null}
                   <ManagedCacheReview
                     key={`${current?.userId}:${course.repositoryId}`}
@@ -350,7 +371,9 @@ export const RemoteCoursesPanel = ({
                   <p key={course.repositoryId}>
                     {course.code}:{" "}
                     {course.authorization === "not_authorized"
-                      ? "Current MSOE faculty identity has no assigned sections."
+                      ? course.schemaVersion === 2
+                        ? "The signed-in GitHub account has no authorizing faculty role."
+                        : "Current MSOE faculty identity has no assigned sections."
                       : "Faculty authorization could not be verified."}
                   </p>
                 ))}

@@ -26,6 +26,7 @@ export interface RemoteCourse {
   readonly code: string;
   readonly title: string;
   readonly schemaVersion: number;
+  readonly lifecycle?: "unarchived" | "archived";
   readonly discoveryHints: readonly string[];
   readonly authorization: CourseAuthorization;
   readonly localStatus: CourseLocalStatus;
@@ -46,11 +47,14 @@ export type CourseDiscoveryProblem =
   | "search_incomplete"
   | "missing_metadata"
   | "unsupported_schema"
+  | "client_incompatible"
   | "invalid_metadata"
   | "ambiguous";
 export interface CourseDiscoveryDiagnostic {
   readonly organizationId: number | null;
   readonly repositoryId?: number;
+  /** Trusted refusal binding for courses excluded from normal discovery. */
+  readonly localFolderIds?: readonly string[];
   readonly status: CourseDiscoveryProblem;
   readonly message: string;
 }
@@ -138,7 +142,12 @@ export interface ManagedSynchronizationState {
   readonly ahead?: number;
   readonly behind?: number;
   readonly lastSuccessfulAt?: string;
-  readonly metadata?: { readonly code: string; readonly title: string };
+  readonly metadata?: {
+    readonly code: string;
+    readonly title: string;
+    readonly schemaVersion?: number;
+    readonly lifecycle?: "unarchived" | "archived";
+  };
 }
 export const synchronizationLabel = (state: ManagedSynchronizationState): string =>
   ({

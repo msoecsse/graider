@@ -47,6 +47,38 @@ const show = (value: GithubOAuthState) => {
   return { onRefresh, onSettings };
 };
 describe("remote dashboard course discovery", () => {
+  it("keeps shared archived v2 courses behind Show archived and opens metadata by ID", async () => {
+    const inspectManagedCourse = vi.fn().mockResolvedValue({
+      repositoryId: course.repositoryId,
+      code: course.code,
+      title: course.title,
+      terms: ["27s1"],
+      assignments: []
+    });
+    Object.assign(window.graiderUI, { githubOAuth: { inspectManagedCourse } });
+    show({
+      ...state,
+      courseDiscovery: {
+        ...state.courseDiscovery,
+        courses: [
+          {
+            ...course,
+            schemaVersion: 2,
+            lifecycle: "archived",
+            localStatus: "registered_local",
+            localFolderIds: ["registered"],
+            bootstrap: { status: "ready", diagnostic: null, retryable: false }
+          }
+        ]
+      }
+    });
+    expect(screen.queryByRole("button", { name: "Course details" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show archived" }));
+    fireEvent.click(screen.getByRole("button", { name: "Course details" }));
+    expect(await screen.findByRole("button", { name: "27s1" })).toBeInTheDocument();
+    expect(inspectManagedCourse).toHaveBeenCalledWith(course.repositoryId);
+    expect(screen.queryByRole("link", { name: /Review migration/ })).not.toBeInTheDocument();
+  });
   it("inspects cached course/term/assignment metadata by ID and offers no mutation", async () => {
     const inspectManagedCourse = vi.fn().mockResolvedValue({
       repositoryId: course.repositoryId,

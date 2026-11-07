@@ -28,6 +28,7 @@ const fixture = () => {
     getCourseRepositoryById: vi.fn().mockResolvedValue(response(rawRepo(20))),
     getCourseRepository: vi.fn().mockResolvedValue(response(rawRepo(20))),
     getCourseMetadataPath: vi.fn(),
+    getRepositoryBranch: vi.fn().mockResolvedValue({ name: "main", commitSha: "a".repeat(40) }),
     getOrganizationScopeResponse: vi.fn().mockResolvedValue(response({})),
     createRepository: vi.fn(),
     writeRepositoryFile: vi.fn(),
@@ -43,6 +44,38 @@ const fixture = () => {
   };
 };
 describe("GitHub remote repository read adapter", () => {
+  it("pins course metadata and term enumeration to the observed authoritative commit", async () => {
+    const f = fixture();
+    const repo = (await f.reader.resolveId(20))!;
+    const revision = await f.reader.revision(repo);
+    f.client.getCourseMetadataPath.mockResolvedValue(response(null, 404));
+    await f.reader.file(repo, "course.yml", revision);
+    await f.reader.terms(repo, revision);
+    expect(f.client.getCourseMetadataPath).toHaveBeenCalledWith(
+      "org",
+      "repo-20",
+      "course.yml",
+      revision,
+      expect.any(AbortSignal)
+    );
+    expect(f.client.getCourseMetadataPath).toHaveBeenCalledWith(
+      "org",
+      "repo-20",
+      "terms",
+      revision,
+      expect.any(AbortSignal)
+    );
+  });
+  it.each([
+    null,
+    { name: "main", commitSha: "unknown" },
+    { name: "other", commitSha: "a".repeat(40) }
+  ])("refuses unavailable or mismatched authoritative revision %j", async (branch) => {
+    const f = fixture();
+    f.client.getRepositoryBranch.mockResolvedValue(branch);
+    await expect(f.reader.revision((await f.reader.resolveId(20))!)).rejects.toThrow();
+    expect(f.client.getCourseMetadataPath).not.toHaveBeenCalled();
+  });
   it("resolves immutable ID without consulting old owner/name", async () => {
     const f = fixture();
     expect(await f.reader.resolveId(20)).toMatchObject({ id: 20, owner: "org" });
@@ -148,6 +181,7 @@ describe("GitHub remote repository read adapter", () => {
       "list",
       "resolve",
       "resolveId",
+      "revision",
       "search",
       "terms"
     ]);

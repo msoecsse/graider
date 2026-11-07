@@ -1854,7 +1854,7 @@ app.whenReady().then(async () => {
     username: () =>
       loadLocalSettings(getLocalSettingsPath(app.getPath("userData"))).currentFacultyMsoeUsername
   });
-  ipcMain.handle("graider-ui:managed-course:inspect", (_event, repositoryId: unknown) => {
+  ipcMain.handle("graider-ui:managed-course:inspect", async (_event, repositoryId: unknown) => {
     const state = facultyAuth.getState();
     const course = state.courseDiscovery.courses.find(
       (candidate) => candidate.repositoryId === repositoryId
@@ -1862,7 +1862,16 @@ app.whenReady().then(async () => {
     if (!state.identity || state.courseDiscovery.userId !== state.identity.id || !course)
       throw new Error("Authorized course identity is required.");
     try {
-      return inspectManagedCourse(app.getPath("userData"), state.identity.id, course);
+      return await facultyAuth.withReadOnlyCourse(course.repositoryId, state.identity.id, (input) =>
+        inspectManagedCourse({
+          ...input,
+          userData: app.getPath("userData"),
+          username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+            .currentFacultyMsoeUsername,
+          reader: createRemoteRepositoryReader(input.token, input.signal),
+          authenticate: () => createAuthenticatedProductionGitWorkspace(input.token)
+        })
+      );
     } catch {
       throw new Error("Cached course details are unavailable. Refresh courses.");
     }
