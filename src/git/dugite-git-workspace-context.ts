@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createGitAuthenticationContext, type GitAuthenticationContext } from "./git-workspace.js";
 import type { GitCredentialResolver } from "./git-credential-resolver.js";
-import { createDugiteGitRunners } from "./dugite-git-runners.js";
+import { createDugiteGitRunners, type DugiteGitRunners } from "./dugite-git-runners.js";
 import { GitCommandWorkspaceFactory } from "./git-command-workspace.js";
 
 export const createDugiteGitWorkspaceFactory = (
@@ -18,7 +18,8 @@ export interface AuthenticatedDugiteGitWorkspace {
 }
 
 export const createAuthenticatedDugiteGitWorkspace = (
-  token: string
+  token: string,
+  runners: DugiteGitRunners = createDugiteGitRunners()
 ): AuthenticatedDugiteGitWorkspace => {
   const trimmedToken = token.trim();
   if (trimmedToken.length === 0) throw new Error("GitHub authentication is required.");
@@ -32,5 +33,8 @@ export const createAuthenticatedDugiteGitWorkspace = (
           : null
       )
   };
-  return { factory: createDugiteGitWorkspaceFactory(credentialResolver), authentication };
+  return {
+    factory: new GitCommandWorkspaceFactory({ ...runners, credentialResolver }),
+    authentication
+  };
 };

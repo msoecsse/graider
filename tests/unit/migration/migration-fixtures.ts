@@ -21,7 +21,7 @@ export const OTHER_ORGANIZATION_ID = 801;
 export const USER_ID = 101;
 export const OTHER_USER_ID = 102;
 export const course = parse(
-  fs.readFileSync("tests/fixtures/config/valid-course/course.yml", "utf8")
+  fs.readFileSync(new URL("../../fixtures/config/valid-course/course.yml", import.meta.url), "utf8")
 ) as RawCourseConfigV1;
 export const term: RawTermConfigV1 = {
   schema_version: 1,

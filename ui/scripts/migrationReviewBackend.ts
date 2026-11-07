@@ -31,6 +31,26 @@ export {
 export type * from "../../src/migration/migration-retry-state.js";
 export { fingerprint as migrationFingerprint } from "../../src/migration/migration-evidence.js";
 export {
+  buildMigrationCandidate,
+  STAGED_PHASE_9_BOUNDARY
+} from "../../src/migration/migration-candidate.js";
+export type * from "../../src/migration/migration-candidate.js";
+export {
+  validateMigrationPublication,
+  migrationPublicationBinding,
+  migrationCandidateFingerprint
+} from "../../src/migration/migration-publication-validation.js";
+export type * from "../../src/migration/migration-publication-models.js";
+export {
+  migrationPublicationIntentSchema,
+  migrationFileSetFingerprint,
+  readMigrationTransactionCandidate,
+  verifyMigrationTransactionFiles,
+  verifyMigrationPublicationCommit
+} from "../../src/migration/migration-publication-transaction.js";
+export type * from "../../src/migration/migration-publication-transaction.js";
+export {
+  createBranchName,
   createExactCommitRevision,
   createTrustedGitRemote,
   createGitAuthenticationContext,
@@ -110,3 +130,9 @@ export type {
   GitHubCoursePermissionClient,
   GitHubManagedTeamClient
 } from "../../src/github/github-client.js";
+export { createDugiteGitRunners, GitCommandWorkspaceFactory };
+
+export {
+  createMigrationGitRunners,
+  createAuthenticatedMigrationGitWorkspace
+} from "../../src/migration/migration-git.js";

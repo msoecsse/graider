@@ -1233,6 +1233,18 @@ stays disabled pending #21–#25 safeguards/composition and Phase 3 signing/dist
 and compatible platform releases. No production evidence provider, cutover, checkpoint or
 publication is added by #20; operational gates remain 1.
 
+Slice 9.5E / #21 implements the main-only publication transaction through the existing
+`managedCourseTransaction`, including exact-base/checkpoint/candidate validation,
+the trusted non-cancellable boundary, independent remote acceptance and durable restart
+recovery without mutation retry. See the
+[9.5E contract](graider-schema-v2-migration.md#implemented-main-only-publication-transaction-slice-95e).
+Synthetic local/bare-Git tests can exercise publication; fixed production readiness still
+refuses unavailable evidence. No IPC/action, operational cutover, production enablement,
+post-publication reconciliation orchestration or Phase 3 release infrastructure is added.
+Remaining production dependencies are #22/#23/#25 safeguards/acknowledgement and verified
+compatible signed/distributed releases and updates for both supported platforms; #24
+retains reconciliation orchestration. Operational gates remain 1. Stop after #21.
+
 ---
 
 # Phase 10 — Assignment Lifecycle and Ownership

@@ -22,6 +22,9 @@ import {
 import { blockMutation, type VerifiedCourseMutationContext } from "./managedCourseMutationGuard.js";
 import type { ManagedOperationInput } from "./githubOAuthSession.js";
 
+const TRANSACTION_CLEANUP_RETRIES = 5;
+const TRANSACTION_CLEANUP_DELAY_MS = 100;
+
 // Git status omits ignored files. Include them in transaction validation so a generated
 // ignored config cannot be reported as published, and hidden side effects cannot escape review.
 const snapshot = (root: string): Map<string, string> => {
@@ -57,6 +60,12 @@ export interface ManagedTransactionRequest<T> {
   readonly changed: () => void;
   readonly authenticate?: (token: string) => AuthenticatedGitWorkspaceContext;
   readonly factory?: GitWorkspaceFactory;
+  /** Main-only migration policy. Existing callers keep their validation/transaction semantics. */
+  readonly publication?: {
+    readonly beforeStage: (root: string) => Promise<void>;
+    readonly beforePush: (root: string, commit: string) => Promise<void>;
+    readonly verifyAcceptance: true;
+  };
 }
 export const requireReadRevision = (
   expected: unknown,
@@ -108,8 +117,14 @@ export const publishManagedCourseTransaction = async <T>(
     try {
       const sync = await input.resynchronize?.(afterPublication);
       if (sync?.currentCommit && sync.currentCommit !== context.authoritativeCommit) changed();
-      const ready =
+      let ready =
         (sync?.status === "updated" || sync?.status === "up_to_date") && !!sync.currentCommit;
+      if (ready && request.publication && published) {
+        const cache = await factory.open(context.courseFolderPath);
+        ready =
+          (await cache.resolveHead()) === sync!.currentCommit &&
+          (await cache.isAncestor(published, sync!.currentCommit!));
+      }
       if (ready) refreshedCommit = sync!.currentCommit;
       return ready;
     } catch {
@@ -183,6 +198,7 @@ export const publishManagedCourseTransaction = async <T>(
     if (
       state.head.kind !== "attached" ||
       state.head.commit !== context.authoritativeCommit ||
+      state.head.branch !== input.course.defaultBranch ||
       state.workingTree.conflicts.length
     )
       throw new Error("Transaction base changed.");
@@ -207,6 +223,7 @@ export const publishManagedCourseTransaction = async <T>(
     if (paths.some((file) => !request.allows(file)))
       throw new Error("Unexpected files in course transaction.");
     if (!paths.length) return result;
+    await request.publication?.beforeStage(root);
     const stage = paths.map(createRelativeGitPath);
     if (stage.some((file) => file === null)) throw new Error("Unsafe transaction path.");
     await workspace.stage(stage.filter((file) => file !== null));
@@ -236,6 +253,9 @@ export const publishManagedCourseTransaction = async <T>(
       stale();
     }
     await active();
+    await request.publication?.beforePush(root, transactionCommit);
+    if (request.publication && (await reader.resolveHead()) !== transactionCommit)
+      throw new Error("Validated migration commit changed before push.");
     attempted = true;
     try {
       if (!workspace.pushBranch) throw new Error("Course publication capability is unavailable.");
@@ -244,6 +264,14 @@ export const publishManagedCourseTransaction = async <T>(
         branch: input.course.defaultBranch,
         authentication: auth.authentication
       });
+      if (request.publication?.verifyAcceptance) {
+        await workspace.fetchOrigin({ authentication: auth.authentication });
+        const remote = await reader.resolveRevision(
+          `refs/remotes/origin/${input.course.defaultBranch}`
+        );
+        if (remote !== transactionCommit && !(await reader.isAncestor(transactionCommit, remote)))
+          throw new Error("Remote acceptance was not independently verified.");
+      }
       published = transactionCommit;
     } catch {
       // A transport failure can occur after the server accepted a push. Establish outcome first.
@@ -371,9 +399,61 @@ export const publishManagedCourseTransaction = async <T>(
         current.ino === identity.ino &&
         path.dirname(temporary) === temporaryRoot
       )
-        fs.rmSync(temporary, { recursive: true });
+        fs.rmSync(temporary, {
+          recursive: true,
+          maxRetries: TRANSACTION_CLEANUP_RETRIES,
+          retryDelay: TRANSACTION_CLEANUP_DELAY_MS
+        });
     } catch {
       /* Retain evidence when ownership cannot be established. */
     }
+  }
+};
+
+/** Read-only authoritative-outcome observation using the same isolated bundled-Git
+ * infrastructure as publication. It never stages, commits, pushes or edits a cache.
+ */
+export const observeManagedCoursePublication = async (request: {
+  readonly userData: string;
+  readonly input: ManagedOperationInput;
+  readonly verifyCommit: (root: string, remoteCommit: string) => Promise<boolean>;
+  readonly authenticate?: (token: string) => AuthenticatedGitWorkspaceContext;
+  readonly factory?: GitWorkspaceFactory;
+}): Promise<{ readonly accepted: boolean; readonly remoteCommit: string }> => {
+  const { input } = request;
+  const temporaryRoot = path.join(accountRoot(request.userData, input.userId), ".transactions");
+  safeDirectories(request.userData, temporaryRoot, true);
+  const temporary = fs.mkdtempSync(path.join(temporaryRoot, "course-"));
+  const identity = fs.lstatSync(temporary);
+  try {
+    const root = path.join(temporary, "repo");
+    const auth = (request.authenticate ?? createAuthenticatedProductionGitWorkspace)(input.token);
+    await auth.factory.clone({
+      remote: `${input.course.url}.git`,
+      destination: root,
+      checkout: "default",
+      authentication: auth.authentication
+    });
+    if (validateManagedStorage(request.userData, root).length)
+      throw new Error("Unsafe recovery workspace.");
+    const reader = await (request.factory ?? getProductionGitWorkspaceFactory()).open(root);
+    const remoteCommit = await reader.resolveRevision(
+      `refs/remotes/origin/${input.course.defaultBranch}`
+    );
+    const accepted = await request.verifyCommit(root, remoteCommit);
+    return { accepted, remoteCommit };
+  } finally {
+    safeDirectories(request.userData, temporary);
+    const current = fs.lstatSync(temporary);
+    if (
+      current.dev === identity.dev &&
+      current.ino === identity.ino &&
+      path.dirname(temporary) === temporaryRoot
+    )
+      fs.rmSync(temporary, {
+        recursive: true,
+        maxRetries: TRANSACTION_CLEANUP_RETRIES,
+        retryDelay: TRANSACTION_CLEANUP_DELAY_MS
+      });
   }
 };

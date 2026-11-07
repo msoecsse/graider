@@ -87,6 +87,8 @@ export const createGraderRemovalHandoffService = (deps: GraderRemovalHandoffDepe
     };
     return Object.freeze({
       plan,
+      /** Main-only retained-object identity check for the publication boundary. */
+      revalidate: retained.revalidate,
       async reconcile(signal = AbortSignal.timeout(TIMEOUT_MS)) {
         if (!deps.publication || !["ready", "needs_attention"].includes(plan.status))
           throw new Error("Grader reconciliation is unavailable.");

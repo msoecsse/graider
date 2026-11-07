@@ -617,3 +617,58 @@ Phase 3 retains signing, distribution, updates and compatible production release
 arm64 and Windows x64. #21 owns transaction-boundary revalidation/publication, and #24 owns
 post-publication orchestration. None is implemented here. Both operational schema gates remain
 **1**. Completing #20 does not authorize migrating a course or creating a checkpoint.
+
+### Implemented main-only publication transaction (Slice 9.5E)
+
+`createMigrationPublicationService` supplies a main-only capability under the existing
+OAuth account/course synchronization lease. No production control, IPC or preload API
+installs it. It requires the exact reviewed authoritative v1 SHA, re-enters the retained
+migration, assignment and grader-removal handoffs, and rebuilds the candidate and #20
+readiness. Retained snapshot/completion/generation and grader-object identity are checked
+again after awaited observations; identical renewed reviews do not restore old authority.
+
+All technical, authorization, compatibility, acknowledgement and production-enablement
+gates must pass before creating/verifying the #19 immutable remote checkpoint. Only then
+does `managedCourseTransaction` clone the exact source into its isolated workspace and
+materialize the explicit candidate delta. Complete validation checks actual bytes,
+including ignored/unrelated files, before staging. Only approved canonical paths are
+staged, and faculty attribution comes from the retained verified immutable identity.
+Committed Git objects are independently checked for exact single-parent source, file
+namespace, bytes, modes and migration/repository/organization provenance. The checkpoint,
+trusted handoffs, identity, source and time-sensitive readiness are revalidated before
+publication. Migration runners use the existing bundled authenticated Git factory with
+inherited Git storage/configuration disabled, exact byte handling, disabled hooks/signing,
+and explicit branch publication without force, tag following or recursive submodule push.
+No active managed cache is used to stage migration.
+
+The trusted **non-cancellable boundary** is immediately before the one branch push,
+after preparation, validation and the isolated commit. The backend synchronously checks
+cancellation and durably writes the exact publication intent before crossing it. Until
+then cancellation leaves authoritative v1 unchanged; a valid checkpoint may remain.
+Afterward no renderer signal, window closure or disconnected review owner is consulted.
+The backend completes the push and independently observes its authoritative outcome,
+even after account invalidation. It never retries the push automatically. Both successful
+and lost push responses require fresh remote acceptance proof. Unverifiable outcomes
+remain `outcome_unknown`, never cancellation or a claimed failure. Confirmed v2 remains
+authoritative when cache synchronization needs attention; it is never rolled back.
+
+The strict version-1 write-ahead locator is
+`<userData>/managed-courses/<user-id>/<repository-id>/migration-publication.json`.
+It contains the exact source/session/artifact binding, candidate commit and complete file-set
+fingerprint, without credentials, raw errors, arbitrary paths or executable authority.
+An exclusive temporary file is flushed before atomic rename; the containing directory is
+also flushed where supported. Restart recovery re-enters current account/repository access,
+clones fresh remote history, and independently verifies the recorded commit and contents.
+A record never restores ephemeral review or authorizes another write. Pending outcomes are
+observed before another attempt; confirmed publication is returned without a duplicate push.
+Confirmed absence requires a fresh explicitly invoked, fully revalidated transaction.
+
+Production readiness composition is fixed and **still refuses publication**: #20 has no
+production evidence provider, operational safeguards/acknowledgement remain #22/#23/#25,
+and signed/distributed compatible macOS arm64 and Windows x64 releases plus Phase 3 update
+prerequisites remain unproven. Successful transaction tests replace that unavailable provider
+only inside an isolated test module, run the real synthetic #20 validator, and use fictional
+credentials with real local/bare repositories. There is no production synthetic-enablement
+flag or readiness override. Passing tests does not make migration operationally available.
+Post-publication reconciliation orchestration remains #24; this capability does not execute
+it. Operational gates stay **1**, Setup stays Schema 1, and no real course is migrated.

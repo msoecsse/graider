@@ -542,7 +542,22 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
         });
       };
       await revalidate();
-      return Object.freeze({ analysis, review, reviewId, revalidate });
+      return Object.freeze({
+        analysis,
+        review,
+        reviewId,
+        generation: session.generation,
+        snapshot: backend().freezeMigrationReview(
+          structuredClone({
+            ...session.source,
+            trustedIdentities: [
+              ...(session.source.trustedIdentities ?? []),
+              ...session.choices.values()
+            ]
+          })
+        ),
+        revalidate
+      });
     },
     /** Main-process handoff for 9.3. Never accept a renderer-returned completed artifact. */
     async getCompleted(owner: number, request: MigrationReviewSessionRequest) {
