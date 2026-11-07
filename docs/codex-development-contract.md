@@ -70,6 +70,28 @@ Use this contract for all backend, UI, test, and documentation changes.
 - For docs-only changes, do not add tests unless a documentation safeguard is
   already part of the project pattern and is relevant.
 
+### Efficient validation and output
+
+- During implementation, run focused tests and checks. Repeat them as necessary
+  during debugging.
+- Run the full validation required by the issue once near completion, after
+  focused tests pass and changes are stable.
+- Repeat full validation when later changes could invalidate its results or
+  failures require it. Never omit required validation.
+- Run root and UI suites according to issue scope and explicit validation
+  requirements. Avoid unnecessary repeated full-suite executions.
+- Capture verbose test output in temporary log files where practical. Show
+  concise summaries and relevant failure excerpts instead of thousands of
+  passing lines.
+- Preserve complete failure information for diagnosis. Never hide failures,
+  warnings, or skipped tests.
+- Diagnose environmental failures with focused checks before retrying expensive
+  suites.
+- Keep final reports concise while recording every required validation command
+  and its result.
+
+These are efficiency rules, not permission to weaken testing requirements.
+
 ### Test hygiene
 
 Run `npm run test:hygiene` from the repository root to check root and UI test
