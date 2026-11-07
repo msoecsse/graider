@@ -27,7 +27,10 @@
     "validate:release": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run build && npm --prefix ui run typecheck && npm --prefix ui test && npm --prefix ui run build && npm --prefix ui run package",
     "package:win": "npm --prefix ui run package:win",
     "audit": "npm audit --audit-level=high",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
+    "test:hygiene": "node --import tsx scripts/check-test-hygiene.ts",
+    "pretest": "npm run test:hygiene",
+    "pretest:watch": "npm run test:hygiene"
   },
   "keywords": [
     "github",

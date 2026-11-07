@@ -25,7 +25,9 @@
     "test": "npm run build:template-sync && vitest run",
     "snapshots": "vitest run --config vitest.snapshot.config.ts && node ../tools/ui-snapshots/wrap.mjs && node ../tools/ui-snapshots/run-capture.mjs",
     "test:watch": "vitest",
-    "format:check": "prettier . --check"
+    "format:check": "prettier . --check",
+    "pretest": "npm --prefix .. run test:hygiene",
+    "pretest:watch": "npm --prefix .. run test:hygiene"
   },
   "dependencies": {
     "dompurify": "^3.4.17",

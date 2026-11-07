@@ -70,6 +70,28 @@ Use this contract for all backend, UI, test, and documentation changes.
 - For docs-only changes, do not add tests unless a documentation safeguard is
   already part of the project pattern and is relevant.
 
+### Test hygiene
+
+Run `npm run test:hygiene` from the repository root to check root and UI test
+files (`*.test.*` and `*.spec.*`, including TypeScript and TSX). The guard also
+runs before root/UI `npm test` and `npm run test:watch`, as part of `npm run check`
+and release validation, and in normal GitHub Actions CI.
+
+The TypeScript syntax and binding check rejects Vitest `.skip`, `.only`, `.todo`,
+disabled/focused aliases (`xit`, `xtest`, `xdescribe`, `fit`, `ftest`, `fdescribe`),
+literal `skipIf(true)` / `runIf(false)`, and inline options with `skip`, `only`,
+or `todo` set to `true`. It covers global declarations,
+named/renamed imports, namespace imports, local aliases, computed string
+properties, and chained/parameterized declarations. Comments, string contents,
+and methods on unrelated bindings are not declarations. Existing dynamic
+platform conditions remain supported; this static check does not evaluate
+runtime conditions or replace reviewing suite summaries for zero skips.
+
+If a test cannot pass, fix the implementation or fixture before committing.
+If that cannot be completed within scope, record/reuse a blocker issue and stop
+the affected work under the workflow contract. Do not skip, focus, mark todo,
+delete, or weaken the test to obtain a green run. There is no guard allowlist.
+
 ## Validation Commands
 
 For backend or shared code changes, the preferred validation sequence is:

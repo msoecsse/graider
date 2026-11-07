@@ -4,6 +4,7 @@ on:
     branches:
       - master
       - ui-redesign
+      - remote-course-v2
   pull_request:
 
 jobs:
@@ -26,6 +27,9 @@ jobs:
 
       - name: Install UI dependencies
         run: npm ci --prefix ui
+
+      - name: Reject skipped and focused tests
+        run: npm run test:hygiene
 
       - name: Generate Electron backend bridges
         run: npm run build:electron-backends
