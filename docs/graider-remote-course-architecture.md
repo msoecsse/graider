@@ -3146,15 +3146,35 @@ No migration may silently invent a security-relevant role.
 
 ## 44. Version Compatibility
 
-Course schema compatibility is strict.
+Course schema compatibility is strict. The authoritative migration prerequisite is
+[the migration compatibility policy](graider-schema-v2-migration.md#12-client-compatibility-and-production-enablement),
+approved by [issue #29, Option B](https://github.com/msoecsse/graider/issues/29#issuecomment-6713330426).
+It requires trusted operational Schema v2 support in the initiating client, a warning
+and explicit authorized acknowledgement of incompatible clients losing access, and
+compatible production releases on both supported platforms before production migration
+is enabled. It withdraws the former all-faculty-installations proof requirement;
+no installation inventory, telemetry or version-attestation infrastructure is required.
+Acknowledgement never substitutes for required technical evidence.
 
-If a synchronized course uses a schema newer than the installed Graider supports:
+If the authoritative course uses a schema the installed Graider cannot operate:
 
 - the course cannot be opened for normal use;
 - the older client does not attempt partial compatibility;
+- every mutation path, including legacy routing and stale local caches, must fail
+  closed; authoritative schema/revision must be revalidated before a write;
 - the user must update Graider.
 
-Graider never automatically downgrades course schemas.
+An old Schema 1 cache cannot authorize overwriting or downgrading authoritative
+Schema v2. Graider never automatically downgrades course schemas. Unsupported newer
+schemas receive the same refusal. Parser support alone does not establish operational
+compatibility, and renderer assertions cannot establish trusted readiness.
+
+Current operational gates remain 1. This policy records required behavior, not its
+implementation or release completion. Missing required technical evidence blocks
+publication with an actionable finding. Production-release availability is a separate
+enablement condition; the Phase 3 signing/distribution/update dependencies remain
+pending until verified, and a Preview artifact does not satisfy them. See the
+[Phase 3 roadmap](graider-architecture-evolution-roadmap.md#phase-3--production-release-and-update-foundation).
 
 ---
 

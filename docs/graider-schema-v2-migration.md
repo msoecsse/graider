@@ -72,6 +72,56 @@ Phase 9 role, lifecycle or section operational fact, that contradiction must be
 resolved before publication. A confirmation cannot manufacture technical proof or
 missing history. Deferral never permits data loss or bypasses a safety check.
 
+### 1.2 Client compatibility and production enablement
+
+[Issue #29, Option B](https://github.com/msoecsse/graider/issues/29#issuecomment-6713330426)
+withdraws the former requirement to prove compatibility across every faculty
+installation. This section is the authoritative replacement compatibility policy;
+it does not change the staged publication boundary in §1.1 or any other migration
+safety requirement.
+
+Before publication:
+
+1. The initiating Graider client must fully support **operational Schema v2**.
+   Parser support alone is insufficient. Compatibility must come from trusted
+   backend evidence; renderer assertions and untrusted serialized data cannot
+   establish it. Missing, unknown, incompatible or stale required technical
+   evidence produces a typed, actionable publication blocker.
+2. Older/incompatible clients must fail closed against Schema v2 across discovery,
+   normal access and every mutation path, including legacy paths and stale local
+   caches. Mutations must revalidate authoritative schema/revision before writing;
+   an old Schema 1 cache cannot authorize overwriting or downgrading Schema v2.
+   Unsupported newer schemas likewise receive no partial normal operation.
+3. The migration UI must warn that faculty using incompatible clients will lose
+   access to the migrated course until they update. An authorized faculty member
+   must explicitly acknowledge that consequence before publication. The trusted
+   backend must bind acknowledgement to the current account and exact reviewed
+   migration; acknowledgement is not technical compatibility proof.
+4. A compatible production release must be available for **macOS Apple Silicon
+   (arm64)** and **Windows x64** before production migration is enabled. Phase 3
+   signing, distribution and update dependencies remain required; this decision
+   does not mark them complete. An unsigned Preview artifact or passing development
+   tests is not evidence of compatible production-release availability.
+5. No faculty installation inventory, telemetry, version attestation or proof that
+   every faculty member has updated is required. Do not introduce such infrastructure
+   to satisfy this policy.
+
+Implementation readiness and production-release availability are separate facts.
+Current operational course/term gates remain **1**; existing v2 parsing and pure
+migration artifacts do not prove operational v2 support. Validator development may
+use synthetic evidence, but production publication remains disabled while any
+required technical condition, acknowledgement or release availability is unproven.
+No new release service or proof mechanism is authorized by this decision.
+
+Issue #20 owns the pure readiness checks and typed blockers. Issue #21 must revalidate
+trusted client/readiness conditions, current acknowledgement and production-enablement
+conditions before its publication boundary, including fresh checks for time-sensitive
+evidence. Issues #22 and #23 own discovery/access and mutation safeguards respectively;
+#25 owns the warning and explicit acknowledgement within the approved single
+**Upgrade course** confirmation action. No extra checkbox or redundant confirmation
+is required. Issue #24 retains post-publication reconciliation responsibilities;
+deferred historical findings do not become client-installation requirements.
+
 ## 2. Decision table
 
 The table applies within §1.1. Rows marked preservation-only describe evidence
@@ -156,7 +206,8 @@ The migration executor must follow this order:
    not reliably present in v1, and ambiguous lifecycle/section mappings required
    by §1.1. Deferred identity/placement/ownership findings remain explicit; they
    are not canonical student/grading/comment conversion decisions. Record
-   actor and decision without inventing missing history.
+   actor and decision without inventing missing history. Also require the authorized
+   compatibility-consequence acknowledgement defined in §1.2.
 5. **Generate the Phase 9 candidate.** Transform only the canonical domains
    in §1.1 into a separate candidate representation. Remove grader-role
    configuration, preserve verified manifest/provenance/history, and retain every
@@ -173,13 +224,16 @@ The migration executor must follow this order:
    authorization, immutable repository/organization binding and authoritative
    remote revision against the reviewed source; stale review requires refresh
    and renewed review under the [trusted review contract](graider-remote-course-architecture.md#implemented-review-contract-slice-92--complete).
+   Require the trusted client/readiness and production-enablement conditions in §1.2
+   before publication; revalidate them at the trusted transaction boundary.
 7. **Push only after validation.** Commit with faculty attribution and push the
    complete validated Phase 9 conversion atomically. Report success only after
    the remote accepts it. If push fails, restore the managed clone to authoritative remote v1 and
    retain the reviewed intent only as an explicit retry artifact.
 8. **Require a compatible Graider client thereafter.** Once schema v2 is
-   authoritative, older clients must refuse normal course operation. Graider
-   never downgrades the course schema automatically.
+   authoritative, older clients must refuse normal course operation and all
+   mutations, including from stale local caches or legacy paths. They must never
+   overwrite or downgrade Schema v2; see §1.2.
 
 ## 4. Reconciliation after publication
 
@@ -204,6 +258,10 @@ or to verify manual GitHub repair.
 Before enabling the push action, the analyzer/review must show at least:
 
 - canonical course/admin repository ID and current locator;
+- trusted initiating-client operational Schema v2 support, separately identified
+  production-release availability and any unproven production-enablement conditions;
+- the incompatible-client access warning and the authorized faculty acknowledgement
+  required by §1.2;
 - proposed fallback administrator;
 - every faculty identity and unresolved mapping;
 - each term lifecycle and current/former coordinator relationship;

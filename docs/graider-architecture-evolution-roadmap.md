@@ -220,6 +220,11 @@ periodic synchronization, student synchronization or schema-v2 changes.
 # Phase 3 — Production Release and Update Foundation
 
 This phase must be functional before a schema-breaking migration reaches Stable.
+The [approved migration compatibility policy](graider-schema-v2-migration.md#12-client-compatibility-and-production-enablement)
+also requires an operational Schema v2-compatible production release for macOS arm64
+and Windows x64 before production migration is enabled. Signing, release distribution,
+update infrastructure and compatible production-release availability remain unverified
+dependencies; Phase 9 development or a Preview artifact does not mark them complete.
 
 ## Slice 3.1 — Windows production installer
 
@@ -936,14 +941,10 @@ authoritative order rather than guessing from academic chronology or local files
 
 # Phase 9 — Existing-Course Migration
 
-Now that:
-
-- updater exists;
-- schema v2 exists;
-- authorization exists;
-- team reconciliation exists;
-
-migration can safely ship.
+Phase 9 builds on Schema v2, authorization and team reconciliation. Production
+migration may ship only after its implementation safeguards and Phase 3 release/update
+dependencies are verified. The updater and compatible production-release availability
+must not be inferred from migration development progress.
 
 ## Slice 9.1 — Migration analyzer — COMPLETE
 
@@ -1196,6 +1197,18 @@ issue #16 is **A — staged Phase 9 publication**. Publication facts, preservati
 evidence, blockers and deferred work are defined authoritatively in the
 [migration publication boundary](graider-schema-v2-migration.md#11-phase-9-publication-boundary);
 apply its safety protocol and report acceptance criteria before enabling push.
+
+[Issue #29, Option B](https://github.com/msoecsse/graider/issues/29#issuecomment-6713330426)
+replaces the former all-faculty-installations compatibility prerequisite with
+[the initiating-client, fail-closed access, acknowledgement and production-release policy](graider-schema-v2-migration.md#12-client-compatibility-and-production-enablement).
+No device inventory, telemetry or all-installations proof is required. Issue #20
+validates trusted operational client readiness; #21 revalidates at publication;
+#22/#23 enforce incompatible-schema access/mutation refusal, including stale caches;
+#25 provides the explicit warning and acknowledgement. Required evidence remains
+fail-closed, and production enablement still depends on compatible releases for both
+supported platforms and the Phase 3 prerequisites above. This reconciliation enables
+a fresh #20 implementation task; it implements no validator, publication or schema-gate
+change and does not claim production readiness.
 
 Slice 9.5A evidence inventory and 9.5B pure deterministic candidate are implemented.
 The [9.5B contract](graider-schema-v2-migration.md#implemented-pure-migration-candidate-slice-95b)
