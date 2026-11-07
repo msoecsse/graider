@@ -1,3 +1,13 @@
+import {
+  buildMigrationCandidate,
+  STAGED_PHASE_9_BOUNDARY
+} from "../../../src/migration/migration-candidate.js";
+import {
+  migrationPublicationBinding,
+  validateMigrationPublication,
+  type MigrationCompatibilityEvidence,
+  type MigrationPublicationContext
+} from "../../../src/migration/migration-publication-validation.js";
 import { reviewFixture, completeSubmission } from "./migration-review-fixtures.js";
 import { validateMigrationReview } from "../../../src/migration/migration-review-validation.js";
 import { planAssignmentMigration } from "../../../src/migration/assignment-migration-planner.js";
@@ -190,4 +200,61 @@ export const completeSyntheticMigration = (
     assignmentPlan,
     graderRemovalPlan
   };
+};
+
+/** Explicit implementation-only evidence. It cannot establish production enablement.
+ * The validator has no production evidence provider; no live release dependency exists. */
+export const syntheticPublicationFixture = (
+  snapshot = BasicCourse(),
+  statuses?: readonly ("draft" | "active" | "archived")[]
+) => {
+  const artifacts = {
+    ...completeSyntheticMigration(snapshot, statuses),
+    boundary: STAGED_PHASE_9_BOUNDARY
+  };
+  const candidate = buildMigrationCandidate(artifacts);
+  const binding = migrationPublicationBinding(artifacts, candidate, {
+    sessionId: "fictional-session",
+    completionId: "fictional-completion",
+    generation: 1
+  });
+  const compatibility: MigrationCompatibilityEvidence = {
+    scope: "synthetic",
+    observationId: "fictional-observation",
+    binding,
+    operationalSchema: 2,
+    safeguards: {
+      access: true,
+      unsupportedSchema: true,
+      staleCache: true,
+      legacyMutations: true,
+      authoritativeRevision: true,
+      overwrite: true,
+      downgrade: true
+    },
+    acknowledgement: {
+      binding,
+      githubUserId: binding.authenticatedGithubUserId,
+      consequence: "incompatible-clients-lose-access-until-update"
+    },
+    releases: {
+      macosArm64: "verified",
+      windowsX64: "verified",
+      signing: "verified",
+      distribution: "verified",
+      updates: "verified"
+    }
+  };
+  const context: MigrationPublicationContext = {
+    artifacts,
+    candidate,
+    binding,
+    current: binding,
+    authorizedFaculty: true,
+    environment: "synthetic",
+    observationId: compatibility.observationId,
+    compatibility
+  };
+  const request = { candidate, binding };
+  return { context, request, run: () => validateMigrationPublication(context, request) };
 };

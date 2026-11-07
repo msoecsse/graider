@@ -1221,8 +1221,17 @@ infrastructure are implemented. The
 [9.5C contract](graider-schema-v2-migration.md#implemented-verified-v1-checkpoint-and-retry-infrastructure-slice-95c)
 defines exact immutable remote tags, independent verification/lost-response recovery,
 isolated bundled-Git attempts and non-authoritative retry hints with current trusted
-revalidation. There is no production integration, migration publication, final
-candidate validator or operational cutover. Issue #20 remains separate work.
+revalidation. There is no production integration or migration publication.
+
+Slice 9.5D / #20 full pure candidate validation is implemented. The
+[9.5D contract](graider-schema-v2-migration.md#implemented-full-candidate-validation-slice-95d)
+defines exact retained source/session/review/plan/candidate bindings, complete cross-file
+validation, deterministic fingerprints, immutable typed blockers and Decision A deferred
+findings. Synthetic compatibility evidence exercises successful internal validation without
+enabling production. Production technical/release evidence remains unavailable; publication
+stays disabled pending #21–#25 safeguards/composition and Phase 3 signing/distribution/update
+and compatible platform releases. No production evidence provider, cutover, checkpoint or
+publication is added by #20; operational gates remain 1.
 
 ---
 

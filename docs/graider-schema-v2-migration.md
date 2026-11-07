@@ -553,5 +553,67 @@ results retain `publicationReady: false`.
 This slice adds no migration publication, final candidate validator, Schema v2
 operational cutover, reconciliation execution or production migration button. Both
 operational gates remain **1**. Later orchestration must supply the current main-owned
-candidate fingerprint and complete independent publication validation; issue #20
-remains separate work.
+candidate fingerprint and the independent 9.5D validation below before publication.
+
+### Implemented full candidate validation (Slice 9.5D)
+
+`validateMigrationPublication` in
+`src/migration/migration-publication-validation.ts` is the pure complete-candidate
+readiness gate. It accepts a backend-owned `MigrationPublicationContext` and only
+candidate/binding assertions as its request. There is no IPC, production composition,
+checkpoint, journal, writer or publication capability. Do not deserialize the trusted
+context or populate it from renderer-returned objects.
+
+The caller must obtain the exact retained snapshot, analysis, human review, assignment
+plan, grader inventory/access review, removal plan and candidate through current trusted
+handoffs. The context separately supplies a current authoritative observation and faculty
+authorization. Its exact binding covers repository/organization/account, source SHA,
+report, session/generation, completion identity, review and both plan digests, and candidate
+fingerprint. A refreshed or identical renewed completion is a different binding. These
+pure comparisons do not replace fresh remote/account/session/authority checks; #21 must
+repeat those checks at its transaction boundary, including after awaits.
+
+Validation reprojects the whole candidate from the retained artifacts and independently
+checks strict course identity/configuration, faculty/fallback and role references/history,
+complete term order/lifecycle/activation evidence, assignment owners and repair states,
+section schedule/Apply evidence, manifest and template provenance, organization continuity,
+obsolete grader desired state, supported versions, portable namespaces and exact bytes.
+Unresolved required lifecycle or identity-sensitive mappings block; completed review cannot
+make technical uncertainty safe. Existing unresolved activation recovery also blocks rather
+than being cleared or reinterpreted. Missing, replaced, added or altered files/audit evidence
+cannot pass by updating their hashes. `migrationCandidateFingerprint` binds the complete
+candidate, bytes and audit, independent of object-key/file-enumeration order while preserving
+meaningful review/history array order.
+
+Decision A preservation remains mandatory: every source file survives, replaced originals
+remain in the audit, runtime evidence stays outside proposed repository files, and the full
+9.5A inventory/metadata must match. Ownerless assignments can remain explicitly acknowledged,
+repair-required and read-only. Preserved incomplete Apply, student identity ambiguity, grading
+placement/commit/publication uncertainty, damaged records, missing reusable-comment ownership
+and earlier role history remain explicit deferred or Needs-attention findings; they never
+become false Complete, canonical identity, invented history or remote durability.
+
+Results are detached and deeply immutable. They expose typed actionable blockers, deferred
+findings, exact candidate fingerprint and complete source/session/artifact provenance,
+compatibility findings, `internalReady` and separate `productionEnablement` findings.
+`implementation_ready` means the model's required candidate/compatibility checks passed;
+it does not enable publication.
+
+The compatibility seam is explicitly **synthetic only** in this slice. Fictional backend
+fixtures can establish operational support, each fail-closed safeguard, exact current-account
+access-loss acknowledgement and separately verified release conditions in the model. Unknown,
+missing, stale, incompatible, renderer-supplied and malformed evidence fails closed. Synthetic
+observations never establish production readiness, even when every modeled release condition
+is verified. There is no production-release evidence issuer/provider, and no serialized
+`trusted` or `productionReady` flag is accepted. Production contexts report unavailable or
+untrusted technical evidence and unproven platform/release prerequisites with actionable
+blockers. `publicationReady` and `productionEnablement.enabled` therefore remain false in the
+current implementation. This is a deliberate unavailable-evidence outcome, not a claim that
+Option B safeguards are complete. Future production composition must retain/revalidate real
+trusted evidence without treating this fixture format as an attestation mechanism.
+
+#22/#23 retain operational access/mutation cutovers; #25 retains faculty warning/acknowledgement;
+Phase 3 retains signing, distribution, updates and compatible production releases for macOS
+arm64 and Windows x64. #21 owns transaction-boundary revalidation/publication, and #24 owns
+post-publication orchestration. None is implemented here. Both operational schema gates remain
+**1**. Completing #20 does not authorize migrating a course or creating a checkpoint.
