@@ -240,3 +240,34 @@ still accepts obsolete grader configuration and manifest-v1 readers preserve his
 permission evidence. Setup and Apply create no grader state. Phase 9.4 owns removal
 of that persisted data and explicit GitHub team/permission reconciliation; migration
 must not infer a section-faculty role from old grader membership.
+
+### Implemented pure grader-removal plan (Slice 9.4C)
+
+`planGraderRemoval` in `src/migration/grader-removal-planner.ts` consumes trusted
+retained 9.1 analysis, completed 9.2 review, exact 9.3 assignment plan, 9.4A
+inventory and completed 9.4B access review. Callers retain responsibility for the
+main-only completed-review freshness/authorization checks. Exact source bindings,
+assignment projection and additive access-review projection are checked again;
+mismatches block rather than selecting an alternative input.
+
+The detached, deeply frozen plan separates candidate-only persisted-field cleanup
+from reviewed faculty terms and post-publication reconciliation intents. Candidate
+course fields `grader_team` / `grader_permission` and manifest desired permission
+`grader_team` are removed; historical evidence, inventory and decisions remain in
+an explicitly non-executable audit branch. Existing section faculty survive and
+only explicit reviewed additions carry forward. Faculty, term and section IDs must
+match the reviewed directory and exact analyzed inventory.
+
+Only complete source-owned repository observations correlated to the exact numeric
+legacy team can produce conditional grant-removal intents. Findings, unknown
+identities and incomplete observations remain Needs attention with no unsafe cleanup
+targets. Each intent carries the reviewed replacement faculty/coordinator/fallback
+policy and member dispositions. After v2 publication, a future reconciler must
+establish and verify managed replacement grants and effective access for that exact
+repository before removing any legacy grant. Failed or ambiguous verification leaves
+it untouched. Team deletion and membership deletion are always disabled.
+
+This is a pure plan: no I/O, clock, randomness, writes, checkpoints, publication or
+GitHub execution. `publicationReady` remains false. Slice 9.4 remains incomplete;
+future handoff/execution and 9.5 candidate generation/publication are separate work.
+Operational schema gates remain **1**, and Setup still emits Schema 1.
