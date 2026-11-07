@@ -2726,13 +2726,15 @@ operation.
 
 Existing schema-v1 courses must be upgraded through a controlled migration.
 
-Migration must:
-
-- synchronize first;
-- create a recoverable pre-migration checkpoint;
-- derive only information that can be inferred safely;
-- require confirmation for ambiguous information;
-- validate the complete new model before publishing it.
+The accepted staged Phase 9 scope, publication facts, preservation-only evidence,
+blocking ambiguities and deferred work are defined in the authoritative
+[migration publication boundary](graider-schema-v2-migration.md#11-phase-9-publication-boundary).
+The [migration safety protocol](graider-schema-v2-migration.md#3-migration-safety-protocol)
+and [report acceptance criteria](graider-schema-v2-migration.md#5-migration-report-acceptance-criteria)
+govern publication. The student identity, grading persistence and comment ownership
+models elsewhere in this architecture describe target behavior across phases;
+they do not require their canonical conversion during Phase 9. Preserved evidence
+does not establish canonical student identity or remotely durable grading state.
 
 ### Implemented read-only analysis contract (Slice 9.1 — complete)
 

@@ -23,11 +23,60 @@ The decision classes are:
 | Preserve unresolved   | Keep the source/checkpoint and mark Needs attention; do not fabricate a value       |
 | Intentionally removed | Obsolete state is not represented in v2; removal is reported and audited            |
 
-Migration changes the authoritative course/admin repository only after a full
-candidate v2 model validates. It does not delete student repositories or
-legacy local clones.
+Migration changes the authoritative course/admin repository only after the complete
+candidate for the publication boundary below validates. It does not delete
+student repositories or legacy local clones.
+
+### 1.1 Phase 9 publication boundary
+
+[Issue #16](https://github.com/msoecsse/graider/issues/16#issuecomment-6690809434)
+records **Decision: A — staged Phase 9 publication**. This section is the
+authoritative definition of that boundary. The logical v2 design describes the
+target architecture across phases, not a requirement to implement every domain
+before Phase 9 publication.
+
+| Responsibility                              | Phase 9 acceptance                                                                                                                                                | Later canonical work                                                                                |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Course identity and lifecycle               | Validate immutable course identity, reviewed lifecycle/activation history and term creation order                                                                 | No deferral of these publication facts                                                              |
+| Faculty directory and authority             | Resolve faculty identities and current roles; explicitly confirm exactly one fallback administrator and term coordinators; validate section-faculty relationships | Missing earlier history remains unknown, never invented                                             |
+| Assignment migration and section operations | Validate reviewed assignment migration state, ownerless repair state, section schedules, usage/Apply evidence and repository/template provenance                  | Subsequent assignment/section features follow the roadmap                                           |
+| Legacy grader role                          | Remove obsolete desired-role fields and retain audit evidence; reconcile only verified managed resources under §4                                                 | No grader-to-faculty role inference                                                                 |
+| Migration safety                            | Preserve provenance, reviewed decisions, recoverable checkpoints and unresolved findings; satisfy §§3–5 before publication                                        | External reconciliation may remain checkpointed Needs attention under §4                            |
+| Student GitHub identity                     | Inventory and preserve usernames, immutable ID observations if available, rename/replacement evidence and explicit unknowns                                       | Phase 13 owns canonical immutable student GitHub identity persistence and identity-change workflows |
+| Individual/group grading                    | Inventory and preserve existing records, section-placement/transfer evidence, selected commits, decisions, status and available publication evidence              | Phase 14 owns canonical grading-state relocation and remote grading persistence                     |
+| Reusable comments                           | Preserve library content, stable IDs where available, defaults/tags and applied snapshots; record missing ownership/history as unknown/repair-required            | Canonical ownership/history conversion is outside Phase 9; no new owner or history is synthesized   |
+
+Preservation is required even when canonical conversion is deferred. Inventory
+must identify source/checkpoint locations and provenance, distinguish remote
+source from machine-local/runtime evidence, and report unavailable evidence and
+unknown completeness explicitly. Preserve existing local/runtime records in place;
+the remote v1 checkpoint alone is not a backup of machine-local grading data.
+Phase 9 must not relocate grading records, persist student identity observations
+as canonical roster identity, or claim remote grading durability. Missing comment
+ownership does not authorize ownership-controlled edits.
+
+Publication blockers are unresolved required Phase 9 facts or safety failures:
+ambiguous faculty authorization, unconfirmed fallback/coordinators, conflicting
+course/repository/organization identity, unresolved lifecycle or section mappings
+needed by the published model, invalid references, stale review, or inability to
+preserve inventoried evidence. Unknown/required organization migration remains a
+blocker. Assignment ownership or Apply uncertainty must satisfy the decision table's
+explicit repair-required/Needs attention rules; it must never become false authority
+or false Complete evidence.
+
+Deferred student identity ambiguity, uncertain grading section placement and
+missing comment ownership/history do not alone block Phase 9 when preserved and
+reported as unresolved. They do block any operation that would rely on an unproven
+identity, placement or ownership. If such evidence also contradicts a required
+Phase 9 role, lifecycle or section operational fact, that contradiction must be
+resolved before publication. A confirmation cannot manufacture technical proof or
+missing history. Deferral never permits data loss or bypasses a safety check.
 
 ## 2. Decision table
+
+The table applies within §1.1. Rows marked preservation-only describe evidence
+handling, not canonical conversion. Future identity and grading transformations
+remain defined by the roadmap and logical design.
 
 | Existing v1 concept/state                                                                      | v2 result                                                                                                                                                | Automatic?                                                          | Confirmation needed?                                                                       | Failure/ambiguity behavior                                                                                                                           |
 | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -48,10 +97,10 @@ legacy local clones.
 | Former section-faculty history absent from v1                                                  | No invented intervals; retain only history supported by repository records or explicit confirmation                                                      | No                                                                  | Only if faculty/coordinator supplies history through the migration workflow                | Missing history is reported as unavailable; never turn an uncertain former role into current authority                                               |
 | Section ID and roster reference                                                                | Preserve as term-scoped section identity and roster locator; subject to immutability once Active                                                         | Yes                                                                 | No                                                                                         | Invalid references or conflicting IDs block affected term migration                                                                                  |
 | Roster `student_id` and status                                                                 | Preserve as institutional student identity and current enrollment fact                                                                                   | Yes                                                                 | No                                                                                         | Duplicate/ambiguous student IDs block affected roster conversion                                                                                     |
-| Roster GitHub username                                                                         | Mutable current GitHub username metadata                                                                                                                 | Yes only after unique account resolution                            | Yes when ambiguous                                                                         | Preserve username as unresolved source evidence; do not bind it to the wrong account                                                                 |
-| Immutable student GitHub user ID absent from v1                                                | Resolve and persist for the student's current GitHub identity                                                                                            | Yes for an obvious unique verified account                          | Yes for ambiguity/account replacement uncertainty                                          | Mark identity Needs attention; block identity-sensitive provisioning/permission changes, not silently guess                                          |
-| Evidence that a student used a different GitHub account                                        | Explicit GitHub identity-history/replacement event attached to the same institutional student                                                            | Only when repository/account IDs prove the change                   | Yes when proof does not establish whether this is rename versus replacement                | Preserve all IDs/usernames and require faculty confirmation before changing access                                                                   |
-| GitHub username rename with same immutable user ID                                             | Update current username metadata; retain observed prior username                                                                                         | Yes                                                                 | No                                                                                         | A name mismatch alone never creates a new identity                                                                                                   |
+| Roster GitHub username                                                                         | Preservation-only: retain source username and provenance                                                                                                 | Yes for preservation                                                | Not for Phase 9 canonical identity binding                                                 | Ambiguous account remains unknown; Phase 13 resolves canonical identity before identity-sensitive changes                                            |
+| Immutable student GitHub user ID absent from v1                                                | Preservation-only: inventory available immutable ID observations; absence stays unknown                                                                  | No canonical persistence in Phase 9                                 | Phase 13 owns identity resolution/confirmation                                             | Missing/ambiguous IDs do not alone block Phase 9; never fabricate an ID or authorize identity-sensitive changes                                      |
+| Evidence that a student used a different GitHub account                                        | Preservation-only: retain observed IDs/usernames and rename/replacement evidence                                                                         | Yes for evidence preservation                                       | Phase 13 requires confirmation where rename versus replacement is unproven                 | No canonical replacement event or access change in Phase 9; uncertainty remains explicit                                                             |
+| GitHub username rename with same immutable user ID                                             | Preservation-only for students: retain verified same-ID observations and prior usernames                                                                 | Yes for proven observations                                         | No for preservation                                                                        | Phase 13 owns canonical student metadata/history updates; a name mismatch never creates an identity                                                  |
 | Assignment slug/title/type/grading/rubric/required files                                       | Shared v2 assignment definition                                                                                                                          | Yes when valid and supported                                        | No                                                                                         | Unsupported or invalid content blocks that assignment migration; do not drop it silently                                                             |
 | `metadata.faculty_owner`                                                                       | One-entry `owners` list referencing the resolved faculty identity                                                                                        | Yes after owner identity resolves                                   | Only if username identity is ambiguous                                                     | Unresolved owner makes assignment repair-required; do not choose a replacement owner                                                                 |
 | No `metadata.faculty_owner`                                                                    | Empty owner list and explicit owner-repair-required condition                                                                                            | Yes                                                                 | Coordinator confirmation is needed later to assign an owner, not to preserve ownerlessness | Assignment remains unowned and cannot be edited, copied, activated, archived, or otherwise operated normally until repaired                          |
@@ -74,13 +123,13 @@ legacy local clones.
 | Manifest v2 `templateCommitSha`, `studentDefaultBranchCommitSha`, `templateSyncBaselineStatus` | Preserve as per-repository template distribution baseline                                                                                                | Yes                                                                 | No                                                                                         | Missing/invalid anchors retain `baseline_required`/Needs attention; never fabricate a safe propagation baseline                                      |
 | Template repository name/branch without immutable repository ID                                | Resolve and store repository ID when accessible; retain name/branch as metadata                                                                          | Yes only for unique verified repository                             | Yes if external/inaccessible/ambiguous                                                     | Assignment may remain migration-blocked for template operations; do not bind a same-named repository                                                 |
 | Template file-management rules absent                                                          | No invented instructor-managed paths; unmatched files receive v2's safe Student-editable behavior                                                        | Yes                                                                 | No                                                                                         | Faculty may configure rules later; migration does not assume overwritable files                                                                      |
-| Current grading state keyed by assignment + student                                            | Move to term + assignment + section + student path and add self-describing identity                                                                      | Yes only when roster/manifest establishes exactly one section       | Yes when section is ambiguous or a transfer creates conflicting evidence                   | Preserve original grading record and mark Needs attention; never place it in a guessed section                                                       |
-| Existing group grading state                                                                   | Move to term + assignment + section + group path when group and section are unambiguous                                                                  | Yes when verified                                                   | Yes for cross-section/ambiguous membership                                                 | Cross-section groups are not created; preserve evidence and require explicit repair                                                                  |
-| Existing selected submission commit and grading decisions                                      | Preserve canonical state and status where valid                                                                                                          | Yes                                                                 | No                                                                                         | Invalid/unreachable commits are reported but not silently replaced by latest submission                                                              |
-| Existing Published status without durable publication history                                  | Preserve current status only if the published report can be verified; seed only facts that are provable                                                  | Partially                                                           | Required if verification cannot distinguish Published from Complete                        | Do not manufacture actor/timestamp history; unresolved publication is Needs attention                                                                |
-| Current reusable comment library                                                               | Preserve entries, IDs where stable, text/defaults/tags                                                                                                   | Yes                                                                 | No for content                                                                             | Invalid/duplicate IDs block library conversion rather than losing comments                                                                           |
-| Reusable-comment ownership/history absent                                                      | Preserve content but mark ownership/history as unknown until explicitly established under a migration rule/UI                                            | No                                                                  | Required before ownership-controlled edits where owner cannot be proven                    | Do not assign every comment to the migrating user or infer ownership from Git commits alone                                                          |
-| Already-applied comments                                                                       | Preserve snapshots in grading records; never relink values as live library content                                                                       | Yes                                                                 | No                                                                                         | Missing source comment is acceptable; applied snapshot remains authoritative                                                                         |
+| Current grading state keyed by assignment + student                                            | Preservation-only: retain original record/location and section-placement/transfer evidence                                                               | Yes for preservation; no relocation                                 | Phase 14 requires resolution before canonical placement when ambiguous                     | Unknown section remains Needs attention; Phase 9 must not select a guessed destination                                                               |
+| Existing group grading state                                                                   | Preservation-only: retain original group record, membership and section evidence                                                                         | Yes for preservation; no relocation                                 | Phase 14 requires repair for cross-section/ambiguous membership                            | Never create cross-section groups or invent a canonical group/section mapping                                                                        |
+| Existing selected submission commit and grading decisions                                      | Preservation-only: retain selected commit, decisions and recorded status                                                                                 | Yes for preservation                                                | No for preservation                                                                        | Report invalid/unreachable commits without replacing them with latest; no Phase 9 canonical grading conversion                                       |
+| Existing Published status without durable publication history                                  | Preservation-only: retain recorded status and available report/verification evidence                                                                     | Yes for preservation; verification establishes only observed facts  | Required before asserting verified Published when evidence is insufficient                 | Mark verification unknown/Needs attention; do not rewrite status or manufacture actor/timestamp history; canonical history is Phase 14               |
+| Current reusable comment library                                                               | Preservation-only: retain entries, IDs where stable, text/defaults/tags                                                                                  | Yes for content preservation                                        | No for preservation                                                                        | Report invalid/duplicate IDs as unresolved; do not drop comments or claim canonical library conversion                                               |
+| Reusable-comment ownership/history absent                                                      | Preservation-only: mark ownership/history unknown/repair-required                                                                                        | No canonical ownership/history conversion in Phase 9                | Required before ownership-controlled edits where owner cannot be proven                    | Does not alone block Phase 9; never assign comments to the migrating user or infer ownership from Git commits alone                                  |
+| Already-applied comments                                                                       | Preservation-only: retain snapshots in original grading records                                                                                          | Yes for preservation                                                | No                                                                                         | Missing source comment is acceptable; snapshot remains authoritative and is never relinked as live library content                                   |
 | Existing faculty/course/section GitHub team names                                              | Candidates for reconciliation metadata, not stable managed-team identity                                                                                 | No, unless immutable team ID and purpose are verified               | Required where ownership/purpose is ambiguous                                              | Leave unrelated or ambiguous teams untouched; never adopt by similar name alone                                                                      |
 | Historical GitHub teams no longer implied by v2 roles                                          | Retain untouched unless an explicit, verified cleanup/reconciliation action targets a Graider-managed team                                               | No                                                                  | Yes for cleanup                                                                            | Report as orphaned candidate; do not delete automatically                                                                                            |
 | Current GitHub permissions that differ from v2 desired roles                                   | Reconcile only after v2 roles are valid and published                                                                                                    | Desired-state reconciliation is automatic after approval where safe | Required for unresolved identity/team ownership                                            | Pending/incomplete reconciliation is durable Needs attention; unrelated teams remain untouched                                                       |
@@ -103,20 +152,30 @@ The migration executor must follow this order:
    writing candidate v2 data. The exact Git mechanism is an implementation
    decision, but recoverability must be verified.
 4. **Obtain required confirmations.** At minimum confirm the fallback
-   administrator, unresolved faculty/student identities, coordinator assignments
-   not reliably present in v1, and ambiguous lifecycle/section mappings. Record
+   administrator, unresolved faculty identities, coordinator assignments
+   not reliably present in v1, and ambiguous lifecycle/section mappings required
+   by §1.1. Deferred identity/placement/ownership findings remain explicit; they
+   are not canonical student/grading/comment conversion decisions. Record
    actor and decision without inventing missing history.
-5. **Generate v2.** Transform into a separate candidate representation. Remove
-   grader-role configuration, preserve verified manifest/provenance/history,
-   and retain every unresolved item as Needs attention rather than guessing.
-6. **Fully validate v2.** Validate cross-file references, canonical IDs,
-   exactly-one-Active term, lifecycle guards, role histories, assignment
-   ownership repair state, section schedules/Apply state, repository mappings,
-   grading paths, and managed-resource identity. Do not publish a partial valid
-   subset as if migration succeeded.
+5. **Generate the Phase 9 candidate.** Transform only the canonical domains
+   in §1.1 into a separate candidate representation. Remove grader-role
+   configuration, preserve verified manifest/provenance/history, and retain every
+   unresolved item as Needs attention rather than guessing. Inventory and preserve
+   deferred evidence without canonical conversion; do not rewrite grading paths
+   or synthesize student identity or comment ownership/history.
+6. **Fully validate the Phase 9 candidate.** Validate all required cross-file
+   references and canonical IDs within §1.1, at most one Active term (zero is
+   valid), lifecycle guards, role histories, assignment ownership repair state,
+   section schedules/Apply state, repository mappings and managed-resource
+   identity. Verify deferred evidence preservation and explicit unknowns, not
+   future canonical student IDs or grading paths. Do not publish a partial valid
+   subset of the Phase 9 boundary as if migration succeeded. Revalidate current
+   authorization, immutable repository/organization binding and authoritative
+   remote revision against the reviewed source; stale review requires refresh
+   and renewed review under the [trusted review contract](graider-remote-course-architecture.md#implemented-review-contract-slice-92--complete).
 7. **Push only after validation.** Commit with faculty attribution and push the
-   complete validated conversion. Report success only after the remote accepts
-   it. If push fails, restore the managed clone to authoritative remote v1 and
+   complete validated Phase 9 conversion atomically. Report success only after
+   the remote accepts it. If push fails, restore the managed clone to authoritative remote v1 and
    retain the reviewed intent only as an explicit retry artifact.
 8. **Require a compatible Graider client thereafter.** Once schema v2 is
    authoritative, older clients must refuse normal course operation. Graider
@@ -153,14 +212,28 @@ Before enabling the push action, the analyzer/review must show at least:
 - per-section copied schedules and usage/Apply outcome;
 - complete versus partial manifests and preserved template baselines;
 - every removed grader-role field/team permission;
-- student immutable identity resolution and ambiguities;
-- every grading record's target section/group path;
-- reusable-comment ownership gaps;
+- student usernames, immutable identity observations where available, provenance,
+  ambiguities and the Phase 13 deferral; no canonical identity resolution claim;
+- every available individual/group grading record's existing location, preservation
+  evidence, known/unknown section placement, selected commit, decisions, status and
+  available publication evidence, with canonical relocation/persistence deferred to
+  Phase 14 rather than a required target path;
+- reusable-comment content and applied-snapshot preservation, stable IDs where
+  available, and explicit unknown/repair-required ownership/history;
+- source/checkpoint references, unavailable evidence and machine-local completeness
+  limits for all preservation-only inventory;
 - managed, ambiguous, and untouched GitHub teams; and
 - confirmation that the legacy registered clone will not be changed.
 
+The report must separately identify validated publication facts, preservation-only
+inventory, publication blockers and deferred work under §1.1. A completed review or
+ready assignment plan is not publication approval. All required Phase 9 facts and
+preservation checks must pass before push is enabled; unresolved deferred evidence
+is not a claim that Phases 13 or 14 have completed.
+
 Any item that would change authorization, identity, or irreversible lifecycle
-without a reliable source or recorded confirmation blocks publication.
+without a reliable source or recorded confirmation blocks publication. Apply the
+§1.1 blocker rules without turning preserved deferred unknowns into canonical facts.
 
 Slice 6.6 removes the active grader role before migration. The operational v1 parser
 still accepts obsolete grader configuration and manifest-v1 readers preserve historical

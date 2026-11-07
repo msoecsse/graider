@@ -13,6 +13,16 @@ versus JSON boundaries, or one file per structure. The
 [repository layout](graider-repository-layout-v2.md) defines required logical
 separations and an illustrative physical layout.
 
+This is the target logical design across roadmap phases. Phase 9 publication does
+not require canonical conversion of every domain below. The
+[migration publication boundary](graider-schema-v2-migration.md#11-phase-9-publication-boundary)
+authoritatively separates required publication facts from preserved evidence,
+blocking ambiguities and deferred work. In particular, §6 student GitHub identity
+persistence remains Phase 13, §10 canonical grading relocation/remote persistence
+remains Phase 14, and legacy §11 comment ownership/history may remain explicitly
+unknown/repair-required under that boundary. These target shapes do not authorize
+inventing missing identity, ownership or history during migration.
+
 In this document:
 
 - a **canonical immutable identifier** is the value used to join records and

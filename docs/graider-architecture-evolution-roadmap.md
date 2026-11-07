@@ -1129,7 +1129,12 @@ role, v2 fields, and new grader planning/execution; it does not perform this cle
 
 ## Slice 9.5 — Publish migrated schema
 
-Checkpoint old state, write/validate v2, push, then enable v2 behavior.
+Checkpoint old state, write/validate the complete staged Phase 9 candidate, push,
+then enable v2 behavior within the published boundary. The accepted decision in
+issue #16 is **A — staged Phase 9 publication**. Publication facts, preservation-only
+evidence, blockers and deferred work are defined authoritatively in the
+[migration publication boundary](graider-schema-v2-migration.md#11-phase-9-publication-boundary);
+apply its safety protocol and report acceptance criteria before enabling push.
 
 ---
 
@@ -1241,7 +1246,9 @@ Optionally migrate clean existing repositories.
 
 ## Slice 13.1 — Immutable GitHub student identity
 
-Persist GitHub user IDs.
+Persist canonical GitHub user IDs using preserved observations and verified identity
+evidence. Phase 9 inventory does not complete this slice; see the
+[migration publication boundary](graider-schema-v2-migration.md#11-phase-9-publication-boundary).
 
 ## Slice 13.2 — GitHub username rename handling
 
@@ -1257,7 +1264,8 @@ Preserve repositories/history, remove student access, stop future provisioning.
 
 ## Slice 13.5 — Section transfer
 
-Preserve repository identity, update permissions, migrate grading-state location.
+Preserve repository identity, update permissions and retain grading placement/transfer
+provenance. Canonical grading-state relocation belongs to Slice 14.1.
 
 ## Slice 13.6 — Group-transfer behavior
 
@@ -1272,6 +1280,11 @@ Preserve original group history and require explicit destination arrangement.
 Move/standardize canonical state as:
 
 `term + assignment + section + student/group`
+
+This phase owns canonical relocation of existing individual/group grading records,
+including resolution of preserved placement ambiguity. Phase 9 preservation does not
+complete relocation or remote persistence; see the
+[migration publication boundary](graider-schema-v2-migration.md#11-phase-9-publication-boundary).
 
 ## Slice 14.2 — Course-repository persistence
 
