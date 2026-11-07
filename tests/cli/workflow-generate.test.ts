@@ -1,14 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parse, parseDocument } from "yaml";
 import { runWorkflowGenerateCommand } from "../../src/cli/commands/workflow.command.js";
 import { formatCommandResultAsJson, formatCommandResultAsText } from "../../src/cli/output.js";
 import { normalizeCommonCommandOptions } from "../../src/core/command-context.js";
 import { ExitCode } from "../../src/core/exit-codes.js";
-
-const FINAL_GRADING_STEP_COUNT = 3;
 
 const FIXTURE_ROOT = path.resolve("tests/fixtures/config");
 const TEMP_FIXTURE_PREFIX = "graider-workflow-generate-";
@@ -112,72 +110,6 @@ const readGeneratedWorkflow = (cwd: string, generatedFile = DEFAULT_WORKFLOW_FIL
   fs.readFileSync(path.join(cwd, generatedFile), "utf8");
 
 describe("graider workflow generate command", () => {
-  it.skip("superseded Classroom-workflow assertions", () => {
-    const cwd = copyFixtureToTemp();
-    replaceCourseGrading(cwd, PRESET_GRADING_BLOCK);
-    const result = runWorkflowGenerate(cwd);
-    const workflow = readGeneratedWorkflow(cwd);
-    const text = formatCommandResultAsText(result);
-
-    expect(result.exitCode).toBe(ExitCode.Success);
-    expect(parseDocument(workflow).errors).toEqual([]);
-    expect(result.generatedFiles).toEqual([DEFAULT_WORKFLOW_FILE]);
-    expect(result.summary).toMatchObject({
-      preset: "java-junit-checkstyle",
-      workflowFile: DEFAULT_WORKFLOW_FILE
-    });
-    expect(text).toContain("workflow generate");
-    expect(text).toContain(`generated: ${DEFAULT_WORKFLOW_FILE}`);
-    expect(workflow).toContain("# Managed by Graider");
-    expect(workflow).toContain("# graider-workflow-version: 1");
-    expect(workflow.split("# Managed by Graider")).toHaveLength(2);
-    expect(workflow).toContain("name: AutoGrading Tests");
-    expect(workflow).toContain("  run-autograding-tests:");
-    expect(workflow).toContain("github.actor != 'github-classroom[bot]'");
-    expect(workflow).toContain("github.event_name == 'push'");
-    expect(workflow).toContain("github.event.before == '0000000000000000000000000000000000000000'");
-    expect(workflow).toContain("github.ref_name == github.event.repository.default_branch");
-    expect(workflow).toContain('JUNIT_PLATFORM_CONSOLE_VERSION: "6.1.2"');
-    expect(workflow).toContain('CHECKSTYLE_VERSION: "14.1.0"');
-    expect(workflow).toContain('JAVA_VERSION: "25"');
-    expect(workflow).toContain(
-      'CHECKSTYLE_CONFIG_URL: "https://csse.msoe.us/csc1110/MSOE_checkStyle.xml"'
-    );
-    expect(workflow).toContain(
-      "org/junit/platform/junit-platform-console-standalone/${JUNIT_PLATFORM_CONSOLE_VERSION}"
-    );
-    const document = parse(workflow) as { jobs: Record<string, { steps: unknown }> };
-    const steps = document.jobs["run-autograding-tests"]?.steps as Array<{
-      name: string;
-      if?: string;
-      "continue-on-error"?: boolean;
-      env?: Record<string, string>;
-      run?: string;
-    }>;
-    for (const name of ["CheckStyle", "Compile Java sources", "Unit Tests"]) {
-      expect(steps.find((step) => step.name === name)?.["continue-on-error"]).toBe(true);
-    }
-    const finalSteps = steps.slice(-FINAL_GRADING_STEP_COUNT);
-    expect(finalSteps.map((step) => step.name)).toEqual([
-      "Write Graider grading result and evidence metadata",
-      "Upload Graider grading result",
-      "Set final grading status"
-    ]);
-    expect(finalSteps.map((step) => step.if)).toEqual(["always()", "always()", "always()"]);
-    expect(finalSteps[0]?.env).toMatchObject({
-      CHECKSTYLE_OUTCOME: "${{ steps.checkstyle.outcome }}",
-      COMPILE_OUTCOME: "${{ steps.compile.outcome }}",
-      UNIT_TESTS_OUTCOME: "${{ steps.unittests.outcome }}"
-    });
-    expect(finalSteps[2]?.env?.RESULT_OUTPUT_PATH).toBe("graider-output/grading-results.json");
-    expect(finalSteps[2]?.run).toContain('os.environ["RESULT_OUTPUT_PATH"]');
-    expect(finalSteps[2]?.run).not.toContain("steps.");
-    expect(workflow).not.toContain("classroom-resources/");
-    expect(workflow).not.toContain(".conclusion");
-    expect(workflow).not.toContain("faculty-summary");
-    expect(workflow).not.toContain("GRAIDER_GITHUB_TOKEN");
-  });
-
   it("generates the shell-based managed workflow", () => {
     const cwd = copyFixtureToTemp();
     replaceCourseGrading(cwd, PRESET_GRADING_BLOCK);
@@ -186,6 +118,34 @@ describe("graider workflow generate command", () => {
 
     expect(result.exitCode).toBe(ExitCode.Success);
     expect(parseDocument(workflow).errors).toEqual([]);
+    expect(result.generatedFiles).toEqual([DEFAULT_WORKFLOW_FILE]);
+    expect(result.summary).toMatchObject({
+      preset: "java-junit-checkstyle",
+      workflowFile: DEFAULT_WORKFLOW_FILE
+    });
+    const text = formatCommandResultAsText(result);
+    expect(text).toContain("workflow generate");
+    expect(text).toContain(`generated: ${DEFAULT_WORKFLOW_FILE}`);
+    expect(workflow).toContain("# Managed by Graider");
+    expect(workflow).toContain("# graider-workflow-version: 1");
+    expect(workflow.split("# Managed by Graider")).toHaveLength(2);
+    expect(parse(workflow)).toMatchObject({
+      name: "AutoGrading Tests",
+      on: { push: {}, workflow_dispatch: {} },
+      permissions: { contents: "read", actions: "read" },
+      jobs: {
+        "run-autograding-tests": {
+          env: { JUNIT_PLATFORM_CONSOLE_VERSION: "6.1.2" },
+          steps: expect.arrayContaining([
+            expect.objectContaining({
+              name: "Set final grading status",
+              env: { RESULT_OUTPUT_PATH: "graider-output/grading-results.json" }
+            })
+          ]) as unknown
+        }
+      }
+    });
+    expect(workflow).toContain("github.event_name == 'push'");
     expect(workflow).toContain("uses: actions/setup-java@v6");
     expect(workflow).toContain("checkstyle/checkstyle/releases/download/checkstyle-");
     expect(workflow).toContain("- name: Detect JavaFX requirements");
@@ -222,6 +182,48 @@ describe("graider workflow generate command", () => {
     expect(json.summary).toMatchObject({
       preset: "java-junit-checkstyle",
       workflowFile: DEFAULT_WORKFLOW_FILE
+    });
+  });
+
+  it("uses configured artifact and result paths for grading evidence", () => {
+    const cwd = copyFixtureToTemp();
+    replaceCourseGrading(
+      cwd,
+      PRESET_GRADING_BLOCK.replace("artifact: grading-results", "artifact: custom-results").replace(
+        "result_file: grading-results.json",
+        "result_file: custom output/result.json"
+      )
+    );
+    const result = runWorkflowGenerate(cwd);
+    const workflow = readGeneratedWorkflow(cwd);
+
+    expect(result.exitCode).toBe(ExitCode.Success);
+    expect(parseDocument(workflow).errors).toEqual([]);
+    expect(parse(workflow)).toMatchObject({
+      jobs: {
+        "run-autograding-tests": {
+          steps: expect.arrayContaining([
+            expect.objectContaining({
+              name: "Write Graider grading result and evidence metadata",
+              env: expect.objectContaining({
+                RESULT_OUTPUT_PATH: "custom output/result.json"
+              }) as unknown
+            }),
+            expect.objectContaining({
+              name: "Upload Graider grading result",
+              with: {
+                name: "custom-results",
+                path: "custom output/result.json\ngrading-evidence/\n",
+                "if-no-files-found": "error"
+              }
+            }),
+            expect.objectContaining({
+              name: "Set final grading status",
+              env: { RESULT_OUTPUT_PATH: "custom output/result.json" }
+            })
+          ]) as unknown
+        }
+      }
     });
   });
 
@@ -298,6 +300,31 @@ describe("graider workflow generate command", () => {
     expect(result.errors).toEqual([
       expect.objectContaining({ code: "unsupported_grading_preset" })
     ]);
+  });
+
+  it("does not embed GitHub credentials in generated output", () => {
+    const cwd = copyFixtureToTemp();
+    replaceCourseGrading(cwd, PRESET_GRADING_BLOCK);
+    const fakeGraiderToken = "fake-graider-workflow-token";
+    const fakeGitHubToken = "fake-github-workflow-token";
+    vi.stubEnv("GRAIDER_GITHUB_TOKEN", fakeGraiderToken);
+    vi.stubEnv("GITHUB_TOKEN", fakeGitHubToken);
+
+    try {
+      const result = runWorkflowGenerate(cwd);
+      expect(result.exitCode).toBe(ExitCode.Success);
+      for (const output of [
+        readGeneratedWorkflow(cwd),
+        formatCommandResultAsJson(result),
+        formatCommandResultAsText(result)
+      ]) {
+        expect(output).not.toContain(fakeGraiderToken);
+        expect(output).not.toContain(fakeGitHubToken);
+        expect(output).not.toMatch(/GRAIDER_GITHUB_TOKEN|GITHUB_TOKEN|authorization:/i);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("does not require GitHub credentials", () => {
