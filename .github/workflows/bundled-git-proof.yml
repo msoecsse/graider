@@ -56,6 +56,13 @@ jobs:
       - name: Build UI
         run: npm --prefix ui run build
 
+      - name: Test local migration checkpoint and retry safety
+        run: npx vitest run tests/unit/git/git-remote-checkpoint.test.ts tests/unit/migration/migration-checkpoint.test.ts tests/unit/migration/migration-retry-state.test.ts --no-file-parallelism
+
+      - name: Test main-process migration checkpoint and retry safety
+        working-directory: ui
+        run: npx vitest run electron/migrationCheckpointService.test.ts electron/migrationRetryStore.test.ts electron/migrationReviewService.test.ts --no-file-parallelism
+
       - name: Package native Windows x64 directory app
         env:
           # Nonfunctional CI-only value; this proof never signs in or publishes an app.

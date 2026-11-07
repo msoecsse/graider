@@ -132,6 +132,7 @@ export const loadMigrationReviewBackend = (): typeof Backend =>
 /** Session-local only. Renderer assertions are compared with retained context, never adopted. */
 export const createMigrationReviewService = (deps: MigrationReviewServiceDependencies) => {
   const sessions = new Map<number, ReviewSession>();
+  const checkpointReviewIds = new WeakMap<Backend.MigrationReviewResult, string>();
   const loads = new Map<number, symbol>();
   const token = deps.receipt ?? randomUUID;
   const backend = () => deps.backend();
@@ -510,6 +511,38 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
         clearGrader(session);
         throw error;
       }
+    },
+    /** Main-only prepublication checkpoint handoff. Completion identity changes even on identical re-review. */
+    async getCheckpointHandoff(owner: number, request: MigrationReviewSessionRequest) {
+      if (!isMigrationReviewSessionRequest(request)) throw new Error("Invalid review binding.");
+      const session = owned(owner, request);
+      const analysis = session.view.analysis;
+      const review = session.completedResult;
+      if (!review || review.status !== "complete") return null;
+      let reviewId = checkpointReviewIds.get(review);
+      if (!reviewId) {
+        reviewId = token();
+        checkpointReviewIds.set(review, reviewId);
+      }
+      const retained = (): void => {
+        if (
+          sessions.get(owner) !== session ||
+          session.busy ||
+          session.view.analysis !== analysis ||
+          session.completedResult !== review
+        )
+          throw new Error("Migration review was replaced. Reopen review.");
+      };
+      const revalidate = async (): Promise<void> => {
+        retained();
+        await deps.withCourse(session.selector, async (trusted) => {
+          if ((await current(session, trusted)) !== "current")
+            throw new Error("Migration source changed. Reopen review.");
+          retained();
+        });
+      };
+      await revalidate();
+      return Object.freeze({ analysis, review, reviewId, revalidate });
     },
     /** Main-process handoff for 9.3. Never accept a renderer-returned completed artifact. */
     async getCompleted(owner: number, request: MigrationReviewSessionRequest) {

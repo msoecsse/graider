@@ -46,7 +46,9 @@ export type GitOperationName =
   | "delete_remote_branch"
   | "list_commits"
   | "list_first_parent_history"
-  | "resolve_remote_branch";
+  | "resolve_remote_branch"
+  | "read_remote_checkpoint"
+  | "create_remote_checkpoint";
 
 export type GitErrorKind =
   | "engine_unavailable"
@@ -175,6 +177,24 @@ export interface CommitHistoryRequest {
 }
 
 export type TrustedGitRemote = string & { readonly __trustedGitRemote: unique symbol };
+
+/** Exact lightweight migration checkpoint only. No arbitrary refs, deletion or force surface. */
+export interface GitRemoteCheckpointRequest {
+  readonly remote: TrustedGitRemote;
+  readonly sourceCommit: ExactCommitRevision;
+  readonly authentication: GitAuthenticationContext;
+}
+
+export interface GitRemoteCheckpointWorkspace {
+  readRemoteCheckpoint(request: GitRemoteCheckpointRequest): Promise<ObjectId | null>;
+  createRemoteCheckpoint(request: GitRemoteCheckpointRequest): Promise<void>;
+}
+
+export const migrationCheckpointReference = (source: string): string => {
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(source))
+    throw new GitError("operation_rejected", "create_remote_checkpoint");
+  return `refs/tags/graider-migration-v1/${source}`;
+};
 
 export interface CloneRequest {
   readonly remote: TrustedGitRemote;

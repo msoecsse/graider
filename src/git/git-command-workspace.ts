@@ -10,6 +10,9 @@ import {
   createRelativeGitPath,
   createRemoteName,
   isObjectId,
+  migrationCheckpointReference,
+  type GitRemoteCheckpointRequest,
+  type GitRemoteCheckpointWorkspace,
   type CommitHistoryRequest,
   type CommitRequest,
   type CreateOrResetBranchRequest,
@@ -186,10 +189,10 @@ const sameRepositoryRemote = (actual: string, expected: string): boolean => {
 };
 
 const requireAuthenticationContext = (
-  context: GitAuthenticationContext,
+  context: GitAuthenticationContext | undefined,
   operation: GitOperationName
 ): void => {
-  if (createGitAuthenticationContext(context.id) === null) {
+  if (context === undefined || createGitAuthenticationContext(context.id) === null) {
     throw new GitError("authentication_failed", operation);
   }
 };
@@ -1298,6 +1301,58 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
     }
   }
 
+  async readRemoteCheckpoint(request: GitRemoteCheckpointRequest): Promise<ObjectId | null> {
+    const reference = migrationCheckpointReference(request.sourceCommit);
+    requireAuthenticationContext(request.authentication, "read_remote_checkpoint");
+    try {
+      const output = await this.executor.run(
+        this.root,
+        ["ls-remote", "--refs", "--", request.remote, reference],
+        "read_remote_checkpoint",
+        { authentication: request.authentication, remote: request.remote }
+      );
+      const lines = output.trim().split(/\r?\n/u).filter(Boolean);
+      if (lines.length === 0) return null;
+      const [commit, observed] = (lines[0] ?? "").split("\t");
+      if (lines.length !== 1 || observed !== reference || !commit || !isObjectId(commit))
+        throw new GitError("operation_rejected", "read_remote_checkpoint");
+      // Raw ref identity is deliberate: an annotated tag's peeled commit is not a lightweight tag.
+      return commit;
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "read_remote_checkpoint", "remote_unavailable");
+    }
+  }
+
+  async createRemoteCheckpoint(request: GitRemoteCheckpointRequest): Promise<void> {
+    const reference = migrationCheckpointReference(request.sourceCommit);
+    requireAuthenticationContext(request.authentication, "create_remote_checkpoint");
+    try {
+      if (String(await this.resolveRevision(request.sourceCommit)) !== request.sourceCommit)
+        throw new GitError("operation_rejected", "create_remote_checkpoint");
+      await this.executor.run(
+        this.root,
+        [
+          "-c",
+          "push.followTags=false",
+          "push",
+          "--no-follow-tags",
+          "--no-mirror",
+          "--no-verify",
+          "--recurse-submodules=no",
+          "--",
+          request.remote,
+          `${request.sourceCommit}:${reference}`
+        ],
+        "create_remote_checkpoint",
+        { authentication: request.authentication, remote: request.remote }
+      );
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      throw errorForFailure(error, "create_remote_checkpoint", "remote_unavailable");
+    }
+  }
+
   private async resolveUpstreamRemoteUrl(): Promise<string> {
     const branch = (
       await this.executor.run(this.root, ["symbolic-ref", "--quiet", "--short", "HEAD"], "push")
@@ -1819,6 +1874,11 @@ export class GitCommandWorkspaceFactory implements GitWorkspacePreparationFactor
           error instanceof GitError ? error : new GitError("unknown_engine_failure", "open", error)
       };
     }
+  }
+
+  async openCheckpoint(path: string): Promise<GitRemoteCheckpointWorkspace> {
+    const workspace = await this.open(path);
+    return new GitCommandWorkspace(workspace.root, this.executor);
   }
 
   async open(path: string): Promise<GitWorkspacePreparer> {

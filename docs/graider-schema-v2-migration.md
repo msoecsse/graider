@@ -445,3 +445,55 @@ completeness remains Needs attention. A blocked result contains no proposed file
 The later validator alone may authorize publication after all required checks.
 Operational course/term gates remain **1** and Setup still emits Schema 1. No writer,
 checkpoint, commit/push, migration executor or publication control is installed here.
+
+### Implemented verified v1 checkpoint and retry infrastructure (Slice 9.5C)
+
+The main-only `createMigrationCheckpointService` obtains the exact retained completed
+review through `getCheckpointHandoff()`. Its revalidation closure rejects replaced
+analysis/completion, refreshed/closed sessions, stale authoritative source, changed
+account/generation, repository/organization mismatch and lost faculty authorization.
+Each completed review has a separate ephemeral identity, including identical renewed
+reviews. The service also re-enters the current OAuth course/session boundary,
+resolves canonical remote identity/revision and shares the existing per-course lease.
+No production control, IPC or renderer installs this capability.
+
+The bundled Git factory exposes `openCheckpoint()` with only exact-source remote
+checkpoint read/create methods. The deterministic lightweight reference is
+`refs/tags/graider-migration-v1/<source-sha>`. An absent remote ref is pushed from the
+reviewed commit without force, using an explicit canonical URL and single refspec;
+follow-tags, mirror pushing, push hooks and recursive submodule pushing are disabled.
+A fresh `ls-remote --refs` read verifies the raw remote ref, independently of the
+push response and all local tags. Exact existing refs are idempotent; conflicts,
+including annotated tags, are Needs attention and are never replaced or deleted.
+Lost/ambiguous responses require fresh observation. All observations/writes are
+bracketed by current source/session/authorization checks; advancement cannot produce
+verified success. The operation uses an authenticated isolated no-checkout clone,
+removed with bounded Windows cleanup retries. Default-branch content, active managed
+clones, legacy clones and local/runtime evidence are preserved.
+
+A failed prepublication attempt may retain a strict version-1 local hint at
+`<userData>/managed-courses/<user-id>/<repository-id>/migration-retry.json`, outside
+the worktree. Main derives its binding from current trusted state: authenticated
+immutable user ID, repository/organization IDs, exact source SHA, report ID, a digest
+of session/completion/review identity, current candidate fingerprint and independently
+verified checkpoint ref/commit. Only a closed concise failure code is stored. The
+record contains no raw errors, credentials, headers, paths, executable capability or
+publication/authorization assertion. Reads never seed storage; malformed, oversized,
+foreign, unknown-field and linked records fail closed. Writes validate first and
+replace only this app-owned record through an exclusive temporary file.
+
+Retry reads are hints only. Every invocation re-enters the current trusted review,
+OAuth/session, canonical repository/source and main-owned candidate-fingerprint
+provider, then independently verifies the remote checkpoint without creating it.
+Source advancement, account/generation/authority changes, repository/organization
+mismatch, review replacement or candidate mismatch reject reuse, including changes
+during awaited observations. Reopening/restarting review requires renewed decisions;
+an old disk record cannot restore ephemeral approvals. Retaining a hint does not back
+up local grading data, validate a candidate or authorize publication. All returned
+results retain `publicationReady: false`.
+
+This slice adds no migration publication, final candidate validator, Schema v2
+operational cutover, reconciliation execution or production migration button. Both
+operational gates remain **1**. Later orchestration must supply the current main-owned
+candidate fingerprint and complete independent publication validation; issue #20
+remains separate work.

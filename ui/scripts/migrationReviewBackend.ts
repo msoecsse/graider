@@ -17,6 +17,31 @@ export { facultyIdentitySchema } from "../../src/config/config-schemas.js";
 export type * from "../../src/migration/migration-models.js";
 export type * from "../../src/migration/preservation-models.js";
 export type * from "../../src/migration/migration-review-models.js";
+export {
+  verifyMigrationCheckpoint,
+  withMigrationCheckpointWorkspace
+} from "../../src/migration/migration-checkpoint.js";
+export type * from "../../src/migration/migration-checkpoint.js";
+export {
+  migrationRetryArtifactSchema,
+  migrationRetryBindingSchema,
+  migrationRetryFailureSchema,
+  matchesMigrationRetryBinding
+} from "../../src/migration/migration-retry-state.js";
+export type * from "../../src/migration/migration-retry-state.js";
+export { fingerprint as migrationFingerprint } from "../../src/migration/migration-evidence.js";
+export {
+  createExactCommitRevision,
+  createTrustedGitRemote,
+  createGitAuthenticationContext,
+  migrationCheckpointReference
+} from "../../src/git/git-workspace.js";
+export type {
+  GitRemoteCheckpointWorkspace,
+  GitAuthenticationContext,
+  TrustedGitRemote,
+  ObjectId
+} from "../../src/git/git-workspace.js";
 
 import fs from "node:fs";
 import path from "node:path";

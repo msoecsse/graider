@@ -1203,6 +1203,14 @@ defines the complete file proposal and strict staged serialization. Candidate
 generation grants no publication authority and installs no writer or executor;
 operational gates remain 1. Final validation and publication remain separate work.
 
+Slice 9.5C verified remote v1 checkpoint and main-owned prepublication retry-state
+infrastructure are implemented. The
+[9.5C contract](graider-schema-v2-migration.md#implemented-verified-v1-checkpoint-and-retry-infrastructure-slice-95c)
+defines exact immutable remote tags, independent verification/lost-response recovery,
+isolated bundled-Git attempts and non-authoritative retry hints with current trusted
+revalidation. There is no production integration, migration publication, final
+candidate validator or operational cutover. Issue #20 remains separate work.
+
 ---
 
 # Phase 10 — Assignment Lifecycle and Ownership
