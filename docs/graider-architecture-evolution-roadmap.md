@@ -1154,6 +1154,13 @@ identity or grading conversion are introduced. `publicationReady` is always fals
 **Slice 9.4 remains incomplete**: cleanup decisions and execution belong to later
 issues. Both operational schema gates remain **1** and Setup still emits Schema 1.
 
+### Slice 9.4D — Post-publication reconciliation capability — IMPLEMENTED
+
+The unwired backend capability and its ordering, identity, replacement-access and
+retry boundaries are defined in the
+[canonical migration contract](graider-schema-v2-migration.md#implemented-post-publication-capability-slice-94d).
+Slice 9.4 remains incomplete; publication and production orchestration are not enabled.
+
 ## Slice 9.5 — Publish migrated schema
 
 Checkpoint old state, write/validate the complete staged Phase 9 candidate, push,

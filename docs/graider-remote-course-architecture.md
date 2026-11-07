@@ -4164,3 +4164,15 @@ The pre-edit inventory traced these remaining concepts and their callers:
 
 Phases 6 and 7 and Slices 8.1–8.6 are complete. Slice 9.3 is complete. Next: **Phase 9 / Slice 9.4 — Grader Removal**. These backend slices do not migrate courses, edit the real
 `csc1120`, change production permissions or term lifecycle, or activate v2.
+
+### Unwired legacy grant retirement (Slice 9.4D)
+
+The backend `LegacyGraderReconciler` implements the
+[post-publication reconciliation capability](graider-schema-v2-migration.md#implemented-post-publication-capability-slice-94d).
+It revalidates exact published v2/session bindings, uses Phase 7 reconcilers for
+replacement access and requires fresh numeric identity and permission observations
+before retiring a reviewed legacy repository grant. Pending/ambiguous targets remain
+Needs attention; successful independent work is preserved and retries start from
+remote observations. Legacy teams/members and direct collaborators are untouched.
+This capability has no production wiring. Slice 9.4 remains incomplete and operational
+schema gates remain **1**; no 9.5 orchestration or publication is introduced.

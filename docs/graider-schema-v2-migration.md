@@ -271,3 +271,35 @@ This is a pure plan: no I/O, clock, randomness, writes, checkpoints, publication
 GitHub execution. `publicationReady` remains false. Slice 9.4 remains incomplete;
 future handoff/execution and 9.5 candidate generation/publication are separate work.
 Operational schema gates remain **1**, and Setup still emits Schema 1.
+
+### Implemented post-publication capability (Slice 9.4D)
+
+`LegacyGraderReconciler` is a backend-only, unwired capability. Its trusted caller
+supplies the retained 9.4C plan, exact published Schema v2 snapshot, complete term
+and repository-scope inventory, canonical course/organization/account IDs, and an
+authoritative `readPublished` callback that rechecks session generation, faculty
+authority and remote revision. Working-tree state and renderer assertions cannot
+supply this context. The caller must serialize it with other course/session work;
+the capability additionally serializes its own calls and detaches retained inputs.
+
+Every target rechecks the publication context and parsed v2 faculty/section roles,
+then verifies the reviewed numeric repository/team association and complete legacy
+team hierarchy/membership observations. Phase 7 membership and course/student
+permission reconcilers establish replacements. Pending organization access, missing
+fallback access, conflicting scopes or incomplete observations leave legacy access
+untouched. Replacement composition withholds collaborator mutation and unrelated
+managed-grant removal; missing collaborator access requires separate repair.
+
+Fresh membership, managed-team permission, publication and legacy association reads
+precede each numeric grant removal. Successful independent targets survive failures.
+Every attempted removal is followed by remote verification, including lost responses
+and cancellation; an unverified outcome remains Needs attention. A later run starts
+with fresh observations and never retries a destructive call blindly. Already absent
+grants still require verified replacement access before reporting success. Once the
+intended state is observed, reruns perform no writes. Legacy teams and their members
+are never deleted; after all inventoried candidate grants are verified absent, the
+report identifies the team only as a manual-cleanup candidate.
+
+No production import, IPC, button, migration orchestration or schema publication is
+installed. Slice 9.4 remains incomplete; 9.5 owns publication/orchestration. Both
+operational schema gates remain **1**.
