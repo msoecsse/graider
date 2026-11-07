@@ -63,6 +63,35 @@ export const createMigrationReviewReader = (
   };
   return {
     observe: observed,
+    async inventory(
+      analysis: Backend.CourseMigrationAnalysis,
+      review: Backend.MigrationReviewResult
+    ) {
+      if (
+        !client.getOrganizationScopeResponse ||
+        !client.getOrganizationMembership ||
+        !client.listManagedOrganizationTeamsPage ||
+        !client.getManagedTeam ||
+        !client.listManagedTeamMembersPage ||
+        !client.getCourseRepositoryById ||
+        !client.listCourseRepositoryTeamsPage
+      )
+        throw new Error("Legacy grader read capabilities are unavailable.");
+      return backend.inventoryLegacyGraders(
+        analysis,
+        review,
+        {
+          getOrganizationScopeResponse: client.getOrganizationScopeResponse.bind(client),
+          getOrganizationMembership: client.getOrganizationMembership.bind(client),
+          listManagedOrganizationTeamsPage: client.listManagedOrganizationTeamsPage.bind(client),
+          getManagedTeam: client.getManagedTeam.bind(client),
+          listManagedTeamMembersPage: client.listManagedTeamMembersPage.bind(client),
+          getCourseRepositoryById: client.getCourseRepositoryById.bind(client),
+          listCourseRepositoryTeamsPage: client.listCourseRepositoryTeamsPage.bind(client)
+        },
+        input.signal
+      );
+    },
     async lookupLogin(login: string): Promise<{ githubUserId: number; githubLogin: string }> {
       const identity = await client.getUser(login);
       const parsed = backend.facultyIdentitySchema.safeParse({

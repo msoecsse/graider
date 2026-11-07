@@ -54,6 +54,8 @@ describe("UI security boundary", () => {
       "graider-ui:migration-review:load",
       "graider-ui:migration-review:refresh",
       "graider-ui:migration-review:verify-faculty",
+      "graider-ui:migration-review:load-graders",
+      "graider-ui:migration-review:complete-graders",
       "graider-ui:migration-review:complete",
       "graider-ui:migration-review:close",
       "graider-ui:managed-course:source-mode",

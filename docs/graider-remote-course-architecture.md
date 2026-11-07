@@ -2939,6 +2939,27 @@ mutation methods. No permission/team/member changes or student identity/grading
 conversion occur. Phase 9.4 cleanup and Phase 9.5 publication remain unfinished,
 under the staged publication boundary above; production schema gates stay **1**.
 
+### Explicit legacy grader access review (Slice 9.4B)
+
+`reviewGraderAccess` layers a separate immutable, additive review on the completed
+9.2 artifact and exact 9.4A inventory. Main retains both inputs and issues a fresh
+inventory receipt; strict load/complete grader IPC accepts only session/source
+assertions and typed per-member decisions. `getCompletedGrader()` is main-only and
+rechecks current authorization, account/generation, repository/organization and
+remote revision. Reloading inventory, replacing/completing the base review,
+verification, refresh or closure invalidates affected decisions.
+
+Every verified member requires existing-sufficient, no-access or explicit exact
+term/section assignment. New faculty use the existing institutional username and
+trusted identity verification/addition boundary. Existing v1 relationships survive;
+Archived additions confirm normal completion retained as current, without former
+history or timestamps. No roles derive from team membership. The faculty page adds
+**Legacy grader access** after the base review; see the
+[faculty guide](faculty-ui-user-guide.md#reviewing-legacy-grader-access-during-migration).
+Results remain ephemeral, main-owned and `publicationReady: false`. No cleanup,
+permission mutation, checkpoint or publication occurs. Slice 9.4 remains incomplete
+and operational schema gates remain **1**.
+
 ### Implemented review contract (Slice 9.2 — complete)
 
 The portable `src/migration/migration-review-models.ts` and

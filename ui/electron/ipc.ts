@@ -26,6 +26,8 @@ export const IPC_CHANNELS = {
   loadMigrationReviewAnalysis: "graider-ui:migration-review:load",
   refreshMigrationReview: "graider-ui:migration-review:refresh",
   verifyMigrationFacultyIdentity: "graider-ui:migration-review:verify-faculty",
+  loadGraderAccessReview: "graider-ui:migration-review:load-graders",
+  completeGraderAccessReview: "graider-ui:migration-review:complete-graders",
   completeMigrationReview: "graider-ui:migration-review:complete",
   closeMigrationReview: "graider-ui:migration-review:close",
   getCourseOperationalMode: "graider-ui:managed-course:source-mode",

@@ -44,7 +44,34 @@ const setup = (resolved = true) => {
     githubUserId: login === "added" ? REVIEW_OTHER_USER : REVIEW_USER,
     githubLogin: login
   }));
-  const reader = { snapshot: vi.fn(async () => structuredClone(snapshot)), observe, lookupLogin };
+  const inventory = vi.fn(
+    async (analysis: Backend.CourseMigrationAnalysis): Promise<Backend.LegacyGraderInventory> => ({
+      kind: "schema-v1-legacy-grader-inventory",
+      status: "ready",
+      publicationReady: false,
+      source: { ...analysis.source, reportId: analysis.reportId },
+      runtimeCoverage: "unavailable",
+      evidence: [],
+      repositoryEvidence: [],
+      repositories: [],
+      findings: [],
+      candidate: {
+        classification: "legacy_candidate",
+        organizationId: REVIEW_ORG,
+        organizationLogin: "example-org",
+        slug: "graders",
+        teamId: 900,
+        membershipComplete: true,
+        members: [{ id: REVIEW_OTHER_USER, login: "added" }]
+      }
+    })
+  );
+  const reader = {
+    inventory,
+    snapshot: vi.fn(async () => structuredClone(snapshot)),
+    observe,
+    lookupLogin
+  };
   const service = createMigrationReviewService({
     backend: loadMigrationReviewBackend,
     withCourse: async (selector, operation) => {
@@ -345,5 +372,103 @@ describe("main-process migration review sessions", () => {
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
+  });
+});
+
+describe("trusted grader access handoff", () => {
+  const prepare = async () => {
+    const f = setup();
+    const view = await f.load();
+    const bound = f.bound(view);
+    await f.service.complete(1, { ...bound, submission: reviewedSubmissionFixture(view) });
+    const context = await f.service.loadGrader(1, bound);
+    const submission = {
+      inventoryId: context.inventoryId,
+      decisions: [
+        { githubUserId: REVIEW_OTHER_USER, disposition: "no_access" as const, sections: [] }
+      ]
+    };
+    return { ...f, view, bound, context, submission };
+  };
+  it("requires trusted completion and binds decisions to exact retained inventory", async () => {
+    const f = setup();
+    const view = await f.load();
+    await expect(f.service.loadGrader(1, f.bound(view))).rejects.toThrow();
+    const ready = await prepare();
+    expect(
+      (await ready.service.completeGrader(1, { ...ready.bound, submission: ready.submission }))
+        .status
+    ).toBe("complete");
+    expect((await ready.service.getCompletedGrader(1, ready.bound))?.publicationReady).toBe(false);
+    const next = await ready.service.loadGrader(1, ready.bound);
+    expect(next.inventoryId).not.toBe(ready.context.inventoryId);
+    expect(await ready.service.getCompletedGrader(1, ready.bound)).toBeNull();
+    expect(
+      (await ready.service.completeGrader(1, { ...ready.bound, submission: ready.submission }))
+        .status
+    ).toBe("blocked");
+    Object.values(ready.writes).forEach((write) => expect(write).not.toHaveBeenCalled());
+  });
+  it.each(["source", "account", "refresh", "verify", "close", "replace"])(
+    "invalidates grader decisions after %s",
+    async (change) => {
+      const f = await prepare();
+      await f.service.completeGrader(1, { ...f.bound, submission: f.submission });
+      if (change === "source")
+        f.change({
+          ...f.snapshot(),
+          binding: { ...f.snapshot().binding, sourceCommitSha: REVIEW_NEW_SHA }
+        });
+      if (change === "account") f.account(REVIEW_OTHER_USER);
+      if (change === "refresh") await f.service.refresh(1, f.bound);
+      if (change === "verify")
+        await f.service.verify(1, {
+          ...f.bound,
+          institutionalUsername: "newprof",
+          githubLogin: "added",
+          addFaculty: true
+        });
+      if (change === "close") f.service.close(1);
+      if (change === "replace") await f.load();
+      const result = await f.service.getCompletedGrader(1, f.bound).catch(() => null);
+      expect(result).toBeNull();
+    }
+  );
+  it("requires explicit institutional verification before grader assignment", async () => {
+    const f = await prepare();
+    const verified = await f.service.verify(1, {
+      ...f.bound,
+      institutionalUsername: "newprof",
+      githubLogin: "added",
+      addFaculty: true
+    });
+    expect(verified.view).not.toBeNull();
+    const view = verified.view!;
+    const bound = {
+      sessionId: view.sessionId,
+      source: loadMigrationReviewBackend().migrationReviewSource(view.analysis)
+    };
+    expect(await f.service.getCompletedGrader(1, bound)).toBeNull();
+    await f.service.complete(1, { ...bound, submission: reviewedSubmissionFixture(view) });
+    const context = await f.service.loadGrader(1, bound);
+    const result = await f.service.completeGrader(1, {
+      ...bound,
+      submission: {
+        inventoryId: context.inventoryId,
+        decisions: [
+          {
+            githubUserId: REVIEW_OTHER_USER,
+            disposition: "assign",
+            sections: [{ termCode: "27s1", sectionId: "001" }]
+          }
+        ]
+      }
+    });
+    expect(result.status).toBe("complete");
+    expect(result.terms[0]?.sections[0]?.currentFacultyGithubUserIds).toEqual([
+      REVIEW_USER,
+      REVIEW_OTHER_USER
+    ]);
+    expect(f.reader.lookupLogin).toHaveBeenCalledWith("added");
   });
 });

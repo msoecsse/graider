@@ -14,6 +14,8 @@ describe("migration review IPC boundary", () => {
       })
     };
     const service = {
+      loadGrader: vi.fn(),
+      completeGrader: vi.fn(),
       load: vi.fn(),
       refresh: vi.fn(),
       verify: vi.fn(),
@@ -47,6 +49,22 @@ describe("migration review IPC boundary", () => {
       f.event.sender.id,
       expect.objectContaining({ githubLogin: "faculty-now" })
     );
+    f.call(IPC_CHANNELS.loadGraderAccessReview, bound);
+    expect(f.service.loadGrader).toHaveBeenCalledWith(f.event.sender.id, bound);
+    f.call(IPC_CHANNELS.completeGraderAccessReview, {
+      ...bound,
+      submission: { inventoryId: "inventory", decisions: [] }
+    });
+    expect(f.service.completeGrader).toHaveBeenCalledWith(
+      f.event.sender.id,
+      expect.objectContaining({ submission: { inventoryId: "inventory", decisions: [] } })
+    );
+    expect(() =>
+      f.call(IPC_CHANNELS.completeGraderAccessReview, {
+        ...bound,
+        submission: { inventoryId: "inventory", decisions: [], forged: true }
+      })
+    ).toThrow();
     f.call(IPC_CHANNELS.completeMigrationReview, {
       ...bound,
       submission: reviewedSubmissionFixture(view)

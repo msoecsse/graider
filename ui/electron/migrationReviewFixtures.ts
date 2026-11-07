@@ -103,3 +103,36 @@ export const unsupportedCourseFixture = (): string =>
     ) as object),
     schema_version: 3
   });
+
+export const graderContextFixture = (): Backend.GraderAccessContext => {
+  const backend = loadMigrationReviewBackend();
+  const view = migrationViewFixture();
+  const review = backend.validateMigrationReview(view, reviewedSubmissionFixture(view));
+  return {
+    inventoryId: "inventory",
+    review,
+    inventory: {
+      kind: "schema-v1-legacy-grader-inventory",
+      status: "ready",
+      publicationReady: false,
+      source: { ...view.analysis.source, reportId: view.analysis.reportId },
+      runtimeCoverage: "unavailable",
+      evidence: [],
+      repositoryEvidence: [],
+      repositories: [],
+      findings: [],
+      candidate: {
+        classification: "legacy_candidate",
+        organizationId: 800,
+        organizationLogin: "example-org",
+        slug: "graders",
+        teamId: 900,
+        membershipComplete: true,
+        members: [
+          { id: REVIEW_USER, login: "faculty-now" },
+          { id: REVIEW_OTHER_USER, login: "new-faculty" }
+        ]
+      }
+    }
+  };
+};

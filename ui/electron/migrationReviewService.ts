@@ -29,6 +29,10 @@ export interface MigrationReviewCompleteRequest extends MigrationReviewSessionRe
 }
 export interface MigrationReviewReader {
   snapshot(): Promise<Backend.MigrationSnapshot>;
+  inventory?(
+    analysis: Backend.CourseMigrationAnalysis,
+    review: Backend.MigrationReviewResult
+  ): Promise<Backend.LegacyGraderInventory>;
   observe(): Promise<{
     repository: { id: number; organizationId: number; defaultBranch: string };
     sourceCommitSha: string;
@@ -59,6 +63,8 @@ interface ReviewSession {
   busy: boolean;
   stale: boolean;
   completedResult: Backend.MigrationReviewResult | null;
+  graderContext?: Backend.GraderAccessContext;
+  graderResult?: Backend.GraderAccessReview;
 }
 export interface MigrationReviewResponse {
   readonly status: "ready" | "blocked" | "stale" | "not_applicable";
@@ -185,12 +191,20 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
       throw new Error("Review session or analysis binding changed. Refresh analysis.");
     return session;
   };
+  const clearGrader = (session: ReviewSession): void => {
+    delete session.graderContext;
+    delete session.graderResult;
+  };
   const current = async (
     session: ReviewSession,
     context: MigrationReviewTrustedContext
   ): Promise<"current" | "stale"> => {
-    if (context.userId !== session.userId || context.generation !== session.generation)
+    if (context.userId !== session.userId || context.generation !== session.generation) {
+      clearGrader(session);
+      session.completedResult = null;
+      session.stale = true;
       throw new Error("Authenticated account changed. Refresh analysis.");
+    }
     if (
       session.view.analysis.validatedMigrationFacts &&
       (!context.institutionalUsername ||
@@ -212,6 +226,7 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
       throw new Error("Immutable repository or organization changed. Refresh courses.");
     }
     session.stale = observed.sourceCommitSha !== session.source.binding.sourceCommitSha;
+    if (session.stale) clearGrader(session);
     return session.stale ? "stale" : "current";
   };
   const load = async (
@@ -298,6 +313,7 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
         session = owned(owner, request);
         if (session.busy) throw new Error("Review operation is already running.");
         session.busy = true;
+        clearGrader(session);
         const retained = session;
         return await deps.withCourse(session.selector, async (context) => {
           if ((await current(retained, context)) === "stale")
@@ -359,6 +375,7 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
             provenance: "trusted-identity-evidence",
             reference: "explicit-review-github-lookup"
           });
+          clearGrader(retained);
           retained.view = buildView(retained);
           retained.completedResult = null;
           return response(
@@ -375,6 +392,83 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
         );
       } finally {
         if (session) session.busy = false;
+      }
+    },
+    async loadGrader(owner: number, request: MigrationReviewSessionRequest) {
+      if (!isMigrationReviewSessionRequest(request)) throw new Error("Invalid review binding.");
+      const session = owned(owner, request);
+      if (session.busy) throw new Error("Review operation is already running.");
+      session.busy = true;
+      clearGrader(session);
+      try {
+        return await deps.withCourse(session.selector, async (context) => {
+          if (
+            (await current(session, context)) !== "current" ||
+            !session.completedResult ||
+            !context.reader.inventory
+          )
+            throw new Error("Complete migration review before loading grader access.");
+          const review = session.completedResult;
+          const inventory = await context.reader.inventory(session.view.analysis, review);
+          if (
+            (await current(session, context)) !== "current" ||
+            sessions.get(owner) !== session ||
+            session.completedResult !== review
+          )
+            throw new Error("Review changed during inventory. Reload review.");
+          const retained = backend().freezeMigrationReview({
+            inventoryId: token(),
+            inventory,
+            review
+          });
+          session.graderContext = retained;
+          return retained;
+        });
+      } finally {
+        session.busy = false;
+      }
+    },
+    async completeGrader(owner: number, request: GraderAccessCompleteRequest) {
+      if (!isGraderAccessCompleteRequest(request)) throw new Error("Invalid grader decisions.");
+      const session = owned(owner, request);
+      if (session.busy) throw new Error("Review operation is already running.");
+      session.busy = true;
+      delete session.graderResult;
+      try {
+        return await deps.withCourse(session.selector, async (context) => {
+          if (
+            (await current(session, context)) !== "current" ||
+            sessions.get(owner) !== session ||
+            !session.graderContext
+          )
+            throw new Error("Grader review changed. Reload review.");
+          const result = backend().reviewGraderAccess(session.graderContext, request.submission);
+          if (result.status === "complete") session.graderResult = result;
+          return result;
+        });
+      } catch (error) {
+        clearGrader(session);
+        throw error;
+      } finally {
+        session.busy = false;
+      }
+    },
+    /** Main-only exact retained handoff; no renderer artifact can become authority. */
+    async getCompletedGrader(owner: number, request: MigrationReviewSessionRequest) {
+      const session = owned(owner, request);
+      try {
+        return await deps.withCourse(session.selector, async (context) => {
+          if (
+            (await current(session, context)) !== "current" ||
+            sessions.get(owner) !== session ||
+            !session.completedResult
+          )
+            return null;
+          return session.graderResult ?? null;
+        });
+      } catch (error) {
+        clearGrader(session);
+        throw error;
       }
     },
     /** Main-process handoff for 9.3. Never accept a renderer-returned completed artifact. */
@@ -399,6 +493,7 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
       const session = owned(owner, request);
       if (session.busy) throw new Error("Review operation is already running.");
       session.busy = true;
+      clearGrader(session);
       try {
         return await deps.withCourse(session.selector, async (context) => {
           const result = backend().validateMigrationReview(session.view, request.submission);
@@ -433,5 +528,16 @@ export interface MigrationReviewApi {
   refresh(request: MigrationReviewSessionRequest): Promise<MigrationReviewResponse>;
   verify(request: MigrationReviewVerifyRequest): Promise<MigrationReviewResponse>;
   complete(request: MigrationReviewCompleteRequest): Promise<Backend.MigrationReviewResult>;
+  loadGrader(request: MigrationReviewSessionRequest): Promise<Backend.GraderAccessContext>;
+  completeGrader(request: GraderAccessCompleteRequest): Promise<Backend.GraderAccessReview>;
   close(): Promise<void>;
 }
+
+export interface GraderAccessCompleteRequest extends MigrationReviewSessionRequest {
+  readonly submission: Backend.GraderAccessSubmission;
+}
+export const isGraderAccessCompleteRequest = (
+  value: unknown
+): value is GraderAccessCompleteRequest =>
+  validSession(value, ["submission"]) &&
+  loadMigrationReviewBackend().graderAccessSubmissionSchema.safeParse(value.submission).success;

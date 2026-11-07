@@ -66,3 +66,11 @@ export const readLocalMigrationReviewEvidence = async (
   }
   return { ...(history === undefined ? {} : { history }), runtime };
 };
+
+export { inventoryLegacyGraders } from "../../src/migration/legacy-grader-inventory.js";
+export type * from "../../src/migration/legacy-grader-models.js";
+export {
+  reviewGraderAccess,
+  graderAccessSubmissionSchema
+} from "../../src/migration/grader-access-review.js";
+export type * from "../../src/migration/grader-access-review.js";

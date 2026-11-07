@@ -394,3 +394,38 @@ students attached to each downloaded group repository.
 Existing destination folders are left unchanged and reported as failures rather
 than overwritten. A failure for one repository does not stop the remaining
 downloads; review the per-repository results when the download completes.
+
+## Reviewing legacy grader access during migration
+
+For an authorized discovered Schema 1 course, open **Review migration**. Complete
+the Faculty, Course authority, Terms, assignment evidence and Review selections,
+then choose **Complete migration review**. This records an in-memory review only.
+
+Open **Legacy grader access** and choose **Load grader inventory**. The read-only
+inventory shows the exact legacy team, immutable GitHub user IDs/current logins,
+existing reviewed section assignments, and legacy repository permissions being
+considered for retirement. Unknown or incomplete evidence stays visible.
+
+Choose an explicit disposition for every verified member:
+
+- **Existing section assignments are sufficient** preserves the reviewed roles.
+- **No section faculty access should remain** adds no roles. It cannot remove an
+  existing v1 section-faculty relationship.
+- **Assign selected exact sections** requires a verified faculty directory identity.
+  Select each exact term and section; membership never selects sections for you.
+
+For a new identity, return to **Faculty**, enter the institutional username and
+GitHub login, and explicitly verify/add the person. This resets review selections;
+complete migration review again and reload the grader inventory. Numeric GitHub
+IDs cannot be entered as identity proof.
+
+Draft/Active selections add current section relationships. Archived selections
+explicitly confirm normal historical completion retained as a current relationship;
+they do not create former roles, removal history or timestamps.
+
+Choose **Complete grader access review**. Missing dispositions or invalid choices
+prevent completion. Completion grants no live access and authorizes no publication.
+Refresh, identity re-verification, changed source/account/session or a replacement
+inventory invalidates the affected decisions. Reopening requires a fresh review.
+No course files, teams or permissions are changed here. Cleanup and publication
+remain later steps; production courses continue using Schema 1.

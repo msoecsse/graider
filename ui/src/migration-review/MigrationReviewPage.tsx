@@ -12,6 +12,7 @@ import {
   migrationReviewSource,
   validateMigrationReview
 } from "../../../src/migration/migration-review-validation";
+import { GraderAccessReviewStep } from "./GraderAccessReview";
 import { MigrationReviewFaculty } from "./MigrationReviewFaculty";
 import { MigrationReviewEvidence } from "./MigrationReviewEvidence";
 
@@ -21,7 +22,8 @@ const STEPS = [
   "Course authority",
   "Terms",
   "Assignments & Apply evidence",
-  "Review"
+  "Review",
+  "Legacy grader access"
 ] as const;
 type Step = (typeof STEPS)[number];
 
@@ -241,6 +243,13 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
           ) : null}
           {view && analysis && decisions && analysis.status !== "not_applicable" ? (
             <fieldset disabled={busy || stale} className="migration-review-fields">
+              {step === "Legacy grader access" ? (
+                <GraderAccessReviewStep
+                  key={view.sessionId}
+                  view={view}
+                  enabled={completed?.status === "complete"}
+                />
+              ) : null}
               {step === "Overview" ? (
                 <section className="detail-panel">
                   <h2>Overview</h2>

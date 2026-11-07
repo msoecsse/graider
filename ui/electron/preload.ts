@@ -303,6 +303,8 @@ const graiderUI: GraiderUIApi = {
     refresh: (request) => invoke(IPC_CHANNELS.refreshMigrationReview, request),
     verify: (request) => invoke(IPC_CHANNELS.verifyMigrationFacultyIdentity, request),
     complete: (request) => invoke(IPC_CHANNELS.completeMigrationReview, request),
+    loadGrader: (request) => invoke(IPC_CHANNELS.loadGraderAccessReview, request),
+    completeGrader: (request) => invoke(IPC_CHANNELS.completeGraderAccessReview, request),
     close: () => invoke(IPC_CHANNELS.closeMigrationReview)
   },
   chooseReviewImport: (request) => invoke(IPC_CHANNELS.chooseReviewImport, request),

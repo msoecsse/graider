@@ -1,6 +1,7 @@
 import type { IpcMain } from "electron";
 import { IPC_CHANNELS } from "./ipc.js";
 import {
+  isGraderAccessCompleteRequest,
   isMigrationReviewLoadRequest,
   isMigrationReviewSessionRequest,
   isMigrationReviewVerifyRequest,
@@ -41,6 +42,16 @@ export const registerMigrationReviewIpc = (
     if (!isMigrationReviewCompleteRequest(request))
       throw new Error("Typed review decisions are required.");
     return service.complete(event.sender.id, request);
+  });
+  ipc.handle(IPC_CHANNELS.loadGraderAccessReview, (event, request: unknown) => {
+    if (!isMigrationReviewSessionRequest(request))
+      throw new Error("Exact review binding required.");
+    return service.loadGrader(event.sender.id, request);
+  });
+  ipc.handle(IPC_CHANNELS.completeGraderAccessReview, (event, request: unknown) => {
+    if (!isGraderAccessCompleteRequest(request))
+      throw new Error("Explicit grader decisions required.");
+    return service.completeGrader(event.sender.id, request);
   });
   ipc.handle(IPC_CHANNELS.closeMigrationReview, (event) => {
     service.close(event.sender.id);
