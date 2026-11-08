@@ -30,6 +30,12 @@ progress must not be collapsed into one lossy status enum.
 
 ## 2. Course lifecycle and migration condition
 
+For Schema 1 → 2 recovery, [approved #31 Decision A](graider-schema-v2-migration.md#41-durable-recovery--approved-decision-a-31)
+separates Published, verified operational Ready and Needs attention from lifecycle.
+Permanent audit and safely deferred historical findings survive Ready. Required
+unverified access keeps student-facing readiness false; neither recovery authority
+nor readiness bypasses Draft/Archived restrictions. Production migration stays disabled.
+
 ### 2.1 Shared archive lifecycle
 
 ```mermaid

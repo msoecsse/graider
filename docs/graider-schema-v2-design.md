@@ -558,6 +558,14 @@ Unrelated organization teams must never be represented as Graider-managed.
 
 ## 13. Organization migration and reconciliation
 
+Schema 1 → 2 publication recovery is separately governed by
+[approved #31 Decision A](graider-schema-v2-migration.md#41-durable-recovery--approved-decision-a-31):
+shared course-repository journals, validated journal-only descendants, durable creation
+guards, fresh fallback/latest-term-coordinator recovery authority and permanent audit.
+Original source/checkpoint and publication identities never become journal revisions.
+Historical approvals do not become execution capabilities, and deferred historical
+findings alone do not block independently verified operational Ready.
+
 Repository/organization rename under the same course/admin repository ID is a
 normal metadata refresh. Moving to another organization is explicit migration.
 Persist enough state to represent:

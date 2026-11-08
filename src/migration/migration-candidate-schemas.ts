@@ -3,6 +3,7 @@ import { stringify } from "yaml";
 import { rawAssignmentConfigSchema, rawCourseConfigV2Schema } from "../config/config-schemas.js";
 import { stableJson } from "./migration-evidence.js";
 import { rawManifestSchema } from "../manifest/manifest-loader.js";
+import { legacyRecoveryPlanSchema } from "./migration-recovery-plan.js";
 
 export { rawManifestSchema as migrationManifestSchema };
 
@@ -181,6 +182,11 @@ export const migrationMetadataSchema = z
     student_observations: z.array(studentObservation),
     student_identity: z.literal("preserved-evidence-only-phase-13"),
     grading: z.literal("preserved-in-place-phase-14-no-remote-durability-claim"),
+    // Earlier publications remain readable, but cannot execute recovery without this projection.
+    recovery: z
+      .object({ version: z.literal(1), review_digest: digest, legacy: legacyRecoveryPlanSchema })
+      .strict()
+      .optional(),
     reconciliation: z
       .object({
         phase: z.literal("after_publication"),

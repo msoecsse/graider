@@ -257,6 +257,125 @@ Partial reconciliation does not roll back already verified external work. It
 creates a checkpointed Needs attention state with enough information to resume
 or to verify manual GitHub repair.
 
+### 4.1 Durable recovery — approved Decision A (#31)
+
+[Issue #31](https://github.com/msoecsse/graider/issues/31), Decision A, defines
+post-publication Schema 1 → 2 recovery. The private course/admin repository is the
+authoritative shared reconciliation journal and permanent migration audit store.
+Local journals are hints and cannot authorize or coordinate cross-machine writes.
+Exact serialization remains an implementation choice.
+
+Keep three distinct bindings: the original Schema 1 source SHA and independently
+verified immutable checkpoint; the original Schema 2 publication SHA/provenance;
+and the current exact reconciliation journal revision. Journal commits never replace
+the original publication identity. Accept descendants only after validating every
+intervening change as confined to the validated reconciliation/audit namespace and
+proving the complete intended course/resource fingerprint unchanged. Unexpected
+changes fail closed and require a fresh explicit plan; ancestry alone is insufficient.
+
+Use the existing isolated `managedCourseTransaction`, bundled authenticated Git,
+course lease, exact-base non-force push and independent lost-response verification.
+Publish a write-ahead guard before each potentially non-idempotent GitHub creation.
+Only the confirmed winning journal transaction authorizes its single attempt.
+Unresolved/ambiguous outcomes survive restart, synchronization and another machine.
+No timeout, account switch or absent local file clears them. Every retry starts with
+fresh authoritative observation; unknown absence cannot justify another create.
+Retain independent verified progress and never roll back publication.
+
+Explicit recovery authority belongs to the current fallback administrator or a
+current coordinator of the most recently created existing term. With no terms,
+only fallback qualifies. Verify immutable account identity, current roles, repository,
+organization, revision and sufficient GitHub privileges afresh. Former-only roles,
+ordinary faculty, directory membership, cached permissions and GitHub ownership alone
+are insufficient. This is a dedicated administrative recovery capability, not ordinary
+section/student visibility and not Phase 18 organization-transfer authority.
+
+Persist validated intended reconciliation state and reviewed provenance sufficient
+to recover without restoring live review objects. Historical approvals/session IDs
+remain audit evidence, never execution capabilities. Re-derive current authority
+independently; renderer-returned plans, approvals or Ready flags cannot authorize work.
+
+The permanent audit retains original source/checkpoint, publication/provenance,
+approved decisions and reviewed identity, deferred historical findings with provenance
+and status, reconciliation outcomes and outstanding attention items. It survives Ready,
+restart and synchronization. Never automatically delete it or the original checkpoint;
+never persist credentials or unnecessary sensitive data.
+
+Published means Schema 2 was accepted and remains authoritative. Ready additionally
+requires independent verification of every required current operational access and
+reconciliation condition. Required incomplete, unsafe or unknown access means Needs
+attention and student-facing readiness false. Safely deferred grading, student identity
+and comment findings remain visible but do not alone prevent Ready. Readiness is
+separate from audit presence and from Draft/Active/Archived; it grants no lifecycle or
+later-phase operation bypass. Production migration remains disabled pending #25 and
+Phase 3 plus compatible macOS arm64/Windows x64 release prerequisites.
+
+### Implemented durable reconciliation composition (Slice 9.5H)
+
+`createMigrationReconciliationService` is a main-only capability. Its caller's
+`withSynchronizedCourse` lease encloses fresh synchronization, reconciliation and
+outcome verification. There is no execution IPC, preload method or production
+upgrade control here; #25 owns that wiring. New-course bootstrap remains separate.
+
+The immutable `.graider/migration.json` audit now includes a strict minimal `recovery`
+projection: reviewed provenance/digest and the conditional legacy-grant plan,
+inventory and reviewed member/role decisions required by the existing 9.4 reconciler.
+It excludes runtime file contents and the duplicate assignment plan. Historical
+review objects are never restored as capabilities. Older audit records remain
+readable; missing recovery evidence refuses execution.
+
+Version-1 `.graider/reconciliation.json` contains source/checkpoint/publication and
+complete intended-file fingerprint bindings, reviewer audit digest, guarded invitation/
+team/branch-rule creations, per-step/per-resource outcomes and safe reason codes,
+and append-only actor/observed-revision history. The current journal revision comes
+from its authoritative Git commit, avoiding a self-referential SHA inside its blob.
+Credentials, raw provider errors and machine-local paths are never journaled.
+
+The bundled-Git reader discovers the original publication from its exact Schema 1
+parent, verifies original-byte preservation and audit/source bindings, validates the
+complete published course/term/role set, and checks **every** single-parent descendant.
+Only this journal path may change. Domain-byte/mode changes, merges, changed-then-restored
+files, journal deletion, foreign bindings, replaced history and incomplete Ready
+assertions fail closed. A fresh run independently verifies the original remote
+checkpoint without creating, moving or deleting it. Portable namespaces and bounded
+reads apply on both supported platforms.
+
+Journal writes reuse the isolated exact-base transaction, scoped staging, faculty
+attribution, non-force push and independent remote acceptance/byte observation. Competing
+machines cannot both claim one base. Only a confirmed winning write ID permits its
+guarded request; ambiguous pushes are observed without another push. Invitation guards
+use immutable course/organization/invitee scope across executing accounts. Unknown
+creates remain guarded even when absent remotely. Later complete observations can
+resolve an accepted-but-lost team creation without another POST.
+
+The composer reuses Phase 7 organization access, lifecycle-projected complete-term
+membership, course/fallback permissions, student permissions and managed branch policy,
+then 9.4 legacy cleanup with the same lifecycle projection. Cleanup independently
+verifies replacements before numeric legacy-grant removal. Legacy teams/membership,
+student repositories and arbitrary collaborators are never deleted. Existing Phase 7
+defaults remain unchanged. Safe independent work survives partial failure; reruns
+inspect before writing and correct resources produce no repeat writes.
+
+Student targets require exact original manifest anchors, immutable repository IDs,
+reviewed roster/section correlation and uncontested scope. Group/name-only, cross-section,
+stale, conflicting and ID-less evidence grants no mutation authority. Required unproven
+Active-term access blocks Ready; safely deferred historical evidence remains visible
+without doing so. Draft student targets are prohibited. No student identity, grading
+relocation or later-phase operation is invented.
+
+`inspect()` returns retained audit after Ready and synchronization. Audit presence
+alone no longer blocks readiness. Before an eligible managed course-lifecycle mutation,
+a read-only pass through the same engines independently rechecks current GitHub access;
+all GitHub/journal mutations are disabled in that pass. A saved Ready flag cannot
+authorize work after external drift. Actual reconciliation records pending/unknown
+operations and verified outcomes. Unverified publication proof remains unknown rather
+than becoming a claimed rollback or publication failure.
+
+Access Ready does not enable unavailable operations in the 9.5G support matrix.
+Student-facing readiness additionally requires an unarchived course and an Active term.
+The permanent audit and original checkpoint survive Ready. Production migration remains
+disabled pending #25 and Phase 3/platform prerequisites.
+
 ## 5. Migration report acceptance criteria
 
 Before enabling the push action, the analyzer/review must show at least:
@@ -766,7 +885,7 @@ Renderer-supplied scope is a request evaluated by the resolver, never evidence.
 | Student Access Pages settings/generation/publication/derived refresh                        | Intentionally unavailable                                                           | Authoritative section/enrollment/repository mappings and supported operations.                                                                                                                                                                                       |
 | Generic transactions, manual publication/retry, legacy cutover/source update                | No generic v2 mutation authority                                                    | Only operation-specific trusted adapters may validate v2 transactions. Legacy paths and stale caches fail closed.                                                                                                                                                    |
 | New remote course setup                                                                     | Supported through trusted setup adapter                                             | Approved #30 Option A; verified creator, explicit verified coordinators and independently verified section faculty. Canonical unarchived course/initial Draft, no migration requirement.                                                                             |
-| Migration publication/reconciliation UI and orchestration                                   | Production migration remains disabled                                               | Existing #20/#21 refusal remains. #24/#25 and Phase 3/platform-release prerequisites are unchanged.                                                                                                                                                                  |
+| Migration publication/reconciliation UI and orchestration                                   | Production migration remains disabled                                               | Existing #20/#21 refusal remains. #24 supplies the main-only durable reconciliation capability; #25 UI/orchestration and Phase 3/platform-release prerequisites remain.                                                                                              |
 
 The mutation inventory includes course-admin IPC, grading/runtime writes, review
 import, downloads, workflow/template operations, publication and derived refresh.

@@ -19,6 +19,10 @@ import {
 } from "../github/student-repository-permissions.js";
 import type { TrustedStudentRepositoryTarget } from "../github/student-repository-target.js";
 import { buildDesiredTeamMemberships } from "../github/desired-team-membership.js";
+import { buildLifecycleTeamMemberships } from "../github/lifecycle-team-membership.js";
+import { CourseLifecycleAuthorizationResolver } from "../faculty/course-lifecycle-authorization-resolver.js";
+import type { LegacyRecoveryPlan } from "./migration-recovery-plan.js";
+import type { Immutable } from "./migration-models.js";
 import {
   RepositoryTeamPermissionBoundary,
   checked,
@@ -28,7 +32,7 @@ import {
 } from "../github/repository-team-permission-boundary.js";
 
 import type { GraderRemovalPlan } from "./grader-removal-models.js";
-import { freeze, isSha, stableJson } from "./migration-evidence.js";
+import { freeze, isSha, stableJson, compare } from "./migration-evidence.js";
 
 const TIMEOUT_MS = 30_000;
 const HTTP_NO_CONTENT = 204;
@@ -53,6 +57,8 @@ export interface LegacyGraderDependencies {
   readPublished(signal: AbortSignal): Promise<PublishedGraderContext>;
   organizationAccess: Pick<FacultyOrganizationReconciler, "inspect">;
   creationJournal: FacultyInvitationJournal;
+  /** Main-only #31 recovery: the stored reviewer is evidence, while the executing role is fresh. */
+  recovery?: { readonly reviewedGithubUserId: number };
 }
 export interface LegacyGraderTargetOutcome {
   repositoryId: number;
@@ -66,6 +72,18 @@ export interface LegacyGraderTargetOutcome {
 }
 type Grant = GraderRemovalPlan["reconciliation"]["grants"][number];
 const same = (a: unknown, b: unknown): boolean => stableJson(a) === stableJson(b);
+const canonicalRoleSets = (value: unknown): unknown => {
+  if (Array.isArray(value))
+    return value.map(canonicalRoleSets).sort((a, b) => compare(stableJson(a), stableJson(b)));
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        canonicalRoleSets(entry)
+      ])
+    );
+  return value;
+};
 const successful = (value: { readonly status: string }): boolean =>
   ["up_to_date", "reconciled"].includes(value.status);
 function refuse(): never {
@@ -78,13 +96,13 @@ function refuse(): never {
  */
 export class LegacyGraderReconciler {
   private readonly context: PublishedGraderContext;
-  private readonly plan: GraderRemovalPlan;
+  private readonly plan: GraderRemovalPlan | Immutable<LegacyRecoveryPlan>;
   private readonly boundary: RepositoryTeamPermissionBoundary;
   private queue: Promise<unknown> = Promise.resolve();
   constructor(
     private readonly client: GitHubCoursePermissionClient & GitHubManagedTeamClient,
     context: PublishedGraderContext,
-    plan: GraderRemovalPlan,
+    plan: GraderRemovalPlan | Immutable<LegacyRecoveryPlan>,
     private readonly dependencies: LegacyGraderDependencies
   ) {
     this.context = structuredClone(context);
@@ -97,6 +115,11 @@ export class LegacyGraderReconciler {
     const operation = this.queue.then(() => this.run(signal));
     this.queue = operation.catch(() => undefined);
     return operation;
+  }
+  private sameRoles(left: unknown, right: unknown): boolean {
+    return this.dependencies.recovery
+      ? same(canonicalRoleSets(left), canonicalRoleSets(right))
+      : same(left, right);
   }
   private async current(signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
@@ -126,13 +149,27 @@ export class LegacyGraderReconciler {
       !same(this.plan.audit.accessReview.source, this.plan.audit.inventory.source) ||
       !this.plan.persistedCleanup ||
       this.plan.source.repositoryId !== this.context.courseRepositoryId ||
-      this.plan.source.authenticatedGithubUserId !== this.context.authenticatedUserId ||
-      !same(course.faculty_directory, access.facultyDirectory) ||
-      !same(this.plan.facultyTerms, access.terms) ||
+      this.plan.source.authenticatedGithubUserId !==
+        (this.dependencies.recovery?.reviewedGithubUserId ?? this.context.authenticatedUserId) ||
+      !this.sameRoles(course.faculty_directory, access.facultyDirectory) ||
+      !this.sameRoles(this.plan.facultyTerms, access.terms) ||
       !same(
-        course.course.term_creation_order,
-        terms.map((t) => t.term.code)
+        this.dependencies.recovery
+          ? [...course.course.term_creation_order].sort()
+          : course.course.term_creation_order,
+        this.dependencies.recovery
+          ? terms.map((t) => t.term.code).sort()
+          : terms.map((t) => t.term.code)
       )
+    )
+      refuse();
+    if (
+      this.dependencies.recovery &&
+      !new CourseLifecycleAuthorizationResolver(
+        course,
+        terms,
+        this.context.authenticatedUserId
+      ).getAuthority().allowed
     )
       refuse();
     const projected = terms.map((t) => ({
@@ -145,7 +182,7 @@ export class LegacyGraderReconciler {
         currentFacultyGithubUserIds: s.faculty.current.map((f) => f.github_user_id)
       }))
     }));
-    if (!same(projected, this.plan.facultyTerms)) refuse();
+    if (!this.sameRoles(projected, this.plan.facultyTerms)) refuse();
     // Phase 7 validates all role references, including former relationships.
     buildDesiredTeamMemberships(course, terms, this.context.courseRepositoryId);
     const repo = await this.boundary.repository(this.context.courseRepositoryId, signal);
@@ -177,8 +214,8 @@ export class LegacyGraderReconciler {
           a.parentId === null &&
           a.slug === candidate.slug
       ) ||
-      !same(grant.replacement.facultyDirectory, this.context.course.faculty_directory) ||
-      !same(grant.replacement.terms, this.plan.facultyTerms) ||
+      !this.sameRoles(grant.replacement.facultyDirectory, this.context.course.faculty_directory) ||
+      !this.sameRoles(grant.replacement.terms, this.plan.facultyTerms) ||
       grant.replacement.fallbackAdministratorGithubUserId !==
         this.context.course.fallback_administrator.github_user_id ||
       !same(grant.replacement.memberDecisions, this.plan.audit.accessReview.decisions) ||
@@ -291,7 +328,8 @@ export class LegacyGraderReconciler {
       this.client,
       c,
       this.dependencies.organizationAccess,
-      this.dependencies.creationJournal
+      this.dependencies.creationJournal,
+      this.dependencies.recovery ? "term-lifecycle" : "all-terms"
     );
     const outcomes = await memberships.reconcile(signal);
     if (!outcomes.every(successful)) refuse();
@@ -340,7 +378,9 @@ export class LegacyGraderReconciler {
     // Fresh membership observation, never a successful mutation response alone.
     const fresh = await memberships.inspect(signal);
     if (fresh.length !== outcomes.length || !fresh.every(successful)) refuse();
-    const desired = buildDesiredTeamMemberships(c.course, c.terms, c.courseRepositoryId);
+    const desired = (
+      this.dependencies.recovery ? buildLifecycleTeamMemberships : buildDesiredTeamMemberships
+    )(c.course, c.terms, c.courseRepositoryId);
     if (
       !desired.every((d) =>
         fresh.some(
@@ -369,14 +409,17 @@ export class LegacyGraderReconciler {
       this.client,
       c,
       this.dependencies.organizationAccess,
-      this.dependencies.creationJournal
+      this.dependencies.creationJournal,
+      this.dependencies.recovery ? "term-lifecycle" : "all-terms"
     );
     const observed = await membership.inspect(signal);
     if (!observed.every(successful)) refuse();
     const scopes = c.targets.filter((t) => t.repositoryId === grant.repositoryId);
     const desired =
       grant.repositoryId === c.courseRepositoryId
-        ? buildDesiredTeamMemberships(c.course, c.terms, c.courseRepositoryId).flatMap((d) => {
+        ? (this.dependencies.recovery
+            ? buildLifecycleTeamMemberships
+            : buildDesiredTeamMemberships)(c.course, c.terms, c.courseRepositoryId).flatMap((d) => {
             const permission = courseTeamRepositoryPermission(d.identity);
             return permission ? [{ identity: d.identity, permission }] : [];
           })

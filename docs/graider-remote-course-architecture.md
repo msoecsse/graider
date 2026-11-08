@@ -2759,6 +2759,19 @@ operation.
 
 Existing schema-v1 courses must be upgraded through a controlled migration.
 
+Approved [Decision A (#31)](graider-schema-v2-migration.md#41-durable-recovery--approved-decision-a-31)
+defines shared post-publication journals, immutable source/publication versus current
+journal revisions, strictly validated journal-only descendants, remote write-ahead
+guards and permanent audit retention. Recovery independently authorizes current
+fallback or current latest-created-term coordinators; historical review sessions
+are evidence only. This does not enable production migration or organization transfer.
+
+The [implemented 9.5H service contract](graider-schema-v2-migration.md#implemented-durable-reconciliation-composition-slice-95h)
+defines the shared journal codec, complete descendant validation, existing Phase 7/9.4
+composition, cross-machine write guards, permanent audit inspection and fresh read-only
+access verification at eligible managed mutation boundaries. Production execution UI
+and orchestration remain #25; production migration is still disabled.
+
 The accepted staged Phase 9 scope, publication facts, preservation-only evidence,
 blocking ambiguities and deferred work are defined in the authoritative
 [migration publication boundary](graider-schema-v2-migration.md#11-phase-9-publication-boundary).

@@ -15,6 +15,9 @@ import {
   DraftDeletionAuthorizationResolver,
   TermActivationRecoveryAuthorizationResolver
 } from "../../src/faculty/term-recovery-authorization.js";
+import { readMigrationReconciliationSnapshot } from "../../src/migration/migration-reconciliation-git.js";
+import { createMigrationGitRunners } from "../../src/migration/migration-git.js";
+import { GitCommandWorkspaceFactory } from "../../src/git/git-command-workspace.js";
 
 export { MANAGED_OPERATION_SUPPORT } from "../../src/faculty/managed-operation-authorization.js";
 export {
@@ -54,12 +57,24 @@ export const readManagedOperationState = (
 };
 
 /** No migration-audit assertion is accepted as proof of completed reconciliation. */
-export const hasUnresolvedManagedReadiness = (root: string): boolean =>
-  [".graider/migration.json", ".graider/reconciliation.yml"].some((file) =>
-    fs.existsSync(path.join(root, file))
-  );
+export const hasUnresolvedManagedReadiness = async (root: string): Promise<boolean> => {
+  if (fs.existsSync(path.join(root, ".graider/reconciliation.yml"))) return true;
+  if (
+    ![".graider/migration.json", ".graider/reconciliation.json"].some((file) =>
+      fs.existsSync(path.join(root, file))
+    )
+  )
+    return false;
+  try {
+    const workspace = await new GitCommandWorkspaceFactory(createMigrationGitRunners()).open(root);
+    const state = await readMigrationReconciliationSnapshot(root, await workspace.resolveHead());
+    return state.record?.status !== "ready";
+  } catch {
+    return true;
+  }
+};
 
-export const readManagedOperationCapabilities = (
+export const readManagedOperationCapabilities = async (
   root: string,
   identity: Parameters<typeof readManagedOperationState>[1]
 ) => {
@@ -68,7 +83,7 @@ export const readManagedOperationCapabilities = (
     complete: true,
     checkpoints: readRecoveryCheckpoints(root, terms, identity.repositoryId)
   });
-  const unresolved = hasUnresolvedManagedReadiness(root);
+  const unresolved = await hasUnresolvedManagedReadiness(root);
   return {
     archiveAllowed: !unresolved && policy.canArchiveCourse().allowed,
     unarchiveAllowed: !unresolved && policy.canUnarchiveCourse().allowed,

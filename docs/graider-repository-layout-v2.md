@@ -120,6 +120,16 @@ the exact choice is not fixed here.
 
 ### 2.3 Assignment and Apply layout
 
+Schema migration recovery follows [approved #31 Decision A](graider-schema-v2-migration.md#41-durable-recovery--approved-decision-a-31).
+Its shared journal, guards and permanent audit belong to this private repository,
+with distinct original source/checkpoint, original publication and current journal
+revisions. Local setup/retry/publication journals cannot substitute for that store.
+Audit survives Ready; historical review identity is evidence, not a live capability.
+The implemented files are immutable `.graider/migration.json` (including reviewed
+recovery intent) and versioned `.graider/reconciliation.json` (guards, outcomes and
+append-only history). The illustrative `reconciliation.yml` path is not this codec;
+an unrecognized existing marker fails closed. Neither file is automatically deleted.
+
 The important boundary is equivalent to:
 
 ```text

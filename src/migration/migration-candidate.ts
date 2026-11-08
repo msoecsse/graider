@@ -8,12 +8,14 @@ import { planGraderRemoval } from "./grader-removal-planner.js";
 import type { CourseMigrationAnalysis, Immutable, MigrationSnapshot } from "./migration-models.js";
 import type { MigrationReviewResult } from "./migration-review-models.js";
 import { analyzeSchemaV1Migration } from "./schema-v1-migration-analyzer.js";
+import { legacyRecoveryPlan } from "./migration-recovery-plan.js";
 import {
   compare,
   freeze,
   stableJson,
   textHash,
   bytesHash,
+  fingerprint,
   sortedUnique
 } from "./migration-evidence.js";
 import {
@@ -203,6 +205,8 @@ export const buildMigrationCandidate = (input: MigrationCandidateInput): Migrati
         );
     }
     const files = new Map(originalFiles.map((entry) => [entry.path, entry]));
+    if (files.has(".graider/reconciliation.json"))
+      return block("Reserved reconciliation journal already exists in source.");
     const generated = new Set<string>();
     const put = (
       path: string,
@@ -492,6 +496,11 @@ export const buildMigrationCandidate = (input: MigrationCandidateInput): Migrati
         student_observations: preservation.studentObservations,
         student_identity: "preserved-evidence-only-phase-13",
         grading: "preserved-in-place-phase-14-no-remote-durability-claim",
+        recovery: {
+          version: 1,
+          review_digest: fingerprint(review),
+          legacy: legacyRecoveryPlan(removal)
+        },
         reconciliation: {
           phase: removal.reconciliation.phase,
           state: "not_executed",

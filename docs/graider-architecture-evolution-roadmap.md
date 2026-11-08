@@ -1191,6 +1191,15 @@ migrated schema.** Stop here until a separate issue authorizes 9.5.
 
 ## Slice 9.5 — Publish migrated schema
 
+Slice 9.5H / #24 implements durable post-publication reconciliation under
+[approved #31 Decision A](graider-schema-v2-migration.md#41-durable-recovery--approved-decision-a-31).
+The [main-only service contract](graider-schema-v2-migration.md#implemented-durable-reconciliation-composition-slice-95h)
+defines shared journal/audit authority, distinct revision bindings, validated journal-only
+descendants, durable creation guards, explicit recovery roles and existing Phase 7/9.4
+composition. Incorporation resolves #31. #25 execution UI/orchestration remains separate;
+no #25 work or production migration enablement is included. Phase 3/platform-release
+gates remain unchanged.
+
 Checkpoint old state, write/validate the complete staged Phase 9 candidate, push,
 then enable v2 behavior within the published boundary. The accepted decision in
 issue #16 is **A — staged Phase 9 publication**. Publication facts, preservation-only

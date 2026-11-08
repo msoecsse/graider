@@ -255,6 +255,20 @@ editing another section's grading record.
 
 ## 9. Organization migration and reconciliation
 
+### Schema publication recovery — approved #31 Decision A
+
+Schema 1 → 2 post-publication reconciliation has a separate explicit capability:
+current fallback administrator or a current coordinator of the most recently created
+existing term. With no terms only fallback qualifies. Fresh authoritative immutable
+identity, role, repository, organization, revision and GitHub privilege verification
+are required on every invocation. Ordinary faculty, former-only roles, directory
+membership, cached permissions and GitHub ownership alone grant no such capability.
+Historical approvals/session IDs do not restore execution authority. It grants no
+ordinary student visibility, lifecycle bypass or organization-transfer permission.
+See the [durable recovery contract](graider-schema-v2-migration.md#41-durable-recovery--approved-decision-a-31).
+
+### Organization transfer (Phase 18)
+
 The approved architecture says an **authorized migration workflow** must
 preview, checkpoint, resume, and reconcile organization migration, but it does
 not assign that authority to a precise role. This is a genuine unresolved

@@ -6,6 +6,8 @@ import { blockMutation, type VerifiedCourseMutationContext } from "./managedCour
 import type { ManagedOperationInput } from "./githubOAuthSession.js";
 import { changeManagedCourseLifecycle } from "./courseLifecycleService.js";
 import { requireReadRevision } from "./managedCourseTransaction.js";
+import fs from "node:fs";
+import { verifyCurrentMigrationAccess } from "./migrationReconciliationService.js";
 import type {
   AuthenticatedGitWorkspaceContext,
   GitWorkspaceFactory
@@ -94,10 +96,23 @@ export const performManagedV2Operation = async (
     requireReadRevision(fields.expectedCourseRevision, context);
     if (fields.targetStatus !== "archived" && fields.targetStatus !== "unarchived")
       throw new Error("Choose an explicit course lifecycle action.");
-    if (backend.hasUnresolvedManagedReadiness(root))
+    if (await backend.hasUnresolvedManagedReadiness(root))
       blockMutation(
         "reconciliation_required",
         "Course migration or reconciliation needs attention before lifecycle changes."
+      );
+    if (
+      fs.existsSync(path.join(root, ".graider/migration.json")) &&
+      !(await verifyCurrentMigrationAccess({
+        userData: trusted.userData,
+        input,
+        ...(trusted.factory ? { factory: trusted.factory } : {}),
+        ...(trusted.authenticate ? { authenticate: trusted.authenticate } : {})
+      }))
+    )
+      blockMutation(
+        "reconciliation_required",
+        "Required current GitHub access could not be independently verified. Reconcile migration before lifecycle changes."
       );
     return changeManagedCourseLifecycle({
       userData: trusted.userData,

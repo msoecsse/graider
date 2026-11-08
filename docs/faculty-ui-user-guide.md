@@ -489,3 +489,13 @@ Refresh, identity re-verification, changed source/account/session or a replaceme
 inventory invalidates the affected decisions. Reopening requires a fresh review.
 No course files, teams or permissions are changed here. Cleanup and publication
 remain later steps; production courses continue using Schema 1.
+
+Production upgrade/recovery controls remain unavailable pending their separate release
+and platform prerequisites. A completed review does not enable them. Migration results
+distinguish **Published** (Schema 2 was accepted), **Ready** (required current GitHub access
+was independently verified) and **Needs attention** (required work is incomplete or
+unverified). Pending access never undoes a successful publication. Safely deferred
+historical findings remain in the permanent audit and do not alone prevent Ready.
+The original recovery checkpoint and audit are retained after Ready. Recovery requires
+the current fallback administrator or a current coordinator of the latest-created term,
+with freshly verified GitHub privileges; old reviews and cached permissions are insufficient.

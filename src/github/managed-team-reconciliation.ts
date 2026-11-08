@@ -467,8 +467,14 @@ export class ManagedTeamMembershipReconciler {
     if (currentSession.organizationId !== session.organizationId) return fail("identity_mismatch");
     const inventory = await this.inventory(session, signal);
     const selected = this.select(desired.identity, inventory);
-    if (selected) return { observed: selected, created: false };
     const key = `managed-team-create:${String(session.organizationId)}:${renderManagedTeamMetadata(desired.identity)}`;
+    if (selected) {
+      // A later fresh complete inventory may finally prove an earlier lost creation.
+      // Resolve only this exact logical identity; never POST again to clear a guard.
+      if (await this.journal(() => this.creationJournal.has(key)))
+        await this.journal(() => this.creationJournal.delete(key));
+      return { observed: selected, created: false };
+    }
     if (await this.journal(() => this.creationJournal.has(key)))
       return fail("team_creation_unverified");
     const name = managedTeamDisplayName(desired.identity);

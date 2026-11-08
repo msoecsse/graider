@@ -684,9 +684,9 @@ export const inspectManagedCourse = async (
     revision: access.revision,
     ...(metadata.schemaVersion === 2
       ? {
-          operations: (() => {
+          operations: await (async () => {
             try {
-              return loadMetadata().inspectManagedOperationCapabilities(localPath, {
+              return await loadMetadata().inspectManagedOperationCapabilities(localPath, {
                 organization: repo.owner,
                 organizationId: repo.organizationId,
                 repositoryId: repo.id,
