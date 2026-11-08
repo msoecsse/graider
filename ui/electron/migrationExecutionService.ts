@@ -318,6 +318,7 @@ export const createMigrationExecutionService = (deps: Dependencies) => {
       if (history.executionState === "fresh_plan_required" && request.freshPlan !== true)
         throw new Error("Explicit fresh-plan recovery is required.");
       const op = reserve(request.selector);
+      op.state = { ...op.state, published: true };
       run(op, () => reconcile(op, userId, repositoryId, request.freshPlan));
       return snapshot(op);
     }

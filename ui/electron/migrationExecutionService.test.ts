@@ -157,3 +157,19 @@ it("reopening a previously Ready course verifies fresh access without repeating 
   expect(f.publication.publish).not.toHaveBeenCalled();
   expect(f.reconciliation.reconcile).not.toHaveBeenCalled();
 });
+
+it("preserves independently proven publication when an explicit reconciliation retry throws", async () => {
+  const f = fixture();
+  f.reconciliation.inspect.mockResolvedValue({ executionState: "current_plan" });
+  f.reconciliation.reconcile.mockRejectedValue(new Error("Unexpected reconciliation failure"));
+  await f.service.retry({ selector: f.view.selector });
+  await settle();
+  expect(await f.service.status({ selector: f.view.selector })).toMatchObject({
+    published: true,
+    outcome: "needs_attention",
+    active: false,
+    cancellable: false
+  });
+  expect(f.publication.publish).not.toHaveBeenCalled();
+  expect(f.publication.recover).not.toHaveBeenCalled();
+});
