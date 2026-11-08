@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type * as Backend from "../dist-electron/migrationReconciliationBackend.cjs";
 import type { GithubOAuthSession, ManagedOperationInput } from "./githubOAuthSession.js";
 import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
@@ -42,7 +43,10 @@ interface StoreDependencies {
 /** Main-only store. The synchronized account/course lease is held by its caller throughout. */
 export const createMigrationReconciliationStore = (
   deps: StoreDependencies
-): Backend.ReconciliationStore => {
+): Backend.ReconciliationStore & {
+  inspectHistory(): Promise<Backend.MigrationHistorySnapshot>;
+  freshPlan(): Promise<Backend.ReconciliationSnapshot>;
+} => {
   const b = loadMigrationReconciliationBackend();
   const input = deps.input;
   const factory =
@@ -57,6 +61,7 @@ export const createMigrationReconciliationStore = (
         token
       ) as unknown as AuthenticatedGitWorkspaceContext);
   let current: Backend.ReconciliationSnapshot | undefined;
+  let executionCurrent = false;
   const remote = async (expectedRevision?: string) => {
     input.signal.throwIfAborted();
     if (!(await input.revalidateSession()))
@@ -97,9 +102,11 @@ export const createMigrationReconciliationStore = (
       throw new b.ReconciliationNeedsAttention("authorization_required");
     await remote(snapshot.revision);
   };
-  const observe = async () => {
+  const observeHistory = async () => {
+    current = undefined;
+    executionCurrent = false;
     const before = await remote();
-    let observed: Backend.ReconciliationSnapshot | undefined;
+    let observed: Backend.MigrationHistorySnapshot | undefined;
     const result = await observeManagedCoursePublication({
       userData: deps.userData,
       input,
@@ -107,7 +114,7 @@ export const createMigrationReconciliationStore = (
       authenticate,
       verifyCommit: async (root, revision) => {
         if (revision !== before.revision) throw new Error("Source advanced during observation.");
-        observed = await b.readMigrationReconciliationSnapshot(root, revision);
+        observed = await b.readMigrationHistorySnapshot(root, revision);
         return true;
       }
     });
@@ -130,95 +137,130 @@ export const createMigrationReconciliationStore = (
     );
     if (checkpoint.status !== "verified" || checkpoint.reference !== observed.checkpoint)
       throw new b.ReconciliationNeedsAttention("checkpoint_unverified");
+    await assertCurrent(observed);
+    executionCurrent = observed.executionState === "current_plan";
     return observed;
+  };
+  const observe = async () => {
+    const observed = await observeHistory();
+    if (!executionCurrent) throw new b.ReconciliationNeedsAttention("fresh_plan_required");
+    return observed;
+  };
+  const publish = async (
+    expectedRevision: string,
+    value: Backend.ReconciliationRecord,
+    fresh = false
+  ): Promise<Backend.ReconciliationSnapshot> => {
+    if (!current || current.revision !== expectedRevision)
+      throw new Error("Stale reconciliation journal request.");
+    if (!fresh && !executionCurrent)
+      throw new b.ReconciliationNeedsAttention("fresh_plan_required");
+    const prior = current;
+    await assertCurrent(prior);
+    const record = b.reconciliationRecordSchema.parse(value);
+    if (fresh) {
+      const expected = b.createFreshReconciliationRecord(
+        { ...prior, executionState: executionCurrent ? "current_plan" : "fresh_plan_required" },
+        input.userId
+      );
+      if (b.stableJson({ ...record, writeId: expected.writeId }) !== b.stableJson(expected))
+        throw new Error("Invalid fresh plan request.");
+    } else if (b.stableJson(record.plan) !== b.stableJson(prior.record?.plan)) {
+      throw new Error("A fresh plan requires an explicit invocation.");
+    }
+    b.validateReconciliationRecord({ ...prior, record });
+    if (
+      b.stableJson(record.history.slice(0, prior.record?.history.length ?? 0)) !==
+      b.stableJson(prior.record?.history ?? [])
+    )
+      throw new Error("Permanent audit cannot be replaced.");
+    const context = {
+      managed: true as const,
+      userId: input.userId,
+      repositoryId: input.course.repositoryId,
+      authoritativeCommit: expectedRevision,
+      operationalCommit: expectedRevision,
+      courseFolderId: `managed-course:${input.userId}:${input.course.repositoryId}`,
+      courseFolderPath: managedCoursePath(deps.userData, input.userId, input.course.repositoryId),
+      mode: "new_mutation" as const
+    };
+    let commit: string | undefined;
+    try {
+      const result = await publishManagedCourseTransaction({
+        userData: deps.userData,
+        context,
+        input,
+        expectedRevision,
+        factory,
+        authenticate,
+        revalidateRepository: () => assertCurrent(prior),
+        author: {
+          name: `faculty-${input.userId}`,
+          email: `${input.userId}+faculty@users.noreply.github.com`
+        },
+        allows: (file) => file === b.RECONCILIATION_PATH,
+        validateChangedPaths: (paths) => {
+          if (paths.length !== 1 || paths[0] !== b.RECONCILIATION_PATH)
+            throw new Error("Unexpected journal transaction paths.");
+        },
+        validateMetadata: (root) => b.validateReconciliationWorkspace(root, prior, record),
+        mutate: async (root) => {
+          await assertCurrent(prior);
+          const file = path.join(root, b.RECONCILIATION_PATH);
+          const existing = fs.existsSync(file)
+            ? b.reconciliationRecordSchema.parse(JSON.parse(fs.readFileSync(file, "utf8")))
+            : null;
+          if (b.stableJson(existing) !== b.stableJson(prior.record))
+            throw new Error("Journal changed before editing.");
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, `${b.stableJson(record)}\n`);
+          return { status: "success" as const };
+        },
+        changed: deps.changed ?? (() => {}),
+        publication: {
+          beforeStage: async (root) => {
+            await assertCurrent(prior);
+            b.validateReconciliationWorkspace(root, prior, record);
+          },
+          beforePush: async () => assertCurrent(prior),
+          verifyAcceptance: true
+        }
+      });
+      commit = (result as typeof result & { publication?: { commit: string } }).publication?.commit;
+    } catch {
+      // An accepted-but-lost journal response is resolved by fresh shared history, never a second push.
+      const observed = await observe();
+      if (observed.record?.writeId !== record.writeId)
+        throw new b.ReconciliationNeedsAttention("journal_outcome_unknown");
+      return observed;
+    }
+    if (!commit) throw new b.ReconciliationNeedsAttention("journal_outcome_unknown");
+    const refreshed = await remote(commit);
+    const bytes = await deps.reader.file(refreshed.repository, b.RECONCILIATION_PATH, commit);
+    if (
+      !bytes ||
+      b.stableJson(b.reconciliationRecordSchema.parse(JSON.parse(bytes))) !== b.stableJson(record)
+    )
+      throw new b.ReconciliationNeedsAttention("journal_outcome_unknown");
+    current = { ...prior, revision: commit, record };
+    executionCurrent = true;
+    await assertCurrent(current);
+    return current;
   };
   return {
     observe,
-    assertCurrent,
-    publish: async (expectedRevision, value) => {
-      if (!current || current.revision !== expectedRevision)
-        throw new Error("Stale reconciliation journal request.");
-      const prior = current;
-      await assertCurrent(prior);
-      const record = b.reconciliationRecordSchema.parse(value);
-      b.validateReconciliationRecord({ ...prior, record });
-      if (
-        b.stableJson(record.history.slice(0, prior.record?.history.length ?? 0)) !==
-        b.stableJson(prior.record?.history ?? [])
-      )
-        throw new Error("Permanent audit cannot be replaced.");
-      const context = {
-        managed: true as const,
-        userId: input.userId,
-        repositoryId: input.course.repositoryId,
-        authoritativeCommit: expectedRevision,
-        operationalCommit: expectedRevision,
-        courseFolderId: `managed-course:${input.userId}:${input.course.repositoryId}`,
-        courseFolderPath: managedCoursePath(deps.userData, input.userId, input.course.repositoryId),
-        mode: "new_mutation" as const
-      };
-      let commit: string | undefined;
-      try {
-        const result = await publishManagedCourseTransaction({
-          userData: deps.userData,
-          context,
-          input,
-          expectedRevision,
-          factory,
-          authenticate,
-          revalidateRepository: () => assertCurrent(prior),
-          author: {
-            name: `faculty-${input.userId}`,
-            email: `${input.userId}+faculty@users.noreply.github.com`
-          },
-          allows: (file) => file === b.RECONCILIATION_PATH,
-          validateChangedPaths: (paths) => {
-            if (paths.length !== 1 || paths[0] !== b.RECONCILIATION_PATH)
-              throw new Error("Unexpected journal transaction paths.");
-          },
-          validateMetadata: (root) => b.validateReconciliationWorkspace(root, prior, record),
-          mutate: async (root) => {
-            await assertCurrent(prior);
-            const file = path.join(root, b.RECONCILIATION_PATH);
-            const existing = fs.existsSync(file)
-              ? b.reconciliationRecordSchema.parse(JSON.parse(fs.readFileSync(file, "utf8")))
-              : null;
-            if (b.stableJson(existing) !== b.stableJson(prior.record))
-              throw new Error("Journal changed before editing.");
-            fs.mkdirSync(path.dirname(file), { recursive: true });
-            fs.writeFileSync(file, `${b.stableJson(record)}\n`);
-            return { status: "success" as const };
-          },
-          changed: deps.changed ?? (() => {}),
-          publication: {
-            beforeStage: async (root) => {
-              await assertCurrent(prior);
-              b.validateReconciliationWorkspace(root, prior, record);
-            },
-            beforePush: async () => assertCurrent(prior),
-            verifyAcceptance: true
-          }
-        });
-        commit = (result as typeof result & { publication?: { commit: string } }).publication
-          ?.commit;
-      } catch {
-        // An accepted-but-lost journal response is resolved by fresh shared history, never a second push.
-        const observed = await observe();
-        if (observed.record?.writeId !== record.writeId)
-          throw new b.ReconciliationNeedsAttention("journal_outcome_unknown");
-        return observed;
-      }
-      if (!commit) throw new b.ReconciliationNeedsAttention("journal_outcome_unknown");
-      const refreshed = await remote(commit);
-      const bytes = await deps.reader.file(refreshed.repository, b.RECONCILIATION_PATH, commit);
-      if (
-        !bytes ||
-        b.stableJson(b.reconciliationRecordSchema.parse(JSON.parse(bytes))) !== b.stableJson(record)
-      )
-        throw new b.ReconciliationNeedsAttention("journal_outcome_unknown");
-      current = { ...prior, revision: commit, record };
-      await assertCurrent(current);
-      return current;
+    inspectHistory: observeHistory,
+    assertCurrent: async (snapshot) => {
+      if (!executionCurrent) throw new b.ReconciliationNeedsAttention("fresh_plan_required");
+      await assertCurrent(snapshot);
+    },
+    publish: (revision, record) => publish(revision, record),
+    freshPlan: async () => {
+      const observed = await observeHistory();
+      const record = b.createFreshReconciliationRecord(observed, input.userId);
+      // Unique winning write ID is separate from historical reviewer/session identities.
+      record.writeId = randomUUID();
+      return publish(observed.revision, record, true);
     }
   };
 };
@@ -283,12 +325,14 @@ export const createMigrationReconciliationService = (deps: Dependencies) => ({
         },
         reader: (deps.reader ?? createRemoteRepositoryReader)(input.token, input.signal)
       });
-      const observed = await store.observe();
+      const observed = await store.inspectHistory();
       return {
         source: observed.source,
         checkpoint: observed.checkpoint,
         publication: observed.publication,
         journalRevision: observed.revision,
+        executionState: observed.executionState,
+        operationalReadiness: "unverified" as const,
         reviewedIdentity: observed.metadata.source.authenticated_github_user_id,
         review: observed.metadata.audit.review,
         reviewedRoles: observed.metadata.recovery?.legacy.facultyTerms ?? [],
@@ -301,7 +345,8 @@ export const createMigrationReconciliationService = (deps: Dependencies) => ({
   },
   async reconcile(
     userId: number,
-    repositoryId: number
+    repositoryId: number,
+    request?: { readonly freshPlan: true }
   ): Promise<Backend.MigrationReconciliationResult> {
     try {
       return await deps.session.withSynchronizedCourse(repositoryId, userId, async (input) => {
@@ -342,6 +387,7 @@ export const createMigrationReconciliationService = (deps: Dependencies) => ({
           client: backendClient,
           reader: (deps.reader ?? createRemoteRepositoryReader)(input.token, input.signal)
         });
+        if (request?.freshPlan) await store.freshPlan();
         return b.reconcilePublishedMigration(
           { store, client: backendClient, authenticatedUserId: input.userId },
           input.signal

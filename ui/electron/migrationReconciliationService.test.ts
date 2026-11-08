@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createMigrationReconciliationStore,
   createMigrationReconciliationService,
+  verifyCurrentMigrationAccess,
   loadMigrationReconciliationBackend
 } from "./migrationReconciliationService.js";
 import type { GitHubClient } from "./githubClientProvider.js";
@@ -18,12 +19,15 @@ import type {
   AuthenticatedGitWorkspaceContext
 } from "./gitWorkspaceReader.js";
 import { removeGitFixture, GIT_INTEGRATION_TIMEOUT_MS } from "./gitIntegrationFixtures.js";
+import { changeManagedCourseLifecycle } from "./courseLifecycleService.js";
+import { managedCoursePath } from "./managedCourses.js";
+import { parse, stringify } from "yaml";
 
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(removeGitFixture));
 });
-const fixture = async () => {
+const fixture = async (lifecycle: "active" | "archived" = "active") => {
   const b = loadMigrationReconciliationBackend();
   const synthetic = (await import(
     path.resolve("../tests/unit/migration/synthetic-migration-fixtures.ts")
@@ -64,7 +68,7 @@ const fixture = async () => {
   };
   const source = await commit("Fictional source");
   const original = synthetic.BasicCourse({ sourceSha: source });
-  const artifacts = synthetic.completeSyntheticMigration(original, ["active"]);
+  const artifacts = synthetic.completeSyntheticMigration(original, [lifecycle]);
   const candidate = b.buildMigrationCandidate({
     ...artifacts,
     boundary: b.STAGED_PHASE_9_BOUNDARY
@@ -200,6 +204,64 @@ const fixture = async () => {
     machine: string,
     client: typeof authority | Backend.ReconciliationClient = authority
   ) => createMigrationReconciliationStore(dependencies(machine, client));
+  const service = (client: Backend.ReconciliationClient) =>
+    createMigrationReconciliationService({
+      ...dependencies("service", client),
+      provideClient: () => client as unknown as GitHubClient,
+      reader: () => reader,
+      session: {
+        withSynchronizedCourse: async (_repositoryId, _userId, operation) =>
+          operation(input, {
+            status: "up_to_date",
+            currentCommit: await reader.revision(repository),
+            diagnostic: null,
+            retryable: false
+          })
+      }
+    });
+  const currentAccess = (client: Backend.ReconciliationClient) =>
+    verifyCurrentMigrationAccess({
+      ...dependencies("access", client),
+      provideClient: () => client as unknown as GitHubClient,
+      reader: () => reader
+    });
+  const changeLifecycle = async (
+    targetStatus: "archived" | "unarchived",
+    client: Backend.ReconciliationClient
+  ) => {
+    // These are the same independent gates used by the managed operation bridge.
+    if (!(await currentAccess(client))) throw new Error("Required current access is unverified.");
+    const current = await store("lifecycle", client).observe();
+    const userData = dependencies("lifecycle", client).userData;
+    return changeManagedCourseLifecycle({
+      userData,
+      input,
+      context: {
+        managed: true,
+        userId: input.userId,
+        repositoryId: repository.id,
+        authoritativeCommit: current.revision,
+        operationalCommit: current.revision,
+        courseFolderId: `managed-course:${input.userId}:${repository.id}`,
+        courseFolderPath: managedCoursePath(userData, input.userId, repository.id),
+        mode: "new_mutation"
+      },
+      expectedRevision: current.revision,
+      targetStatus,
+      revalidateRepository: async () => {
+        if (
+          !(await input.revalidateSession()) ||
+          (await reader.revision(repository)) !== current.revision
+        )
+          throw new Error("Current authority changed.");
+      },
+      changed: () => {},
+      factory: transport as unknown as GitWorkspaceFactory,
+      authenticate: () =>
+        ({ factory: transport, authentication }) as unknown as AuthenticatedGitWorkspaceContext,
+      author: { name: "Fixture", email: "fixture@example.test" }
+    });
+  };
   return {
     b,
     root,
@@ -215,6 +277,9 @@ const fixture = async () => {
     commit,
     store,
     dependencies,
+    service,
+    currentAccess,
+    changeLifecycle,
     invalidate: () => {
       active = false;
     },
@@ -386,7 +451,12 @@ describe("shared production journal transaction", { timeout: GIT_INTEGRATION_TIM
     await expect(store.assertCurrent(observed)).rejects.toThrow();
     f.repository.organizationId--;
     await f.git(f.remote, ["update-ref", "-d", observed.checkpoint]);
-    await expect(f.store("home").observe()).rejects.toThrow();
+    const home = f.store("home");
+    await expect(home.inspectHistory()).rejects.toThrow();
+    await expect(
+      home.publish(observed.revision, f.b.createReconciliationRecord(observed))
+    ).rejects.toThrow();
+    await expect(home.freshPlan()).rejects.toThrow();
     f.invalidate();
     await expect(
       store.publish(observed.revision, {
@@ -413,3 +483,194 @@ describe("shared production journal transaction", { timeout: GIT_INTEGRATION_TIM
     expect(await f.git(f.remote, ["rev-parse", "main"])).toBe(winner);
   });
 });
+
+const operationalClient = async () => {
+  const fixtures = (await import(
+    path.resolve("../tests/unit/migration/migration-reconciliation-fixtures.ts")
+  )) as {
+    reconciliationFixture(): {
+      client: Backend.ReconciliationClient & {
+        teamsCreated: unknown[];
+        creations: unknown[];
+        accountId: number;
+        repositoryGrants: Map<number, Map<number, string>>;
+        teamPermissionWrites: unknown[];
+      };
+    };
+  };
+  return fixtures.reconciliationFixture().client;
+};
+
+describe(
+  "permanent history and explicit current recovery",
+  { timeout: GIT_INTEGRATION_TIMEOUT_MS },
+  () => {
+    it("retains Ready history through archive, independently revalidates a fresh plan and safely unarchives", async () => {
+      const f = await fixture("archived");
+      const client = await operationalClient();
+      const service = f.service(client);
+      expect((await service.reconcile(f.input.userId, f.repository.id)).status).toBe("ready");
+      const original = await service.inspect(f.input.userId, f.repository.id);
+      expect((await f.changeLifecycle("archived", client)).status).toBe("archived");
+      const archiveHead = await f.reader.revision(f.repository);
+      const history = await service.inspect(f.input.userId, f.repository.id);
+      expect(history).toMatchObject({
+        publication: f.publication,
+        source: f.source,
+        journalRevision: archiveHead,
+        executionState: "fresh_plan_required",
+        operationalReadiness: "unverified"
+      });
+      expect(history.review).toEqual(original.review);
+      expect(history.reconciliation).toEqual(original.reconciliation);
+      expect(history.reconciliation?.status).toBe("ready");
+      expect((await service.reconcile(f.input.userId, f.repository.id)).attention).toContain(
+        "fresh_plan_required"
+      );
+      expect(await f.reader.revision(f.repository)).toBe(archiveHead);
+      await expect(f.changeLifecycle("unarchived", client)).rejects.toThrow("unverified");
+      const fresh = await f.store("fresh", client).freshPlan();
+      expect(fresh.record?.plan).toEqual({ baseRevision: archiveHead, actor: f.input.userId });
+      expect(fresh.record?.steps).toEqual([]);
+      expect(fresh.record?.status).toBe("needs_attention");
+      expect(await f.currentAccess(client)).toBe(false);
+      const ready = await service.reconcile(f.input.userId, f.repository.id);
+      expect(ready.status).toBe("ready");
+      expect(ready.studentFacingReady).toBe(false);
+      expect((await f.changeLifecycle("unarchived", client)).status).toBe("unarchived");
+      const final = await service.inspect(f.input.userId, f.repository.id);
+      expect(final.executionState).toBe("fresh_plan_required");
+      expect(final.review).toEqual(original.review);
+      expect(
+        final.reconciliation?.history.slice(0, original.reconciliation?.history.length)
+      ).toEqual(original.reconciliation?.history);
+      expect(final.publication).toBe(f.publication);
+      expect(await f.git(f.remote, ["rev-parse", final.checkpoint])).toBe(f.source);
+      expect(await f.git(f.remote, ["rev-list", "--count", `${f.source}..${f.publication}`])).toBe(
+        "1"
+      );
+    });
+
+    it("requires another explicit current plan and verifies access after unarchive", async () => {
+      const f = await fixture("archived");
+      const client = await operationalClient();
+      const service = f.service(client);
+      const course = parse(fs.readFileSync(path.join(f.seed, "course.yml"), "utf8"));
+      course.course.lifecycle = "archived";
+      f.write("course.yml", stringify(course));
+      await f.commit("Archived starting course");
+      await f.git(f.seed, ["push", pathToFileURL(f.remote).href, "HEAD:main"]);
+      expect(
+        (await service.reconcile(f.input.userId, f.repository.id, { freshPlan: true })).status
+      ).toBe("ready");
+      expect((await f.changeLifecycle("unarchived", client)).status).toBe("unarchived");
+      const history = await service.inspect(f.input.userId, f.repository.id);
+      expect(history.executionState).toBe("fresh_plan_required");
+      expect((await service.reconcile(f.input.userId, f.repository.id)).attention).toContain(
+        "fresh_plan_required"
+      );
+      const result = await service.reconcile(f.input.userId, f.repository.id, { freshPlan: true });
+      expect(result.status).toBe("ready");
+      expect(result.studentFacingReady).toBe(false);
+      expect(await f.currentAccess(client)).toBe(true);
+      const final = await service.inspect(f.input.userId, f.repository.id);
+      expect(final.review).toEqual(history.review);
+      expect(final.publication).toBe(f.publication);
+      expect(final.source).toBe(f.source);
+    });
+
+    it("keeps historical Ready evidence visible when independent operational verification detects external drift", async () => {
+      const f = await fixture();
+      const client = await operationalClient();
+      const service = f.service(client);
+      expect((await service.reconcile(f.input.userId, f.repository.id)).status).toBe("ready");
+      const original = await service.inspect(f.input.userId, f.repository.id);
+      const writes = vi.spyOn(client, "setCourseRepositoryTeamPermission");
+      client.repositoryGrants.get(f.repository.id)?.clear();
+      const beforeCheck = await f.reader.revision(f.repository);
+      expect(await f.currentAccess(client)).toBe(false);
+      expect(writes).not.toHaveBeenCalled();
+      expect(await f.reader.revision(f.repository)).toBe(beforeCheck);
+      const history = await service.inspect(f.input.userId, f.repository.id);
+      expect(history.review).toEqual(original.review);
+      expect(history.reconciliation?.status).toBe("ready");
+      expect(history.operationalReadiness).toBe("unverified");
+      expect((await service.reconcile(f.input.userId, f.repository.id)).status).toBe("ready");
+      expect(await f.currentAccess(client)).toBe(true);
+    });
+
+    it("preserves ambiguous creation guards after a domain change and never recreates the resource", async () => {
+      const f = await fixture();
+      const client = await operationalClient();
+      const create = vi
+        .spyOn(client, "createManagedTeam")
+        .mockRejectedValue(new Error("unknown create outcome"));
+      const service = f.service(client);
+      expect((await service.reconcile(f.input.userId, f.repository.id)).status).toBe(
+        "needs_attention"
+      );
+      const original = await f.store("before", client).inspectHistory();
+      expect(original.record?.guards.length).toBeGreaterThan(0);
+      const creates = create.mock.calls.length;
+      await f.git(f.seed, ["fetch", pathToFileURL(f.remote).href, "main"]);
+      await f.git(f.seed, ["reset", "--hard", "FETCH_HEAD"]);
+      const file = path.join(f.seed, "course.yml");
+      fs.appendFileSync(file, "\n# fresh domain revision\n");
+      await f.commit("Advance domain");
+      await f.git(f.seed, ["push", pathToFileURL(f.remote).href, "HEAD:main"]);
+      const fresh = await f.store("fresh", client).freshPlan();
+      expect(fresh.record?.guards).toEqual(original.record?.guards);
+      expect(fresh.record?.steps).toEqual([]);
+      expect((await service.reconcile(f.input.userId, f.repository.id)).status).toBe(
+        "needs_attention"
+      );
+      expect(create).toHaveBeenCalledTimes(creates);
+      expect(
+        (await service.inspect(f.input.userId, f.repository.id)).reconciliation?.guards
+      ).toEqual(original.record?.guards);
+    });
+
+    it("requires current account and role authorization for history and fresh plans with zero unauthorized writes", async () => {
+      const f = await fixture();
+      const client = await operationalClient();
+      const original = await f.store("before", client).inspectHistory();
+      const retained = f.store("retained", client);
+      const oldSnapshot = await retained.observe();
+      const replacement = original.course.faculty_directory.find(
+        (faculty) => faculty.github_user_id !== f.input.userId
+      )!.github_user_id;
+      const course = parse(fs.readFileSync(path.join(f.seed, "course.yml"), "utf8"));
+      course.fallback_administrator.github_user_id = replacement;
+      const term = parse(fs.readFileSync(path.join(f.seed, "terms/27s1/term.yml"), "utf8"));
+      term.coordinators.former.push(...term.coordinators.current);
+      term.coordinators.current = [{ github_user_id: replacement }];
+      f.write("course.yml", stringify(course));
+      f.write("terms/27s1/term.yml", stringify(term));
+      const changed = await f.commit("Current role authority changes");
+      await f.git(f.seed, ["push", pathToFileURL(f.remote).href, "HEAD:main"]);
+      await expect(
+        retained.publish(oldSnapshot.revision, f.b.createReconciliationRecord(oldSnapshot))
+      ).rejects.toThrow();
+      await expect(f.service(client).inspect(f.input.userId, f.repository.id)).rejects.toThrow();
+      await expect(f.store("former", client).freshPlan()).rejects.toThrow();
+      expect(await f.reader.revision(f.repository)).toBe(changed);
+      const currentDependencies = {
+        ...f.dependencies("replacement", client),
+        input: { ...f.input, userId: replacement }
+      };
+      client.accountId = replacement;
+      const currentStore = createMigrationReconciliationStore(currentDependencies);
+      const history = await currentStore.inspectHistory();
+      expect(history.metadata).toEqual(original.metadata);
+      expect((await currentStore.freshPlan()).record?.plan?.actor).toBe(replacement);
+      const currentHead = await f.reader.revision(f.repository);
+      await expect(f.service(client).inspect(f.input.userId, f.repository.id)).rejects.toThrow();
+      f.invalidate();
+      await expect(currentStore.freshPlan()).rejects.toThrow();
+      expect(await f.reader.revision(f.repository)).toBe(currentHead);
+      expect(client.teamsCreated).toEqual([]);
+      expect(client.creations).toEqual([]);
+      expect(client.teamPermissionWrites).toEqual([]);
+    });
+  }
+);

@@ -92,7 +92,8 @@ export const reconciliationRecordSchema = z
     guards: z.array(guard),
     steps: z.array(step),
     history: z.array(event),
-    writeId: z.string().min(1)
+    writeId: z.string().min(1),
+    plan: z.object({ baseRevision: sha, actor: id }).strict().optional()
   })
   .strict();
 export type ReconciliationRecord = z.infer<typeof reconciliationRecordSchema>;
@@ -110,6 +111,36 @@ export interface ReconciliationSnapshot {
   targetAttention: readonly string[];
   record: ReconciliationRecord | null;
 }
+/** History is evidence only. It never asserts current operational readiness. */
+export interface MigrationHistorySnapshot extends ReconciliationSnapshot {
+  executionState: "current_plan" | "fresh_plan_required";
+}
+
+/** Explicitly invoked with independently read current state, never a renderer-authored plan.
+ * No outcomes or approvals are rebased. Permanent events and unresolved guards survive intact.
+ */
+export const createFreshReconciliationRecord = (
+  snapshot: MigrationHistorySnapshot,
+  actor: number
+): ReconciliationRecord => {
+  if (!canRecoverMigration(snapshot.course, snapshot.terms, actor))
+    throw new ReconciliationNeedsAttention("authorization_required");
+  return {
+    ...createReconciliationRecord(snapshot),
+    plan: { baseRevision: snapshot.revision, actor },
+    guards: structuredClone(snapshot.record?.guards ?? []),
+    history: [
+      ...structuredClone(snapshot.record?.history ?? []),
+      {
+        actor,
+        observedRevision: snapshot.revision,
+        step: "fresh_plan",
+        status: "needs_attention",
+        reasons: []
+      }
+    ]
+  };
+};
 /** Dedicated #31 recovery capability; reuse role derivation, not archive lifecycle guards. */
 export const canRecoverMigration = (
   course: RawCourseConfigV2,

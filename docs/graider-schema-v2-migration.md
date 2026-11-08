@@ -268,7 +268,7 @@ Exact serialization remains an implementation choice.
 Keep three distinct bindings: the original Schema 1 source SHA and independently
 verified immutable checkpoint; the original Schema 2 publication SHA/provenance;
 and the current exact reconciliation journal revision. Journal commits never replace
-the original publication identity. Accept descendants only after validating every
+the original publication identity. For retained execution authority, accept descendants only after validating every
 intervening change as confined to the validated reconciliation/audit namespace and
 proving the complete intended course/resource fingerprint unchanged. Unexpected
 changes fail closed and require a fresh explicit plan; ancestry alone is insufficient.
@@ -334,9 +334,9 @@ Credentials, raw provider errors and machine-local paths are never journaled.
 The bundled-Git reader discovers the original publication from its exact Schema 1
 parent, verifies original-byte preservation and audit/source bindings, validates the
 complete published course/term/role set, and checks **every** single-parent descendant.
-Only this journal path may change. Domain-byte/mode changes, merges, changed-then-restored
-files, journal deletion, foreign bindings, replaced history and incomplete Ready
-assertions fail closed. A fresh run independently verifies the original remote
+For retained execution authority only this journal path may change. Domain-byte/mode
+changes, merges, changed-then-restored files, journal deletion, foreign bindings,
+replaced history and incomplete Ready assertions fail closed. A fresh run independently verifies the original remote
 checkpoint without creating, moving or deleting it. Portable namespaces and bounded
 reads apply on both supported platforms.
 
@@ -363,8 +363,36 @@ Active-term access blocks Ready; safely deferred historical evidence remains vis
 without doing so. Draft student targets are prohibited. No student identity, grading
 relocation or later-phase operation is invented.
 
-`inspect()` returns retained audit after Ready and synchronization. Audit presence
-alone no longer blocks readiness. Before an eligible managed course-lifecycle mutation,
+`inspect()` independently validates permanent history after Ready, synchronization
+and subsequent domain commits, including supported archive/unarchive. It validates
+original publication/source preservation, immutable audit bytes throughout the complete
+single-parent history, historical journal bindings and append-only events, and the
+original remote checkpoint. Current account, course/organization identity, roles,
+privileges and exact remote revision are checked independently. The result exposes
+historical reconciliation evidence, `executionState` and `operationalReadiness: unverified`;
+a historical Ready record is never current access proof.
+
+Any intervening domain change still invalidates retained execution authority, including
+changed-then-restored bytes. The main-only explicit
+`reconcile(userId, repositoryId, { freshPlan: true })` invocation reads current trusted
+state and publishes a new journal-only plan at that exact base before reconciliation.
+The optional version-1 journal `plan` binds its base revision and current actor; the
+existing intended fingerprint binds current domain files. The original source,
+checkpoint, publication and review digest remain distinct. This transition preserves
+all historical events and unresolved guards, appends a fresh-plan event, resets current
+step outcomes and starts Needs attention. It never restores review capabilities or
+rebases outcomes. Every descendant after that base must again be journal-only; mixed
+domain/journal rewrites, stale plans, changed bindings and altered permanent audit fail
+closed. Ordinary retry never implicitly creates this fresh plan.
+
+Current roles feed the existing Phase 7 engines. Original manifests cannot prove
+changed roster/assignment/manifest or section scope: affected student targets are
+withheld, and required Active scope remains Needs attention until trusted current
+evidence is available. Existing legacy cleanup validation remains unchanged; a new
+plan cannot bypass its reviewed-role, grant-identity or replacement-access checks.
+No new carry-forward policy or publication operation is introduced.
+
+Audit presence alone no longer blocks readiness. Before an eligible managed course-lifecycle mutation,
 a read-only pass through the same engines independently rechecks current GitHub access;
 all GitHub/journal mutations are disabled in that pass. A saved Ready flag cannot
 authorize work after external drift. Actual reconciliation records pending/unknown

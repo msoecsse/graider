@@ -30,7 +30,9 @@ import {
   validateReconciliationRecord,
   reconciliationValue,
   ReconciliationNeedsAttention,
-  type ReconciliationSnapshot
+  createFreshReconciliationRecord,
+  type ReconciliationSnapshot,
+  type MigrationHistorySnapshot
 } from "./migration-reconciliation-state.js";
 
 const HISTORY_LIMIT = 10_000;
@@ -45,22 +47,26 @@ const SINGLE_PARENT_FIELDS = 2;
 /** Exact Git objects only. Every intermediate descendant is checked, including changed-then-restored files.
  * The caller independently proves current remote identity/revision and the immutable remote checkpoint.
  */
-export const readMigrationReconciliationSnapshot = async (
+export const readMigrationHistorySnapshot = async (
   root: string,
   revision: string
-): Promise<ReconciliationSnapshot> => {
+): Promise<MigrationHistorySnapshot> => {
   const exact = createExactCommitRevision(revision);
   if (!exact) throw new Error("Invalid authoritative revision.");
   const runners = createMigrationGitRunners();
   const workspace = await new GitCommandWorkspaceFactory(runners).open(root);
   const git = async (...args: string[]) => (await runners.runGit({ cwd: root, args })).trim();
   let totalBytes = 0;
+  const blobs = new Map<string, Buffer>();
   const blob = async (objectId: string): Promise<Buffer> => {
+    const cached = blobs.get(objectId);
+    if (cached) return cached;
     const result = await runners.runGitBinary({ cwd: root, args: ["cat-file", "blob", objectId] });
     const bytes = Buffer.from(result.stdout);
     totalBytes += bytes.length;
     if (bytes.length > MAX_BLOB_BYTES || totalBytes > MAX_SNAPSHOT_BYTES)
       throw new Error("Recovery evidence exceeds its safe bound.");
+    blobs.set(objectId, bytes);
     return bytes;
   };
   const tree = async (sha: string) => {
@@ -139,9 +145,7 @@ export const readMigrationReconciliationSnapshot = async (
     reviewed.authenticatedGithubUserId !== metadata.source.authenticated_github_user_id
   )
     throw new ReconciliationNeedsAttention("fresh_plan_required");
-  const course = migrationCourseSchema.parse(
-    parse(files.get("course.yml")?.toString("utf8") ?? "")
-  );
+  let course = migrationCourseSchema.parse(parse(files.get("course.yml")?.toString("utf8") ?? ""));
   if (
     course.course.repository_id !== metadata.source.repository_id ||
     course.course.organization_binding.organization_id !== metadata.source.organization_id ||
@@ -150,7 +154,7 @@ export const readMigrationReconciliationSnapshot = async (
     )
   )
     throw new Error("Published migration identity mismatch.");
-  const terms = publishedTree
+  let terms = publishedTree
     .filter((entry) => /^terms\/[^/]+\/term\.yml$/u.test(entry.path))
     .map((entry) => {
       const term = rawTermConfigV2Schema.parse(
@@ -163,6 +167,37 @@ export const readMigrationReconciliationSnapshot = async (
   // Validates the entire term/role/order/lifecycle set without granting the reviewer recovery authority.
   if (!canRecoverMigration(course, terms, course.fallback_administrator.github_user_id))
     throw new Error("Invalid published role state.");
+  const publishedCourse = course;
+  const publishedTerms = terms;
+  const readDomain = async (entries: typeof publishedTree) => {
+    const read = async (file: string) =>
+      (
+        await blob(reconciliationValue(entries.find((entry) => entry.path === file)).objectId)
+      ).toString("utf8");
+    const currentCourse = migrationCourseSchema.parse(parse(await read("course.yml")));
+    const currentTerms = [];
+    for (const entry of entries.filter((file) => /^terms\/[^/]+\/term\.yml$/u.test(file.path))) {
+      const term = rawTermConfigV2Schema.parse(parse(await read(entry.path)));
+      if (entry.path !== `terms/${term.term.code}/term.yml`)
+        throw new Error("Term scope mismatch.");
+      currentTerms.push(term);
+    }
+    if (
+      currentCourse.course.repository_id !== metadata.source.repository_id ||
+      currentCourse.course.organization_binding.organization_id !==
+        metadata.source.organization_id ||
+      !canRecoverMigration(
+        currentCourse,
+        currentTerms,
+        currentCourse.fallback_administrator.github_user_id
+      )
+    )
+      throw new Error("Invalid current course identity or role state.");
+    const files = [];
+    for (const entry of entries.filter((file) => file.path !== RECONCILIATION_PATH))
+      files.push({ path: entry.path, sha256: bytesHash(await blob(entry.objectId)) });
+    return { course: currentCourse, terms: currentTerms, intendedFingerprint: fingerprint(files) };
+  };
   const sourceTree = await tree(source);
   const originals = new Map<string, Buffer>();
   for (const entry of sourceTree) {
@@ -213,6 +248,9 @@ export const readMigrationReconciliationSnapshot = async (
     )
       throw new Error("Stored cleanup intent changed.");
   }
+  const currentDomain = await readDomain(currentTree);
+  course = currentDomain.course;
+  terms = currentDomain.terms;
   const targets: TrustedStudentRepositoryTarget[] = [];
   const unsafeRepositoryIds = new Set<number>();
   let unknownOperationalScope = false;
@@ -367,44 +405,124 @@ export const readMigrationReconciliationSnapshot = async (
         targetAttention.push("required_student_scope_unverified");
     } else if (required(target.termCode)) targetAttention.push(target.reason);
   }
-  const snapshot: ReconciliationSnapshot = {
-    revision,
+  // Original manifests prove only the reviewed source scope. Changed resource evidence
+  // cannot inherit that proof; withhold it until a trusted current inventory is available.
+  const unprovenTerms = new Set<string>();
+  const resourceEvidence = (file: string) =>
+    /^terms\/[^/]+\/(?:assignments|manifests|rosters)\//u.test(file) ||
+    metadata.students.some((student) => student.location === file) ||
+    metadata.evidence.some(
+      (evidence) => evidence.kind === "manifest" && evidence.location === file
+    );
+  for (const entry of [...currentTree, ...publishedTree]) {
+    const termCode = /^terms\/([^/]+)\//u.exec(entry.path)?.[1];
+    if (
+      termCode &&
+      resourceEvidence(entry.path) &&
+      (!currentTree.some((file) => stableJson(file) === stableJson(entry)) ||
+        !publishedTree.some((file) => stableJson(file) === stableJson(entry)))
+    )
+      unprovenTerms.add(termCode);
+  }
+  const scope = (term: (typeof terms)[number] | undefined) =>
+    term?.sections.map((section) => ({ id: section.id, roster: section.roster }));
+  for (const term of terms)
+    if (
+      stableJson(scope(term)) !==
+      stableJson(scope(publishedTerms.find((original) => original.term.code === term.term.code)))
+    )
+      unprovenTerms.add(term.term.code);
+  if (terms.some((term) => term.term.status === "active" && unprovenTerms.has(term.term.code)))
+    targetAttention.push("current_resource_scope_unverified");
+  const snapshot: MigrationHistorySnapshot = {
+    revision: publication,
     publication,
     source,
     checkpoint: migrationCheckpointReference(source),
     intendedFingerprint: fingerprint(fingerprints.map(({ path, sha256 }) => ({ path, sha256 }))),
-    course,
-    terms,
+    course: publishedCourse,
+    terms: publishedTerms,
     metadata,
-    targets: safeTargets,
+    targets: safeTargets.filter((target) => !unprovenTerms.has(target.termCode)),
     targetAttention: [...new Set(targetAttention)],
-    record: null
+    record: null,
+    executionState: "current_plan"
   };
   const domainTree = (entries: Awaited<ReturnType<typeof tree>>) =>
     stableJson(entries.filter((entry) => entry.path !== RECONCILIATION_PATH));
-  let previous = snapshot.record;
+  let previousTree = publishedTree;
   // Replay oldest first; no changed-then-restored domain data or deleted journal can hide in ancestry.
   for (const fields of history.slice(0, sourceIndex - 1).reverse()) {
-    const entries = await tree(reconciliationValue(fields[0]));
-    if (domainTree(entries) !== domainTree(publishedTree))
-      throw new ReconciliationNeedsAttention("fresh_plan_required");
-    const entry = entries.find((file) => file.path === RECONCILIATION_PATH);
-    if (!entry || entry.mode !== "100644") throw new Error("Missing shared journal.");
-    const record = reconciliationRecordSchema.parse(
-      JSON.parse((await blob(entry.objectId)).toString("utf8"))
+    const commit = reconciliationValue(fields[0]);
+    const entries = await tree(commit);
+    if (entries.some((entry) => entry.path === ".graider/reconciliation.yml"))
+      snapshot.targetAttention = [
+        ...new Set([...snapshot.targetAttention, "unrecognized_reconciliation_metadata"])
+      ];
+    const audit = entries.find((entry) => entry.path === METADATA_PATH);
+    const originalAudit = reconciliationValue(
+      publishedTree.find((entry) => entry.path === METADATA_PATH)
     );
-    snapshot.record = record;
-    validateReconciliationRecord(snapshot);
-    const retainedLength = previous?.history.length ?? 0;
-    if (stableJson(record.history.slice(0, retainedLength)) !== stableJson(previous?.history ?? []))
-      throw new Error("Permanent reconciliation history was replaced.");
-    for (const event of record.history.slice(retainedLength)) {
-      if (event.observedRevision !== fields[1] || !canRecoverMigration(course, terms, event.actor))
-        throw new Error("Unverified journal actor or revision.");
+    if (!audit || audit.objectId !== originalAudit.objectId || audit.mode !== originalAudit.mode)
+      throw new Error("Permanent migration audit was changed.");
+    const domainChanged = domainTree(entries) !== domainTree(previousTree);
+    const entry = entries.find((file) => file.path === RECONCILIATION_PATH);
+    const previousEntry = previousTree.find((file) => file.path === RECONCILIATION_PATH);
+    if ((previousEntry && !entry) || (entry && entry.mode !== "100644"))
+      throw new Error("Missing or unsafe shared journal.");
+    const journalChanged = entry?.objectId !== previousEntry?.objectId;
+    if (domainChanged) {
+      if (journalChanged) throw new Error("Domain changes cannot rewrite reconciliation intent.");
+      Object.assign(snapshot, await readDomain(entries));
+      snapshot.executionState = "fresh_plan_required";
+    } else if (journalChanged && entry) {
+      const previous = snapshot.record;
+      const record = reconciliationRecordSchema.parse(
+        JSON.parse((await blob(entry.objectId)).toString("utf8"))
+      );
+      if (stableJson(record.plan) !== stableJson(previous?.plan)) {
+        const expected = createFreshReconciliationRecord(
+          snapshot,
+          reconciliationValue(record.plan).actor
+        );
+        if (stableJson({ ...record, writeId: expected.writeId }) !== stableJson(expected))
+          throw new Error("Invalid explicit fresh plan.");
+        snapshot.executionState = "current_plan";
+      } else if (snapshot.executionState !== "current_plan") {
+        throw new ReconciliationNeedsAttention("fresh_plan_required");
+      }
+      snapshot.record = record;
+      validateReconciliationRecord(snapshot);
+      const retainedLength = previous?.history.length ?? 0;
+      if (
+        stableJson(record.history.slice(0, retainedLength)) !== stableJson(previous?.history ?? [])
+      )
+        throw new Error("Permanent reconciliation history was replaced.");
+      for (const event of record.history.slice(retainedLength)) {
+        if (
+          event.observedRevision !== fields[1] ||
+          !canRecoverMigration(snapshot.course, snapshot.terms, event.actor)
+        )
+          throw new Error("Unverified journal actor or revision.");
+      }
     }
-    previous = record;
+    snapshot.revision = commit;
+    previousTree = entries;
   }
   return snapshot;
+};
+
+/** Retained execution authority accepts only journal-only descendants of its explicit plan.
+ * History inspection never makes a stale plan executable, even after bytes are restored.
+ */
+export const readMigrationReconciliationSnapshot = async (
+  root: string,
+  revision: string
+): Promise<ReconciliationSnapshot> => {
+  const history = await readMigrationHistorySnapshot(root, revision);
+  if (history.executionState !== "current_plan")
+    throw new ReconciliationNeedsAttention("fresh_plan_required");
+  return history;
 };
 
 /** Validate actual isolated workspace bytes before staging. Git mode/path checks remain in the transaction. */
