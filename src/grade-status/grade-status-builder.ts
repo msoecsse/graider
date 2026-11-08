@@ -1,9 +1,14 @@
-import { getEffectiveAssignmentGrading } from "../config/effective-grading.js";
+import { readGradeStatusResult } from "./grade-status-result.js";
+import {
+  getEffectiveAssignmentGrading,
+  type EffectiveAssignmentGrading
+} from "../config/effective-grading.js";
 import type { LoadedGraiderConfig } from "../config/config-models.js";
 import { DISABLED_GRADING_MODE } from "../config/config-schemas.js";
 import { loadGraiderConfig } from "../config/config-loader.js";
 import type { CommandStatus } from "../core/command-result.js";
 import {
+  DiagnosticCode,
   ASSIGNMENT_STATUS_BLOCKS_GRADE_CODE,
   GITHUB_TOKEN_REQUIRED_CODE,
   GRADING_NOT_CONFIGURED_CODE,
@@ -54,6 +59,8 @@ const TOKEN_REQUIRED_REASON = "token_required";
 const LATEST_WORKFLOW_RUN_SELECTION = "latest_configured_workflow_run";
 const NO_RUN_SELECTION = "no_configured_workflow_run";
 const ACTIVE_ASSIGNMENT_STATUSES = ["active", "closed"] as const;
+const MAX_CONCURRENT_REPOSITORY_READS = 4;
+const MAX_STATUS_WORKFLOW_RUNS = 20;
 const GITHUB_HOST = "github.com";
 const ACTIONS_RUN_PATH_SEGMENT_COUNT = 5;
 
@@ -308,10 +315,15 @@ const normalizeConclusion = (
   return conclusion;
 };
 
-const getRunTimestamp = (run: GitHubWorkflowRun): string => run.startedAt ?? run.createdAt;
+const getRunTimestamp = (run: GitHubWorkflowRun): string => run.createdAt;
 
 const sortRunsNewestFirst = (runs: readonly GitHubWorkflowRun[]): GitHubWorkflowRun[] =>
-  [...runs].sort((left, right) => getRunTimestamp(right).localeCompare(getRunTimestamp(left)));
+  [...runs].sort(
+    (left, right) =>
+      getRunTimestamp(right).localeCompare(getRunTimestamp(left)) ||
+      right.id - left.id ||
+      (right.runAttempt ?? 0) - (left.runAttempt ?? 0)
+  );
 
 const selectLatestWorkflowRun = (runs: readonly GitHubWorkflowRun[]): GitHubWorkflowRun | null =>
   sortRunsNewestFirst(runs)[0] ?? null;
@@ -388,6 +400,9 @@ const createRow = (
     runUrl: run === null || repositoryRecord === null ? null : createRunUrl(repositoryRecord, run),
     status,
     conclusion,
+    gradingResult: "not_checked",
+    submissionSha: null,
+    runAttempt: run?.runAttempt ?? null,
     startedAt: run?.startedAt ?? run?.createdAt ?? null,
     completedAt: status === "completed" ? (run?.completedAt ?? run?.updatedAt ?? null) : null,
     selectionStrategy: run === null ? NO_RUN_SELECTION : LATEST_WORKFLOW_RUN_SELECTION,
@@ -528,7 +543,9 @@ const getRepositoryWorkflowStatus = async (
   repository: GradingRepositoryTarget,
   githubClient: GitHubClient,
   workflowPath: string,
-  ref: string | null
+  ref: string | null,
+  grading: EffectiveAssignmentGrading,
+  assignmentSlug: string
 ): Promise<GradeStatusRepositoryRow> => {
   try {
     const observedRepository = await githubClient.getRepository(
@@ -539,12 +556,13 @@ const getRepositoryWorkflowStatus = async (
     const runs = await githubClient.listWorkflowRuns({
       owner: repository.owner,
       repo: repository.repositoryName,
-      workflowPath: getWorkflowDispatchIdentifier(workflowPath)
+      workflowPath: getWorkflowDispatchIdentifier(workflowPath),
+      limit: MAX_STATUS_WORKFLOW_RUNS
     });
     const run = selectLatestWorkflowRun(runs);
 
-    return run === null
-      ? repository.gradingResultsExpected === false
+    if (run === null) {
+      return repository.gradingResultsExpected === false
         ? createRow(
             student,
             repository.fullName,
@@ -556,8 +574,68 @@ const getRepositoryWorkflowStatus = async (
             null,
             repository
           )
-        : createMissingRunRow(student, repository, workflowPath, ref)
-      : createRunRow(student, repository, workflowPath, ref, run);
+        : createMissingRunRow(student, repository, workflowPath, ref);
+    }
+    const row = createRunRow(student, repository, workflowPath, ref, run);
+    if (run.status !== "completed") return row;
+    let submissionSha: string | undefined;
+    try {
+      submissionSha = (
+        await githubClient.getRepositoryBranch(
+          repository.owner,
+          repository.repositoryName,
+          observedRepository.defaultBranch
+        )
+      )?.commitSha;
+    } catch {
+      // Keep execution details even when the authoritative submission cannot be read.
+      submissionSha = undefined;
+    }
+    let gradingResult = await readGradeStatusResult({
+      githubClient,
+      owner: repository.owner,
+      repo: repository.repositoryName,
+      grading,
+      run,
+      submissionSha,
+      assignmentSlug,
+      studentIds: repository.studentIds,
+      githubUsernames: repository.githubUsernames
+    });
+    if (gradingResult === "passed" || gradingResult === "failed") {
+      try {
+        const current = await githubClient.getRepositoryBranch(
+          repository.owner,
+          repository.repositoryName,
+          observedRepository.defaultBranch
+        );
+        if (current?.commitSha !== submissionSha) gradingResult = "stale";
+      } catch {
+        gradingResult = "unavailable";
+      }
+    }
+    const resultDiagnostics =
+      gradingResult === "passed"
+        ? []
+        : [
+            createConfigDiagnostic(
+              gradingResult === "failed"
+                ? DiagnosticCode.GradingResultFailed
+                : GRADING_WORKFLOW_STATUS_UNKNOWN_CODE,
+              gradingResult === "failed"
+                ? "Verified grading checks failed."
+                : `Grading result needs attention: ${gradingResult}.`,
+              { repository: repository.fullName, runId: run.id, gradingResult }
+            )
+          ];
+    return {
+      ...row,
+      gradingResult,
+      submissionSha: submissionSha ?? null,
+      reason: `grading_result_${gradingResult}`,
+      needsAttention: row.needsAttention || gradingResult !== "passed",
+      diagnostics: [...row.diagnostics, ...resultDiagnostics]
+    };
   } catch (error: unknown) {
     return createUnknownRunRow(error, student, repository, workflowPath, ref);
   }
@@ -592,7 +670,15 @@ const createRepositoryStatusRowUncached = async (
     return createTokenRequiredRow(student, repository, workflowPath, workflowRef);
   }
 
-  return getRepositoryWorkflowStatus(student, repository, githubClient, workflowPath, workflowRef);
+  return getRepositoryWorkflowStatus(
+    student,
+    repository,
+    githubClient,
+    workflowPath,
+    workflowRef,
+    grading,
+    config.assignment.assignment.slug
+  );
 };
 
 const createRepositoryStatusRow = async (
@@ -641,12 +727,21 @@ const createSummary = (repositories: readonly GradeStatusRepositoryRow[]): Grade
   const missing = countRows(repositories, (row) => row.status === "missing");
   const unknown = countRows(
     repositories,
-    (row) => row.status === "unknown" || row.status === "token_required"
+    (row) =>
+      row.status === "unknown" ||
+      row.status === "token_required" ||
+      (row.status === "completed" &&
+        row.gradingResult !== "passed" &&
+        row.gradingResult !== "failed")
   );
   const blocked = countRows(repositories, (row) => row.status === "blocked");
   const readyForReport =
     repositories.length > EMPTY_COUNT &&
-    repositories.every((row) => row.status === "completed" && row.conclusion !== "unknown");
+    repositories.every(
+      (row) =>
+        row.status === "completed" &&
+        (row.gradingResult === "passed" || row.gradingResult === "failed")
+    );
 
   return {
     totalRepositories: repositories.length,
@@ -655,11 +750,11 @@ const createSummary = (repositories: readonly GradeStatusRepositoryRow[]): Grade
     completed,
     successful: countRows(
       repositories,
-      (row) => row.status === "completed" && row.conclusion === "success"
+      (row) => row.status === "completed" && row.gradingResult === "passed"
     ),
     failed: countRows(
       repositories,
-      (row) => row.status === "completed" && row.conclusion === "failure"
+      (row) => row.status === "completed" && row.gradingResult === "failed"
     ),
     cancelled: countRows(
       repositories,
@@ -807,13 +902,29 @@ export const buildAssignmentGradeStatus = async ({
       : [])
   ];
   const statusCache = new Map<string, Promise<GradeStatusRepositoryRow>>();
-  const repositoryRows = await Promise.all(
-    selectedStudents.map((student) =>
-      manifestResult.status === "missing"
-        ? Promise.resolve(createRow(student, null, null, "assignment_not_applied", null, null))
-        : createRepositoryStatusRow(config, student, normalizedTargets, githubClient, statusCache)
-    )
-  );
+  const repositoryRows: GradeStatusRepositoryRow[] = [];
+  for (
+    let offset = 0;
+    offset < selectedStudents.length;
+    offset += MAX_CONCURRENT_REPOSITORY_READS
+  ) {
+    const batch = await Promise.all(
+      selectedStudents
+        .slice(offset, offset + MAX_CONCURRENT_REPOSITORY_READS)
+        .map((student) =>
+          manifestResult.status === "missing"
+            ? Promise.resolve(createRow(student, null, null, "assignment_not_applied", null, null))
+            : createRepositoryStatusRow(
+                config,
+                student,
+                normalizedTargets,
+                githubClient,
+                statusCache
+              )
+        )
+    );
+    repositoryRows.push(...batch);
+  }
   const targetRows = Array.from(
     new Map(
       repositoryRows.map((row) => [row.targetId ?? `${row.studentId}:${row.section}`, row])

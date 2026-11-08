@@ -99,6 +99,7 @@ export const DiagnosticCode = {
   TargetStudentNotActive: "target_student_not_active",
   StudentRepositoryMissing: "student_repository_missing",
   ManifestRepositoryMissing: "manifest_repository_missing",
+  GradingResultFailed: "grading_result_failed",
   InvalidGradingResult: "invalid_grading_result",
   InvalidGradingResultSchemaVersion: "invalid_grading_result_schema_version",
   InvalidGradingResultStatus: "invalid_grading_result_status",

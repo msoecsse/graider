@@ -1,3 +1,4 @@
+import type { GradeStatusResult } from "./grade-status-result.js";
 import type { CommandStatus } from "../core/command-result.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
 
@@ -90,7 +91,11 @@ export interface GradeStatusRepositoryRow {
   readonly runId: number | null;
   readonly runUrl: string | null;
   readonly status: GradeStatusRepositoryStatus;
+  /** GitHub Actions execution conclusion, independent of gradingResult. */
   readonly conclusion: GradeStatusRepositoryConclusion;
+  readonly gradingResult: GradeStatusResult;
+  readonly submissionSha: string | null;
+  readonly runAttempt: number | null;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
   readonly selectionStrategy: string;

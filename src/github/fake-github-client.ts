@@ -186,11 +186,7 @@ export interface FakeArtifactDownloadRead {
   artifactName: string;
 }
 
-export interface FakeWorkflowRunRead {
-  owner: string;
-  repo: string;
-  workflowPath?: string;
-}
+export type FakeWorkflowRunRead = ListWorkflowRunsInput;
 
 export type FakeWorkflowRunForCommitRead = ListWorkflowRunsForCommitInput;
 export type FakeWorkflowRunArtifactsRead = ListWorkflowRunArtifactsInput;
@@ -717,7 +713,7 @@ export class FakeGitHubClient implements GitHubClient {
         .slice(0, input.limit ?? this.workflowRuns.length)
         .map((record) => ({
           ...record.run,
-          runAttempt: "runAttempt" in record.run ? Number(record.run.runAttempt) : 1
+          runAttempt: record.run.runAttempt ?? 1
         }));
     });
   }

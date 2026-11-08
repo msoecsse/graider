@@ -7,6 +7,7 @@ export type GradingEvidenceOutcome = "success" | "failure" | "skipped";
 
 export interface GradingEvidenceArtifactInput {
   readonly metadataJson: string;
+  readonly resultJson?: string;
   readonly junitReports: readonly GradingEvidenceTextFile[];
   readonly checkstyleXml?: string;
 }
@@ -235,7 +236,7 @@ const parsePhase = (value: unknown): GradingEvidencePhase | undefined => {
   return outcome === undefined ? undefined : { outcome };
 };
 
-const parseMetadata = (
+export const parseGradingEvidenceMetadata = (
   metadataJson: string
 ): GradingEvidenceMetadata | GradingEvidenceParseError => {
   let parsed: unknown;
@@ -420,7 +421,7 @@ const parseCheckstyle = (content: string): readonly CheckstyleViolation[] | unde
 export const parseGradingEvidence = (
   input: GradingEvidenceArtifactInput
 ): GradingEvidenceParseResult => {
-  const metadata = parseMetadata(input.metadataJson);
+  const metadata = parseGradingEvidenceMetadata(input.metadataJson);
   if ("code" in metadata) {
     return { status: "failure", error: metadata };
   }

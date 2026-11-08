@@ -91,6 +91,44 @@ Graider rejects invalid JSON, unsupported schema versions, malformed check
 entries, and status values outside the contract vocabulary. `grading-results.json`
 is the source of truth for faculty summaries.
 
+### Assignment status verification
+
+Assignment Grade Status keeps Actions execution (`status`, `conclusion`, links)
+separate from `gradingResult`. A successful Actions job alone never establishes
+passing grading. Explicit failed/error checks override an overall passed field;
+other contradictory evidence, skipped checks under passed, and empty passed
+check lists cannot display green. Failed results remain reportable.
+
+Status reads only the newest configured workflow run (at most 20 run summaries),
+then at most one configured artifact. It never falls back to an earlier pass.
+The current remote default-branch commit is the authoritative Assignment
+submission; it is checked again after successful result validation. Each refresh
+caches only within that invocation, sharing repository results across group
+members and limiting concurrent repository reads to four.
+
+The existing bounded ZIP decoder, evidence metadata parser, XML parser, and
+result validator validate artifact contents. Result files may be at the configured
+path or under `graider-output/`; ambiguous copies are invalid. Managed results
+and all dispatch/rerun results require evidence metadata binding the submission
+SHA, workflow run ID, and attempt. `workflow_dispatch` uses that metadata's
+`submissionCommitSha`, because GitHub's `head_sha` can identify a different
+workflow ref. Initial custom push runs can instead bind through GitHub's
+`head_sha`; a supplied result `commit` must agree. Optional assignment/student
+identity fields must agree with the assignment/repository target. Missing identity
+proof cannot display green. Configured managed presets require their named
+CheckStyle and Unit Tests checks to pass.
+
+Missing, malformed, expired, stale, contradictory, and unavailable results are
+attention states, distinct from verified grading failure. Queued/in-progress runs
+are not read for results. Refresh never writes local state, replaces workflows,
+or dispatches runs.
+
+The managed Java workflow uploads results/evidence with `always()` before an
+unconditional final gate. The gate rejects missing/invalid results, non-passed
+overall status, and checks that did not all pass. Existing managed content that
+differs from the generated workflow is outdated and can be replaced only through
+the existing confirmed repair operation; generation alone does not deploy it.
+
 ## 4. Supported Grading Modes
 
 These grading modes are the stable configuration model for reusable grading.

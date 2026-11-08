@@ -18,7 +18,7 @@ Assignment Detail -> Grade Status
 Grade Dispatch Result Summary -> Grade Status
 ```
 
-The view shows a one-shot snapshot of GitHub Actions grading workflow run status
+The view shows a one-shot snapshot of GitHub Actions execution and verified grading results
 and can refresh unfinished rows while the page remains open. Grade Status is
 read-only: it performs one-shot command executions from the UI and may run
 page-local auto-refresh while open, but it does not run in the background after
@@ -141,10 +141,10 @@ Faculty-facing row labels are:
 ```text
 Queued
 In progress
-Completed — success
-Completed — failure
-Cancelled
-Timed out
+Grading passed
+Grading failed
+Grading results missing/invalid/expired/stale/contradictory/unavailable/unverified
+Grading skipped
 Missing
 Unknown
 Token required
@@ -208,13 +208,20 @@ Sign in with GitHub CLI using gh auth login, then refresh.
 Diagnostics and command snippets must not expose tokens, authorization headers,
 raw `process.env`, or raw stack traces by default.
 
+`gradingResult`, `submissionSha`, and `runAttempt` pass through the existing
+JSON response over the narrow grade-status IPC. The renderer normalizes these
+fields and never infers grading success from `conclusion`. Missing result fields
+fail closed as unverified. Both Assignment and Grade Status use the same labels,
+colors, and verified-result readiness logic. Group summary counts deduplicate
+`targetId`. The full page displays Actions execution separately beside run links.
+Artifact retrieval and validation stay in the backend; no renderer GitHub access
+is introduced. See the [result verification contract](grading-result-contract.md#assignment-status-verification).
+
 ## No-Report Boundary
 
 Grade Status does not:
 
 - call `graider report`
-- download artifacts
-- parse grading result files
 - generate faculty reports
 - publish student reports
 - dispatch workflows

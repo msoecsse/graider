@@ -1,3 +1,4 @@
+import { STATUS_SHA, statusArchive } from "../helpers/grading-artifact.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -56,6 +57,7 @@ const run = (
   workflowPath: string = DEFAULT_WORKFLOW
 ): GitHubWorkflowRun => ({
   id,
+  runAttempt: 1,
   workflowPath,
   status,
   conclusion,
@@ -95,6 +97,49 @@ const createStatusClient = (
     repositories: [
       repository(JONES_REPOSITORY, TestNumber.JonesRepositoryId),
       repository(KIM_REPOSITORY, TestNumber.KimRepositoryId)
+    ],
+    repositoryBranches: [JONES_REPOSITORY, KIM_REPOSITORY].map((repo) => ({
+      owner: ORGANIZATION,
+      repo,
+      name: "main",
+      commitSha: STATUS_SHA
+    })),
+    actionsArtifacts: [
+      ...[
+        { repo: JONES_REPOSITORY, run: jonesRun },
+        { repo: KIM_REPOSITORY, run: kimRun }
+      ].flatMap(({ repo, run: selected }) =>
+        selected === null
+          ? []
+          : [
+              {
+                owner: ORGANIZATION,
+                repo,
+                runId: selected.id,
+                artifact: {
+                  id: selected.id,
+                  name: selected.workflowPath.includes("custom")
+                    ? "override-results"
+                    : "grading-results",
+                  sizeInBytes: 1024,
+                  expired: false,
+                  createdAt: selected.createdAt,
+                  updatedAt: selected.updatedAt
+                },
+                archiveBytes: statusArchive(
+                  selected.id,
+                  selected.conclusion === "failure"
+                    ? "failed"
+                    : selected.conclusion === "success"
+                      ? "passed"
+                      : "skipped",
+                  selected.workflowPath.includes("custom")
+                    ? "override-results.json"
+                    : "results.json"
+                )
+              }
+            ]
+      )
     ],
     workflowRuns: [
       ...(jonesRun === null
@@ -232,6 +277,25 @@ describe("graider assignment grade-status command", () => {
     writeGroupManifest(cwd);
     const githubClient = new FakeGitHubClient({
       repositories: [repository(GROUP_REPOSITORY, TestNumber.JonesRepositoryId)],
+      repositoryBranches: [
+        { owner: ORGANIZATION, repo: GROUP_REPOSITORY, name: "main", commitSha: STATUS_SHA }
+      ],
+      actionsArtifacts: [
+        {
+          owner: ORGANIZATION,
+          repo: GROUP_REPOSITORY,
+          runId: TestNumber.JonesRunId,
+          artifact: {
+            id: TestNumber.JonesRunId,
+            name: "grading-results",
+            sizeInBytes: 1024,
+            expired: false,
+            createdAt: "2026-06-12T10:00:00Z",
+            updatedAt: "2026-06-12T10:05:00Z"
+          },
+          archiveBytes: statusArchive(TestNumber.JonesRunId, "failed")
+        }
+      ],
       workflowRuns: [
         {
           owner: ORGANIZATION,
@@ -248,6 +312,13 @@ describe("graider assignment grade-status command", () => {
       githubClient
     });
 
+    expect(githubClient.artifactArchiveDownloads).toHaveLength(1);
+    expect(result.summary).toMatchObject({
+      totalRepositories: 1,
+      failed: 1,
+      successful: 0,
+      readyForReport: true
+    });
     expect(result.repositoryMode).toBe("group");
     expect(result.targets).toHaveLength(1);
     expect(result.targets[0]).toMatchObject({
@@ -255,17 +326,20 @@ describe("graider assignment grade-status command", () => {
       groupId: "team-1",
       repository: `${ORGANIZATION}/${GROUP_REPOSITORY}`,
       studentIds: ["jones", "kim"],
-      status: "completed"
+      status: "completed",
+      gradingResult: "failed"
     });
     expect(getRow(result, "jones")).toMatchObject({
       targetId: "team-1",
       groupId: "team-1",
-      status: "completed"
+      status: "completed",
+      gradingResult: "failed"
     });
     expect(getRow(result, "kim")).toMatchObject({
       targetId: "team-1",
       groupId: "team-1",
-      status: "completed"
+      status: "completed",
+      gradingResult: "failed"
     });
     expect(githubClient.workflowRunReadRequests.map((request) => request.repo)).toEqual([
       GROUP_REPOSITORY
@@ -536,7 +610,7 @@ describe("graider assignment grade-status command", () => {
     ]);
   });
 
-  it("does not write local state, download artifacts, dispatch workflows, or mutate GitHub", async () => {
+  it("verifies artifacts without writing local state, dispatching workflows, or mutating GitHub", async () => {
     const cwd = copyFixtureToTemp("active-assignment");
     const manifestPath = path.join(cwd, MANIFEST_FILE);
     const manifestBefore = fs.readFileSync(manifestPath, "utf8");
@@ -603,7 +677,8 @@ describe("graider assignment grade-status command", () => {
       {
         owner: ORGANIZATION,
         repo: JONES_REPOSITORY,
-        workflowPath: DEFAULT_WORKFLOW
+        workflowPath: DEFAULT_WORKFLOW,
+        limit: 20
       }
     ]);
     expectNoMutations(githubClient);

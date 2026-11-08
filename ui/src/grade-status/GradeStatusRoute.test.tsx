@@ -111,6 +111,7 @@ const GRADE_STATUS_JSON = {
       runUrl: "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123",
       status: "completed",
       conclusion: "success",
+      gradingResult: "passed",
       startedAt: "2026-06-10T12:00:00.000Z",
       completedAt: "2026-06-10T12:05:00.000Z",
       selectionStrategy: "latest_configured_workflow_run",

@@ -121,6 +121,7 @@ const createGradeStatusRow = (
   runUrl: null,
   status: "completed",
   conclusion: "success",
+  gradingResult: "passed",
   startedAt: null,
   completedAt: null,
   selectionStrategy: null,
@@ -241,9 +242,7 @@ describe("AssignmentDetailStudentTable", () => {
     expect(amyCells[checksCellIndex]).toHaveTextContent("");
 
     const benRow = screen.getByText("ben").closest("tr");
-    expect(
-      within(benRow as HTMLTableRowElement).getByText("Completed — success")
-    ).toBeInTheDocument();
+    expect(within(benRow as HTMLTableRowElement).getByText("Grading passed")).toBeInTheDocument();
   });
 
   it("shows an empty state when the assignment has no active students at all", () => {

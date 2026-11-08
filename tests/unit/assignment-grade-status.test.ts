@@ -1,3 +1,4 @@
+import { STATUS_SHA, statusArchive } from "../helpers/grading-artifact.js";
 import { loadManifest } from "../../src/manifest/manifest-loader.js";
 import { renderManifestYaml } from "../../src/manifest/manifest-renderer.js";
 import fs from "node:fs";
@@ -41,6 +42,7 @@ const run = (
   conclusion: GitHubWorkflowRun["conclusion"]
 ): GitHubWorkflowRun => ({
   id,
+  runAttempt: 1,
   workflowPath: WORKFLOW_PATH,
   status,
   conclusion,
@@ -61,6 +63,49 @@ const createClient = (
     repositories: [
       repository(JONES_REPOSITORY, TestNumber.JonesRepositoryId),
       repository(KIM_REPOSITORY, TestNumber.KimRepositoryId)
+    ],
+    repositoryBranches: [JONES_REPOSITORY, KIM_REPOSITORY].map((repo) => ({
+      owner: ORGANIZATION,
+      repo,
+      name: "main",
+      commitSha: STATUS_SHA
+    })),
+    actionsArtifacts: [
+      ...[
+        { repo: JONES_REPOSITORY, run: jonesRun },
+        { repo: KIM_REPOSITORY, run: kimRun }
+      ].flatMap(({ repo, run: selected }) =>
+        selected === null
+          ? []
+          : [
+              {
+                owner: ORGANIZATION,
+                repo,
+                runId: selected.id,
+                artifact: {
+                  id: selected.id,
+                  name: selected.workflowPath.includes("custom")
+                    ? "override-results"
+                    : "grading-results",
+                  sizeInBytes: 1024,
+                  expired: false,
+                  createdAt: selected.createdAt,
+                  updatedAt: selected.updatedAt
+                },
+                archiveBytes: statusArchive(
+                  selected.id,
+                  selected.conclusion === "failure"
+                    ? "failed"
+                    : selected.conclusion === "success"
+                      ? "passed"
+                      : "skipped",
+                  selected.workflowPath.includes("custom")
+                    ? "override-results.json"
+                    : "results.json"
+                )
+              }
+            ]
+      )
     ],
     workflowRuns: [
       ...(jonesRun === null
@@ -245,7 +290,9 @@ describe("assignment grade status builder", () => {
     });
     expect(failureResult.diagnostics).toEqual([
       expect.objectContaining({ code: DiagnosticCode.GradingWorkflowRunFailed }),
-      expect.objectContaining({ code: DiagnosticCode.GradingWorkflowRunFailed })
+      expect.objectContaining({ code: DiagnosticCode.GradingResultFailed }),
+      expect.objectContaining({ code: DiagnosticCode.GradingWorkflowRunFailed }),
+      expect.objectContaining({ code: DiagnosticCode.GradingWorkflowStatusUnknown })
     ]);
   });
 

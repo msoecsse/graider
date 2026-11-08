@@ -71,6 +71,7 @@ export type GitHubWorkflowRunConclusion =
   | null;
 
 export interface GitHubWorkflowRun {
+  readonly runAttempt?: number;
   id: number;
   workflowPath: string;
   status: GitHubWorkflowRunStatus;
@@ -170,6 +171,7 @@ export interface DispatchWorkflowInput {
 }
 
 export interface ListWorkflowRunsInput {
+  readonly limit?: number;
   owner: string;
   repo: string;
   workflowPath?: string;

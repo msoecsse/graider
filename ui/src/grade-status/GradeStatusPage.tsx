@@ -243,7 +243,9 @@ const RepositoryRowsPanel = ({
                 )}
                 <span className="muted-inline">
                   {" "}
-                  Started {formatReadableDateTime(row.startedAt) ?? "Not configured"}
+                  Actions: {row.status} / {row.conclusion ?? "unknown"}. Attempt{" "}
+                  {row.runAttempt ?? "unknown"}. Started{" "}
+                  {formatReadableDateTime(row.startedAt) ?? "Not configured"}
                 </span>
                 <span className="muted-inline">
                   {" "}
@@ -473,7 +475,8 @@ export const GradeStatusPage = ({
 
       <section className="dashboard-content assignment-detail" aria-label="Grade status">
         <p className="preview-only-notice">
-          Read-only status view — no reports, artifacts, or workflow dispatches are started.
+          Read-only status view. Grading artifacts are verified; refresh does not dispatch workflows
+          or publish reports.
         </p>
         <p className="assignment-detail__path">
           Assignment file: {activeStatus?.assignment.file ?? selection.assignmentFile}

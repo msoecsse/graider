@@ -154,6 +154,7 @@ const createAssignmentGradeStatusJson = (
       runUrl: "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123",
       status: "completed",
       conclusion: "success",
+      gradingResult: "passed",
       startedAt: "2026-06-12T17:32:49Z",
       completedAt: "2026-06-12T17:33:39Z",
       selectionStrategy: "latest_configured_workflow_run",
@@ -172,6 +173,7 @@ const createAssignmentGradeStatusJson = (
       runUrl: null,
       status: "completed",
       conclusion: "failure",
+      gradingResult: "failed",
       startedAt: "2026-06-12T18:00:00Z",
       completedAt: "2026-06-12T18:05:00Z",
       selectionStrategy: "latest_configured_workflow_run",
@@ -1708,8 +1710,8 @@ describe("AssignmentDetailPage", () => {
     ).toBeGreaterThan(0);
     expect(within(summary).getByText(/Started .*[A-Za-z]{3} Jun 12,/u)).toBeInTheDocument();
     expect(within(summary).getByText("No run time available")).toBeInTheDocument();
-    expect(within(summary).getByText("Completed — success")).toHaveClass("status-chip--success");
-    expect(within(summary).getByText("Completed — failure")).toHaveClass("status-chip--error");
+    expect(within(summary).getByText("Grading passed")).toHaveClass("status-chip--success");
+    expect(within(summary).getByText("Grading failed")).toHaveClass("status-chip--error");
     expect(within(summary).getByText("In progress")).toBeInTheDocument();
     expect(within(summary).getByText("Missing")).toBeInTheDocument();
     expect(within(summary).getByRole("link", { name: "Open run" })).toHaveAttribute(
@@ -1822,6 +1824,7 @@ describe("AssignmentDetailPage", () => {
                 runUrl: null,
                 status: "completed",
                 conclusion: "success",
+                gradingResult: "passed",
                 startedAt: "2026-06-12T17:32:49Z",
                 completedAt: "2026-06-12T17:33:39Z",
                 selectionStrategy: "latest_configured_workflow_run",
@@ -1864,6 +1867,7 @@ describe("AssignmentDetailPage", () => {
                 runUrl: null,
                 status: "completed",
                 conclusion: "success",
+                gradingResult: "passed",
                 startedAt: "2026-06-12T17:32:49Z",
                 completedAt: "2026-06-12T17:33:39Z",
                 selectionStrategy: "latest_configured_workflow_run",
@@ -1904,6 +1908,7 @@ describe("AssignmentDetailPage", () => {
                 runUrl: null,
                 status: "completed",
                 conclusion: "success",
+                gradingResult: "passed",
                 startedAt: "2026-06-12T17:32:49Z",
                 completedAt: "2026-06-12T17:33:39Z",
                 selectionStrategy: "latest_configured_workflow_run",
@@ -1922,6 +1927,7 @@ describe("AssignmentDetailPage", () => {
                 runUrl: "javascript:alert(1)",
                 status: "completed",
                 conclusion: "success",
+                gradingResult: "passed",
                 startedAt: "2026-06-12T17:32:49Z",
                 completedAt: "2026-06-12T17:33:39Z",
                 selectionStrategy: "latest_configured_workflow_run",
@@ -1940,6 +1946,7 @@ describe("AssignmentDetailPage", () => {
                 runUrl: "https://github.com/graider-sandbox/course-admin/actions/runs/789",
                 status: "completed",
                 conclusion: "success",
+                gradingResult: "passed",
                 startedAt: "2026-06-12T17:32:49Z",
                 completedAt: "2026-06-12T17:33:39Z",
                 selectionStrategy: "latest_configured_workflow_run",

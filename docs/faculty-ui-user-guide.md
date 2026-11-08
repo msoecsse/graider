@@ -380,12 +380,34 @@ refresh while work is unfinished; use **Refresh status** if automatic refresh
 stops or you want a new snapshot. A missing run usually means dispatch has not
 occurred, the workflow is unavailable, or GitHub has not started it yet.
 
+Assignment rows show **Grading passed** in green only after Graider verifies the
+configured grading result for the current remote default-branch submission and
+the selected workflow run/attempt. **Grading failed** is red when the result or
+an explicit Checkstyle/JUnit check failed, even if GitHub Actions says success.
+Missing, invalid, expired, stale, contradictory, unavailable, and unverified
+results use attention labels; they are not recorded as actual grading failures.
+Queued, in-progress, disabled, and newly created repository states remain separate.
+The full Grade Status page retains Actions execution status/conclusion and run links.
+Refresh only reads GitHub; it does not repair repositories or rerun grading.
+
+For an older managed workflow missing the final status enforcement step, use the
+existing **Replace Graider workflow…** operation in student grading, review and
+confirm replacement of the managed workflow, then explicitly run grading for the
+current submission and refresh. Update the template's managed workflow with **Replace with Graider workflow**
+and confirm replacement for future repositories. The separate **Replace workflows
+& run for all students** action also requires explicit confirmation. Unmanaged
+workflow conflicts require faculty review. Existing student repositories are
+never silently updated or rerun. The final workflow step fails the Actions job
+when grading fails, after result and diagnostic artifact upload.
+
 ## Generate the Faculty Report
 
 Choose **Generate report** from Assignment Detail, or **View faculty report**
 from Grade Status. Use **Refresh report** after grading artifacts become
 available. The report depends on configured grading results, so unavailable or
-failed workflow results may leave report rows incomplete.
+failed workflow results may leave report rows incomplete. Verified failed grading
+results remain reportable; a failed Actions job does not by itself prevent report
+generation when valid grading evidence exists.
 
 ## Common Problems and Fixes
 

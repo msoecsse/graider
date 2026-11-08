@@ -30,14 +30,17 @@ With a token-backed GitHub client, it performs bounded read-only checks:
 
 - configured grading workflow runs for each active manifest-tracked student
   repository
-- latest run status, conclusion, run id, run URL, and timestamps when available
+- latest run execution status, conclusion, run id/attempt, run URL, and timestamps
+- authoritative current remote default-branch submission SHA
+- one bounded configured artifact for the selected completed run, validated using
+  the [grading result contract](grading-result-contract.md#assignment-status-verification)
 
 Without a token, local target/config data still returns when it can be resolved.
 Active repository rows use `token_required`, and the command returns
 `partial_success`.
 
-The command does not dispatch workflows, generate reports, download artifacts,
-parse grading result files, publish student reports, generate workflow files, or
+The command does not dispatch workflows, generate reports,
+publish student reports, generate workflow files, or
 write local state. It does not call `graider report <assignment>`.
 
 ## Student Filters
@@ -124,9 +127,11 @@ configured grading workflow. The current selection strategy is:
 latest_configured_workflow_run
 ```
 
-That means the command selects the newest run returned for the effective
-grading workflow. It does not scan unrelated workflows, inspect artifacts, or
-parse result files. If no run exists for a repository, the row uses `missing`
+The command selects the newest run returned for the effective grading workflow
+from a bounded 20-run snapshot, using creation time then run ID/attempt. It does
+not scan unrelated workflows or fall back to an older passing artifact. Completed
+runs are checked against the current remote submission and exact run/attempt.
+If no run exists for a repository, the row uses `missing`
 with `selectionStrategy: "no_configured_workflow_run"`.
 
 ## JSON Shape
@@ -197,10 +202,13 @@ version `1`:
       "runUrl": "https://github.com/owner/repo/actions/runs/123456789",
       "status": "completed",
       "conclusion": "success",
+      "gradingResult": "passed",
+      "submissionSha": "0123456789abcdef0123456789abcdef01234567",
+      "runAttempt": 1,
       "startedAt": "2026-06-12T10:00:00.000Z",
       "completedAt": "2026-06-12T10:03:00.000Z",
       "selectionStrategy": "latest_configured_workflow_run",
-      "reason": "success",
+      "reason": "grading_result_passed",
       "needsAttention": false,
       "diagnostics": []
     }
@@ -253,7 +261,7 @@ Repository conclusion values:
 ## Ready For Report
 
 `summary.readyForReport` is conservative. It is `true` only when every active
-target repository has a completed workflow run with a known conclusion. It is
+target repository has verified `passed` or `failed` grading for its current submission. It is
 `false` when any active repository is queued, in progress, missing, unknown,
 blocked, or token-required.
 
@@ -302,13 +310,25 @@ Grade status does not:
 - push files or commits
 - write manifests or local state
 - generate reports
-- download artifacts
-- parse grading result files
 - publish student reports
 - generate workflow files
 - poll continuously or start background monitoring
 
-The implementation uses `listWorkflowRuns` only for GitHub run inspection and
-does not call the grade executor, report collector, artifact downloader,
+The implementation uses read-only repository/run/artifact APIs and existing
+bounded artifact/result validators. It does not call the grade executor, report collector,
 workflow dispatcher, apply executor, manifest writer, workflow generator, or
 report publisher.
+
+### Grading result fields
+
+`status` and `conclusion` preserve GitHub execution. `gradingResult` is one of
+`not_checked`, `passed`, `failed`, `skipped`, `missing`, `invalid`, `expired`,
+`stale`, `contradictory`, or `unavailable`. Only verified `passed` is green.
+`submissionSha` records the authoritative submission observed for verification;
+`runAttempt` records GitHub's selected attempt. Legacy payloads without an
+explicit result display unverified. `summary.successful`/`failed` count verified
+grading outcomes; `completed`/`cancelled`/`timedOut` retain execution counts.
+Unverified completed results contribute to `unknown` and need attention.
+`grading_result_failed` identifies a verified failure; other result diagnostics
+include the typed gradingResult in their safe context. Group summary counts are
+per target, with compatibility rows projected to each selected member.

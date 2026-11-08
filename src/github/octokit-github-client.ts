@@ -1101,14 +1101,16 @@ export class OctokitGitHubClient implements GitHubClient {
         ? await this.run(() =>
             this.octokit.rest.actions.listWorkflowRunsForRepo({
               owner: input.owner,
-              repo: input.repo
+              repo: input.repo,
+              ...(input.limit === undefined ? {} : { per_page: input.limit })
             })
           )
         : await this.run(() =>
             this.octokit.rest.actions.listWorkflowRuns({
               owner: input.owner,
               repo: input.repo,
-              workflow_id: input.workflowPath
+              workflow_id: input.workflowPath,
+              ...(input.limit === undefined ? {} : { per_page: input.limit })
             })
           );
     const record = asRecord(response);
@@ -1587,8 +1589,10 @@ function mapWorkflowRun(value: unknown, workflowPath: string | undefined): GitHu
   const runUrl = asString(record.html_url);
   const event = asString(record.event);
   const startedAt = asString(record.run_started_at);
+  const runAttempt = asNumber(record.run_attempt);
 
   return {
+    ...(runAttempt === undefined ? {} : { runAttempt }),
     conclusion: toWorkflowConclusion(record.conclusion),
     createdAt: asString(record.created_at) ?? "",
     headSha: asString(record.head_sha) ?? "",

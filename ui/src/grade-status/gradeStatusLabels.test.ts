@@ -23,6 +23,7 @@ const BASE_ROW: GradeStatusRepositoryRow = {
   runUrl: "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123",
   status: "completed",
   conclusion: "success",
+  gradingResult: "passed",
   startedAt: "2026-06-10T12:00:00.000Z",
   completedAt: "2026-06-10T12:05:00.000Z",
   selectionStrategy: "latest_configured_workflow_run",
@@ -101,36 +102,35 @@ describe("formatGradeStatusLabel", () => {
     expect(formatGradeStatusLabel(createRow({ status, conclusion: null }))).toBe(expectedLabel);
   });
 
-  const CONCLUSIONS: readonly [string, string][] = [
-    ["success", "Completed — success"],
-    ["failure", "Completed — failure"],
-    ["cancelled", "Cancelled"],
-    ["timed_out", "Timed out"],
-    // These are real GitHub Actions conclusion values with no specific
-    // Graider copy. They must never leak into the label raw (README
-    // section 2.3) -- this is the fix for GradeStatusPage.tsx's previous
-    // `Completed — ${row.conclusion ?? "unknown"}` template, which did leak
-    // them.
-    ["skipped", "Completed — unknown"],
-    ["neutral", "Completed — unknown"],
-    ["action_required", "Completed — unknown"],
-    ["unknown", "Completed — unknown"]
-  ];
-
-  it.each(CONCLUSIONS)("labels a completed run with conclusion %s as %s", (conclusion, label) => {
-    expect(formatGradeStatusLabel(createRow({ status: "completed", conclusion }))).toBe(label);
+  it.each([
+    "success",
+    "failure",
+    "cancelled",
+    "timed_out",
+    "skipped",
+    "neutral",
+    "action_required",
+    "unknown",
+    null
+  ])("never infers a grading result from workflow conclusion %s", (conclusion) => {
+    const row = createRow({ status: "completed", conclusion, gradingResult: null });
+    expect(formatGradeStatusLabel(row)).toBe("Grading results unverified");
+    expect(getGradeStatusChipClassName(row)).toBe("status-chip status-chip--attention");
   });
-
-  it("labels a completed run with a null conclusion as unknown, not a literal 'null'", () => {
-    expect(formatGradeStatusLabel(createRow({ status: "completed", conclusion: null }))).toBe(
-      "Completed — unknown"
-    );
-  });
-
-  it("labels a completed run with an unrecognized conclusion string as unknown", () => {
-    expect(
-      formatGradeStatusLabel(createRow({ status: "completed", conclusion: "something_new" }))
-    ).toBe("Completed — unknown");
+  it.each([
+    ["passed", "Grading passed", "success"],
+    ["failed", "Grading failed", "error"],
+    ["missing", "Grading results missing", "attention"],
+    ["invalid", "Grading results invalid", "attention"],
+    ["expired", "Grading results expired", "attention"],
+    ["stale", "Grading results stale", "attention"],
+    ["contradictory", "Grading results contradictory", "attention"],
+    ["unavailable", "Grading results unavailable", "attention"],
+    ["skipped", "Grading skipped", "attention"]
+  ])("renders %s independently of workflow success", (gradingResult, label, color) => {
+    const row = createRow({ gradingResult });
+    expect(formatGradeStatusLabel(row)).toBe(label);
+    expect(getGradeStatusChipClassName(row)).toBe(`status-chip status-chip--${color}`);
   });
 });
 
@@ -143,7 +143,9 @@ describe("getGradeStatusChipClassName", () => {
 
   it("uses the error chip for a completed failure run", () => {
     expect(
-      getGradeStatusChipClassName(createRow({ status: "completed", conclusion: "failure" }))
+      getGradeStatusChipClassName(
+        createRow({ status: "completed", conclusion: "success", gradingResult: "failed" })
+      )
     ).toBe("status-chip status-chip--error");
   });
 

@@ -173,7 +173,23 @@ describe("java-junit-checkstyle workflow", () => {
   });
 
   it.each([
-    ["passed", '{"schema_version":1,"status":"passed"}', true],
+    [
+      "passed",
+      '{"schema_version":1,"status":"passed","checks":[{"name":"CheckStyle","status":"passed"},{"name":"Unit Tests","status":"passed"}]}',
+      true
+    ],
+    [
+      "contradictory failed check",
+      '{"schema_version":1,"status":"passed","checks":[{"name":"JUnit","status":"failed"}]}',
+      false
+    ],
+    [
+      "contradictory skipped check",
+      '{"schema_version":1,"status":"passed","checks":[{"name":"JUnit","status":"skipped"}]}',
+      false
+    ],
+    ["empty checks", '{"schema_version":1,"status":"passed","checks":[]}', false],
+    ["missing checks", '{"schema_version":1,"status":"passed"}', false],
     ["failed", '{"schema_version":1,"status":"failed"}', false],
     ["missing", undefined, false],
     ["empty", "", false],

@@ -56,6 +56,7 @@ const createGradeStatusJson = (
       runUrl: "https://github.com/graider-sandbox/csc1120-lab02-grace/actions/runs/456",
       status: "completed",
       conclusion: "success",
+      gradingResult: "passed",
       startedAt: "2026-06-10T12:00:00.000Z",
       completedAt: "2026-06-10T12:05:00.000Z",
       selectionStrategy: "latest_configured_workflow_run",
@@ -196,7 +197,7 @@ describe("GradeStatusPage", () => {
     });
     expect(screen.getByText("Total repositories")).toBeInTheDocument();
     expect(screen.getAllByText("Queued").length).toBeGreaterThan(0);
-    expect(screen.getByText("Completed — success")).toHaveClass("status-chip--success");
+    expect(screen.getByText("Grading passed")).toHaveClass("status-chip--success");
     expect(screen.getByRole("link", { name: "Run 123" })).toHaveAttribute(
       "href",
       "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123"
@@ -257,6 +258,7 @@ describe("GradeStatusPage", () => {
     const completedFailure = {
       ...(createGradeStatusJson().repositories[1] as Record<string, unknown>),
       conclusion: "failure",
+      gradingResult: "failed",
       reason: "failure",
       needsAttention: true
     };
@@ -268,7 +270,7 @@ describe("GradeStatusPage", () => {
 
     renderGradeStatusPage();
 
-    expect(await screen.findByText("Completed — failure")).toHaveClass("status-chip--error");
+    expect(await screen.findByText("Grading failed")).toHaveClass("status-chip--error");
   });
 
   it("renders disabled grading neutrally without auto-refreshing or blocking rows", async () => {
@@ -320,10 +322,10 @@ describe("GradeStatusPage", () => {
     mockGraiderUI({ getAssignmentGradeStatus });
     renderGradeStatusPage();
 
-    expect(await screen.findByText("Completed — success")).toBeInTheDocument();
+    expect(await screen.findByText("Grading passed")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
 
-    expect(screen.getByText("Completed — success")).toBeInTheDocument();
+    expect(screen.getByText("Grading passed")).toBeInTheDocument();
     expect(
       screen.getByText("Refreshing status while keeping the current snapshot.")
     ).toBeInTheDocument();
@@ -396,6 +398,7 @@ describe("GradeStatusPage", () => {
       ...(createGradeStatusJson().repositories[0] as Record<string, unknown>),
       status: "completed",
       conclusion: "success",
+      gradingResult: "passed",
       completedAt: "2026-06-10T12:15:00.000Z"
     };
     const getAssignmentGradeStatus = vi
@@ -426,7 +429,7 @@ describe("GradeStatusPage", () => {
       assignmentFile: SELECTION.assignmentFile,
       studentIds: ["s001"]
     });
-    expect(screen.getAllByText("Completed — success")).toHaveLength(2);
+    expect(screen.getAllByText("Grading passed")).toHaveLength(2);
     expect(screen.getAllByText("Ready for report generation.").length).toBeGreaterThan(0);
   });
 

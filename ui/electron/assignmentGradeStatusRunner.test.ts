@@ -85,6 +85,36 @@ const createRunner = (results: readonly ProcessRunResult[]): ProcessRunner => {
 };
 
 describe("assignmentGradeStatusRunner", () => {
+  it("preserves verified grading and execution independently across IPC JSON", async () => {
+    const row = {
+      studentId: "s001",
+      targetId: "team-1",
+      status: "completed",
+      conclusion: "success",
+      gradingResult: "failed",
+      submissionSha: "0123456789abcdef0123456789abcdef01234567",
+      runId: 123,
+      runAttempt: 2,
+      runUrl: "https://github.com/example-org/lab02-team-1/actions/runs/123"
+    };
+    const runner = createRunner([
+      createProcessResult({
+        stdout: JSON.stringify({
+          ...createGradeStatusJson("partial_success"),
+          repositories: [row]
+        }),
+        exitCode: PARTIAL_SUCCESS_EXIT_CODE
+      })
+    ]);
+    const result = await runAssignmentGradeStatusCommand({
+      request: GRADE_STATUS_REQUEST,
+      token: "fake-token",
+      runner
+    });
+    expect(result.status).toBe("success");
+    expect(result.gradeStatus?.repositories).toEqual([row]);
+  });
+
   it("runs full grade-status with argv array, course cwd, and token env", async () => {
     const runner = createRunner([createProcessResult()]);
 

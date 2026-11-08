@@ -75,6 +75,7 @@ export interface GradeStatusSummary {
 }
 
 export interface GradeStatusRepositoryRow {
+  readonly targetId?: string | null;
   readonly studentUsername: string | null;
   readonly studentId: string | null;
   readonly githubUsername: string | null;
@@ -86,6 +87,9 @@ export interface GradeStatusRepositoryRow {
   readonly runUrl: string | null;
   readonly status: GradeStatusRepositoryStatus;
   readonly conclusion: string | null;
+  readonly gradingResult?: string | null;
+  readonly submissionSha?: string | null;
+  readonly runAttempt?: number | null;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
   readonly selectionStrategy: string | null;

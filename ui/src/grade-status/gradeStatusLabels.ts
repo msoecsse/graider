@@ -4,44 +4,24 @@ import type {
   NormalizedGradeStatus
 } from "./gradeStatusTypes";
 
-// Mirrors GradeStatusRepositoryConclusion in src/grade-status/grade-status-models.ts.
-// Can't import it directly: ui/src/ never imports from the CLI package (src/), only
-// from ui/electron via window.graiderUI, so the frontend keeps its own copy — the
-// same reason GradeStatusRepositoryStatus is redeclared in gradeStatusTypes.ts
-// rather than imported from there. Keep both in sync by hand if the backend adds a
-// new conclusion value.
-type KnownGradeStatusConclusion =
-  | "success"
-  | "failure"
-  | "cancelled"
-  | "timed_out"
-  | "skipped"
-  | "neutral"
-  | "action_required"
-  | "unknown";
-
-const COMPLETED_CONCLUSION_LABELS: Readonly<Record<KnownGradeStatusConclusion, string>> = {
-  success: "Completed — success",
-  failure: "Completed — failure",
-  cancelled: "Cancelled",
-  timed_out: "Timed out",
-  // GitHub Actions can report skipped/neutral/action_required conclusions;
-  // Graider has no specific copy for them, so they fold into the same
-  // catch-all as a genuinely unrecognized value rather than leaking the raw
-  // GitHub conclusion string into faculty-facing text (README section 2.3).
-  skipped: "Completed — unknown",
-  neutral: "Completed — unknown",
-  action_required: "Completed — unknown",
-  unknown: "Completed — unknown"
+const GRADING_RESULT_LABELS: Readonly<Record<string, string>> = {
+  passed: "Grading passed",
+  failed: "Grading failed",
+  skipped: "Grading skipped",
+  missing: "Grading results missing",
+  invalid: "Grading results invalid",
+  expired: "Grading results expired",
+  stale: "Grading results stale",
+  contradictory: "Grading results contradictory",
+  unavailable: "Grading results unavailable"
 };
 
-const isKnownGradeStatusConclusion = (value: string | null): value is KnownGradeStatusConclusion =>
-  value !== null && Object.hasOwn(COMPLETED_CONCLUSION_LABELS, value);
-
-const formatCompletedLabel = (conclusion: string | null): string =>
-  isKnownGradeStatusConclusion(conclusion)
-    ? COMPLETED_CONCLUSION_LABELS[conclusion]
-    : "Completed — unknown";
+const formatCompletedLabel = (row: GradeStatusRepositoryRow): string =>
+  row.gradingResult !== undefined &&
+  row.gradingResult !== null &&
+  Object.hasOwn(GRADING_RESULT_LABELS, row.gradingResult)
+    ? (GRADING_RESULT_LABELS[row.gradingResult] ?? "Grading results unverified")
+    : "Grading results unverified";
 
 /**
  * Enumerated directly from GradeStatusRepositoryStatus so a future addition
@@ -60,7 +40,7 @@ export const formatGradeStatusLabel = (row: GradeStatusRepositoryRow): string =>
     case "in_progress":
       return "In progress";
     case "completed":
-      return formatCompletedLabel(row.conclusion);
+      return formatCompletedLabel(row);
     case "missing":
       return "Missing";
     case "token_required":
@@ -79,15 +59,17 @@ export const formatGradeStatusLabel = (row: GradeStatusRepositoryRow): string =>
 };
 
 export const getGradeStatusChipClassName = (row: GradeStatusRepositoryRow): string => {
-  if (row.status === "completed" && row.conclusion === "success") {
+  if (row.status === "completed" && row.gradingResult === "passed") {
     return "status-chip status-chip--success";
   }
 
-  if (row.status === "completed" && row.conclusion === "failure") {
+  if (row.status === "completed" && row.gradingResult === "failed") {
     return "status-chip status-chip--error";
   }
 
-  return row.needsAttention ? "status-chip status-chip--attention" : "status-chip";
+  return row.needsAttention || row.status === "completed"
+    ? "status-chip status-chip--attention"
+    : "status-chip";
 };
 
 const buildGradeStatusReasonParts = (status: NormalizedGradeStatus): readonly string[] => {

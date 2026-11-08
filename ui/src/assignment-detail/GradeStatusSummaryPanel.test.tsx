@@ -24,6 +24,7 @@ const createRow = (
   runUrl: "https://github.com/graider-sandbox/csc1120-lab02-ada/actions/runs/123",
   status: "completed",
   conclusion: "success",
+  gradingResult: "passed",
   startedAt: "2026-06-12T17:32:49Z",
   completedAt: "2026-06-12T17:33:39Z",
   selectionStrategy: "latest_configured_workflow_run",
@@ -72,6 +73,55 @@ const createGradeStatus = (
 });
 
 describe("GradeStatusSummaryPanel", () => {
+  it.each([
+    [{ gradingResult: "passed", conclusion: "success" }, "Grading passed", "success"],
+    [{ gradingResult: "failed", conclusion: "success" }, "Grading failed", "error"],
+    [{ gradingResult: "failed", conclusion: "failure" }, "Grading failed", "error"],
+    [{ gradingResult: "passed", conclusion: "failure" }, "Grading passed", "success"],
+    [{ gradingResult: "missing" }, "Grading results missing", "attention"],
+    [{ gradingResult: "invalid" }, "Grading results invalid", "attention"],
+    [{ gradingResult: "expired" }, "Grading results expired", "attention"],
+    [{ gradingResult: "stale" }, "Grading results stale", "attention"],
+    [{ gradingResult: "contradictory" }, "Grading results contradictory", "attention"],
+    [{ gradingResult: "unavailable" }, "Grading results unavailable", "attention"],
+    [{ gradingResult: null }, "Grading results unverified", "attention"],
+    [{ status: "in_progress", gradingResult: "not_checked" }, "In progress", null],
+    [{ status: "queued", gradingResult: "not_checked" }, "Queued", null],
+    [{ status: "not_configured", gradingResult: "not_checked" }, "Grading disabled", null]
+  ] as const)("renders verified Assignment outcome %j", (overrides, label, color) => {
+    const row = createRow(overrides);
+    render(
+      <GradeStatusSummaryPanel
+        status={createGradeStatus([row])}
+        isLoading={false}
+        errorMessage={null}
+        onViewFullGradeStatus={vi.fn()}
+        canUpdateRepositories={false}
+        isTemplateSyncPending={false}
+        onUpdateRepository={vi.fn()}
+      />
+    );
+    expect(screen.getByText(label)).toHaveClass(
+      color === null ? "status-chip" : `status-chip--${color}`
+    );
+    if (color !== "success")
+      expect(screen.getByText(label)).not.toHaveClass("status-chip--success");
+    expect(screen.getByRole("link", { name: "Open run" })).toHaveAttribute("href", row.runUrl);
+  });
+
+  it("counts shared group results once and keeps failed grading reportable", () => {
+    const rows = [
+      createRow({ targetId: "team-1", gradingResult: "failed", studentId: "one" }),
+      createRow({ targetId: "team-1", gradingResult: "failed", studentId: "two" })
+    ];
+    expect(createGradeStatusSummary(rows)).toMatchObject({
+      totalRepositories: 1,
+      failed: 1,
+      successful: 0,
+      readyForReport: true
+    });
+  });
+
   it("keeps unapplied students visible with an empty status and no polling or report readiness", () => {
     const row = createRow({
       status: null,

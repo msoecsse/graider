@@ -1076,6 +1076,42 @@ describe("OctokitGitHubClient", () => {
     expect(Object.hasOwn(observedDispatchInput, "inputs")).toBe(false);
   });
 
+  it("bounds Assignment run reads and preserves the authoritative attempt", async () => {
+    const octokit = createMockOctokit();
+    let observed: unknown;
+    octokit.rest.actions.listWorkflowRuns = (parameters) => {
+      observed = parameters;
+      return resolvedResponse({
+        workflow_runs: [
+          {
+            id: OctokitTestNumber.WorkflowRunId,
+            run_attempt: 3,
+            path: WORKFLOW_PATH,
+            status: "completed",
+            conclusion: "success",
+            head_sha: "head-sha",
+            created_at: "2026-09-01T00:00:00Z",
+            updated_at: "2026-09-01T00:01:00Z"
+          }
+        ]
+      });
+    };
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    const runs = await client.listWorkflowRuns({
+      owner: OWNER,
+      repo: REPO,
+      workflowPath: WORKFLOW_PATH,
+      limit: 20
+    });
+    expect(runs[0]).toMatchObject({ runAttempt: 3, conclusion: "success" });
+    expect(observed).toEqual({
+      owner: OWNER,
+      repo: REPO,
+      workflow_id: WORKFLOW_PATH,
+      per_page: 20
+    });
+  });
+
   it("queries exact-SHA completed workflow runs and paginates run artifacts", async () => {
     const octokit = createMockOctokit();
     const requests: Record<string, unknown>[] = [];

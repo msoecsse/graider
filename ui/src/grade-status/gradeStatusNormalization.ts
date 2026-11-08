@@ -68,6 +68,7 @@ const normalizeRepositoryRow = (value: unknown): GradeStatusRepositoryRow => {
   const row = isRecord(value) ? value : {};
 
   return {
+    targetId: getString(row, "targetId"),
     studentUsername: getStringFromKeys(row, [
       "studentUsername",
       "student_username",
@@ -87,6 +88,9 @@ const normalizeRepositoryRow = (value: unknown): GradeStatusRepositoryRow => {
     runUrl: getString(row, "runUrl"),
     status: row.status === null ? null : normalizeRepositoryStatus(getString(row, "status")),
     conclusion: getString(row, "conclusion"),
+    gradingResult: getString(row, "gradingResult"),
+    submissionSha: getString(row, "submissionSha"),
+    runAttempt: getNumber(row, "runAttempt"),
     startedAt: getString(row, "startedAt"),
     completedAt: getString(row, "completedAt"),
     selectionStrategy: getString(row, "selectionStrategy"),
@@ -113,10 +117,20 @@ export const isNonTerminalGradeStatusRow = (row: GradeStatusRepositoryRow): bool
   row.status !== null && !isTerminalGradeStatusRow(row);
 
 export const createGradeStatusSummary = (
-  rows: readonly GradeStatusRepositoryRow[]
+  repositoryRows: readonly GradeStatusRepositoryRow[]
 ): GradeStatusSummary => {
+  const rows = Array.from(
+    new Map(
+      repositoryRows.map((row, index) => [row.targetId ?? `row:${String(index)}`, row])
+    ).values()
+  );
   const readyForReport =
-    rows.length > 0 && rows.every((row) => row.status === "completed" && row.conclusion !== null);
+    rows.length > 0 &&
+    rows.every(
+      (row) =>
+        row.status === "completed" &&
+        (row.gradingResult === "passed" || row.gradingResult === "failed")
+    );
 
   return {
     totalRepositories: rows.length,
@@ -125,9 +139,9 @@ export const createGradeStatusSummary = (
     completed: countRows(rows, (row) => row.status === "completed"),
     successful: countRows(
       rows,
-      (row) => row.status === "completed" && row.conclusion === "success"
+      (row) => row.status === "completed" && row.gradingResult === "passed"
     ),
-    failed: countRows(rows, (row) => row.status === "completed" && row.conclusion === "failure"),
+    failed: countRows(rows, (row) => row.status === "completed" && row.gradingResult === "failed"),
     cancelled: countRows(
       rows,
       (row) => row.status === "completed" && row.conclusion === "cancelled"
@@ -137,7 +151,15 @@ export const createGradeStatusSummary = (
       (row) => row.status === "completed" && row.conclusion === "timed_out"
     ),
     missing: countRows(rows, (row) => row.status === "missing"),
-    unknown: countRows(rows, (row) => row.status === "unknown" || row.status === "token_required"),
+    unknown: countRows(
+      rows,
+      (row) =>
+        row.status === "unknown" ||
+        row.status === "token_required" ||
+        (row.status === "completed" &&
+          row.gradingResult !== "passed" &&
+          row.gradingResult !== "failed")
+    ),
     blocked: countRows(rows, (row) => row.status === "blocked"),
     needsAttention: countRows(rows, (row) => row.needsAttention),
     readyForReport

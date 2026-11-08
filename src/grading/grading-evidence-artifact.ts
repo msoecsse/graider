@@ -129,7 +129,8 @@ const readEntry = async (zipFile: ZipFile, entry: Entry): Promise<Buffer | undef
   });
 
 const decodeArchiveEntries = async (
-  archiveBytes: Uint8Array
+  archiveBytes: Uint8Array,
+  resultFile?: string
 ): Promise<GradingEvidenceArtifactDecodeResult> =>
   new Promise((resolve) => {
     fromBuffer(
@@ -154,6 +155,7 @@ const decodeArchiveEntries = async (
         }
 
         const metadata: EvidenceMember[] = [];
+        const results: EvidenceMember[] = [];
         const checkstyle: EvidenceMember[] = [];
         const junit: EvidenceMember[] = [];
         const junitPaths = new Set<string>();
@@ -174,7 +176,7 @@ const decodeArchiveEntries = async (
           );
         });
         zipFile.once("end", () => {
-          if (metadata.length !== 1) {
+          if (metadata.length > 1 || (metadata.length !== 1 && resultFile === undefined)) {
             finish(
               archiveError(
                 "evidence_archive_member_invalid",
@@ -194,7 +196,7 @@ const decodeArchiveEntries = async (
           }
 
           const metadataMember = metadata[0];
-          if (metadataMember === undefined) {
+          if (metadataMember === undefined && resultFile === undefined) {
             finish(
               archiveError(
                 "evidence_archive_member_invalid",
@@ -203,11 +205,21 @@ const decodeArchiveEntries = async (
             );
             return;
           }
+          if (results.length > 1) {
+            finish(
+              archiveError(
+                "evidence_archive_member_invalid",
+                "The artifact contains ambiguous grading result files."
+              )
+            );
+            return;
+          }
           const checkstyleMember = checkstyle[0];
           finish({
             status: "success",
             value: {
-              metadataJson: metadataMember.content,
+              metadataJson: metadataMember?.content ?? "",
+              ...(results[0] === undefined ? {} : { resultJson: results[0].content }),
               junitReports: junit
                 .sort((left, right) => left.path.localeCompare(right.path))
                 .map(({ path, content }) => ({ name: path, content })),
@@ -251,7 +263,10 @@ const decodeArchiveEntries = async (
           const isMetadata = memberPath === GRADING_EVIDENCE_METADATA_PATH;
           const isCheckstyle = memberPath === GRADING_EVIDENCE_CHECKSTYLE_PATH;
           const isJUnit = isJUnitReportPath(memberPath);
-          if (!isMetadata && !isCheckstyle && !isJUnit) {
+          const isResult =
+            resultFile !== undefined &&
+            (memberPath === resultFile || memberPath === `graider-output/${resultFile}`);
+          if (!isMetadata && !isCheckstyle && !isJUnit && !isResult) {
             zipFile.readEntry();
             return;
           }
@@ -287,7 +302,9 @@ const decodeArchiveEntries = async (
             return;
           }
           const member = { path: memberPath, content };
-          if (isMetadata) {
+          if (isResult) {
+            results.push(member);
+          } else if (isMetadata) {
             metadata.push(member);
           } else if (isCheckstyle) {
             checkstyle.push(member);
@@ -322,8 +339,9 @@ const decodeArchiveEntries = async (
   });
 
 export const decodeGradingEvidenceArtifact = async (
-  archiveBytes: Uint8Array
-): Promise<GradingEvidenceArtifactDecodeResult> => decodeArchiveEntries(archiveBytes);
+  archiveBytes: Uint8Array,
+  resultFile?: string
+): Promise<GradingEvidenceArtifactDecodeResult> => decodeArchiveEntries(archiveBytes, resultFile);
 
 export const parseGradingEvidenceArtifact = async (
   archiveBytes: Uint8Array

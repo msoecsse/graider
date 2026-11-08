@@ -352,6 +352,10 @@ jobs:
           if not isinstance(result, dict) or type(result.get("schema_version")) is not int or result.get("schema_version") != EXPECTED_SCHEMA_VERSION or result.get("status") not in ("passed", "failed"):
               print("::error::Graider grading result has an unsupported structure or status.")
               sys.exit(FAILURE_EXIT_STATUS)
+          checks = result.get("checks")
+          if not isinstance(checks, list) or not checks or any(not isinstance(check, dict) or not isinstance(check.get("name"), str) or not check["name"].strip() or check.get("status") != "passed" for check in checks):
+              print("::error::Graider grading checks did not all pass.")
+              sys.exit(FAILURE_EXIT_STATUS)
           if result["status"] != "passed":
               print("::error::Autograding checks failed. See the CheckStyle and Unit Tests results above.")
               sys.exit(FAILURE_EXIT_STATUS)
