@@ -306,14 +306,28 @@ const graiderUI: GraiderUIApi = {
     await invoke<CombinedDashboardResult>(IPC_CHANNELS.refreshDashboard),
   getAssignmentDetail: async (request: AssignmentDetailRequest): Promise<AssignmentDetailResult> =>
     await invoke<AssignmentDetailResult>(IPC_CHANNELS.getAssignmentDetail, request),
+  migrationExecution: {
+    start: (request) => invoke(IPC_CHANNELS.startMigration, request),
+    status: (request) => invoke(IPC_CHANNELS.migrationExecutionStatus, request),
+    cancel: (request) => invoke(IPC_CHANNELS.cancelMigration, request),
+    recover: (request) => invoke(IPC_CHANNELS.recoverMigrationPublication, request),
+    history: (request) => invoke(IPC_CHANNELS.migrationHistory, request),
+    active: () => invoke(IPC_CHANNELS.activeMigration),
+    retry: (request) => invoke(IPC_CHANNELS.retryMigrationReconciliation, request)
+  },
   migrationReview: {
+    save: (request) => invoke(IPC_CHANNELS.saveMigrationReview, request),
+    saveGrader: (request) => invoke(IPC_CHANNELS.saveGraderAccessReview, request),
     load: (request) => invoke(IPC_CHANNELS.loadMigrationReviewAnalysis, request),
     refresh: (request) => invoke(IPC_CHANNELS.refreshMigrationReview, request),
     verify: (request) => invoke(IPC_CHANNELS.verifyMigrationFacultyIdentity, request),
     complete: (request) => invoke(IPC_CHANNELS.completeMigrationReview, request),
     loadGrader: (request) => invoke(IPC_CHANNELS.loadGraderAccessReview, request),
     completeGrader: (request) => invoke(IPC_CHANNELS.completeGraderAccessReview, request),
-    close: () => invoke(IPC_CHANNELS.closeMigrationReview)
+    close: (request) =>
+      request === undefined
+        ? invoke(IPC_CHANNELS.closeMigrationReview)
+        : invoke(IPC_CHANNELS.closeMigrationReview, request)
   },
   chooseReviewImport: (request) => invoke(IPC_CHANNELS.chooseReviewImport, request),
   applyReviewImport: (request) => invoke(IPC_CHANNELS.applyReviewImport, request),

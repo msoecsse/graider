@@ -21,6 +21,8 @@ const setup = (initial = migrationViewFixture()) => {
   let view = initial;
   const backend = loadMigrationReviewBackend();
   const api = {
+    save: vi.fn(async () => {}),
+    saveGrader: vi.fn(async () => {}),
     load: vi.fn(async () => ({ status: "ready" as const, view, message: null })),
     refresh: vi.fn(async () => ({
       status: "ready" as const,
@@ -44,6 +46,7 @@ const setup = (initial = migrationViewFixture()) => {
     </MemoryRouter>
   );
   const loaded = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Check course" }));
     await screen.findByText(/Analyzed revision:/);
   };
   return {
@@ -72,11 +75,11 @@ const selectTerm = () => {
 };
 
 describe("Migration Review page", () => {
-  it("offers seven accessible steps, exact revision and review-only messaging, with no migration action", async () => {
+  it("offers eight accessible steps, exact revision and review-only messaging, with no migration action", async () => {
     const f = setup();
     await f.loaded();
     const nav = screen.getByRole("navigation", { name: "Migration review steps" });
-    expect(within(nav).getAllByRole("button")).toHaveLength(7);
+    expect(within(nav).getAllByRole("button")).toHaveLength(8);
     expect(screen.getByText(/This page makes no course/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(screen.getByRole("button", { name: "Complete migration review" })).toBeDisabled();

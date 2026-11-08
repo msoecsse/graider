@@ -113,6 +113,11 @@ export interface ReconciliationSnapshot {
 }
 /** History is evidence only. It never asserts current operational readiness. */
 export interface MigrationHistorySnapshot extends ReconciliationSnapshot {
+  readonly publicationDate?: string;
+  readonly reviewedAuthority?: {
+    readonly fallbackAdministratorGithubUserId: number;
+    readonly termCreationOrder: readonly string[];
+  };
   executionState: "current_plan" | "fresh_plan_required";
 }
 

@@ -45,6 +45,7 @@ export const createMigrationReconciliationStore = (
   deps: StoreDependencies
 ): Backend.ReconciliationStore & {
   inspectHistory(): Promise<Backend.MigrationHistorySnapshot>;
+  assertHistoryCurrent(snapshot: Backend.MigrationHistorySnapshot): Promise<void>;
   freshPlan(): Promise<Backend.ReconciliationSnapshot>;
 } => {
   const b = loadMigrationReconciliationBackend();
@@ -250,6 +251,7 @@ export const createMigrationReconciliationStore = (
   return {
     observe,
     inspectHistory: observeHistory,
+    assertHistoryCurrent: assertCurrent,
     assertCurrent: async (snapshot) => {
       if (!executionCurrent) throw new b.ReconciliationNeedsAttention("fresh_plan_required");
       await assertCurrent(snapshot);
@@ -326,7 +328,14 @@ export const createMigrationReconciliationService = (deps: Dependencies) => ({
         reader: (deps.reader ?? createRemoteRepositoryReader)(input.token, input.signal)
       });
       const observed = await store.inspectHistory();
+      const currentAccess = (await verifyCurrentMigrationAccess({ ...deps, input }))
+        ? ("ready" as const)
+        : ("needs_attention" as const);
+      await store.assertHistoryCurrent(observed);
       return {
+        migrationDate: observed.publicationDate ?? null,
+        reviewedAuthority: observed.reviewedAuthority ?? null,
+        currentAccess,
         source: observed.source,
         checkpoint: observed.checkpoint,
         publication: observed.publication,

@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { MIGRATION_STATUS_POLL_MS } from "../../electron/migrationExecutionTypes";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Link, useParams } from "react-router-dom";
 import type {
   MigrationReviewResponse,
@@ -13,6 +14,8 @@ import {
   validateMigrationReview
 } from "../../../src/migration/migration-review-validation";
 import { GraderAccessReviewStep } from "./GraderAccessReview";
+import { MigrationExecutionPanel } from "./MigrationExecutionPanel";
+import type { MigrationExecutionState } from "../../electron/migrationExecutionTypes";
 import { MigrationReviewFaculty } from "./MigrationReviewFaculty";
 import { MigrationReviewEvidence } from "./MigrationReviewEvidence";
 
@@ -23,12 +26,25 @@ const STEPS = [
   "Terms",
   "Assignments & Apply evidence",
   "Review",
-  "Legacy grader access"
+  "Legacy grader access",
+  "Final summary"
 ] as const;
 type Step = (typeof STEPS)[number];
 
 export const MigrationReviewPage = ({ selector }: { readonly selector: string }): ReactElement => {
+  const [checked, setChecked] = useState(false);
+  const [graderReview, setGraderReview] = useState<
+    import("../../../src/migration/grader-access-review").GraderAccessReview | null
+  >(null);
+  const [graderComplete, setGraderComplete] = useState(false);
+  const [execution, setExecution] = useState<MigrationExecutionState | null>(null);
+  const [saving, setSaving] = useState(false);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const saveFailed = useRef(false);
+  const pendingSaves = useRef(0);
+  const starting = useRef(false);
   const [view, setView] = useState<MigrationReviewSessionView | null>(null);
+  const latestView = useRef<MigrationReviewSessionView | null>(null);
   const [decisions, setDecisions] = useState<MigrationReviewSubmission | null>(null);
   const [step, setStep] = useState<Step>("Overview");
   const [busy, setBusy] = useState(true);
@@ -40,13 +56,17 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
     setMessage(response.message);
     setStale(response.status === "stale");
     if (response.view !== null) {
+      latestView.current = response.view;
       setView(response.view);
-      setDecisions(emptyMigrationReviewSubmission(response.view));
+      setDecisions(response.savedSubmission ?? emptyMigrationReviewSubmission(response.view));
+      setGraderComplete(false);
       setCompleted(null);
     }
   };
   useEffect(() => {
+    if (!checked) return;
     let active = true;
+    latestView.current = null;
     setView(null);
     setDecisions(null);
     setBusy(true);
@@ -70,12 +90,50 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
       });
     return () => {
       active = false;
-      void api.close().catch(() => {});
+      const closing = latestView.current;
+      if (closing)
+        void saveQueue.current
+          .finally(() =>
+            api.close({
+              sessionId: closing.sessionId,
+              source: migrationReviewSource(closing.analysis)
+            })
+          )
+          .catch(() => {});
     };
-  }, [selector, api]);
+  }, [selector, api, checked]);
+  const enqueueSave = (work: () => Promise<void>): Promise<void> => {
+    setSaving(true);
+    pendingSaves.current += 1;
+    // Send every decision immediately. Main serializes received saves and drains them on close.
+    saveQueue.current = Promise.all([saveQueue.current, work()])
+      .then(() => {
+        saveFailed.current = false;
+      })
+      .catch(() => {
+        saveFailed.current = true;
+        setMessage(
+          "Review autosave failed. Keep this page open, refresh course access and retry your selection before leaving."
+        );
+      })
+      .finally(() => {
+        pendingSaves.current -= 1;
+        if (pendingSaves.current === 0) setSaving(false);
+      });
+    return saveQueue.current;
+  };
   const change = (next: MigrationReviewSubmission) => {
     setDecisions(next);
     setCompleted(null);
+    setGraderComplete(false);
+    if (api?.save && view)
+      void enqueueSave(() =>
+        api.save({
+          sessionId: view.sessionId,
+          source: migrationReviewSource(view.analysis),
+          submission: next
+        })
+      );
   };
   const verify = async (
     institutionalUsername: string,
@@ -85,6 +143,7 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
     if (!api || !view) return;
     setBusy(true);
     try {
+      await saveQueue.current;
       accept(
         await api.verify({
           sessionId: view.sessionId,
@@ -104,6 +163,7 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
     if (!api) return;
     setBusy(true);
     try {
+      await saveQueue.current;
       const response = view
         ? await api.refresh({
             sessionId: view.sessionId,
@@ -125,6 +185,8 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
     if (!api || !view || !decisions) return;
     setBusy(true);
     try {
+      await saveQueue.current;
+      if (saveFailed.current) throw new Error("Autosave failed.");
       const result = await api.complete({
         sessionId: view.sessionId,
         source: migrationReviewSource(view.analysis),
@@ -134,7 +196,7 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
       setStale(result.status === "stale");
       setMessage(
         result.status === "complete"
-          ? "Migration review complete. No course changes were made. Publication remains a separate later step."
+          ? "Migration review complete. No course changes were made. Complete legacy grader access review, then review the final summary."
           : result.status === "stale"
             ? "The authoritative course changed. Refresh analysis and review again."
             : "Review is incomplete or blocked. Check the review findings."
@@ -144,6 +206,48 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
         "Review could not be completed. Your account, authorization or analysis binding may have changed. Refresh analysis."
       );
     } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (!execution?.active) return;
+    let active = true;
+    const timer = setInterval(() => {
+      void window.graiderUI.migrationExecution
+        ?.status({ selector })
+        .then((value) => {
+          if (active) setExecution(value);
+        })
+        .catch(() => {
+          if (active) setMessage("Reconnect and refresh course access to verify migration status.");
+        });
+    }, MIGRATION_STATUS_POLL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [execution?.active, selector]);
+  const start = async () => {
+    if (starting.current || !view || !graderComplete || !window.graiderUI.migrationExecution)
+      return;
+    starting.current = true;
+    setBusy(true);
+    try {
+      await saveQueue.current;
+      if (saveFailed.current) throw new Error("Autosave failed.");
+      setExecution(
+        await window.graiderUI.migrationExecution.start({
+          sessionId: view.sessionId,
+          source: migrationReviewSource(view.analysis),
+          confirmed: true
+        })
+      );
+    } catch {
+      setMessage(
+        "The account, source or completed reviews changed. Refresh analysis and review before confirming again."
+      );
+    } finally {
+      starting.current = false;
       setBusy(false);
     }
   };
@@ -174,6 +278,69 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
       updateOrder(codes);
     }
   };
+  if (!checked)
+    return (
+      <main className="dashboard-shell">
+        <header className="app-header">
+          <div className="app-header__inner">
+            <h1>Upgrade course</h1>
+            <Link to="/">Back to dashboard</Link>
+          </div>
+        </header>
+        <section className="dashboard-content">
+          <div className="detail-panel">
+            <h2>Migration overview</h2>
+            <p>
+              Upgrading is optional. Your existing Schema 1 course operations remain available while
+              you review or wait for upgrade prerequisites.
+            </p>
+            <p>
+              Schema 2 records verified faculty roles, term lifecycle and section assignment
+              evidence. Original course files and deferred student identity, grading and comment
+              evidence are preserved; machine-local grading records stay in place.
+            </p>
+            <p>
+              Check course performs read-only analysis. It creates no checkpoint and publishes
+              nothing. Review decisions are automatically saved on this computer and checked against
+              fresh evidence when you resume.
+            </p>
+            <p>
+              A recovery checkpoint preserves original remote Schema 1 evidence. Publication makes
+              Schema 2 authoritative; subsequent access reconciliation can need attention without
+              undoing publication.
+            </p>
+            <p>
+              Production migration is disabled until operational support, Phase 3 and compatible
+              macOS arm64 and Windows x64 production releases are verified. A completed review or
+              Preview app does not enable it.
+            </p>
+            <button className="primary-action" type="button" onClick={() => setChecked(true)}>
+              Check course
+            </button>
+          </div>
+        </section>
+      </main>
+    );
+  if (execution)
+    return (
+      <main className="dashboard-shell">
+        <section className="dashboard-content">
+          <MigrationExecutionPanel state={execution} onState={setExecution} />
+          {!execution.active && execution.published !== true ? (
+            <button
+              type="button"
+              onClick={() => {
+                setExecution(null);
+                setChecked(false);
+                setGraderComplete(false);
+              }}
+            >
+              Return to migration overview
+            </button>
+          ) : null}
+        </section>
+      </main>
+    );
   return (
     <main className="dashboard-shell" aria-labelledby="migration-review-title">
       <header className="app-header">
@@ -209,7 +376,7 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
         <div className="course-setup__content">
           <p>
             Review only. This page makes no course, assignment, manifest or GitHub permission
-            changes.
+            changes until you explicitly confirm Upgrade course and all backend prerequisites pass.
           </p>
           <button
             className="secondary-action"
@@ -221,6 +388,11 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
           >
             Refresh analysis
           </button>
+          {saving ? (
+            <p role="status">Saving review decisions…</p>
+          ) : (
+            <p>Review changes are saved automatically on this computer.</p>
+          )}
           {busy ? <p role="status">Checking migration review…</p> : null}
           {message ? <p role="status">{message}</p> : null}
           {stale ? (
@@ -248,6 +420,9 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
                   key={view.sessionId}
                   view={view}
                   enabled={completed?.status === "complete"}
+                  onCompleted={setGraderComplete}
+                  onReview={setGraderReview}
+                  onSave={(request) => enqueueSave(() => api!.saveGrader(request))}
                 />
               ) : null}
               {step === "Overview" ? (
@@ -281,9 +456,128 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
                     historical archive claim. Local hiding and inactivity are ignored.
                   </p>
                   <p>
-                    Completing review records decisions for this exact analysis in memory. It does
-                    not make migration ready for publication.
+                    Decisions are saved for this exact source and account outside the course
+                    repository. Restored decisions require fresh review completion and final
+                    confirmation.
+                    <details>
+                      <summary>Technical details</summary>
+                      <pre>
+                        {JSON.stringify(
+                          {
+                            source: analysis.source,
+                            findings: analysis.issues,
+                            preservation: analysis.preservation
+                          },
+                          null,
+                          2
+                        )}
+                      </pre>
+                    </details>
                   </p>
+                </section>
+              ) : null}
+              {step === "Final summary" ? (
+                <section className="detail-panel" aria-label="Final migration confirmation">
+                  <h2>Final migration summary</h2>
+                  <p>
+                    {analysis.courseConfigurationEvidence?.value.course.code} —{" "}
+                    {analysis.courseConfigurationEvidence?.value.course.title}. Repository ID{" "}
+                    {analysis.source.repositoryId}. Scope: faculty authority, terms, assignments and
+                    preserved evidence.
+                  </p>
+                  <p>
+                    Fallback administrator: {decisions.fallbackAdministratorUsername ?? "Required"}.
+                    Term creation order:{" "}
+                    {decisions.creationOrder.termCodes.join(", ") || "No terms"}.
+                  </p>
+                  <ul>
+                    {decisions.terms.map((term) => (
+                      <li key={term.termCode}>
+                        {term.termCode}: {term.status ?? "Required"}; coordinators{" "}
+                        {term.currentCoordinatorUsernames.join(", ") || "Required"}; activation
+                        history {String(term.hasEverBeenActive)}.
+                      </li>
+                    ))}
+                  </ul>
+                  <p>
+                    Legacy grader access review:{" "}
+                    {graderComplete
+                      ? "Complete for the current review"
+                      : "Complete this review before confirming"}
+                    .
+                  </p>
+                  <ul>
+                    {graderComplete
+                      ? graderReview?.decisions.map((decision) => (
+                          <li key={decision.githubUserId}>
+                            Legacy member GitHub ID {decision.githubUserId}:{" "}
+                            {decision.disposition.replaceAll("_", " ")}
+                            {decision.sections.length
+                              ? ` — ${decision.sections.map((section) => `${section.termCode} / ${section.sectionId}`).join(", ")}`
+                              : ""}
+                            .
+                          </li>
+                        ))
+                      : null}
+                  </ul>
+                  <p>
+                    Reviewed assignment findings:{" "}
+                    {decisions.acknowledgements
+                      .map(
+                        (item) =>
+                          `${item.termCode}/${item.assignmentSlug}: ${item.kind.replaceAll("_", " ")}`
+                      )
+                      .join("; ") || "No acknowledgements required"}
+                    .
+                  </p>
+                  <h3>Preserved deferred findings</h3>
+                  <ul>
+                    {analysis.preservation.deferredWork.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                  <p>
+                    The immutable recovery checkpoint preserves the exact original remote Schema 1
+                    state. It is preserved evidence, not an automatic rollback or a backup of
+                    machine-local grading data.
+                  </p>
+                  <p>
+                    Publication makes Schema 2 authoritative. Ready additionally requires verified
+                    access reconciliation. Incomplete reconciliation remains Published — Needs
+                    attention and is retried separately.
+                  </p>
+                  <p role="note">
+                    <strong>
+                      Faculty using incompatible Graider clients will lose access to this course
+                      until they update.
+                    </strong>{" "}
+                    By choosing Upgrade course, you explicitly acknowledge this consequence for this
+                    reviewed migration.
+                  </p>
+                  <p>
+                    Production migration remains disabled until trusted operational support, Phase 3
+                    signing/distribution/updates, and compatible macOS arm64 and Windows x64
+                    production releases are verified. If blocked, update Graider when a compatible
+                    production release is available and check the course again. Existing Schema 1
+                    operations remain available.
+                  </p>
+                  <button
+                    className="primary-action"
+                    type="button"
+                    disabled={
+                      busy ||
+                      saving ||
+                      stale ||
+                      completed?.status !== "complete" ||
+                      !graderComplete ||
+                      !window.graiderUI.migrationExecution
+                    }
+                    onClick={() => {
+                      void start();
+                    }}
+                  >
+                    Upgrade course
+                  </button>
                 </section>
               ) : null}
               {step === "Faculty" ? (
@@ -616,8 +910,8 @@ export const MigrationReviewPage = ({ selector }: { readonly selector: string })
               <h2>Review result: {completed.status}</h2>
               <p>
                 Bound to repository {completed.source.repositoryId}, revision{" "}
-                {completed.source.sourceCommitSha.slice(0, 12)}. Session-local review artifact only;
-                publicationReady: false.
+                {completed.source.sourceCommitSha.slice(0, 12)}. Decisions are saved; final
+                execution independently revalidates this review and all publication prerequisites.
               </p>
               {completed.errors.map((error, index) => (
                 <p key={`${index}/${error.key}`}>{error.message}</p>

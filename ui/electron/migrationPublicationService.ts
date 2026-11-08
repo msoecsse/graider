@@ -28,6 +28,12 @@ import type {
   GitWorkspaceFactory
 } from "./gitWorkspaceReader.js";
 
+export type MigrationPublicationPhase =
+  | "preparing"
+  | "validating"
+  | "checkpointing"
+  | "publishing"
+  | "synchronizing";
 export interface MigrationPublicationDependencies {
   readonly userData: string;
   readonly reviewService: MigrationReviewService;
@@ -67,7 +73,7 @@ const unknownOutcome = (): MigrationPublicationOutcome => ({
     "Reconnect and recover the authoritative remote outcome before retrying. Publication will never be retried automatically."
 });
 
-/** Main-only capability. No production control, IPC, preload or renderer installs it.
+/** Main-only publication capability. #25 exposes intent through its execution coordinator.
  * A cancellation signal applies to preparation only; nothing after the durable
  * beforePush boundary reads it, the renderer owner or the ephemeral review again.
  */
@@ -151,6 +157,9 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
     }
   };
   return {
+    hasIntent(userId: number, repositoryId: number): boolean {
+      return store.read(userId, repositoryId) !== null;
+    },
     /** Restart recovery reads remote history and exact commit objects, never resumes a push. */
     async recover(userId: number, repositoryId: number): Promise<MigrationPublicationOutcome> {
       try {
@@ -170,10 +179,18 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
     async publish(
       owner: number,
       submitted: MigrationReviewSessionRequest,
-      cancellation?: AbortSignal
+      cancellation?: AbortSignal,
+      onPhase?: (phase: MigrationPublicationPhase, cancellable: boolean) => void
     ): Promise<MigrationPublicationOutcome> {
       let nonCancellable = false;
       let intentWritten = false;
+      const progress = (phase: MigrationPublicationPhase): void => {
+        try {
+          onPhase?.(phase, !nonCancellable);
+        } catch {
+          /* UI delivery never changes backend outcome. */
+        }
+      };
       const preparing = (): void => {
         if (!nonCancellable && cancellation?.aborted)
           throw new PublicationRefused({ status: "cancelled" });
@@ -190,6 +207,7 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
           source: Object.freeze({ ...submitted.source })
         });
         preparing();
+        progress("preparing");
         return await deps.session.withSynchronizedCourse(
           request.source.repositoryId,
           request.source.authenticatedGithubUserId,
@@ -213,6 +231,7 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
                 status: "blocked",
                 action: "Complete assignment and grader-access review first."
               };
+            const acknowledgement = await deps.reviewService.getAcknowledgement(owner, request);
             const b = backend();
             const artifacts: Backend.MigrationCandidateInput = {
               snapshot: retained.snapshot,
@@ -240,6 +259,7 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
                 refuse("Account authorization changed. Refresh course access and renew review.");
               await retained.revalidate();
               await grader.revalidate();
+              await acknowledgement.revalidate();
               const currentAssignment = await assignment.getPlan(owner, request);
               const currentGrader = await removal.getHandoff(owner, request);
               if (
@@ -265,6 +285,7 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
                 );
               await retained.revalidate();
               await grader.revalidate();
+              await acknowledgement.revalidate();
               if (!(await input.revalidateSession()))
                 refuse("Authenticated session changed. Renew review.");
               preparing();
@@ -305,7 +326,9 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
                 });
               await revalidate();
             };
+            progress("validating");
             await ready();
+            progress("checkpointing");
             const remote = b.createTrustedGitRemote(`${input.course.url}.git`);
             const sourceCommit = b.createExactCommitRevision(binding.sourceCommitSha);
             if (!remote || !sourceCommit)
@@ -323,6 +346,7 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
               return refuse(
                 "The immutable Schema v1 remote checkpoint could not be independently verified. Resolve checkpoint access/conflicts before retrying."
               );
+            progress("validating");
             await ready();
             const original = new Map(
               artifacts.snapshot.sourceBytesBase64
@@ -344,7 +368,13 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
             if (!identity) return refuse("Trusted faculty attribution is unavailable.");
             const result = await publishManagedCourseTransaction({
               userData: deps.userData,
-              input,
+              input: {
+                ...input,
+                resynchronize: async (afterPublication) => {
+                  if (afterPublication) progress("synchronizing");
+                  return input.resynchronize!(afterPublication);
+                }
+              },
               context: {
                 managed: true,
                 userId: input.userId,
@@ -426,6 +456,7 @@ export const createMigrationPublicationService = (deps: MigrationPublicationDepe
                   store.write(intent);
                   intentWritten = true;
                   nonCancellable = true;
+                  progress("publishing");
                 }
               }
             });

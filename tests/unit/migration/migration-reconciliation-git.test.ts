@@ -118,6 +118,13 @@ describeGitIntegration("exact published migration and journal descendant validat
     const history = await readMigrationHistorySnapshot(f.root, archived);
     expect(history.revision).toBe(archived);
     expect(history.publication).toBe(f.publication);
+    expect(history.publicationDate).toBe(
+      await f.git("show", "-s", "--format=%cI", f.publication, "--")
+    );
+    expect(history.reviewedAuthority).toEqual({
+      fallbackAdministratorGithubUserId: published.course.fallback_administrator.github_user_id,
+      termCreationOrder: published.course.course.term_creation_order
+    });
     expect(history.metadata.audit).toEqual(published.metadata.audit);
     expect(history.record).toEqual(record);
     expect(history.executionState).toBe("fresh_plan_required");

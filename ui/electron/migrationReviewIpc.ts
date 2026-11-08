@@ -38,6 +38,16 @@ export const registerMigrationReviewIpc = (
       throw new Error("An institutional username and GitHub login are required.");
     return service.verify(event.sender.id, request);
   });
+  ipc.handle(IPC_CHANNELS.saveMigrationReview, (event, request: unknown) => {
+    if (!isMigrationReviewCompleteRequest(request))
+      throw new Error("Typed review decisions are required.");
+    return service.save(event.sender.id, request);
+  });
+  ipc.handle(IPC_CHANNELS.saveGraderAccessReview, (event, request: unknown) => {
+    if (!isGraderAccessCompleteRequest(request))
+      throw new Error("Typed grader decisions are required.");
+    return service.saveGrader(event.sender.id, request);
+  });
   ipc.handle(IPC_CHANNELS.completeMigrationReview, (event, request: unknown) => {
     if (!isMigrationReviewCompleteRequest(request))
       throw new Error("Typed review decisions are required.");
@@ -53,7 +63,10 @@ export const registerMigrationReviewIpc = (
       throw new Error("Explicit grader decisions required.");
     return service.completeGrader(event.sender.id, request);
   });
-  ipc.handle(IPC_CHANNELS.closeMigrationReview, (event) => {
-    service.close(event.sender.id);
+  ipc.handle(IPC_CHANNELS.closeMigrationReview, (event, request: unknown) => {
+    if (request !== undefined && !isMigrationReviewSessionRequest(request))
+      throw new Error("An exact review binding is required.");
+    if (request === undefined) service.close(event.sender.id);
+    else service.close(event.sender.id, request);
   });
 };

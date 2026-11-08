@@ -1,3 +1,4 @@
+import { MigrationActivityGate } from "./migration-review/MigrationExecutionPanel";
 import { CourseMutationStatus } from "./dashboard/CourseMutationStatus";
 import type { ReactElement } from "react";
 import { HashRouter } from "react-router-dom";
@@ -23,8 +24,10 @@ export const App = (): ReactElement => (
   <DashboardDataProvider>
     <HashRouter>
       <RouteErrorBoundary>
-        <CourseMutationStatus />
-        <AppRoutes />
+        <MigrationActivityGate>
+          <CourseMutationStatus />
+          <AppRoutes />
+        </MigrationActivityGate>
       </RouteErrorBoundary>
     </HashRouter>
   </DashboardDataProvider>

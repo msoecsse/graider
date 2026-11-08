@@ -1,3 +1,4 @@
+import { MigrationHistoryPage } from "./migration-review/MigrationHistoryPage";
 import { MigrationReviewRoute } from "./migration-review/MigrationReviewPage";
 import type { ReactElement } from "react";
 import { Route, Routes } from "react-router-dom";
@@ -21,6 +22,7 @@ import { CommentLibraryRoute } from "./comment-library/CommentLibraryRoute";
 export const AppRoutes = (): ReactElement => (
   <Routes>
     <Route path="/" element={<DashboardPage />} />
+    <Route path="/migration-history/:selector" element={<MigrationHistoryPage />} />
     <Route path="/migration-review/:selector" element={<MigrationReviewRoute />} />
     <Route path="/course/:courseSlug/:termSlug/roster" element={<RosterManagerRoute />} />
     <Route path="/course/:courseSlug/:termSlug/comment-library" element={<CommentLibraryRoute />} />

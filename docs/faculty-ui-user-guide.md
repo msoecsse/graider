@@ -481,7 +481,13 @@ downloads; review the per-repository results when the download completes.
 
 For an authorized discovered Schema 1 course, open **Review migration**. Complete
 the Faculty, Course authority, Terms, assignment evidence and Review selections,
-then choose **Complete migration review**. This records an in-memory review only.
+then choose **Complete migration review**. Decisions are automatically saved on this
+computer, outside the course repository, for your signed-in account and exact source.
+Leaving the page, closing the window or restarting Graider preserves unfinished
+review progress. Reopening always shows the overview; choose **Check course** to
+recheck source and identities before restoring decisions. Check course is read only
+and creates no checkpoint. Complete both reviews again after restoration; saved
+progress never authorizes publication.
 
 Open **Legacy grader access** and choose **Load grader inventory**. The read-only
 inventory shows the exact legacy team, immutable GitHub user IDs/current logins,
@@ -508,16 +514,76 @@ they do not create former roles, removal history or timestamps.
 Choose **Complete grader access review**. Missing dispositions or invalid choices
 prevent completion. Completion grants no live access and authorizes no publication.
 Refresh, identity re-verification, changed source/account/session or a replacement
-inventory invalidates the affected decisions. Reopening requires a fresh review.
-No course files, teams or permissions are changed here. Cleanup and publication
-remain later steps; production courses continue using Schema 1.
+inventory invalidates affected approvals. Source or identity changes discard stale
+decisions rather than merging them onto new evidence. A different account cannot
+reuse your saved progress. Damaged/incomplete saved state is ignored safely; check
+the course and review again. An autosave error is shown explicitly; keep the page
+open, restore course access and retry the selection before leaving.
+No course files, teams or permissions change during review. Production courses
+continue using Schema 1 until all independent publication prerequisites are satisfied.
 
-Production upgrade/recovery controls remain unavailable pending their separate release
-and platform prerequisites. A completed review does not enable them. Migration results
-distinguish **Published** (Schema 2 was accepted), **Ready** (required current GitHub access
-was independently verified) and **Needs attention** (required work is incomplete or
-unverified). Pending access never undoes a successful publication. Safely deferred
-historical findings remain in the permanent audit and do not alone prevent Ready.
-The original recovery checkpoint and audit are retained after Ready. Recovery requires
-the current fallback administrator or a current coordinator of the latest-created term,
-with freshly verified GitHub privileges; old reviews and cached permissions are insufficient.
+## Confirming an upgrade and following progress
+
+Migration is optional. Authorized Schema 1 courses have a dismissible upgrade
+reminder; **Review migration** remains available after dismissal. Existing Schema 1
+operations remain available while prerequisites are unmet.
+
+After completing both reviews, open **Final summary**. Review course identity,
+resolved roles/lifecycle decisions, preserved deferred findings and checkpoint
+meaning. Faculty using incompatible Graider clients will lose access to the
+migrated course until they update. The single **Upgrade course** button explicitly
+acknowledges this consequence for the exact current review; there is no additional
+checkbox, typed phrase or confirmation dialog.
+
+Production migration remains disabled pending independently verified initiating-client
+operational support, Phase 3 signing/distribution/update prerequisites and compatible
+macOS arm64 and Windows x64 production releases. Review completion, acknowledgement,
+a Preview app and passing tests do not enable migration. Backend blockers explain
+whether to refresh/review current source or wait for and install a compatible
+production update. No inventory of other faculty installations is required.
+
+When execution is available, Graider displays actual preparation, validation,
+checkpoint, publication, synchronization and reconciliation stages. Navigation is
+blocked while the transaction is active. **Cancel upgrade** is available only while
+the backend says preparation can be cancelled. Once publication begins, cancellation
+is unavailable. Closing/reloading the window is not cancellation. Reopening recovers
+authoritative status; an unknown push outcome must be verified before another attempt.
+
+## Migration results, recovery and permanent history
+
+- **Ready:** Schema 2 is authoritative and required current operational access was
+  independently verified. Safely deferred historical findings remain informational.
+- **Published — Needs attention:** Schema 2 is authoritative; synchronization or
+  required reconciliation is incomplete/unverified. Return to the course overview
+  for permitted functionality and use **Migration History and recovery** for details.
+- **Not published:** this attempt did not publish. Reopen the saved review, check
+  the course and complete current reviews before explicitly retrying. If the source
+  changed, review the new revision; old decisions are never silently applied.
+
+A rejected push is not automatically repeated. For an unknown outcome, reconnect
+and choose **Verify publication outcome**. Graider observes remote history without
+pushing again. Confirmed Schema 2 publication is never rolled back because cache
+refresh or access reconciliation needs attention.
+
+For published courses, **Course Settings → Migration History** permanently retains
+the migration date, original Schema 1 checkpoint, publication revision, reviewed
+faculty decisions, deferred findings and reconciliation results. The summary has
+expandable **Technical details**. The checkpoint is preserved remote evidence, not
+an automatic rollback or backup of machine-local grading records.
+
+**Verify and retry reconciliation** checks fresh course/account/GitHub state. It
+never republishes the migration. After intervening course changes, review the report
+and explicitly choose **Review current state and retry with a fresh plan**. This
+preserves original audit history and unresolved operations while rebuilding current
+reconciliation intent. Historical Ready is not current access proof. Recovery
+requires the current fallback administrator or a current coordinator of the
+latest-created existing term, with fresh GitHub privileges; old reviews and cached
+permissions cannot grant recovery authority. With no terms, fallback alone qualifies.
+No Git, Terminal, PAT entry or manual reset is the normal recovery path.
+
+On the first return to a course with freshly verified access, Graider shows a brief
+upgrade-complete notice. Subsequent visits keep the permanent history entry without
+repeating migration warnings. Published courses with incomplete/unverified current
+access keep a **Needs attention** notice linking to recovery. Deferred student
+identity/grading/comment findings alone do not generate repeated warnings for Ready
+courses, and Ready does not enable operations reserved for later roadmap phases.

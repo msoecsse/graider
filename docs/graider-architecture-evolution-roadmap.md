@@ -1191,6 +1191,12 @@ migrated schema.** Stop here until a separate issue authorizes 9.5.
 
 ## Slice 9.5 — Publish migrated schema
 
+Slice 9.5I / #25 supplies the approved faculty execution, autosave, progress,
+results/recovery and permanent-history UI/IPC over the trusted #21/#24/#32 services.
+See the [implementation contract](graider-schema-v2-migration.md#implemented-faculty-execution-and-recovery-composition-slice-95i--25).
+Production migration remains disabled pending independent Phase 3/platform-release
+and operational evidence. #26 remains a separate phase audit; no next issue is started.
+
 Slice 9.5H / #24 implements durable post-publication reconciliation under
 [approved #31 Decision A](graider-schema-v2-migration.md#41-durable-recovery--approved-decision-a-31).
 The [main-only service contract](graider-schema-v2-migration.md#implemented-durable-reconciliation-composition-slice-95h)

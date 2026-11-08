@@ -1,5 +1,11 @@
 import fs from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import os from "node:os";
+import path from "node:path";
+import {
+  createMigrationReviewProgressStore,
+  type MigrationReviewProgressStore
+} from "./migrationReviewProgress.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createMigrationReviewService,
   loadMigrationReviewBackend,
@@ -19,7 +25,7 @@ import {
 } from "./migrationReviewFixtures.js";
 import type * as Backend from "../dist-electron/migrationReviewBackend.cjs";
 
-const setup = (resolved = true) => {
+const setup = (resolved = true, progress?: MigrationReviewProgressStore) => {
   let snapshot = migrationSnapshotFixture(resolved);
   let generation = 1;
   let userId = REVIEW_USER;
@@ -74,6 +80,7 @@ const setup = (resolved = true) => {
   };
   const service = createMigrationReviewService({
     backend: loadMigrationReviewBackend,
+    progress,
     withCourse: async (selector, operation) => {
       if (selector !== REVIEW_SELECTOR) throw new Error("Wrong selector.");
       return operation({
@@ -470,5 +477,214 @@ describe("trusted grader access handoff", () => {
       REVIEW_OTHER_USER
     ]);
     expect(f.reader.lookupLogin).toHaveBeenCalledWith("added");
+  });
+});
+
+const progressRoots: string[] = [];
+afterEach(() =>
+  progressRoots.splice(0).forEach((root) => fs.rmSync(root, { recursive: true, force: true }))
+);
+const progressFixture = () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-autosave-"));
+  progressRoots.push(root);
+  return createMigrationReviewProgressStore(root);
+};
+describe("durable review decisions and exact acknowledgement", () => {
+  it("restores decisions after closure/restart with new receipts but no live approval", async () => {
+    const progress = progressFixture();
+    const f = setup(true, progress);
+    const view = await f.load();
+    const submission = reviewedSubmissionFixture(view);
+    await f.service.save(1, { ...f.bound(view), submission });
+    f.service.close(1);
+    const next = setup(true, progress);
+    const response = await next.service.load(1, { selector: REVIEW_SELECTOR });
+    expect(response.savedSubmission?.fallbackAdministratorUsername).toBe("prof");
+    expect(response.savedSubmission?.facultyMappings).not.toEqual(submission.facultyMappings);
+    expect(next.reader.lookupLogin).toHaveBeenCalledWith("faculty-now");
+    expect(await next.service.getCompleted(1, next.bound(response.view!))).toBeNull();
+    await expect(next.service.getAcknowledgement(1, next.bound(response.view!))).rejects.toThrow();
+    Object.values(next.writes).forEach((write) => expect(write).not.toHaveBeenCalled());
+  });
+  it("serializes already received autosaves through window destruction and preserves the latest decision", async () => {
+    const progress = progressFixture();
+    const f = setup(true, progress);
+    const view = await f.load();
+    const request = { ...f.bound(view), submission: reviewedSubmissionFixture(view) };
+    const first = f.service.save(1, {
+      ...request,
+      submission: { ...request.submission, fallbackAdministratorUsername: null }
+    });
+    const second = f.service.save(1, request);
+    f.service.close(1);
+    const results = await Promise.allSettled([first, second]);
+    expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect(progress.read(REVIEW_USER, REVIEW_REPO)?.submission.fallbackAdministratorUsername).toBe(
+      "prof"
+    );
+    await expect(f.service.getCompleted(1, f.bound(view))).rejects.toThrow();
+  });
+  it("ignores delayed navigation cleanup for an already replaced review", async () => {
+    const f = setup();
+    const old = await f.load();
+    const current = await f.load();
+    f.service.close(1, f.bound(old));
+    expect(
+      (
+        await f.service.complete(1, {
+          ...f.bound(current),
+          submission: reviewedSubmissionFixture(current)
+        })
+      ).status
+    ).toBe("complete");
+  });
+  it("restores exact grader choices after restart only against a new current inventory, without completing it", async () => {
+    const progress = progressFixture();
+    const f = setup(true, progress);
+    const view = await f.load();
+    await f.service.complete(1, { ...f.bound(view), submission: reviewedSubmissionFixture(view) });
+    const inventory = await f.service.loadGrader(1, f.bound(view));
+    const decisions = [
+      { githubUserId: REVIEW_OTHER_USER, disposition: "no_access" as const, sections: [] }
+    ];
+    await f.service.saveGrader(1, {
+      ...f.bound(view),
+      submission: { inventoryId: inventory.inventoryId, decisions }
+    });
+    f.service.close(1);
+    const next = setup(true, progress);
+    const restored = await next.service.load(1, { selector: REVIEW_SELECTOR });
+    await next.service.complete(1, {
+      ...next.bound(restored.view!),
+      submission: restored.savedSubmission!
+    });
+    const fresh = await next.service.loadGrader(1, next.bound(restored.view!));
+    expect(fresh.inventoryId).not.toBe(inventory.inventoryId);
+    expect(fresh.savedDecisions).toEqual(decisions);
+    expect(await next.service.getCompletedGrader(1, next.bound(restored.view!))).toBeNull();
+    await expect(next.service.getAcknowledgement(1, next.bound(restored.view!))).rejects.toThrow();
+  });
+  it("reverifies explicit identities before restoring unresolved-source decisions", async () => {
+    const progress = progressFixture();
+    const f = setup(false, progress);
+    const initial = await f.load();
+    const verified = await f.service.verify(1, {
+      ...f.bound(initial),
+      institutionalUsername: "prof",
+      githubLogin: "faculty-now",
+      addFaculty: false
+    });
+    await f.service.save(1, {
+      ...f.bound(verified.view!),
+      submission: reviewedSubmissionFixture(verified.view!)
+    });
+    const next = setup(false, progress);
+    const restored = await next.service.load(1, { selector: REVIEW_SELECTOR });
+    expect(restored.savedSubmission?.fallbackAdministratorUsername).toBe("prof");
+    expect(restored.view?.analysis.reportId).toBe(verified.view?.analysis.reportId);
+    expect(next.reader.lookupLogin).toHaveBeenCalledWith("faculty-now");
+  });
+  it("does not promote recomputed disk identity history into trusted evidence", async () => {
+    const progress = progressFixture();
+    const f = setup(false, progress);
+    const view = await f.load();
+    const verified = await f.service.verify(1, {
+      ...f.bound(view),
+      institutionalUsername: "prof",
+      githubLogin: "faculty-now",
+      addFaculty: false
+    });
+    await f.service.save(1, {
+      ...f.bound(verified.view!),
+      submission: reviewedSubmissionFixture(verified.view!)
+    });
+    const saved = progress.read(REVIEW_USER, REVIEW_REPO)!;
+    const identities = saved.identities.map((identity) => ({
+      ...identity,
+      github_login_history: ["invented-history"]
+    }));
+    const forgedAnalysis = loadMigrationReviewBackend().analyzeSchemaV1Migration({
+      ...f.snapshot(),
+      trustedIdentities: [
+        {
+          institutionalUsername: "prof",
+          githubUserId: REVIEW_USER,
+          githubLogin: "faculty-now",
+          githubLoginHistory: ["invented-history"],
+          provenance: "trusted-identity-evidence",
+          reference: "explicit-review-github-lookup"
+        }
+      ]
+    });
+    progress.write({
+      ...saved,
+      identities,
+      choices: identities,
+      submission: {
+        ...saved.submission,
+        source: { ...saved.submission.source, reportId: forgedAnalysis.reportId }
+      }
+    });
+    const next = setup(false, progress);
+    const restored = await next.service.load(1, { selector: REVIEW_SELECTOR });
+    expect(restored.savedSubmission).toBeUndefined();
+    expect(restored.view?.verifiedFaculty).toEqual([]);
+    expect(await next.service.getCompleted(1, next.bound(restored.view!))).toBeNull();
+  });
+  it("discards decisions when source or verified identity changes", async () => {
+    const progress = progressFixture();
+    const f = setup(true, progress);
+    const view = await f.load();
+    await f.service.save(1, { ...f.bound(view), submission: reviewedSubmissionFixture(view) });
+    f.change({
+      ...f.snapshot(),
+      binding: { ...f.snapshot().binding, sourceCommitSha: REVIEW_NEW_SHA }
+    });
+    expect(
+      (await f.service.load(1, { selector: REVIEW_SELECTOR })).savedSubmission
+    ).toBeUndefined();
+    const next = setup(true, progress);
+    next.reader.lookupLogin.mockResolvedValue({
+      githubUserId: REVIEW_OTHER_USER,
+      githubLogin: "faculty-now"
+    });
+    expect(
+      (await next.service.load(1, { selector: REVIEW_SELECTOR })).savedSubmission
+    ).toBeUndefined();
+  });
+  it("rejects stale/foreign receipts and cannot save renderer authority", async () => {
+    const f = setup(true, progressFixture());
+    const view = await f.load();
+    const request = { ...f.bound(view), submission: reviewedSubmissionFixture(view) };
+    await expect(f.service.save(2, request)).rejects.toThrow();
+    await expect(
+      f.service.save(1, {
+        ...request,
+        submission: { ...request.submission, ...{ publicationReady: true } }
+      })
+    ).rejects.toThrow();
+    f.account(REVIEW_OTHER_USER);
+    await expect(f.service.save(1, request)).rejects.toThrow();
+  });
+  it("retains explicit acknowledgement only for exact completed reviews and current account", async () => {
+    const f = setup();
+    const view = await f.load();
+    const bound = f.bound(view);
+    await expect(f.service.acknowledge(1, bound)).rejects.toThrow();
+    await f.service.complete(1, { ...bound, submission: reviewedSubmissionFixture(view) });
+    const context = await f.service.loadGrader(1, bound);
+    await f.service.completeGrader(1, {
+      ...bound,
+      submission: {
+        inventoryId: context.inventoryId,
+        decisions: [{ githubUserId: REVIEW_OTHER_USER, disposition: "no_access", sections: [] }]
+      }
+    });
+    await f.service.acknowledge(1, bound);
+    const ack = await f.service.getAcknowledgement(1, bound);
+    await ack.revalidate();
+    await f.service.complete(1, { ...bound, submission: reviewedSubmissionFixture(view) });
+    await expect(ack.revalidate()).rejects.toThrow();
+    await expect(f.service.getAcknowledgement(1, bound)).rejects.toThrow();
   });
 });

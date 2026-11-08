@@ -1,5 +1,9 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import type {
+  MigrationReviewProgressStore,
+  MigrationReviewProgress
+} from "./migrationReviewTypes.js";
 import type * as Backend from "../dist-electron/migrationReviewBackend.cjs";
 export type {
   CourseMigrationAnalysis,
@@ -52,6 +56,7 @@ export interface MigrationReviewServiceDependencies {
     operation: (context: MigrationReviewTrustedContext) => Promise<T>
   ) => Promise<T>;
   readonly receipt?: () => string;
+  readonly progress?: MigrationReviewProgressStore;
 }
 interface ReviewSession {
   readonly selector: string;
@@ -65,11 +70,18 @@ interface ReviewSession {
   completedResult: Backend.MigrationReviewResult | null;
   graderContext?: Backend.GraderAccessContext;
   graderResult?: Backend.GraderAccessReview;
+  decisions?: Backend.MigrationReviewSubmission;
+  savedGrader?: MigrationReviewProgress["grader"];
+  acknowledgement?: {
+    readonly review: Backend.MigrationReviewResult;
+    readonly access: Backend.GraderAccessReview;
+  };
 }
 export interface MigrationReviewResponse {
   readonly status: "ready" | "blocked" | "stale" | "not_applicable";
   readonly view: Backend.MigrationReviewSessionView | null;
   readonly message: string | null;
+  readonly savedSubmission?: Backend.MigrationReviewSubmission;
 }
 const object = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
@@ -134,13 +146,44 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
   const sessions = new Map<number, ReviewSession>();
   const checkpointReviewIds = new WeakMap<Backend.MigrationReviewResult, string>();
   const loads = new Map<number, symbol>();
+  const retainedOwners = new Set<number>();
+  const closingOwners = new Set<number>();
+  const autosaves = new Map<number, Promise<void>>();
+  const disposeClosed = (owner: number): void => {
+    if (closingOwners.has(owner) && !retainedOwners.has(owner) && !autosaves.has(owner)) {
+      closingOwners.delete(owner);
+      sessions.delete(owner);
+      loads.delete(owner);
+    }
+  };
+  const queueAutosave = (owner: number, operation: () => Promise<void>): Promise<void> => {
+    if (!sessions.has(owner) || closingOwners.has(owner))
+      return Promise.reject(new Error("Review is closed."));
+    const previous = autosaves.get(owner) ?? Promise.resolve();
+    const queued = previous
+      .catch(() => {})
+      .then(operation)
+      .finally(() => {
+        if (autosaves.get(owner) === queued) autosaves.delete(owner);
+        disposeClosed(owner);
+      });
+    autosaves.set(owner, queued);
+    return queued;
+  };
   const token = deps.receipt ?? randomUUID;
   const backend = () => deps.backend();
   const response = (
     status: MigrationReviewResponse["status"],
     view: Backend.MigrationReviewSessionView | null,
-    message: string | null
-  ): MigrationReviewResponse => backend().freezeMigrationReview({ status, view, message });
+    message: string | null,
+    savedSubmission?: Backend.MigrationReviewSubmission
+  ): MigrationReviewResponse =>
+    backend().freezeMigrationReview({
+      status,
+      view,
+      message,
+      ...(savedSubmission ? { savedSubmission } : {})
+    });
   const buildView = (
     session: Omit<ReviewSession, "view" | "busy" | "stale" | "completedResult">
   ): Backend.MigrationReviewSessionView => {
@@ -193,6 +236,7 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
     return session;
   };
   const clearGrader = (session: ReviewSession): void => {
+    delete session.acknowledgement;
     delete session.graderContext;
     delete session.graderResult;
   };
@@ -231,6 +275,109 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
     if (session.stale) clearGrader(session);
     return session.stale ? "stale" : "current";
   };
+  const persist = (session: ReviewSession): void => {
+    if (deps.progress && session.source.binding.organizationId)
+      deps.progress.write({
+        version: 1,
+        organizationId: session.source.binding.organizationId,
+        reviewIdentity: session.view.sessionId,
+        submission: session.decisions ?? backend().emptyMigrationReviewSubmission(session.view),
+        identities: session.view.verifiedFaculty.map((entry) => entry.identity),
+        choices: [...session.choices].map(([username, identity]) => ({
+          institutional_username: username,
+          github_user_id: identity.githubUserId,
+          github_login: identity.githubLogin,
+          github_login_history: identity.githubLoginHistory ?? []
+        })),
+        grader: session.savedGrader ?? null
+      });
+  };
+  const restore = async (
+    session: ReviewSession,
+    context: MigrationReviewTrustedContext
+  ): Promise<boolean> => {
+    const saved = deps.progress?.read(context.userId, session.source.binding.repositoryId);
+    if (
+      !saved ||
+      saved.organizationId !== session.source.binding.organizationId ||
+      saved.submission.source.sourceCommitSha !== session.source.binding.sourceCommitSha
+    )
+      return false;
+    // Disk records are hints. Fresh lookups must prove every immutable identity again.
+    try {
+      for (const identity of saved.identities) {
+        const observed = await context.reader.lookupLogin(identity.github_login);
+        if (
+          observed.githubUserId !== identity.github_user_id ||
+          observed.githubLogin !== identity.github_login
+        )
+          return false;
+      }
+      for (const identity of saved.choices) {
+        if (
+          !saved.identities.some(
+            (verified) =>
+              verified.institutional_username === identity.institutional_username &&
+              verified.github_user_id === identity.github_user_id &&
+              verified.github_login === identity.github_login
+          )
+        )
+          return false;
+        // Re-derive historical observations from the trusted source. Disk history is not evidence.
+        const history = [
+          ...new Set(
+            (session.source.trustedIdentities ?? [])
+              .filter(
+                (entry) =>
+                  entry.institutionalUsername === identity.institutional_username &&
+                  entry.githubUserId === identity.github_user_id
+              )
+              .flatMap((entry) => [entry.githubLogin, ...(entry.githubLoginHistory ?? [])])
+          )
+        ]
+          .filter((login) => login !== identity.github_login)
+          .sort();
+        session.choices.set(identity.institutional_username, {
+          institutionalUsername: identity.institutional_username,
+          githubUserId: identity.github_user_id,
+          githubLogin: identity.github_login,
+          githubLoginHistory: history,
+          provenance: "trusted-identity-evidence",
+          reference: "explicit-review-github-lookup"
+        });
+      }
+      const fresh = buildView(session);
+      if (
+        !sameSource(backend().migrationReviewSource(fresh.analysis), saved.submission.source) ||
+        backend().migrationFingerprint(fresh.verifiedFaculty.map((entry) => entry.identity)) !==
+          backend().migrationFingerprint(saved.identities)
+      ) {
+        session.choices.clear();
+        return false;
+      }
+      const restoredDecisions = backend().freezeMigrationReview({
+        ...saved.submission,
+        source: backend().migrationReviewSource(fresh.analysis),
+        facultyMappings: backend().emptyMigrationReviewSubmission(fresh).facultyMappings
+      });
+      const checked = backend().validateMigrationReview(fresh, restoredDecisions);
+      if (
+        checked.errors.length ||
+        checked.status === "stale" ||
+        checked.status === "not_applicable"
+      ) {
+        session.choices.clear();
+        return false;
+      }
+      session.view = fresh;
+      session.decisions = restoredDecisions;
+      session.savedGrader = saved.grader;
+      return true;
+    } catch {
+      session.choices.clear();
+      return false;
+    }
+  };
   const load = async (
     owner: number,
     request: MigrationReviewLoadRequest
@@ -263,6 +410,7 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
           stale: false,
           completedResult: null
         };
+        const restored = await restore(session, context);
         if ((await current(session, context)) === "stale")
           return response("stale", null, "Course changed during analysis. Refresh analysis.");
         if (loads.get(owner) !== attempt) throw new Error("Review session was replaced.");
@@ -270,7 +418,10 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
         return response(
           session.view.analysis.status === "not_applicable" ? "not_applicable" : "ready",
           session.view,
-          null
+          restored
+            ? "Saved decisions restored after fresh validation. Complete both reviews again before final confirmation."
+            : "Review decisions are saved on this computer. Changed or unavailable evidence requires a new review.",
+          session.decisions
         );
       });
     } catch {
@@ -283,9 +434,27 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
   };
   return {
     load,
-    close(owner: number): void {
-      sessions.delete(owner);
-      loads.delete(owner);
+    retain(owner: number): () => void {
+      if (!sessions.has(owner) || retainedOwners.has(owner))
+        throw new Error("Review cannot be retained.");
+      retainedOwners.add(owner);
+      return () => {
+        retainedOwners.delete(owner);
+        disposeClosed(owner);
+      };
+    },
+    close(owner: number, request?: MigrationReviewSessionRequest): void {
+      const session = sessions.get(owner);
+      // A delayed navigation cleanup must not dispose a replacement review.
+      const matches =
+        request === undefined ||
+        (isMigrationReviewSessionRequest(request) &&
+          session?.view.sessionId === request.sessionId &&
+          sameSource(backend().migrationReviewSource(session.view.analysis), request.source));
+      if (matches) {
+        closingOwners.add(owner);
+        disposeClosed(owner);
+      }
     },
     async refresh(
       owner: number,
@@ -380,6 +549,9 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
           clearGrader(retained);
           retained.view = buildView(retained);
           retained.completedResult = null;
+          retained.decisions = backend().emptyMigrationReviewSubmission(retained.view);
+          retained.savedGrader = null;
+          persist(retained);
           return response(
             "ready",
             retained.view,
@@ -424,7 +596,17 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
             review
           });
           session.graderContext = retained;
-          return retained;
+          const saved = session.savedGrader;
+          const reusable =
+            saved?.fingerprint === backend().migrationFingerprint({ inventory, review }) &&
+            backend().reviewGraderAccess(retained, {
+              inventoryId: retained.inventoryId,
+              decisions: saved.submission.decisions
+            }).errors.length === 0;
+          return backend().freezeMigrationReview({
+            ...retained,
+            savedDecisions: reusable && saved ? saved.submission.decisions : []
+          });
         });
       } finally {
         session.busy = false;
@@ -435,6 +617,7 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
       const session = owned(owner, request);
       if (session.busy) throw new Error("Review operation is already running.");
       session.busy = true;
+      delete session.acknowledgement;
       delete session.graderResult;
       try {
         return await deps.withCourse(session.selector, async (context) => {
@@ -445,6 +628,14 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
           )
             throw new Error("Grader review changed. Reload review.");
           const result = backend().reviewGraderAccess(session.graderContext, request.submission);
+          session.savedGrader = {
+            fingerprint: backend().migrationFingerprint({
+              inventory: session.graderContext.inventory,
+              review: session.graderContext.review
+            }),
+            submission: structuredClone(request.submission)
+          };
+          persist(session);
           if (result.status === "complete") session.graderResult = result;
           return result;
         });
@@ -572,6 +763,109 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
         });
       });
     },
+    save(owner: number, submitted: MigrationReviewCompleteRequest): Promise<void> {
+      const request = structuredClone(submitted);
+      return queueAutosave(owner, async () => {
+        if (
+          !isMigrationReviewCompleteRequest(request) ||
+          !backend().migrationReviewSubmissionSchema.safeParse(request.submission).success
+        )
+          throw new Error("Invalid review decisions.");
+        const session = owned(owner, request);
+        if (session.busy) throw new Error("Review operation is already running.");
+        session.busy = true;
+        clearGrader(session);
+        session.completedResult = null;
+        try {
+          await deps.withCourse(session.selector, async (context) => {
+            if (
+              (await current(session, context)) !== "current" ||
+              sessions.get(owner) !== session ||
+              !sameSource(request.submission.source, request.source)
+            )
+              throw new Error("Review changed. Refresh analysis.");
+            const mappings = backend().emptyMigrationReviewSubmission(session.view).facultyMappings;
+            if (
+              backend().migrationFingerprint(request.submission.facultyMappings) !==
+              backend().migrationFingerprint(mappings)
+            )
+              throw new Error("Identity receipts changed.");
+            session.decisions = backend().freezeMigrationReview(
+              structuredClone(request.submission)
+            );
+            session.savedGrader = null;
+            persist(session);
+          });
+        } finally {
+          session.busy = false;
+        }
+      });
+    },
+    saveGrader(owner: number, submitted: GraderAccessCompleteRequest): Promise<void> {
+      const request = structuredClone(submitted);
+      return queueAutosave(owner, async () => {
+        if (!isGraderAccessCompleteRequest(request)) throw new Error("Invalid grader decisions.");
+        const session = owned(owner, request);
+        if (session.busy) throw new Error("Review operation is already running.");
+        session.busy = true;
+        delete session.acknowledgement;
+        delete session.graderResult;
+        try {
+          await deps.withCourse(session.selector, async (context) => {
+            if (
+              (await current(session, context)) !== "current" ||
+              sessions.get(owner) !== session ||
+              !session.graderContext ||
+              request.submission.inventoryId !== session.graderContext.inventoryId
+            )
+              throw new Error("Grader inventory changed.");
+            session.savedGrader = {
+              fingerprint: backend().migrationFingerprint({
+                inventory: session.graderContext.inventory,
+                review: session.graderContext.review
+              }),
+              submission: structuredClone(request.submission)
+            };
+            persist(session);
+          });
+        } finally {
+          session.busy = false;
+        }
+      });
+    },
+    /** Main-only acknowledgement issued by the single explicit Upgrade course action. */
+    async acknowledge(owner: number, request: MigrationReviewSessionRequest): Promise<void> {
+      const session = owned(owner, request);
+      const handoff = await this.getCheckpointHandoff(owner, request);
+      const grader = await this.getCompletedGraderHandoff(owner, request);
+      if (!handoff || !grader)
+        throw new Error("Complete both current reviews before confirmation.");
+      await handoff.revalidate();
+      await grader.revalidate();
+      session.acknowledgement = { review: handoff.review, access: grader.access };
+    },
+    async getAcknowledgement(owner: number, request: MigrationReviewSessionRequest) {
+      const session = owned(owner, request);
+      const ack = session.acknowledgement;
+      if (!ack) throw new Error("Explicit authorized acknowledgement is required.");
+      const handoff = await this.getCheckpointHandoff(owner, request);
+      const grader = await this.getCompletedGraderHandoff(owner, request);
+      const revalidate = async (): Promise<void> => {
+        if (
+          !handoff ||
+          !grader ||
+          session.acknowledgement !== ack ||
+          ack.review !== handoff.review ||
+          ack.access !== grader.access
+        )
+          throw new Error("Acknowledgement changed. Confirm the current review again.");
+        await handoff.revalidate();
+        await grader.revalidate();
+        if (session.acknowledgement !== ack) throw new Error("Acknowledgement was invalidated.");
+      };
+      await revalidate();
+      return { revalidate };
+    },
     async complete(
       owner: number,
       request: MigrationReviewCompleteRequest
@@ -600,6 +894,14 @@ export const createMigrationReviewService = (deps: MigrationReviewServiceDepende
               ]
             });
           }
+          const parsed = backend().migrationReviewSubmissionSchema.safeParse(request.submission);
+          if (
+            parsed.success &&
+            sameSource(parsed.data.source, backend().migrationReviewSource(session.view.analysis))
+          ) {
+            session.decisions = backend().freezeMigrationReview(parsed.data);
+            persist(session);
+          }
           session.completedResult = result.status === "complete" ? result : null;
           return result;
         });
@@ -616,9 +918,15 @@ export interface MigrationReviewApi {
   refresh(request: MigrationReviewSessionRequest): Promise<MigrationReviewResponse>;
   verify(request: MigrationReviewVerifyRequest): Promise<MigrationReviewResponse>;
   complete(request: MigrationReviewCompleteRequest): Promise<Backend.MigrationReviewResult>;
-  loadGrader(request: MigrationReviewSessionRequest): Promise<Backend.GraderAccessContext>;
+  loadGrader(request: MigrationReviewSessionRequest): Promise<
+    Backend.GraderAccessContext & {
+      readonly savedDecisions?: Backend.GraderAccessSubmission["decisions"];
+    }
+  >;
   completeGrader(request: GraderAccessCompleteRequest): Promise<Backend.GraderAccessReview>;
-  close(): Promise<void>;
+  save(request: MigrationReviewCompleteRequest): Promise<void>;
+  saveGrader(request: GraderAccessCompleteRequest): Promise<void>;
+  close(request?: MigrationReviewSessionRequest): Promise<void>;
 }
 
 export interface GraderAccessCompleteRequest extends MigrationReviewSessionRequest {

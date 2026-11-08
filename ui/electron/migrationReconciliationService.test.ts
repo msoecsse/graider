@@ -339,6 +339,10 @@ describe("shared production journal transaction", { timeout: GIT_INTEGRATION_TIM
     expect(home.publication).toBe(f.publication);
     const audit = await service.inspect(f.input.userId, f.repository.id);
     expect(audit.source).toBe(f.source);
+    expect(audit.migrationDate).toBe(
+      await f.git(f.remote, ["show", "-s", "--format=%cI", f.publication, "--"])
+    );
+    expect(audit.currentAccess).toBe("ready");
     expect(audit.publication).toBe(f.publication);
     expect(audit.reconciliation?.status).toBe("ready");
     expect(audit.findings).toEqual(home.metadata.findings);

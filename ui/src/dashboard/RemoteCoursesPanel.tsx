@@ -1,4 +1,7 @@
-import { getMigrationReviewPath } from "./routePaths";
+import {
+  CourseMigrationReminder,
+  CourseMigrationNotice
+} from "../migration-review/CourseMigrationNotice";
 import { ManagedCourseOperationsPanel } from "./ManagedCourseOperationsPanel";
 import { ManagedOperationalSourceControls } from "./ManagedOperationalSourceControls";
 import { ManagedCacheReview } from "./ManagedCacheReview";
@@ -182,14 +185,11 @@ export const RemoteCoursesPanel = ({
           {current?.courses
             .filter((course) => course.authorization === "authorized" && course.schemaVersion === 1)
             .map((course) => (
-              <p key={`migration-${course.repositoryId}`}>
-                <a
-                  className="secondary-action"
-                  href={`#${getMigrationReviewPath(`managed-course:${current.userId}:${course.repositoryId}`)}`}
-                >
-                  Review migration — {course.code}
-                </a>
-              </p>
+              <CourseMigrationReminder
+                key={`${current.userId}:${course.repositoryId}`}
+                selector={`managed-course:${current.userId}:${course.repositoryId}`}
+                code={course.code}
+              />
             ))}
           {current?.courses
             .filter(
@@ -224,6 +224,14 @@ export const RemoteCoursesPanel = ({
                 {course.code} — {course.title}
               </h3>
               <p>{course.fullName}</p>
+              {course.schemaVersion === 2 &&
+              course.authorization === "authorized" &&
+              current?.userId ? (
+                <CourseMigrationNotice
+                  key={`${current.userId}:${course.repositoryId}`}
+                  selector={`managed-course:${current.userId}:${course.repositoryId}`}
+                />
+              ) : null}
               {course.authorization === "faculty_identity_required" ? (
                 <>
                   <p>Set your MSOE username to verify course access.</p>

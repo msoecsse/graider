@@ -2769,8 +2769,7 @@ are evidence only. This does not enable production migration or organization tra
 The [implemented 9.5H service contract](graider-schema-v2-migration.md#implemented-durable-reconciliation-composition-slice-95h)
 defines the shared journal codec, complete descendant validation, existing Phase 7/9.4
 composition, cross-machine write guards, permanent audit inspection and fresh read-only
-access verification at eligible managed mutation boundaries. Production execution UI
-and orchestration remain #25; production migration is still disabled.
+access verification at eligible managed mutation boundaries. Faculty execution UI and orchestration are composed by [#25](graider-schema-v2-migration.md#implemented-faculty-execution-and-recovery-composition-slice-95i--25); production migration is still disabled.
 
 The accepted staged Phase 9 scope, publication facts, preservation-only evidence,
 blocking ambiguities and deferred work are defined in the authoritative

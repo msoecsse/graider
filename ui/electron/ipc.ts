@@ -28,6 +28,15 @@ export const IPC_CHANNELS = {
   previewRemoteCourseSetup: "graider-ui:remote-course-setup:preview",
   createRemoteCourse: "graider-ui:remote-course-setup:create",
   changeManagedCourseLifecycle: "graider-ui:managed-course:lifecycle",
+  saveMigrationReview: "graider-ui:migration-review:save",
+  saveGraderAccessReview: "graider-ui:migration-review:save-graders",
+  startMigration: "graider-ui:migration:start",
+  migrationExecutionStatus: "graider-ui:migration:status",
+  cancelMigration: "graider-ui:migration:cancel",
+  recoverMigrationPublication: "graider-ui:migration:recover-publication",
+  migrationHistory: "graider-ui:migration:history",
+  activeMigration: "graider-ui:migration:active",
+  retryMigrationReconciliation: "graider-ui:migration:retry-reconciliation",
   loadMigrationReviewAnalysis: "graider-ui:migration-review:load",
   refreshMigrationReview: "graider-ui:migration-review:refresh",
   verifyMigrationFacultyIdentity: "graider-ui:migration-review:verify-faculty",
@@ -1134,6 +1143,7 @@ export interface GraiderUIApi {
     readonly expectedCourseRevision: string;
     readonly targetStatus: "archived" | "unarchived";
   }) => Promise<import("./courseLifecycleTypes.js").CourseLifecycleResult>;
+  readonly migrationExecution?: import("./migrationExecutionTypes.js").MigrationExecutionApi;
   readonly migrationReview?: import("./migrationReviewService.js").MigrationReviewApi;
   readonly getCourseOperationalMode?: (folderId: string) => Promise<"legacy" | "managed">;
   readonly cutoverManagedCourse?: (folderId: string) => Promise<void>;

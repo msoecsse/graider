@@ -434,7 +434,14 @@ export const readMigrationHistorySnapshot = async (
       unprovenTerms.add(term.term.code);
   if (terms.some((term) => term.term.status === "active" && unprovenTerms.has(term.term.code)))
     targetAttention.push("current_resource_scope_unverified");
+  const publicationDate = await git("show", "-s", "--format=%cI", publication, "--");
+  if (!Number.isFinite(Date.parse(publicationDate))) throw new Error("Invalid publication date.");
   const snapshot: MigrationHistorySnapshot = {
+    publicationDate,
+    reviewedAuthority: {
+      fallbackAdministratorGithubUserId: publishedCourse.fallback_administrator.github_user_id,
+      termCreationOrder: publishedCourse.course.term_creation_order
+    },
     revision: publication,
     publication,
     source,

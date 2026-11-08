@@ -951,3 +951,45 @@ compatible production-release evidence or Phase 3 signing/distribution/updates.
 Production migration stays disabled. The earlier slice summaries above describe
 their historical implementation boundaries; this section defines current operation
 support without enabling their deferred features.
+
+### Implemented faculty execution and recovery composition (Slice 9.5I / #25)
+
+The typed `migrationReview` autosave and `migrationExecution` preload APIs convey
+only source/session assertions, faculty decisions, explicit confirmation and recovery
+intent. Electron supplies the owner. Main retains all analysis, identities, completed
+reviews, candidate/readiness and publication/reconciliation authority. Unknown fields,
+renderer plans and compatibility/Ready assertions are rejected.
+
+`migration-review.json` under the existing account/repository userData directory is
+bounded, strict local review progress outside the worktree and separate from retry,
+publication and shared reconciliation records. It binds authenticated user, immutable
+repository/organization, exact source/report and historical review identity. Identity
+choices are freshly looked up; report and complete verified directory must match before
+partial decisions receive fresh receipts. Main serializes every immediately sent autosave and drains already-received decisions before disposing a closed owner. Navigation cleanup is bound to its exact old review, so it cannot close a replacement session. Restoring never restores completion,
+acknowledgement, grader inventory capability or publication authorization. Changed,
+foreign, corrupt or unsafe records cannot revive stale authority. Grader decisions
+restore only against freshly obtained exact inventory/review fingerprints.
+
+The single Upgrade course intent retains access-loss acknowledgement against the exact
+completed base and grader review objects. Publication revalidates it with every retained
+handoff/readiness check before the durable non-cancellable boundary. Window closure
+releases idle sessions but defers disposal of an executing review until the main-owned
+operation settles; account/generation, source and authorization checks remain mandatory.
+Duplicate requests share the active operation. Cancellation uses only backend phase
+state. After the boundary, the existing durable publication intent and independent
+remote verification govern outcome without consulting renderer lifetime. Restart recovery
+observes pending publication before any retry; it never resumes a push.
+
+Published reconciliation runs only through #24; explicit retries and #32 fresh-plan
+intents never rerun migration. Permanent history includes the independently proven
+original publication commit date and original authority projection, preserved through
+subsequent lifecycle commits. Historical reconciliation is separate from a fresh
+read-only current-access verification. The approved overview, autosave, final warning,
+blocking step progress, three outcomes, course notices and permanent Course Settings
+entry are described in the [faculty guide](faculty-ui-user-guide.md#confirming-an-upgrade-and-following-progress).
+
+The fixed production readiness provider still refuses publication before checkpoint
+creation. #25 installs no technical/release evidence issuer or enablement override.
+Phase 3 and compatible macOS arm64/Windows x64 production releases remain independent
+prerequisites. No student repository update, grading dispatch, Phase 10–14 feature or
+#26 phase audit is included.

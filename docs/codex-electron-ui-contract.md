@@ -213,3 +213,10 @@ with faculty scope, repository containment, format, and resource checks in main.
 The renderer receives validated PDF/DOCX bytes only. See
 [Repository document viewing](features/repository-documents.md) for the viewer,
 local resources, sanitization, and revision refresh contract.
+
+Migration execution exposes only typed confirmation, status/cancellation, permanent
+history and explicit reconciliation/fresh-plan recovery intents. The main-owned
+coordinator outlives renderer disposal, retains exact current acknowledgement, and
+follows the publication service's durable cancellation boundary. Navigation blocking
+is presentation only. Local review decisions restore with fresh trusted evidence and
+receipts, never historical executable approvals. See the [9.5I implementation contract](graider-schema-v2-migration.md#implemented-faculty-execution-and-recovery-composition-slice-95i--25).

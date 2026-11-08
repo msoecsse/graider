@@ -555,3 +555,23 @@
     align-items: stretch;
   }
 }
+
+.migration-history .detail-panel,
+.migration-execution {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.migration-history pre,
+.migration-review-fields pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.migration-execution .secondary-action {
+  display: inline-block;
+  margin: 0.5rem 0.5rem 0.5rem 0;
+}

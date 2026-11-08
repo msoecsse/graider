@@ -136,3 +136,5 @@ export {
   createMigrationGitRunners,
   createAuthenticatedMigrationGitWorkspace
 } from "../../src/migration/migration-git.js";
+
+export { migrationReviewProgressSchema } from "../../src/migration/migration-review-progress.js";

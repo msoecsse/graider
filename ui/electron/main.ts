@@ -1,3 +1,8 @@
+import { createMigrationReviewProgressStore } from "./migrationReviewProgress.js";
+import { createMigrationPublicationService } from "./migrationPublicationService.js";
+import { createMigrationReconciliationService } from "./migrationReconciliationService.js";
+import { createMigrationExecutionService } from "./migrationExecutionService.js";
+import { registerMigrationExecutionIpc } from "./migrationExecutionIpc.js";
 import {
   createMigrationReviewService,
   loadMigrationReviewBackend
@@ -1848,33 +1853,75 @@ app.whenReady().then(async () => {
       };
     }
   });
-  registerMigrationReviewIpc(
+  const migrationReview = createMigrationReviewService({
+    progress: createMigrationReviewProgressStore(app.getPath("userData")),
+    backend: loadMigrationReviewBackend,
+    withCourse: async (selector, operation) => {
+      const match = /^managed-course:([1-9][0-9]*):([1-9][0-9]*)$/.exec(selector);
+      if (!match) throw new Error("A managed course selector is required.");
+      const userId = Number(match[1]);
+      const repositoryId = Number(match[2]);
+      if (!Number.isSafeInteger(userId) || !Number.isSafeInteger(repositoryId))
+        throw new Error("Invalid managed identity.");
+      const generation = facultyAuth.mutationGeneration;
+      return facultyAuth.withReadOnlyCourse(repositoryId, userId, async (input) =>
+        operation({
+          userId: input.userId,
+          institutionalUsername: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+            .currentFacultyMsoeUsername,
+          generation,
+          reader: createMigrationReviewReader(
+            input,
+            app.getPath("userData"),
+            loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+              .currentFacultyMsoeUsername,
+            loadMigrationReviewBackend()
+          )
+        })
+      );
+    }
+  });
+  registerMigrationReviewIpc(ipcMain, migrationReview);
+  const migrationPublication = createMigrationPublicationService({
+    userData: app.getPath("userData"),
+    reviewService: migrationReview,
+    session: facultyAuth
+  });
+  const migrationReconciliation = createMigrationReconciliationService({
+    userData: app.getPath("userData"),
+    session: facultyAuth
+  });
+  registerMigrationExecutionIpc(
     ipcMain,
-    createMigrationReviewService({
-      backend: loadMigrationReviewBackend,
-      withCourse: async (selector, operation) => {
+    createMigrationExecutionService({
+      review: migrationReview,
+      publication: migrationPublication,
+      reconciliation: migrationReconciliation,
+      currentUser: () => facultyAuth.getState().identity?.id ?? null,
+      selectors: () => {
+        const state = facultyAuth.getState();
+        return state.courseDiscovery.courses
+          .filter((course) => course.authorization === "authorized")
+          .map((course) => `managed-course:${state.identity?.id}:${course.repositoryId}`);
+      },
+      authorize: async (selector) => {
         const match = /^managed-course:([1-9][0-9]*):([1-9][0-9]*)$/.exec(selector);
-        if (!match) throw new Error("A managed course selector is required.");
+        if (!match) throw new Error("Select an authorized managed course.");
         const userId = Number(match[1]);
         const repositoryId = Number(match[2]);
         if (!Number.isSafeInteger(userId) || !Number.isSafeInteger(repositoryId))
-          throw new Error("Invalid managed identity.");
-        const generation = facultyAuth.mutationGeneration;
-        return facultyAuth.withReadOnlyCourse(repositoryId, userId, async (input) =>
-          operation({
-            userId: input.userId,
-            institutionalUsername: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
-              .currentFacultyMsoeUsername,
-            generation,
-            reader: createMigrationReviewReader(
-              input,
-              app.getPath("userData"),
-              loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
-                .currentFacultyMsoeUsername,
-              loadMigrationReviewBackend()
-            )
-          })
-        );
+          throw new Error("Invalid course identity.");
+        const state = facultyAuth.getState();
+        if (
+          state.identity?.id !== userId ||
+          state.courseDiscovery.userId !== userId ||
+          !state.courseDiscovery.courses.some(
+            (course) =>
+              course.repositoryId === repositoryId && course.authorization === "authorized"
+          )
+        )
+          throw new Error("Current authorized account/course is required.");
+        return { userId, repositoryId };
       }
     })
   );

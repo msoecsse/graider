@@ -375,3 +375,36 @@ it("exposes only narrow migration review DTO operations", async () => {
   });
   expect(electron.invoke).toHaveBeenCalledWith("graider-ui:migration-review:close");
 });
+
+it("exposes only narrow migration execution, observation and explicit recovery intents", async () => {
+  const api = electron.exposedApi?.migrationExecution;
+  if (!api) throw new Error("Missing migration execution API.");
+  electron.invoke.mockClear();
+  const request = { selector: "managed-course:101:700" };
+  const confirmation = {
+    sessionId: "retained",
+    source: {
+      repositoryId: 700,
+      sourceCommitSha: "a".repeat(40),
+      reportId: "report",
+      authenticatedGithubUserId: 101
+    },
+    confirmed: true as const
+  };
+  await api.start(confirmation);
+  await api.status(request);
+  await api.active();
+  await api.cancel(request);
+  await api.recover(request);
+  await api.history(request);
+  await api.retry({ ...request, freshPlan: true });
+  expect(electron.invoke.mock.calls).toEqual([
+    ["graider-ui:migration:start", confirmation],
+    ["graider-ui:migration:status", request],
+    ["graider-ui:migration:active"],
+    ["graider-ui:migration:cancel", request],
+    ["graider-ui:migration:recover-publication", request],
+    ["graider-ui:migration:history", request],
+    ["graider-ui:migration:retry-reconciliation", { ...request, freshPlan: true }]
+  ]);
+});

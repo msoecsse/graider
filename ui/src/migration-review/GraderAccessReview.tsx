@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   GraderAccessContext,
   GraderAccessSubmission,
@@ -9,11 +9,20 @@ import { migrationReviewSource } from "../../../src/migration/migration-review-v
 
 export const GraderAccessReviewStep = ({
   view,
-  enabled
+  enabled,
+  onCompleted,
+  onSave,
+  onReview
 }: {
   readonly view: MigrationReviewSessionView;
   readonly enabled: boolean;
+  readonly onReview?: (review: GraderAccessReview | null) => void;
+  readonly onCompleted?: (complete: boolean) => void;
+  readonly onSave?: (
+    request: import("../../electron/migrationReviewService").GraderAccessCompleteRequest
+  ) => Promise<void>;
 }) => {
+  const saves = useRef<Promise<void>>(Promise.resolve());
   const [context, setContext] = useState<GraderAccessContext | null>(null);
   const [decisions, setDecisions] = useState<GraderAccessSubmission["decisions"]>([]);
   const [result, setResult] = useState<GraderAccessReview | null>(null);
@@ -27,7 +36,12 @@ export const GraderAccessReviewStep = ({
     setDecisions([]);
     setResult(null);
     try {
-      setContext(await api!.loadGrader(bound));
+      await saves.current;
+      onCompleted?.(false);
+      onReview?.(null);
+      const loaded = await api!.loadGrader(bound);
+      setContext(loaded);
+      setDecisions(loaded.savedDecisions ?? []);
       setMessage("");
     } catch {
       setMessage(
@@ -41,14 +55,18 @@ export const GraderAccessReviewStep = ({
     if (!context) return;
     setBusy(true);
     try {
-      setResult(
-        await api!.completeGrader({
-          ...bound,
-          submission: { inventoryId: context.inventoryId, decisions }
-        })
-      );
+      await saves.current;
+      const reviewed = await api!.completeGrader({
+        ...bound,
+        submission: { inventoryId: context.inventoryId, decisions }
+      });
+      setResult(reviewed);
+      onCompleted?.(reviewed.status === "complete");
+      onReview?.(reviewed.status === "complete" ? reviewed : null);
       setMessage("");
     } catch {
+      onCompleted?.(false);
+      onReview?.(null);
       setContext(null);
       setResult(null);
       setMessage("Review evidence changed. Refresh analysis and review again.");
@@ -57,7 +75,15 @@ export const GraderAccessReviewStep = ({
     }
   };
   const update = (id: number, value: GraderAccessSubmission["decisions"][number]) => {
-    setDecisions([...decisions.filter((d) => d.githubUserId !== id), value]);
+    const next = [...decisions.filter((d) => d.githubUserId !== id), value];
+    setDecisions(next);
+    onCompleted?.(false);
+    onReview?.(null);
+    if (context && onSave)
+      saves.current = onSave({
+        ...bound,
+        submission: { inventoryId: context.inventoryId, decisions: next }
+      });
     setResult(null);
   };
   return (

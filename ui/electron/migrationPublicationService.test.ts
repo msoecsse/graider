@@ -198,6 +198,7 @@ const setup = async () => {
       })
     ).status
   ).toBe("complete");
+  await reviewService.acknowledge(OWNER, request);
   const course = {
     repositoryId: snapshot.binding.repositoryId,
     organizationId: snapshot.binding.organizationId,
@@ -814,6 +815,39 @@ describe(
       expect(
         f.commands.some((args) => args.some((arg) => arg.startsWith("HEAD:refs/heads/")))
       ).toBe(false);
+    });
+    it("retains an executing review across window closure and releases it after outcome", async () => {
+      seams.synthetic = true;
+      const f = await setup();
+      const release = f.reviewService.retain(OWNER);
+      let closed = false;
+      seams.beforeValidation = async () => {
+        if (!closed) {
+          closed = true;
+          f.reviewService.close(OWNER);
+        }
+      };
+      const phases: { phase: string; cancellable: boolean }[] = [];
+      const result = await f.service.publish(OWNER, f.request, undefined, (phase, cancellable) => {
+        phases.push({ phase, cancellable });
+      });
+      expect(result).toMatchObject({ status: "published" });
+      expect(phases).toContainEqual({ phase: "publishing", cancellable: false });
+      expect(phases).toContainEqual({ phase: "checkpointing", cancellable: true });
+      release();
+      await expect(f.reviewService.getCompleted(OWNER, f.request)).rejects.toThrow();
+    });
+    it("refuses a completed review with missing exact acknowledgement before creating a checkpoint", async () => {
+      seams.synthetic = true;
+      const f = await setup();
+      const graders = await f.reviewService.getCompletedGraderHandoff(OWNER, f.request);
+      await f.reviewService.completeGrader(OWNER, {
+        ...f.request,
+        submission: { inventoryId: graders!.access.inventoryId, decisions: [] }
+      });
+      expect(await f.service.publish(OWNER, f.request)).toMatchObject({ status: "blocked" });
+      expect(await f.git(f.remote, ["tag", "--list"])).toBe("");
+      await unchanged(f);
     });
     it("serializes competing same-course requests through remote acceptance", async () => {
       seams.synthetic = true;
