@@ -171,12 +171,13 @@ describe("course setup service", () => {
 
   it("detects conflicts before save and only writes after explicit confirmation", () => {
     const root = createRoot();
-    fs.writeFileSync(path.join(root, "course.yml"), "existing\n", "utf8");
+    const existing = "schema_version: 1\n";
+    fs.writeFileSync(path.join(root, "course.yml"), existing, "utf8");
     const request = createRequest(root);
 
     expect(previewCourseSetup(request).hasConflicts).toBe(true);
     expect(saveCourseSetup(request).status).toBe("failure");
-    expect(fs.readFileSync(path.join(root, "course.yml"), "utf8")).toBe("existing\n");
+    expect(fs.readFileSync(path.join(root, "course.yml"), "utf8")).toBe(existing);
     expect(saveCourseSetup({ ...request, confirmed: true }).status).toBe("failure");
     expect(saveCourseSetup({ ...request, confirmed: true, replaceExisting: true }).status).toBe(
       "success"

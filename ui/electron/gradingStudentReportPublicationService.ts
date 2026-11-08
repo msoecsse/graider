@@ -1,4 +1,5 @@
 import path from "node:path";
+import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
 import { extractRequiredReportDocuments } from "./documentReportService.js";
 import type { ReportDocument } from "../../src/shared/document-content.js";
 import type { GitHubClient } from "./githubClientProvider.js";
@@ -402,6 +403,7 @@ export const createGradingStudentReportPublicationService = (
             prewriteFailure = revalidated;
             return false;
           }
+          await revalidateCourseOperation();
           return true;
         }
       );
@@ -423,6 +425,7 @@ export const createGradingStudentReportPublicationService = (
           studentId: prepared.studentId,
           remoteReportPublished: true
         };
+      await revalidateCourseOperation();
       const marked = backend.markPreparedGradingStudentReportPublished(
         prepared,
         finalHead.submissionCommitSha

@@ -93,6 +93,12 @@ export interface ManagedCourseState {
   readonly retryable: boolean;
 }
 export interface ManagedCourseInspection {
+  readonly revision?: string;
+  readonly operations?: {
+    readonly archiveAllowed: boolean;
+    readonly unarchiveAllowed: boolean;
+    readonly lifecycleReason: string;
+  };
   readonly repositoryId: number;
   readonly code: string;
   readonly title: string;

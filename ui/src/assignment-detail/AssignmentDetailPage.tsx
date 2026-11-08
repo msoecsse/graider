@@ -712,6 +712,8 @@ export const AssignmentDetailPage = ({
     setIsLoadingWorkflow(true);
     try {
       const result = await window.graiderUI.getTemplateWorkflow({
+        courseFolderId: selection.courseFolderId,
+        courseFolderPath: selection.courseFolderPath,
         templateRepository: detail.template.repository,
         templateBranch: detail.template.branch,
         workflowPath: detail.grading.workflow,

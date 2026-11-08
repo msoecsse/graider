@@ -135,6 +135,11 @@ evolve.
   changes occurred.
 - Actual mutation commands must be explicit and confirmation-oriented in the UI.
 - Mutation commands must preserve existing validation and safety guards.
+- Production legacy CLI mutations require authenticated authoritative schema/revision
+  evidence before execution and before GitHub writes. A stale Schema 1 cache cannot
+  authorize a Schema 2 operation. Pre-action refusal uses the existing JSON envelope,
+  `failure`, `course_operation_unavailable` and `summary.operationAvailable: false`,
+  with no raw provider response or stack trace.
 
 ## No-Mutation / Preview-Only Commands
 

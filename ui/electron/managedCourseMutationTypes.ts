@@ -1,4 +1,24 @@
 /** Sanitized notification only. Never an executable mutation ticket. */
+export type CourseMutationMode =
+  | "new_mutation"
+  | "publication_retry"
+  | "source_update"
+  | "cutover"
+  | "read";
+/** Main-only context. The freshness closure is never serialized or accepted over IPC. */
+export interface VerifiedCourseMutationContext {
+  readonly revalidate?: (revision?: string) => Promise<void>;
+  readonly managed?: boolean;
+  readonly sessionGeneration?: number;
+  readonly legacyFolderPath?: string;
+  readonly userId: number;
+  readonly repositoryId: number;
+  readonly authoritativeCommit: string;
+  readonly operationalCommit: string;
+  readonly courseFolderId: string;
+  readonly courseFolderPath: string;
+  readonly mode: CourseMutationMode;
+}
 export interface CourseMutationBlock {
   readonly status: "blocked";
   readonly reason:
@@ -18,6 +38,9 @@ export interface CourseMutationBlock {
     | "operational_source_mismatch"
     | "operational_source_unsafe"
     | "remote_only_mutation_unavailable"
+    | "operation_unavailable"
+    | "operation_not_authorized"
+    | "reconciliation_required"
     | "local_storage_failure";
   readonly repositoryId?: number;
   readonly courseFolderId?: string;

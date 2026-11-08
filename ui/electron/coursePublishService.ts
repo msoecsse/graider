@@ -4,6 +4,8 @@ import {
 } from "./gitPublicationAuthentication.js";
 import fs from "node:fs";
 import path from "node:path";
+import { legacyCourseWriteIncompatible } from "./legacyCourseCompatibility.js";
+import { verifyLegacyPublicationSource } from "./legacyCoursePublicationSafety.js";
 
 import type {
   CoursePublishActionResult,
@@ -157,6 +159,16 @@ export const publishCourseChanges = async (
   courseFolderPath: string,
   options: GitPublicationOptions
 ): Promise<CoursePublishActionResult> => {
+  if (legacyCourseWriteIncompatible(courseFolderPath))
+    return {
+      status: "failure",
+      diagnostics: [
+        diagnostic(
+          "This course schema requires an explicit trusted managed operation; legacy publication is unavailable."
+        )
+      ],
+      commitMessage: null
+    };
   const factory = options.factory ?? getProductionGitWorkspaceFactory();
   const status = await getCoursePublishStatus(courseFolderPath, factory);
   if (status.status === "up_to_date" || status.status === "unrelated_changes")
@@ -195,8 +207,13 @@ export const publishCourseChanges = async (
       commitMessage: null
     };
   let workspace: Awaited<ReturnType<GitWorkspaceWriterFactory["open"]>>;
+  let authoritativeRevision: string;
   try {
     workspace = await authenticated.factory.open(status.courseFolderPath);
+    authoritativeRevision = await verifyLegacyPublicationSource(
+      workspace,
+      authenticated.authentication
+    );
   } catch {
     return {
       status: "failure",
@@ -255,6 +272,11 @@ export const publishCourseChanges = async (
     }
   }
   try {
+    await verifyLegacyPublicationSource(
+      workspace,
+      authenticated.authentication,
+      authoritativeRevision
+    );
     await workspace.pushUpstream({ authentication: authenticated.authentication });
   } catch {
     return {

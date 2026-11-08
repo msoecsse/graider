@@ -43,7 +43,11 @@ const publicationSuccess = () => ({
 const git = (root: string, arguments_: readonly string[]): string =>
   execFileSync("git", arguments_, { cwd: root, encoding: "utf8" }).trim();
 const initializeGitCourse = (root: string) => {
-  fs.writeFileSync(path.join(root, "course.yml"), "course:\n  code: CSC1120\n", "utf8");
+  fs.writeFileSync(
+    path.join(root, "course.yml"),
+    "schema_version: 1\ncourse:\n  code: CSC1120\n",
+    "utf8"
+  );
   git(root, ["init"]);
   git(root, ["config", "user.email", "test@example.invalid"]);
   git(root, ["config", "user.name", "Test User"]);

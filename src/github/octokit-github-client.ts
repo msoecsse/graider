@@ -146,6 +146,7 @@ export interface OctokitRestClientLike {
       listCommits: OctokitMethodLike;
       removeCollaborator: OctokitMethodLike;
       update: OctokitMethodLike;
+      replaceAllTopics?: OctokitMethodLike;
     };
     pulls: { create: CreatePullRequestMethodLike; list: OctokitMethodLike };
     git: { deleteRef: OctokitMethodLike };
@@ -800,7 +801,7 @@ export class OctokitGitHubClient implements GitHubClient {
         org: input.owner,
         name: input.name,
         private: input.private,
-        auto_init: false,
+        auto_init: input.autoInitialize ?? false,
         ...(input.description === undefined ? {} : { description: input.description })
       })
     );
@@ -812,6 +813,20 @@ export class OctokitGitHubClient implements GitHubClient {
     const data = await this.runNullable(() => this.octokit.rest.users.getByUsername({ username }));
 
     return data === null ? null : mapUser(data);
+  }
+
+  async setCourseRepositoryTopic(owner: string, repo: string): Promise<void> {
+    const replace = this.octokit.rest.repos.replaceAllTopics;
+    if (!replace) throw new Error("Repository topic configuration is unavailable.");
+    const repository = asRecord(await this.run(() => this.octokit.rest.repos.get({ owner, repo })));
+    const topics = repository.topics;
+    if (
+      !Array.isArray(topics) ||
+      !topics.every((topic): topic is string => typeof topic === "string")
+    )
+      throw new Error("Repository topics could not be verified.");
+    if (!topics.includes("graider-course"))
+      await this.run(() => replace({ owner, repo, names: [...topics, "graider-course"] }));
   }
 
   async getTeam(org: string, teamSlug: string): Promise<GitHubTeam | null> {

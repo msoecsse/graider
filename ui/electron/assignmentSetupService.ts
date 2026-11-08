@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { legacyCourseWriteIncompatible } from "./legacyCourseCompatibility.js";
 
 import type {
   AssignmentSetupFilePreview,
@@ -76,6 +77,15 @@ const parseTermFile = (content: string): AssignmentSetupTerm | null => {
 };
 
 export const loadAssignmentSetupTerms = (courseFolderPath: string): AssignmentSetupTermsResult => {
+  if (legacyCourseWriteIncompatible(courseFolderPath))
+    return {
+      terms: [],
+      diagnostics: [
+        diagnostic(
+          "Schema 2 assignment and roster editing requires the later lifecycle/section services."
+        )
+      ]
+    };
   const courseConfigPath = path.join(courseFolderPath, "course.yml");
   const termsRoot = path.join(courseFolderPath, "terms");
   if (!fs.existsSync(courseConfigPath) || !fs.existsSync(termsRoot)) {

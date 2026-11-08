@@ -178,6 +178,14 @@ export const publishManagedCourseTransaction = async <T>(
     )
       throw new Error("Unsafe transaction repository.");
     await active();
+    await request.revalidateRepository?.();
+    await workspace.fetchOrigin({ authentication: auth.authentication });
+    if (
+      (await reader.resolveRevision(`refs/remotes/origin/${input.course.defaultBranch}`)) !==
+      context.authoritativeCommit
+    )
+      stale();
+    await active();
     if (
       !request.validateMetadata &&
       loadMetadata().inspectOperationCourse(fs.readFileSync(path.join(root, "course.yml"), "utf8"))

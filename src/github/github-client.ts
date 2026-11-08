@@ -277,6 +277,8 @@ export interface GitHubClient
 
   createRepository(input: CreateRepositoryInput): Promise<GitHubRepository>;
 
+  setCourseRepositoryTopic?(owner: string, repo: string): Promise<void>;
+
   getUser(username: string): Promise<GitHubUser | null>;
 
   getTeam(org: string, teamSlug: string): Promise<GitHubTeam | null>;

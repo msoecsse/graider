@@ -4,6 +4,7 @@ export const DiagnosticCode = {
   MissingRequiredFile: "missing_required_file",
   InvalidYaml: "invalid_yaml",
   InvalidSchemaVersion: "invalid_schema_version",
+  CourseOperationUnavailable: "course_operation_unavailable",
   MissingRequiredField: "missing_required_field",
   InvalidTermCode: "invalid_term_code",
   AssignmentSlugMismatch: "assignment_slug_mismatch",

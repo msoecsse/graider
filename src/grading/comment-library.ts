@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { legacyCourseWriteIncompatible } from "../config/legacy-course-compatibility.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -153,6 +154,12 @@ const writeCommentLibrary = (
   courseRoot: string,
   library: CommentLibrary
 ): CommentLibraryResult<undefined> => {
+  if (legacyCourseWriteIncompatible(courseRoot))
+    return {
+      status: "failure",
+      code: "schema_operation_unavailable",
+      message: "Immutable comment ownership/history is required before editing this library."
+    };
   const validated = validateLibrary(library);
   if (validated.status === "failure") return validated;
   const libraryPath = createCommentLibraryPath(courseRoot);

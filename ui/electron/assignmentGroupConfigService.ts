@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { legacyCourseWriteIncompatible } from "./legacyCourseCompatibility.js";
 import { parseDocument } from "yaml";
 import type {
   AssignmentGroupConfigRequest,
@@ -163,6 +164,10 @@ const validateGroups = (
 };
 
 const load = (request: AssignmentGroupConfigRequest): AssignmentGroupConfigResult => {
+  if (legacyCourseWriteIncompatible(request.courseFolderPath))
+    return emptyResult([
+      diagnostic("Schema 2 group configuration requires section and student identity support.")
+    ]);
   const paths = assignmentPaths(request.courseFolderPath, request.assignmentFile);
   if (paths === null) return emptyResult([diagnostic("Assignment path is invalid.")]);
   try {

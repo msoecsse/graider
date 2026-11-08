@@ -59,6 +59,15 @@ Renderer code may:
   nonzero command failures.
 - Redact resolved tokens from stdout and stderr snippets.
 - Validate request shapes before running commands.
+- Discriminate authoritative schema before invoking course services. Schema 2 must
+  use a closed trusted operation adapter; never fall back to institutional usernames.
+- Classify runtime/grading/workspace writes as mutations even when no admin-repository
+  commit is produced. Revalidate account, source revision and support before writing,
+  including after awaited preparation. Freshness closures and backend validators must
+  remain main-owned and must never be serialized as renderer authorization tickets.
+- Keep current/historical section scope, explicit coordinator expansion, fallback
+  administration and lifecycle/readiness gates independent. See the
+  [managed-operation support matrix](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g).
 
 ## Preload / IPC Rules
 

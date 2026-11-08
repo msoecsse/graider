@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { CourseLifecycleResult } from "./courseLifecycleTypes.js";
+export type { CourseLifecycleResult } from "./courseLifecycleTypes.js";
 import type * as Backend from "../dist-electron/termActivationBackend.cjs";
 import {
   publishManagedCourseTransaction,
@@ -26,17 +28,6 @@ export interface CourseLifecycleRequest extends Omit<
   /** Existing trust hook; future Phase 9 composition must also reject required/in-progress/incomplete migration. */
   readonly revalidateRepository: () => Promise<void>;
 }
-export type CourseLifecycleResult =
-  | Attention
-  | {
-      readonly status: "up_to_date" | "archived" | "unarchived";
-      readonly beforeStatus: "unarchived" | "archived";
-      readonly afterStatus: "unarchived" | "archived";
-      readonly authorizationBasis: string;
-      readonly revision: string;
-      readonly refreshRequired: boolean;
-    };
-
 /** Future v2 only. Holds the caller's existing course lease; never reconciles GitHub on archive/unarchive. */
 export const changeManagedCourseLifecycle = async (
   request: CourseLifecycleRequest

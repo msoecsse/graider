@@ -271,9 +271,28 @@ describe("IPC enforcement inventory", () => {
   });
 });
 
+const authoritativeFixtures = vi.hoisted(
+  () => new Map<number, { revision: string; content: string }>()
+);
+vi.mock("./remoteCourseAccess.js", () => ({
+  readRemoteCourseAccess: async (_reader: unknown, repo: { id: number }) => {
+    const fixture = authoritativeFixtures.get(repo.id);
+    if (!fixture) throw new Error("Missing authoritative unit fixture.");
+    return {
+      status: "valid",
+      schemaVersion: 1,
+      authorization: "authorized",
+      incomplete: false,
+      revision: fixture.revision,
+      content: fixture.content,
+      termContents: {}
+    };
+  }
+}));
 vi.mock("./githubRemoteRepositories.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   createRemoteRepositoryReader: () => ({
+    resolveId: async (id: number) => ({ id, organizationId: 10, defaultBranch: "main" }),
     resolve: async (_owner: string, name: string) => ({
       id: name === "other" ? 21 : 20,
       organizationId: 10
@@ -287,7 +306,7 @@ const deferred = () => {
   });
   return { promise, release };
 };
-const prepareSynchronizedMetadata = (userData: string, repositoryId: number) => {
+const prepareSynchronizedMetadata = (userData: string, repositoryId: number, revision: string) => {
   // This unit fixture shares the app profile and legacy root; keep simulated
   // managed storage out of the legacy working-tree evidence, as in production.
   fs.appendFileSync(path.join(userData, ".git", "info", "exclude"), "\n/managed-courses/\n");
@@ -299,6 +318,10 @@ const prepareSynchronizedMetadata = (userData: string, repositoryId: number) => 
       .readFileSync("../tests/fixtures/config/valid-course/course.yml", "utf8")
       .replaceAll("example-org", "fixture")
   );
+  authoritativeFixtures.set(repositoryId, {
+    revision,
+    content: fs.readFileSync(path.join(cache, "course.yml"), "utf8")
+  });
 };
 describe("guard execution and account isolation", () => {
   const execution = async () => {
@@ -306,7 +329,7 @@ describe("guard execution and account isolation", () => {
     let generation = 1;
     let signedIn = true;
     const sync = vi.fn(async (_repo, _user, operation) => {
-      prepareSynchronizedMetadata(f.root, _repo);
+      prepareSynchronizedMetadata(f.root, _repo, f.head);
       return operation(
         {
           userId: 42,
@@ -375,11 +398,17 @@ describe("guard execution and account isolation", () => {
         "https://github.com/fixture/other.git"
       ]);
       const other = { ...course, repositoryId: 21, localFolderIds: ["other"] };
-      prepareSynchronizedMetadata(f.root, course.repositoryId);
-      prepareSynchronizedMetadata(f.root, other.repositoryId);
+      prepareSynchronizedMetadata(f.root, course.repositoryId, f.head);
+      prepareSynchronizedMetadata(f.root, other.repositoryId, secondSource.head);
       f.sync.mockImplementation(async (_repo, _user, operation) =>
         operation(
-          { course: other, userId: 42, token: "test", revalidateSession: async () => true },
+          {
+            course: other,
+            userId: 42,
+            token: "test",
+            signal: new AbortController().signal,
+            revalidateSession: async () => true
+          },
           { ...ready, currentCommit: secondSource.head }
         )
       );
@@ -396,7 +425,13 @@ describe("guard execution and account isolation", () => {
         started.release();
         await held.promise;
         return operation(
-          { course, userId: 42, token: "test", revalidateSession: async () => true },
+          {
+            course,
+            userId: 42,
+            token: "test",
+            signal: new AbortController().signal,
+            revalidateSession: async () => true
+          },
           { ...ready, currentCommit: f.head }
         );
       });
@@ -424,6 +459,28 @@ describe("guard execution and account isolation", () => {
     expect(f.sync).toHaveBeenCalledOnce();
     expect(operation).toHaveBeenCalledOnce();
     expect(operation.mock.calls[0][0]).not.toHaveProperty("token");
+  });
+  it("requires fresh remote evidence after local validation before invoking a legacy writer", async () => {
+    const f = await execution();
+    f.sync.mockImplementationOnce(async (repositoryId, _user, operation) => {
+      prepareSynchronizedMetadata(f.root, repositoryId, f.head);
+      authoritativeFixtures.delete(repositoryId);
+      return operation(
+        {
+          userId: 42,
+          token: "test",
+          course,
+          signal: new AbortController().signal,
+          revalidateSession: async () => true
+        },
+        { ...ready, currentCommit: f.head }
+      );
+    });
+    const writer = vi.fn(async () => {});
+    await expect(f.guard.run("registered", f.root, "new_mutation", writer)).rejects.toMatchObject({
+      result: { reason: "operational_source_unsafe" }
+    });
+    expect(writer).not.toHaveBeenCalled();
   });
   it("serializes synchronization through immediate publication", async () => {
     const f = await execution();
@@ -496,7 +553,8 @@ describe("guard execution and account isolation", () => {
       }).run("unmapped", f.root, "new_mutation", operation)
     ).rejects.toThrow();
     expect(operation).not.toHaveBeenCalled();
-    expect(f.sync).not.toHaveBeenCalled();
+    // Schema must be established before deciding whether a local username is required.
+    expect(f.sync).toHaveBeenCalledTimes(1);
   });
   it("retries run synchronization again; no cached readiness authorizes a write", async () => {
     const f = await execution();

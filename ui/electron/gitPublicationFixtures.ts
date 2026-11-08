@@ -2,6 +2,7 @@ import path from "node:path";
 import { vi } from "vitest";
 import {
   getProductionGitWorkspaceFactory,
+  type GitWorkspace,
   type GitWorkspaceWriterFactory
 } from "./gitWorkspaceReader";
 
@@ -19,12 +20,20 @@ export const localPublicationOptions = (
       inspect: factory.inspect.bind(factory),
       open: async (root: string) => {
         const workspace = await factory.open(root);
+        const reader = workspace as GitWorkspace & {
+          fetchOrigin(request: { authentication?: unknown }): Promise<void>;
+          readRevisionFile(revision: string, file: string): Promise<string | null>;
+        };
         return {
           root: workspace.root,
           inspect: workspace.inspect.bind(workspace),
           remoteUrl: workspace.remoteUrl.bind(workspace),
           stage: workspace.stage.bind(workspace),
           commit: workspace.commit.bind(workspace),
+          fetchOrigin: () => reader.fetchOrigin({}),
+          resolveRevision: reader.resolveRevision.bind(reader),
+          readRevisionFile: reader.readRevisionFile.bind(reader),
+          isAncestor: reader.isAncestor.bind(reader),
           pushUpstream: () =>
             (workspace.pushUpstream as unknown as () => Promise<{ readonly kind: "pushed" }>)()
         };

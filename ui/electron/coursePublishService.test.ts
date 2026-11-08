@@ -33,7 +33,11 @@ afterEach(async () => {
 const fixture = (withUpstream = true): string => {
   const root = temporaryRoot("graider-course-publish-");
   fs.mkdirSync(path.join(root, "terms", "27s1", "rosters"), { recursive: true });
-  fs.writeFileSync(path.join(root, "course.yml"), "course:\n  code: CSC1120\n", "utf8");
+  fs.writeFileSync(
+    path.join(root, "course.yml"),
+    "schema_version: 1\ncourse:\n  code: CSC1120\n",
+    "utf8"
+  );
   fs.writeFileSync(path.join(root, "terms", "27s1", "term.yml"), "term: 27s1\n", "utf8");
   git(root, ["init"]);
   git(root, ["symbolic-ref", "HEAD", "refs/heads/main"]);
@@ -539,6 +543,26 @@ describe("course publish semantic status projection", () => {
 });
 
 describe("coursePublishService authenticated push regression", () => {
+  it.each([2, 99])(
+    "refuses authoritative schema %s from a stale Schema 1 clone before staging or committing",
+    async (schema) => {
+      const root = fixture();
+      writeCommentLibrary(root, "Preserved local work");
+      const source = git(root, ["rev-parse", "HEAD"]);
+      const writer = temporaryRoot("graider-authoritative-schema-");
+      git(writer, ["clone", path.join(root, "remote"), "."]);
+      git(writer, ["config", "user.name", "Fixture"]);
+      git(writer, ["config", "user.email", "fixture@example.test"]);
+      fs.writeFileSync(path.join(writer, "course.yml"), `schema_version: ${schema}\n`);
+      git(writer, ["commit", "-am", "Authoritative schema upgrade"]);
+      git(writer, ["push", "origin", "main"]);
+      const remote = git(writer, ["rev-parse", "HEAD"]);
+      expect((await publishCourseChanges(root, localPublicationOptions())).status).toBe("failure");
+      expect(git(root, ["rev-parse", "HEAD"])).toBe(source);
+      expect(git(root, ["diff", "--cached", "--name-only"])).toBe("");
+      expect(git(path.join(root, "remote"), ["rev-parse", "main"])).toBe(remote);
+    }
+  );
   it("pushes with the exact context paired with its authenticated factory", async () => {
     const root = fixture();
     writeCommentLibrary(root, "Authentication regression");
@@ -551,12 +575,20 @@ describe("coursePublishService authenticated push regression", () => {
         inspect: (repositoryPath: string) => backend.inspect(repositoryPath),
         open: async (repositoryPath: string) => {
           const workspace = await backend.open(repositoryPath);
+          const source = workspace as typeof workspace & {
+            fetchOrigin(request: object): Promise<void>;
+            readRevisionFile(revision: string, file: string): Promise<string | null>;
+          };
           return {
             root: workspace.root,
             inspect: () => workspace.inspect(),
             remoteUrl: () => workspace.remoteUrl("origin"),
             stage: workspace.stage.bind(workspace),
             commit: workspace.commit.bind(workspace),
+            fetchOrigin: () => source.fetchOrigin({}),
+            resolveRevision: workspace.resolveRevision.bind(workspace),
+            readRevisionFile: source.readRevisionFile.bind(source),
+            isAncestor: workspace.isAncestor.bind(workspace),
             pushUpstream: push
           };
         }

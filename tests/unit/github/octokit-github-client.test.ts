@@ -474,6 +474,24 @@ const expectGitHubError = async (
 };
 
 describe("OctokitGitHubClient", () => {
+  it("adds the course discovery topic while preserving existing topics and avoids repeat writes", async () => {
+    const octokit = createMockOctokit();
+    const topics = ["department-course"];
+    octokit.rest.repos.get = () => resolvedResponse({ topics: [...topics] });
+    const replace = vi.fn((parameters?: Record<string, unknown>) => {
+      const names = parameters?.names;
+      if (!Array.isArray(names) || !names.every((name): name is string => typeof name === "string"))
+        throw new Error("Invalid topic request.");
+      topics.splice(0, topics.length, ...names);
+      return resolvedResponse({ names });
+    });
+    octokit.rest.repos.replaceAllTopics = replace;
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    await client.setCourseRepositoryTopic(OWNER, REPO);
+    await client.setCourseRepositoryTopic(OWNER, REPO);
+    expect(topics).toEqual(["department-course", "graider-course"]);
+    expect(replace).toHaveBeenCalledOnce();
+  });
   afterEach(() => {
     vi.restoreAllMocks();
   });

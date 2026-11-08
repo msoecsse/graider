@@ -22,8 +22,8 @@ const writeFixture = (root: string, course = true): void => {
   fs.writeFileSync(
     path.join(root, "course.yml"),
     course
-      ? "course:\n  code: CSC1120\n  title: Data Structures\n  repository: csc1120\ngithub:\n  organization: graider-sandbox\nnotifications:\n  student_access_pages:\n    repository: csc1120/csc1120pages\n    base_url: https://csc1120.github.io/csc1120pages\n    branch: main\n"
-      : "course:\n  code: CSC1120\n  title: Data Structures\n",
+      ? "schema_version: 1\ncourse:\n  code: CSC1120\n  title: Data Structures\n  repository: csc1120\ngithub:\n  organization: graider-sandbox\nnotifications:\n  student_access_pages:\n    repository: csc1120/csc1120pages\n    base_url: https://csc1120.github.io/csc1120pages\n    branch: main\n"
+      : "schema_version: 1\ncourse:\n  code: CSC1120\n  title: Data Structures\n",
     "utf8"
   );
   fs.mkdirSync(path.join(root, "pages repo"), { recursive: true });

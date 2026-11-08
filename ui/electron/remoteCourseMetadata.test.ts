@@ -9,6 +9,19 @@ const v1 = fs.readFileSync("../tests/fixtures/config/valid-course/course.yml", "
 const v2 = fs.readFileSync("../tests/fixtures/config/schema-v2-course.yml", "utf8");
 
 describe("production course schema activation boundary", () => {
+  it("requires explicit trusted managed-operation schema support independently of legacy support", () => {
+    const metadata = loadMetadata();
+    expect(metadata.inspectManagedOperationCourse(v1, null)).toEqual({
+      status: "client_incompatible"
+    });
+    expect(metadata.inspectManagedOperationCourse(v1, [])).toEqual({
+      status: "client_incompatible"
+    });
+    expect(metadata.inspectManagedOperationCourse("schema_version: 99\n")).toEqual({
+      status: "unsupported_schema"
+    });
+    expect(metadata.inspectOperationCourse(v2).status).not.toBe("valid");
+  });
   it.each([2, 3])("refuses term schema %s even with operational v1 course metadata", (version) => {
     const content = fs
       .readFileSync("../tests/fixtures/config/schema-v2-term.yml", "utf8")

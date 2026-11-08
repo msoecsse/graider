@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { legacyCourseWriteIncompatible } from "./legacyCourseCompatibility.js";
 import { parseDocument } from "yaml";
 
 export interface StudentAccessPagesConfigInput {
@@ -26,6 +27,14 @@ const contained = (root: string, target: string): boolean => {
 export const saveStudentAccessPagesConfig = (
   input: StudentAccessPagesConfigInput
 ): StudentAccessPagesConfigResult => {
+  if (legacyCourseWriteIncompatible(input.courseFolderPath))
+    return {
+      status: "failure",
+      changed: false,
+      diagnostics: [
+        diagnostic("Schema 2 Access Pages require authoritative section/student mappings.")
+      ]
+    };
   const repository = input.repository.trim();
   const baseUrl = input.baseUrl.trim();
   const branch = input.branch.trim();

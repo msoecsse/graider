@@ -10,7 +10,7 @@ describe("trusted GitHub client provider", () => {
       status: "available" as const,
       githubClient: client
     }));
-    const load = vi.fn(() => ({ resolveProductionGitHubClient }));
+    const load = vi.fn(() => ({ resolveProductionGitHubClient, GITHUB_MUTATION_METHODS: [] }));
     const provide = createGithubClientProvider(load);
     expect(load).not.toHaveBeenCalled();
     expect(provide("resolved-secret")).toBe(client);
@@ -22,7 +22,8 @@ describe("trusted GitHub client provider", () => {
 
   it("rejects empty credentials before loading and safely handles unexpected missing resolution", () => {
     const load = vi.fn(() => ({
-      resolveProductionGitHubClient: vi.fn(() => ({ status: "token_missing" as const }))
+      resolveProductionGitHubClient: vi.fn(() => ({ status: "token_missing" as const })),
+      GITHUB_MUTATION_METHODS: []
     }));
     const provide = createGithubClientProvider(load);
     expect(() => provide(" ")).toThrow("GitHub client unavailable.");

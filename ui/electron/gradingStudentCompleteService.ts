@@ -1,4 +1,5 @@
 import path from "node:path";
+import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -85,6 +86,7 @@ export const createGradingStudentCompleteService = (
     if (repository.status !== "success") return repository;
     const head = await readHead(repository.localPath);
     if (head.status !== "success") return head;
+    await revalidateCourseOperation();
     return getBackend().markGradingStudentCompleteContext({
       courseFolderPath: request.courseFolderPath,
       termCode: request.termCode,

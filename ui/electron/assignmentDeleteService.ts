@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { legacyCourseWriteIncompatible } from "./legacyCourseCompatibility.js";
 
 import type {
   AssignmentDeleteRequest,
@@ -18,6 +19,12 @@ const isContainedPath = (root: string, target: string): boolean => {
 };
 
 export const deleteAssignment = (request: AssignmentDeleteRequest): AssignmentDeleteResult => {
+  if (legacyCourseWriteIncompatible(request.courseFolderPath))
+    return {
+      status: "failure",
+      path: request.assignmentFile,
+      diagnostics: [diagnostic("Schema 2 assignment deletion requires Phase 10 lifecycle/history.")]
+    };
   if (!request.confirmed)
     return {
       status: "failure",

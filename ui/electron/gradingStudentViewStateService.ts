@@ -1,4 +1,5 @@
 import path from "node:path";
+import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -158,6 +159,7 @@ export const createGradingStudentViewStateService = (
     },
     save: async (request) => {
       const prepared = await prepare(request);
+      if (prepared.status === "success") await revalidateCourseOperation();
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().saveGradingStudentViewStateContext({
@@ -167,6 +169,7 @@ export const createGradingStudentViewStateService = (
     },
     clear: async (request) => {
       const prepared = await prepare(request);
+      if (prepared.status === "success") await revalidateCourseOperation();
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().clearGradingStudentViewStateContext(prepared.backendRequest);

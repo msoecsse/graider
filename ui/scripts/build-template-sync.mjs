@@ -115,6 +115,9 @@ await build({
     remoteCourseMetadataBackend: fileURLToPath(
       new URL("./remoteCourseMetadataBackend.ts", import.meta.url)
     ),
+    managedOperationBackend: fileURLToPath(
+      new URL("./managedOperationBackend.ts", import.meta.url)
+    ),
     reviewImportBackend: fileURLToPath(new URL("./reviewImportBackend.ts", import.meta.url)),
     termActivationBackend: fileURLToPath(new URL("./termActivationBackend.ts", import.meta.url))
   },

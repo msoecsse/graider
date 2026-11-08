@@ -1885,9 +1885,21 @@ remain directory metadata; renderer assertions, machine-local settings and cache
 faculty arrays cannot establish identity or role authority. Setup cannot publish
 until the required explicit selections and identity verification are complete.
 
-This is the approved creation policy for #23 to implement. The current local setup
-wizard still emits Schema 1; this decision does not implement remote Schema 2 setup,
-change standalone/legacy workflows or enable production migration.
+Slice 9.5G implements this policy through **Create remote course**. Main verifies
+the authenticated creator and every explicit coordinator/section-faculty selection,
+retains an account/window-scoped review and repeats verification before creating
+anything. It requires current owner privileges in the selected existing organization.
+The private repository's immutable identity anchors canonical Schema 2 course metadata
+and an initial never-Active Draft. The existing isolated Git transaction publishes
+metadata before Phase 7 teams, permissions, branch policy and discovery topic setup.
+Pending/failed external configuration reports Needs attention without undoing metadata
+or automatically retrying creation. No migration is required for a newly created course.
+
+The separate **Set up course folder** wizard retains standalone/legacy Schema 1
+preparation. It cannot replace authoritative Schema 2 through a stale folder or a
+deleted local metadata file. See the [current operation support and trust boundary](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g).
+Term activation still requires trusted execution evidence that is unavailable in the
+current production composition. Production migration remains disabled.
 
 ---
 

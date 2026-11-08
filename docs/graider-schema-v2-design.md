@@ -7,6 +7,13 @@
 
 ## 1. Purpose and boundaries
 
+Slice 9.5G adds canonical new remote course/Draft-term generation and a closed trusted
+operation bridge. Its [support matrix](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g)
+is authoritative for current availability. Generic legacy parsers/aggregate writers
+remain Schema 1-only; later logical domains below are not enabled by parser support.
+The separate standalone setup wizard still emits Schema 1. No new course needs
+migration, and production migration/release enablement remains unchanged.
+
 Schema v2 describes durable Graider domain state in the private course/admin
 repository. It deliberately does not prescribe Zod declarations, exact YAML
 versus JSON boundaries, or one file per structure. The

@@ -1,7 +1,7 @@
 # Graider Faculty User Guide
 
-Graider is a desktop app for managing GitHub-based course assignments from a
-local course folder. Use a safe sandbox course first when trying actions that
+Graider is a desktop app for GitHub-backed courses, with discovered managed courses
+and separate legacy local course folders. Use a safe sandbox course first when trying actions that
 create repositories, push a grading workflow, or dispatch grading.
 
 ## What Graider Does
@@ -27,11 +27,12 @@ Graider helps faculty:
 
 ## Before You Start
 
-You need a local course folder, access to its GitHub organization and course
-repository, and GitHub authentication. For most faculty, open Terminal once and
-run `gh auth login`, then start Graider and check that the dashboard reports
-GitHub authentication as connected. The packaged app includes Graider itself;
-you do not need a separate CLI install.
+For managed courses, use **Sign in to GitHub** in Graider and authorize course access.
+Courses are discovered and synchronized for that account; no manual admin-repository
+clone or GitHub CLI sign-in is required. Creating a remote course requires owner
+privileges in an existing GitHub organization. The packaged app includes Graider
+and its Git engine; you do not need a separate CLI install. Separate legacy CLI/local
+workflows retain their existing authentication requirements.
 
 ## Publish Course Changes
 
@@ -89,8 +90,19 @@ faculty retain their permitted historical views; fallback administration alone d
 not grant student or section access.
 
 Shared archived Schema 2 courses appear through **Show archived** and continue to
-synchronize. Course editing and student operations for Schema 2 are unavailable in
-this version. Production course upgrades remain disabled. An incompatible or newer
+synchronize. **Course details** includes **Inspect authorized rosters** and **Read
+shared comments** as read-only evidence. A coordinator can explicitly choose
+**Expand to all sections as coordinator**; the backend still verifies that role.
+Fallback administration alone exposes no students or shared comments. Eligible
+administrators/coordinators see **Archive course** or **Unarchive course** only when
+the lifecycle/readiness guards allow it; saving changes the remote course state.
+
+Assignment/roster editing, Apply, student repository downloads/updates, grading,
+report publication, workflow/template changes and Access Pages for Schema 2 remain
+unavailable pending their later phase services. Term activation/deletion/recovery
+also remains unavailable without complete trusted execution evidence. Draft terms
+cannot run student-facing work. Archived and former-role access never bypasses these
+limits. Production course upgrades remain disabled. An incompatible or newer
 schema requires an update; Graider will not open a stale Schema 1 cache as a workaround.
 If the remote course changed or freshness cannot be verified, refresh courses before
 opening its details. Your local files are preserved.
@@ -108,11 +120,44 @@ GitHub repositories, student repositories, GitHub Classroom resources, or
 generated local artifacts; create the assignment again with **New Assignment**
 when needed.
 
-## Set Up a Course and Term
+## Create a Remote Course
 
-For a new course, use the course setup wizard. Provide the course title and
+1. Choose **Create remote course** after signing in.
+2. Select an existing organization where you have owner privileges, then enter a
+   new private repository name, course details, your institutional username and
+   initial term code (`YYs1`, `YYs2` or `YYs3`).
+3. Explicitly select at least one coordinator by institutional and GitHub username.
+   You become fallback administrator automatically, with no automatic coordinator
+   role. **Select me as a coordinator** is an explicit choice.
+4. Select section faculty separately. Neither fallback nor coordinator status makes
+   someone section faculty. Graider independently verifies every selected GitHub
+   account; institutional usernames are directory metadata.
+5. Choose **Verify setup**, review the verified account IDs and roles, then choose
+   **Create private course**. Identities and organization access are checked again.
+
+The new course uses Schema 2 immediately and starts with an Unarchived course and
+a never-Active Draft term. It does not need migration. Graider publishes metadata,
+then configures managed GitHub teams, permissions, branch protection and discovery.
+Refresh courses to synchronize and open Course details. Student-facing operations
+remain unavailable as described above; creating the course does not activate its term.
+
+If GitHub invitations or external setup need attention, the published course is
+preserved. Check the account/organization and repository before retrying anything;
+Graider does not silently recreate or delete a partially configured course. An
+unconfirmed creation result also requires checking whether the repository exists.
+Changing account or closing the setup window invalidates its review.
+
+## Set Up a Legacy Course Folder and Term
+
+For standalone/legacy Schema 1 preparation, use **Set up course folder**. Provide the course title and
 code, GitHub organization, term code, and one or more section IDs. You may add
 roster uploads during setup.
+
+Use a new folder outside an existing Git repository for standalone preparation.
+Registered existing Git courses require current authenticated remote access. The
+legacy wizard cannot replace Schema 2 or use a stale Schema 1 cache to downgrade it.
+The roster, assignment, grading and publication instructions below describe existing
+Schema 1 operations unless a section explicitly says Schema 2.
 
 The wizard writes these local files after confirmation:
 

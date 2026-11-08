@@ -9,6 +9,15 @@
 
 ## 1. Storage classes
 
+Current [Slice 9.5G adapters](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g)
+read preserved roster/comment evidence in place after authorization. They do not
+relocate student identity, grading, comments or assignment state into the illustrative
+future paths below. New remote setup publishes canonical `course.yml` and
+`terms/<term>/term.yml`, with faculty directory and current/former roles in the existing
+Phase 6–8 serialization. Main-owned setup intent journals are account/repository-scoped
+local reconciliation aids, outside the worktree; they contain no credentials and
+cannot restore role or publication authority.
+
 Graider v2 has three deliberately different storage models:
 
 | Storage class           | Owner and synchronization                                                                                    | Purpose                                                                                                                    |

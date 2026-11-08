@@ -1255,11 +1255,19 @@ reconciliation and #25 the warning/acknowledgement UI. Production publication re
 disabled, Setup remains Schema 1, and Phase 3 plus verified compatible releases on both
 supported platforms remain prerequisites. Stop after #22; do not begin #23 here.
 
-Issue #30 resolves the new-course setup authority decision with **Option A**; see
-the [canonical initial authority policy](graider-remote-course-architecture.md#initial-authority--approved-option-a-30).
-Its product-decision blocker on #23 is resolved. #23's operation bridge and remote
-Schema 2 setup remain unimplemented; this documentation decision enables neither
-production migration nor Phase 3 release readiness.
+Slice 9.5G / #23 implements the schema-discriminated managed-operation bridge and
+remote Schema 2 setup under [#30's approved Option A](graider-remote-course-architecture.md#initial-authority--approved-option-a-30).
+The [final operation matrix](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g)
+distinguishes supported metadata/setup, adapted scoped read-only evidence and course
+lifecycle, and intentionally unavailable later-phase or missing-evidence operations.
+Legacy Schema 1 behavior remains isolated; stale caches, legacy routes, runtime writes,
+publication retries and CLI writes must establish current authoritative compatibility.
+
+The existing aggregate Schema 1 gates remain unchanged; closed managed adapters have
+their own Schema 1/2 support declaration. This is neither a compatible production-release
+attestation nor production migration enablement. #24/#25, Phase 3 signing/distribution/
+updates and verified compatible releases on macOS arm64/Windows x64 remain dependencies.
+No Phase 10–14 behavior is added. Stop after #23; do not begin #24 in this task.
 
 ---
 

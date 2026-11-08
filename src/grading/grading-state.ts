@@ -1,5 +1,6 @@
 import { courseRuntimePath } from "../core/course-runtime-paths.js";
 import fs from "node:fs";
+import { legacyCourseWriteIncompatible } from "../config/legacy-course-compatibility.js";
 import path from "node:path";
 import { z } from "zod";
 import { reviewProvenanceSchema } from "../review-import/review-schema.js";
@@ -281,6 +282,12 @@ export const saveGradingState = (
   request: GradingStatePathRequest,
   state: GradingState
 ): GradingStateResult<undefined> => {
+  if (legacyCourseWriteIncompatible(request.courseRoot))
+    return {
+      status: "failure",
+      code: "schema_operation_unavailable",
+      message: "Schema 2 grading requires Phase 14 remote persistence."
+    };
   const statePath = createGradingStatePath(request);
   if (statePath.status === "failure")
     return { status: "failure", code: statePath.code, message: statePath.message };

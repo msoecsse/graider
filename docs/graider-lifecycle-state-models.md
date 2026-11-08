@@ -9,6 +9,13 @@
 
 ## 1. Modeling conventions
 
+Current production composition is limited by the [Slice 9.5G operation matrix](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g).
+New remote courses start Unarchived with a never-Active Draft. Course archive/unarchive
+uses the complete Phase 8.6 adapter; term lifecycle execution remains unavailable
+without complete trusted target/reconciliation/activity evidence. Pure policy or
+checkpoint support never authorizes a later-phase student operation. Historical
+slice progress notes below do not override this current support boundary.
+
 The diagrams show domain transitions, not UI navigation or Git operations.
 Authorization is always resolved from the actor's immutable GitHub user ID and
 the persisted role history. A transition is successful only after the

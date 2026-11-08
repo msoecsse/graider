@@ -1,5 +1,7 @@
 import type { GitHubClient } from "./github-client.js";
 import { createGitHubClient } from "./github-client-factory.js";
+import { guardProductionLegacyClient } from "../execution/authoritative-legacy-course.js";
+export { GITHUB_MUTATION_METHODS } from "../execution/authoritative-legacy-course.js";
 
 export const GRAIDER_GITHUB_TOKEN_ENV = "GRAIDER_GITHUB_TOKEN";
 export const GITHUB_TOKEN_ENV = "GITHUB_TOKEN";
@@ -19,13 +21,16 @@ export const resolveProductionGitHubClient = (
   options: ProductionGitHubClientOptions = {}
 ): ProductionGitHubClientResolution => {
   if (options.githubClient !== undefined) {
-    return { status: "available", githubClient: options.githubClient };
+    return { status: "available", githubClient: guardProductionLegacyClient(options.githubClient) };
   }
 
   const token = normalizeToken(options.token) ?? readGitHubToken(options.env);
   return token === undefined
     ? { status: "token_missing" }
-    : { status: "available", githubClient: createGitHubClient({ token }) };
+    : {
+        status: "available",
+        githubClient: guardProductionLegacyClient(createGitHubClient({ token }))
+      };
 };
 
 export function readGitHubToken(

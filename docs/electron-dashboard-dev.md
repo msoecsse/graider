@@ -15,6 +15,25 @@ in the [Electron Assignment Detail Developer Guide](electron-assignment-detail-d
 
 ## Overview
 
+Current Schema 2 flows are defined by the [Slice 9.5G operation matrix](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g).
+`RemoteCourseSetupPage` uses narrow preview/create/close APIs. Main retains and
+revalidates verified selections; create receives only an opaque review ID and
+confirmation. `RemoteCourseSetupService` publishes canonical Draft metadata through
+the existing transaction, then composes Phase 7 policies. Its local setup journal
+contains scoped intent keys, never credentials or executable authority.
+
+`ManagedCourseOperationsPanel` exposes read-only scoped roster/library evidence and
+eligible archive/unarchive actions. `ManagedCourseInspection` includes the current
+read revision and non-executable action availability. Lifecycle saves revalidate
+independently, and invalidate open views. A coordinator's explicit expansion remains
+a backend-evaluated scope request. New term lifecycle preflight returns Needs attention
+when trusted execution evidence is absent. Historical UI-1/UI-2 descriptions below
+do not imply availability of later-phase Schema 2 writers.
+
+Specific IPC additions are `remote-course-setup:preview`, `remote-course-setup:create`,
+`remote-course-setup:close`, `managed-course:lifecycle` and `managed-term:lifecycle`
+under the existing `graider-ui:` namespace. There is no generic mutation/validator API.
+
 The UI is an Electron desktop dashboard with a React/TypeScript/Vite renderer. UI-1 provides a read-only multi-course dashboard for faculty:
 
 - Stores local Graider course admin folders in an Electron user-data registry.

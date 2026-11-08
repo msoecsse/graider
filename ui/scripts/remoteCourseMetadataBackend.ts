@@ -14,6 +14,7 @@ import {
   rawAssignmentConfigSchema,
   COURSE_SCHEMA_VERSION_V2,
   OPERATIONAL_DISCOVERY_SCHEMA_VERSIONS,
+  OPERATIONAL_MANAGED_SCHEMA_VERSIONS,
   OPERATIONAL_COURSE_SCHEMA_VERSION,
   OPERATIONAL_TERM_SCHEMA_VERSION
 } from "../../src/config/config-schemas.js";
@@ -107,6 +108,10 @@ export const inspectCourse = (
 };
 export const inspectOperationCourse = (content: string) =>
   inspectCourse(content, [OPERATIONAL_COURSE_SCHEMA_VERSION]);
+export const inspectManagedOperationCourse = (
+  content: string,
+  schemas: readonly number[] | null = OPERATIONAL_MANAGED_SCHEMA_VERSIONS
+) => inspectCourse(content, schemas);
 
 /** Trusted metadata projection. The caller proves exact remote revision and account freshness.
  * This capability authorizes metadata reads only; it never enables a legacy operation on v2.
@@ -336,3 +341,8 @@ export const validateTransaction = (root: string, organization: string): void =>
 };
 
 export { registerCourseRuntimeRoot } from "../../src/core/course-runtime-paths.js";
+export {
+  legacyCourseWriteIncompatible,
+  legacyCourseContentIncompatible
+} from "../../src/config/legacy-course-compatibility.js";
+export { readManagedOperationCapabilities as inspectManagedOperationCapabilities } from "./managedOperationBackend.js";

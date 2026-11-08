@@ -1,4 +1,5 @@
 import { getMigrationReviewPath } from "./routePaths";
+import { ManagedCourseOperationsPanel } from "./ManagedCourseOperationsPanel";
 import { ManagedOperationalSourceControls } from "./ManagedOperationalSourceControls";
 import { ManagedCacheReview } from "./ManagedCacheReview";
 import { synchronizationLabel } from "../../electron/remoteCourseTypes";
@@ -251,7 +252,7 @@ export const RemoteCoursesPanel = ({
                   course.synchronization?.status !== "needs_attention" ? (
                     <p>
                       {course.schemaVersion === 2
-                        ? "Course details are available. Course editing and student operations are unavailable in this version."
+                        ? "Course details, authorized read-only rosters and shared comments are available. Lifecycle actions require current authority and readiness. Student operations are unavailable in this version."
                         : "Open this course from the course dashboard."}
                     </p>
                   ) : null}
@@ -316,6 +317,14 @@ export const RemoteCoursesPanel = ({
                 {inspection.code} — {inspection.title}
               </h3>
               <p>Managed course metadata. Updated at startup and when you refresh courses.</p>
+              {inspection.operations && current?.userId ? (
+                <ManagedCourseOperationsPanel
+                  key={`${current.userId}:${inspection.repositoryId}:${inspection.revision}`}
+                  inspection={inspection}
+                  userId={current.userId}
+                  onChanged={onRefresh}
+                />
+              ) : null}
               <ul>
                 {inspection.terms.map((term) => (
                   <li key={term}>

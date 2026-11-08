@@ -1,6 +1,6 @@
 # Graider Authorization and Visibility Matrix
 
-**Status:** design contract for later authorization tests
+**Status:** canonical authorization contract; Phase 6–8 policies with closed Phase 9.5G production adapters
 
 **Authority:** [remote course architecture](graider-remote-course-architecture.md)
 
@@ -293,3 +293,12 @@ Every “Allowed” result remains subject to these guards:
 
 GitHub team reconciliation follows the persisted result of these rules. It
 does not define them.
+
+Slice 9.5G composes these policies with current main-owned account, repository,
+schema/revision and readiness checks. Its [operation support matrix](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g)
+defines which services are actually available. An Allowed policy result does not
+make a deferred writer available. Roster/library evidence is read only; lifecycle
+and historical scope are enforced without local-username fallback. In particular,
+fallback alone sees no section students or shared comments, and former-only roles
+gain no mutation authority. Historical implementation notes above retain their
+original slice boundaries; current adapter support is defined by that matrix.

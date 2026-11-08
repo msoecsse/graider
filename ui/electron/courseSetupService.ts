@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { legacyCourseWriteIncompatible } from "./legacyCourseCompatibility.js";
 
 import { parseAndValidateRosterCsv, parseRosterCsvText } from "./rosterSharedService.js";
 import type {
@@ -276,6 +277,15 @@ const withConflicts = (
   files.map((file) => ({ ...file, exists: fs.existsSync(path.join(courseFolderPath, file.path)) }));
 
 export const previewCourseSetup = (request: CourseSetupRequest): CourseSetupPreviewResult => {
+  if (legacyCourseWriteIncompatible(request.courseFolderPath))
+    return {
+      status: "invalid",
+      files: [],
+      hasConflicts: true,
+      diagnostics: [
+        createDiagnostic("This course schema cannot be replaced through legacy Course Setup.")
+      ]
+    };
   const generated = getFiles(request);
   const files = withConflicts(request.courseFolderPath, generated.files);
 

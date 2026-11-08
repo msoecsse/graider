@@ -36,6 +36,12 @@ export interface ManagedOperationInput {
   readonly signal: AbortSignal;
   readonly revalidateSession: () => Promise<boolean>;
 }
+export interface AuthenticatedAccountOperation {
+  readonly token: string;
+  readonly userId: number;
+  readonly signal: AbortSignal;
+  readonly revalidateSession: () => Promise<boolean>;
+}
 interface Dependencies {
   readonly store: GithubOAuthCredentialStore;
   readonly secret: () => string | undefined;
@@ -91,6 +97,45 @@ export class GithubOAuthSession {
   private accountGeneration = 0;
   get mutationGeneration(): number {
     return this.accountGeneration;
+  }
+  /** Main-only bootstrap boundary, before a new course can exist in discovery. */
+  async withAuthenticatedAccount<T>(
+    operation: (input: AuthenticatedAccountOperation) => Promise<T>
+  ): Promise<T> {
+    const token = this.token;
+    const userId = this.state.identity?.id;
+    const generation = this.accountGeneration;
+    if (!token || !userId || this.active || this.stopped)
+      throw new Error("Sign in and authorize course access before setup.");
+    const controller = new AbortController();
+    const current = () =>
+      !this.stopped &&
+      !this.active &&
+      !controller.signal.aborted &&
+      generation === this.accountGeneration &&
+      token === this.token &&
+      this.state.identity?.id === userId;
+    const input: AuthenticatedAccountOperation = {
+      token,
+      userId,
+      signal: controller.signal,
+      revalidateSession: async () =>
+        current() &&
+        (await this.deps.network.identity(token, controller.signal)).id === userId &&
+        (await this.deps.network.repositoryCapability(token, controller.signal)) &&
+        (await this.deps.network.organizationCapability(token, controller.signal)) &&
+        current()
+    };
+    this.courseOperations.add(controller);
+    try {
+      if (!(await input.revalidateSession())) throw new Error("Account authorization changed.");
+      const result = await operation(input);
+      if (!current())
+        throw new Error("Account authorization changed. Refresh course setup status.");
+      return result;
+    } finally {
+      this.courseOperations.delete(controller);
+    }
   }
   private readonly reconciliations = new Map<number, AbortController>();
   private readonly courseOperations = new Set<AbortController>();

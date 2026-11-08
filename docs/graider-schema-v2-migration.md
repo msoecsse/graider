@@ -108,8 +108,11 @@ Before publication:
 
 Implementation readiness and production-release availability are separate facts.
 Discovery, synchronization and metadata access explicitly support **1 and 2** after
-Slice 9.5F; generic course/term operation gates remain **1** pending #23. Access support,
-v2 parsing and pure migration artifacts do not prove full operational v2 support. Validator development may
+Slice 9.5F. Slice 9.5G additionally declares **1 and 2** for its closed managed-operation
+bridge; legacy aggregate course/term services retain their **1** gates. See the
+[operation support matrix](#implemented-managed-operation-bridge-slice-95g) for supported
+adapters and explicit unavailable families. Access support, v2 parsing and pure
+migration artifacts do not prove production migration readiness. Validator development may
 use synthetic evidence, but production publication remains disabled while any
 required technical condition, acknowledgement or release availability is unproven.
 No new release service or proof mechanism is authorized by this decision.
@@ -726,3 +729,78 @@ Deterministic mixed-schema, role/lifecycle/identity/compatibility tests and real
 Git tests cover immediate rediscovery, stale-v1 inspection refusal, synchronization to v2,
 authorization loss and zero stale mutation/overwrite/downgrade. macOS arm64/Windows x64
 release and CI prerequisites remain independent of local test success.
+
+### Implemented managed-operation bridge (Slice 9.5G)
+
+`ManagedCourseMutationGuard` discriminates the freshly synchronized authoritative
+schema before consulting a local institutional username. Schema 2 enters only
+`performManagedV2Operation`; it never invokes the legacy handler. The bridge uses
+immutable authenticated GitHub identity, complete course/term/role validation,
+`AuthorizationResolver`, Draft/Archived overlays and current remote revision checks.
+Section reads load only authorized roster files. Coordinator expansion is explicit;
+fallback alone receives administrative metadata, without students or shared comments.
+Former roles retain their permitted historical reads, with no new mutation authority.
+
+The default aggregate validators remain Schema 1-only. The separate
+`OPERATIONAL_MANAGED_SCHEMA_VERSIONS` declaration enables only the closed adapters
+below. Unknown/missing operational support and unsupported versions fail closed.
+Renderer-supplied scope is a request evaluated by the resolver, never evidence.
+
+| Operation family                                                                            | Final Schema 2 support                                                              | Boundary or dependency                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Discovery, synchronization, course/term/assignment metadata                                 | Supported (#22)                                                                     | Exact remote revision, immutable course/org/account identity and lifecycle-filtered metadata.                                                                                                                                                                        |
+| Course archive/unarchive                                                                    | Adapted                                                                             | Main-owned request, exact read revision, Phase 8.6 authorization/checkpoint guards and existing `course.yml`-only transaction. No GitHub repository archive or permission change.                                                                                    |
+| Term activation, Draft deletion, rollback, accept-current/restore-predecessor               | Policy adapted; execution intentionally unavailable when trusted evidence is absent | Production has no complete current student-target inventory, durable lifecycle reconciliation composition or exact-source remote activity-absence provider. Authorized requests return typed Needs attention; no empty target list substitutes for unknown evidence. |
+| First student-facing activity marker                                                        | Internal barrier retained; no standalone production authority                       | Student operations below remain unavailable. A marker must never authorize their execution by itself.                                                                                                                                                                |
+| Scoped roster terms, section roster and summaries                                           | Adapted read-only evidence                                                          | Current/historical section scope with Draft/Archived overlays. CSV usernames are preserved evidence, not canonical Phase 13 identities.                                                                                                                              |
+| Shared reusable comment library                                                             | Adapted read-only evidence                                                          | Requires a qualifying term relationship; fallback alone has no library authority. No ownership or history is fabricated.                                                                                                                                             |
+| Existing-course configuration, term creation, fallback transfer/coordinator handoff         | Intentionally unavailable                                                           | Complete persisted/audited operation services are not installed. Legacy configuration replacement cannot overwrite v2 identity/history.                                                                                                                              |
+| Roster/section/faculty/enrollment mutations                                                 | Intentionally unavailable                                                           | Phases 11/13, with Phase 14 for grading placement on transfer. Exceptional correction policy is not a corrective writer.                                                                                                                                             |
+| Assignment create/edit/copy/delete/owners/groups/lifecycle                                  | Intentionally unavailable                                                           | Phase 10 and section operations in Phase 11. Staged migration definitions remain evidence.                                                                                                                                                                           |
+| Apply/provisioning/schedules/usage                                                          | Intentionally unavailable                                                           | Phases 11/13 and trusted target/readiness evidence. Draft student-facing execution and Archived provisioning remain prohibited.                                                                                                                                      |
+| Student repository mapping/download/pull/snapshot/source/history                            | Intentionally unavailable                                                           | Phases 12/13 authoritative repository-to-student/section scope. A local clone or username cannot establish it.                                                                                                                                                       |
+| Student/template workflow save/repair/replacement and template distribution                 | Intentionally unavailable                                                           | Phases 10/11/13/16. Template IPC requires the source course selector.                                                                                                                                                                                                |
+| Grading dispatch, workspace/state, comments/adjustments/completion/view state/review import | Intentionally unavailable                                                           | Phase 14 canonical remote persistence/audit, with Phase 15 concurrency. Runtime-only saves cannot stand in for remote durability.                                                                                                                                    |
+| Faculty/student reports and individual/bulk publication                                     | Intentionally unavailable                                                           | Proven record/submission/repository placement and Phase 14 durable publication history. Archived late-work policy alone does not supply storage.                                                                                                                     |
+| Comment-library mutations                                                                   | Intentionally unavailable                                                           | Immutable ownership/history workflow; preserved unknown ownership grants no edit/delete authority.                                                                                                                                                                   |
+| Student Access Pages settings/generation/publication/derived refresh                        | Intentionally unavailable                                                           | Authoritative section/enrollment/repository mappings and supported operations.                                                                                                                                                                                       |
+| Generic transactions, manual publication/retry, legacy cutover/source update                | No generic v2 mutation authority                                                    | Only operation-specific trusted adapters may validate v2 transactions. Legacy paths and stale caches fail closed.                                                                                                                                                    |
+| New remote course setup                                                                     | Supported through trusted setup adapter                                             | Approved #30 Option A; verified creator, explicit verified coordinators and independently verified section faculty. Canonical unarchived course/initial Draft, no migration requirement.                                                                             |
+| Migration publication/reconciliation UI and orchestration                                   | Production migration remains disabled                                               | Existing #20/#21 refusal remains. #24/#25 and Phase 3/platform-release prerequisites are unchanged.                                                                                                                                                                  |
+
+The mutation inventory includes course-admin IPC, grading/runtime writes, review
+import, downloads, workflow/template operations, publication and derived refresh.
+Runtime writes are no longer treated as reads merely because they do not commit
+course-admin files. Main-owned freshness closures are rechecked after awaited
+preparation and before GitHub/Git writes. They never cross IPC. The existing
+transaction also revalidates/fetches before its mutator, retaining serialization,
+scoped staging, exact-base/pre-push checks and non-force publication.
+
+Previously undiscovered registered Git folders require fresh authenticated remote
+Schema 1 access before legacy reads. Missing discovery/account evidence cannot
+restore an old route. Local standalone Schema 1 preparation is separate. Legacy
+writers reject explicit v2/unknown course schemas even when a cached term still
+contains v1 username arrays. Legacy publication independently fetches and reads
+`course.yml` at the current remote SHA before staging and again before pushing;
+source advancement cannot publish a downgrade. The production CLI performs the
+corresponding authoritative check before mutation commands and before each GitHub
+write. No parser flag, environment assertion or generic validation override enables v2.
+
+New remote setup retains the verified review in main, scoped to its owning window,
+account and generation. Creation accepts only its opaque review ID plus confirmation;
+identities/organization privileges and repository absence are checked again before
+creation. The private repository is initialized to obtain an exact Git base, then
+canonical metadata is published through the existing isolated transaction. Existing
+Phase 7 organization/team/permission/branch reconcilers run afterward, with durable
+account/repository-scoped setup intent keys outside the worktree, followed by the
+discovery topic and synchronization. Pending/failed external setup is explicit Needs
+attention; published metadata is preserved and creation is never silently retried.
+No students, assignments, canonical grading records or migration audit are invented.
+
+Any migration/reconciliation artifact lacking a complete trusted readiness adapter
+blocks course lifecycle mutation. This slice deliberately does not implement #24's
+post-migration orchestration, #25's upgrade UI/acknowledgement, later domain phases,
+compatible production-release evidence or Phase 3 signing/distribution/updates.
+Production migration stays disabled. The earlier slice summaries above describe
+their historical implementation boundaries; this section defines current operation
+support without enabling their deferred features.

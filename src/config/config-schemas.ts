@@ -15,6 +15,11 @@ export const OPERATIONAL_DISCOVERY_SCHEMA_VERSIONS: readonly number[] = Object.f
   SUPPORTED_SCHEMA_VERSION,
   COURSE_SCHEMA_VERSION_V2
 ]);
+// Closed main-process adapters declare support separately from legacy aggregate services.
+export const OPERATIONAL_MANAGED_SCHEMA_VERSIONS: readonly number[] = Object.freeze([
+  SUPPORTED_SCHEMA_VERSION,
+  COURSE_SCHEMA_VERSION_V2
+]);
 export const SUPPORTED_ASSIGNMENT_TYPE = "individual";
 export const SUPPORTED_REPOSITORY_VISIBILITY = "private";
 export const STUDENT_PERMISSION = "admin";

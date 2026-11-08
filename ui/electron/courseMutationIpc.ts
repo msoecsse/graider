@@ -13,9 +13,13 @@ import {
   type ManagedCourseMutationGuard
 } from "./managedCourseMutationGuard.js";
 import { COURSE_MUTATION_NOTICE } from "./managedCourseMutationTypes.js";
+import { COURSE_RUNTIME_MUTATION_CHANNELS } from "./managedOperationInventory.js";
 
 /** Explicit inventory: all handlers are wrapped before their first local/remote write. */
 export const COURSE_MUTATION_CHANNELS: readonly string[] = [
+  IPC_CHANNELS.changeManagedCourseLifecycle,
+  IPC_CHANNELS.changeManagedTermLifecycle,
+  ...COURSE_RUNTIME_MUTATION_CHANNELS,
   IPC_CHANNELS.saveCourseSetup,
   IPC_CHANNELS.saveRoster,
   IPC_CHANNELS.removeRoster,
@@ -323,6 +327,18 @@ export const createCourseMutationIpc = (
             typeof request === "object" && request !== null
               ? (request as Record<string, unknown>)
               : {};
+          const schemaRequest = {
+            channel,
+            fields,
+            onChanged: (_context: VerifiedCourseMutationContext) => {
+              for (const sender of [event.sender, ...views()]) {
+                if (!sender.isDestroyed()) {
+                  invalidate(sender);
+                  sender.send(COURSE_MUTATION_NOTICE, { status: "view_invalidated" });
+                }
+              }
+            }
+          };
           const setup =
             channel === IPC_CHANNELS.saveCourseSetup || channel === IPC_CHANNELS.previewCourseSetup
               ? resolveSetup?.(fields.courseFolderPath)
@@ -344,10 +360,10 @@ export const createCourseMutationIpc = (
             transaction = false,
             afterPublication?: Array<() => Promise<unknown>>
           ) => {
-            if (!context?.managed || !root) return handler(event, ...args);
+            if (!context || !root) return handler(event, ...args);
             const { expectedCourseRevision: _expected, ...domainFields } = fields;
             const projectedArgs =
-              request && typeof request === "object"
+              context.managed && request && typeof request === "object"
                 ? [
                     {
                       ...domainFields,
@@ -368,6 +384,7 @@ export const createCourseMutationIpc = (
               },
               () => handler(event, ...projectedArgs)
             );
+            if (!context.managed) return result;
             const publicResult = projectManagedCourseResult(
               result,
               root,
@@ -392,34 +409,39 @@ export const createCourseMutationIpc = (
               return invoke(context);
             }
             return boundary
-              .read(folderId, fields.courseFolderPath, async (context) => {
-                if (context?.managed) {
-                  if (
-                    EDIT_PREVIEWS.includes(channel) &&
-                    (channel !== IPC_CHANNELS.previewCourseSetup ||
-                      fields.expectedCourseRevision !== undefined)
-                  )
-                    requireReadRevision(fields.expectedCourseRevision, context);
-                  bind(event.sender, context);
-                  if (channel === IPC_CHANNELS.getCoursePublishStatus)
-                    return {
-                      status: "up_to_date",
-                      courseFolderPath: context.legacyFolderPath,
-                      currentBranch: null,
-                      upstreamBranch: null,
-                      aheadCount: 0,
-                      allowedChangedFiles: [],
-                      unrelatedChangedFiles: [],
-                      diagnostics: [
-                        {
-                          message:
-                            "Managed course changes publish atomically. No pending course changes."
-                        }
-                      ]
-                    };
-                }
-                return invoke(context);
-              })
+              .read(
+                folderId,
+                fields.courseFolderPath,
+                async (context) => {
+                  if (context?.managed) {
+                    if (
+                      EDIT_PREVIEWS.includes(channel) &&
+                      (channel !== IPC_CHANNELS.previewCourseSetup ||
+                        fields.expectedCourseRevision !== undefined)
+                    )
+                      requireReadRevision(fields.expectedCourseRevision, context);
+                    bind(event.sender, context);
+                    if (channel === IPC_CHANNELS.getCoursePublishStatus)
+                      return {
+                        status: "up_to_date",
+                        courseFolderPath: context.legacyFolderPath,
+                        currentBranch: null,
+                        upstreamBranch: null,
+                        aheadCount: 0,
+                        allowedChangedFiles: [],
+                        unrelatedChangedFiles: [],
+                        diagnostics: [
+                          {
+                            message:
+                              "Managed course changes publish atomically. No pending course changes."
+                          }
+                        ]
+                      };
+                  }
+                  return invoke(context);
+                },
+                schemaRequest
+              )
               .catch((error) => {
                 if (error instanceof CourseMutationBlocked && !event.sender.isDestroyed())
                   event.sender.send(COURSE_MUTATION_NOTICE, error.result);
@@ -465,7 +487,14 @@ export const createCourseMutationIpc = (
                     "Account authorization changed since this view was loaded. Refresh the view before continuing.",
                     "refresh_view"
                   );
-                if (!context?.managed) return handler(event, ...args);
+                if (!context?.managed) return invoke(context);
+                const loadedRevision = bindings.get(event.sender)?.get(courseKey(context));
+                if (loadedRevision && loadedRevision !== context.authoritativeCommit)
+                  blockMutation(
+                    "view_refresh_required",
+                    "The authoritative course changed since this workspace was loaded. Reopen it before writing.",
+                    "refresh_view"
+                  );
                 changed(event.sender, courseKey(context), context.authoritativeCommit);
                 if (channel === IPC_CHANNELS.publishCourseChanges)
                   return {
@@ -500,7 +529,15 @@ export const createCourseMutationIpc = (
                     const warnings: unknown[] = [];
                     for (const task of afterPublication) {
                       try {
-                        const diagnostics = await task();
+                        const revision = (result.publication as { commit?: string }).commit;
+                        await context.revalidate?.(revision);
+                        const diagnostics = await managedCourseOperation.run(
+                          {
+                            ...context,
+                            revalidate: () => context.revalidate?.(revision) ?? Promise.resolve()
+                          },
+                          task
+                        );
                         if (Array.isArray(diagnostics)) warnings.push(...diagnostics);
                       } catch {
                         warnings.push({
@@ -530,7 +567,8 @@ export const createCourseMutationIpc = (
                 }
                 bind(event.sender, context);
                 return invoke(context);
-              }
+              },
+              schemaRequest
             );
           } catch (error) {
             if (error instanceof CourseMutationBlocked) {

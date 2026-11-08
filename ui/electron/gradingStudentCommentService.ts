@@ -1,5 +1,6 @@
 import { recordRecentGradingComment } from "./recentGradingComments.js";
 import path from "node:path";
+import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -175,6 +176,7 @@ export const createGradingStudentCommentService = (
   return {
     add: async (request) => {
       const prepared = await prepare(request);
+      if (prepared.status === "success") await revalidateCourseOperation();
       const result =
         prepared.status === "failure"
           ? prepared.result
@@ -196,6 +198,7 @@ export const createGradingStudentCommentService = (
     },
     edit: async (request) => {
       const prepared = await prepare(request);
+      if (prepared.status === "success") await revalidateCourseOperation();
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().editGradingStudentCommentContext(
@@ -206,6 +209,7 @@ export const createGradingStudentCommentService = (
     },
     delete: async (request) => {
       const prepared = await prepare(request);
+      if (prepared.status === "success") await revalidateCourseOperation();
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().deleteGradingStudentCommentContext(

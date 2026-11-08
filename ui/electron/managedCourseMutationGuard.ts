@@ -32,26 +32,20 @@ import {
   type ManagedSynchronizationState,
   type RemoteCourse
 } from "./remoteCourseTypes.js";
-import type { CourseMutationBlock } from "./managedCourseMutationTypes.js";
+import type {
+  CourseMutationBlock,
+  CourseMutationMode,
+  VerifiedCourseMutationContext
+} from "./managedCourseMutationTypes.js";
+export type {
+  CourseMutationMode,
+  VerifiedCourseMutationContext
+} from "./managedCourseMutationTypes.js";
+import {
+  performManagedV2Operation,
+  type ManagedOperationRequest
+} from "./managedOperationBridge.js";
 
-export type CourseMutationMode =
-  | "new_mutation"
-  | "publication_retry"
-  | "source_update"
-  | "cutover"
-  | "read";
-export interface VerifiedCourseMutationContext {
-  readonly managed?: boolean;
-  readonly sessionGeneration?: number;
-  readonly legacyFolderPath?: string;
-  readonly userId: number;
-  readonly repositoryId: number;
-  readonly authoritativeCommit: string;
-  readonly operationalCommit: string;
-  readonly courseFolderId: string;
-  readonly courseFolderPath: string;
-  readonly mode: CourseMutationMode;
-}
 export class CourseMutationBlocked extends Error {
   constructor(readonly result: CourseMutationBlock) {
     super(result.message);
@@ -262,6 +256,7 @@ export class ManagedCourseMutationGuard {
       expectedRevision,
       revalidateRepository: async () => {
         try {
+          await context.revalidate?.();
           const repo = await revalidateManagedRepository({
             ...input,
             userData: this.deps.userData,
@@ -296,7 +291,9 @@ export class ManagedCourseMutationGuard {
     if (!userId || state.courseDiscovery.userId !== userId) return [];
     return state.courseDiscovery.courses
       .filter(
-        (course) => course.authorization === "authorized" && course.localFolderIds.length === 0
+        (course) =>
+          course.authorization === "authorized" &&
+          (course.schemaVersion === 2 || course.localFolderIds.length === 0)
       )
       .map((course) => {
         const id = `managed-course:${userId}:${course.repositoryId}`;
@@ -356,7 +353,8 @@ export class ManagedCourseMutationGuard {
     operation: (
       context?: VerifiedCourseMutationContext,
       input?: ManagedOperationInput
-    ) => Promise<T>
+    ) => Promise<T>,
+    managedRequest?: ManagedOperationRequest
   ): Promise<T> {
     const remote = this.remoteSelector(folderId);
     const folder = remote ?? this.deps.folders().find((item) => item.id === folderId);
@@ -374,7 +372,8 @@ export class ManagedCourseMutationGuard {
         "remote_only_mutation_unavailable",
         "Authoritative course access is unavailable. Refresh courses or update Graider before opening this folder."
       );
-    if (this.isManaged(folderId)) return this.run(folderId, suppliedPath, "read", operation);
+    if (this.isManaged(folderId))
+      return this.run(folderId, suppliedPath, "read", operation, managedRequest);
     if (this.hasManagedBinding(folderId))
       blockMutation(
         "authorization_required",
@@ -399,6 +398,9 @@ export class ManagedCourseMutationGuard {
     const known = state.courseDiscovery.courses.find((course) =>
       course.localFolderIds.includes(folder!.id)
     );
+    // Known v2 sources always enter the managed bridge, including uncut legacy folders.
+    if (known?.schemaVersion === 2)
+      return this.run(folderId, suppliedPath, "read", operation, managedRequest);
     if (known && state.identity && state.courseDiscovery.userId === state.identity.id)
       return this.deps.session.withReadOnlyCourse(
         known.repositoryId,
@@ -435,7 +437,72 @@ export class ManagedCourseMutationGuard {
           return operation();
         }
       );
-    return operation();
+    let local: ReturnType<ReturnType<typeof loadMetadata>["inspectOperationCourse"]>;
+    try {
+      local = loadMetadata().inspectOperationCourse(
+        fs.readFileSync(path.join(folder!.path, "course.yml"), "utf8")
+      );
+    } catch {
+      return blockMutation(
+        "operation_unavailable",
+        "Course metadata is unavailable. Refresh courses before opening this folder."
+      );
+    }
+    if (local.status !== "valid")
+      blockMutation(
+        "operation_unavailable",
+        "This folder requires fresh authoritative managed-course access. Refresh courses and open Course details."
+      );
+    const factory = this.deps.factory ?? getProductionGitWorkspaceFactory();
+    const repository = await factory.inspect(folder!.path);
+    if (repository.kind === "not_repository") return operation(); // Standalone Schema 1 preparation.
+    if (repository.kind !== "repository" || !sameFilesystemRoot(repository.root, folder!.path))
+      blockMutation(
+        "operational_source_unsafe",
+        "The registered course repository requires attention."
+      );
+    if (!state.identity || state.busy)
+      blockMutation(
+        "authorization_required",
+        "Sign in and refresh authoritative course access before opening this repository.",
+        "authorization"
+      );
+    return this.deps.session.withAuthenticatedAccount(async (account) => {
+      const workspace = await factory.open(folder!.path);
+      const locator = parseGithubOrigin(await workspace.remoteUrl("origin"));
+      if (!locator)
+        blockMutation(
+          "operational_source_mismatch",
+          "A verified GitHub course origin is required."
+        );
+      const reader = createRemoteRepositoryReader(account.token, account.signal);
+      const remote = await reader.resolve(locator!.owner, locator!.name);
+      if (!remote || remote.disabled)
+        blockMutation(
+          "course_access_lost",
+          "The course repository is unavailable.",
+          "authorization"
+        );
+      const access = await readRemoteCourseAccess(
+        reader,
+        remote!,
+        account.userId,
+        this.deps.username()
+      );
+      if (
+        access.status !== "valid" ||
+        access.schemaVersion !== 1 ||
+        access.authorization !== "authorized" ||
+        access.incomplete ||
+        (await workspace.resolveHead()) !== access.revision ||
+        !(await account.revalidateSession())
+      )
+        blockMutation(
+          "operation_unavailable",
+          "Current Schema 1 course access could not be established. Refresh courses and use the managed entry for Schema 2."
+        );
+      return operation();
+    });
   }
   async cutover(folderId: unknown): Promise<void> {
     if (this.remoteSelector(folderId))
@@ -558,7 +625,8 @@ export class ManagedCourseMutationGuard {
     folderId: unknown,
     suppliedPath: unknown,
     mode: CourseMutationMode,
-    operation: (context: VerifiedCourseMutationContext, input: ManagedOperationInput) => Promise<T>
+    operation: (context: VerifiedCourseMutationContext, input: ManagedOperationInput) => Promise<T>,
+    managedRequest?: ManagedOperationRequest
   ): Promise<T> {
     const session = this.deps.session;
     const state = session.getState();
@@ -611,13 +679,6 @@ export class ManagedCourseMutationGuard {
         "The registered folder cannot be confidently mapped to an authorized course. Refresh courses and inspect its registration."
       );
     const course = courses[0];
-    if (!this.deps.username())
-      blockMutation(
-        "faculty_identity_required",
-        "Configure your MSOE username before making course changes.",
-        "faculty_settings",
-        course.repositoryId
-      );
     const key = `${userId}:${course.repositoryId}`;
     const previous = this.pending.get(key) ?? Promise.resolve();
     let operationStarted = false;
@@ -649,9 +710,9 @@ export class ManagedCourseMutationGuard {
               "Course registration no longer matches authorized discovery."
             );
           const authoritativeCommit = requireSynchronizedCommit(input.course, sync);
-          // #22 access support does not enable #23's operation bridge. Inspect the
-          // freshly synchronized source, never a stale discovery schema or local username.
-          const operational = loadMetadata().inspectOperationCourse(
+          // Inspect declared operation support on the freshly synchronized source;
+          // discovery schema, parser support and local usernames cannot enable an adapter.
+          const operational = loadMetadata().inspectManagedOperationCourse(
             fs.readFileSync(
               path.join(
                 managedCoursePath(this.deps.userData, input.userId, input.course.repositoryId),
@@ -663,7 +724,107 @@ export class ManagedCourseMutationGuard {
           if (operational.status !== "valid")
             blockMutation(
               "remote_only_mutation_unavailable",
-              "This course schema requires an operation bridge that is not available in this client. Course details remain available."
+              "This client cannot operate the authoritative course schema. Update Graider or refresh Course details to inspect available metadata."
+            );
+          if (operational.status !== "valid") throw new Error("Unsupported course schema.");
+          const operationUsername = operational.schemaVersion === 1 ? this.deps.username() : null;
+          const source = managedCoursePath(this.deps.userData, input.userId, course.repositoryId);
+          const revalidate = async (expectedRevision = authoritativeCommit) => {
+            if (operational.schemaVersion === 1 && operationUsername !== this.deps.username())
+              blockMutation(
+                "faculty_identity_required",
+                "Faculty identity changed. Reload the course before writing.",
+                "faculty_settings"
+              );
+            const reader = createRemoteRepositoryReader(input.token, input.signal);
+            const repo = await reader.resolveId(input.course.repositoryId);
+            if (repo && repo.organizationId !== input.course.organizationId)
+              blockMutation(
+                "organization_migration_required",
+                "Course organization changed. Migration/reconciliation is required."
+              );
+            if (
+              !repo ||
+              repo.disabled ||
+              repo.defaultBranch !== input.course.defaultBranch ||
+              input.signal.aborted ||
+              !(await input.revalidateSession())
+            )
+              blockMutation(
+                "course_access_lost",
+                "Current course identity or account authorization changed.",
+                "authorization"
+              );
+            const access = await readRemoteCourseAccess(
+              reader,
+              repo!,
+              input.userId,
+              operationUsername
+            );
+            if (access.status === "valid" && access.revision !== expectedRevision) {
+              await input.resynchronize?.();
+              blockMutation(
+                "remote_version_conflict",
+                "The authoritative course changed. Refresh the view before retrying.",
+                "refresh_view"
+              );
+            }
+            if (
+              access.status !== "valid" ||
+              access.authorization !== "authorized" ||
+              access.incomplete ||
+              access.revision !== expectedRevision ||
+              access.schemaVersion !== operational.schemaVersion ||
+              access.content !== fs.readFileSync(path.join(source, "course.yml"), "utf8") ||
+              Object.entries(access.termContents).some(
+                ([code, bytes]) =>
+                  bytes !== fs.readFileSync(path.join(source, "terms", code, "term.yml"), "utf8")
+              ) ||
+              !(await input.revalidateSession())
+            )
+              blockMutation(
+                "operational_source_stale",
+                "Authoritative schema, revision or faculty authority changed. Refresh courses.",
+                "refresh_view"
+              );
+          };
+          if (operational.schemaVersion === 2) {
+            if (!managedRequest || mode === "source_update" || mode === "cutover")
+              blockMutation(
+                "operation_unavailable",
+                "Schema 2 requires an explicit supported managed operation. Use Course details; legacy source updates and cutover are unavailable."
+              );
+            const context: VerifiedCourseMutationContext = {
+              managed: true,
+              sessionGeneration: generation,
+              legacyFolderPath: folder.path,
+              userId: input.userId,
+              repositoryId: course.repositoryId,
+              authoritativeCommit,
+              operationalCommit: authoritativeCommit,
+              courseFolderId: folder.id,
+              courseFolderPath: source,
+              mode
+            };
+            return (await performManagedV2Operation(managedRequest!, {
+              userData: this.deps.userData,
+              context,
+              input: {
+                ...input,
+                course: { ...input.course, schemaVersion: operational.schemaVersion }
+              },
+              revalidate,
+              changed: () => managedRequest?.onChanged?.(context),
+              factory: this.deps.factory,
+              authenticate: this.deps.authenticate
+            })) as T;
+          }
+          if (!this.deps.username())
+            blockMutation(
+              "faculty_identity_required",
+              "Configure your MSOE username before making course changes.",
+              "faculty_settings",
+              course.repositoryId
             );
           const managedRoot = path.join(this.deps.userData, MANAGED_COURSE_ROOT);
           if (
@@ -742,9 +903,11 @@ export class ManagedCourseMutationGuard {
                 operationalFolderIds: [...(entry.operationalFolderIds ?? []), folder.id]
               });
           }
+          await revalidate();
           operationStarted = true;
           return operation(
             {
+              revalidate,
               managed: useManaged,
               legacyFolderPath: folder.path,
               sessionGeneration: generation,

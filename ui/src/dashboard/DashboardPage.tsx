@@ -1,4 +1,5 @@
 import { RemoteCoursesPanel, useRemoteCourses } from "./RemoteCoursesPanel";
+import { RemoteCourseSetupPage } from "../course-setup/RemoteCourseSetupPage";
 import { GithubAccountPanel } from "./GithubAccountPanel";
 import { useEffect, useState, type ReactElement } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -150,6 +151,7 @@ const CoursePublishPanel = ({
 
 export const DashboardPage = (): ReactElement => {
   const remote = useRemoteCourses();
+  const [remoteSetupOpen, setRemoteSetupOpen] = useState(false);
   const {
     courseFolders,
     refreshResults,
@@ -415,6 +417,17 @@ export const DashboardPage = (): ReactElement => {
     );
   }
 
+  if (remoteSetupOpen)
+    return (
+      <RemoteCourseSetupPage
+        account={remote.state}
+        onBack={() => setRemoteSetupOpen(false)}
+        onCreated={() => {
+          void remote.refresh();
+        }}
+      />
+    );
+
   if (selectedAssignmentSetupCourse !== null) {
     return (
       <AssignmentSetupPage
@@ -457,6 +470,15 @@ export const DashboardPage = (): ReactElement => {
             </h1>
           </div>
           <div className="app-header__actions">
+            {window.graiderUI.remoteCourseSetup ? (
+              <button
+                className="secondary-action"
+                type="button"
+                onClick={() => setRemoteSetupOpen(true)}
+              >
+                Create remote course
+              </button>
+            ) : null}
             <button
               className="secondary-action"
               type="button"

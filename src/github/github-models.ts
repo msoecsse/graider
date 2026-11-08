@@ -137,6 +137,8 @@ export interface CreateRepositoryInput {
   name: string;
   private: boolean;
   description?: string;
+  /** New course bootstrap needs an exact default-branch base for the existing transaction. */
+  autoInitialize?: boolean;
 }
 
 export interface AddCollaboratorInput {

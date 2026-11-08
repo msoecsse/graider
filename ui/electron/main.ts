@@ -36,6 +36,8 @@ import {
 import path from "node:path";
 import fs from "node:fs";
 import { GithubOAuthSession } from "./githubOAuthSession.js";
+import { RemoteCourseSetupService } from "./remoteCourseSetupService.js";
+import { standaloneSetupHasRepository } from "./legacyCourseCompatibility.js";
 import { createGithubOAuthCredentialStore } from "./githubOAuthCredentialStore.js";
 import { createGithubOAuthNetwork } from "./githubOAuthNetwork.js";
 import { readGithubOAuthSecret } from "./githubOAuthConfiguration.js";
@@ -534,12 +536,21 @@ export const registerIpcHandlers = (): void => {
         isNew:
           !folder &&
           typeof setupPath === "string" &&
-          !fs.existsSync(path.join(setupPath, "course.yml"))
+          !fs.existsSync(path.join(setupPath, "course.yml")) &&
+          !standaloneSetupHasRepository(setupPath)
       };
     },
     () => BrowserWindow.getAllWindows().map((window) => window.webContents)
   );
   invalidateManagedCourseViews = courseIpc.invalidateRevision;
+  courseIpc.handle(IPC_CHANNELS.changeManagedCourseLifecycle, () => {
+    throw new Error("Course lifecycle actions require an authoritative Schema 2 managed course.");
+  });
+  courseIpc.handle(IPC_CHANNELS.changeManagedTermLifecycle, () => {
+    throw new Error(
+      "Term lifecycle requires authoritative Schema 2 metadata and trusted operation evidence."
+    );
+  });
   const approvedCourseSetupRoots = new Set<string>();
   const baseProcessRunner = createNodeProcessRunner({
     graiderCli: app.isPackaged
@@ -552,8 +563,16 @@ export const registerIpcHandlers = (): void => {
           mode: "external"
         }
   });
-  const processRunner: ProcessRunner = (request) => {
+  const processRunner: ProcessRunner = async (request) => {
     const operation = managedCourseOperation.getStore();
+    if (
+      operation &&
+      request.command === "graider" &&
+      request.args.some((argument) =>
+        ["apply", "grade", "download-repositories", "report", "generate"].includes(argument)
+      )
+    )
+      await operation.revalidate?.();
     return baseProcessRunner(
       operation?.managed && !operation.transaction
         ? {
@@ -1161,19 +1180,31 @@ export const registerIpcHandlers = (): void => {
   });
 
   courseIpc.handle(IPC_CHANNELS.getTemplateWorkflow, async (_event, request: unknown) => {
-    if (!isTemplateWorkflowRequest(request))
+    if (
+      !isTemplateWorkflowRequest(request) ||
+      typeof request.courseFolderId !== "string" ||
+      typeof request.courseFolderPath !== "string"
+    )
       throw new Error("Template workflow request is required.");
     return await getTemplateWorkflow(request, { env: process.env, runner: processRunner });
   });
 
   courseIpc.handle(IPC_CHANNELS.previewTemplateWorkflowSave, async (_event, request: unknown) => {
-    if (!isTemplateWorkflowSaveRequest(request))
+    if (
+      !isTemplateWorkflowSaveRequest(request) ||
+      typeof request.courseFolderId !== "string" ||
+      typeof request.courseFolderPath !== "string"
+    )
       throw new Error("Template workflow save request is required.");
     return await previewTemplateWorkflowSave(request, { env: process.env, runner: processRunner });
   });
 
   courseIpc.handle(IPC_CHANNELS.saveTemplateWorkflow, async (_event, request: unknown) => {
-    if (!isTemplateWorkflowSaveRequest(request))
+    if (
+      !isTemplateWorkflowSaveRequest(request) ||
+      typeof request.courseFolderId !== "string" ||
+      typeof request.courseFolderPath !== "string"
+    )
       throw new Error("Template workflow save request is required.");
     return await saveTemplateWorkflow(request, { env: process.env, runner: processRunner });
   });
@@ -1854,6 +1885,25 @@ app.whenReady().then(async () => {
     username: () =>
       loadLocalSettings(getLocalSettingsPath(app.getPath("userData"))).currentFacultyMsoeUsername
   });
+  const remoteSetup = new RemoteCourseSetupService({
+    userData: app.getPath("userData"),
+    session: facultyAuth
+  });
+  ipcMain.handle(IPC_CHANNELS.closeRemoteCourseSetup, (event) => {
+    remoteSetup.close(event.sender.id);
+  });
+  ipcMain.handle(IPC_CHANNELS.previewRemoteCourseSetup, async (event, request: unknown) => {
+    event.sender.once("destroyed", () => remoteSetup.close(event.sender.id));
+    return remoteSetup.preview(event.sender.id, request);
+  });
+  ipcMain.handle(
+    IPC_CHANNELS.createRemoteCourse,
+    async (event, previewId: unknown, confirmed: unknown) => {
+      const result = await remoteSetup.create(event.sender.id, previewId, confirmed);
+      await facultyAuth.refreshOrganizations();
+      return result;
+    }
+  );
   ipcMain.handle("graider-ui:managed-course:inspect", async (_event, repositoryId: unknown) => {
     const state = facultyAuth.getState();
     const course = state.courseDiscovery.courses.find(

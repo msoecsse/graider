@@ -681,6 +681,27 @@ export const inspectManagedCourse = async (
   assertActive(request);
   return {
     repositoryId: course.repositoryId,
+    revision: access.revision,
+    ...(metadata.schemaVersion === 2
+      ? {
+          operations: (() => {
+            try {
+              return loadMetadata().inspectManagedOperationCapabilities(localPath, {
+                organization: repo.owner,
+                organizationId: repo.organizationId,
+                repositoryId: repo.id,
+                userId
+              });
+            } catch {
+              return {
+                archiveAllowed: false,
+                unarchiveAllowed: false,
+                lifecycleReason: "lifecycle-evidence-unavailable"
+              };
+            }
+          })()
+        }
+      : {}),
     code: metadata.code,
     title: metadata.title,
     terms,

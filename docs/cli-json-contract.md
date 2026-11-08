@@ -1,5 +1,12 @@
 # CLI JSON Contract
 
+Production mutation commands additionally enforce authoritative legacy compatibility.
+If the current remote schema, revision, repository or account cannot be established,
+the CLI returns the existing failure envelope with diagnostic
+`course_operation_unavailable` and `summary.operationAvailable: false`, before running
+the action. Schema 2 operations are available only through the closed main-process
+adapters in the [support matrix](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g).
+
 Reusable Codex instructions for changing backend JSON commands live in the
 [Codex Backend JSON Command Contract](codex-backend-json-command-contract.md).
 

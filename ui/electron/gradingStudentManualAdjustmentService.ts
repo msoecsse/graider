@@ -1,4 +1,5 @@
 import path from "node:path";
+import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -158,6 +159,7 @@ export const createGradingStudentManualAdjustmentService = (
   return {
     add: async (request) => {
       const prepared = await prepare(request);
+      if (prepared.status === "success") await revalidateCourseOperation();
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().addGradingStudentManualAdjustmentContext(
@@ -167,6 +169,7 @@ export const createGradingStudentManualAdjustmentService = (
     },
     edit: async (request) => {
       const prepared = await prepare(request);
+      if (prepared.status === "success") await revalidateCourseOperation();
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().editGradingStudentManualAdjustmentContext(
@@ -177,6 +180,7 @@ export const createGradingStudentManualAdjustmentService = (
     },
     delete: async (request) => {
       const prepared = await prepare(request);
+      if (prepared.status === "success") await revalidateCourseOperation();
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().deleteGradingStudentManualAdjustmentContext(

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { legacyCourseWriteIncompatible } from "../config/legacy-course-compatibility.js";
 import { OPERATIONAL_TERM_SCHEMA_VERSION } from "../config/config-schemas.js";
 import { validateTermConfig } from "../config/config-validation.js";
 import type { Diagnostic } from "../diagnostics/diagnostic.js";
@@ -31,6 +32,8 @@ export type FacultyScopeContextResult =
 export const resolveFacultyScopeContext = (
   request: FacultyScopeContextRequest
 ): FacultyScopeContextResult => {
+  if (legacyCourseWriteIncompatible(request.courseFolderPath))
+    return { status: "term_config_error", sections: [], students: [], errors: [] };
   const termConfigPath = path.posix.join(TERMS_DIRECTORY, request.termCode, TERM_CONFIG_FILE_NAME);
   const termResult = loadTermConfig(path.join(request.courseFolderPath, termConfigPath));
 

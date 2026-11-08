@@ -23,6 +23,11 @@ import type {
 } from "./assignmentGradingLifecycleService.js";
 
 export const IPC_CHANNELS = {
+  closeRemoteCourseSetup: "graider-ui:remote-course-setup:close",
+  changeManagedTermLifecycle: "graider-ui:managed-term:lifecycle",
+  previewRemoteCourseSetup: "graider-ui:remote-course-setup:preview",
+  createRemoteCourse: "graider-ui:remote-course-setup:create",
+  changeManagedCourseLifecycle: "graider-ui:managed-course:lifecycle",
   loadMigrationReviewAnalysis: "graider-ui:migration-review:load",
   refreshMigrationReview: "graider-ui:migration-review:refresh",
   verifyMigrationFacultyIdentity: "graider-ui:migration-review:verify-faculty",
@@ -266,6 +271,7 @@ export interface AssignmentSetupTerm {
 }
 
 export interface AssignmentSetupTermsRequest extends ExpectedCourseReadVersion {
+  readonly scope?: "default" | "coordinator-term";
   readonly courseFolderId: string;
   readonly courseFolderPath: string;
 }
@@ -666,6 +672,8 @@ export interface RosterRemoveResult extends CourseReadVersion {
 }
 
 export interface TemplateWorkflowRequest {
+  readonly courseFolderId?: string;
+  readonly courseFolderPath?: string;
   readonly templateRepository: string | null;
   readonly templateBranch: string | null;
   readonly workflowPath: string | null;
@@ -1105,6 +1113,27 @@ export interface CombinedDashboardResult {
 }
 
 export interface GraiderUIApi {
+  readonly changeManagedTermLifecycle?: (request: {
+    readonly courseFolderId: string;
+    readonly expectedCourseRevision: string;
+    readonly targetTermCode: string;
+    readonly operation:
+      | "activate"
+      | "delete-draft"
+      | "safe-rollback"
+      | "accept-current"
+      | "restore-predecessor";
+  }) => Promise<{
+    readonly status: "needs_attention";
+    readonly reason: string;
+    readonly message: string;
+  }>;
+  readonly remoteCourseSetup?: import("./remoteCourseSetupTypes.js").RemoteCourseSetupApi;
+  readonly changeManagedCourseLifecycle?: (request: {
+    readonly courseFolderId: string;
+    readonly expectedCourseRevision: string;
+    readonly targetStatus: "archived" | "unarchived";
+  }) => Promise<import("./courseLifecycleTypes.js").CourseLifecycleResult>;
   readonly migrationReview?: import("./migrationReviewService.js").MigrationReviewApi;
   readonly getCourseOperationalMode?: (folderId: string) => Promise<"legacy" | "managed">;
   readonly cutoverManagedCourse?: (folderId: string) => Promise<void>;
