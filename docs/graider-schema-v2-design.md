@@ -191,6 +191,10 @@ term:
       end_reason: null
 ```
 
+For new courses, the [initial authority policy](graider-remote-course-architecture.md#initial-authority--approved-option-a-30)
+requires explicit coordinator selection by verified immutable identity, separately
+from section faculty. Creator fallback administration does not seed coordinator roles.
+
 Coordinator relationships are interval/history records. Closing an interval
 does not erase the former coordinator. `end_reason` must distinguish removal
 during an active term from normal completion/archival because their later

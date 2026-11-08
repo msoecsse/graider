@@ -1255,6 +1255,12 @@ reconciliation and #25 the warning/acknowledgement UI. Production publication re
 disabled, Setup remains Schema 1, and Phase 3 plus verified compatible releases on both
 supported platforms remain prerequisites. Stop after #22; do not begin #23 here.
 
+Issue #30 resolves the new-course setup authority decision with **Option A**; see
+the [canonical initial authority policy](graider-remote-course-architecture.md#initial-authority--approved-option-a-30).
+Its product-decision blocker on #23 is resolved. #23's operation bridge and remote
+Schema 2 setup remain unimplemented; this documentation decision enables neither
+production migration nor Phase 3 release readiness.
+
 ---
 
 # Phase 10 — Assignment Lifecycle and Ownership

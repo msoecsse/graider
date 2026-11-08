@@ -38,6 +38,10 @@ stateDiagram-v2
 | Unarchived → Archived | Fallback administrator or coordinator of the most recent term | No Active/Draft term, no unresolved activation checkpoint; no migration block                      | Yes                       | Shared remote archive flag changes; course remains synchronized and available through Show archived                                                                                             |
 | Archived → Unarchived | Same authorities                                              | Authentication, sync, valid schema, no migration block                                             | Yes                       | Enables creation of terms/assignments; does not reactivate an old term                                                                                                                          |
 
+New-course bootstrap must satisfy the [initial authority policy](graider-remote-course-architecture.md#initial-authority--approved-option-a-30):
+explicit verified coordinator selection and separate verified section-faculty
+selections. Becoming fallback administrator does not make the creator a coordinator.
+
 Course archive is shared remote state. Machine-local hide/show is not a course
 state and never controls whether the managed clone exists or synchronizes.
 There is no normal permanent Delete course transition.

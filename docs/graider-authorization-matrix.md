@@ -31,6 +31,12 @@ silently expands student/section visibility. For example, a fallback
 administrator who also teaches Section 001 grades Section 001 because of the
 section-faculty role, not because of fallback-administrator status.
 
+For new Schema v2 courses, the [initial authority policy](graider-remote-course-architecture.md#initial-authority--approved-option-a-30)
+requires at least one explicitly selected, verified coordinator. Creation grants the
+creator fallback administration only; they may explicitly select themselves as a
+coordinator. Section-faculty selections are separate and also require independently
+verified immutable GitHub identities. These roles retain the distinct scopes below.
+
 “Own section” includes all students shared with current co-faculty in that
 section. Graider never partitions students between co-faculty. “Target
 section” means the section currently being evaluated in the table.

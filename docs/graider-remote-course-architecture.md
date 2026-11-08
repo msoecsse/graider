@@ -1858,15 +1858,36 @@ Creating a course through Graider:
 3. validates required organization permissions;
 4. creates a private course/admin repository;
 5. initializes course metadata;
-6. records the creating faculty identity;
+6. records the creating faculty's verified immutable GitHub identity;
 7. establishes that person as fallback administrator;
 8. creates the initial Draft term;
-9. establishes initial coordinator information;
+9. establishes explicitly selected, verified initial coordinators and separate section-faculty assignments;
 10. configures Graider-managed teams and branch protections;
 11. adds the `graider-course` topic;
 12. begins managed synchronization.
 
 Course/admin repositories are always private.
+
+### Initial authority — approved Option A (#30)
+
+[Issue #30, approved Option A](https://github.com/msoecsse/graider/issues/30#issuecomment-6716066531)
+defines initial authority for new Schema v2 courses. Creation requires explicit
+selection of at least one coordinator for the initial Draft term. Every selected
+coordinator must have a verified immutable GitHub identity in the faculty directory.
+The authenticated creator automatically becomes fallback administrator, but is not
+automatically assigned coordinator authority. The creator may explicitly select
+themselves using their verified immutable identity.
+
+Section-faculty selections are separate from coordinator selection and must also
+use independently verified immutable GitHub identities. Fallback administration or
+coordination never implicitly assigns section teaching roles. Institutional usernames
+remain directory metadata; renderer assertions, machine-local settings and cached v1
+faculty arrays cannot establish identity or role authority. Setup cannot publish
+until the required explicit selections and identity verification are complete.
+
+This is the approved creation policy for #23 to implement. The current local setup
+wizard still emits Schema 1; this decision does not implement remote Schema 2 setup,
+change standalone/legacy workflows or enable production migration.
 
 ---
 
