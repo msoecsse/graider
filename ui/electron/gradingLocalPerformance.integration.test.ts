@@ -679,7 +679,15 @@ it.each(["origin", "revision", "metadata", "registration"])(
     if (change === "revision") {
       fs.writeFileSync(path.join(f.legacy, "note.txt"), "Changed");
       await fixtureGit(f.legacy, ["add", "."]);
-      await fixtureGit(f.legacy, ["commit", "-m", "Changed source"]);
+      await fixtureGit(f.legacy, [
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.test",
+        "commit",
+        "-m",
+        "Changed source"
+      ]);
     }
     if (change === "metadata") {
       await fixtureGit(f.legacy, ["update-index", "--assume-unchanged", "course.yml"]);
