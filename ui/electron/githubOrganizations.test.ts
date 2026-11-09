@@ -25,7 +25,10 @@ const createNetwork = (request: (url: string, init: RequestInit) => Promise<Resp
     return {
       status: response.status,
       headers: Object.fromEntries(response.headers),
-      data: await response.clone().json()
+      data:
+        path == "/user" && response.ok
+          ? { id: 42, login: "faculty", name: "Faculty", ...(await response.clone().json()) }
+          : await response.clone().json()
     };
   };
   return createGithubOrganizationNetwork(
@@ -48,17 +51,17 @@ describe("OAuth organization adapter", () => {
     ["repo", false]
   ])("uses authoritative scope header %s", async (scope, expected) => {
     const request = vi.fn().mockResolvedValue(response({}, 200, { "x-oauth-scopes": scope }));
-    expect(await createNetwork(request).organizationCapability(TOKEN, signal)).toBe(expected);
+    expect((await createNetwork(request).verifyAccount(TOKEN, signal)).organizationCapability).toBe(
+      expected
+    );
+    expect(request).toHaveBeenCalledOnce();
     expect(request.mock.calls[0][0]).toBe("https://api.github.com/user");
     expect(request.mock.calls[0][1].redirect).toBe("error");
   });
   it("does not guess when GitHub omits scopes", async () => {
     await expect(
-      createNetwork(vi.fn().mockResolvedValue(new Response("{}"))).organizationCapability(
-        TOKEN,
-        signal
-      )
-    ).rejects.toMatchObject({ code: "error" });
+      createNetwork(vi.fn().mockResolvedValue(new Response("{}"))).verifyAccount(TOKEN, signal)
+    ).rejects.toMatchObject({ code: "authorization_evidence_missing" });
   });
   it("paginates, deduplicates IDs, normalizes pending/member and active/admin, and probes only active memberships", async () => {
     const request = vi
@@ -121,10 +124,10 @@ describe("OAuth organization adapter", () => {
       }
     }
   );
-  it("reports invalid credentials distinctly", async () => {
+  it("keeps organization rejection scoped without a session confirmation context", async () => {
     const request = vi.fn().mockResolvedValue(response({}, 401));
     await expect(createNetwork(request).discoverOrganizations(TOKEN, signal)).rejects.toMatchObject(
-      { code: "invalid_credential" }
+      { code: "forbidden" }
     );
   });
   it("does not revoke a valid global identity when only the organization returns 401", async () => {
@@ -135,7 +138,7 @@ describe("OAuth organization adapter", () => {
       .mockResolvedValueOnce(response({ id: 42 }));
     const result = await createNetwork(request).discoverOrganizations(TOKEN, signal);
     expect(result.organizations[0].accessStatus).toBe("forbidden");
-    expect(request.mock.calls[2][0]).toBe("https://api.github.com/user");
+    expect(request).toHaveBeenCalledTimes(2);
   });
   it("keeps discovered membership on a failed network probe", async () => {
     const request = vi
@@ -178,6 +181,6 @@ describe("authoritative private repository capability", () => {
     const network = createNetwork(
       vi.fn().mockResolvedValue(response({}, 200, { "x-oauth-scopes": scopes }))
     );
-    expect(await network.repositoryCapability(TOKEN, signal)).toBe(expected);
+    expect((await network.verifyAccount(TOKEN, signal)).repositoryCapability).toBe(expected);
   });
 });

@@ -565,6 +565,27 @@ describe("OctokitGitHubClient", () => {
       "default branch"
     );
   });
+  it("provides identity and OAuth scope evidence in one raw global account request", async () => {
+    const octokit = createMockOctokit();
+    const data = { login: USERNAME, id: OctokitTestNumber.UserId, name: "Faculty Name" };
+    const headers = { "x-oauth-scopes": "read:org, repo" };
+    const SUCCESS_STATUS = 200;
+    const request = vi.fn().mockResolvedValue({ status: SUCCESS_STATUS, data, headers });
+    octokit.request = request;
+    const client = new OctokitGitHubClient({ token: TOKEN, octokit });
+    const signal = new AbortController().signal;
+    await expect(client.getOrganizationScopeResponse(signal)).resolves.toEqual({
+      status: SUCCESS_STATUS,
+      data,
+      headers
+    });
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      method: "GET",
+      url: "/user",
+      request: { signal, redirect: "error" }
+    });
+  });
+
   it("maps authenticated user response", async () => {
     const client = new OctokitGitHubClient({ token: TOKEN, octokit: createMockOctokit() });
 

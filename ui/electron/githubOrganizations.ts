@@ -3,12 +3,25 @@ import {
   type GithubClientProvider,
   type GitHubClient
 } from "./githubClientProvider.js";
+import {
+  confirmGithubCredentialRejection,
+  withoutGithubAccountVerification
+} from "./githubAccountVerification.js";
 import { GithubOAuthError } from "./githubOAuthCallback.js";
 import type {
+  GithubFacultyIdentity,
   GithubOrganization,
   OrganizationAccessStatus,
   OrganizationDiscovery
 } from "./githubOAuthTypes.js";
+
+/** Main-process verification evidence; never serialized through IPC or persisted. */
+export interface VerifiedGithubAccount {
+  readonly identity: GithubFacultyIdentity;
+  readonly scopes: readonly string[];
+  readonly organizationCapability: boolean;
+  readonly repositoryCapability: boolean;
+}
 
 const TIMEOUT_MS = 30_000;
 const PAGE_SIZE = 100;
@@ -102,17 +115,10 @@ export const createGithubOrganizationNetwork = (
     return "error";
   };
   const classifyOrganizationResponse = async (
-    response: Response,
-    token: string,
-    signal: AbortSignal
+    response: Response
   ): Promise<OrganizationAccessStatus | null> => {
     if (response.status !== UNAUTHORIZED) return classify(response);
-    // Confirm global rejection at /user before allowing an organization response to revoke sign-in.
-    const identityResponse = await get(token, signal, (client, bounded) =>
-      client.getOrganizationScopeResponse!(bounded)
-    );
-    const identityStatus = await classify(identityResponse);
-    if (identityStatus) return failure(identityStatus);
+    await confirmGithubCredentialRejection();
     return "forbidden";
   };
   const read = async (response: Response): Promise<unknown> => {
@@ -147,26 +153,38 @@ export const createGithubOrganizationNetwork = (
     };
   };
   return {
-    async organizationCapability(token: string, signal: AbortSignal): Promise<boolean> {
-      const response = await get(token, signal, (client, bounded) =>
-        client.getOrganizationScopeResponse!(bounded)
-      );
-      // Scope absence is authoritative only when GitHub actually supplies the header.
-      const status = await classify(response);
-      if (status === "insufficient_scope") return false;
-      if (status) return failure(status);
-      if (!response.headers.has("x-oauth-scopes")) return failure("error");
-      return hasOrganizationScope(response.headers.get("x-oauth-scopes")!);
-    },
-    async repositoryCapability(token: string, signal: AbortSignal): Promise<boolean> {
-      const response = await get(token, signal, (client, bounded) =>
-        client.getOrganizationScopeResponse!(bounded)
+    async verifyAccount(token: string, signal: AbortSignal): Promise<VerifiedGithubAccount> {
+      const response = await withoutGithubAccountVerification(() =>
+        get(token, signal, (client, bounded) => client.getOrganizationScopeResponse!(bounded))
       );
       const status = await classify(response);
-      if (status && status !== "insufficient_scope") return failure(status);
+      if (!response.ok || (status && status !== "insufficient_scope"))
+        return failure(status ?? "error");
+      const body = record(await read(response));
+      if (
+        typeof body.login !== "string" ||
+        !/^[A-Za-z0-9-]+$/.test(body.login) ||
+        typeof body.id !== "number" ||
+        !Number.isSafeInteger(body.id) ||
+        body.id <= 0
+      )
+        throw new GithubOAuthError("identity", "GitHub identity could not be verified. Try again.");
       const scopes = response.headers.get("x-oauth-scopes");
-      if (scopes === null) return failure("error");
-      return scopes.split(/[ ,]+/).includes("repo");
+      if (scopes === null)
+        throw new GithubOAuthError(
+          "authorization_evidence_missing",
+          "GitHub omitted OAuth scope evidence. Account capabilities could not be verified. Try signing in again."
+        );
+      return {
+        identity: {
+          id: body.id,
+          login: body.login,
+          name: typeof body.name === "string" ? body.name : null
+        },
+        scopes: scopes.split(/[ ,]+/).filter(Boolean),
+        organizationCapability: hasOrganizationScope(scopes),
+        repositoryCapability: scopes.split(/[ ,]+/).includes("repo")
+      };
     },
     async discoverOrganizations(
       token: string,
@@ -180,7 +198,7 @@ export const createGithubOrganizationNetwork = (
         const response = await get(token, signal, (client, bounded) =>
           client.listOrganizationMembershipsPage!(page, PAGE_SIZE, bounded)
         );
-        const status = await classifyOrganizationResponse(response, token, signal);
+        const status = await classifyOrganizationResponse(response);
         if (status) return failure(status);
         partial ||= /partial-results/i.test(response.headers.get("x-github-sso") ?? "");
         const body = await read(response);
@@ -200,7 +218,7 @@ export const createGithubOrganizationNetwork = (
             const response = await get(token, signal, (client, bounded) =>
               client.getOrganizationMembership!(org.login, bounded)
             );
-            const status = await classifyOrganizationResponse(response, token, signal);
+            const status = await classifyOrganizationResponse(response);
             if (status === "insufficient_scope") failure(status);
             if (status)
               validated = {

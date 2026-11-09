@@ -32,9 +32,12 @@ const fixture = (
   synchronizeCourse?: ConstructorParameters<typeof GithubOAuthSession>[0]["synchronizeCourse"]
 ) => {
   const network = {
-    identity: vi.fn().mockResolvedValue({ id: 42, login: "faculty", name: null }),
-    organizationCapability: vi.fn().mockResolvedValue(true),
-    repositoryCapability: vi.fn().mockResolvedValue(true),
+    verifyAccount: vi.fn().mockResolvedValue({
+      identity: { id: 42, login: "faculty", name: null },
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    }),
     discoverOrganizations: vi
       .fn()
       .mockResolvedValue({ status: "ready", organizations: [], message: null, stale: false }),
@@ -140,7 +143,12 @@ describe("automatic bootstrap session orchestration", () => {
     );
     await f.session.restore();
     await vi.waitFor(() => expect(f.bootstrapCourse).toHaveBeenCalledOnce());
-    f.network.identity.mockResolvedValue({ id: 99, login: "other", name: null });
+    f.network.verifyAccount.mockResolvedValue({
+      identity: { id: 99, login: "other", name: null },
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    });
     await f.session.signIn(true);
     await vi.waitFor(() => expect(f.session.getState().courseDiscovery.userId).toBe(99));
     finish();
@@ -148,25 +156,27 @@ describe("automatic bootstrap session orchestration", () => {
       expect(f.session.getState().courseDiscovery.courses[0]?.bootstrap?.status).toBe("ready")
     );
     expect(f.bootstrapCourse.mock.calls.map(([input]) => input.userId)).toEqual([42, 99]);
-    f.network.identity.mockResolvedValue({ id: 42, login: "renamed-account", name: null });
+    f.network.verifyAccount.mockResolvedValue({
+      identity: { id: 42, login: "renamed-account", name: null },
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    });
     await f.session.signIn(true);
     await vi.waitFor(() => expect(f.bootstrapCourse).toHaveBeenCalledTimes(3));
     expect(f.bootstrapCourse.mock.calls[2][0].userId).toBe(42);
     f.session.shutdown();
   });
-  it("revalidates current identity and both OAuth capabilities", async () => {
+  it("reuses verified identity and both capabilities until the session changes", async () => {
     const f = fixture();
     await f.session.restore();
     await vi.waitFor(() => expect(f.bootstrapCourse).toHaveBeenCalledOnce());
     const input = f.bootstrapCourse.mock.calls[0][0];
     expect(await input.revalidateSession()).toBe(true);
-    f.network.repositoryCapability.mockResolvedValue(false);
-    expect(await input.revalidateSession()).toBe(false);
-    f.network.repositoryCapability.mockResolvedValue(true);
-    f.network.organizationCapability.mockResolvedValue(false);
-    expect(await input.revalidateSession()).toBe(false);
-    f.network.organizationCapability.mockResolvedValue(true);
-    f.network.identity.mockResolvedValue({ id: 99, login: "other", name: null });
+    f.network.verifyAccount.mockRejectedValue(new Error("No routine account requests"));
+    expect(await input.revalidateSession()).toBe(true);
+    expect(f.network.verifyAccount).toHaveBeenCalledOnce();
+    await f.session.signOut();
     expect(await input.revalidateSession()).toBe(false);
     f.session.shutdown();
   });
@@ -275,7 +285,12 @@ describe("startup, refresh and synchronization lifecycle", () => {
     });
     await f.session.restore();
     await vi.waitFor(() => expect(f.synchronizeCourse).toHaveBeenCalledOnce());
-    f.network.identity.mockResolvedValue({ id: 99, login: "new", name: null });
+    f.network.verifyAccount.mockResolvedValue({
+      identity: { id: 99, login: "new", name: null },
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    });
     await f.session.signIn(true);
     await vi.waitFor(() => expect(f.synchronizeCourse).toHaveBeenCalledTimes(2));
     finish();
@@ -328,8 +343,19 @@ it("keeps a valid global identity on Git authentication rejection, but clears a 
   );
   expect(session.getState().status).toBe("signed_in");
   expect(f.store.delete).not.toHaveBeenCalled();
+  await session.signOut();
+  f.store.delete.mockClear();
+  const replacement = new GithubOAuthSession({
+    store: f.store,
+    network: f.network,
+    bootstrapCourse: f.bootstrapCourse,
+    discoverCourses: f.discoverCourses,
+    synchronizeCourse,
+    secret: () => "secret",
+    openBrowser: async () => {}
+  });
   synchronizeCourse.mockImplementation(async () => {
-    f.network.identity.mockRejectedValue(
+    f.network.verifyAccount.mockRejectedValue(
       new GithubOAuthError("invalid_credential", "Expired sign-in")
     );
     return {
@@ -339,8 +365,8 @@ it("keeps a valid global identity on Git authentication rejection, but clears a 
       retryable: true
     };
   });
-  await session.refreshOrganizations();
-  expect(session.getState().status).toBe("signed_out");
+  await replacement.restore();
+  await vi.waitFor(() => expect(replacement.getState().status).toBe("signed_out"));
   expect(f.store.delete).toHaveBeenCalledOnce();
   session.shutdown();
 });
@@ -488,6 +514,6 @@ it("sign-out aborts the operation signal while a synchronized legacy update is p
   await f.session.signOut();
   expect(signal.aborted).toBe(true);
   finish();
-  await operation;
+  await expect(operation).rejects.toThrow("Account changed");
   f.session.shutdown();
 });

@@ -1,3 +1,5 @@
+import { withGithubAccountVerification } from "./githubAccountVerification.js";
+import type { VerifiedGithubAccount } from "./githubOrganizations.js";
 import { mapBounded } from "./remoteCourseDiscovery.js";
 import { MANAGED_BOOTSTRAP_CONCURRENCY, serializeManagedOperation } from "./managedCourses.js";
 import type {
@@ -18,6 +20,14 @@ import {
 } from "./githubOAuthNetwork.js";
 import type { GithubOAuthCredentialStore } from "./githubOAuthCredentialStore.js";
 import type { GithubOAuthState } from "./githubOAuthTypes.js";
+
+interface VerifiedSession extends VerifiedGithubAccount {
+  readonly credential: string;
+  generation: number;
+  valid: boolean;
+  confirmation?: Promise<void>;
+  controller: AbortController;
+}
 
 const RANDOM_BYTE_COUNT = 32;
 export const createOAuthProof = () => {
@@ -98,8 +108,162 @@ const safeMessage = (error: unknown): string =>
 export class GithubOAuthSession {
   private state = signedOut();
   private token: string | null = null;
+  private authorization: VerifiedSession | null = null;
+  private establishAccount(token: string, account: VerifiedGithubAccount): void {
+    if (this.authorization) this.authorization.valid = false;
+    this.invalidateReconciliations();
+    this.token = token;
+    this.authorization = {
+      ...account,
+      credential: token,
+      generation: this.accountGeneration,
+      valid: true,
+      controller: new AbortController()
+    };
+  }
+  private verified(
+    token: string,
+    userId: number,
+    generation: number,
+    signal: AbortSignal,
+    requireCapabilities = true
+  ): boolean {
+    const snapshot = this.authorization;
+    return (
+      !!snapshot &&
+      snapshot.valid &&
+      !this.stopped &&
+      !signal.aborted &&
+      this.state.status === "signed_in" &&
+      generation === this.accountGeneration &&
+      snapshot.generation === generation &&
+      snapshot.credential === token &&
+      this.token === token &&
+      snapshot.identity.id === userId &&
+      this.state.identity?.id === userId &&
+      snapshot.identity.login === this.state.identity.login &&
+      (!requireCapabilities || (snapshot.repositoryCapability && snapshot.organizationCapability))
+    );
+  }
+  private withVerifiedAccount<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+    const snapshot = this.authorization;
+    const generation = this.accountGeneration;
+    return withGithubAccountVerification(
+      {
+        credential: snapshot?.credential ?? "",
+        account: async (requestSignal) => {
+          if (
+            !snapshot ||
+            requestSignal?.aborted ||
+            this.active ||
+            !this.verified(snapshot.credential, snapshot.identity.id, generation, signal, false)
+          )
+            throw new Error("Account authorization changed.");
+          return {
+            identity: { ...snapshot.identity },
+            scopes: [...snapshot.scopes],
+            organizationCapability: snapshot.organizationCapability,
+            repositoryCapability: snapshot.repositoryCapability
+          };
+        },
+        confirmRejection: () =>
+          signal.aborted ? Promise.resolve() : this.confirmCredential(snapshot)
+      },
+      operation
+    );
+  }
+  private async confirmCredential(snapshot: VerifiedSession | null): Promise<void> {
+    if (!snapshot || snapshot !== this.authorization || !snapshot.valid) return;
+    // Retain the settled promise too: one exceptional confirmation per established session,
+    // shared by all course readers and Git failures, with no automatic retry loop.
+    snapshot.confirmation ??= this.confirmStoredCredential(snapshot);
+    await snapshot.confirmation;
+  }
+  private async confirmStoredCredential(snapshot: VerifiedSession): Promise<void> {
+    const generation = this.accountGeneration;
+    const current = () =>
+      this.authorization === snapshot &&
+      snapshot.valid &&
+      !this.stopped &&
+      this.active === null &&
+      generation === this.accountGeneration;
+    try {
+      const account = await this.deps.network.verifyAccount(
+        snapshot.credential,
+        snapshot.controller.signal
+      );
+      if (current()) {
+        if (
+          account.identity.id !== snapshot.identity.id ||
+          account.identity.login !== snapshot.identity.login
+        ) {
+          snapshot.valid = false;
+          this.invalidateReconciliations();
+          this.discovery?.abort();
+          this.authorization = null;
+          this.token = null;
+          this.state = {
+            ...signedOut(),
+            status: "unavailable",
+            message: "GitHub account identity changed. Your credential is preserved. Sign in again."
+          };
+        }
+        // Newly supplied scope evidence can restrict the current session, never expand it.
+        else if (!account.organizationCapability || !account.repositoryCapability) {
+          snapshot.valid = false;
+          this.authorization = {
+            ...snapshot,
+            valid: true,
+            scopes: snapshot.scopes.filter((scope) => account.scopes.includes(scope)),
+            organizationCapability:
+              snapshot.organizationCapability && account.organizationCapability,
+            repositoryCapability: snapshot.repositoryCapability && account.repositoryCapability
+          };
+          this.invalidateReconciliations();
+          this.discovery?.abort();
+          this.state = {
+            ...this.state,
+            courseDiscovery: {
+              ...emptyCourseDiscovery(),
+              userId: snapshot.identity.id,
+              status: "authorization_required"
+            },
+            organizationPermission: this.authorization.organizationCapability
+              ? "available"
+              : "required",
+            repositoryPermission: this.authorization.repositoryCapability ? "available" : "required"
+          };
+        }
+      }
+    } catch (error) {
+      if (current() && error instanceof GithubOAuthError && error.code === "invalid_credential") {
+        snapshot.valid = false;
+        this.invalidateReconciliations();
+        this.discovery?.abort();
+        this.token = null;
+        this.authorization = null;
+        this.state = { ...signedOut(), message: safeMessage(error) };
+        const cleanup = new AbortController();
+        this.active = cleanup;
+        try {
+          await this.deps.store.delete();
+        } catch {
+          this.state = {
+            ...this.state,
+            status: "unavailable",
+            message: "The invalid saved credential could not be removed. Choose Sign out to retry."
+          };
+        } finally {
+          if (this.active === cleanup) this.active = null;
+        }
+        throw error;
+      }
+      // 403, SSO, missing evidence and temporary failures never revoke the credential.
+    }
+  }
   private active: AbortController | null = null;
   private restored: Promise<void> | null = null;
+  private authenticationCompletion: Promise<void> | null = null;
   private stopped = false;
   private accountGeneration = 0;
   get mutationGeneration(): number {
@@ -121,6 +285,7 @@ export class GithubOAuthSession {
       );
       if (
         !this.token ||
+        !this.verified(this.token, expectedUserId, generation, controller.signal, false) ||
         this.stopped ||
         this.active !== null ||
         controller.signal.aborted ||
@@ -178,6 +343,7 @@ export class GithubOAuthSession {
       throw new Error("Sign in and authorize course access before setup.");
     const controller = new AbortController();
     const current = () =>
+      this.verified(token, userId, generation, controller.signal) &&
       !this.stopped &&
       !this.active &&
       !controller.signal.aborted &&
@@ -188,17 +354,12 @@ export class GithubOAuthSession {
       token,
       userId,
       signal: controller.signal,
-      revalidateSession: async () =>
-        current() &&
-        (await this.deps.network.identity(token, controller.signal)).id === userId &&
-        (await this.deps.network.repositoryCapability(token, controller.signal)) &&
-        (await this.deps.network.organizationCapability(token, controller.signal)) &&
-        current()
+      revalidateSession: async () => current()
     };
     this.courseOperations.add(controller);
     try {
       if (!(await input.revalidateSession())) throw new Error("Account authorization changed.");
-      const result = await operation(input);
+      const result = await this.withVerifiedAccount(controller.signal, () => operation(input));
       if (!current())
         throw new Error("Account authorization changed. Refresh course setup status.");
       return result;
@@ -210,6 +371,11 @@ export class GithubOAuthSession {
   private readonly courseOperations = new Set<AbortController>();
   private invalidateReconciliations(): void {
     this.accountGeneration += 1;
+    if (this.authorization) {
+      this.authorization.generation = this.accountGeneration;
+      this.authorization.controller.abort();
+      this.authorization.controller = new AbortController();
+    }
     for (const controller of this.courseOperations) controller.abort();
     for (const controller of this.reconciliations.values()) controller.abort();
     this.reconciliations.clear();
@@ -239,6 +405,8 @@ export class GithubOAuthSession {
       throw new Error("Current authorized course is required.");
     const generation = this.accountGeneration;
     const controller = new AbortController();
+    if (this.active || !this.verified(token, userId, generation, controller.signal))
+      throw new Error("Current account authorization is required.");
     this.reconciliations.set(repositoryId, controller);
     const current = (): boolean =>
       !this.stopped &&
@@ -258,32 +426,31 @@ export class GithubOAuthSession {
         };
     };
     try {
-      const result = await this.deps.reconcileCourse({
-        token,
-        userId,
-        course,
-        action,
-        planId,
-        confirmed,
-        signal: controller.signal,
-        sessionGeneration: generation,
-        revalidateSession: async () =>
-          current() &&
-          !controller.signal.aborted &&
-          (await this.deps.network.identity(token, controller.signal)).id === userId &&
-          (await this.deps.network.repositoryCapability(token, controller.signal)) &&
-          (await this.deps.network.organizationCapability(token, controller.signal)) &&
-          current(),
-        onProgress: (synchronization) =>
-          update({
-            synchronization,
-            ...(synchronization.metadata ?? {}),
-            ...(synchronization.status === "up_to_date" || synchronization.status === "updated"
-              ? { bootstrap: { status: "ready", diagnostic: null, retryable: false } }
-              : {})
-          }),
-        onReconciliationProgress: (reconciliation) => update({ reconciliation })
-      });
+      const result = await this.withVerifiedAccount(controller.signal, () =>
+        this.deps.reconcileCourse!({
+          token,
+          userId,
+          course,
+          action,
+          planId,
+          confirmed,
+          signal: controller.signal,
+          sessionGeneration: generation,
+          revalidateSession: async () =>
+            current() &&
+            this.active === null &&
+            this.verified(token, userId, generation, controller.signal),
+          onProgress: (synchronization) =>
+            update({
+              synchronization,
+              ...(synchronization.metadata ?? {}),
+              ...(synchronization.status === "up_to_date" || synchronization.status === "updated"
+                ? { bootstrap: { status: "ready", diagnostic: null, retryable: false } }
+                : {})
+            }),
+          onReconciliationProgress: (reconciliation) => update({ reconciliation })
+        })
+      );
       update({ reconciliation: result });
       if (!current()) throw new Error("Account changed. Review the cache again.");
       return result;
@@ -317,6 +484,7 @@ export class GithubOAuthSession {
       throw new Error("Current authorized course is required.");
     const controller = new AbortController();
     const current = () =>
+      this.verified(token, expectedUserId, generation, controller.signal) &&
       !this.stopped &&
       this.active === null &&
       generation === this.accountGeneration &&
@@ -327,12 +495,7 @@ export class GithubOAuthSession {
       userId: expectedUserId,
       course,
       signal: controller.signal,
-      revalidateSession: async () =>
-        current() &&
-        (await this.deps.network.identity(token, controller.signal)).id === expectedUserId &&
-        (await this.deps.network.repositoryCapability(token, controller.signal)) &&
-        (await this.deps.network.organizationCapability(token, controller.signal)) &&
-        current()
+      revalidateSession: async () => current()
     };
     const updateSynchronization = (synchronization: ManagedSynchronizationState): void => {
       if (current())
@@ -349,23 +512,32 @@ export class GithubOAuthSession {
         };
     };
     const synchronize = async (afterPublication = false) => {
+      if (!current()) throw new Error("Account authorization changed.");
       const result = await this.deps.synchronizeCourse!({
         ...input,
         alreadySerialized: true,
         requireFacultyAuthorization: !afterPublication,
         onProgress: updateSynchronization
       });
+      if (!current()) throw new Error("Account authorization changed.");
+      if (result.reason === "authentication_failed")
+        await this.confirmCredential(this.authorization);
+      if (!current()) throw new Error("Account authorization changed.");
       updateSynchronization(result);
       return result;
     };
     this.courseOperations.add(controller);
     try {
-      return await serializeManagedOperation(input, async () => {
-        if (!current()) throw new Error("Account changed. Retry the operation.");
-        const synchronization = await synchronize();
-        if (!current()) throw new Error("Account changed. Retry the operation.");
-        return operation({ ...input, resynchronize: synchronize }, synchronization);
-      });
+      return await this.withVerifiedAccount(controller.signal, () =>
+        serializeManagedOperation(input, async () => {
+          if (!current()) throw new Error("Account changed. Retry the operation.");
+          const synchronization = await synchronize();
+          if (!current()) throw new Error("Account changed. Retry the operation.");
+          const result = await operation({ ...input, resynchronize: synchronize }, synchronization);
+          if (!current()) throw new Error("Account changed. Retry the operation.");
+          return result;
+        })
+      );
     } finally {
       this.courseOperations.delete(controller);
     }
@@ -394,6 +566,7 @@ export class GithubOAuthSession {
       throw new Error("Current authorized course is required.");
     const controller = new AbortController();
     const current = () =>
+      this.verified(token, expectedUserId, generation, controller.signal) &&
       !this.stopped &&
       !controller.signal.aborted &&
       this.active === null &&
@@ -409,18 +582,13 @@ export class GithubOAuthSession {
       userId: expectedUserId,
       course,
       signal: controller.signal,
-      revalidateSession: async () =>
-        current() &&
-        (await this.deps.network.identity(token, controller.signal)).id === expectedUserId &&
-        (await this.deps.network.repositoryCapability(token, controller.signal)) &&
-        (await this.deps.network.organizationCapability(token, controller.signal)) &&
-        current()
+      revalidateSession: async () => current()
     };
     this.courseOperations.add(controller);
     try {
       if (!(await input.revalidateSession()))
         throw new Error("Course account authorization changed.");
-      const result = await operation(input);
+      const result = await this.withVerifiedAccount(controller.signal, () => operation(input));
       if (!current()) throw new Error("Course account authorization changed.");
       return result;
     } finally {
@@ -438,18 +606,26 @@ export class GithubOAuthSession {
     return this.restored;
   }
   private async restoreStored(): Promise<void> {
+    if (this.active || this.token || this.stopped) return;
     const controller = new AbortController();
     this.active = controller;
+    let complete!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    this.authenticationCompletion = completion;
     try {
       const token = await this.deps.store.load();
       if (token && !controller.signal.aborted) {
-        const identity = await this.deps.network.identity(token, controller.signal);
+        const account = await this.deps.network.verifyAccount(token, controller.signal);
         if (!controller.signal.aborted) {
-          this.token = token;
+          this.establishAccount(token, account);
           this.state = {
             ...signedOut(),
             status: "signed_in",
-            identity,
+            identity: account.identity,
+            repositoryPermission: account.repositoryCapability ? "available" : "required",
+            organizationPermission: account.organizationCapability ? "available" : "required",
             busy: false,
             persistence: "secure",
             message: null
@@ -475,13 +651,17 @@ export class GithubOAuthSession {
             ...signedOut(),
             status: "unavailable",
             message:
-              "Saved GitHub sign-in could not be verified. Your credential is preserved. Check your connection or secure storage, then retry."
+              error instanceof GithubOAuthError && error.code === "authorization_evidence_missing"
+                ? `${safeMessage(error)} Your saved credential is preserved.`
+                : "Saved GitHub sign-in could not be verified. Your credential is preserved. Check your connection or secure storage, then retry."
           };
         }
       }
     } finally {
-      this.active = null;
-      if (this.token) void this.refreshOrganizations();
+      if (this.active === controller) this.active = null;
+      if (this.authenticationCompletion === completion) this.authenticationCompletion = null;
+      complete();
+      if (this.token && !this.active && !this.stopped) void this.refreshOrganizations();
     }
   }
   async signIn(switchAccount = false): Promise<GithubOAuthState> {
@@ -495,6 +675,11 @@ export class GithubOAuthSession {
       };
     const controller = new AbortController();
     this.active = controller;
+    let complete!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    this.authenticationCompletion = completion;
     let callback: Awaited<ReturnType<typeof startOAuthCallback>> | undefined;
     try {
       const secret = this.deps.secret()?.trim();
@@ -529,17 +714,11 @@ export class GithubOAuthSession {
         { code, redirectUri: callback.redirectUri, verifier: proof.verifier, secret },
         controller.signal
       );
-      const identity = await this.deps.network.identity(token, controller.signal);
+      const account = await this.deps.network.verifyAccount(token, controller.signal);
       if (controller.signal.aborted)
         throw new GithubOAuthError("canceled", "GitHub sign-in canceled.");
-      const organizationPermission = await this.deps.network.organizationCapability(
-        token,
-        controller.signal
-      );
-      const repositoryPermission = await this.deps.network.repositoryCapability(
-        token,
-        controller.signal
-      );
+      const organizationPermission = account.organizationCapability;
+      const repositoryPermission = account.repositoryCapability;
       if (this.state.identity && (!organizationPermission || !repositoryPermission))
         throw new GithubOAuthError(
           "insufficient_scope",
@@ -561,13 +740,21 @@ export class GithubOAuthSession {
         persistence = "memory";
         message = "Secure persistence is unavailable. Sign in again after restarting Graider.";
       }
-      this.invalidateReconciliations();
-      this.token = token;
+      if (controller.signal.aborted || this.stopped) {
+        // The store write may finish after cancellation. Restore the previous association
+        // before ending the transaction; never publish the canceled account's authority.
+        if (persistence === "secure") {
+          if (this.token) await this.deps.store.save(this.token);
+          else await this.deps.store.delete();
+        }
+        throw new GithubOAuthError("canceled", "GitHub sign-in canceled.");
+      }
+      this.establishAccount(token, account);
       this.discovery?.abort();
       this.state = {
         ...signedOut(),
         status: "signed_in",
-        identity,
+        identity: account.identity,
         busy: false,
         persistence,
         message,
@@ -581,8 +768,10 @@ export class GithubOAuthSession {
       };
     } finally {
       callback?.cancel();
-      this.active = null;
-      if (this.token) void this.refreshOrganizations();
+      if (this.active === controller) this.active = null;
+      if (this.authenticationCompletion === completion) this.authenticationCompletion = null;
+      complete();
+      if (this.token && !this.active && !this.stopped) void this.refreshOrganizations();
     }
     return this.getState();
   }
@@ -591,24 +780,29 @@ export class GithubOAuthSession {
     return this.getState();
   }
   async signOut(): Promise<GithubOAuthState> {
-    if (!this.active) {
-      this.active = new AbortController();
-      this.discovery?.abort();
-      this.invalidateReconciliations();
-      this.token = null;
-      this.state = signedOut();
-      try {
-        await this.deps.store.delete();
-      } catch {
-        this.state = {
-          ...signedOut(),
-          status: "unavailable",
-          message:
-            "Sign-out could not remove the saved credential. Please retry before closing Graider."
-        };
-      } finally {
-        this.active = null;
-      }
+    const pendingAuthentication = this.authenticationCompletion;
+    this.active?.abort();
+    const cleanup = new AbortController();
+    this.active = cleanup;
+    this.discovery?.abort();
+    this.invalidateReconciliations();
+    this.token = null;
+    if (this.authorization) this.authorization.valid = false;
+    this.authorization = null;
+    this.state = signedOut();
+    try {
+      // A late replacement write must finish/roll back before final credential removal.
+      await pendingAuthentication;
+      await this.deps.store.delete();
+    } catch {
+      this.state = {
+        ...signedOut(),
+        status: "unavailable",
+        message:
+          "Sign-out could not remove the saved credential. Please retry before closing Graider."
+      };
+    } finally {
+      if (this.active === cleanup) this.active = null;
     }
     return this.getState();
   }
@@ -621,22 +815,21 @@ export class GithubOAuthSession {
     const token = this.token;
     const userId = this.state.identity?.id;
     if (!token || !userId || this.stopped || this.active) return this.getState();
+    const snapshot = this.authorization;
+    const generation = this.accountGeneration;
     this.discovery?.abort();
     const controller = new AbortController();
     this.discovery = controller;
     const current = (): boolean =>
-      !controller.signal.aborted && this.token === token && this.state.identity?.id === userId;
+      this.verified(token, userId, generation, controller.signal, false) && this.active === null;
     this.state = {
       ...this.state,
       organizationDiscovery: { ...this.state.organizationDiscovery, status: "loading" },
       courseDiscovery: { ...emptyCourseDiscovery(), status: "loading", userId }
     };
     try {
-      const capable = await this.deps.network.organizationCapability(token, controller.signal);
-      const repositoryCapable = await this.deps.network.repositoryCapability(
-        token,
-        controller.signal
-      );
+      const capable = snapshot?.organizationCapability === true;
+      const repositoryCapable = snapshot?.repositoryCapability === true;
       if (current()) {
         this.state = {
           ...this.state,
@@ -649,15 +842,14 @@ export class GithubOAuthSession {
           }
         };
         if (capable) {
-          const result = await this.deps.network.discoverOrganizations(token, controller.signal);
+          const result = await this.withVerifiedAccount(controller.signal, () =>
+            this.deps.network.discoverOrganizations(token, controller.signal)
+          );
           if (current()) this.state = { ...this.state, organizationDiscovery: result };
           if (current() && repositoryCapable && this.deps.discoverCourses) {
             try {
-              const courses = await this.deps.discoverCourses(
-                token,
-                userId,
-                result.organizations,
-                controller.signal
+              const courses = await this.withVerifiedAccount(controller.signal, () =>
+                this.deps.discoverCourses!(token, userId, result.organizations, controller.signal)
               );
               if (current()) {
                 this.state = {
@@ -716,20 +908,11 @@ export class GithubOAuthSession {
                           course,
                           signal: controller.signal,
                           revalidateSession: async () =>
-                            current() &&
-                            (await this.deps.network.identity(token, controller.signal)).id ===
-                              userId &&
-                            (await this.deps.network.organizationCapability(
-                              token,
-                              controller.signal
-                            )) &&
-                            (await this.deps.network.repositoryCapability(
-                              token,
-                              controller.signal
-                            )) &&
-                            current()
+                            current() && this.verified(token, userId, generation, controller.signal)
                         };
-                        const result = await bootstrap(input);
+                        const result = await this.withVerifiedAccount(controller.signal, () =>
+                          bootstrap(input)
+                        );
                         update(course.repositoryId, result);
                         if (current() && result.status !== "ready")
                           this.state = {
@@ -780,21 +963,17 @@ export class GithubOAuthSession {
                               };
                           };
                           try {
-                            const synchronized = await this.deps.synchronizeCourse({
-                              ...input,
-                              onProgress
-                            });
+                            const synchronized = await this.withVerifiedAccount(
+                              controller.signal,
+                              () =>
+                                this.deps.synchronizeCourse!({
+                                  ...input,
+                                  onProgress
+                                })
+                            );
                             // A Git rejection alone cannot revoke the global OAuth session.
                             if (current() && synchronized.reason === "authentication_failed") {
-                              try {
-                                await this.deps.network.identity(token, controller.signal);
-                              } catch (error) {
-                                if (
-                                  error instanceof GithubOAuthError &&
-                                  error.code === "invalid_credential"
-                                )
-                                  throw error;
-                              }
+                              await this.confirmCredential(snapshot);
                             }
                             onProgress(synchronized);
                           } catch (error) {
@@ -857,47 +1036,38 @@ export class GithubOAuthSession {
         }
       }
     } catch (error) {
-      if (current()) {
-        if (error instanceof GithubOAuthError && error.code === "invalid_credential") {
-          this.active = controller;
-          this.token = null;
-          this.state = { ...signedOut(), message: safeMessage(error) };
-          try {
-            await this.deps.store.delete();
-          } catch {
-            this.state = {
-              ...this.state,
-              status: "unavailable",
-              message:
-                "The invalid saved credential could not be removed. Choose Sign out to retry."
-            };
-          }
-        } else {
-          const insufficient =
-            error instanceof GithubOAuthError && error.code === "insufficient_scope";
-          this.state = {
-            ...this.state,
-            courseDiscovery: {
-              ...emptyCourseDiscovery(),
-              userId,
-              status: "error",
-              diagnostics: [
-                {
-                  organizationId: null,
-                  status: "unavailable",
-                  message: "Course discovery temporarily unavailable. Refresh courses."
-                }
-              ]
-            },
-            organizationPermission: insufficient ? "required" : this.state.organizationPermission,
-            organizationDiscovery: {
-              ...this.state.organizationDiscovery,
-              status: insufficient ? "authorization_required" : "error",
-              message: safeMessage(error),
-              stale: this.state.organizationDiscovery.organizations.length > 0
-            }
-          };
+      if (error instanceof GithubOAuthError && error.code === "invalid_credential") {
+        try {
+          await this.confirmCredential(snapshot);
+        } catch {
+          /* Confirmed rejection already cleared the session. */
         }
+      }
+      if (current()) {
+        const insufficient =
+          error instanceof GithubOAuthError && error.code === "insufficient_scope";
+        this.state = {
+          ...this.state,
+          courseDiscovery: {
+            ...emptyCourseDiscovery(),
+            userId,
+            status: "error",
+            diagnostics: [
+              {
+                organizationId: null,
+                status: "unavailable",
+                message: "Course discovery temporarily unavailable. Refresh courses."
+              }
+            ]
+          },
+          organizationPermission: insufficient ? "required" : this.state.organizationPermission,
+          organizationDiscovery: {
+            ...this.state.organizationDiscovery,
+            status: insufficient ? "authorization_required" : "error",
+            message: safeMessage(error),
+            stale: this.state.organizationDiscovery.organizations.length > 0
+          }
+        };
       }
     } finally {
       if (current() && this.state.courseDiscovery.status === "loading")
@@ -912,6 +1082,7 @@ export class GithubOAuthSession {
   }
   shutdown(): void {
     this.stopped = true;
+    if (this.authorization) this.authorization.valid = false;
     this.invalidateReconciliations();
     this.discovery?.abort();
     this.active?.abort();

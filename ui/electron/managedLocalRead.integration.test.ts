@@ -31,9 +31,12 @@ const fixture = async () => {
   const course = { ...f.course, localFolderIds: [], bootstrap: state("ready") };
   saveEntry(f.root, catalogEntry(f.root, 42, 20, course, state("ready"), new Date().toISOString()));
   const network = {
-    identity: vi.fn().mockResolvedValue({ id: 42, login: "faculty", name: null }),
-    repositoryCapability: vi.fn().mockResolvedValue(true),
-    organizationCapability: vi.fn().mockResolvedValue(true),
+    verifyAccount: vi.fn().mockResolvedValue({
+      identity: { id: 42, login: "faculty", name: null },
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    }),
     discoverOrganizations: vi
       .fn()
       .mockResolvedValue({ status: "ready", organizations: [], message: null, stale: false }),
@@ -308,7 +311,12 @@ describe("verified local managed reads", () => {
       await Promise.race([entered, result]);
       if (change === "sign-out") await f.session.signOut();
       if (change === "switch") {
-        f.network.identity.mockResolvedValue({ id: 99, login: "second", name: null });
+        f.network.verifyAccount.mockResolvedValue({
+          identity: { id: 99, login: "second", name: null },
+          scopes: ["read:org", "repo"],
+          repositoryCapability: true,
+          organizationCapability: true
+        });
         await f.session.signIn(true);
       }
       if (change === "revocation") {

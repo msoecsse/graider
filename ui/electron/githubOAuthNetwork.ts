@@ -1,11 +1,9 @@
 import { createGithubOrganizationNetwork } from "./githubOrganizations.js";
 import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
 import { GithubOAuthError } from "./githubOAuthCallback.js";
-import type { GithubFacultyIdentity } from "./githubOAuthTypes.js";
 export const GITHUB_OAUTH_CLIENT_ID = "Ov23lilUrjxhcDiX2RBq";
 export const GITHUB_OAUTH_SCOPES: readonly string[] = ["read:org", "repo"];
 const NETWORK_TIMEOUT_MS = 30_000;
-const UNAUTHORIZED_STATUS = 401;
 export interface OAuthExchange {
   readonly code: string;
   readonly redirectUri: string;
@@ -81,39 +79,6 @@ export const createGithubOAuthNetwork = (
         );
       }
       return body.access_token;
-    },
-    async identity(token: string, signal: AbortSignal): Promise<GithubFacultyIdentity> {
-      try {
-        const body = await provideClient(token).getAuthenticatedUser({ signal });
-        if (
-          !/^[A-Za-z0-9-]+$/.test(body.username) ||
-          !Number.isSafeInteger(body.id) ||
-          (body.id ?? 0) <= 0
-        ) {
-          throw new GithubOAuthError(
-            "identity",
-            "GitHub identity could not be verified. Try again."
-          );
-        }
-        return { login: body.username, id: body.id!, name: body.name ?? null };
-      } catch (error) {
-        if (error instanceof GithubOAuthError) throw error;
-        if (
-          typeof error === "object" &&
-          error !== null &&
-          "statusCode" in error &&
-          error.statusCode === UNAUTHORIZED_STATUS
-        ) {
-          throw new GithubOAuthError(
-            "invalid_credential",
-            "Your GitHub sign-in has expired or been revoked. Sign in again."
-          );
-        }
-        throw new GithubOAuthError(
-          "unavailable",
-          "GitHub identity could not be verified. Check your connection and try again."
-        );
-      }
     }
   };
 };

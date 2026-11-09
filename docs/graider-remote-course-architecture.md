@@ -3734,6 +3734,52 @@ projects its own managed/transaction path. The main-only async operation context
 covers services that resolve paths by folder ID (notably Comment Library). No token, Git
 command, arbitrary managed path, or reusable authorization ticket is exposed to renderer.
 
+#### Authorization minimization Slice 2: verified OAuth sessions
+
+Sign-in and saved-credential restoration each issue one `GET /user` through
+`getOrganizationScopeResponse()`. The same successful response supplies immutable
+account ID, login, optional display name and the `x-oauth-scopes` evidence. Organization
+read capability requires `read:org`, `write:org` or `admin:org`; private repository
+capability requires full `repo`. Missing scope headers prevent establishment and
+report missing evidence; an explicitly limited grant establishes a restricted session
+that can be upgraded transactionally through sign-in.
+
+`GithubOAuthSession` owns the in-memory identity, exact granted scopes, capability flags,
+credential association, validity and account generation. Only the credential remains
+in the existing OS-encrypted store. Every restart requires fresh verification. Sanitized
+IPC state contains identity and permission status, never tokens, response headers,
+verification internals or executable session closures.
+
+Routine `revalidateSession()` calls check this snapshot locally, including generation,
+identity, credential association, capabilities and cancellation. Organization refresh,
+course discovery, multiple-course bootstrap, synchronization, reconciliation, account
+setup, remote previews and guarded mutations add zero global account requests. The
+main-only async context lets the shared GitHub client adapt backend
+`getAuthenticatedUser()` and `getOrganizationScopeResponse()` account-evidence reads to
+the same verified snapshot, retaining exact scopes (including broader organization
+write grants). Standalone CLI clients retain their independent account verification.
+This context does not intercept organization membership, repository identity/permissions,
+faculty/team policy, source-revision checks, conditional writes or actual GitHub operations.
+GitHub continues enforcing permissions on every remote operation. Slice 1's token-free
+local reads and grading navigation retain their existing local cache boundary.
+
+An organization/repository `401`, or a Git authentication rejection, may request one
+bounded global confirmation shared by all operations in the established session. Its
+settled promise is retained until a new sign-in/restoration, preventing repeated probes
+and automatic verification loops. Only a confirmed global `/user` `401` invalidates the
+session, aborts affected operations and removes the secure credential. Repository-only
+rejection, `403`, rate limits, SSO/approval policy, missing evidence and temporary network
+failures preserve sign-in and credentials. Newly confirmed scope loss restricts operations.
+Sign-out/account replacement invalidate generations; failed replacement retains the previous
+verified account. Late verification, bootstrap, synchronization and confirmation results
+cannot restore authority after cancellation or account change, including replacement with
+the same account and credential. Sign-out waits for a pending credential replacement to
+finish or roll back before final secure deletion.
+
+This slice removes redundant global verification; startup membership/repository discovery
+can still encounter `403`, SSO/approval restrictions or rate limits. Discovery caching,
+request deduplication and general rate-limit handling remain Slice 3 work.
+
 #### Authentication minimization Slice 1: local course reads
 
 Supported managed reads use `GithubOAuthSession.withLocalCourse()` and
@@ -3780,8 +3826,8 @@ checks capabilities, discovers authorization, bootstraps and synchronizes. A tra
 outage after authorization adds no network prerequisite to local reads while that
 trusted session/discovery evidence remains available. Restart or discovery refresh
 can still fail to establish or replace that evidence; a disk catalog is insufficient.
-OAuth recovery/remaining startup 403s and discovery refresh/rate-limit behavior remain
-for authentication-minimization Slices 2 and 3, respectively.
+Session verification is covered by authorization-minimization Slice 2 above. Remaining
+startup discovery 403s and discovery refresh/rate-limit behavior remain Slice 3 work.
 
 All registered course identity requests through `courseMutationIpc` use this source after
 cutover: assignment setup/edit/delete/group configuration, roster/section administration,

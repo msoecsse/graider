@@ -3,6 +3,7 @@ import {
   type GithubClientProvider,
   type GitHubClient
 } from "./githubClientProvider.js";
+import { confirmGithubCredentialRejection } from "./githubAccountVerification.js";
 import { GithubOAuthError } from "./githubOAuthCallback.js";
 
 const PAGE_SIZE = 100;
@@ -113,18 +114,9 @@ export const createRemoteRepositoryReader = (
     const message =
       body && typeof body === "object" && "message" in body ? String(body.message) : "";
     if (response.status === HTTP_UNAUTHORIZED) {
-      // A single repository cannot revoke a global session.
-      let identity: Response;
-      try {
-        identity = await client.getOrganizationScopeResponse!(
-          AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)])
-        );
-      } catch {
-        return fail("network_unavailable");
-      }
-      return fail(
-        identity.status === HTTP_UNAUTHORIZED ? "invalid_credential" : "repository_inaccessible"
-      );
+      // Only the owning session may confirm global rejection, once for its credential.
+      await confirmGithubCredentialRejection();
+      return fail("repository_inaccessible");
     }
     if (
       response.status === HTTP_RATE_LIMIT ||

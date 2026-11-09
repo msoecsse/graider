@@ -33,13 +33,16 @@ const fixture = () => {
     delete: vi.fn().mockResolvedValue(undefined)
   };
   const network = {
-    repositoryCapability: vi.fn().mockResolvedValue(true),
-    organizationCapability: vi.fn().mockResolvedValue(true),
     discoverOrganizations: vi
       .fn()
       .mockResolvedValue({ status: "ready", organizations: [], message: null, stale: false }),
     exchange: vi.fn().mockResolvedValue(TOKEN),
-    identity: vi.fn().mockResolvedValue(IDENTITY)
+    verifyAccount: vi.fn().mockResolvedValue({
+      identity: IDENTITY,
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    })
   };
   const callback = vi.fn().mockResolvedValue({
     redirectUri: "http://127.0.0.1:54321/callback",
@@ -121,7 +124,7 @@ describe("faculty session", () => {
     expect(url.searchParams.get("code_challenge")).toBe(
       createHash("sha256").update(exchange.verifier).digest("base64url")
     );
-    expect(f.network.identity).toHaveBeenCalledWith(TOKEN, expect.any(AbortSignal));
+    expect(f.network.verifyAccount).toHaveBeenCalledWith(TOKEN, expect.any(AbortSignal));
     expect(f.store.save).toHaveBeenCalledWith(TOKEN);
     expect(state).toMatchObject({ status: "signed_in", identity: IDENTITY, persistence: "secure" });
     expect(JSON.stringify(state)).not.toContain(TOKEN);
@@ -139,7 +142,12 @@ describe("faculty session", () => {
       "select_account"
     );
     const replacement = { login: "second", id: 99, name: null };
-    f.network.identity.mockResolvedValueOnce(replacement);
+    f.network.verifyAccount.mockResolvedValueOnce({
+      identity: replacement,
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    });
     expect((await f.session.signIn(true)).identity).toEqual(replacement);
     expect(f.store.save).toHaveBeenCalledTimes(2);
   });
@@ -147,7 +155,12 @@ describe("faculty session", () => {
     const f = fixture();
     await f.session.signIn();
     f.store.save.mockRejectedValueOnce(new Error(SECRET));
-    f.network.identity.mockResolvedValueOnce({ login: "second", id: 99, name: null });
+    f.network.verifyAccount.mockResolvedValueOnce({
+      identity: { login: "second", id: 99, name: null },
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    });
     expect((await f.session.signIn(true)).identity).toEqual(IDENTITY);
   });
   it("supports memory-only sign-in on storage failure, then clears identity on sign out", async () => {
@@ -165,7 +178,7 @@ describe("faculty session", () => {
     expect(f.store.load).toHaveBeenCalledOnce();
     const revoked = fixture();
     revoked.store.load.mockResolvedValue(TOKEN);
-    revoked.network.identity.mockRejectedValue(
+    revoked.network.verifyAccount.mockRejectedValue(
       new GithubOAuthError("invalid_credential", "Sign in again.")
     );
     await revoked.session.restore();
@@ -173,7 +186,7 @@ describe("faculty session", () => {
     expect(revoked.session.getState().status).toBe("signed_out");
     const offline = fixture();
     offline.store.load.mockResolvedValue(TOKEN);
-    offline.network.identity.mockRejectedValue(new Error(TOKEN));
+    offline.network.verifyAccount.mockRejectedValue(new Error(TOKEN));
     await offline.session.restore();
     expect(offline.store.delete).not.toHaveBeenCalled();
     expect(offline.session.getState().status).toBe("unavailable");
@@ -232,12 +245,12 @@ describe("trusted network boundary", () => {
       fetcher,
       () =>
         ({
-          getAuthenticatedUser: async () => ({
-            username: IDENTITY.login,
-            id: IDENTITY.id,
-            name: IDENTITY.name
+          getOrganizationScopeResponse: async () => ({
+            status: 200,
+            headers: { "x-oauth-scopes": "read:org, repo" },
+            data: IDENTITY
           })
-        }) as GitHubClient
+        }) as unknown as GitHubClient
     );
     const signal = new AbortController().signal;
     expect(
@@ -257,12 +270,17 @@ describe("trusted network boundary", () => {
     expect(init.body.get("code_verifier")).toBe("verifier");
     expect(init.body.get("client_id")).toBe(GITHUB_OAUTH_CLIENT_ID);
     expect(init.redirect).toBe("error");
-    expect(await network.identity(TOKEN, signal)).toEqual(IDENTITY);
+    expect(await network.verifyAccount(TOKEN, signal)).toEqual({
+      identity: IDENTITY,
+      organizationCapability: true,
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true
+    });
   });
   it.each([
     [401, "invalid_credential"],
-    [403, "unavailable"],
-    [500, "unavailable"]
+    [403, "forbidden"],
+    [500, "network_unavailable"]
   ])("distinguishes identity status %s", async (status, code) => {
     const fetcher = vi.fn().mockResolvedValue(new Response(SECRET + TOKEN, { status }));
     await expect(
@@ -270,11 +288,9 @@ describe("trusted network boundary", () => {
         fetcher,
         () =>
           ({
-            getAuthenticatedUser: async () => {
-              throw { statusCode: status };
-            }
+            getOrganizationScopeResponse: async () => ({ status, headers: {}, data: {} })
           }) as unknown as GitHubClient
-      ).identity(TOKEN, new AbortController().signal)
+      ).verifyAccount(TOKEN, new AbortController().signal)
     ).rejects.toMatchObject({ code });
   });
   it("rejects invalid token responses without including the body", async () => {
@@ -326,7 +342,12 @@ describe("organization session lifecycle and authorization upgrades", () => {
   it("detects an existing no-scope token and upgrades transactionally across restart", async () => {
     const f = fixture();
     f.store.load.mockResolvedValue(TOKEN);
-    f.network.organizationCapability.mockResolvedValue(false);
+    f.network.verifyAccount.mockResolvedValue({
+      identity: IDENTITY,
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: false
+    });
     await f.session.restore();
     await f.session.refreshOrganizations();
     expect(f.session.getState()).toMatchObject({
@@ -336,7 +357,12 @@ describe("organization session lifecycle and authorization upgrades", () => {
     });
     expect(f.network.discoverOrganizations).not.toHaveBeenCalled();
     f.network.exchange.mockResolvedValue("fake_upgraded_token");
-    f.network.organizationCapability.mockResolvedValue(true);
+    f.network.verifyAccount.mockResolvedValue({
+      identity: IDENTITY,
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    });
     await f.session.signIn();
     expect(f.store.save).toHaveBeenCalledWith("fake_upgraded_token");
     f.store.load.mockResolvedValue("fake_upgraded_token");
@@ -355,7 +381,12 @@ describe("organization session lifecycle and authorization upgrades", () => {
     async (code) => {
       const f = fixture();
       f.store.load.mockResolvedValue(TOKEN);
-      f.network.organizationCapability.mockResolvedValue(false);
+      f.network.verifyAccount.mockResolvedValue({
+        identity: IDENTITY,
+        scopes: ["read:org", "repo"],
+        repositoryCapability: true,
+        organizationCapability: false
+      });
       await f.session.restore();
       await f.session.refreshOrganizations();
       f.network.exchange.mockRejectedValueOnce(new GithubOAuthError(code, "Authorization failed."));
@@ -402,6 +433,9 @@ describe("organization session lifecycle and authorization upgrades", () => {
       expect((await f.session.refreshOrganizations()).status).toBe("signed_in");
       expect(f.store.delete).not.toHaveBeenCalled();
     }
+    f.network.verifyAccount.mockRejectedValueOnce(
+      new GithubOAuthError("invalid_credential", "Revoked")
+    );
     f.network.discoverOrganizations.mockRejectedValueOnce(
       new GithubOAuthError("invalid_credential", "Revoked")
     );
@@ -415,7 +449,7 @@ describe("organization session lifecycle and authorization upgrades", () => {
   it("never runs discovery signed out and ignores late results after switching or signing out", async () => {
     const f = fixture();
     await f.session.refreshOrganizations();
-    expect(f.network.organizationCapability).not.toHaveBeenCalled();
+    expect(f.network.verifyAccount).not.toHaveBeenCalled();
     await f.session.signIn();
     await f.session.refreshOrganizations();
     let finish!: (value: unknown) => void;
@@ -427,7 +461,12 @@ describe("organization session lifecycle and authorization upgrades", () => {
     );
     const pending = f.session.refreshOrganizations();
     await vi.waitFor(() => expect(finish).toBeDefined());
-    f.network.identity.mockResolvedValueOnce({ id: 99, login: "second", name: null });
+    f.network.verifyAccount.mockResolvedValueOnce({
+      identity: { id: 99, login: "second", name: null },
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    });
     await f.session.signIn(true);
     finish({
       status: "ready",
@@ -451,7 +490,12 @@ describe("private course discovery capability and transactional upgrades", () =>
   it("restores a read:org-only session with course upgrade required and never discovers courses", async () => {
     const f = fixture();
     f.store.load.mockResolvedValue(TOKEN);
-    f.network.repositoryCapability.mockResolvedValue(false);
+    f.network.verifyAccount.mockResolvedValue({
+      identity: IDENTITY,
+      scopes: ["read:org", "repo"],
+      organizationCapability: true,
+      repositoryCapability: false
+    });
     const discoverCourses = vi.fn();
     const session = new GithubOAuthSession({ ...f, discoverCourses });
     await session.restore();
@@ -469,7 +513,11 @@ describe("private course discovery capability and transactional upgrades", () =>
     async (outcome) => {
       const f = fixture();
       f.store.load.mockResolvedValue(TOKEN);
-      f.network.repositoryCapability.mockResolvedValue(false);
+      f.network.verifyAccount.mockResolvedValue({
+        identity: IDENTITY,
+        organizationCapability: true,
+        repositoryCapability: false
+      });
       await f.session.restore();
       await f.session.refreshOrganizations();
       if (outcome === "cancel")
@@ -492,10 +540,20 @@ describe("private course discovery capability and transactional upgrades", () =>
   it("commits an upgraded credential only after capability validation and restores it", async () => {
     const f = fixture();
     f.store.load.mockResolvedValue(TOKEN);
-    f.network.repositoryCapability.mockResolvedValue(false);
+    f.network.verifyAccount.mockResolvedValue({
+      identity: IDENTITY,
+      scopes: ["read:org", "repo"],
+      organizationCapability: true,
+      repositoryCapability: false
+    });
     await f.session.restore();
     await f.session.refreshOrganizations();
-    f.network.repositoryCapability.mockResolvedValue(true);
+    f.network.verifyAccount.mockResolvedValue({
+      identity: IDENTITY,
+      organizationCapability: true,
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true
+    });
     f.network.exchange.mockResolvedValue("upgraded_token");
     await f.session.signIn();
     expect(f.store.save).toHaveBeenCalledWith("upgraded_token");
@@ -522,7 +580,12 @@ describe("private course discovery capability and transactional upgrades", () =>
     await session.refreshOrganizations();
     expect(discoverCourses).toHaveBeenCalledWith(TOKEN, IDENTITY.id, [], expect.any(AbortSignal));
     expect(session.getState().courseDiscovery.userId).toBe(IDENTITY.id);
-    f.network.identity.mockResolvedValue({ login: "second", id: 99, name: null });
+    f.network.verifyAccount.mockResolvedValue({
+      identity: { login: "second", id: 99, name: null },
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    });
     await session.signIn(true);
     await session.refreshOrganizations();
     expect(session.getState().courseDiscovery.userId).toBe(99);

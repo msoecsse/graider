@@ -53,7 +53,10 @@ Renderer code may:
 
 - Own all filesystem-backed registry access.
 - Own all Graider command execution and all direct/bundled backend calls.
-- Own token resolution.
+- Own token resolution and the verified OAuth session. Establish identity and scope
+  evidence once per sign-in/restoration; routine session checks are local. Keep
+  repository/membership authority and revision checks independent. See
+  [verified OAuth sessions](graider-remote-course-architecture.md#authorization-minimization-slice-2-verified-oauth-sessions).
 - Parse stdout JSON before returning structured results to the renderer.
 - Return bounded safe errors for invalid JSON, spawn failures, missing CLI, and
   nonzero command failures.

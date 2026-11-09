@@ -1,4 +1,5 @@
 import path from "node:path";
+import { verifiedGithubAccount } from "./githubAccountVerification.js";
 import { managedCourseOperation } from "./managedCourseOperationContext.js";
 import type { resolveProductionGitHubClient } from "../dist-electron/githubClientCompositionBackend.cjs";
 
@@ -28,14 +29,35 @@ export const createGithubClientProvider =
       const resolved = backend.resolveProductionGitHubClient({ token, env: {} });
       if (resolved.status === "token_missing") throw new Error("GitHub client unavailable.");
       const operation = managedCourseOperation.getStore();
-      if (!operation?.revalidate) return resolved.githubClient;
+      const account = verifiedGithubAccount(token);
+      if (!operation?.revalidate && !account) return resolved.githubClient;
       return new Proxy(resolved.githubClient, {
         get(target, key) {
+          // Adapt existing backend account-evidence reads to the current verified lease.
+          // Membership, repository authority and all mutation methods still use GitHub.
+          if (account && key === "getOrganizationScopeResponse")
+            return async (signal: AbortSignal) => {
+              const verified = await account(signal);
+              return {
+                status: 200,
+                headers: { "x-oauth-scopes": verified.scopes.join(",") },
+                data: verified.identity
+              };
+            };
+          if (account && key === "getAuthenticatedUser")
+            return async (options?: { readonly signal: AbortSignal }) => {
+              const { identity } = await account(options?.signal);
+              return {
+                id: identity.id,
+                username: identity.login,
+                ...(identity.name === null ? {} : { name: identity.name })
+              };
+            };
           const method = target[key as keyof GitHubClient];
           if (typeof method !== "function") return method;
           return backend.GITHUB_MUTATION_METHODS.includes(String(key))
             ? async (...args: unknown[]) => {
-                await operation.revalidate?.();
+                await operation?.revalidate?.();
                 return Reflect.apply(method, target, args);
               }
             : method.bind(target);

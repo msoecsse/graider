@@ -140,12 +140,13 @@ describe("GitHub remote repository read adapter", () => {
       message: expect.not.stringContaining("private-token")
     });
   });
-  it("keeps repository 401 scoped until /user confirms global invalidation", async () => {
+  it("keeps repository 401 scoped without independently verifying the account", async () => {
     const f = fixture();
     f.client.listCourseRepositoriesPage.mockResolvedValue(response({}, 401));
     await expect(f.reader.list("org")).rejects.toMatchObject({ code: "repository_inaccessible" });
     f.client.getOrganizationScopeResponse.mockResolvedValue(response({}, 401));
-    await expect(f.reader.list("org")).rejects.toMatchObject({ code: "invalid_credential" });
+    await expect(f.reader.list("org")).rejects.toMatchObject({ code: "repository_inaccessible" });
+    expect(f.client.getOrganizationScopeResponse).not.toHaveBeenCalled();
   });
   it("normalizes transport failure without leaking raw provider details", async () => {
     const f = fixture();

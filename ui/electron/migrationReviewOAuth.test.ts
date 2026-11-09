@@ -12,8 +12,6 @@ const fixture = async () => {
     delete: vi.fn(async () => {})
   };
   const network = {
-    repositoryCapability: vi.fn(async () => true),
-    organizationCapability: vi.fn(async () => true),
     discoverOrganizations: vi.fn(async () => ({
       status: "ready" as const,
       organizations: [],
@@ -21,7 +19,12 @@ const fixture = async () => {
       stale: false
     })),
     exchange: vi.fn(async () => "oauth-token"),
-    identity: vi.fn(async () => ({ id: USER, login: "faculty", name: null }))
+    verifyAccount: vi.fn(async () => ({
+      identity: { id: USER, login: "faculty", name: null },
+      scopes: ["read:org", "repo"],
+      repositoryCapability: true,
+      organizationCapability: true
+    }))
   };
   const synchronizeCourse = vi.fn();
   const session = new GithubOAuthSession({
