@@ -62,7 +62,7 @@ export const GradingWorkflowRepairPanel = ({
     <button
       className="secondary-action"
       type="button"
-      disabled={workflowRepair.status !== "ready"}
+      disabled={workflowRepair.status === "loading" || workflowRepair.status === "running"}
       onClick={onOpenWorkflowRepairConfirmation}
     >
       {workflowRepair.status === "running" ? "Replacing workflow…" : "Replace Graider workflow…"}

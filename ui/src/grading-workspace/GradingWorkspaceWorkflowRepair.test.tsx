@@ -139,7 +139,7 @@ describe("GradingWorkspacePage workflow repair", () => {
       await screen.findByRole("button", { name: "Replace workflows & run for all students" })
     );
     expect(bulkRepair).not.toHaveBeenCalled();
-    const dialog = screen.getByRole("dialog", {
+    const dialog = await screen.findByRole("dialog", {
       name: "Replace workflows and start grading runs?"
     });
     fireEvent.click(
@@ -157,17 +157,20 @@ describe("GradingWorkspacePage workflow repair", () => {
     expect(screen.getByText(/trusted-org\/lab1-grace: write_failed/u)).toBeInTheDocument();
   });
 
-  it("keeps the action disabled when managed workflow grading is ineligible", async () => {
+  it("checks eligibility only on demand", async () => {
     const repair = vi.fn(({ studentId }: { studentId: string }) =>
       Promise.resolve({ status: "grading_not_eligible" as const, studentId })
     );
     setApis(repair);
     render(<GradingWorkspacePage request={REQUEST} />);
 
+    const action = await screen.findByRole("button", { name: "Replace Graider workflow…" });
+    expect(repair).not.toHaveBeenCalled();
+    fireEvent.click(action);
     expect(
       await screen.findByText(/unavailable for this assignment's grading configuration/u)
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Replace Graider workflow…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Replace Graider workflow…" })).toBeEnabled();
   });
 
   it("requires confirmation and cancel performs no confirmed request", async () => {
@@ -184,7 +187,7 @@ describe("GradingWorkspacePage workflow repair", () => {
     const action = await screen.findByRole("button", { name: "Replace Graider workflow…" });
     await waitFor(() => expect(action).toBeEnabled());
     fireEvent.click(action);
-    const dialog = screen.getByRole("dialog", { name: "Replace Graider workflow?" });
+    const dialog = await screen.findByRole("dialog", { name: "Replace Graider workflow?" });
     expect(dialog).toHaveTextContent("Replace .github/workflows/grade.yml in trusted-org/lab1-ada");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(repair).toHaveBeenCalledTimes(1);
@@ -213,7 +216,7 @@ describe("GradingWorkspacePage workflow repair", () => {
     const action = await screen.findByRole("button", { name: "Replace Graider workflow…" });
     await waitFor(() => expect(action).toBeEnabled());
     fireEvent.click(action);
-    const dialog = screen.getByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
     fireEvent.click(
       within(dialog).getByRole("checkbox", {
         name: "I understand this replaces the repository's grading workflow."
@@ -250,7 +253,7 @@ describe("GradingWorkspacePage workflow repair", () => {
     const action = await screen.findByRole("button", { name: "Replace Graider workflow…" });
     await waitFor(() => expect(action).toBeEnabled());
     fireEvent.click(action);
-    const dialog = screen.getByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
     fireEvent.click(
       within(dialog).getByRole("checkbox", {
         name: "I understand this replaces the repository's grading workflow."
@@ -282,7 +285,7 @@ describe("GradingWorkspacePage workflow repair", () => {
     const action = await screen.findByRole("button", { name: "Replace Graider workflow…" });
     await waitFor(() => expect(action).toBeEnabled());
     fireEvent.click(action);
-    const dialog = screen.getByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
     fireEvent.click(
       within(dialog).getByRole("checkbox", {
         name: "I understand this replaces the repository's grading workflow."
@@ -312,8 +315,9 @@ describe("GradingWorkspacePage workflow repair", () => {
     setApis(repair);
     render(<GradingWorkspacePage request={REQUEST} />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Replace Graider workflow…" }));
     fireEvent.click(await screen.findByRole("button", { name: /grace · Section 002/u }));
-    await waitFor(() => expect(repair).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(repair).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole("button", { name: "Replace Graider workflow…" })).toBeEnabled();
     await act(async () =>
       ada.resolve({
@@ -323,6 +327,6 @@ describe("GradingWorkspacePage workflow repair", () => {
       })
     );
     fireEvent.click(screen.getByRole("button", { name: "Replace Graider workflow…" }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("trusted-org/lab1-grace");
+    expect(await screen.findByRole("dialog")).toHaveTextContent("trusted-org/lab1-grace");
   });
 });

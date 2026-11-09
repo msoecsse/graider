@@ -640,3 +640,18 @@ optional remote template or workflow readiness checks are unavailable. Local
 grading requires your verified Graider account and authorized local course state;
 it does not require GitHub CLI sign-in or another course synchronization. Remote
 readiness restrictions still apply to GitHub-dependent operations.
+
+Student switching loads source and saved editor position together. The editor opens
+with its saved cursor and scroll position before position autosave is enabled.
+
+Choose **Replace Graider workflow…** to check workflow repair availability. This
+check runs on demand and can require GitHub access. Replacement still requires
+the confirmation dialog and existing authorization checks.
+
+After successful **Mark Complete** or **Set score to 0 and complete**, grading
+moves to the next student needing grading in the current student sort order,
+including students outside the active filter. Completion waits for persistence
+and refreshed grading details. Pending drafts still require resolution. If you
+switch students during completion, the completed request leaves your selection
+alone. When none remain, the workspace stays on the completed student and shows
+a grading-finished message.

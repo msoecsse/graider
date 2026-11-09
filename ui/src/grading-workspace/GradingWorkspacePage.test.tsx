@@ -874,6 +874,9 @@ describe("GradingWorkspacePage grading snapshot", () => {
       await screen.findByText("Complete", { selector: ".grading-student-snapshot strong" })
     ).toBeInTheDocument();
     expect(screen.getByText("Snapshot comment")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Grading is finished. No students remain to grade.")
+    ).toBeInTheDocument();
     expect(screen.getByText("95 / 100", { selector: ".grading-score-total" })).toBeInTheDocument();
     await showAllStudents();
     expect(screen.getByRole("button", { name: /ada · Section 001/u })).toHaveTextContent(
@@ -4408,4 +4411,149 @@ it("imports reviews at assignment level and refreshes comments/scores without re
   fireEvent.click(screen.getByRole("button", { name: "Show comment location: Imported title" }));
   expect(screen.getByTestId("mock-navigation")).toHaveTextContent('"startLine":1');
   expect(screen.getByRole("button", { name: "Edit comment: Imported **body**" })).toBeEnabled();
+});
+
+describe("completion navigation", () => {
+  it.each([false, true])("advances after persisted completion (zero=%s)", async (zero) => {
+    if (zero) rememberStudentSort({ key: "section", direction: "descending" });
+    const completion = deferred<{
+      status: "success";
+      studentId: string;
+      gradingStatus: "complete";
+    }>();
+    setApis(
+      vi.fn().mockResolvedValue(
+        workspace([
+          { studentId: "ada", section: "001", gradingStatus: "not_started" },
+          { studentId: "grace", section: "002", gradingStatus: "in_progress" },
+          { studentId: "zed", section: "003", gradingStatus: "not_started" },
+          { studentId: "bea", section: "004", gradingStatus: "complete" },
+          { studentId: "cy", section: "005", gradingStatus: "published" }
+        ])
+      ),
+      vi.fn().mockImplementation(({ studentId }) => Promise.resolve(source(studentId)))
+    );
+    Object.assign(window.graiderUI, {
+      markGradingStudentComplete: vi.fn().mockReturnValue(completion.promise)
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    if (zero) {
+      await showAllStudents();
+      fireEvent.click(await screen.findByRole("button", { name: "Set score to 0 and complete" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm set score to 0 and complete" }));
+    } else {
+      fireEvent.click(await screen.findByRole("button", { name: "Mark Complete" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm Mark Complete" }));
+    }
+    expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("ada:");
+    await act(async () =>
+      completion.resolve({ status: "success", studentId: "ada", gradingStatus: "complete" })
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-monaco")).toHaveTextContent(zero ? "zed:" : "grace:")
+    );
+  });
+});
+
+it("benchmarks latency-injected student switching", async () => {
+  const latency = { snapshot: 180, source: 240, view: 160 };
+  const delayed = <T,>(value: T, ms: number): Promise<T> =>
+    new Promise((resolve) => setTimeout(() => resolve(value), ms));
+  const loadSource = vi.fn(({ studentId }: { studentId: string }) =>
+    delayed(source(studentId), latency.source)
+  );
+  const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+    delayed(snapshot(studentId), latency.snapshot)
+  );
+  const loadView = vi.fn(({ studentId }: { studentId: string }) =>
+    delayed({ status: "success", studentId, viewState: null }, latency.view)
+  );
+  const repair = vi.fn().mockResolvedValue({ status: "grading_not_eligible" });
+  setApis(vi.fn().mockResolvedValue(workspace()), loadSource, loadView, undefined, loadSnapshot);
+  Object.assign(window.graiderUI, { repairGradingStudentWorkflow: repair });
+  render(<GradingWorkspacePage request={REQUEST} />);
+  await screen.findByTestId("mock-monaco");
+  await showAllStudents();
+  loadSource.mockClear();
+  loadSnapshot.mockClear();
+  loadView.mockClear();
+  repair.mockClear();
+  const started = performance.now();
+  fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+  const selectionMs = performance.now() - started;
+  await waitFor(() =>
+    expect(document.querySelector(".grading-student-snapshot")).toHaveTextContent("Not Started")
+  );
+  const snapshotMs = performance.now() - started;
+  await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
+  process.stdout.write(
+    JSON.stringify({
+      synthetic: true,
+      latency,
+      selectionMs,
+      snapshotMs,
+      sourceVisibleMs: performance.now() - started,
+      requests: {
+        snapshot: loadSnapshot.mock.calls.length,
+        source: loadSource.mock.calls.length,
+        view: loadView.mock.calls.length,
+        repair: repair.mock.calls.length
+      }
+    })
+  );
+});
+
+it.each(["failure", "submission_changed", "manual_navigation"])(
+  "does not auto-advance on %s",
+  async (scenario) => {
+    const pending = deferred<unknown>();
+    setApis(
+      vi.fn().mockResolvedValue(
+        workspace([
+          { studentId: "ada", section: "001", gradingStatus: "not_started" },
+          { studentId: "grace", section: "002", gradingStatus: "in_progress" }
+        ])
+      ),
+      vi.fn().mockImplementation(({ studentId }) => Promise.resolve(source(studentId)))
+    );
+    Object.assign(window.graiderUI, {
+      markGradingStudentComplete: vi.fn().mockReturnValue(pending.promise)
+    });
+    render(<GradingWorkspacePage request={REQUEST} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Mark Complete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Mark Complete" }));
+    await waitFor(() => expect(window.graiderUI.markGradingStudentComplete).toHaveBeenCalled());
+    if (scenario === "manual_navigation") {
+      fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+      await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
+    }
+    await act(async () =>
+      pending.resolve({
+        status: scenario === "manual_navigation" ? "success" : scenario,
+        studentId: "ada",
+        gradingStatus: "complete"
+      })
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-monaco")).toHaveTextContent(
+        scenario === "manual_navigation" ? "grace:" : "ada:"
+      )
+    );
+  }
+);
+
+it("preserves selection when discovery supplies the same workspace identity", async () => {
+  const prepare = vi.fn().mockResolvedValue(workspace());
+  const loadSource = vi
+    .fn()
+    .mockImplementation(({ studentId }) => Promise.resolve(source(studentId)));
+  setApis(prepare, loadSource);
+  const rendered = render(<GradingWorkspacePage request={REQUEST} />);
+  await showAllStudents();
+  fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+  await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:"));
+  rendered.rerender(<GradingWorkspacePage request={{ ...REQUEST }} />);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(loadSource).toHaveBeenCalledTimes(2);
+  expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:");
 });

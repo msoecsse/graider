@@ -529,6 +529,7 @@ export const GradingWorkspacePage = ({
     studentId: string;
     message: string;
   }>();
+  const [completionNotice, setCompletionNotice] = useState<string>();
   const [selectedStudentId, setSelectedStudentId] = useState<string>();
   const [studentSort, setStudentSort] = useState(getStudentSort);
   const [studentFilter, setStudentFilter] = useState<StudentFilterId>("to_grade");
@@ -644,13 +645,36 @@ export const GradingWorkspacePage = ({
       publicationProgressCleanup.current = undefined;
       bulkPublicationRequestGeneration.current += 1;
     };
-  }, [request]);
+  }, [request.courseFolderId, request.courseFolderPath, request.termCode, request.assignmentSlug]);
   const selected =
     isReady(result) && selectedStudentId !== undefined
       ? result.students.findIndex((candidate) => candidate.studentId === selectedStudentId)
       : 0;
   const currentStudentId = isReady(result) ? result.students[selected]?.studentId : undefined;
   const currentStudentIdRef = useRef<string | undefined>(currentStudentId);
+  const selectionTiming = useRef<
+    { studentId: string; started: number; recorded: Set<string> } | undefined
+  >(undefined);
+  const beginSelectionTiming = (studentId: string | undefined): void => {
+    if (studentId !== undefined)
+      selectionTiming.current = { studentId, started: performance.now(), recorded: new Set() };
+  };
+  useEffect(() => {
+    const timing = selectionTiming.current;
+    if (timing === undefined || timing.studentId !== currentStudentId) return;
+    const record = (stage: string): void => {
+      if (timing.recorded.has(stage)) return;
+      timing.recorded.add(stage);
+      const name = `graider.student-switch.${stage}`;
+      performance.clearMeasures(name);
+      performance.measure(name, { start: timing.started, end: performance.now() });
+    };
+    record("selection");
+    if (snapshot.status === "success" && snapshot.snapshot.studentId === currentStudentId)
+      record("snapshot");
+    if (source.status === "success" && source.source.studentId === currentStudentId)
+      record("source-visible");
+  }, [currentStudentId, snapshot, source]);
   const pendingViewStateSaves = useRef(new Map<string, GradingEditorViewState>());
   const autosaveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const viewStateSavePromises = useRef(new Map<string, Promise<void>>());
@@ -658,6 +682,8 @@ export const GradingWorkspacePage = ({
   const gradingMutationBlockedStudents = useRef(new Set<string>());
   const autosaveBlockedStudents = useRef(new Set<string>());
   const mounted = useRef(true);
+  const selectionRevision = useRef(0);
+  if (currentStudentIdRef.current !== currentStudentId) selectionRevision.current += 1;
   currentStudentIdRef.current = currentStudentId;
 
   const setStudentWarning = useCallback((studentId: string, message?: string): void => {
@@ -791,13 +817,18 @@ export const GradingWorkspacePage = ({
   }, [flushPendingViewState]);
 
   useEffect(() => {
+    let active = true;
     void window.graiderUI.prepareGradingWorkspace(request).then((value) => {
+      if (!active) return;
       const prepared = value as PreparationResult;
       setSelectedStudentId(isReady(prepared) ? prepared.students[0]?.studentId : undefined);
       setStudentStatusOverrides({});
       setResult(prepared);
     });
-  }, [request]);
+    return () => {
+      active = false;
+    };
+  }, [request.courseFolderId, request.courseFolderPath, request.termCode, request.assignmentSlug]);
 
   useEffect(() => {
     let active = true;
@@ -840,6 +871,19 @@ export const GradingWorkspacePage = ({
   const selectedStudent = isReady(result) ? result.students[selected] : undefined;
 
   useEffect(() => {
+    workflowRepairRequestGeneration.current += 1;
+    setWorkflowRepair({ status: "idle" });
+    setWorkflowRepairConfirmation(undefined);
+    setWorkflowRepairNotice(undefined);
+  }, [
+    currentStudentId,
+    request.courseFolderId,
+    request.courseFolderPath,
+    request.termCode,
+    request.assignmentSlug
+  ]);
+
+  const checkWorkflowRepair = (): void => {
     const generation = workflowRepairRequestGeneration.current + 1;
     workflowRepairRequestGeneration.current = generation;
     setWorkflowRepairConfirmation(undefined);
@@ -877,6 +921,13 @@ export const GradingWorkspacePage = ({
           currentStudentIdRef.current !== studentId
         )
           return;
+        if (value.status === "ready" && value.studentId === studentId) {
+          setWorkflowRepairRunAfterReplacement(true);
+          setWorkflowRepairConfirmation({
+            studentId,
+            repositoryFullName: value.repositoryFullName
+          });
+        }
         setWorkflowRepair(
           value.status === "ready" && value.studentId === studentId
             ? {
@@ -902,7 +953,7 @@ export const GradingWorkspacePage = ({
             message: "Workflow repair availability could not be checked safely."
           });
       });
-  }, [request, result, selectedStudent]);
+  };
 
   const confirmWorkflowRepair = async (): Promise<void> => {
     const confirmation = workflowRepairConfirmation;
@@ -1019,6 +1070,8 @@ export const GradingWorkspacePage = ({
         : [],
     [result, studentStatusOverrides, studentSort, publicationSort]
   );
+  const latestOrderedSubmissions = useRef(orderedSubmissions);
+  latestOrderedSubmissions.current = orderedSubmissions;
   const completeStudentIds = useMemo(
     () =>
       orderedSubmissions
@@ -1237,6 +1290,7 @@ export const GradingWorkspacePage = ({
   ]);
 
   useEffect(() => {
+    setCompletionNotice(undefined);
     setCanonicalSourceTarget(undefined);
     setCommentEditor(undefined);
     commentEditorBaseline.current = undefined;
@@ -1271,6 +1325,12 @@ export const GradingWorkspacePage = ({
       assignmentSlug: request.assignmentSlug,
       studentId: selectedStudent.studentId
     };
+    // Start both local reads together; mount the editor only with restored state.
+    // Convert rejection immediately so a slow source cannot leave it unhandled.
+    const pendingViewState = window.graiderUI.loadGradingStudentViewState(identity).then(
+      (value) => ({ value }),
+      () => ({ value: undefined })
+    );
     void window.graiderUI
       .loadGradingStudentSource(identity)
       .then(async (value) => {
@@ -1285,7 +1345,9 @@ export const GradingWorkspacePage = ({
         }
         let viewStateResult: GradingStudentViewStateResult;
         try {
-          viewStateResult = await window.graiderUI.loadGradingStudentViewState(identity);
+          const restored = await pendingViewState;
+          if (restored.value === undefined) throw new Error("View state unavailable");
+          viewStateResult = restored.value;
         } catch {
           if (sourceRequestGeneration.current !== generation) return;
           setStudentWarning(
@@ -1566,6 +1628,8 @@ export const GradingWorkspacePage = ({
   // the selection changes, so this only needs to guard against a dirty draft —
   // it does not need to close panels itself the way requestPanelOpen does.
   const requestStudentSwitch = (perform: () => void): void => withDraftGuard(perform);
+  const latestStudentSwitch = useRef(requestStudentSwitch);
+  latestStudentSwitch.current = requestStudentSwitch;
 
   const pullLatestChanges = async (studentId: string): Promise<void> => {
     const pull = window.graiderUI.pullLatestGradingStudentChanges;
@@ -1834,15 +1898,7 @@ export const GradingWorkspacePage = ({
   };
 
   const openWorkflowRepairConfirmation = (): void => {
-    if (workflowRepair.status !== "ready") return;
-    const confirmation: WorkflowRepairConfirmation = {
-      studentId: workflowRepair.studentId,
-      repositoryFullName: workflowRepair.repositoryFullName
-    };
-    requestPanelOpen(() => {
-      setWorkflowRepairRunAfterReplacement(true);
-      setWorkflowRepairConfirmation(confirmation);
-    });
+    requestPanelOpen(checkWorkflowRepair);
   };
 
   const openBulkWorkflowRepairConfirmation = (): void => {
@@ -2299,7 +2355,8 @@ export const GradingWorkspacePage = ({
       return false;
     }
     const confirmation = markCompleteConfirmation;
-    return runGradingMutation(
+    const revision = selectionRevision.current;
+    const succeeded = await runGradingMutation(
       confirmation.studentId,
       () =>
         markComplete({
@@ -2309,6 +2366,28 @@ export const GradingWorkspacePage = ({
         }),
       () => setMarkCompleteConfirmation(undefined)
     );
+    if (
+      succeeded &&
+      selectionRevision.current === revision &&
+      currentStudentIdRef.current === confirmation.studentId
+    ) {
+      const entries = latestOrderedSubmissions.current;
+      const position = entries.findIndex(
+        (entry) => entry.student.studentId === confirmation.studentId
+      );
+      const candidates = [...entries.slice(position + 1), ...entries.slice(0, position)];
+      const next = candidates.find((entry) => UNGRADED_STATUSES.includes(entry.status));
+      if (next)
+        latestStudentSwitch.current(() => {
+          void flushPendingViewState(confirmation.studentId);
+          setSelectedStudentId(next.student.studentId);
+          filterPillsContainerRef.current
+            ?.querySelector<HTMLElement>('button[aria-pressed="true"]')
+            ?.focus();
+        });
+      else setCompletionNotice("Grading is finished. No students remain to grade.");
+    }
+    return succeeded;
   };
 
   const refreshSnapshotAfterPublication = async (
@@ -2870,6 +2949,7 @@ export const GradingWorkspacePage = ({
   };
   const switchToStudent = (targetIndex: number | undefined): void => {
     if (targetIndex === undefined || targetIndex === selected) return;
+    beginSelectionTiming(isReady(result) ? result.students[targetIndex]?.studentId : undefined);
     requestStudentSwitch(() => {
       void flushPendingViewState(currentStudentId);
       setSelectedStudentId(isReady(result) ? result.students[targetIndex]?.studentId : undefined);
@@ -2914,9 +2994,7 @@ export const GradingWorkspacePage = ({
       markCompleteConfirmation !== undefined &&
       markCompleteConfirmation.studentId === currentStudentId
     ) {
-      void confirmMarkComplete().then((succeeded) => {
-        if (succeeded) goToNextStudentNeedingGrading();
-      });
+      void confirmMarkComplete();
       return;
     }
     if (
@@ -3289,6 +3367,7 @@ export const GradingWorkspacePage = ({
           progress={publishReviewProgress}
           refreshFailedStudentIds={publishReviewRefreshFailedStudentIds}
         />
+        {completionNotice === undefined ? null : <p role="status">{completionNotice}</p>}
         {gradingMutationError === undefined ? null : <p role="alert">{gradingMutationError}</p>}
         {footer}
         {cheatSheet}
@@ -3403,6 +3482,7 @@ export const GradingWorkspacePage = ({
             statusLabel={label}
             onSelectStudent={(index) => {
               if (index === selected) return;
+              beginSelectionTiming(result.students[index]?.studentId);
               requestStudentSwitch(() => {
                 void flushPendingViewState(student?.studentId);
                 setSelectedStudentId(result.students[index]?.studentId);
@@ -3717,6 +3797,7 @@ export const GradingWorkspacePage = ({
                     Browse comment library
                   </button>
                 </div>
+                {completionNotice === undefined ? null : <p role="status">{completionNotice}</p>}
                 {gradingMutationError === undefined ? null : (
                   <div className="grading-panel-message" role="alert">
                     {gradingMutationError}
