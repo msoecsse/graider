@@ -12,7 +12,11 @@ import {
   blockMutation,
   type ManagedCourseMutationGuard
 } from "./managedCourseMutationGuard.js";
-import { COURSE_MUTATION_NOTICE } from "./managedCourseMutationTypes.js";
+import {
+  courseContextRevision,
+  type VerifiedCourseOperationContext,
+  COURSE_MUTATION_NOTICE
+} from "./managedCourseMutationTypes.js";
 import { COURSE_RUNTIME_MUTATION_CHANNELS } from "./managedOperationInventory.js";
 
 /** Explicit inventory: all handlers are wrapped before their first local/remote write. */
@@ -157,7 +161,7 @@ export const createCourseMutationIpc = (
     WebContents,
     { userId: number; generation: number | undefined }
   >();
-  const courseKey = (context: VerifiedCourseMutationContext) =>
+  const courseKey = (context: VerifiedCourseOperationContext) =>
     `${context.userId}:${context.repositoryId}`;
   const bindings = new Map<WebContents, Map<string, string>>();
   const changed = (origin: WebContents, folderId: string, revision?: string) => {
@@ -173,7 +177,7 @@ export const createCourseMutationIpc = (
       }
     }
   };
-  const bind = (sender: WebContents, context: VerifiedCourseMutationContext) => {
+  const bind = (sender: WebContents, context: VerifiedCourseOperationContext) => {
     const previous = readSessions.get(sender);
     if (
       previous &&
@@ -183,14 +187,14 @@ export const createCourseMutationIpc = (
       sender.send(COURSE_MUTATION_NOTICE, { status: "view_invalidated" });
     } else
       readSessions.set(sender, { userId: context.userId, generation: context.sessionGeneration });
-    changed(sender, courseKey(context), context.authoritativeCommit);
+    changed(sender, courseKey(context), courseContextRevision(context));
     let courses = bindings.get(sender);
     if (!courses) {
       courses = new Map();
       bindings.set(sender, courses);
       sender.once?.("destroyed", () => bindings.delete(sender));
     }
-    courses.set(courseKey(context), context.authoritativeCommit);
+    courses.set(courseKey(context), courseContextRevision(context));
   };
   const documents = new WeakMap<
     WebContents,
@@ -355,7 +359,7 @@ export const createCourseMutationIpc = (
               ? request
               : fields.courseFolderId);
           const invoke = async (
-            context?: VerifiedCourseMutationContext,
+            context?: VerifiedCourseOperationContext,
             root = context?.courseFolderPath,
             transaction = false,
             afterPublication?: Array<() => Promise<unknown>>
@@ -391,7 +395,13 @@ export const createCourseMutationIpc = (
               context.legacyFolderPath!
             );
             return publicResult && typeof publicResult === "object" && !Array.isArray(publicResult)
-              ? { ...publicResult, courseReadRevision: context.authoritativeCommit }
+              ? {
+                  ...publicResult,
+                  courseReadRevision: courseContextRevision(context),
+                  ...(context.mode === "local_read"
+                    ? { courseReadRevisionSource: "local_cache" }
+                    : {})
+                }
               : publicResult;
           };
           if (!COURSE_MUTATION_CHANNELS.includes(channel)) {
@@ -403,7 +413,8 @@ export const createCourseMutationIpc = (
               const context = await boundary.read(
                 folderId,
                 fields.courseFolderPath,
-                async (resolved) => resolved
+                async (resolved) => resolved,
+                schemaRequest
               );
               if (context?.managed) bind(event.sender, context);
               return invoke(context);
@@ -424,6 +435,8 @@ export const createCourseMutationIpc = (
                     if (channel === IPC_CHANNELS.getCoursePublishStatus)
                       return {
                         status: "up_to_date",
+                        courseReadRevision: courseContextRevision(context),
+                        courseReadRevisionSource: "local_cache",
                         courseFolderPath: context.legacyFolderPath,
                         currentBranch: null,
                         upstreamBranch: null,
@@ -433,7 +446,7 @@ export const createCourseMutationIpc = (
                         diagnostics: [
                           {
                             message:
-                              "Managed course changes publish atomically. No pending course changes."
+                              "Managed course changes publish atomically. No pending local course changes; remote freshness has not been checked."
                           }
                         ]
                       };
@@ -489,13 +502,13 @@ export const createCourseMutationIpc = (
                   );
                 if (!context?.managed) return invoke(context);
                 const loadedRevision = bindings.get(event.sender)?.get(courseKey(context));
-                if (loadedRevision && loadedRevision !== context.authoritativeCommit)
+                if (loadedRevision && loadedRevision !== courseContextRevision(context))
                   blockMutation(
                     "view_refresh_required",
                     "The authoritative course changed since this workspace was loaded. Reopen it before writing.",
                     "refresh_view"
                   );
-                changed(event.sender, courseKey(context), context.authoritativeCommit);
+                changed(event.sender, courseKey(context), courseContextRevision(context));
                 if (channel === IPC_CHANNELS.publishCourseChanges)
                   return {
                     status: "up_to_date",

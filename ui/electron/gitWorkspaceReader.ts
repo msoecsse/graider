@@ -56,6 +56,8 @@ export interface GitRepositoryState {
 
 export interface GitWorkspaceInspector {
   readonly root: string;
+  /** Exact committed local bytes; no revision expressions or remote observation. */
+  readRevisionFile?(revision: string, file: string): Promise<string | null>;
   inspect(options?: {
     readonly paths?: readonly RelativeGitPath[];
     readonly readOnly?: boolean;

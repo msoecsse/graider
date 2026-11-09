@@ -65,6 +65,11 @@ Renderer code may:
   commit is produced. Revalidate account, source revision and support before writing,
   including after awaited preparation. Freshness closures and backend validators must
   remain main-owned and must never be serialized as renderer authorization tickets.
+- Authorize supported managed local reads with the token-free local session lease and
+  validated account-scoped cache. Keep that context distinct from mutation evidence;
+  `courseReadRevisionSource: local_cache` reports a cached commit, not current GitHub
+  verification. Unknown channels cannot acquire local-read authorization. See
+  [local-read semantics](graider-remote-course-architecture.md#authentication-minimization-slice-1-local-course-reads).
 - Keep current/historical section scope, explicit coordinator expansion, fallback
   administration and lifecycle/readiness gates independent. See the
   [managed-operation support matrix](graider-schema-v2-migration.md#implemented-managed-operation-bridge-slice-95g).

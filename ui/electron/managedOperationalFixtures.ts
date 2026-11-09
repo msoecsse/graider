@@ -4,6 +4,9 @@ import path from "node:path";
 import { exec } from "dugite";
 import { vi } from "vitest";
 import {
+  catalogEntry,
+  saveEntry,
+  state,
   managedCoursePath,
   performSynchronization,
   serializeManagedOperation
@@ -11,7 +14,11 @@ import {
 import type { GitWorkspaceWriter, GitWorkspaceSynchronizer } from "./gitWorkspaceReader.js";
 import { createAuthenticatedProductionGitWorkspace } from "./gitWorkspaceReader.js";
 import { ManagedCourseMutationGuard } from "./managedCourseMutationGuard.js";
-import type { GithubOAuthSession, ManagedOperationInput } from "./githubOAuthSession.js";
+import type {
+  GithubOAuthSession,
+  LocalCourseReadInput,
+  ManagedOperationInput
+} from "./githubOAuthSession.js";
 import type { RemoteCourse } from "./remoteCourseTypes.js";
 import type { RemoteRepositoryReader } from "./githubRemoteRepositories.js";
 
@@ -194,6 +201,39 @@ export const managedOperationalFixture = async () => {
       identity: userId ? { id: userId, login: "faculty" } : null,
       courseDiscovery: { userId, courses: [course], diagnostics: [] }
     }),
+    withLocalCourse: async <T>(
+      _id: number,
+      expected: number,
+      operation: (input: LocalCourseReadInput) => Promise<T>
+    ) => {
+      const captured = generation;
+      const assertCurrent = () => {
+        if (
+          userId !== expected ||
+          captured !== generation ||
+          course.authorization !== "authorized" ||
+          ["authorization_lost", "authentication_failed", "remote_unavailable"].includes(
+            course.synchronization?.reason ?? ""
+          )
+        )
+          throw new Error("Account or authorization changed.");
+      };
+      assertCurrent();
+      return serializeManagedOperation(
+        { userId: expected, course, signal: controller.signal },
+        async () => {
+          assertCurrent();
+          const result = await operation({
+            userId: expected,
+            course,
+            signal: controller.signal,
+            assertCurrent
+          });
+          assertCurrent();
+          return result;
+        }
+      );
+    },
     withReadOnlyCourse: async <T>(
       _id: number,
       expected: number,
@@ -260,6 +300,7 @@ export const managedOperationalFixture = async () => {
     username: () => "jones",
     authenticate
   };
+  saveEntry(root, catalogEntry(root, 42, 20, course, state("ready"), new Date().toISOString()));
   const guard = new ManagedCourseMutationGuard(deps);
   const advance = async (title = "Remote winner") => {
     fs.writeFileSync(

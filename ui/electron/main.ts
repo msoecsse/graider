@@ -1,3 +1,5 @@
+import { inspectLocalManagedCourse } from "./managedCourseLocalRead.js";
+import { courseContextRevision } from "./managedCourseMutationTypes.js";
 import { createMigrationReviewProgressStore } from "./migrationReviewProgress.js";
 import { createMigrationPublicationService } from "./migrationPublicationService.js";
 import { createMigrationReconciliationService } from "./migrationReconciliationService.js";
@@ -28,7 +30,6 @@ import {
   bootstrapManagedCourse,
   synchronizeManagedCourse,
   performSynchronization,
-  inspectManagedCourse,
   loadManagedCatalog
 } from "./managedCourses.js";
 import { createRemoteRepositoryReader } from "./githubRemoteRepositories.js";
@@ -636,21 +637,26 @@ export const registerIpcHandlers = (): void => {
     ) => Promise<Omit<import("./ipc.js").CourseFolderDashboardResult, "refreshedAt">>
   ) =>
     courseMutationGuard
-      ? courseMutationGuard.read(folder.id, folder.path, async (context, input) => {
-          const result = context?.managed
-            ? await managedCourseOperation.run(context, () =>
-                perform({ ...folder, path: context.courseFolderPath }, input?.token)
-              )
-            : await perform(folder);
-          const projected = context?.managed
-            ? projectManagedCourseResult(result, context.courseFolderPath, folder.path)
-            : result;
-          return {
-            ...projected,
-            courseFolderPath: folder.path,
-            ...(context?.managed ? { courseReadRevision: context.authoritativeCommit } : {})
-          };
-        })
+      ? courseMutationGuard.read(
+          folder.id,
+          folder.path,
+          async (context, input) => {
+            const result = context?.managed
+              ? await managedCourseOperation.run(context, () =>
+                  perform({ ...folder, path: context.courseFolderPath }, input?.token)
+                )
+              : await perform(folder);
+            const projected = context?.managed
+              ? projectManagedCourseResult(result, context.courseFolderPath, folder.path)
+              : result;
+            return {
+              ...projected,
+              courseFolderPath: folder.path,
+              ...(context?.managed ? { courseReadRevision: courseContextRevision(context) } : {})
+            };
+          },
+          { channel: IPC_CHANNELS.refreshCourseFolder, fields: {} }
+        )
       : perform(folder);
 
   courseIpc.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
@@ -1959,14 +1965,12 @@ app.whenReady().then(async () => {
     if (!state.identity || state.courseDiscovery.userId !== state.identity.id || !course)
       throw new Error("Authorized course identity is required.");
     try {
-      return await facultyAuth.withReadOnlyCourse(course.repositoryId, state.identity.id, (input) =>
-        inspectManagedCourse({
-          ...input,
+      return await facultyAuth.withLocalCourse(course.repositoryId, state.identity.id, (input) =>
+        inspectLocalManagedCourse({
+          input,
           userData: app.getPath("userData"),
           username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
-            .currentFacultyMsoeUsername,
-          reader: createRemoteRepositoryReader(input.token, input.signal),
-          authenticate: () => createAuthenticatedProductionGitWorkspace(input.token)
+            .currentFacultyMsoeUsername
         })
       );
     } catch {

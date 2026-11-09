@@ -34,6 +34,21 @@ privileges in an existing GitHub organization. The packaged app includes Graider
 and its Git engine; you do not need a separate CLI install. Separate legacy CLI/local
 workflows retain their existing authentication requirements.
 
+After sign-in and course authorization are established, opening supported cached
+course details, roster sections, and the Comment Library does not check GitHub or
+fetch the course again. Supported local assignment and configuration views also use
+the cached course revision. A temporary GitHub outage does not add a new sign-in
+requirement for those reads. Cached content can be older than GitHub; opening a view
+does not verify remote freshness. Managed publication status describes pending local
+changes only.
+
+Saving, publishing, lifecycle changes, synchronization, and explicit remote status
+or readiness checks still require current remote access. Sign-out, account changes,
+known loss of course access, or an unsafe cache prevent cached reads. Startup and
+**Refresh courses** still establish authorization through GitHub; this does not add
+offline startup support. Schema 2 operation availability and section/role restrictions
+remain unchanged.
+
 ## Publish Course Changes
 
 Roster CSVs, term files, assignments, and course settings are saved locally in

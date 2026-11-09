@@ -7,6 +7,7 @@ import type {
 } from "./ipc.js";
 import { MAX_COMMAND_OUTPUT_SNIPPET_LENGTH } from "./dashboardRunner.js";
 import { GITHUB_TOKEN_ENV_NAME, resolveGithubToken } from "./tokenResolver.js";
+import { managedCourseOperation } from "./managedCourseOperationContext.js";
 
 const GRAIDER_COMMAND = "graider";
 const ASSIGNMENT_DETAIL_ARGS_PREFIX = ["assignment", "detail"] as const;
@@ -166,6 +167,20 @@ export const getAssignmentDetail = async (
   request: AssignmentDetailRequest,
   options: AssignmentDetailRunnerOptions
 ): Promise<AssignmentDetailResult> => {
+  if (managedCourseOperation.getStore()?.mode === "local_read") {
+    const {
+      GRAIDER_GITHUB_TOKEN: _token,
+      GITHUB_TOKEN: _fallback,
+      ...localEnv
+    } = options.env ?? process.env;
+    const result = await runAssignmentDetailCommand({
+      request,
+      token: null,
+      runner: options.runner,
+      env: localEnv
+    });
+    return { ...result, refreshedAt: (options.now ?? DEFAULT_NOW)().toISOString() };
+  }
   const tokenResult = await resolveGithubToken({
     runner: options.runner,
     ...(options.env === undefined ? {} : { env: options.env })

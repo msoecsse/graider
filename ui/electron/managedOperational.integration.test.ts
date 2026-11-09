@@ -1,3 +1,4 @@
+import { courseContextRevision } from "./managedCourseMutationTypes";
 // @vitest-environment node
 import {
   describeGitIntegration as describe,
@@ -96,7 +97,7 @@ describe("managed operational-source cutover", () => {
       expect(context).toMatchObject({
         managed: true,
         courseFolderPath: f.cache,
-        authoritativeCommit: f.head
+        cachedCommit: f.head
       });
     });
     expect(guard.isManaged("registered")).toBe(true);
@@ -263,10 +264,8 @@ describe("real bundled-Git managed publication transactions", () => {
     });
     expect(mutate).not.toHaveBeenCalled();
     expect(f.clone).not.toHaveBeenCalled();
-    const current = await f.guard.read(
-      "registered",
-      f.legacy,
-      async (context) => context!.authoritativeCommit
+    const current = await f.guard.read("registered", f.legacy, async (context) =>
+      courseContextRevision(context!)
     );
     expect(current).toBe(winner);
     await transact(f, mutate, current);
@@ -332,6 +331,8 @@ describe("real bundled-Git managed publication transactions", () => {
       commit: head
     });
     await f.guard.read("registered", f.legacy, async () => {});
+    expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(f.head);
+    await f.deps.session.withSynchronizedCourse(20, 42, async () => {});
     expect(await git(f.cache, ["rev-parse", "HEAD"])).toBe(head);
     expect(f.push).toHaveBeenCalledOnce();
   });
@@ -688,6 +689,11 @@ itGitIntegration(
     await guard.read("second", second.path, async (context) =>
       expect(context?.courseFolderPath).toBe(f.cache)
     );
+    // A local read does not persist registry changes. A freshly authorized operation does.
+    expect(loadManagedCatalog(f.root, 42).courses["20"].operationalFolderIds).toEqual([
+      "registered"
+    ]);
+    await guard.run("second", second.path, "new_mutation", async () => {});
     expect(loadManagedCatalog(f.root, 42).courses["20"].operationalFolderIds).toEqual([
       "registered",
       "second"
@@ -812,7 +818,7 @@ itGitIntegration(
       currentSubmissionCommitSha: "a".repeat(40),
       viewState
     };
-    await f.guard.read("registered", f.legacy, async () =>
+    await f.guard.run("registered", f.legacy, "new_mutation", async () =>
       expect(backend.saveGradingStudentViewStateContext(request)).toMatchObject({
         status: "success"
       })
@@ -880,7 +886,7 @@ describe("managed-only course identity", () => {
       expect(context).toMatchObject({
         managed: true,
         courseFolderPath: f.cache,
-        authoritativeCommit: f.head
+        cachedCommit: f.head
       });
     });
     await expect(guard.read(selector.id, f.cache, vi.fn())).rejects.toMatchObject({

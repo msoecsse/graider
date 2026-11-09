@@ -3,6 +3,7 @@ import type { ProcessRunResult, ProcessRunner } from "./commandRunner.js";
 import { getAssignmentDetail, runAssignmentDetailCommand } from "./assignmentDetailRunner.js";
 import type { AssignmentDetailJsonResponse, AssignmentDetailRequest } from "./ipc.js";
 import { GITHUB_TOKEN_ENV_NAME } from "./tokenResolver.js";
+import { managedCourseOperation } from "./managedCourseOperationContext.js";
 
 const SUCCESS_EXIT_CODE = 0;
 const FAILURE_EXIT_CODE = 1;
@@ -216,5 +217,32 @@ describe("assignmentDetailRunner", () => {
         env: {}
       }
     ]);
+  });
+  it("omits credential resolution and optional GitHub checks for verified local course reads", async () => {
+    const runner = vi.fn(async () => createProcessResult());
+    await managedCourseOperation.run(
+      {
+        mode: "local_read",
+        cachedCommit: "a".repeat(40),
+        operationalCommit: "a".repeat(40),
+        userId: 42,
+        repositoryId: 20,
+        courseFolderId: ASSIGNMENT_DETAIL_REQUEST.courseFolderId,
+        courseFolderPath: ASSIGNMENT_DETAIL_REQUEST.courseFolderPath
+      },
+      () =>
+        getAssignmentDetail(ASSIGNMENT_DETAIL_REQUEST, {
+          runner,
+          env: {
+            GRAIDER_GITHUB_TOKEN: "test-only-token",
+            GITHUB_TOKEN: "test-only-fallback",
+            PATH: "test-path"
+          }
+        })
+    );
+    expect(runner).toHaveBeenCalledOnce();
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "graider", env: { PATH: "test-path" } })
+    );
   });
 });

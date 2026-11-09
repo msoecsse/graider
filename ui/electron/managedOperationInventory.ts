@@ -1,4 +1,48 @@
 import { IPC_CHANNELS } from "./ipc.js";
+/** Closed inventory of operations whose course authorization can be checked entirely locally.
+ * Runtime writes and remote observations deliberately do not inherit this capability.
+ */
+export const LOCAL_COURSE_READ_CHANNELS: readonly string[] = Object.freeze([
+  IPC_CHANNELS.getCoursePublishStatus,
+  IPC_CHANNELS.loadAssignmentSetupTerms,
+  IPC_CHANNELS.getAssignmentForEdit,
+  IPC_CHANNELS.getAssignmentGroupConfig,
+  IPC_CHANNELS.getStudentRepositoryAccessPageStatus,
+  IPC_CHANNELS.loadRosterTerms,
+  IPC_CHANNELS.getRosterForSection,
+  IPC_CHANNELS.getRosterSectionSummaries,
+  IPC_CHANNELS.loadGradingCommentLibrary,
+  IPC_CHANNELS.getAssignmentDetail,
+  IPC_CHANNELS.getAssignmentGradingLifecycle,
+  IPC_CHANNELS.loadGradingStudentDocument,
+  IPC_CHANNELS.loadGradingStudentViewState,
+  IPC_CHANNELS.loadGradingStudentCommitHistory
+]);
+export const MANAGED_V2_LOCAL_READ_CHANNELS: readonly string[] = Object.freeze([
+  IPC_CHANNELS.loadRosterTerms,
+  IPC_CHANNELS.getRosterForSection,
+  IPC_CHANNELS.getRosterSectionSummaries,
+  IPC_CHANNELS.loadGradingCommentLibrary
+]);
+/** Existing explicit remote observations/preparations retain their stronger guard. */
+export const SYNCHRONIZED_COURSE_READ_CHANNELS: readonly string[] = Object.freeze([
+  IPC_CHANNELS.refreshCourseFolder,
+  IPC_CHANNELS.previewCourseSetup,
+  IPC_CHANNELS.previewAssignmentSetup,
+  IPC_CHANNELS.previewAssignmentEdit,
+  IPC_CHANNELS.previewRosterSave,
+  IPC_CHANNELS.getTemplateWorkflow,
+  IPC_CHANNELS.previewTemplateWorkflowSave,
+  IPC_CHANNELS.chooseReviewImport,
+  IPC_CHANNELS.loadGradingStudentSource,
+  IPC_CHANNELS.loadGradingStudentSnapshot,
+  IPC_CHANNELS.previewGradingStudentReport,
+  IPC_CHANNELS.getAssignmentApplyPreview,
+  IPC_CHANNELS.getAssignmentGradePreview,
+  IPC_CHANNELS.getAssignmentGradeStatus,
+  IPC_CHANNELS.getFacultyReport,
+  IPC_CHANNELS.loadGradingStudentEvidence
+]);
 type ManagedOperationFamily =
   keyof typeof import("../dist-electron/managedOperationBackend.cjs").MANAGED_OPERATION_SUPPORT;
 

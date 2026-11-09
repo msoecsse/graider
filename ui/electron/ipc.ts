@@ -138,6 +138,7 @@ export const IPC_CHANNELS = {
 
 export interface CourseReadVersion {
   readonly courseReadRevision?: string;
+  readonly courseReadRevisionSource?: "local_cache";
 }
 export interface ExpectedCourseReadVersion {
   readonly expectedCourseRevision?: string | undefined;
@@ -174,7 +175,7 @@ export type CoursePublishStatus =
   | "no_upstream"
   | "failure";
 
-export interface CoursePublishStatusResult {
+export interface CoursePublishStatusResult extends CourseReadVersion {
   readonly status: CoursePublishStatus;
   readonly courseFolderPath: string;
   readonly currentBranch: string | null;

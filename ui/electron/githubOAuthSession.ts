@@ -36,6 +36,13 @@ export interface ManagedOperationInput {
   readonly signal: AbortSignal;
   readonly revalidateSession: () => Promise<boolean>;
 }
+/** Main-only local authorization lease. No credential or remote revalidation capability. */
+export interface LocalCourseReadInput {
+  readonly userId: number;
+  readonly course: RemoteCourse;
+  readonly signal: AbortSignal;
+  readonly assertCurrent: () => void;
+}
 export interface AuthenticatedAccountOperation {
   readonly token: string;
   readonly userId: number;
@@ -97,6 +104,68 @@ export class GithubOAuthSession {
   private accountGeneration = 0;
   get mutationGeneration(): number {
     return this.accountGeneration;
+  }
+  async withLocalCourse<T>(
+    repositoryId: number,
+    expectedUserId: number,
+    operation: (input: LocalCourseReadInput) => Promise<T>
+  ): Promise<T> {
+    const generation = this.accountGeneration;
+    const controller = new AbortController();
+    const course = this.state.courseDiscovery.courses.find(
+      (candidate) => candidate.repositoryId === repositoryId
+    );
+    const assertCurrent = () => {
+      const current = this.state.courseDiscovery.courses.find(
+        (candidate) => candidate.repositoryId === repositoryId
+      );
+      if (
+        !this.token ||
+        this.stopped ||
+        this.active !== null ||
+        controller.signal.aborted ||
+        this.state.status !== "signed_in" ||
+        generation !== this.accountGeneration ||
+        this.state.identity?.id !== expectedUserId ||
+        this.state.courseDiscovery.userId !== expectedUserId ||
+        !course ||
+        !current ||
+        current.authorization !== "authorized" ||
+        current.organizationId !== course.organizationId ||
+        current.schemaVersion !== course.schemaVersion ||
+        current.defaultBranch !== course.defaultBranch ||
+        [
+          "authorization_lost",
+          "authentication_failed",
+          "remote_unavailable",
+          "organization_transfer"
+        ].includes(current.synchronization?.reason ?? "") ||
+        this.state.courseDiscovery.diagnostics.some((item) => item.repositoryId === repositoryId)
+      )
+        throw new Error(
+          "Current account and previously verified course authorization are required. Refresh course access."
+        );
+    };
+    assertCurrent();
+    this.courseOperations.add(controller);
+    try {
+      return await serializeManagedOperation(
+        { userId: expectedUserId, course: course!, signal: controller.signal },
+        async () => {
+          assertCurrent();
+          const result = await operation({
+            userId: expectedUserId,
+            course: course!,
+            signal: controller.signal,
+            assertCurrent
+          });
+          assertCurrent();
+          return result;
+        }
+      );
+    } finally {
+      this.courseOperations.delete(controller);
+    }
   }
   /** Main-only bootstrap boundary, before a new course can exist in discovery. */
   async withAuthenticatedAccount<T>(

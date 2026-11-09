@@ -3,7 +3,7 @@ import { publishManagedCourseTransaction } from "./managedCourseTransaction.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { GithubOAuthSession } from "./githubOAuthSession.js";
-import type { CourseFolderRecord } from "./ipc.js";
+import { IPC_CHANNELS, type CourseFolderRecord } from "./ipc.js";
 import {
   getProductionGitWorkspaceFactory,
   createAuthenticatedProductionGitWorkspace,
@@ -27,6 +27,18 @@ import {
   safeDirectories
 } from "./managedCourses.js";
 import type { ManagedOperationInput } from "./githubOAuthSession.js";
+import {
+  LocalCourseReadUnavailable,
+  validateLocalManagedCourse
+} from "./managedCourseLocalRead.js";
+import {
+  LOCAL_COURSE_READ_CHANNELS,
+  SYNCHRONIZED_COURSE_READ_CHANNELS
+} from "./managedOperationInventory.js";
+import type {
+  VerifiedLocalCourseReadContext,
+  VerifiedCourseOperationContext
+} from "./managedCourseMutationTypes.js";
 import {
   canReviewManagedCache,
   type ManagedSynchronizationState,
@@ -239,6 +251,7 @@ interface Dependencies {
 }
 export class ManagedCourseMutationGuard {
   private readonly pending = new Map<string, Promise<unknown>>();
+  private readonly localReadBindings = new Set<string>();
   constructor(private readonly deps: Dependencies) {}
   transaction<T>(
     context: VerifiedCourseMutationContext,
@@ -314,7 +327,15 @@ export class ManagedCourseMutationGuard {
     if (this.remoteSelector(folderId)) return true;
     const state = this.deps.session.getState();
     const id = state.identity?.id;
-    const catalog = id ? loadManagedCatalog(this.deps.userData, id) : null;
+    if (
+      id &&
+      state.courseDiscovery.userId === id &&
+      state.courseDiscovery.courses.some(
+        (course) => course.schemaVersion === 2 && course.localFolderIds.includes(String(folderId))
+      )
+    )
+      return true;
+    const catalog = id ? loadManagedCatalog(this.deps.userData, id, { readOnly: true }) : null;
     return (
       !!catalog &&
       Object.values(catalog.courses).some(
@@ -332,10 +353,11 @@ export class ManagedCourseMutationGuard {
 
   /** A persisted binding prevents signed-out/lost-access reads from reverting to the legacy source. */
   private hasManagedBinding(folderId: unknown): boolean {
+    if (this.localReadBindings.has(String(folderId))) return true;
     const root = path.join(this.deps.userData, MANAGED_COURSE_ROOT);
     if (!fs.existsSync(root)) return false;
     for (const id of fs.readdirSync(root).filter((name) => /^[1-9][0-9]*$/u.test(name))) {
-      const catalog = loadManagedCatalog(this.deps.userData, Number(id));
+      const catalog = loadManagedCatalog(this.deps.userData, Number(id), { readOnly: true });
       if (
         Object.values(catalog.courses).some(
           (entry) =>
@@ -351,7 +373,7 @@ export class ManagedCourseMutationGuard {
     folderId: unknown,
     suppliedPath: unknown,
     operation: (
-      context?: VerifiedCourseMutationContext,
+      context?: VerifiedCourseOperationContext,
       input?: ManagedOperationInput
     ) => Promise<T>,
     managedRequest?: ManagedOperationRequest
@@ -372,8 +394,7 @@ export class ManagedCourseMutationGuard {
         "remote_only_mutation_unavailable",
         "Authoritative course access is unavailable. Refresh courses or update Graider before opening this folder."
       );
-    if (this.isManaged(folderId))
-      return this.run(folderId, suppliedPath, "read", operation, managedRequest);
+    if (this.isManaged(folderId)) return this.readManaged(folder!, operation, managedRequest);
     if (this.hasManagedBinding(folderId))
       blockMutation(
         "authorization_required",
@@ -399,8 +420,7 @@ export class ManagedCourseMutationGuard {
       course.localFolderIds.includes(folder!.id)
     );
     // Known v2 sources always enter the managed bridge, including uncut legacy folders.
-    if (known?.schemaVersion === 2)
-      return this.run(folderId, suppliedPath, "read", operation, managedRequest);
+    if (known?.schemaVersion === 2) return this.readManaged(folder!, operation, managedRequest);
     if (known && state.identity && state.courseDiscovery.userId === state.identity.id)
       return this.deps.session.withReadOnlyCourse(
         known.repositoryId,
@@ -502,6 +522,134 @@ export class ManagedCourseMutationGuard {
           "Current Schema 1 course access could not be established. Refresh courses and use the managed entry for Schema 2."
         );
       return operation();
+    });
+  }
+  private async readManaged<T>(
+    folder: CourseFolderRecord,
+    operation: (
+      context?: VerifiedCourseOperationContext,
+      input?: ManagedOperationInput
+    ) => Promise<T>,
+    request?: ManagedOperationRequest
+  ): Promise<T> {
+    if (request && SYNCHRONIZED_COURSE_READ_CHANNELS.includes(request.channel))
+      return this.run(folder.id, folder.path, "read", operation, request);
+    if (request && !LOCAL_COURSE_READ_CHANNELS.includes(request.channel))
+      blockMutation("operation_unavailable", "This operation does not support local course reads.");
+    const session = this.deps.session;
+    const state = session.getState();
+    const userId = state.identity?.id;
+    if (!userId || state.courseDiscovery.userId !== userId)
+      blockMutation(
+        "authorization_required",
+        "Sign in and establish course authorization before opening this cache.",
+        "authorization"
+      );
+    const generation = session.mutationGeneration;
+    const catalog = loadManagedCatalog(this.deps.userData, userId!, { readOnly: true });
+    const binding = Object.values(catalog.courses).find(
+      (entry) =>
+        entry.operationalSource === "managed" && entry.operationalFolderIds?.includes(folder.id)
+    );
+    const candidates = state.courseDiscovery.courses.filter(
+      (course) =>
+        folder.id === `managed-course:${userId}:${course.repositoryId}` ||
+        (binding
+          ? binding.repositoryId === course.repositoryId
+          : course.localFolderIds.includes(folder.id))
+    );
+    if (candidates.length !== 1)
+      blockMutation(
+        "operational_source_mismatch",
+        "A unique authorized course registration is required."
+      );
+    const username = this.deps.username();
+    return session.withLocalCourse(candidates[0]!.repositoryId, userId!, async (input) => {
+      const assertCurrent = () => {
+        input.assertCurrent();
+        if (
+          session.mutationGeneration !== generation ||
+          (input.course.schemaVersion === 1 && this.deps.username() !== username) ||
+          (!folder.id.startsWith("managed-course:") &&
+            !this.deps.folders().some((item) => item.id === folder.id && item.path === folder.path))
+        )
+          blockMutation(
+            "authorization_required",
+            "Course registration or account changed. Reopen the course.",
+            "authorization"
+          );
+      };
+      assertCurrent();
+      this.localReadBindings.add(folder.id);
+      let local: Awaited<ReturnType<typeof validateLocalManagedCourse>>;
+      try {
+        local = await validateLocalManagedCourse({
+          userData: this.deps.userData,
+          input,
+          username,
+          factory: this.deps.factory
+        });
+      } catch (error) {
+        return blockMutation(
+          "operational_source_unsafe",
+          error instanceof LocalCourseReadUnavailable
+            ? error.message
+            : "A safe managed cache is required. Review the cache or refresh courses."
+        );
+      }
+      const context: VerifiedLocalCourseReadContext = {
+        mode: "local_read",
+        managed: true,
+        cachedCommit: local.commit,
+        operationalCommit: local.commit,
+        sessionGeneration: generation,
+        userId: input.userId,
+        repositoryId: input.course.repositoryId,
+        courseFolderId: folder.id,
+        legacyFolderPath: folder.path,
+        courseFolderPath: local.root
+      };
+      // Registration only; read authorization never creates or imports runtime data.
+      loadMetadata().registerCourseRuntimeRoot(
+        local.root,
+        path.join(path.dirname(local.root), "runtime")
+      );
+      if (local.metadata.schemaVersion === 2 && !request)
+        blockMutation(
+          "operation_unavailable",
+          "Schema 2 requires an explicit supported managed read operation."
+        );
+      const result =
+        local.metadata.schemaVersion === 2 &&
+        request &&
+        request.channel !== IPC_CHANNELS.getCoursePublishStatus
+          ? ((await performManagedV2Operation(request, {
+              kind: "local_read",
+              context,
+              input,
+              assertCurrent
+            })) as T)
+          : await operation(context);
+      assertCurrent();
+      const after = await validateLocalManagedCourse({
+        userData: this.deps.userData,
+        input,
+        username,
+        factory: this.deps.factory
+      }).catch(() =>
+        blockMutation(
+          "operational_source_unsafe",
+          "The managed cache changed or became unavailable during this read. Review the cache."
+        )
+      );
+      if (after.commit !== local.commit)
+        blockMutation(
+          "view_refresh_required",
+          "The local cache changed during this read. Reopen the course.",
+          "refresh_view"
+        );
+      assertCurrent();
+      return result;
     });
   }
   async cutover(folderId: unknown): Promise<void> {

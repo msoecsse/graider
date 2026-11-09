@@ -94,6 +94,7 @@ export interface ManagedCourseState {
 }
 export interface ManagedCourseInspection {
   readonly revision?: string;
+  readonly revisionSource?: "local_cache";
   readonly operations?: {
     readonly archiveAllowed: boolean;
     readonly unarchiveAllowed: boolean;

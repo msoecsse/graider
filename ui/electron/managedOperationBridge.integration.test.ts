@@ -11,7 +11,7 @@ import { COURSE_MUTATION_CHANNELS } from "./courseMutationIpc";
 import { IPC_CHANNELS } from "./ipc";
 import type { GithubOAuthSession } from "./githubOAuthSession";
 import type { RemoteRepositoryReader } from "./githubRemoteRepositories";
-import { managedCoursePath } from "./managedCourses";
+import { catalogEntry, saveEntry, state, managedCoursePath } from "./managedCourses";
 
 let currentReader: RemoteRepositoryReader;
 vi.mock("./githubRemoteRepositories.js", async (original) => ({
@@ -61,6 +61,21 @@ const fixture = async (actor = 44) => {
       identity: { id: actor },
       courseDiscovery: { userId: actor, courses: [courseState], diagnostics: [] }
     }),
+    withLocalCourse: async (_repo: number, expected: number, operation: Function) => {
+      const assertCurrent = () => {
+        if (!active || expected !== actor || courseState.authorization !== "authorized")
+          throw new Error("Account changed.");
+      };
+      assertCurrent();
+      const result = await operation({
+        userId: actor,
+        course: courseState,
+        signal: new AbortController().signal,
+        assertCurrent
+      });
+      assertCurrent();
+      return result;
+    },
     withSynchronizedCourse: async (_repo: number, _user: number, operation: Function) => {
       const sync = await f.request.input.resynchronize?.();
       return operation(
@@ -80,18 +95,18 @@ const fixture = async (actor = 44) => {
     fs.mkdirSync(path.dirname(actorCache), { recursive: true });
     fs.cpSync(f.cache, actorCache, { recursive: true });
   }
+  saveEntry(
+    f.root,
+    catalogEntry(f.root, actor, 20, courseState, state("ready"), new Date().toISOString())
+  );
   const guard = new ManagedCourseMutationGuard({ ...f.deps, session, username: () => null });
   const legacyHandler = vi.fn(async () => {
     throw new Error("Legacy code must not run on v2.");
   });
   const invoke = (channel: string, fields: Record<string, unknown> = {}) =>
-    guard.run(
-      "registered",
-      f.legacy,
-      COURSE_MUTATION_CHANNELS.includes(channel) ? "new_mutation" : "read",
-      legacyHandler,
-      { channel, fields }
-    );
+    COURSE_MUTATION_CHANNELS.includes(channel)
+      ? guard.run("registered", f.legacy, "new_mutation", legacyHandler, { channel, fields })
+      : guard.read("registered", f.legacy, legacyHandler, { channel, fields });
   return {
     ...f,
     guard,
@@ -105,6 +120,51 @@ const fixture = async (actor = 44) => {
 };
 
 describe("trusted managed-operation production bridge", () => {
+  it(
+    "reads scoped rosters and comments repeatedly with zero remote authorization requests",
+    async () => {
+      const f = await fixture();
+      const resolve = vi.fn(currentReader.resolveId);
+      const revision = vi.fn(currentReader.revision);
+      const file = vi.fn(currentReader.file);
+      currentReader = { ...currentReader, resolveId: resolve, revision, file };
+      const synchronize = vi.spyOn(f.deps.session, "withSynchronizedCourse");
+      const authenticate = f.authenticate.mock.calls.length;
+      for (const channel of [
+        IPC_CHANNELS.loadRosterTerms,
+        IPC_CHANNELS.getRosterSectionSummaries,
+        IPC_CHANNELS.loadGradingCommentLibrary
+      ])
+        await f.invoke(channel, { termCode: "27s2" });
+      await expect(
+        f.invoke(IPC_CHANNELS.getRosterForSection, { termCode: "27s2", sectionId: "002" })
+      ).rejects.toMatchObject({ result: { reason: "operation_not_authorized" } });
+      expect(resolve).not.toHaveBeenCalled();
+      expect(revision).not.toHaveBeenCalled();
+      expect(file).not.toHaveBeenCalled();
+      expect(synchronize).not.toHaveBeenCalled();
+      expect(f.authenticate).toHaveBeenCalledTimes(authenticate);
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
+  it(
+    "denies the comment library to a fallback-only account and rejects forged role scope",
+    async () => {
+      const f = await fixture(42);
+      await expect(
+        f.invoke(IPC_CHANNELS.loadGradingCommentLibrary, {
+          termCode: "27s2",
+          role: "coordinator",
+          authorized: true
+        })
+      ).rejects.toMatchObject({ result: { reason: "operation_not_authorized" } });
+      await expect(
+        f.invoke(IPC_CHANNELS.loadRosterTerms, { scope: "all-sections" })
+      ).rejects.toMatchObject({ result: { reason: "operation_not_authorized" } });
+      expect(f.legacyHandler).not.toHaveBeenCalled();
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
   it(
     "preserves immutable-ID scope after an organization rename with stale persisted locators",
     async () => {

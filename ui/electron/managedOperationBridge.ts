@@ -1,12 +1,16 @@
 import path from "node:path";
 import type * as Backend from "../dist-electron/managedOperationBackend.cjs";
-import { managedOperationFamily } from "./managedOperationInventory.js";
+import {
+  managedOperationFamily,
+  MANAGED_V2_LOCAL_READ_CHANNELS
+} from "./managedOperationInventory.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import { blockMutation, type VerifiedCourseMutationContext } from "./managedCourseMutationGuard.js";
-import type { ManagedOperationInput } from "./githubOAuthSession.js";
+import type { LocalCourseReadInput, ManagedOperationInput } from "./githubOAuthSession.js";
 import { changeManagedCourseLifecycle } from "./courseLifecycleService.js";
 import { requireReadRevision } from "./managedCourseTransaction.js";
 import fs from "node:fs";
+import type { VerifiedLocalCourseReadContext } from "./managedCourseMutationTypes.js";
 import { verifyCurrentMigrationAccess } from "./migrationReconciliationService.js";
 import type {
   AuthenticatedGitWorkspaceContext,
@@ -30,16 +34,40 @@ const loadBackend = (): typeof Backend =>
 /** Only this closed adapter reaches Schema 2. No legacy handler or renderer validator is invoked. */
 export const performManagedV2Operation = async (
   request: ManagedOperationRequest,
-  trusted: {
-    readonly userData: string;
-    readonly context: VerifiedCourseMutationContext;
-    readonly input: ManagedOperationInput;
-    readonly revalidate: () => Promise<void>;
-    readonly changed: () => void;
-    readonly factory?: GitWorkspaceFactory;
-    readonly authenticate?: (token: string) => AuthenticatedGitWorkspaceContext;
-  }
+  trusted:
+    | {
+        readonly kind?: "remote";
+        readonly userData: string;
+        readonly context: VerifiedCourseMutationContext;
+        readonly input: ManagedOperationInput;
+        readonly revalidate: () => Promise<void>;
+        readonly changed: () => void;
+        readonly factory?: GitWorkspaceFactory;
+        readonly authenticate?: (token: string) => AuthenticatedGitWorkspaceContext;
+      }
+    | {
+        readonly kind: "local_read";
+        readonly context: VerifiedLocalCourseReadContext;
+        readonly input: LocalCourseReadInput;
+        readonly assertCurrent: () => void;
+      }
 ) => {
+  if (trusted.kind === "local_read") {
+    if (!MANAGED_V2_LOCAL_READ_CHANNELS.includes(request.channel))
+      blockMutation(
+        "operation_unavailable",
+        "This Schema 2 operation does not support local reads."
+      );
+    trusted.assertCurrent();
+    const result = performManagedV2Read(
+      request,
+      trusted.context.courseFolderPath,
+      trusted.input,
+      trusted.context.cachedCommit
+    );
+    trusted.assertCurrent();
+    return result;
+  }
   const { context, input } = trusted;
   const { channel, fields } = request;
   const backend = loadBackend();
@@ -50,8 +78,6 @@ export const performManagedV2Operation = async (
     organization: input.course.organizationLogin
   };
   const root = context.courseFolderPath;
-  const version = { courseReadRevision: context.authoritativeCommit, readOnly: true };
-  const unavailable = (message: string): never => blockMutation("operation_unavailable", message);
   await trusted.revalidate();
   const state = backend.readManagedOperationState(root, identity);
   if (channel === IPC_CHANNELS.changeManagedTermLifecycle) {
@@ -135,6 +161,34 @@ export const performManagedV2Operation = async (
       }
     });
   }
+  const family = managedOperationFamily(channel);
+  return blockMutation(
+    "operation_unavailable",
+    `Schema 2 ${family} is unavailable (${backend.MANAGED_OPERATION_SUPPORT[family]}). Preserved data remains unchanged; use Course details for metadata.`
+  );
+};
+
+/** Shared backend policy retains section and role restrictions on token-free local evidence. */
+const performManagedV2Read = (
+  request: ManagedOperationRequest,
+  root: string,
+  input: LocalCourseReadInput,
+  commit: string
+) => {
+  const backend = loadBackend();
+  const { channel, fields } = request;
+  const identity = {
+    userId: input.userId,
+    repositoryId: input.course.repositoryId,
+    organizationId: input.course.organizationId,
+    organization: input.course.organizationLogin
+  };
+  const version = {
+    courseReadRevision: commit,
+    courseReadRevisionSource: "local_cache" as const,
+    readOnly: true
+  };
+  const unavailable = (message: string): never => blockMutation("operation_unavailable", message);
   const scope =
     fields.scope === undefined || fields.scope === "default"
       ? "default"
@@ -224,6 +278,5 @@ export const performManagedV2Operation = async (
       "The requested section or preserved evidence is unavailable to this account. Refresh Course details."
     );
   }
-  await trusted.revalidate();
   return result;
 };

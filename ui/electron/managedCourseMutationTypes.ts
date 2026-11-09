@@ -19,6 +19,20 @@ export interface VerifiedCourseMutationContext {
   readonly courseFolderPath: string;
   readonly mode: CourseMutationMode;
 }
+/** Local cache revision only; cannot authorize a remote mutation or publication. */
+export interface VerifiedLocalCourseReadContext extends Omit<
+  VerifiedCourseMutationContext,
+  "mode" | "authoritativeCommit" | "revalidate"
+> {
+  readonly mode: "local_read";
+  readonly cachedCommit: string;
+  readonly revalidate?: never;
+}
+export type VerifiedCourseOperationContext =
+  | VerifiedCourseMutationContext
+  | VerifiedLocalCourseReadContext;
+export const courseContextRevision = (context: VerifiedCourseOperationContext): string =>
+  context.mode === "local_read" ? context.cachedCommit : context.authoritativeCommit;
 export interface CourseMutationBlock {
   readonly status: "blocked";
   readonly reason:

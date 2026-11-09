@@ -1,9 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { VerifiedCourseMutationContext } from "./managedCourseMutationTypes.js";
+import type { VerifiedCourseOperationContext } from "./managedCourseMutationTypes.js";
 
 /** Main-only projection for services that historically resolved paths via the registry. */
 export const managedCourseOperation = new AsyncLocalStorage<
-  VerifiedCourseMutationContext & {
+  VerifiedCourseOperationContext & {
     readonly transaction?: boolean;
     readonly authoritativePath?: string;
     readonly afterPublication?: Array<() => Promise<unknown>>;
@@ -15,5 +15,8 @@ export const courseOperationDocument = new AsyncLocalStorage<number>();
 
 /** Rechecked after awaited preparation and immediately before local/backend writes. */
 export const revalidateCourseOperation = async (): Promise<void> => {
-  await managedCourseOperation.getStore()?.revalidate?.();
+  const operation = managedCourseOperation.getStore();
+  if (operation?.mode === "local_read")
+    throw new Error("Local read authorization cannot authorize writes.");
+  await operation?.revalidate?.();
 };

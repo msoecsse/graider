@@ -3734,6 +3734,55 @@ projects its own managed/transaction path. The main-only async operation context
 covers services that resolve paths by folder ID (notably Comment Library). No token, Git
 command, arbitrary managed path, or reusable authorization ticket is exposed to renderer.
 
+#### Authentication minimization Slice 1: local course reads
+
+Supported managed reads use `GithubOAuthSession.withLocalCourse()` and
+`validateLocalManagedCourse()`, independently of synchronization and mutation
+authorization. Main checks the authenticated session generation before and after
+asynchronous reads, account-owned discovery authorization, immutable repository and
+organization registration, reconstructed safe cache paths, local Git origin/branch,
+clean working tree, supported schema, and local backend role evidence. The shared
+cache lease prevents overlap with synchronization/reconciliation. Catalog records
+alone never authorize access. Sign-out, account switch, known authorization loss,
+unsupported operations and unsafe caches fail closed, without legacy fallback.
+Course and term authorization bytes must match the exact local commit, including
+when Git index flags hide a working-tree change. Partial/promisor caches are refused
+so local object inspection cannot trigger lazy fetching.
+
+The main-owned `LOCAL_COURSE_READ_CHANNELS` inventory covers course configuration,
+assignment detail/edit/group configuration, roster reads, Comment Library, locally
+derived publication status, and supported local grading/document/history reads.
+Schema 2 retains its narrower adapter: scoped roster and comment reads plus Course
+details and locally derived publication status. Existing backend section, historical
+role, explicit coordinator expansion and fallback restrictions still apply.
+Course details also uses the local boundary. None of these authorization paths
+requests GitHub identity/capabilities, resolves a remote repository, or fetches Git.
+Assignment Detail skips optional GitHub readiness observations on this path.
+
+Local responses identify `courseReadRevisionSource: local_cache` (Course details:
+`revisionSource: local_cache`). Revisions describe the validated local commit and
+do not claim remote freshness. Reads do not recover an outdated cache or persist
+new operational-folder bindings. Freshly authorized mutation operations can persist
+those bindings as before. Existing view invalidation and exact expected-revision
+checks remain; mutations still synchronize and independently revalidate remote
+authorization and revision before changing or publishing state.
+
+Explicit remote observations/preparations retain the synchronized path, including
+dashboard readiness refresh, edit previews, Apply/grading previews and status,
+template inspection, student evidence retrieval, source/snapshot preparation and
+report previews. Course/term lifecycle changes, publication, runtime writes, source
+updates and reconciliation retain their existing fresh authorization requirements.
+The supported local/remote channel inventories are main-owned; unknown channels
+receive neither implicit local support nor renderer-provided authorization.
+
+This is not offline startup authorization. Startup still restores OAuth identity,
+checks capabilities, discovers authorization, bootstraps and synchronizes. A transient
+outage after authorization adds no network prerequisite to local reads while that
+trusted session/discovery evidence remains available. Restart or discovery refresh
+can still fail to establish or replace that evidence; a disk catalog is insufficient.
+OAuth recovery/remaining startup 403s and discovery refresh/rate-limit behavior remain
+for authentication-minimization Slices 2 and 3, respectively.
+
 All registered course identity requests through `courseMutationIpc` use this source after
 cutover: assignment setup/edit/delete/group configuration, roster/section administration,
 Access Pages settings, Comment Library, grading workspace/configuration, Apply and grading

@@ -21,6 +21,10 @@ import {
 } from "./gitWorkspaceReader.js";
 import { blockMutation, type VerifiedCourseMutationContext } from "./managedCourseMutationGuard.js";
 import type { ManagedOperationInput } from "./githubOAuthSession.js";
+import {
+  courseContextRevision,
+  type VerifiedCourseOperationContext
+} from "./managedCourseMutationTypes.js";
 
 const TRANSACTION_CLEANUP_RETRIES = 5;
 const TRANSACTION_CLEANUP_DELAY_MS = 100;
@@ -69,12 +73,14 @@ export interface ManagedTransactionRequest<T> {
 }
 export const requireReadRevision = (
   expected: unknown,
-  context: VerifiedCourseMutationContext
+  context: VerifiedCourseOperationContext
 ): void => {
-  if (expected !== context.authoritativeCommit)
+  if (expected !== courseContextRevision(context))
     blockMutation(
       "remote_version_conflict",
-      "The course changed remotely. Your form has been preserved. Refresh the view before saving again.",
+      context.mode === "local_read"
+        ? "The cached course revision changed. Your form has been preserved. Refresh the view before saving again."
+        : "The course changed remotely. Your form has been preserved. Refresh the view before saving again.",
       "refresh_view",
       context.repositoryId
     );
