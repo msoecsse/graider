@@ -22,6 +22,7 @@ import {
   measureGradingPhase,
   type GradingPerformanceSample
 } from "./gradingPerformance";
+import { getProductionGitWorkspaceFactory } from "./gitWorkspaceReader";
 import { createGradingStudentEvidenceService } from "./gradingStudentEvidenceService";
 import { GithubOAuthSession } from "./githubOAuthSession";
 import type { RemoteRepositoryReader } from "./githubRemoteRepositories";
@@ -47,6 +48,11 @@ const fixture = async (mode: "managed" | "legacy" = "managed", realistic = false
   roots.push(f.root);
   if (mode === "managed") Object.assign(f.course, { localFolderIds: [] });
   remote.reader = f.reader;
+  const factory = getProductionGitWorkspaceFactory();
+  const openCourseWorkspace = vi.fn(factory.open.bind(factory));
+  Object.assign(f.deps, {
+    factory: { inspect: factory.inspect.bind(factory), open: openCourseWorkspace }
+  });
   const requests = Object.values(f.reader).map((method) =>
     vi.fn((...args: unknown[]) =>
       measureGradingPhase("remote_request", async () => {
@@ -232,6 +238,7 @@ grading:
     call,
     samples,
     requests,
+    openCourseWorkspace,
     student,
     resolveFacultyScope,
     backend,
@@ -459,8 +466,12 @@ it.each(["managed", "legacy"] as const)(
         `${JSON.stringify({ mode, rosterSize: REALISTIC_ROSTER_SIZE, samples: f.samples, remoteReaderCalls: f.requests.reduce((sum, method) => sum + method.mock.calls.length, 0) })}\n`
       );
     expect(f.requests.every((method) => method.mock.calls.length === 0)).toBe(true);
+    expect(f.openCourseWorkspace).toHaveBeenCalledTimes(
+      f.samples.reduce((count, sample) => count + (sample.phases.cache_validation?.count ?? 0), 0) *
+        (mode === "legacy" ? 2 : 1)
+    );
     for (const sample of f.samples) {
-      expect(sample.durationMs).toBeLessThan(LOCAL_ACTION_BUDGET_MS);
+      expect(sample.durationMs, `${mode}:${sample.channel}`).toBeLessThan(LOCAL_ACTION_BUDGET_MS);
       expect(sample.source).toBe(mode);
       expect(sample.operation).toMatch(/^local_/u);
       const mutates = [

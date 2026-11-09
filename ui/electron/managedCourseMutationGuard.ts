@@ -746,18 +746,27 @@ export class ManagedCourseMutationGuard {
       await validateLegacy();
       const revalidateLocal = async () => {
         assertCurrent();
-        const after = await validateLocalManagedCourse({
-          userData: this.deps.userData,
-          input,
-          username,
-          factory: this.deps.factory,
-          committedMetadata
-        }).catch(() =>
-          blockMutation(
-            "operational_source_unsafe",
-            "The managed cache changed or became unavailable. Review the cache."
-          )
-        );
+        // Independent cache/source inspections retain all checks while overlapping
+        // bundled Git process startup, which is especially costly on Windows.
+        const [cacheCheck, sourceCheck] = await Promise.allSettled([
+          validateLocalManagedCourse({
+            userData: this.deps.userData,
+            input,
+            username,
+            factory: this.deps.factory,
+            committedMetadata
+          }).catch(() =>
+            blockMutation(
+              "operational_source_unsafe",
+              "The managed cache changed or became unavailable. Review the cache."
+            )
+          ),
+          validateLegacy()
+        ]);
+        // Keep the lease until both read-only checks settle, including failure paths.
+        if (cacheCheck.status === "rejected") throw cacheCheck.reason;
+        if (sourceCheck.status === "rejected") throw sourceCheck.reason;
+        const after = cacheCheck.value;
         if (after.commit !== local.commit)
           blockMutation(
             "view_refresh_required",
@@ -765,7 +774,6 @@ export class ManagedCourseMutationGuard {
             "refresh_view"
           );
         assertCurrent();
-        await validateLegacy();
         if (localGrading && !legacy)
           safeDirectories(this.deps.userData, path.join(path.dirname(local.root), "runtime"));
       };

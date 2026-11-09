@@ -116,6 +116,9 @@ jobs:
 
       - name: Test local grading, cache leases, account invalidation and publication safeguards
         working-directory: ui
+        env:
+          GRAIDER_GRADING_PERFORMANCE: "1"
+          GRAIDER_GRADING_BENCHMARK: "1"
         run: >-
           npx vitest run --maxWorkers=2
           electron/gradingLocalPerformance.integration.test.ts

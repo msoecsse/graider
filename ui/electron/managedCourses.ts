@@ -26,6 +26,7 @@ export const MANAGED_BOOTSTRAP_CONCURRENCY = 2;
 export const BOOTSTRAP_DIRECTORY_PREFIX = "course-bootstrap-";
 export const MANAGED_CATALOG_SCHEMA = 1;
 const CATALOG_FILE_MODE = 0o600;
+const SINGLE_FILE_LINK_COUNT = 1;
 const CATALOG_FILE = "catalog.json";
 const TEMP_ROOT = ".bootstrap";
 const WORKTREE_DIRECTORY = "repo";
@@ -91,13 +92,17 @@ export const safeDirectories = (userData: string, directory: string, create = fa
   }
 };
 /** Reject dangling links too, before Git or metadata readers traverse the cache. */
-const rejectLinks = (directory: string): void => {
+const inspectStorageFiles = (directory: string): void => {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const target = path.join(directory, entry.name);
     const stat = fs.lstatSync(target);
     if (stat.isSymbolicLink())
       throw new Attention("Managed cache contains a symbolic link. Review is required.");
-    if (stat.isDirectory()) rejectLinks(target);
+    if (stat.isDirectory()) inspectStorageFiles(target);
+    else if (!stat.isFile() || stat.nlink !== SINGLE_FILE_LINK_COUNT)
+      throw new Attention(
+        "Manual review required: linked or special storage cannot be preserved safely."
+      );
   }
 };
 export interface ManagedCatalogEntry {
@@ -394,25 +399,15 @@ export const revalidateManagedRepository = async (
 /** A complete rename preserves data only for self-contained storage. Never follow links. */
 export const validateManagedStorage = (userData: string, localPath: string): readonly string[] => {
   safeDirectories(userData, localPath);
-  rejectLinks(localPath);
+  // One traversal checks symlinks, hard links and special files together. Each
+  // revalidation still checks the complete tree before any Git/metadata access.
+  inspectStorageFiles(localPath);
   const gitDirectory = path.join(localPath, ".git");
   if (
     !fs.lstatSync(gitDirectory).isDirectory() ||
     EXTERNAL_GIT_STORAGE.some((name) => fs.existsSync(path.join(gitDirectory, name)))
   )
     throw new Attention("Manual review required: external Git storage cannot be preserved safely.");
-  const inspectFiles = (directory: string): void => {
-    for (const name of fs.readdirSync(directory)) {
-      const file = path.join(directory, name);
-      const stat = fs.lstatSync(file);
-      if (stat.isDirectory()) inspectFiles(file);
-      else if (!stat.isFile() || stat.nlink !== 1)
-        throw new Attention(
-          "Manual review required: linked or special storage cannot be preserved safely."
-        );
-    }
-  };
-  inspectFiles(localPath);
   const config = fs.readFileSync(path.join(gitDirectory, "config"), "utf8");
   if (
     /^\s*\[include(?:if)?(?:\s|\])/imu.test(config) ||

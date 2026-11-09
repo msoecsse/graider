@@ -233,6 +233,7 @@ describe("verified local managed reads", () => {
     "schema",
     "missing-cache",
     "linked-cache",
+    "hard-linked-metadata",
     "forged-catalog",
     "account",
     "hidden-metadata-change"
@@ -265,6 +266,8 @@ describe("verified local managed reads", () => {
         fs.renameSync(f.cache, `${f.cache}-linked`);
         fs.symlinkSync(`${f.cache}-linked`, f.cache, "junction");
       }
+      if (invalid === "hard-linked-metadata")
+        fs.linkSync(path.join(f.cache, "course.yml"), path.join(f.root, "linked-course.yml"));
       if (invalid === "forged-catalog") {
         const file = path.join(f.root, "managed-courses", "42", "catalog.json");
         const catalog = JSON.parse(fs.readFileSync(file, "utf8"));
