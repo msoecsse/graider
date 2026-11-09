@@ -821,7 +821,19 @@ export const GradingWorkspacePage = ({
     void window.graiderUI.prepareGradingWorkspace(request).then((value) => {
       if (!active) return;
       const prepared = value as PreparationResult;
-      setSelectedStudentId(isReady(prepared) ? prepared.students[0]?.studentId : undefined);
+      const students = isReady(prepared)
+        ? sortGradingStudents(
+            prepared.students.map((student, index) => ({
+              student,
+              index,
+              status: student.gradingStatus
+            })),
+            getStudentSort()
+          )
+        : [];
+      const initialStudent =
+        students.find((entry) => UNGRADED_STATUSES.includes(entry.status)) ?? students[0];
+      setSelectedStudentId(initialStudent?.student.studentId);
       setStudentStatusOverrides({});
       setResult(prepared);
     });

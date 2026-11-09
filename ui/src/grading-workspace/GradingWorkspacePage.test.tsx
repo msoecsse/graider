@@ -4439,6 +4439,8 @@ describe("completion navigation", () => {
     render(<GradingWorkspacePage request={REQUEST} />);
     if (zero) {
       await showAllStudents();
+      fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+      await waitFor(() => expect(screen.getByTestId("mock-monaco")).toHaveTextContent("ada:"));
       fireEvent.click(await screen.findByRole("button", { name: "Set score to 0 and complete" }));
       fireEvent.click(screen.getByRole("button", { name: "Confirm set score to 0 and complete" }));
     } else {
@@ -4556,4 +4558,68 @@ it("preserves selection when discovery supplies the same workspace identity", as
   expect(prepare).toHaveBeenCalledTimes(1);
   expect(loadSource).toHaveBeenCalledTimes(2);
   expect(screen.getByTestId("mock-monaco")).toHaveTextContent("grace:");
+});
+
+describe("initial student selection", () => {
+  it.each([
+    {
+      name: "skips complete and published students",
+      students: [
+        { studentId: "ada", section: "001", gradingStatus: "complete" },
+        { studentId: "grace", section: "002", gradingStatus: "published" },
+        { studentId: "lin", section: "003", gradingStatus: "in_progress" }
+      ],
+      expected: "lin"
+    },
+    {
+      name: "uses the saved descending section sort among students needing grading",
+      students: [
+        { studentId: "ada", section: "001", gradingStatus: "not_started" },
+        { studentId: "grace", section: "002", gradingStatus: "in_progress" }
+      ],
+      expected: "grace"
+    },
+    {
+      name: "falls back to the first sorted student when all are graded",
+      students: [
+        { studentId: "ada", section: "001", gradingStatus: "complete" },
+        { studentId: "grace", section: "002", gradingStatus: "published" }
+      ],
+      expected: "grace"
+    }
+  ])("$name and loads only that student's data", async ({ students, expected }) => {
+    rememberStudentSort({ key: "section", direction: "descending" });
+    const loadSource = vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve(source(studentId))
+    );
+    const loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
+      Promise.resolve(snapshot(studentId))
+    );
+    setApis(
+      vi.fn().mockResolvedValue(workspace(students)),
+      loadSource,
+      undefined,
+      undefined,
+      loadSnapshot
+    );
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("mock-monaco")).toHaveTextContent(`${expected}:`)
+    );
+    expect(loadSource).toHaveBeenCalledTimes(1);
+    expect(loadSource).toHaveBeenCalledWith(expect.objectContaining({ studentId: expected }));
+    expect(loadSnapshot).toHaveBeenCalledTimes(1);
+    expect(loadSnapshot).toHaveBeenCalledWith(expect.objectContaining({ studentId: expected }));
+  });
+
+  it("handles an empty roster without loading student data", async () => {
+    const prepare = vi.fn().mockResolvedValue(workspace([]));
+    const loadSource = vi.fn();
+    const loadSnapshot = vi.fn();
+    setApis(prepare, loadSource, undefined, undefined, loadSnapshot);
+    render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findAllByText("No assigned students.");
+    expect(loadSource).not.toHaveBeenCalled();
+    expect(loadSnapshot).not.toHaveBeenCalled();
+  });
 });

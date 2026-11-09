@@ -641,6 +641,10 @@ grading requires your verified Graider account and authorized local course state
 it does not require GitHub CLI sign-in or another course synchronization. Remote
 readiness restrictions still apply to GitHub-dependent operations.
 
+Opening an assignment selects the first student needing grading in your current
+student sort order. If everyone is complete or published, it selects the first
+student in that order.
+
 Student switching loads source and saved editor position together. The editor opens
 with its saved cursor and scroll position before position autosave is enabled.
 
