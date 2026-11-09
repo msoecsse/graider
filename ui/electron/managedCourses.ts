@@ -1,3 +1,4 @@
+import { measureGradingPhase } from "./gradingPerformance.js";
 import { readRemoteCourseAccess } from "./remoteCourseAccess.js";
 import { sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import fs from "node:fs";
@@ -712,35 +713,77 @@ export const inspectManagedCourse = async (
 // Shared scheduler also bounds overlapping refreshes/account switches. Same destination is serialized.
 let activeBootstraps = 0;
 const waitingBootstraps: Array<() => void> = [];
-const destinationLocks = new Map<string, Promise<unknown>>();
-export const serializeManagedOperation = async <T>(
-  request: Pick<ManagedBootstrapRequest, "userId" | "course" | "signal">,
+interface CacheLease {
+  tail: Promise<unknown>;
+  readonly readers: Set<Promise<void>>;
+  users: number;
+}
+const destinationLocks = new Map<string, CacheLease>();
+type CacheLeaseRequest = {
+  readonly userId: number;
+  readonly course: Pick<RemoteCourse, "repositoryId">;
+  readonly signal: AbortSignal;
+};
+/** Fair shared/exclusive lease. A queued writer blocks later readers; failures release every lease. */
+const withManagedCacheLease = async <T>(
+  request: CacheLeaseRequest,
+  shared: boolean,
   perform: () => Promise<T>
 ): Promise<T> => {
   const key = `${request.userId}:${request.course.repositoryId}`;
-  const previous = destinationLocks.get(key) ?? Promise.resolve();
-  const operation = previous
-    .catch(() => undefined)
-    .then(async () => {
-      if (activeBootstraps >= MANAGED_BOOTSTRAP_CONCURRENCY)
-        await new Promise<void>((resolve) => waitingBootstraps.push(resolve));
-      else activeBootstraps += 1;
-      try {
-        assertActive(request);
-        return await perform();
-      } finally {
-        const next = waitingBootstraps.shift();
-        if (next) next();
-        else activeBootstraps -= 1;
-      }
-    });
-  destinationLocks.set(key, operation);
+  const lease = destinationLocks.get(key) ?? {
+    tail: Promise.resolve(),
+    readers: new Set<Promise<void>>(),
+    users: 0
+  };
+  destinationLocks.set(key, lease);
+  lease.users++;
+  const previous = shared ? lease.tail : Promise.all([lease.tail, ...lease.readers]);
+  let release!: () => void;
+  const done = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  if (shared) lease.readers.add(done);
+  else {
+    lease.readers.clear();
+    lease.tail = done;
+  }
   try {
-    return await operation;
+    await measureGradingPhase("lock_wait", async () => {
+      await previous;
+    });
+    assertActive(request);
+    return await perform();
   } finally {
-    if (destinationLocks.get(key) === operation) destinationLocks.delete(key);
+    release();
+    lease.readers.delete(done);
+    lease.users--;
+    if (!lease.users) destinationLocks.delete(key);
   }
 };
+/** Local operations never consume clone/fetch concurrency slots or overlap a cache writer. */
+export const withManagedLocalOperation = <T>(
+  request: CacheLeaseRequest,
+  perform: () => Promise<T>
+): Promise<T> => withManagedCacheLease(request, true, perform);
+
+export const serializeManagedOperation = <T>(
+  request: CacheLeaseRequest,
+  perform: () => Promise<T>
+): Promise<T> =>
+  withManagedCacheLease(request, false, async () => {
+    if (activeBootstraps >= MANAGED_BOOTSTRAP_CONCURRENCY)
+      await new Promise<void>((resolve) => waitingBootstraps.push(resolve));
+    else activeBootstraps += 1;
+    try {
+      assertActive(request);
+      return await perform();
+    } finally {
+      const next = waitingBootstraps.shift();
+      if (next) next();
+      else activeBootstraps -= 1;
+    }
+  });
 
 export const bootstrapManagedCourse = (
   request: ManagedBootstrapRequest
@@ -843,7 +886,7 @@ export const synchronizationFailure = (error: unknown): ManagedSynchronizationSt
     retryable: true
   };
 };
-export const performSynchronization = async (
+const synchronizeCourseCache = async (
   request: ManagedSynchronizationRequest
 ): Promise<ManagedSynchronizationState> => {
   let observed: GitRepositoryState | null = null;
@@ -868,7 +911,9 @@ export const performSynchronization = async (
     observed = await workspace.inspect();
     before = observed.head.kind === "unborn" ? undefined : observed.head.commit;
     progress("fetching");
-    await workspace.fetchOrigin({ authentication: context.authentication });
+    await measureGradingPhase("fetch", () =>
+      workspace.fetchOrigin({ authentication: context.authentication })
+    );
     assertActive(request);
     await validateStructure(request, repo, localPath, context);
     observed = await workspace.inspect();
@@ -988,6 +1033,8 @@ export const performSynchronization = async (
     return { ...synchronizationFailure(error), localCommit: before };
   }
 };
+export const performSynchronization = (...args: Parameters<typeof synchronizeCourseCache>) =>
+  measureGradingPhase("synchronization", () => synchronizeCourseCache(...args));
 export const synchronizeManagedCourse = (
   request: ManagedSynchronizationRequest
 ): Promise<ManagedSynchronizationState> =>

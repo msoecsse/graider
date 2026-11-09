@@ -21,8 +21,8 @@ const loadBackend = (): CompositionBackend =>
 export const createGithubClientProvider =
   (load: () => CompositionBackend = loadBackend): GithubClientProvider =>
   (token) => {
-    if (managedCourseOperation.getStore()?.mode === "local_read")
-      throw new Error("Local course reads cannot acquire a GitHub client.");
+    if (["local_read", "local_grading"].includes(managedCourseOperation.getStore()?.mode ?? ""))
+      throw new Error("Local course operations cannot acquire a GitHub client.");
     if (token.trim().length === 0) throw new Error("GitHub client unavailable.");
     try {
       const backend = load();

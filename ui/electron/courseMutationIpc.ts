@@ -1,3 +1,4 @@
+import { measureGradingOperation, measureGradingPhase } from "./gradingPerformance.js";
 import { projectManagedCourseResult } from "./managedCourseResultProjection.js";
 import {
   managedCourseOperation,
@@ -17,7 +18,16 @@ import {
   type VerifiedCourseOperationContext,
   COURSE_MUTATION_NOTICE
 } from "./managedCourseMutationTypes.js";
-import { COURSE_RUNTIME_MUTATION_CHANNELS } from "./managedOperationInventory.js";
+import {
+  COURSE_RUNTIME_MUTATION_CHANNELS,
+  LOCAL_GRADING_MUTATION_CHANNELS
+} from "./managedOperationInventory.js";
+
+const executeCourseOperation = <T>(
+  senderId: number,
+  channel: string,
+  operation: () => Promise<T>
+) => measureGradingOperation(channel, () => courseOperationDocument.run(senderId, operation));
 
 /** Explicit inventory: all handlers are wrapped before their first local/remote write. */
 export const COURSE_MUTATION_CHANNELS: readonly string[] = [
@@ -323,7 +333,7 @@ export const createCourseMutationIpc = (
     },
     handle(channel, handler) {
       ipc.handle(channel, (event, ...args: unknown[]) =>
-        courseOperationDocument.run(event.sender.id, async () => {
+        executeCourseOperation(event.sender.id, channel, async () => {
           const view = document(event.sender);
           const epoch = view.epoch;
           const request = args[0];
@@ -386,7 +396,7 @@ export const createCourseMutationIpc = (
                 authoritativePath: context.courseFolderPath,
                 afterPublication
               },
-              () => handler(event, ...projectedArgs)
+              () => measureGradingPhase("service", async () => handler(event, ...projectedArgs))
             );
             if (!context.managed) return result;
             const publicResult = projectManagedCourseResult(
@@ -398,7 +408,7 @@ export const createCourseMutationIpc = (
               ? {
                   ...publicResult,
                   courseReadRevision: courseContextRevision(context),
-                  ...(context.mode === "local_read"
+                  ...(context.mode === "local_read" || context.mode === "local_grading"
                     ? { courseReadRevisionSource: "local_cache" }
                     : {})
                 }
@@ -481,6 +491,38 @@ export const createCourseMutationIpc = (
                 "authorization_required",
                 "Course authorization is not ready. Retry after sign-in.",
                 "authorization"
+              );
+            if (LOCAL_GRADING_MUTATION_CHANNELS.includes(channel))
+              return await boundary.localGrading(
+                folderId,
+                fields.courseFolderPath,
+                async (context) => {
+                  requireFreshView(view, epoch);
+                  const loaded = readSessions.get(event.sender);
+                  if (
+                    loaded &&
+                    (!context ||
+                      loaded.userId !== context.userId ||
+                      loaded.generation !== context.sessionGeneration)
+                  )
+                    blockMutation(
+                      "view_refresh_required",
+                      "Account authorization changed since this view was loaded. Reopen it before writing.",
+                      "refresh_view"
+                    );
+                  if (context?.managed) {
+                    const revision = bindings.get(event.sender)?.get(courseKey(context));
+                    if (revision && revision !== courseContextRevision(context))
+                      blockMutation(
+                        "view_refresh_required",
+                        "Course changed. Reopen this workspace before writing.",
+                        "refresh_view"
+                      );
+                    bind(event.sender, context);
+                  }
+                  return invoke(context);
+                },
+                schemaRequest
               );
             return await boundary.run(
               folderId,

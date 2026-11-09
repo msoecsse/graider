@@ -1,3 +1,4 @@
+import { measureGradingBackend } from "./gradingPerformance.js";
 import path from "node:path";
 import {
   resolveCurrentFacultyScope,
@@ -104,7 +105,7 @@ export const createGradingStudentSnapshotService = (
     ((request: GradingStudentSnapshotRequest) =>
       resolveLocalStudentRepository(getLocalRepositoryLocatorPath(request.userDataPath), request));
   const readHead = dependencies.readHead ?? readLocalRepositoryHead;
-  const getBackend = dependencies.loadBackend ?? loadBackend;
+  const getBackend = () => measureGradingBackend((dependencies.loadBackend ?? loadBackend)());
   return async (request) => {
     const scope = resolveFacultyScope(request);
     if (scope.status !== "success") return { status: scope.status };

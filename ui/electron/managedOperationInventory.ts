@@ -34,14 +34,29 @@ export const SYNCHRONIZED_COURSE_READ_CHANNELS: readonly string[] = Object.freez
   IPC_CHANNELS.getTemplateWorkflow,
   IPC_CHANNELS.previewTemplateWorkflowSave,
   IPC_CHANNELS.chooseReviewImport,
-  IPC_CHANNELS.loadGradingStudentSource,
-  IPC_CHANNELS.loadGradingStudentSnapshot,
   IPC_CHANNELS.previewGradingStudentReport,
   IPC_CHANNELS.getAssignmentApplyPreview,
   IPC_CHANNELS.getAssignmentGradePreview,
   IPC_CHANNELS.getAssignmentGradeStatus,
   IPC_CHANNELS.getFacultyReport,
   IPC_CHANNELS.loadGradingStudentEvidence
+]);
+/** Schema 1 grading state stays local. No course/student Git writes or remote observations. */
+export const LOCAL_GRADING_READ_CHANNELS: readonly string[] = Object.freeze([
+  IPC_CHANNELS.loadGradingStudentSource,
+  IPC_CHANNELS.loadGradingStudentSnapshot
+]);
+export const LOCAL_GRADING_MUTATION_CHANNELS: readonly string[] = Object.freeze([
+  IPC_CHANNELS.prepareGradingWorkspace,
+  IPC_CHANNELS.saveGradingStudentViewState,
+  IPC_CHANNELS.clearGradingStudentViewState,
+  IPC_CHANNELS.markGradingStudentComplete,
+  IPC_CHANNELS.addGradingStudentComment,
+  IPC_CHANNELS.editGradingStudentComment,
+  IPC_CHANNELS.deleteGradingStudentComment,
+  IPC_CHANNELS.addGradingStudentManualAdjustment,
+  IPC_CHANNELS.editGradingStudentManualAdjustment,
+  IPC_CHANNELS.deleteGradingStudentManualAdjustment
 ]);
 type ManagedOperationFamily =
   keyof typeof import("../dist-electron/managedOperationBackend.cjs").MANAGED_OPERATION_SUPPORT;

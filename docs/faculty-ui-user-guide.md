@@ -492,6 +492,20 @@ Existing destination folders are left unchanged and reported as failures rather
 than overwritten. A failure for one repository does not stop the remaining
 downloads; review the per-repository results when the download completes.
 
+## Local grading responsiveness
+
+Once a managed course is authorized and its local cache is available, preparing the
+Schema 1 grading workspace, opening student source, saving comments or adjustments,
+marking grading complete and autosaving editor position use local course evidence.
+These actions do not fetch the course from GitHub. Signing out or changing accounts
+invalidates the workspace; reopen it after authorizing the correct account. Changed
+student submission commits still block stale grading changes.
+
+Publishing reports, pulling student changes, downloading repositories, applying
+assignments and running remote grading retain their remote checks. Use an explicit
+course refresh to obtain newer remote course configuration. Schema 2 operation
+restrictions are unchanged.
+
 ## Reviewing legacy grader access during migration
 
 For an authorized discovered Schema 1 course, open **Review migration**. Complete

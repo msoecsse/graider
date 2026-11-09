@@ -1,3 +1,4 @@
+import { measureGradingBackend } from "./gradingPerformance.js";
 import path from "node:path";
 import {
   resolveCurrentFacultyScope,
@@ -84,7 +85,7 @@ export const createGradingWorkspaceService = (
 ): ((request: GradingWorkspaceRequest) => GradingWorkspaceResult) => {
   const services: GradingWorkspaceDependencies = {
     resolveFacultyScope: dependencies.resolveFacultyScope ?? resolveCurrentFacultyScope,
-    backend: dependencies.backend ?? loadBackend()
+    backend: measureGradingBackend(dependencies.backend ?? loadBackend())
   };
   return (request) => {
     if (!isValidGradingWorkspaceIdentity(request)) return { status: "assignment_config_error" };

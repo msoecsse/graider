@@ -63,3 +63,45 @@ jobs:
 
       - name: Audit dependencies
         run: npm run audit
+
+  grading-cache-safety-windows:
+    name: Grading local boundary (Windows x64)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Preserve repository line endings
+        run: git config --global core.autocrlf false
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Generate Electron backend bridges
+        run: npm run build:electron-backends
+
+      - name: Test local grading, cache leases, account invalidation and publication safeguards
+        working-directory: ui
+        run: >-
+          npx vitest run --maxWorkers=2
+          electron/gradingLocalPerformance.integration.test.ts
+          electron/gradingPerformance.test.ts
+          electron/managedCourseLeases.test.ts
+          electron/managedLocalRead.integration.test.ts
+          electron/managedRuntimeWriteSafety.test.ts
+          electron/managedOperationBridge.integration.test.ts
+          electron/gradingStudentReportPublicationService.test.ts

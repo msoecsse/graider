@@ -1,7 +1,11 @@
 import { withGithubAccountVerification } from "./githubAccountVerification.js";
 import type { VerifiedGithubAccount } from "./githubOrganizations.js";
 import { mapBounded } from "./remoteCourseDiscovery.js";
-import { MANAGED_BOOTSTRAP_CONCURRENCY, serializeManagedOperation } from "./managedCourses.js";
+import {
+  MANAGED_BOOTSTRAP_CONCURRENCY,
+  serializeManagedOperation,
+  withManagedLocalOperation
+} from "./managedCourses.js";
 import type {
   RemoteCourse,
   ManagedCourseState,
@@ -314,7 +318,7 @@ export class GithubOAuthSession {
     assertCurrent();
     this.courseOperations.add(controller);
     try {
-      return await serializeManagedOperation(
+      return await withManagedLocalOperation(
         { userId: expectedUserId, course: course!, signal: controller.signal },
         async () => {
           assertCurrent();

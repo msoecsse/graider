@@ -1,3 +1,4 @@
+import { measureGradingBackend } from "./gradingPerformance.js";
 import path from "node:path";
 import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
 import {
@@ -127,7 +128,7 @@ export const createGradingStudentViewStateService = (
     ((request: GradingStudentViewStateRequest) =>
       resolveLocalStudentRepository(getLocalRepositoryLocatorPath(request.userDataPath), request));
   const readHead = dependencies.readHead ?? readLocalRepositoryHead;
-  const getBackend = dependencies.loadBackend ?? loadBackend;
+  const getBackend = () => measureGradingBackend((dependencies.loadBackend ?? loadBackend)());
 
   const prepare = async (request: GradingStudentViewStateRequest): Promise<PreparedRequest> => {
     const scope = resolveFacultyScope(request);

@@ -1,3 +1,4 @@
+import { LOCAL_GRADING_MUTATION_CHANNELS } from "./managedOperationInventory";
 // @vitest-environment node
 import fs from "node:fs";
 import os from "node:os";
@@ -220,7 +221,10 @@ describe("IPC enforcement inventory", () => {
     "blocks %s before any handler, save or publication",
     async (channel) => {
       const handles = new Map<string, Function>();
-      const guard = { run: vi.fn().mockRejectedValue(new Error("Blocked")) };
+      const guard = {
+        run: vi.fn().mockRejectedValue(new Error("Blocked")),
+        localGrading: vi.fn().mockRejectedValue(new Error("Blocked"))
+      };
       const adapter = createCourseMutationIpc(
         {
           handle: (name, handler) => {
@@ -237,7 +241,9 @@ describe("IPC enforcement inventory", () => {
           { courseFolderId: "registered" }
         )
       ).rejects.toThrow();
-      expect(guard.run).toHaveBeenCalledOnce();
+      expect(
+        LOCAL_GRADING_MUTATION_CHANNELS.includes(channel) ? guard.localGrading : guard.run
+      ).toHaveBeenCalledOnce();
       expect(mutation).not.toHaveBeenCalled();
     }
   );

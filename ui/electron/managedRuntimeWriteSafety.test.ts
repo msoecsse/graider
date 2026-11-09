@@ -1,3 +1,6 @@
+import { createGithubClientProvider } from "./githubClientProvider";
+import { authenticateGitPublication } from "./gitPublicationAuthentication";
+import type { VerifiedLocalGradingContext } from "./managedCourseMutationTypes";
 // @vitest-environment node
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -63,4 +66,30 @@ describe("runtime mutation freshness after awaited preparation", () => {
       expect(write).not.toHaveBeenCalled();
     }
   );
+});
+
+it("local grading cannot acquire remote GitHub or Git publication capabilities", async () => {
+  const load = vi.fn();
+  const resolveToken = vi.fn();
+  const context: VerifiedLocalGradingContext = {
+    managed: true,
+    userId: 42,
+    repositoryId: 20,
+    cachedCommit: "a".repeat(40),
+    operationalCommit: "a".repeat(40),
+    courseFolderId: "fixture",
+    courseFolderPath: path.resolve("course-fixture"),
+    mode: "local_grading",
+    revalidateLocal: async () => {}
+  };
+  await managedCourseOperation.run(context, async () => {
+    expect(() => createGithubClientProvider(load)("test-only-token")).toThrow(
+      "cannot acquire a GitHub client"
+    );
+    await expect(authenticateGitPublication({ runner: {} as never, resolveToken })).rejects.toThrow(
+      "cannot authorize Git publication"
+    );
+  });
+  expect(load).not.toHaveBeenCalled();
+  expect(resolveToken).not.toHaveBeenCalled();
 });

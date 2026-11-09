@@ -1,3 +1,4 @@
+import { measureGradingPhase } from "./gradingPerformance.js";
 import {
   getProductionGitWorkspaceFactory,
   type GitWorkspaceReaderFactory
@@ -11,16 +12,19 @@ export type LocalRepositoryHeadResult =
 
 export const createLocalRepositoryHeadReader =
   (factory?: GitWorkspaceReaderFactory) =>
-  async (repositoryRoot: string): Promise<LocalRepositoryHeadResult> => {
-    try {
-      const workspace = await (factory ?? getProductionGitWorkspaceFactory()).open(repositoryRoot);
-      const submissionCommitSha = await workspace.resolveHead();
-      return COMMIT_SHA_PATTERN.test(submissionCommitSha)
-        ? { status: "success", submissionCommitSha }
-        : { status: "submission_commit_unavailable" };
-    } catch {
-      return { status: "submission_commit_unavailable" };
-    }
-  };
+  async (repositoryRoot: string): Promise<LocalRepositoryHeadResult> =>
+    measureGradingPhase("student_head", async () => {
+      try {
+        const workspace = await (factory ?? getProductionGitWorkspaceFactory()).open(
+          repositoryRoot
+        );
+        const submissionCommitSha = await workspace.resolveHead();
+        return COMMIT_SHA_PATTERN.test(submissionCommitSha)
+          ? { status: "success", submissionCommitSha }
+          : { status: "submission_commit_unavailable" };
+      } catch {
+        return { status: "submission_commit_unavailable" };
+      }
+    });
 
 export const readLocalRepositoryHead = createLocalRepositoryHeadReader();

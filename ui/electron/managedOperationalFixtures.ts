@@ -9,7 +9,8 @@ import {
   state,
   managedCoursePath,
   performSynchronization,
-  serializeManagedOperation
+  serializeManagedOperation,
+  withManagedLocalOperation
 } from "./managedCourses.js";
 import type { GitWorkspaceWriter, GitWorkspaceSynchronizer } from "./gitWorkspaceReader.js";
 import { createAuthenticatedProductionGitWorkspace } from "./gitWorkspaceReader.js";
@@ -219,7 +220,7 @@ export const managedOperationalFixture = async () => {
           throw new Error("Account or authorization changed.");
       };
       assertCurrent();
-      return serializeManagedOperation(
+      return withManagedLocalOperation(
         { userId: expected, course, signal: controller.signal },
         async () => {
           assertCurrent();

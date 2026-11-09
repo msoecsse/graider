@@ -290,9 +290,13 @@ describe("verified local managed reads", () => {
     },
     GIT_INTEGRATION_TIMEOUT_MS
   );
-  it.each(["sign-out", "switch", "revocation"])(
-    "invalidates an in-flight read on %s",
-    async (change) => {
+  it.each(
+    ["sign-out", "switch", "revocation"].flatMap((change) =>
+      ["read", "grading"].map((mode) => ({ change, mode }))
+    )
+  )(
+    "invalidates an in-flight $mode on $change",
+    async ({ change, mode }) => {
       const f = await fixture();
       let release!: () => void;
       let started!: () => void;
@@ -302,11 +306,24 @@ describe("verified local managed reads", () => {
       const entered = new Promise<void>((resolve) => {
         started = resolve;
       });
-      const result = f.read(async () => {
+      const operation = async () => {
         started();
         await held;
         return "private content";
-      });
+      };
+      const result =
+        mode === "read"
+          ? f.read(operation)
+          : f.guard.localGrading(
+              f.selector.id,
+              f.selector.path,
+              async (context) => {
+                await operation();
+                if (context?.mode === "local_grading") await context.revalidateLocal();
+                return "private content";
+              },
+              { channel: IPC_CHANNELS.saveGradingStudentViewState, fields: {} }
+            );
       const rejected = expect(result).rejects.toThrow();
       await Promise.race([entered, result]);
       if (change === "sign-out") await f.session.signOut();

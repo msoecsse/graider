@@ -18,5 +18,6 @@ export const revalidateCourseOperation = async (): Promise<void> => {
   const operation = managedCourseOperation.getStore();
   if (operation?.mode === "local_read")
     throw new Error("Local read authorization cannot authorize writes.");
-  await operation?.revalidate?.();
+  if (operation?.mode === "local_grading") await operation.revalidateLocal();
+  else await operation?.revalidate?.();
 };

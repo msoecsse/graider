@@ -1,3 +1,4 @@
+import { measureGradingPhase } from "./gradingPerformance.js";
 import fs from "node:fs";
 import path from "node:path";
 import { sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
@@ -13,7 +14,7 @@ import type { LocalCourseReadInput } from "./githubOAuthSession.js";
 export class LocalCourseReadUnavailable extends Error {}
 
 /** Validate local bytes, identity and revision without acquiring any remote capability. */
-export const validateLocalManagedCourse = async (request: {
+const inspectLocalCourseEvidence = async (request: {
   readonly userData: string;
   readonly input: LocalCourseReadInput;
   readonly username: string | null;
@@ -124,6 +125,9 @@ export const validateLocalManagedCourse = async (request: {
   input.assertCurrent();
   return { root, commit: state.head.commit, metadata: operational, access };
 };
+export const validateLocalManagedCourse = (
+  ...args: Parameters<typeof inspectLocalCourseEvidence>
+) => measureGradingPhase("cache_validation", () => inspectLocalCourseEvidence(...args));
 
 export const inspectLocalManagedCourse = async (
   request: Parameters<typeof validateLocalManagedCourse>[0]

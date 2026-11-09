@@ -28,11 +28,23 @@ export interface VerifiedLocalCourseReadContext extends Omit<
   readonly cachedCommit: string;
   readonly revalidate?: never;
 }
+/** Trusted local runtime write capability; never accepted by a remote publication boundary. */
+export interface VerifiedLocalGradingContext extends Omit<
+  VerifiedLocalCourseReadContext,
+  "mode" | "revalidate"
+> {
+  readonly mode: "local_grading";
+  readonly revalidate?: never;
+  readonly revalidateLocal: () => Promise<void>;
+}
 export type VerifiedCourseOperationContext =
   | VerifiedCourseMutationContext
-  | VerifiedLocalCourseReadContext;
+  | VerifiedLocalCourseReadContext
+  | VerifiedLocalGradingContext;
 export const courseContextRevision = (context: VerifiedCourseOperationContext): string =>
-  context.mode === "local_read" ? context.cachedCommit : context.authoritativeCommit;
+  context.mode === "local_read" || context.mode === "local_grading"
+    ? context.cachedCommit
+    : context.authoritativeCommit;
 export interface CourseMutationBlock {
   readonly status: "blocked";
   readonly reason:

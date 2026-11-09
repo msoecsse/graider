@@ -1,9 +1,10 @@
+import { measureGradingPhase } from "./gradingPerformance.js";
 import type { CourseRepository, RemoteRepositoryReader } from "./githubRemoteRepositories.js";
 import { loadMetadata } from "./remoteCourseDiscovery.js";
 import { GithubOAuthError } from "./githubOAuthCallback.js";
 
 /** Exact remote metadata observation, never a managed-cache authorization assertion. */
-export const readRemoteCourseAccess = async (
+const inspectRemoteCourseAccess = async (
   reader: RemoteRepositoryReader,
   repo: CourseRepository,
   userId: number,
@@ -56,3 +57,5 @@ export const readRemoteCourseAccess = async (
       }
     : { ...access, revision };
 };
+export const readRemoteCourseAccess = (...args: Parameters<typeof inspectRemoteCourseAccess>) =>
+  measureGradingPhase("remote_authorization", () => inspectRemoteCourseAccess(...args));

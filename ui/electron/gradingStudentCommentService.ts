@@ -1,3 +1,4 @@
+import { measureGradingBackend } from "./gradingPerformance.js";
 import { recordRecentGradingComment } from "./recentGradingComments.js";
 import path from "node:path";
 import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
@@ -152,7 +153,7 @@ export const createGradingStudentCommentService = (
     ((request: GradingStudentCommentRequest) =>
       resolveLocalStudentRepository(getLocalRepositoryLocatorPath(request.userDataPath), request));
   const readHead = dependencies.readHead ?? readLocalRepositoryHead;
-  const getBackend = dependencies.loadBackend ?? loadBackend;
+  const getBackend = () => measureGradingBackend((dependencies.loadBackend ?? loadBackend)());
   const prepare = async (request: GradingStudentCommentRequest): Promise<Prepared> => {
     const scope = resolveFacultyScope(request);
     if (scope.status !== "success") return { status: "failure", result: { status: scope.status } };

@@ -3810,13 +3810,14 @@ Local responses identify `courseReadRevisionSource: local_cache` (Course details
 do not claim remote freshness. Reads do not recover an outdated cache or persist
 new operational-folder bindings. Freshly authorized mutation operations can persist
 those bindings as before. Existing view invalidation and exact expected-revision
-checks remain; mutations still synchronize and independently revalidate remote
-authorization and revision before changing or publishing state.
+checks remain. Remote and course-configuration mutations still synchronize and
+independently revalidate remote authorization and revision. The local grading
+exception is defined below.
 
 Explicit remote observations/preparations retain the synchronized path, including
 dashboard readiness refresh, edit previews, Apply/grading previews and status,
-template inspection, student evidence retrieval, source/snapshot preparation and
-report previews. Course/term lifecycle changes, publication, runtime writes, source
+template inspection, student evidence retrieval and report previews. Course/term
+lifecycle changes, publication, repository downloads/pulls, review import, source
 updates and reconciliation retain their existing fresh authorization requirements.
 The supported local/remote channel inventories are main-owned; unknown channels
 receive neither implicit local support nor renderer-provided authorization.
@@ -3828,6 +3829,68 @@ trusted session/discovery evidence remains available. Restart or discovery refre
 can still fail to establish or replace that evidence; a disk catalog is insufficient.
 Session verification is covered by authorization-minimization Slice 2 above. Remaining
 startup discovery 403s and discovery refresh/rate-limit behavior remain Slice 3 work.
+
+#### Grading workspace performance hotfix
+
+For an already authorized managed Schema 1 course, main routes workspace preparation,
+student source/snapshot loads, view-state save/clear, student comment and adjustment
+mutations, and marking grading complete through a trusted local boundary. The closed
+`LOCAL_GRADING_READ_CHANNELS` and `LOCAL_GRADING_MUTATION_CHANNELS` inventories classify
+these operations explicitly. Comment Library changes remain course publications;
+report previews/publication, evidence retrieval, repository pulls/downloads, review
+import, Apply and remote workflows retain their remote guards. Schema 2 gains no
+additional supported operation or legacy fallback. Uncut legacy mutation sources keep
+their existing synchronized source/schema checks.
+
+The local capability has no token, authoritative remote revision or remote revalidation
+closure. GitHub-client acquisition and Git publication explicitly refuse it. It validates
+the verified account generation, authorized course registration, safe cache and runtime
+paths, committed local course/term role evidence and current faculty identity. Existing
+backend section/roster restrictions, local student HEAD reads and stale-submission guards
+remain unchanged. Runtime writes revalidate local evidence after awaited preparation and
+before the synchronous backend update; results revalidate again before returning.
+Existing document/account/revision invalidation still applies. Comments, adjustments,
+scores, drafts and editor state retain their existing runtime storage and format.
+
+The shared cache scheduler admits overlapping local operations without consuming remote
+clone/fetch slots. Synchronization, reconciliation and publication hold an exclusive lease
+on the same account/repository key; a queued writer blocks later readers. Backend grading
+state updates remain synchronous, so overlapping local preparation cannot interleave a
+state read/modify/write. Every local operation still performs full local Git and metadata
+validation; no time-based authorization cache or memoized student HEAD was introduced.
+This deliberately retains detection of external edits and Git index flags hiding metadata
+changes. Discovery caching and general request deduplication remain Slice 3 work.
+
+Opt-in main-process diagnostics use `GRAIDER_GRADING_PERFORMANCE=1`. Each course IPC call
+reports only its static channel, total milliseconds, and phase counts/milliseconds for
+synchronization, fetch, remote authorization, local validation, lock waiting, student HEAD,
+service execution and synchronous backend execution. Nested phases overlap; their times
+must not be added. Arguments, tokens, identities, paths, student content, results and
+errors are never logged. Normal operation emits none of these diagnostics.
+
+The reproducible regression is `electron/gradingLocalPerformance.integration.test.ts` in
+the UI suite. Run it with Vitest and `GRAIDER_GRADING_BENCHMARK=1` for aggregate output.
+It uses synthetic data, real bundled Git and a local bare remote with mocked GitHub reads;
+no live credentials or GitHub services are involved. An isolated macOS arm64 / Node 24 run
+measured the same six-call sequence before and after the hotfix:
+
+| Operation             | Before (ms) | After (ms) | Course fetches before → after |
+| --------------------- | ----------: | ---------: | ----------------------------: |
+| Prepare workspace     |         247 |        112 |                         1 → 0 |
+| Load student source   |         204 |         93 |                         1 → 0 |
+| Load student snapshot |         283 |         86 |                         1 → 0 |
+| Save view state       |         334 |        106 |                         1 → 0 |
+| Save comment          |         241 |        113 |                         1 → 0 |
+| Reload snapshot       |         196 |         57 |                         1 → 0 |
+
+Across these calls, remote repository-reader invocations fell from **204 to 0**, remote
+metadata authorization passes from **32 to 0**, and fetches from **6 to 0**. The autosave +
+comment + snapshot sequence fell from approximately **771 ms to 276 ms**. These are fixture
+measurements without internet latency, not a production latency guarantee. Afterward,
+local validation accounts for roughly 46–93 ms per read/preparation and 72–73 ms per
+runtime write; student HEAD takes 6–8 ms and actual backend execution 3–11 ms. Tests enforce
+zero remote requests and deterministic concurrent progress rather than fragile wall-clock
+thresholds. Startup/discovery, explicit refresh and actual remote actions still use GitHub.
 
 All registered course identity requests through `courseMutationIpc` use this source after
 cutover: assignment setup/edit/delete/group configuration, roster/section administration,
