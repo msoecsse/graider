@@ -601,6 +601,16 @@ export class GithubOAuthSession {
   }
 
   private discovery: AbortController | null = null;
+  private courseDiscoveryCompletion: Promise<void> | null = null;
+  /** Join existing startup work; never refresh or resume an operation under another account. */
+  async waitForCourseStartup(): Promise<void> {
+    const identity = this.state.identity?.id;
+    const generation = this.accountGeneration;
+    await this.authenticationCompletion;
+    await this.courseDiscoveryCompletion;
+    if (identity && (identity !== this.state.identity?.id || generation !== this.accountGeneration))
+      throw new Error("Account changed while course access was loading. Reopen the course.");
+  }
   constructor(private readonly deps: Dependencies) {}
   getState(): GithubOAuthState {
     return { ...this.state, busy: this.active !== null };
@@ -824,6 +834,11 @@ export class GithubOAuthSession {
     this.discovery?.abort();
     const controller = new AbortController();
     this.discovery = controller;
+    let completeDiscovery!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      completeDiscovery = resolve;
+    });
+    this.courseDiscoveryCompletion = completion;
     const current = (): boolean =>
       this.verified(token, userId, generation, controller.signal, false) && this.active === null;
     this.state = {
@@ -875,6 +890,7 @@ export class GithubOAuthSession {
                     }))
                   }
                 };
+                completeDiscovery();
                 if (this.deps.bootstrapCourse) {
                   const bootstrap = this.deps.bootstrapCourse;
                   const pending = courses.courses.filter(
@@ -1079,6 +1095,8 @@ export class GithubOAuthSession {
           ...this.state,
           courseDiscovery: { ...this.state.courseDiscovery, status: "ready" }
         };
+      completeDiscovery();
+      if (this.courseDiscoveryCompletion === completion) this.courseDiscoveryCompletion = null;
       if (this.discovery === controller) this.discovery = null;
       if (this.active === controller) this.active = null;
     }

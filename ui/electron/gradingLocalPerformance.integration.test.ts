@@ -17,7 +17,13 @@ import { createGradingStudentCompleteService } from "./gradingStudentCompleteSer
 import { managedCourseOperation } from "./managedCourseOperationContext";
 import { createFacultyScopeService } from "./facultyScopeService";
 import { getLocalSettingsPath, saveCurrentFacultyMsoeUsername } from "./localSettings";
-import { measureGradingOperation, type GradingPerformanceSample } from "./gradingPerformance";
+import {
+  measureGradingOperation,
+  measureGradingPhase,
+  type GradingPerformanceSample
+} from "./gradingPerformance";
+import { createGradingStudentEvidenceService } from "./gradingStudentEvidenceService";
+import { GithubOAuthSession } from "./githubOAuthSession";
 import type { RemoteRepositoryReader } from "./githubRemoteRepositories";
 
 const remote = vi.hoisted(() => ({ reader: null as RemoteRepositoryReader | null }));
@@ -29,12 +35,26 @@ const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(removeGitFixture));
 });
-const fixture = async () => {
+import { createGradingStudentCommitHistoryService } from "./gradingStudentCommitHistoryService";
+
+const REALISTIC_ROSTER_SIZE = 120;
+const REALISTIC_ASSIGNMENT_COUNT = 24;
+const NETWORK_DELAY_MS = 80;
+const LOCAL_ACTION_BUDGET_MS = 2000;
+const REALISTIC_WORKLOAD_TIMEOUT_MS = GIT_INTEGRATION_TIMEOUT_MS * 3;
+const fixture = async (mode: "managed" | "legacy" = "managed", realistic = false) => {
   const f = await managedOperationalFixture();
   roots.push(f.root);
-  Object.assign(f.course, { localFolderIds: [] });
+  if (mode === "managed") Object.assign(f.course, { localFolderIds: [] });
   remote.reader = f.reader;
-  const requests = Object.values(f.reader).map((method) => vi.fn(method));
+  const requests = Object.values(f.reader).map((method) =>
+    vi.fn((...args: unknown[]) =>
+      measureGradingPhase("remote_request", async () => {
+        if (realistic) await new Promise((resolve) => setTimeout(resolve, NETWORK_DELAY_MS));
+        return Reflect.apply(method, f.reader, args);
+      })
+    )
+  );
   Object.keys(f.reader).forEach((key, index) => {
     Object.assign(f.reader, { [key]: requests[index] });
   });
@@ -78,10 +98,26 @@ grading:
     path.join(rosters, "001.csv"),
     "student_id,github_username,section,status\ns1,student,001,active\n"
   );
+  if (realistic) {
+    fs.appendFileSync(
+      path.join(rosters, "001.csv"),
+      Array.from(
+        { length: REALISTIC_ROSTER_SIZE - 1 },
+        (_, index) => `s${index + 2},student${index + 2},001,active\n`
+      ).join("")
+    );
+    for (let index = 1; index < REALISTIC_ASSIGNMENT_COUNT; index++) {
+      const extra = path.join(path.dirname(assignment), `lab${index + 1}`);
+      fs.cpSync(assignment, extra, { recursive: true });
+      for (let file = 0; file < REALISTIC_ASSIGNMENT_COUNT; file++)
+        fs.writeFileSync(path.join(extra, `rubric-${file}.md`), "Assignment material\n");
+    }
+  }
   await fixtureGit(f.writer, ["add", "."]);
   await fixtureGit(f.writer, ["commit", "-m", "Grading fixture"]);
   await fixtureGit(f.writer, ["push", "origin", "main"]);
   await fixtureGit(f.cache, ["pull", "--ff-only"]);
+  await fixtureGit(f.legacy, ["pull", "--ff-only"]);
   saveCurrentFacultyMsoeUsername(getLocalSettingsPath(f.root), "jones");
   // The student repository is deliberately separate from the course cache.
   const student = path.join(f.root, "student");
@@ -91,11 +127,18 @@ grading:
   fs.writeFileSync(path.join(student, "Main.java"), "class Main {}\n");
   await fixtureGit(student, ["add", "."]);
   await fixtureGit(student, ["commit", "-m", "Submission"]);
+  if (realistic) {
+    for (let index = 2; index <= REALISTIC_ROSTER_SIZE; index++)
+      fs.cpSync(student, path.join(f.root, `student-${index}`), { recursive: true });
+  }
   const backend = (name: string) => require(path.resolve(`dist-electron/${name}Backend.cjs`));
   const resolveFacultyScope = createFacultyScopeService(backend("facultyScope"));
   const common = {
     resolveFacultyScope,
-    resolveRepository: () => ({ status: "success" as const, localPath: student })
+    resolveRepository: ({ studentId }: { studentId: string }) => ({
+      status: "success" as const,
+      localPath: studentId === "s1" ? student : path.join(f.root, `student-${studentId.slice(1)}`)
+    })
   };
   const workspace = createGradingWorkspaceService({
     resolveFacultyScope,
@@ -125,6 +168,11 @@ grading:
     ...common,
     loadBackend: () => backend("gradingStudentComplete")
   });
+  let evidenceOperation: () => Promise<unknown> = async () => ({
+    status: "not_applicable",
+    studentId: "s1"
+  });
+  const history = createGradingStudentCommitHistoryService({ ...common });
   const handlers = new Map<string, Function>();
   const ipc = createCourseMutationIpc(
     {
@@ -136,6 +184,8 @@ grading:
   );
   for (const [channel, operation] of [
     [IPC_CHANNELS.prepareGradingWorkspace, workspace],
+    [IPC_CHANNELS.loadGradingStudentCommitHistory, history],
+    [IPC_CHANNELS.loadGradingStudentEvidence, () => evidenceOperation()],
     [IPC_CHANNELS.loadGradingStudentSource, source],
     [IPC_CHANNELS.loadGradingStudentSnapshot, snapshot],
     [IPC_CHANNELS.saveGradingStudentViewState, view.save],
@@ -155,7 +205,7 @@ grading:
     isDestroyed: () => false,
     send: vi.fn()
   });
-  const selector = f.guard.remoteSelectors()[0];
+  const selector = mode === "managed" ? f.guard.remoteSelectors()[0] : f.deps.folders()[0];
   const request = {
     courseFolderId: selector.id,
     courseFolderPath: selector.path,
@@ -173,6 +223,12 @@ grading:
   requests.forEach((method) => method.mockClear());
   return {
     ...f,
+    sender,
+    ipc,
+    handlers,
+    setEvidenceOperation: (operation: typeof evidenceOperation) => {
+      evidenceOperation = operation;
+    },
     call,
     samples,
     requests,
@@ -227,10 +283,10 @@ it(
   GIT_INTEGRATION_TIMEOUT_MS
 );
 
-it(
-  "preserves comments, adjustments, view state and completion across concurrent runtime writes and rejects changed submissions",
-  async () => {
-    const f = await fixture();
+it.each(["managed", "legacy"] as const)(
+  "%s preserves comments, adjustments, view state and completion across concurrent runtime writes and rejects changed submissions",
+  async (mode) => {
+    const f = await fixture(mode);
     await f.call(IPC_CHANNELS.prepareGradingWorkspace);
     const writes = await Promise.all([
       f.call(IPC_CHANNELS.saveGradingStudentViewState, { viewState: f.viewState }),
@@ -255,8 +311,7 @@ it(
       gradingStatus: "complete"
     });
     const stateFile = path.join(
-      path.dirname(f.cache),
-      "runtime",
+      ...(mode === "managed" ? [path.dirname(f.cache), "runtime"] : [f.legacy]),
       ".graider",
       "grading",
       "27s1",
@@ -321,10 +376,14 @@ it(
   GIT_INTEGRATION_TIMEOUT_MS
 );
 
-it.each(["account", "faculty", "metadata"])(
-  "refuses backend writes if %s changes during awaited preparation",
-  async (change) => {
-    const f = await fixture();
+it.each(
+  (["managed", "legacy"] as const).flatMap((mode) =>
+    ["account", "signout", "faculty", "metadata"].map((change) => ({ mode, change }))
+  )
+)(
+  "$mode refuses backend writes if $change changes during awaited preparation",
+  async ({ mode, change }) => {
+    const f = await fixture(mode);
     const write = vi.fn();
     const service = createGradingStudentViewStateService({
       resolveFacultyScope: f.resolveFacultyScope,
@@ -333,6 +392,7 @@ it.each(["account", "faculty", "metadata"])(
         if (change === "metadata")
           fs.appendFileSync(path.join(f.cache, "course.yml"), "\n# changed authority\n");
         if (change === "account") f.switchAccount(99);
+        if (change === "signout") f.switchAccount(null);
         if (change === "faculty") Object.assign(f.deps, { username: () => "unassigned" });
         return { status: "success", submissionCommitSha: "a".repeat(40) };
       },
@@ -355,6 +415,299 @@ it.each(["account", "faculty", "metadata"])(
       )
     ).rejects.toThrow();
     expect(write).not.toHaveBeenCalled();
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
+
+const WORKLOAD_STUDENTS = 3;
+it.each(["managed", "legacy"] as const)(
+  "profiles %s grading with 120 student repositories, 24 assignments and delayed remote calls",
+  async (mode) => {
+    const f = await fixture(mode, true);
+    expect(
+      await f.handlers.get(IPC_CHANNELS.getCourseOperationalMode)!(
+        { sender: f.sender },
+        f.request.courseFolderId
+      )
+    ).toBe(mode);
+    await expect(f.call(IPC_CHANNELS.prepareGradingWorkspace)).resolves.toMatchObject({
+      status: "success"
+    });
+    for (let index = 1; index <= WORKLOAD_STUDENTS; index++) {
+      const fields = { studentId: `s${index}` };
+      await Promise.all([
+        f.call(IPC_CHANNELS.loadGradingStudentSource, fields),
+        f.call(IPC_CHANNELS.loadGradingStudentSnapshot, fields),
+        f.call(IPC_CHANNELS.loadGradingStudentViewState, fields),
+        f.call(IPC_CHANNELS.loadGradingStudentCommitHistory, fields)
+      ]);
+      await f.call(IPC_CHANNELS.addGradingStudentComment, {
+        ...fields,
+        comment: { id: "c1", text: "Feedback", deduction: -3 }
+      });
+      await f.call(IPC_CHANNELS.saveGradingStudentViewState, { ...fields, viewState: f.viewState });
+      await expect(f.call(IPC_CHANNELS.markGradingStudentComplete, fields)).resolves.toMatchObject({
+        status: "success",
+        gradingStatus: "complete"
+      });
+      await expect(f.call(IPC_CHANNELS.loadGradingStudentSnapshot, fields)).resolves.toMatchObject({
+        grade: { totalScore: 97 }
+      });
+    }
+    if (process.env.GRAIDER_GRADING_BENCHMARK === "1")
+      process.stdout.write(
+        `${JSON.stringify({ mode, rosterSize: REALISTIC_ROSTER_SIZE, samples: f.samples, remoteReaderCalls: f.requests.reduce((sum, method) => sum + method.mock.calls.length, 0) })}\n`
+      );
+    expect(f.requests.every((method) => method.mock.calls.length === 0)).toBe(true);
+    for (const sample of f.samples) {
+      expect(sample.durationMs).toBeLessThan(LOCAL_ACTION_BUDGET_MS);
+      expect(sample.source).toBe(mode);
+      expect(sample.operation).toMatch(/^local_/u);
+      const mutates = [
+        IPC_CHANNELS.addGradingStudentComment,
+        IPC_CHANNELS.saveGradingStudentViewState,
+        IPC_CHANNELS.markGradingStudentComplete
+      ].includes(sample.channel as never);
+      const validationCount = mutates ? 3 : 2;
+      expect(sample.phases.cache_validation?.count).toBe(validationCount);
+      expect(sample.phases.local_git_validation?.count).toBe(
+        validationCount * (mode === "legacy" ? 2 : 1)
+      );
+      expect(sample.phases.committed_metadata?.count).toBe(2);
+      expect(sample.phases.remote_request?.count ?? 0).toBe(0);
+    }
+  },
+  REALISTIC_WORKLOAD_TIMEOUT_MS
+);
+
+it.each(["managed", "legacy"] as const)(
+  "%s evidence cannot block primary reads or local writes",
+  async (mode) => {
+    const f = await fixture(mode);
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const provideClient = vi.fn(() => ({}) as import("./githubClientProvider").GitHubClient);
+    const evidenceService = createGradingStudentEvidenceService({
+      resolveFacultyScope: f.resolveFacultyScope,
+      resolveRepository: () => ({ status: "success", localPath: f.student }),
+      provideClient,
+      loadBackend: () => ({
+        prepareGradingStudentEvidenceContext: () => ({
+          status: "success",
+          value: {
+            studentId: "s1",
+            submissionCommitSha: "a".repeat(40),
+            repository: { owner: "fixture", repo: "student" },
+            grading: { enabled: true, mode: "preset", preset: "java-junit-checkstyle" }
+          }
+        }),
+        retrievePreparedGradingStudentEvidence: async () => {
+          entered();
+          await held;
+          return { status: "not_applicable" };
+        }
+      })
+    });
+    f.ipc.handle(IPC_CHANNELS.loadGradingStudentEvidence, (_event, request) =>
+      evidenceService({ ...request, userDataPath: f.root })
+    );
+    const evidence = f.call(IPC_CHANNELS.loadGradingStudentEvidence);
+    await started;
+    try {
+      await expect(f.call(IPC_CHANNELS.prepareGradingWorkspace)).resolves.toMatchObject({
+        status: "success"
+      });
+      await expect(f.call(IPC_CHANNELS.loadGradingStudentSource)).resolves.toMatchObject({
+        status: "success"
+      });
+      await expect(
+        f.call(IPC_CHANNELS.addGradingStudentComment, {
+          comment: { id: "c1", text: "Feedback", deduction: -3 }
+        })
+      ).resolves.toMatchObject({ status: "success" });
+      await expect(
+        f.call(IPC_CHANNELS.saveGradingStudentViewState, { viewState: f.viewState })
+      ).resolves.toMatchObject({ status: "success" });
+      await expect(f.call(IPC_CHANNELS.markGradingStudentComplete)).resolves.toMatchObject({
+        status: "success"
+      });
+      await expect(f.call(IPC_CHANNELS.loadGradingStudentSnapshot)).resolves.toMatchObject({
+        grade: { totalScore: 97 }
+      });
+      expect(f.requests.every((method) => method.mock.calls.length === 0)).toBe(true);
+      expect(provideClient).toHaveBeenCalledExactlyOnceWith("oauth-fixture-secret");
+    } finally {
+      release();
+      await evidence;
+    }
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
+
+it(
+  "joins restoration and discovery for concurrent registered legacy startup IPC instead of producing the exact false sign-in warning",
+  async () => {
+    const f = await fixture("legacy");
+    let restore!: () => void;
+    let discover!: () => void;
+    const loadingCredential = new Promise<void>((resolve) => {
+      restore = resolve;
+    });
+    const discovering = new Promise<void>((resolve) => {
+      discover = resolve;
+    });
+    const discoverCourses = vi.fn(async () => {
+      await discovering;
+      return {
+        status: "ready" as const,
+        userId: 42,
+        discoveredAt: null,
+        courses: [f.course],
+        diagnostics: []
+      };
+    });
+    const session = new GithubOAuthSession({
+      store: {
+        load: async () => {
+          await loadingCredential;
+          return "fixture-token";
+        },
+        save: async () => {},
+        delete: async () => {}
+      },
+      network: {
+        verifyAccount: async () => ({
+          identity: { id: 42, login: "faculty", name: null },
+          scopes: ["repo", "read:org"],
+          repositoryCapability: true,
+          organizationCapability: true
+        }),
+        discoverOrganizations: async () => ({
+          status: "ready",
+          organizations: [],
+          message: null,
+          stale: false
+        }),
+        exchange: async () => "fixture-token"
+      },
+      discoverCourses,
+      secret: () => "fixture-secret",
+      openBrowser: async () => {}
+    });
+    Object.assign(f.deps, { session });
+    f.ipc.handle(IPC_CHANNELS.refreshDashboard, () =>
+      f.guard.read("registered", f.legacy, async () => ({ status: "success" }))
+    );
+    const restoring = session.restore();
+    const operations = [
+      f.call(IPC_CHANNELS.refreshDashboard),
+      f.call(IPC_CHANNELS.loadGradingStudentSnapshot),
+      f.call(IPC_CHANNELS.prepareGradingWorkspace)
+    ];
+    restore();
+    await restoring;
+    await vi.waitFor(() => expect(discoverCourses).toHaveBeenCalledOnce());
+    expect(session.getState().status).toBe("signed_in");
+    expect(f.samples).toHaveLength(0);
+    discover();
+    for (const result of await Promise.all(operations))
+      expect(result).toMatchObject({ status: "success" });
+    expect(f.sender.send.mock.calls.flat()).not.toContainEqual(
+      expect.objectContaining({
+        message: "Sign in and refresh authoritative course access before opening this repository."
+      })
+    );
+    session.shutdown();
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
+
+it.each(["managed", "legacy"] as const)(
+  "%s rejects a submission changed during course revalidation before writing",
+  async (mode) => {
+    const f = await fixture(mode);
+    const write = vi.fn();
+    let reads = 0;
+    const service = createGradingStudentViewStateService({
+      resolveFacultyScope: f.resolveFacultyScope,
+      resolveRepository: () => ({ status: "success", localPath: f.student }),
+      readHead: async () => ({
+        status: "success",
+        submissionCommitSha: ++reads === 1 ? "a".repeat(40) : "b".repeat(40)
+      }),
+      loadBackend: () => ({ saveGradingStudentViewStateContext: write }) as never
+    });
+    await expect(
+      f.guard.localGrading(
+        f.request.courseFolderId,
+        f.request.courseFolderPath,
+        async (context) =>
+          managedCourseOperation.run(context!, () =>
+            service.save({
+              ...f.request,
+              courseFolderPath: context!.courseFolderPath,
+              userDataPath: f.root,
+              viewState: f.viewState
+            })
+          ),
+        { channel: IPC_CHANNELS.saveGradingStudentViewState, fields: {} }
+      )
+    ).resolves.toMatchObject({ status: "submission_changed" });
+    expect(write).not.toHaveBeenCalled();
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
+
+it.each(["origin", "revision", "metadata", "registration"])(
+  "rejects changed legacy %s without migration or remote grading work",
+  async (change) => {
+    const f = await fixture("legacy");
+    const courseBytes = fs.readFileSync(path.join(f.legacy, "course.yml"), "utf8");
+    if (change === "origin")
+      await fixtureGit(f.legacy, [
+        "remote",
+        "set-url",
+        "origin",
+        "https://github.com/other/course.git"
+      ]);
+    if (change === "revision") {
+      fs.writeFileSync(path.join(f.legacy, "note.txt"), "Changed");
+      await fixtureGit(f.legacy, ["add", "."]);
+      await fixtureGit(f.legacy, ["commit", "-m", "Changed source"]);
+    }
+    if (change === "metadata") {
+      await fixtureGit(f.legacy, ["update-index", "--assume-unchanged", "course.yml"]);
+      fs.appendFileSync(path.join(f.legacy, "course.yml"), "\n# Hidden edit\n");
+    }
+    if (change === "registration") Object.assign(f.course, { localFolderIds: [] });
+    await expect(f.call(IPC_CHANNELS.markGradingStudentComplete)).rejects.toThrow();
+    expect(f.guard.isManaged("registered")).toBe(false);
+    if (change !== "metadata")
+      expect(fs.readFileSync(path.join(f.legacy, "course.yml"), "utf8")).toBe(courseBytes);
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
+
+it.each(["managed", "legacy"] as const)(
+  "%s report preview and publication still require remote source authorization",
+  async (mode) => {
+    const f = await fixture(mode);
+    await f.call(IPC_CHANNELS.prepareGradingWorkspace);
+    const preview = vi.fn();
+    const publish = vi.fn();
+    f.ipc.handle(IPC_CHANNELS.previewGradingStudentReport, preview);
+    f.ipc.handle(IPC_CHANNELS.publishGradingStudentReport, publish);
+    Object.assign(f.reader, { resolveId: vi.fn(async () => null) });
+    await expect(f.call(IPC_CHANNELS.previewGradingStudentReport)).rejects.toThrow();
+    await expect(f.call(IPC_CHANNELS.publishGradingStudentReport)).rejects.toThrow();
+    expect(preview).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
   },
   GIT_INTEGRATION_TIMEOUT_MS
 );

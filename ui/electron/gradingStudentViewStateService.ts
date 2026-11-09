@@ -1,6 +1,6 @@
 import { measureGradingBackend } from "./gradingPerformance.js";
 import path from "node:path";
-import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
+import { revalidateGradingSubmission } from "./managedCourseOperationContext.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -106,6 +106,7 @@ type PreparedRequest =
   | { readonly status: "failure"; readonly result: GradingStudentViewStateResult }
   | {
       readonly status: "success";
+      readonly readSubmission: () => Promise<LocalRepositoryHeadResult>;
       readonly backendRequest: GradingStudentViewStateBackendRequest;
     };
 
@@ -141,6 +142,7 @@ export const createGradingStudentViewStateService = (
     if (head.status !== "success") return { status: "failure", result: head };
     return {
       status: "success",
+      readSubmission: () => readHead(repository.localPath),
       backendRequest: {
         courseFolderPath: request.courseFolderPath,
         termCode: request.termCode,
@@ -160,7 +162,14 @@ export const createGradingStudentViewStateService = (
     },
     save: async (request) => {
       const prepared = await prepare(request);
-      if (prepared.status === "success") await revalidateCourseOperation();
+      if (
+        prepared.status === "success" &&
+        !(await revalidateGradingSubmission(
+          prepared.readSubmission,
+          prepared.backendRequest.currentSubmissionCommitSha
+        ))
+      )
+        return { status: "submission_changed", studentId: request.studentId };
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().saveGradingStudentViewStateContext({
@@ -170,7 +179,14 @@ export const createGradingStudentViewStateService = (
     },
     clear: async (request) => {
       const prepared = await prepare(request);
-      if (prepared.status === "success") await revalidateCourseOperation();
+      if (
+        prepared.status === "success" &&
+        !(await revalidateGradingSubmission(
+          prepared.readSubmission,
+          prepared.backendRequest.currentSubmissionCommitSha
+        ))
+      )
+        return { status: "submission_changed", studentId: request.studentId };
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().clearGradingStudentViewStateContext(prepared.backendRequest);

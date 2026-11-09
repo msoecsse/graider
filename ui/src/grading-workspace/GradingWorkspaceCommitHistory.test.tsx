@@ -308,9 +308,8 @@ describe("GradingWorkspacePage commit history", () => {
       await screen.findByText("Commit history could not be loaded safely.")
     ).toBeInTheDocument();
     expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Source for ada");
-    expect(screen.getByRole("region", { name: "Automated Checks" })).toHaveTextContent(
-      "All reported tests passed."
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Load automated checks" }));
+    await screen.findByText("All reported tests passed.");
     fireEvent.click(screen.getByRole("button", { name: "Reload automated checks" }));
     await waitFor(() => expect(loadEvidence).toHaveBeenCalledTimes(2));
     expect(loadHistory).toHaveBeenCalledTimes(1);

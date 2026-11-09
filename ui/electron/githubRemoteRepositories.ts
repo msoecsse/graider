@@ -1,3 +1,4 @@
+import { measureGradingPhase } from "./gradingPerformance.js";
 import {
   provideGithubClient,
   type GithubClientProvider,
@@ -105,7 +106,9 @@ export const createRemoteRepositoryReader = (
   ): Promise<unknown> => {
     let response: Response;
     try {
-      response = await read(AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]));
+      response = await measureGradingPhase("remote_request", () =>
+        read(AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]))
+      );
     } catch {
       return fail("network_unavailable");
     }

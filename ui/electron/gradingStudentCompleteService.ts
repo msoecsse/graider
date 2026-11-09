@@ -1,6 +1,6 @@
 import { measureGradingBackend } from "./gradingPerformance.js";
 import path from "node:path";
-import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
+import { revalidateGradingSubmission } from "./managedCourseOperationContext.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -87,7 +87,13 @@ export const createGradingStudentCompleteService = (
     if (repository.status !== "success") return repository;
     const head = await readHead(repository.localPath);
     if (head.status !== "success") return head;
-    await revalidateCourseOperation();
+    if (
+      !(await revalidateGradingSubmission(
+        () => readHead(repository.localPath),
+        head.submissionCommitSha
+      ))
+    )
+      return { status: "submission_changed", studentId: request.studentId };
     return getBackend().markGradingStudentCompleteContext({
       courseFolderPath: request.courseFolderPath,
       termCode: request.termCode,

@@ -42,7 +42,7 @@ requirement for those reads. Cached content can be older than GitHub; opening a 
 does not verify remote freshness. Managed publication status describes pending local
 changes only.
 
-Saving, publishing, lifecycle changes, synchronization, and explicit remote status
+Saving course configuration, publishing, lifecycle changes, synchronization, and explicit remote status
 or readiness checks still require current remote access. Sign-out, account changes,
 known loss of course access, or an unsafe cache prevent cached reads. Startup and
 **Refresh courses** still establish authorization through GitHub; this does not add
@@ -494,12 +494,23 @@ downloads; review the per-repository results when the download completes.
 
 ## Local grading responsiveness
 
-Once a managed course is authorized and its local cache is available, preparing the
-Schema 1 grading workspace, opening student source, saving comments or adjustments,
-marking grading complete and autosaving editor position use local course evidence.
-These actions do not fetch the course from GitHub. Signing out or changing accounts
+Once a Schema 1 course is authorized and its verified local cache is available,
+preparing the grading workspace, opening student source, saving comments or
+adjustments, marking grading complete and autosaving editor position use local
+course evidence. This also applies to registered legacy folders whose origin,
+revision and faculty metadata match the verified cache; no migration or cutover is
+required. These actions do not fetch the course from GitHub. Signing out or changing accounts
 invalidates the workspace; reopen it after authorizing the correct account. Changed
 student submission commits still block stale grading changes.
+
+Student source, grading details, saved editor position and local commit history
+load independently of remote automated evidence. Choose **Load automated checks**
+in the **Automated Checks** panel (or press **A**) to retrieve JUnit, Checkstyle and
+workflow details. **Reload automated checks** retrieves fresh results. Switching
+students clears the previous evidence and requires a new request; late results
+from the previous student are discarded. Evidence retrieval does not block local
+grading actions. Startup requests wait for sign-in restoration and course discovery
+rather than treating loading as a sign-in failure.
 
 Publishing reports, pulling student changes, downloading repositories, applying
 assignments and running remote grading retain their remote checks. Use an explicit

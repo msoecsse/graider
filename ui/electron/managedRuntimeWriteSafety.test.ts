@@ -80,6 +80,7 @@ it("local grading cannot acquire remote GitHub or Git publication capabilities",
     courseFolderId: "fixture",
     courseFolderPath: path.resolve("course-fixture"),
     mode: "local_grading",
+    assertCurrent: () => {},
     revalidateLocal: async () => {}
   };
   await managedCourseOperation.run(context, async () => {

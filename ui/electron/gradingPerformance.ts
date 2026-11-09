@@ -9,20 +9,39 @@ type Phase =
   | "lock_wait"
   | "student_head"
   | "service"
-  | "backend";
+  | "backend"
+  | "faculty_scope"
+  | "local_git_validation"
+  | "committed_metadata"
+  | "remote_request"
+  | "student_evidence";
 export interface GradingPerformanceSample {
   readonly channel: string;
+  source?: "managed" | "legacy";
+  operation?:
+    | "local_read"
+    | "local_grading"
+    | "evidence_read"
+    | "synchronized"
+    | "source_authorization";
+  authorization?: "restoring" | "discovering" | "unrecognized" | "source_required" | "signed_out";
   readonly durationMs: number;
   readonly phases: Partial<Record<Phase, { count: number; durationMs: number }>>;
 }
-const measurements = new AsyncLocalStorage<GradingPerformanceSample["phases"]>();
+const measurements = new AsyncLocalStorage<GradingPerformanceSample>();
 const record = (phase: Phase, started: number) => {
-  const phases = measurements.getStore();
+  const phases = measurements.getStore()?.phases;
   if (phases) {
     const entry = (phases[phase] ??= { count: 0, durationMs: 0 });
     entry.count++;
     entry.durationMs += performance.now() - started;
   }
+};
+export const classifyGradingOperation = (
+  classification: Pick<GradingPerformanceSample, "source" | "operation" | "authorization">
+): void => {
+  const sample = measurements.getStore();
+  if (sample) Object.assign(sample, classification);
 };
 export const measureGradingPhase = async <T>(phase: Phase, operation: () => Promise<T>) => {
   const started = performance.now();
@@ -57,14 +76,15 @@ export const measureGradingOperation = async <T>(
   operation: () => Promise<T>,
   report?: (sample: GradingPerformanceSample) => void
 ): Promise<T> => {
-  if (!report && process.env.GRAIDER_GRADING_PERFORMANCE !== "1") return operation();
-  const phases: GradingPerformanceSample["phases"] = {};
+  if (!report && (measurements.getStore() || process.env.GRAIDER_GRADING_PERFORMANCE !== "1"))
+    return operation();
+  const sample: GradingPerformanceSample = { channel, durationMs: 0, phases: {} };
   const started = performance.now();
   try {
-    return await measurements.run(phases, operation);
+    return await measurements.run(sample, operation);
   } finally {
-    const sample = { channel, durationMs: performance.now() - started, phases };
-    if (report) report(sample);
-    else console.info("Graider grading performance", JSON.stringify(sample));
+    const completed = { ...sample, durationMs: performance.now() - started };
+    if (report) report(completed);
+    else console.info("Graider grading performance", JSON.stringify(completed));
   }
 };

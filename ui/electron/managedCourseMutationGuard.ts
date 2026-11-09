@@ -1,4 +1,4 @@
-import { measureGradingPhase } from "./gradingPerformance.js";
+import { classifyGradingOperation, measureGradingPhase } from "./gradingPerformance.js";
 import { canonicalFilesystemRoot, sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import { publishManagedCourseTransaction } from "./managedCourseTransaction.js";
 import fs from "node:fs";
@@ -41,6 +41,7 @@ import {
 import type {
   VerifiedLocalCourseReadContext,
   VerifiedLocalGradingContext,
+  VerifiedEvidenceReadContext,
   VerifiedCourseOperationContext
 } from "./managedCourseMutationTypes.js";
 import {
@@ -181,7 +182,9 @@ export const validateOperationalCourseSource = async (request: {
     (repo?.defaultBranch !== undefined && repo.defaultBranch !== course.defaultBranch)
   )
     unsafe();
-  const state = await workspace.inspect({ readOnly: true });
+  const state = await measureGradingPhase("local_git_validation", () =>
+    workspace.inspect({ readOnly: true })
+  );
   if (
     state.head.kind !== "attached" ||
     state.head.branch !== course.defaultBranch ||
@@ -394,7 +397,9 @@ export class ManagedCourseMutationGuard {
     managedRequest?: ManagedOperationRequest,
     localGrading = false
   ): Promise<T> {
+    await this.deps.session.waitForCourseStartup?.();
     const remote = this.remoteSelector(folderId);
+    classifyGradingOperation({ source: this.isManaged(folderId) ? "managed" : "legacy" });
     const folder = remote ?? this.deps.folders().find((item) => item.id === folderId);
     if (!folder || (suppliedPath !== undefined && suppliedPath !== folder.path))
       blockMutation(
@@ -439,7 +444,33 @@ export class ManagedCourseMutationGuard {
     // Known v2 sources always enter the managed bridge, including uncut legacy folders.
     if (known?.schemaVersion === 2)
       return this.readManaged(folder!, operation, managedRequest, localGrading);
-    if (known && state.identity && state.courseDiscovery.userId === state.identity.id)
+    classifyGradingOperation({ source: "legacy", operation: "source_authorization" });
+    const localRequest =
+      managedRequest &&
+      [
+        ...LOCAL_COURSE_READ_CHANNELS,
+        ...LOCAL_GRADING_READ_CHANNELS,
+        ...(localGrading ? LOCAL_GRADING_MUTATION_CHANNELS : [])
+      ].includes(managedRequest.channel);
+    if (
+      known?.schemaVersion === 1 &&
+      localRequest &&
+      state.identity &&
+      state.courseDiscovery.userId === state.identity.id
+    )
+      return this.readManaged(folder!, operation, managedRequest, localGrading, true);
+    if (localGrading) {
+      classifyGradingOperation({
+        authorization: state.busy ? "restoring" : !state.identity ? "signed_out" : "unrecognized"
+      });
+      blockMutation(
+        !state.identity ? "authorization_required" : "operational_source_mismatch",
+        "A verified registered Schema 1 course is required for local grading. Refresh course access.",
+        !state.identity ? "authorization" : "attention"
+      );
+    }
+    if (known && state.identity && state.courseDiscovery.userId === state.identity.id) {
+      classifyGradingOperation({ authorization: "source_required" });
       return this.deps.session.withReadOnlyCourse(
         known.repositoryId,
         state.identity.id,
@@ -475,6 +506,7 @@ export class ManagedCourseMutationGuard {
           return operation();
         }
       );
+    }
     let local: ReturnType<ReturnType<typeof loadMetadata>["inspectOperationCourse"]>;
     try {
       local = loadMetadata().inspectOperationCourse(
@@ -499,12 +531,31 @@ export class ManagedCourseMutationGuard {
         "operational_source_unsafe",
         "The registered course repository requires attention."
       );
-    if (!state.identity || state.busy)
+    if (state.busy) {
+      classifyGradingOperation({ authorization: "restoring" });
+      blockMutation(
+        "synchronization_retry_required",
+        "GitHub sign-in is still being restored. Retry when account loading finishes.",
+        "retry"
+      );
+    }
+    if (!state.identity) {
+      classifyGradingOperation({ authorization: "signed_out" });
       blockMutation(
         "authorization_required",
         "Sign in and refresh authoritative course access before opening this repository.",
         "authorization"
       );
+    }
+    if (state.courseDiscovery.status === "idle" || state.courseDiscovery.status === "loading") {
+      classifyGradingOperation({ authorization: "discovering" });
+      blockMutation(
+        "synchronization_retry_required",
+        "Course discovery is still running. Retry when course loading finishes.",
+        "retry"
+      );
+    }
+    classifyGradingOperation({ authorization: "unrecognized" });
     return this.deps.session.withAuthenticatedAccount(async (account) => {
       const workspace = await factory.open(folder!.path);
       const locator = parseGithubOrigin(await workspace.remoteUrl("origin"));
@@ -553,10 +604,7 @@ export class ManagedCourseMutationGuard {
         "operation_unavailable",
         "An explicit supported local grading operation is required."
       );
-    if (this.isManaged(folderId) || this.hasManagedBinding(folderId))
-      return this.readCourse(folderId, suppliedPath, operation, request, true);
-    // Uncut legacy sources retain their existing authoritative-schema/source checks.
-    return this.run(folderId, suppliedPath, "new_mutation", operation, request);
+    return this.readCourse(folderId, suppliedPath, operation, request, true);
   }
   private async readManaged<T>(
     folder: CourseFolderRecord,
@@ -565,8 +613,19 @@ export class ManagedCourseMutationGuard {
       input?: ManagedOperationInput
     ) => Promise<T>,
     request?: ManagedOperationRequest,
-    localGrading = false
+    localGrading = false,
+    legacy = false,
+    evidenceInput?: ManagedOperationInput
   ): Promise<T> {
+    classifyGradingOperation({
+      source: legacy ? "legacy" : "managed",
+      operation:
+        request?.channel === IPC_CHANNELS.loadGradingStudentEvidence
+          ? "evidence_read"
+          : localGrading
+            ? "local_grading"
+            : "local_read"
+    });
     if (request && SYNCHRONIZED_COURSE_READ_CHANNELS.includes(request.channel))
       return this.run(folder.id, folder.path, "read", operation, request);
     if (
@@ -606,10 +665,22 @@ export class ManagedCourseMutationGuard {
         "A unique authorized course registration is required."
       );
     const username = this.deps.username();
+    if (request?.channel === IPC_CHANNELS.loadGradingStudentEvidence && !evidenceInput)
+      return session.withReadOnlyCourse(candidates[0]!.repositoryId, userId!, (remoteInput) =>
+        this.readManaged(folder, operation, request, localGrading, legacy, remoteInput)
+      );
     return session.withLocalCourse(candidates[0]!.repositoryId, userId!, async (input) => {
       const assertCurrent = () => {
         input.assertCurrent();
         if (
+          (legacy &&
+            !session
+              .getState()
+              .courseDiscovery.courses.some(
+                (current) =>
+                  current.repositoryId === input.course.repositoryId &&
+                  current.localFolderIds.includes(folder.id)
+              )) ||
           session.mutationGeneration !== generation ||
           (input.course.schemaVersion === 1 && this.deps.username() !== username) ||
           (!folder.id.startsWith("managed-course:") &&
@@ -622,14 +693,16 @@ export class ManagedCourseMutationGuard {
           );
       };
       assertCurrent();
-      this.localReadBindings.add(folder.id);
+      if (!legacy) this.localReadBindings.add(folder.id);
+      const committedMetadata = new Map<string, string | null>();
       let local: Awaited<ReturnType<typeof validateLocalManagedCourse>>;
       try {
         local = await validateLocalManagedCourse({
           userData: this.deps.userData,
           input,
           username,
-          factory: this.deps.factory
+          factory: this.deps.factory,
+          committedMetadata
         });
       } catch (error) {
         return blockMutation(
@@ -639,13 +712,46 @@ export class ManagedCourseMutationGuard {
             : "A safe managed cache is required. Review the cache or refresh courses."
         );
       }
+      const validateLegacy = async () => {
+        if (!legacy) return;
+        const commit = await validateOperationalCourseSource({
+          root: folder.path,
+          course: input.course,
+          authoritativeCommit: local.commit,
+          mode: "new_mutation",
+          factory: this.deps.factory ?? getProductionGitWorkspaceFactory(),
+          resolveOrigin: async (owner, name) =>
+            `${owner}/${name}`.toLowerCase() ===
+            `${input.course.organizationLogin}/${input.course.name}`.toLowerCase()
+              ? {
+                  id: input.course.repositoryId,
+                  organizationId: input.course.organizationId,
+                  defaultBranch: input.course.defaultBranch
+                }
+              : null
+        });
+        if (
+          commit !== local.commit ||
+          Object.entries(local.metadataBytes).some(
+            ([file, bytes]) => fs.readFileSync(path.join(folder.path, file), "utf8") !== bytes
+          )
+        )
+          blockMutation(
+            "operational_source_stale",
+            "The registered course source differs from the verified course revision. Refresh courses and review its source.",
+            "refresh_view"
+          );
+        assertCurrent();
+      };
+      await validateLegacy();
       const revalidateLocal = async () => {
         assertCurrent();
         const after = await validateLocalManagedCourse({
           userData: this.deps.userData,
           input,
           username,
-          factory: this.deps.factory
+          factory: this.deps.factory,
+          committedMetadata
         }).catch(() =>
           blockMutation(
             "operational_source_unsafe",
@@ -659,14 +765,23 @@ export class ManagedCourseMutationGuard {
             "refresh_view"
           );
         assertCurrent();
-        if (localGrading)
+        await validateLegacy();
+        if (localGrading && !legacy)
           safeDirectories(this.deps.userData, path.join(path.dirname(local.root), "runtime"));
       };
-      const context: VerifiedLocalCourseReadContext | VerifiedLocalGradingContext = {
-        ...(localGrading
-          ? { mode: "local_grading" as const, revalidateLocal }
-          : { mode: "local_read" as const }),
-        managed: true,
+      const context:
+        | VerifiedLocalCourseReadContext
+        | VerifiedLocalGradingContext
+        | VerifiedEvidenceReadContext = {
+        ...(evidenceInput
+          ? {
+              mode: "evidence_read" as const,
+              evidence: { token: evidenceInput.token, assertCurrent }
+            }
+          : localGrading
+            ? { mode: "local_grading" as const, revalidateLocal, assertCurrent }
+            : { mode: "local_read" as const }),
+        managed: !legacy,
         cachedCommit: local.commit,
         operationalCommit: local.commit,
         sessionGeneration: generation,
@@ -674,17 +789,22 @@ export class ManagedCourseMutationGuard {
         repositoryId: input.course.repositoryId,
         courseFolderId: folder.id,
         legacyFolderPath: folder.path,
-        courseFolderPath: local.root
+        courseFolderPath: legacy ? folder.path : local.root
       };
-      if (context.mode === "local_grading" && local.metadata.schemaVersion !== 1)
+      if (
+        (context.mode === "local_grading" || context.mode === "evidence_read") &&
+        local.metadata.schemaVersion !== 1
+      )
         blockMutation(
           "operation_unavailable",
           "Local grading is unavailable for this course schema."
         );
       const runtime = path.join(path.dirname(local.root), "runtime");
       // Local writes retain the same safe runtime storage boundary as synchronized writes.
-      if (localGrading) safeDirectories(this.deps.userData, runtime, true);
-      loadMetadata().registerCourseRuntimeRoot(local.root, runtime);
+      if (!legacy) {
+        if (localGrading) safeDirectories(this.deps.userData, runtime, true);
+        loadMetadata().registerCourseRuntimeRoot(local.root, runtime);
+      }
       if (local.metadata.schemaVersion === 2 && !request)
         blockMutation(
           "operation_unavailable",
@@ -830,6 +950,9 @@ export class ManagedCourseMutationGuard {
     operation: (context: VerifiedCourseMutationContext, input: ManagedOperationInput) => Promise<T>,
     managedRequest?: ManagedOperationRequest
   ): Promise<T> {
+    classifyGradingOperation({
+      operation: "synchronized"
+    });
     const session = this.deps.session;
     const state = session.getState();
     const generation = session.mutationGeneration;
@@ -881,6 +1004,7 @@ export class ManagedCourseMutationGuard {
         "The registered folder cannot be confidently mapped to an authorized course. Refresh courses and inspect its registration."
       );
     const course = courses[0];
+    classifyGradingOperation({ source: remote || binding ? "managed" : "legacy" });
     const key = `${userId}:${course.repositoryId}`;
     const previous = this.pending.get(key) ?? Promise.resolve();
     let operationStarted = false;

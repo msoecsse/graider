@@ -1,7 +1,7 @@
 import { measureGradingBackend } from "./gradingPerformance.js";
 import { recordRecentGradingComment } from "./recentGradingComments.js";
 import path from "node:path";
-import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
+import { revalidateGradingSubmission } from "./managedCourseOperationContext.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -134,7 +134,11 @@ const loadBackend = (): GradingStudentCommentBackend =>
 
 type Prepared =
   | { readonly status: "failure"; readonly result: GradingStudentCommentResult }
-  | { readonly status: "success"; readonly backendRequest: BackendRequest };
+  | {
+      readonly status: "success";
+      readonly readSubmission: () => Promise<LocalRepositoryHeadResult>;
+      readonly backendRequest: BackendRequest;
+    };
 
 export const createGradingStudentCommentService = (
   dependencies: Partial<GradingStudentCommentDependencies> = {}
@@ -165,6 +169,7 @@ export const createGradingStudentCommentService = (
     if (head.status !== "success") return { status: "failure", result: head };
     return {
       status: "success",
+      readSubmission: () => readHead(repository.localPath),
       backendRequest: {
         courseFolderPath: request.courseFolderPath,
         termCode: request.termCode,
@@ -177,7 +182,14 @@ export const createGradingStudentCommentService = (
   return {
     add: async (request) => {
       const prepared = await prepare(request);
-      if (prepared.status === "success") await revalidateCourseOperation();
+      if (
+        prepared.status === "success" &&
+        !(await revalidateGradingSubmission(
+          prepared.readSubmission,
+          prepared.backendRequest.currentSubmissionCommitSha
+        ))
+      )
+        return { status: "submission_changed", studentId: request.studentId };
       const result =
         prepared.status === "failure"
           ? prepared.result
@@ -199,7 +211,14 @@ export const createGradingStudentCommentService = (
     },
     edit: async (request) => {
       const prepared = await prepare(request);
-      if (prepared.status === "success") await revalidateCourseOperation();
+      if (
+        prepared.status === "success" &&
+        !(await revalidateGradingSubmission(
+          prepared.readSubmission,
+          prepared.backendRequest.currentSubmissionCommitSha
+        ))
+      )
+        return { status: "submission_changed", studentId: request.studentId };
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().editGradingStudentCommentContext(
@@ -210,7 +229,14 @@ export const createGradingStudentCommentService = (
     },
     delete: async (request) => {
       const prepared = await prepare(request);
-      if (prepared.status === "success") await revalidateCourseOperation();
+      if (
+        prepared.status === "success" &&
+        !(await revalidateGradingSubmission(
+          prepared.readSubmission,
+          prepared.backendRequest.currentSubmissionCommitSha
+        ))
+      )
+        return { status: "submission_changed", studentId: request.studentId };
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().deleteGradingStudentCommentContext(

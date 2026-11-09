@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from "./ipc.js";
 /** Closed inventory of operations whose course authorization can be checked entirely locally.
- * Runtime writes and remote observations deliberately do not inherit this capability.
+ * Evidence observes student Actions under its own authenticated reader; it must never
+ * synchronize or exclusively lock the course cache. It cannot authorize writes.
  */
 export const LOCAL_COURSE_READ_CHANNELS: readonly string[] = Object.freeze([
   IPC_CHANNELS.getCoursePublishStatus,
@@ -16,7 +17,8 @@ export const LOCAL_COURSE_READ_CHANNELS: readonly string[] = Object.freeze([
   IPC_CHANNELS.getAssignmentGradingLifecycle,
   IPC_CHANNELS.loadGradingStudentDocument,
   IPC_CHANNELS.loadGradingStudentViewState,
-  IPC_CHANNELS.loadGradingStudentCommitHistory
+  IPC_CHANNELS.loadGradingStudentCommitHistory,
+  IPC_CHANNELS.loadGradingStudentEvidence
 ]);
 export const MANAGED_V2_LOCAL_READ_CHANNELS: readonly string[] = Object.freeze([
   IPC_CHANNELS.loadRosterTerms,
@@ -38,8 +40,7 @@ export const SYNCHRONIZED_COURSE_READ_CHANNELS: readonly string[] = Object.freez
   IPC_CHANNELS.getAssignmentApplyPreview,
   IPC_CHANNELS.getAssignmentGradePreview,
   IPC_CHANNELS.getAssignmentGradeStatus,
-  IPC_CHANNELS.getFacultyReport,
-  IPC_CHANNELS.loadGradingStudentEvidence
+  IPC_CHANNELS.getFacultyReport
 ]);
 /** Schema 1 grading state stays local. No course/student Git writes or remote observations. */
 export const LOCAL_GRADING_READ_CHANNELS: readonly string[] = Object.freeze([

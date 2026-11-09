@@ -408,7 +408,9 @@ export const createCourseMutationIpc = (
               ? {
                   ...publicResult,
                   courseReadRevision: courseContextRevision(context),
-                  ...(context.mode === "local_read" || context.mode === "local_grading"
+                  ...(context.mode === "local_read" ||
+                  context.mode === "local_grading" ||
+                  context.mode === "evidence_read"
                     ? { courseReadRevisionSource: "local_cache" }
                     : {})
                 }
@@ -434,6 +436,7 @@ export const createCourseMutationIpc = (
                 folderId,
                 fields.courseFolderPath,
                 async (context) => {
+                  if (context) bind(event.sender, context);
                   if (context?.managed) {
                     if (
                       EDIT_PREVIEWS.includes(channel) &&
@@ -510,7 +513,7 @@ export const createCourseMutationIpc = (
                       "Account authorization changed since this view was loaded. Reopen it before writing.",
                       "refresh_view"
                     );
-                  if (context?.managed) {
+                  if (context) {
                     const revision = bindings.get(event.sender)?.get(courseKey(context));
                     if (revision && revision !== courseContextRevision(context))
                       blockMutation(

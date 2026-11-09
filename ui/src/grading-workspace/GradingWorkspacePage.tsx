@@ -1109,13 +1109,13 @@ export const GradingWorkspacePage = ({
   );
 
   useEffect(() => {
-    if (!isReady(result) || selectedStudent === undefined) {
-      evidenceRequestGeneration.current += 1;
-      setEvidence({ status: "idle" });
-      return;
-    }
-    void loadEvidence(selectedStudent.studentId);
-  }, [loadEvidence, result, selectedStudent]);
+    evidenceRequestGeneration.current += 1;
+    setEvidence(
+      !isReady(result) || selectedStudent === undefined
+        ? { status: "idle" }
+        : { status: "unrequested", studentId: selectedStudent.studentId }
+    );
+  }, [result, selectedStudent]);
 
   useEffect(() => {
     const generation = commitHistoryRequestGeneration.current + 1;
@@ -2900,6 +2900,8 @@ export const GradingWorkspacePage = ({
     const activeElement = document.activeElement;
     evidencePanelPriorFocusRef.current =
       activeElement instanceof HTMLElement ? activeElement : document.body;
+    if (evidence.status === "unrequested" && selectedStudent)
+      void loadEvidence(selectedStudent.studentId);
     setEvidencePanelOpen(true);
     setEvidenceFocusRequest((current) => ({ target: "checks", token: (current?.token ?? 0) + 1 }));
   };
@@ -3789,7 +3791,14 @@ export const GradingWorkspacePage = ({
               </div>
             )}
             <GradingEvidencePanel
-              state={evidence}
+              state={
+                evidence.status === "success" &&
+                evidence.result.studentId !== selectedStudent?.studentId
+                  ? { status: "idle" }
+                  : "studentId" in evidence && evidence.studentId !== selectedStudent?.studentId
+                    ? { status: "idle" }
+                    : evidence
+              }
               commitHistory={commitHistory}
               onReload={(studentId) => void loadEvidence(studentId)}
               open={evidencePanelOpen}

@@ -1,3 +1,4 @@
+import { measureGradingPhaseSync } from "./gradingPerformance.js";
 import path from "node:path";
 import { getLocalSettingsPath, loadLocalSettings } from "./localSettings.js";
 
@@ -45,11 +46,13 @@ export const createFacultyScopeService =
   (request) => {
     const settings = loadLocalSettings(getLocalSettingsPath(request.userDataPath));
 
-    return backend.resolveFacultyScopeContext({
-      courseFolderPath: request.courseFolderPath,
-      termCode: request.termCode,
-      currentFacultyMsoeUsername: settings.currentFacultyMsoeUsername
-    });
+    return measureGradingPhaseSync("faculty_scope", () =>
+      backend.resolveFacultyScopeContext({
+        courseFolderPath: request.courseFolderPath,
+        termCode: request.termCode,
+        currentFacultyMsoeUsername: settings.currentFacultyMsoeUsername
+      })
+    );
   };
 
 export const resolveCurrentFacultyScope = (

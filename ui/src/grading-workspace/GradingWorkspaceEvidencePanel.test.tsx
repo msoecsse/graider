@@ -188,6 +188,9 @@ const setApis = ({
   return { loadSource, loadSnapshot, mutations };
 };
 
+const requestChecks = async (): Promise<void> => {
+  fireEvent.click(await screen.findByRole("button", { name: "Load automated checks" }));
+};
 const showAllStudents = async (): Promise<void> => {
   const pill =
     screen.queryByRole("button", { name: /^All\b/u }) ??
@@ -200,6 +203,7 @@ describe("GradingWorkspacePage automated checks", () => {
     const historical = { ...evidence("ada"), submissionCommitSha: "b".repeat(40) };
     setApis({ loadEvidence: vi.fn().mockResolvedValue(historical) });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
     expect(await screen.findByText(/Results from previous revision/u)).toHaveTextContent(
       "01234567"
     );
@@ -219,6 +223,7 @@ describe("GradingWorkspacePage automated checks", () => {
     });
 
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
 
     const panel = await screen.findByRole("region", { name: "Automated Checks" });
     expect(loadEvidence).toHaveBeenCalledWith({ ...REQUEST, studentId: "ada" });
@@ -254,8 +259,10 @@ describe("GradingWorkspacePage automated checks", () => {
     );
     setApis({ loadEvidence });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await requestChecks();
     await waitFor(() => expect(loadEvidence).toHaveBeenCalledTimes(2));
     await act(async () => grace.resolve(evidence("grace")));
     expect(await screen.findByText("Automated checks for grace")).toBeInTheDocument();
@@ -266,8 +273,10 @@ describe("GradingWorkspacePage automated checks", () => {
     const oldFailure = deferred<GradingStudentEvidenceResult>();
     loadEvidence.mockImplementationOnce(() => oldFailure.promise);
     fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+    await requestChecks();
     await waitFor(() => expect(loadEvidence).toHaveBeenCalledTimes(3));
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await requestChecks();
     await screen.findByText("Automated checks for grace");
     await act(async () => oldFailure.reject(new Error("stale private error")));
     expect(screen.getByText("Automated checks for grace")).toBeInTheDocument();
@@ -283,11 +292,14 @@ describe("GradingWorkspacePage automated checks", () => {
       .mockReturnValueOnce(reloadedAda.promise);
     setApis({ loadEvidence });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
     await screen.findByText("Automated checks for ada");
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await requestChecks();
     await screen.findByText("Automated checks for grace");
     fireEvent.click(screen.getByRole("button", { name: /ada · Section 001/u }));
+    await requestChecks();
 
     expect(await screen.findByText("Loading automated checks for ada…")).toBeInTheDocument();
     expect(screen.queryByText("Automated checks for grace")).not.toBeInTheDocument();
@@ -305,6 +317,7 @@ describe("GradingWorkspacePage automated checks", () => {
       .mockResolvedValueOnce(evidence("grace"));
     const { loadSource, loadSnapshot, mutations } = setApis({ loadEvidence });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
     fireEvent.click(await screen.findByRole("button", { name: "Reload automated checks" }));
     expect(screen.getByRole("button", { name: "Reload automated checks" })).toBeDisabled();
     expect(loadEvidence).toHaveBeenCalledTimes(2);
@@ -314,6 +327,7 @@ describe("GradingWorkspacePage automated checks", () => {
 
     await showAllStudents();
     fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+    await requestChecks();
     expect(await screen.findByText("Automated checks for grace")).toBeInTheDocument();
     await act(async () => staleReload.resolve(evidence("ada")));
     expect(screen.getByText("Automated checks for grace")).toBeInTheDocument();
@@ -323,6 +337,7 @@ describe("GradingWorkspacePage automated checks", () => {
   it("keeps evidence failures independent from ordinary source and grading", async () => {
     setApis({ loadEvidence: vi.fn().mockRejectedValue(new Error("raw private failure")) });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
 
     expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("Source for ada");
     expect(
@@ -342,6 +357,7 @@ describe("GradingWorkspacePage automated checks", () => {
     });
     setApis({ loadEvidence: vi.fn().mockResolvedValue(successful) });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
     const panel = await screen.findByRole("region", { name: "Automated Checks" });
     expect(panel).toHaveTextContent("All reported tests passed.");
     expect(panel).toHaveTextContent("No Checkstyle violations reported.");
@@ -378,6 +394,7 @@ describe("GradingWorkspacePage automated checks", () => {
       loadEvidence: vi.fn().mockResolvedValue({ status: "evidence_error", studentId: "ada", code })
     });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
     expect(
       await screen.findByText(new RegExp(message.replaceAll(".", "\\."), "u"))
     ).toBeInTheDocument();
@@ -394,6 +411,7 @@ describe("GradingWorkspacePage automated checks", () => {
       loadEvidence: vi.fn().mockResolvedValue({ status, studentId: "ada" })
     });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
     expect(await screen.findByText(new RegExp(message, "u"))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mark Complete" })).toBeEnabled();
   });
@@ -403,6 +421,7 @@ describe("GradingWorkspacePage automated checks", () => {
       loadEvidence: vi.fn().mockResolvedValue({ status: "not_applicable", studentId: "ada" })
     });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await requestChecks();
     await screen.findByTestId("mock-monaco");
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Automated Checks" })).not.toBeInTheDocument()
@@ -418,6 +437,7 @@ describe("GradingWorkspacePage automated checks", () => {
         loadSnapshot
       });
       render(<GradingWorkspacePage request={REQUEST} />);
+      await requestChecks();
       await screen.findByText("Automated checks for ada");
       expect(
         screen.getByText(
@@ -433,4 +453,23 @@ describe("GradingWorkspacePage automated checks", () => {
       for (const mutation of Object.values(mutations)) expect(mutation).not.toHaveBeenCalled();
     }
   );
+});
+
+it("does not request evidence during navigation and keeps the editor usable while requested evidence is delayed", async () => {
+  const pending = deferred<GradingStudentEvidenceResult>();
+  const loadEvidence = vi.fn().mockReturnValue(pending.promise);
+  setApis({ loadEvidence });
+  render(<GradingWorkspacePage request={REQUEST} />);
+  expect(await screen.findByTestId("mock-monaco")).toHaveTextContent("Source for ada");
+  expect(loadEvidence).not.toHaveBeenCalled();
+  await requestChecks();
+  expect(screen.getByRole("button", { name: "Mark Complete" })).toBeEnabled();
+  await showAllStudents();
+  fireEvent.click(screen.getByRole("button", { name: /grace · Section 002/u }));
+  await waitFor(() =>
+    expect(screen.getByTestId("mock-monaco")).toHaveTextContent("Source for grace")
+  );
+  expect(loadEvidence).toHaveBeenCalledTimes(1);
+  await act(async () => pending.resolve(evidence("ada")));
+  expect(screen.queryByText("Automated checks for ada")).not.toBeInTheDocument();
 });

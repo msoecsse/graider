@@ -19,6 +19,8 @@ const inspectLocalCourseEvidence = async (request: {
   readonly input: LocalCourseReadInput;
   readonly username: string | null;
   readonly factory?: GitWorkspaceFactory;
+  /** Request-scoped immutable Git object bytes. Working-tree bytes are always reread. */
+  readonly committedMetadata?: Map<string, string | null>;
 }) => {
   const { userData, input, username } = request;
   input.assertCurrent();
@@ -64,7 +66,9 @@ const inspectLocalCourseEvidence = async (request: {
     throw new LocalCourseReadUnavailable(
       "Managed cache origin does not match its trusted registration."
     );
-  const state = await workspace.inspect({ readOnly: true });
+  const state = await measureGradingPhase("local_git_validation", () =>
+    workspace.inspect({ readOnly: true })
+  );
   if (
     state.head.kind !== "attached" ||
     state.head.branch !== course.defaultBranch ||
@@ -103,7 +107,20 @@ const inspectLocalCourseEvidence = async (request: {
       Object.entries(termContents).map(([code, value]) => [`terms/${code}/term.yml`, value])
     )
   })) {
-    if ((await workspace.readRevisionFile(state.head.commit, file)) !== bytes)
+    const key = `${state.head.commit}:${file}`;
+    const committed = request.committedMetadata;
+    if (committed && !committed.has(key))
+      committed.set(
+        key,
+        await measureGradingPhase("committed_metadata", () =>
+          workspace.readRevisionFile!(state.head.kind === "attached" ? state.head.commit : "", file)
+        )
+      );
+    if (
+      (committed
+        ? committed.get(key)
+        : await workspace.readRevisionFile(state.head.commit, file)) !== bytes
+    )
       throw new LocalCourseReadUnavailable(
         "Cached authorization metadata differs from its local commit. Review the cache."
       );
@@ -123,7 +140,18 @@ const inspectLocalCourseEvidence = async (request: {
       "Local course role evidence is unavailable for this account."
     );
   input.assertCurrent();
-  return { root, commit: state.head.commit, metadata: operational, access };
+  return {
+    root,
+    commit: state.head.commit,
+    metadata: operational,
+    access,
+    metadataBytes: {
+      "course.yml": content,
+      ...Object.fromEntries(
+        Object.entries(termContents).map(([code, bytes]) => [`terms/${code}/term.yml`, bytes])
+      )
+    }
+  };
 };
 export const validateLocalManagedCourse = (
   ...args: Parameters<typeof inspectLocalCourseEvidence>

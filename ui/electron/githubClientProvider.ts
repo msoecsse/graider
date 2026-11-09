@@ -30,6 +30,21 @@ export const createGithubClientProvider =
       if (resolved.status === "token_missing") throw new Error("GitHub client unavailable.");
       const operation = managedCourseOperation.getStore();
       const account = verifiedGithubAccount(token);
+      if (operation?.mode === "evidence_read")
+        return new Proxy(resolved.githubClient, {
+          get(target, key) {
+            const method = target[key as keyof GitHubClient];
+            if (typeof method !== "function") return method;
+            return async (...args: unknown[]) => {
+              if (backend.GITHUB_MUTATION_METHODS.includes(String(key)))
+                throw new Error("Evidence reads cannot mutate GitHub.");
+              operation.evidence.assertCurrent();
+              const result = await Reflect.apply(method, target, args);
+              operation.evidence.assertCurrent();
+              return result;
+            };
+          }
+        });
       if (!operation?.revalidate && !account) return resolved.githubClient;
       return new Proxy(resolved.githubClient, {
         get(target, key) {

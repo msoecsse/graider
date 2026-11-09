@@ -18,7 +18,11 @@ export interface GitPublicationOptions {
 export const authenticateGitPublication = async (
   options: GitPublicationOptions
 ): Promise<AuthenticatedGitWorkspaceContext | null> => {
-  if (["local_read", "local_grading"].includes(managedCourseOperation.getStore()?.mode ?? ""))
+  if (
+    ["local_read", "local_grading", "evidence_read"].includes(
+      managedCourseOperation.getStore()?.mode ?? ""
+    )
+  )
     throw new Error("Local course operations cannot authorize Git publication.");
   try {
     const resolution = await (options.resolveToken ?? (() => resolveGithubToken(options)))();

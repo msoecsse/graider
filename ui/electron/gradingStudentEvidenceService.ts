@@ -1,3 +1,5 @@
+import { measureGradingPhase } from "./gradingPerformance.js";
+import { managedCourseOperation } from "./managedCourseOperationContext.js";
 import path from "node:path";
 import type { GitHubClient } from "./githubClientProvider.js";
 import { provideGithubClient, type GithubClientProvider } from "./githubClientProvider.js";
@@ -207,7 +209,14 @@ export const createGradingStudentEvidenceService = (
   const readHead = overrides.readHead ?? readLocalRepositoryHead;
   const resolveToken =
     overrides.resolveToken ??
-    (async () => await resolveGithubToken({ runner: createNodeProcessRunner() }));
+    (async () => {
+      const context = managedCourseOperation.getStore();
+      if (context?.mode === "evidence_read") {
+        context.evidence.assertCurrent();
+        return { status: "success" as const, token: context.evidence.token };
+      }
+      return resolveGithubToken({ runner: createNodeProcessRunner() });
+    });
   const getBackend = overrides.loadBackend ?? loadBackend;
 
   return async (request) => {
@@ -254,9 +263,8 @@ export const createGradingStudentEvidenceService = (
     let retrieved: RetrievalResult;
     try {
       const githubClient = (overrides.provideClient ?? provideGithubClient)(token.token);
-      retrieved = await backend.retrievePreparedGradingStudentEvidence(
-        prepared.value,
-        githubClient
+      retrieved = await measureGradingPhase("student_evidence", () =>
+        backend.retrievePreparedGradingStudentEvidence(prepared.value, githubClient)
       );
     } catch {
       return {

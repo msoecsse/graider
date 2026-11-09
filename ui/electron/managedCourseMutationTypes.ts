@@ -36,13 +36,22 @@ export interface VerifiedLocalGradingContext extends Omit<
   readonly mode: "local_grading";
   readonly revalidate?: never;
   readonly revalidateLocal: () => Promise<void>;
+  readonly assertCurrent: () => void;
+}
+/** Read-only student Actions capability, held under a shared course lease. Main-process only. */
+export interface VerifiedEvidenceReadContext extends Omit<VerifiedLocalCourseReadContext, "mode"> {
+  readonly mode: "evidence_read";
+  readonly evidence: { readonly token: string; readonly assertCurrent: () => void };
 }
 export type VerifiedCourseOperationContext =
   | VerifiedCourseMutationContext
   | VerifiedLocalCourseReadContext
-  | VerifiedLocalGradingContext;
+  | VerifiedLocalGradingContext
+  | VerifiedEvidenceReadContext;
 export const courseContextRevision = (context: VerifiedCourseOperationContext): string =>
-  context.mode === "local_read" || context.mode === "local_grading"
+  context.mode === "local_read" ||
+  context.mode === "local_grading" ||
+  context.mode === "evidence_read"
     ? context.cachedCommit
     : context.authoritativeCommit;
 export interface CourseMutationBlock {

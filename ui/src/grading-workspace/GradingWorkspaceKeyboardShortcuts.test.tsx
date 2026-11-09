@@ -493,7 +493,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select ada line" }));
     fireEvent.keyDown(window, { key: "c" });
     await screen.findByRole("form", { name: "Add comment" });
-    await waitFor(() => expect(loadEvidence).toHaveBeenCalledTimes(1));
+    expect(loadEvidence).not.toHaveBeenCalled();
 
     const title = screen.getByRole("textbox", { name: "Title" });
     const comment = screen.getByRole("textbox", { name: "Comment" });
@@ -512,7 +512,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     expect(comment).toHaveValue("Needs a clearer justification");
     expect(deduction).toHaveValue(1);
     expect(screen.getByRole("heading", { name: "Comments · ada" })).toBeInTheDocument();
-    expect(loadEvidence).toHaveBeenCalledTimes(1);
+    expect(loadEvidence).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Publish review" })).not.toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Apply First comment" })).not.toBeInTheDocument();
   });
@@ -603,6 +603,7 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     setApis({ loadEvidence });
     render(<GradingWorkspacePage request={REQUEST} />);
     await screen.findByTestId("mock-monaco");
+    fireEvent.click(await screen.findByRole("button", { name: "Load automated checks" }));
     await waitFor(() => expect(loadEvidence).toHaveBeenCalledTimes(1));
 
     fireEvent.keyDown(window, { key: "a" });

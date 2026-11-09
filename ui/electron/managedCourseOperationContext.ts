@@ -16,8 +16,21 @@ export const courseOperationDocument = new AsyncLocalStorage<number>();
 /** Rechecked after awaited preparation and immediately before local/backend writes. */
 export const revalidateCourseOperation = async (): Promise<void> => {
   const operation = managedCourseOperation.getStore();
-  if (operation?.mode === "local_read")
+  if (operation?.mode === "local_read" || operation?.mode === "evidence_read")
     throw new Error("Local read authorization cannot authorize writes.");
   if (operation?.mode === "local_grading") await operation.revalidateLocal();
   else await operation?.revalidate?.();
+};
+
+/** Close the submission race introduced by awaited course validation before a local write. */
+export const revalidateGradingSubmission = async (
+  readHead: () => Promise<import("./localRepositoryHead.js").LocalRepositoryHeadResult>,
+  expected: string
+): Promise<boolean> => {
+  await revalidateCourseOperation();
+  const operation = managedCourseOperation.getStore();
+  if (operation?.mode !== "local_grading") return true;
+  const current = await readHead();
+  operation.assertCurrent();
+  return current.status === "success" && current.submissionCommitSha === expected;
 };

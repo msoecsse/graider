@@ -1,6 +1,6 @@
 import { measureGradingBackend } from "./gradingPerformance.js";
 import path from "node:path";
-import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
+import { revalidateGradingSubmission } from "./managedCourseOperationContext.js";
 import {
   resolveCurrentFacultyScope,
   type FacultyScopeServiceRequest,
@@ -115,7 +115,11 @@ const loadBackend = (): GradingStudentManualAdjustmentBackend =>
 
 type Prepared =
   | { readonly status: "failure"; readonly result: GradingStudentManualAdjustmentResult }
-  | { readonly status: "success"; readonly backendRequest: BackendRequest };
+  | {
+      readonly status: "success";
+      readonly readSubmission: () => Promise<LocalRepositoryHeadResult>;
+      readonly backendRequest: BackendRequest;
+    };
 
 export const createGradingStudentManualAdjustmentService = (
   dependencies: Partial<GradingStudentManualAdjustmentDependencies> = {}
@@ -148,6 +152,7 @@ export const createGradingStudentManualAdjustmentService = (
     if (head.status !== "success") return { status: "failure", result: head };
     return {
       status: "success",
+      readSubmission: () => readHead(repository.localPath),
       backendRequest: {
         courseFolderPath: request.courseFolderPath,
         termCode: request.termCode,
@@ -160,7 +165,14 @@ export const createGradingStudentManualAdjustmentService = (
   return {
     add: async (request) => {
       const prepared = await prepare(request);
-      if (prepared.status === "success") await revalidateCourseOperation();
+      if (
+        prepared.status === "success" &&
+        !(await revalidateGradingSubmission(
+          prepared.readSubmission,
+          prepared.backendRequest.currentSubmissionCommitSha
+        ))
+      )
+        return { status: "submission_changed", studentId: request.studentId };
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().addGradingStudentManualAdjustmentContext(
@@ -170,7 +182,14 @@ export const createGradingStudentManualAdjustmentService = (
     },
     edit: async (request) => {
       const prepared = await prepare(request);
-      if (prepared.status === "success") await revalidateCourseOperation();
+      if (
+        prepared.status === "success" &&
+        !(await revalidateGradingSubmission(
+          prepared.readSubmission,
+          prepared.backendRequest.currentSubmissionCommitSha
+        ))
+      )
+        return { status: "submission_changed", studentId: request.studentId };
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().editGradingStudentManualAdjustmentContext(
@@ -181,7 +200,14 @@ export const createGradingStudentManualAdjustmentService = (
     },
     delete: async (request) => {
       const prepared = await prepare(request);
-      if (prepared.status === "success") await revalidateCourseOperation();
+      if (
+        prepared.status === "success" &&
+        !(await revalidateGradingSubmission(
+          prepared.readSubmission,
+          prepared.backendRequest.currentSubmissionCommitSha
+        ))
+      )
+        return { status: "submission_changed", studentId: request.studentId };
       return prepared.status === "failure"
         ? prepared.result
         : getBackend().deleteGradingStudentManualAdjustmentContext(

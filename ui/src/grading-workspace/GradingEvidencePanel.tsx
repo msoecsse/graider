@@ -9,6 +9,7 @@ type EvidenceSuccess = Extract<GradingStudentEvidenceResult, { readonly status: 
 
 export type EvidenceLoadState =
   | { readonly status: "idle" }
+  | { readonly status: "unrequested"; readonly studentId: string }
   | { readonly status: "not_applicable" }
   | { readonly status: "loading"; readonly studentId: string }
   | { readonly status: "success"; readonly result: EvidenceSuccess }
@@ -309,11 +310,13 @@ export const GradingEvidencePanel = ({
               disabled={state.status === "loading"}
               onClick={() => onReload(studentId)}
             >
-              Reload automated checks
+              {state.status === "unrequested" ? "Load automated checks" : "Reload automated checks"}
             </button>
           </div>
         ) : null}
-        {state.status === "loading" ? (
+        {state.status === "unrequested" ? (
+          <p>Load automated checks to retrieve current JUnit, Checkstyle, and workflow details.</p>
+        ) : state.status === "loading" ? (
           <p aria-live="polite" tabIndex={-1} ref={loadingRef}>
             Loading automated checks for {state.studentId}…
           </p>
