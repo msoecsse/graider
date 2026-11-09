@@ -128,6 +128,7 @@ it("shows each local dashboard independently, preserves it during discovery, and
 });
 
 it("keeps cached assignments navigable while background refresh is pending and after failure", async () => {
+  window.location.hash = "#/course/cached/27s1";
   const cached: CourseFolderDashboardResult = {
     courseFolderId: "cached",
     courseFolderPath: "cached-path",
@@ -204,6 +205,8 @@ it("keeps cached assignments navigable while background refresh is pending and a
   expect(await screen.findByText("Lab 1")).toBeInTheDocument();
   expect(screen.getByText("Cached route ready")).toBeInTheDocument();
   await waitFor(() => expect(background).toHaveBeenCalledOnce());
+  expect(window.graiderUI.loadDashboardDisplay).toHaveBeenCalledWith("cached");
+  window.location.hash = "";
   expect(manual).not.toHaveBeenCalled();
   await act(async () => {
     complete({ ...cached, status: "failure", dashboard: null });

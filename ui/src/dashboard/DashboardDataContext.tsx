@@ -176,7 +176,7 @@ export const DashboardDataProvider = ({
         }
         const epoch = accountEpoch.current;
         const cached = await window.graiderUI.loadDashboardDisplay?.(
-          window.location.hash.split("/")[1]
+          window.location.hash.match(/^#\/course\/([^/]+)/u)?.[1]
         );
         if (!active || version !== remoteVersion.current || epoch !== accountEpoch.current) return;
         if (cached?.userId !== undefined && cached.userId !== account) return;
