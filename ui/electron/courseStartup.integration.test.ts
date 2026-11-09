@@ -58,6 +58,9 @@ const setup = (cold = false) => {
   const verifyCourse = vi.fn(async (): Promise<RemoteCourse> => ({ ...course }));
   const discoverCourses = vi.fn(() => scan.promise);
   const findRegisteredCourse = vi.fn(async () => ({ ...course }));
+  const saveSnapshot = vi.fn((userId: number, courses: readonly RemoteCourse[]) =>
+    saveCourseSnapshot(root, userId, courses)
+  );
   const session = new GithubOAuthSession({
     store: { load: async () => "fixture-token", save: async () => {}, delete: async () => {} },
     secret: () => "fixture-secret",
@@ -88,13 +91,23 @@ const setup = (cold = false) => {
       })
     },
     loadSnapshot: (userId) => (cold ? [] : loadCourseSnapshot(root, userId)),
+    saveSnapshot,
     ...(cold ? { findRegisteredCourse } : {}),
     verifyCourse,
     discoverCourses
   });
   const finish = (courses = [course]) =>
     scan.resolve({ status: "ready", userId: 42, discoveredAt: null, courses, diagnostics: [] });
-  return { root, scan, session, verifyCourse, discoverCourses, findRegisteredCourse, finish };
+  return {
+    root,
+    scan,
+    session,
+    verifyCourse,
+    discoverCourses,
+    findRegisteredCourse,
+    saveSnapshot,
+    finish
+  };
 };
 describe("cache-first startup", () => {
   it("displays cached cards and authorizes selected Schema 1 before discovery, then reuses session authority", async () => {
@@ -175,6 +188,7 @@ describe("cache-first startup", () => {
     f.finish();
     await expect(f.session.withLocalCourse(20, 42, async () => {})).rejects.toThrow();
     expect(f.session.getState().courseDiscovery.courses).toEqual([]);
+    expect(f.saveSnapshot).not.toHaveBeenCalled();
     f.session.shutdown();
   });
   it("retains established access during a transient course check and invalidates a definitive repository refusal", async () => {

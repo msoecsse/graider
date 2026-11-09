@@ -766,7 +766,12 @@ export class GithubOAuthSession {
               ? await this.deps.synchronizeCourse?.({ ...input, onProgress: () => {} })
               : undefined;
           update({ ...verified, bootstrap, synchronization, freshness: "current" });
-          if (await account.revalidateSession()) {
+          if (
+            (await account.revalidateSession()) &&
+            generation === this.accountGeneration &&
+            this.state.courseDiscovery.userId === account.userId &&
+            courseCurrent()
+          ) {
             try {
               this.deps.saveSnapshot?.(account.userId, this.state.courseDiscovery.courses);
             } catch {
