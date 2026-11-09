@@ -37,7 +37,13 @@ const isDashboardDataReady = (isLoadingFolders: boolean, hasRefreshResults: bool
 /** Resolves `:courseSlug`/`:termSlug` from the current route into a registered course folder and its card. */
 export const useResolvedCourseFolder = (): RouteResolution<ResolvedCourseFolder> => {
   const { courseSlug, termSlug } = useParams();
-  const { courseFolders, aggregatedDashboard, isLoadingFolders } = useDashboardData();
+  const {
+    courseFolders,
+    aggregatedDashboard,
+    isLoadingFolders,
+    isRefreshingAll,
+    hasPendingCourseLoads
+  } = useDashboardData();
 
   if (courseSlug === undefined || termSlug === undefined) {
     return { status: "not_found", reason: "This course and term could not be found." };
@@ -53,6 +59,9 @@ export const useResolvedCourseFolder = (): RouteResolution<ResolvedCourseFolder>
       ? null
       : resolveCourseFolder(courseFolders, aggregatedDashboard.cards, courseSlug, termSlug);
 
+  if ((card === null || courseFolder === null) && (isRefreshingAll || hasPendingCourseLoads))
+    return { status: "loading" };
+
   return card === null || courseFolder === null
     ? {
         status: "not_found",
@@ -66,8 +75,14 @@ export const useResolvedAssignmentSelection = (): RouteResolution<
   Extract<AssignmentSelectionResolution, { status: "ready" }>["selection"]
 > => {
   const { courseSlug, termSlug, assignment } = useParams();
-  const { courseFolders, aggregatedDashboard, isLoadingFolders, isRefreshingAll, refreshingId } =
-    useDashboardData();
+  const {
+    courseFolders,
+    aggregatedDashboard,
+    isLoadingFolders,
+    isRefreshingAll,
+    refreshingId,
+    hasPendingCourseLoads
+  } = useDashboardData();
 
   if (courseSlug === undefined || termSlug === undefined || assignment === undefined) {
     return { status: "not_found", reason: "This assignment could not be found." };
@@ -99,7 +114,11 @@ export const useResolvedAssignmentSelection = (): RouteResolution<
   // refresh for this specific folder (or a refresh-all) lands, this either
   // resolves to "ready" or becomes a genuine "not_found".
   const card = findCombinedCard(aggregatedDashboard.cards, courseSlug, termSlug);
-  if (isRefreshingAll || (card !== null && refreshingId === card.sourceFolderId)) {
+  if (
+    isRefreshingAll ||
+    hasPendingCourseLoads ||
+    (card !== null && refreshingId === card.sourceFolderId)
+  ) {
     return { status: "loading" };
   }
 

@@ -39,6 +39,7 @@ export interface DashboardDataValue {
   readonly aggregatedDashboard: AggregatedDashboard;
   readonly isLoadingFolders: boolean;
   readonly isRefreshingAll: boolean;
+  readonly hasPendingCourseLoads: boolean;
   readonly isSelectingFolder: boolean;
   readonly refreshingId: string | null;
   readonly removingId: string | null;
@@ -79,6 +80,7 @@ export const DashboardDataProvider = ({
       performance.measure("graider.dashboard_displayed", { start: 0, end: performance.now() });
     }
   }, [refreshResults]);
+  const [pendingCourseLoads, setPendingCourseLoads] = useState(0);
   const remoteVersion = useRef("");
   const remoteAccount = useRef<number | null | undefined>(undefined);
   const accountEpoch = useRef(0);
@@ -88,6 +90,7 @@ export const DashboardDataProvider = ({
       accountEpoch.current += 1;
       remoteVersion.current = "";
       setRefreshResults({});
+      setPendingCourseLoads(0);
       setErrorMessage(null);
     }
   };
@@ -160,6 +163,7 @@ export const DashboardDataProvider = ({
         if (accountChanged) {
           accountEpoch.current += 1;
           setRefreshResults({});
+          setPendingCourseLoads(0);
         }
         const epoch = accountEpoch.current;
         const folders = await window.graiderUI.listCourseFolders();
@@ -177,14 +181,20 @@ export const DashboardDataProvider = ({
               .map(async (folder) => {
                 const request = (folderRequests.current.get(folder.id) ?? 0) + 1;
                 folderRequests.current.set(folder.id, request);
-                const result = await window.graiderUI.refreshCourseFolder(folder.id);
-                if (
-                  active &&
-                  account === remoteAccount.current &&
-                  epoch === accountEpoch.current &&
-                  request === folderRequests.current.get(folder.id)
-                )
-                  rememberRefreshResult(result);
+                setPendingCourseLoads((pending) => pending + 1);
+                try {
+                  const result = await window.graiderUI.refreshCourseFolder(folder.id);
+                  if (
+                    active &&
+                    account === remoteAccount.current &&
+                    epoch === accountEpoch.current &&
+                    request === folderRequests.current.get(folder.id)
+                  )
+                    rememberRefreshResult(result);
+                } finally {
+                  if (active && epoch === accountEpoch.current)
+                    setPendingCourseLoads((pending) => Math.max(0, pending - 1));
+                }
               })
           ).catch(() => {
             if (active && account === remoteAccount.current && epoch === accountEpoch.current)
@@ -373,6 +383,7 @@ export const DashboardDataProvider = ({
     aggregatedDashboard: aggregateDashboardResults(refreshResults),
     isLoadingFolders,
     isRefreshingAll,
+    hasPendingCourseLoads: pendingCourseLoads > 0,
     isSelectingFolder,
     refreshingId,
     removingId,

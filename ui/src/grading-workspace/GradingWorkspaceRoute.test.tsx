@@ -1,4 +1,7 @@
-import { screen, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { DashboardDataProvider, useDashboardData } from "../dashboard/DashboardDataContext";
+import { GradingWorkspaceRoute } from "./GradingWorkspaceRoute";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   CombinedDashboardResult,
@@ -137,4 +140,50 @@ describe("GradingWorkspaceRoute", () => {
       await screen.findByRole("heading", { name: "This page could not be found." })
     ).toBeInTheDocument();
   });
+});
+
+it("keeps an active grading request stable when dashboard results refresh", async () => {
+  const prepareGradingWorkspace = vi.fn().mockResolvedValue({
+    status: "success",
+    assignment: { title: "Lab 02", termCode: "27s1", slug: "lab02" },
+    requiredFiles: [],
+    rubric: [],
+    students: []
+  });
+  const refreshCourseFolder = vi.fn().mockResolvedValue(createDashboardResult());
+  mockGraiderUI({ prepareGradingWorkspace, refreshCourseFolder });
+  const Refresh = () => {
+    const data = useDashboardData();
+    return (
+      <button
+        disabled={data.refreshingId !== null}
+        onClick={() => {
+          void data.handleRefreshCourseFolder(COURSE_FOLDER.id);
+        }}
+      >
+        Update dashboard data
+      </button>
+    );
+  };
+  render(
+    <MemoryRouter initialEntries={["/course/csc1120/27s1/lab02/grade"]}>
+      <DashboardDataProvider>
+        <Refresh />
+        <Routes>
+          <Route
+            path="/course/:courseSlug/:termSlug/:assignment/grade"
+            element={<GradingWorkspaceRoute />}
+          />
+        </Routes>
+      </DashboardDataProvider>
+    </MemoryRouter>
+  );
+  await screen.findByText("Lab 02");
+  await waitFor(() => expect(prepareGradingWorkspace).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Update dashboard data" }));
+  await waitFor(() => expect(refreshCourseFolder).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Update dashboard data" })).toBeEnabled()
+  );
+  expect(prepareGradingWorkspace).toHaveBeenCalledOnce();
 });

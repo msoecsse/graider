@@ -1,3 +1,5 @@
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { useResolvedCourseFolder } from "./useRouteResolution";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { DashboardDataProvider, useDashboardData } from "./DashboardDataContext";
@@ -75,8 +77,11 @@ it("shows each local dashboard independently, preserves it during discovery, and
   });
   const View = () => {
     const data = useDashboardData();
+    const route = useResolvedCourseFolder();
     return (
       <div>
+        <span>Course route {route.status}</span>
+        <span>{data.isRefreshingAll ? "combined pending" : "combined settled"}</span>
         <button onClick={() => data.acceptGithubAccount(state.identity?.id ?? null)}>
           Apply account
         </button>
@@ -87,9 +92,13 @@ it("shows each local dashboard independently, preserves it during discovery, and
     );
   };
   render(
-    <DashboardDataProvider>
-      <View />
-    </DashboardDataProvider>
+    <MemoryRouter initialEntries={["/b/27s1"]}>
+      <DashboardDataProvider>
+        <Routes>
+          <Route path="/:courseSlug/:termSlug" element={<View />} />
+        </Routes>
+      </DashboardDataProvider>
+    </MemoryRouter>
   );
   expect(await screen.findByText("a loaded")).toBeInTheDocument();
   expect(screen.queryByText("b loaded")).not.toBeInTheDocument();
@@ -98,6 +107,9 @@ it("shows each local dashboard independently, preserves it during discovery, and
   expect(screen.getByText("a loaded")).toBeInTheDocument();
   expect(refreshCourseFolder).toHaveBeenCalledTimes(2);
   completeAll({ status: "success", results: [] });
+  await screen.findByText("combined settled");
+  expect(screen.getByText("Course route loading")).toBeInTheDocument();
+  expect(screen.getByText("a loaded")).toBeInTheDocument();
   refreshDashboard.mockResolvedValue({ status: "success", results: [] });
   state = {
     ...state,

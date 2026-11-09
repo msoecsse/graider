@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useMemo, type ReactElement } from "react";
 import { Navigate } from "react-router-dom";
 import { GradingWorkspacePage } from "./GradingWorkspacePage";
 import { Breadcrumbs } from "../components/Breadcrumbs";
@@ -17,6 +17,15 @@ import { getGradePreviewPath, toRouteSlug } from "../dashboard/routePaths";
  */
 export const GradingWorkspaceRoute = (): ReactElement => {
   const resolution = useResolvedAssignmentSelection();
+  const resolved = resolution.status === "ready" ? resolution.value : null;
+  const courseFolderId = resolved?.courseFolderId ?? "";
+  const courseFolderPath = resolved?.courseFolderPath ?? "";
+  const termCode = resolved?.termSlug ?? "";
+  const assignmentSlug = resolved?.assignmentSlug ?? "";
+  const request = useMemo(
+    () => ({ courseFolderId, courseFolderPath, termCode, assignmentSlug }),
+    [courseFolderId, courseFolderPath, termCode, assignmentSlug]
+  );
 
   if (resolution.status === "loading") return <RouteLoading />;
   if (resolution.status === "not_found") return <RouteNotFound reason={resolution.reason} />;
@@ -38,14 +47,7 @@ export const GradingWorkspaceRoute = (): ReactElement => {
   return (
     <>
       <Breadcrumbs items={buildAssignmentBreadcrumbs(selection, "Grade")} />
-      <GradingWorkspacePage
-        request={{
-          courseFolderId: selection.courseFolderId,
-          courseFolderPath: selection.courseFolderPath,
-          termCode: selection.termSlug,
-          assignmentSlug: selection.assignmentSlug
-        }}
-      />
+      <GradingWorkspacePage request={request} />
     </>
   );
 };

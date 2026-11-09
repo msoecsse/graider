@@ -125,6 +125,8 @@ jobs:
           electron/gradingPerformance.test.ts
           electron/courseStartup.integration.test.ts
           electron/remoteCourseDiscovery.test.ts
+          src/dashboard/DashboardDataContext.test.tsx
+          src/grading-workspace/GradingWorkspaceRoute.test.tsx
           electron/githubClientProvider.test.ts
           electron/gradingStudentEvidenceService.test.ts
           electron/managedCourseLeases.test.ts
