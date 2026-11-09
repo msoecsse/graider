@@ -30,9 +30,11 @@ const parseCourse = (value: unknown): RemoteCourse | null => {
     typeof value.archived !== "boolean" ||
     !Array.isArray(value.localFolderIds) ||
     !value.localFolderIds.every((id: unknown) => typeof id === "string") ||
-    !["private", "public", "internal"].includes(String(value.visibility)) ||
+    typeof value.visibility !== "string" ||
+    !["private", "public", "internal"].includes(value.visibility) ||
+    typeof value.localStatus !== "string" ||
     !["registered_local", "remote_only", "local_origin_mismatch", "local_unverified"].includes(
-      String(value.localStatus)
+      value.localStatus
     ) ||
     (value.lifecycle !== undefined &&
       value.lifecycle !== "archived" &&

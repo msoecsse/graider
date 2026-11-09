@@ -173,6 +173,17 @@ describe("cache-first startup", () => {
     expect(loadCourseSnapshot(f.root, 42)).toEqual([]);
     f.session.shutdown();
   });
+  it.each(["visibility", "localStatus"] as const)(
+    "rejects non-string persisted %s instead of coercing it",
+    (field) => {
+      const f = setup();
+      const malformed = { ...course, [field]: [course[field]] };
+      const target = path.join(f.root, "course-discovery-42.json");
+      fs.writeFileSync(target, JSON.stringify({ version: 1, userId: 42, courses: [malformed] }));
+      expect(loadCourseSnapshot(f.root, 42)).toEqual([]);
+      f.session.shutdown();
+    }
+  );
   it("rejects account changes and source replacements during targeted verification", async () => {
     const f = setup();
     await f.session.restore();
