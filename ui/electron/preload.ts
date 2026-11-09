@@ -302,6 +302,13 @@ const graiderUI: GraiderUIApi = {
   },
   refreshCourseFolder: async (id: string): Promise<CourseFolderDashboardResult> =>
     await invoke<CourseFolderDashboardResult>(IPC_CHANNELS.refreshCourseFolder, id),
+  loadDashboardDisplay: async (courseSlug?: string) =>
+    await invoke<CombinedDashboardResult & { readonly userId?: number | null }>(
+      IPC_CHANNELS.loadDashboardDisplay,
+      courseSlug
+    ),
+  refreshCourseDisplay: async (id: string) =>
+    await invoke<CourseFolderDashboardResult>(IPC_CHANNELS.refreshCourseDisplay, id),
   refreshDashboard: async (): Promise<CombinedDashboardResult> =>
     await invoke<CombinedDashboardResult>(IPC_CHANNELS.refreshDashboard),
   getAssignmentDetail: async (request: AssignmentDetailRequest): Promise<AssignmentDetailResult> =>

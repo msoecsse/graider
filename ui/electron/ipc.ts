@@ -93,6 +93,8 @@ export const IPC_CHANNELS = {
   replaceTemplateManagedWorkflow: "graider-ui:template-workflow:replace-managed",
   removeCourseFolder: "graider-ui:course-registry:remove",
   refreshCourseFolder: "graider-ui:dashboard:refresh-course-folder",
+  loadDashboardDisplay: "graider-ui:dashboard:display",
+  refreshCourseDisplay: "graider-ui:dashboard:refresh-display",
   refreshDashboard: "graider-ui:dashboard:refresh-all",
   getAssignmentDetail: "graider-ui:assignment-detail:get",
   prepareGradingWorkspace: "graider-ui:grading-workspace:prepare",
@@ -1237,6 +1239,10 @@ export interface GraiderUIApi {
   readonly listCourseFolders: () => Promise<CourseFolderRecord[]>;
   readonly removeCourseFolder: (id: string) => Promise<void>;
   readonly refreshCourseFolder: (id: string) => Promise<CourseFolderDashboardResult>;
+  readonly loadDashboardDisplay?: (
+    courseSlug?: string
+  ) => Promise<CombinedDashboardResult & { readonly userId?: number | null }>;
+  readonly refreshCourseDisplay?: (id: string) => Promise<CourseFolderDashboardResult>;
   readonly refreshDashboard: () => Promise<CombinedDashboardResult>;
   readonly getAssignmentDetail: (
     request: AssignmentDetailRequest

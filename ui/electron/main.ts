@@ -1,3 +1,5 @@
+import { measureStartup } from "./gradingPerformance.js";
+import { loadDashboardDisplay, saveDashboardDisplay } from "./dashboardDisplayCache.js";
 import { loadCourseSnapshot, saveCourseSnapshot } from "./courseDiscoverySnapshot.js";
 import { createGithubOrganizationNetwork } from "./githubOrganizations.js";
 import { inspectLocalManagedCourse } from "./managedCourseLocalRead.js";
@@ -525,6 +527,7 @@ const isTemplateManagedWorkflowReplacementRequest = (
   );
 };
 
+let oauthSession: GithubOAuthSession | undefined;
 let courseMutationGuard: ManagedCourseMutationGuard | undefined;
 let invalidateManagedCourseViews: (
   userId: number,
@@ -634,35 +637,112 @@ export const registerIpcHandlers = (): void => {
     managedCourseOperation.getStore()?.transaction
       ? { status: "success" as const, diagnostics: [], commitMessage: null }
       : publishCourseChanges(courseFolderPath, { runner: processRunner, env: process.env });
-  const withCourseSource = async (
-    folder: CourseFolderRecord,
-    perform: (
-      source: CourseFolderRecord,
-      sourceToken?: string
-    ) => Promise<Omit<import("./ipc.js").CourseFolderDashboardResult, "refreshedAt">>
-  ) =>
-    courseMutationGuard
-      ? courseMutationGuard.read(
-          folder.id,
-          folder.path,
-          async (context, input) => {
-            const result = context?.managed
-              ? await managedCourseOperation.run(context, () =>
-                  perform({ ...folder, path: context.courseFolderPath }, input?.token)
+  const withCourseSourceFor =
+    (channel: string) =>
+    async (
+      folder: CourseFolderRecord,
+      perform: (
+        source: CourseFolderRecord,
+        sourceToken?: string
+      ) => Promise<Omit<import("./ipc.js").CourseFolderDashboardResult, "refreshedAt">>
+    ) =>
+      courseMutationGuard
+        ? courseMutationGuard.read(
+            folder.id,
+            folder.path,
+            async (context, input) => {
+              const readingAccount = oauthSession?.getState().identity?.id;
+              const readingGeneration = oauthSession?.mutationGeneration;
+              const result = context?.managed
+                ? await managedCourseOperation.run(context, () =>
+                    perform({ ...folder, path: context.courseFolderPath }, input?.token)
+                  )
+                : await perform(folder);
+              const projected = context?.managed
+                ? projectManagedCourseResult(result, context.courseFolderPath, folder.path)
+                : result;
+              if (result.status === "success") {
+                const state = oauthSession?.getState();
+                if (
+                  state?.identity &&
+                  state.identity.id === readingAccount &&
+                  readingGeneration === oauthSession?.mutationGeneration &&
+                  state.courseDiscovery.userId === state.identity.id
                 )
-              : await perform(folder);
-            const projected = context?.managed
-              ? projectManagedCourseResult(result, context.courseFolderPath, folder.path)
-              : result;
-            return {
-              ...projected,
-              courseFolderPath: folder.path,
-              ...(context?.managed ? { courseReadRevision: courseContextRevision(context) } : {})
-            };
-          },
-          { channel: IPC_CHANNELS.refreshCourseFolder, fields: {} }
+                  saveDashboardDisplay(
+                    app.getPath("userData"),
+                    state.identity.id,
+                    state.courseDiscovery.courses,
+                    {
+                      ...projected,
+                      courseFolderPath: folder.path,
+                      refreshedAt: new Date().toISOString()
+                    }
+                  );
+              }
+              return {
+                ...projected,
+                courseFolderPath: folder.path,
+                ...(context?.managed ? { courseReadRevision: courseContextRevision(context) } : {})
+              };
+            },
+            { channel, fields: {} }
+          )
+        : perform(folder);
+
+  const withCourseSource = withCourseSourceFor(IPC_CHANNELS.refreshCourseFolder);
+
+  courseIpc.handle(IPC_CHANNELS.loadDashboardDisplay, (_event, courseSlug: unknown) =>
+    measureStartup("cached_dashboard_display_ready", async () => {
+      await oauthSession?.restore();
+      const state = oauthSession?.getState();
+      const display = {
+        userId: state?.identity?.id ?? null,
+        status: "success" as const,
+        results:
+          state?.status === "signed_in" && state.identity
+            ? loadDashboardDisplay(
+                app.getPath("userData"),
+                state.identity.id,
+                state.courseDiscovery.courses
+              )
+            : []
+      };
+      const preferred = display.results.find((result) =>
+        result.dashboard?.cards.some(
+          (card) =>
+            typeof card === "object" &&
+            card !== null &&
+            "courseSlug" in card &&
+            card.courseSlug === courseSlug
         )
-      : perform(folder);
+      );
+      oauthSession?.startCourseUpdates(preferred?.courseFolderId);
+      return display;
+    })
+  );
+  const displayReads = new Map<string, Promise<import("./ipc.js").CourseFolderDashboardResult>>();
+  courseIpc.handle(IPC_CHANNELS.refreshCourseDisplay, async (_event, id: unknown) => {
+    if (typeof id !== "string") throw new Error("Course folder id is required.");
+    const key = JSON.stringify([oauthSession?.mutationGeneration, id]);
+    const pending = displayReads.get(key);
+    if (pending) return pending;
+    const work = (async () => {
+      await oauthSession?.waitForCourseStartup(id);
+      return refreshCourseFolder(getCourseRegistryPath(app.getPath("userData")), id, {
+        remoteSources: courseMutationGuard?.remoteSelectors(),
+        withCourseSource: withCourseSourceFor(IPC_CHANNELS.refreshCourseDisplay),
+        runner: processRunner,
+        env: process.env
+      });
+    })();
+    displayReads.set(key, work);
+    try {
+      return await work;
+    } finally {
+      if (displayReads.get(key) === work) displayReads.delete(key);
+    }
+  });
 
   courseIpc.handle(IPC_CHANNELS.getAppInfo, () => getAppInfo());
   courseIpc.handle(IPC_CHANNELS.getLocalSettings, () =>
@@ -1243,6 +1323,7 @@ export const registerIpcHandlers = (): void => {
       throw new Error("Course folder id is required.");
     }
 
+    await oauthSession?.waitForCourseStartup(id);
     return await refreshCourseFolder(getCourseRegistryPath(app.getPath("userData")), id, {
       remoteSources: courseMutationGuard?.remoteSelectors(),
       withCourseSource,
@@ -1251,16 +1332,21 @@ export const registerIpcHandlers = (): void => {
     });
   });
 
-  courseIpc.handle(
-    IPC_CHANNELS.refreshDashboard,
-    async () =>
-      await refreshDashboard(getCourseRegistryPath(app.getPath("userData")), {
-        remoteSources: courseMutationGuard?.remoteSelectors(),
-        withCourseSource,
-        runner: processRunner,
-        env: process.env
-      })
-  );
+  courseIpc.handle(IPC_CHANNELS.refreshDashboard, async () => {
+    const state = oauthSession?.getState();
+    for (const course of state?.courseDiscovery.courses ?? []) {
+      if (course.freshness !== "current")
+        await oauthSession
+          ?.waitForCourseStartup(`managed-course:${state?.identity?.id}:${course.repositoryId}`)
+          .catch(() => {});
+    }
+    return await refreshDashboard(getCourseRegistryPath(app.getPath("userData")), {
+      remoteSources: courseMutationGuard?.remoteSelectors(),
+      withCourseSource,
+      runner: processRunner,
+      env: process.env
+    });
+  });
 
   courseIpc.handle(IPC_CHANNELS.getAssignmentDetail, async (_event, request: unknown) => {
     if (!isAssignmentDetailRequest(request)) {
@@ -2120,6 +2206,7 @@ app.whenReady().then(async () => {
       shell.showItemInFolder(preserved);
     }
   );
+  oauthSession = facultyAuth;
   const restoration = facultyAuth.restore();
   const operations = {
     get: async () => {

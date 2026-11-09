@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from "./ipc.js";
  * synchronize or exclusively lock the course cache. It cannot authorize writes.
  */
 export const LOCAL_COURSE_READ_CHANNELS: readonly string[] = Object.freeze([
+  IPC_CHANNELS.refreshCourseDisplay,
   IPC_CHANNELS.getCoursePublishStatus,
   IPC_CHANNELS.loadAssignmentSetupTerms,
   IPC_CHANNELS.getAssignmentForEdit,

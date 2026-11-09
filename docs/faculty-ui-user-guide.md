@@ -655,3 +655,21 @@ and refreshed grading details. Pending drafts still require resolution. If you
 switch students during completion, the completed request leaves your selection
 alone. When none remain, the workspace stays on the completed student and shows
 a grading-finished message.
+
+### Previously opened courses and background refresh
+
+After Graider verifies your signed-in GitHub account, previously opened course,
+term, and assignment summaries can appear from this computer's display cache.
+A **Cached display** status means the information may be stale while Graider checks
+course access and updates in the background. You can browse available summaries
+without waiting for organization-wide course discovery. Opening grading data or
+performing operations may still wait for current course access and a safe local
+source; cached cards do not grant permission to grade, modify, or publish.
+
+Background updates preserve your route and grading selections. A genuine course
+revision or authorization change can still require you to reload or resolve access
+before proceeding. Refresh explicitly checks authoritative course state and retries
+failed work. If GitHub is temporarily unavailable, existing summaries remain visible
+and failed updates can be retried. A new session must still verify account identity;
+if that cannot complete, Graider preserves the saved credential and asks you to retry
+when connected. Signing out or switching accounts clears the displayed account data.

@@ -126,3 +126,90 @@ it("shows each local dashboard independently, preserves it during discovery, and
   });
   expect(screen.queryByText("b loaded")).not.toBeInTheDocument();
 });
+
+it("keeps cached assignments navigable while background refresh is pending and after failure", async () => {
+  const cached: CourseFolderDashboardResult = {
+    courseFolderId: "cached",
+    courseFolderPath: "cached-path",
+    status: "success",
+    error: null,
+    refreshedAt: "2026-01-01T00:00:00Z",
+    dashboard: {
+      schemaVersion: 1,
+      commandName: "dashboard",
+      status: "cached",
+      exitCode: 0,
+      summary: {},
+      diagnostics: [],
+      cards: [
+        { courseSlug: "cached", termSlug: "27s1", assignments: [{ slug: "lab1", title: "Lab 1" }] }
+      ]
+    }
+  };
+  let complete!: (result: CourseFolderDashboardResult) => void;
+  const background = vi.fn(
+    () =>
+      new Promise<CourseFolderDashboardResult>((resolve) => {
+        complete = resolve;
+      })
+  );
+  const manual = vi.fn().mockResolvedValue({ status: "success", results: [] });
+  Object.assign(window.graiderUI, {
+    listCourseFolders: vi.fn().mockResolvedValue([]),
+    loadDashboardDisplay: vi.fn().mockResolvedValue({ status: "success", results: [cached] }),
+    refreshCourseDisplay: background,
+    refreshDashboard: manual,
+    githubOAuth: {
+      get: vi.fn().mockResolvedValue({
+        status: "signed_in",
+        identity: { id: 42 },
+        courseDiscovery: {
+          courses: [
+            {
+              repositoryId: 20,
+              localFolderIds: ["cached"],
+              authorization: "unavailable"
+            }
+          ]
+        }
+      })
+    }
+  });
+  const View = () => {
+    const data = useDashboardData();
+    const route = useResolvedCourseFolder();
+    return (
+      <>
+        <span>Cached route {route.status}</span>
+        <span>{data.aggregatedDashboard.cards[0]?.card.assignments[0]?.title}</span>
+        <button
+          onClick={() => {
+            void data.handleRefreshDashboard();
+          }}
+        >
+          Manual refresh
+        </button>
+      </>
+    );
+  };
+  render(
+    <MemoryRouter initialEntries={["/cached/27s1"]}>
+      <DashboardDataProvider>
+        <Routes>
+          <Route path="/:courseSlug/:termSlug" element={<View />} />
+        </Routes>
+      </DashboardDataProvider>
+    </MemoryRouter>
+  );
+  expect(await screen.findByText("Lab 1")).toBeInTheDocument();
+  expect(screen.getByText("Cached route ready")).toBeInTheDocument();
+  await waitFor(() => expect(background).toHaveBeenCalledOnce());
+  expect(manual).not.toHaveBeenCalled();
+  await act(async () => {
+    complete({ ...cached, status: "failure", dashboard: null });
+  });
+  expect(screen.getByText("Lab 1")).toBeInTheDocument();
+  expect(screen.getByText("Cached route ready")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Manual refresh"));
+  await waitFor(() => expect(manual).toHaveBeenCalledOnce());
+});

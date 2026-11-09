@@ -119,6 +119,8 @@ describe("UI security boundary", () => {
       "graider-ui:template-workflow:replace-managed",
       "graider-ui:course-registry:remove",
       "graider-ui:dashboard:refresh-course-folder",
+      "graider-ui:dashboard:display",
+      "graider-ui:dashboard:refresh-display",
       "graider-ui:dashboard:refresh-all",
       "graider-ui:assignment-detail:get",
       "graider-ui:grading-workspace:prepare",

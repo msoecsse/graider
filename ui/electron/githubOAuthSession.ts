@@ -6,11 +6,7 @@ import {
 import { withGithubAccountVerification } from "./githubAccountVerification.js";
 import type { VerifiedGithubAccount } from "./githubOrganizations.js";
 import { mapBounded } from "./remoteCourseDiscovery.js";
-import {
-  MANAGED_BOOTSTRAP_CONCURRENCY,
-  serializeManagedOperation,
-  withManagedLocalOperation
-} from "./managedCourses.js";
+import { serializeManagedOperation, withManagedLocalOperation } from "./managedCourses.js";
 import type {
   RemoteCourse,
   ManagedCourseState,
@@ -39,6 +35,7 @@ interface VerifiedSession extends VerifiedGithubAccount {
 }
 
 const RANDOM_BYTE_COUNT = 32;
+const BACKGROUND_COURSE_CONCURRENCY = 1;
 const COURSE_AUTHORIZATION_TIMEOUT_MS = 60_000;
 export const createOAuthProof = () => {
   const verifier = randomBytes(RANDOM_BYTE_COUNT).toString("base64url");
@@ -400,6 +397,7 @@ export class GithubOAuthSession {
     for (const controller of this.reconciliations.values()) controller.abort();
     this.reconciliations.clear();
     this.targeted.clear();
+    this.targetQueue = Promise.resolve();
     this.registrations.clear();
   }
   cancelReconciliation(repositoryId: number): void {
@@ -658,7 +656,7 @@ export class GithubOAuthSession {
           };
         }
       }
-      if (course && course.freshness !== "current")
+      if (course && (course.freshness !== "current" || this.targeted.has(course.repositoryId)))
         await this.authorizeKnownCourse(course, verified);
       else if (course) measureGradingPhaseSync("authorization_cache_hit", () => undefined);
     }
@@ -690,6 +688,30 @@ export class GithubOAuthSession {
       if (this.registrations.get(folderId) === work) this.registrations.delete(folderId);
     }
   }
+  private backgroundGeneration = -1;
+  startCourseUpdates(preferredFolderId?: string): void {
+    if (this.backgroundGeneration === this.accountGeneration || !this.state.identity) return;
+    this.backgroundGeneration = this.accountGeneration;
+    const generation = this.accountGeneration;
+    void measureStartup("background_course_updates", async () => {
+      const courses = [...this.state.courseDiscovery.courses].sort((left, right) => {
+        const selected = (course: RemoteCourse) =>
+          course.localFolderIds.includes(preferredFolderId ?? "") ||
+          preferredFolderId === `managed-course:${this.state.identity?.id}:${course.repositoryId}`;
+        return Number(selected(right)) - Number(selected(left));
+      });
+      for (const course of courses) {
+        if (
+          generation === this.accountGeneration &&
+          !this.stopped &&
+          course.freshness !== "current"
+        )
+          await this.authorizeKnownCourse(course).catch(() => {});
+      }
+      if (generation === this.accountGeneration && !this.stopped) await this.refreshOrganizations();
+    });
+  }
+  private targetQueue: Promise<unknown> = Promise.resolve();
   private readonly targeted = new Map<number, Promise<void>>();
   private loadKnownCourses(): void {
     const userId = this.state.identity?.id;
@@ -709,83 +731,107 @@ export class GithubOAuthSession {
   ): Promise<void> {
     const pending = this.targeted.get(course.repositoryId);
     if (pending) return pending;
-    const work = measureStartup("selected_course", () =>
-      this.withAuthenticatedAccount(async (session) => {
-        const signal = AbortSignal.any([
-          session.signal,
-          AbortSignal.timeout(COURSE_AUTHORIZATION_TIMEOUT_MS)
-        ]);
-        let expected = course;
-        const courseCurrent = () =>
-          this.state.courseDiscovery.courses.find(
-            (entry) => entry.repositoryId === course.repositoryId
-          ) === expected;
-        const account = {
-          ...session,
-          signal,
-          revalidateSession: async () =>
-            !signal.aborted && courseCurrent() && session.revalidateSession()
-        };
-        const generation = this.accountGeneration;
-        const update = (next: RemoteCourse): void => {
-          if (generation === this.accountGeneration && !account.signal.aborted && courseCurrent()) {
-            expected = next;
-            this.state = {
-              ...this.state,
-              courseDiscovery: {
-                ...this.state.courseDiscovery,
-                courses: this.state.courseDiscovery.courses.map((entry) =>
-                  entry.repositoryId === course.repositoryId ? next : entry
-                )
-              }
-            };
-          }
-        };
-        update({ ...course, freshness: "verifying", authorization: "unavailable" });
-        try {
-          const verified =
-            alreadyVerified ?? (await this.deps.verifyCourse!({ ...account, course }));
-          if (!(await account.revalidateSession()))
-            throw new Error("Account authorization changed.");
-          if (
-            verified.repositoryId !== course.repositoryId ||
-            verified.organizationId !== course.organizationId ||
-            verified.schemaVersion !== course.schemaVersion ||
-            verified.authorization !== "authorized"
-          )
-            throw new Error(
-              "Course identity or faculty authorization changed. Refresh course access."
-            );
-          // Target readiness uses the existing guarded bootstrap/synchronization implementations.
-          const input = { ...account, course: verified };
-          const bootstrap = this.deps.bootstrapCourse
-            ? await measureGradingPhase("bootstrap", () => this.deps.bootstrapCourse!(input))
-            : undefined;
-          const synchronization =
-            bootstrap?.status === "ready"
-              ? await this.deps.synchronizeCourse?.({ ...input, onProgress: () => {} })
-              : undefined;
-          update({ ...verified, bootstrap, synchronization, freshness: "current" });
-          if (
-            (await account.revalidateSession()) &&
-            generation === this.accountGeneration &&
-            this.state.courseDiscovery.userId === account.userId &&
-            courseCurrent()
-          ) {
-            try {
-              this.deps.saveSnapshot?.(account.userId, this.state.courseDiscovery.courses);
-            } catch {
-              /* The verified session remains usable when display persistence is unavailable. */
+    const requestedGeneration = this.accountGeneration;
+    const work = measureGradingPhase("lock_wait", () => this.targetQueue.catch(() => {})).then(() =>
+      measureStartup("selected_course", () =>
+        this.withAuthenticatedAccount(async (session) => {
+          if (requestedGeneration !== this.accountGeneration)
+            throw new Error("Account changed while course update was queued.");
+          const signal = AbortSignal.any([
+            session.signal,
+            AbortSignal.timeout(COURSE_AUTHORIZATION_TIMEOUT_MS)
+          ]);
+          let expected =
+            this.state.courseDiscovery.courses.find(
+              (entry) => entry.repositoryId === course.repositoryId
+            ) ?? course;
+          const courseCurrent = () =>
+            this.state.courseDiscovery.courses.find(
+              (entry) => entry.repositoryId === course.repositoryId
+            ) === expected;
+          const account = {
+            ...session,
+            signal,
+            revalidateSession: async () =>
+              !signal.aborted && courseCurrent() && session.revalidateSession()
+          };
+          const generation = this.accountGeneration;
+          const update = (next: RemoteCourse): void => {
+            if (
+              generation === this.accountGeneration &&
+              !account.signal.aborted &&
+              courseCurrent()
+            ) {
+              expected = next;
+              this.state = {
+                ...this.state,
+                courseDiscovery: {
+                  ...this.state.courseDiscovery,
+                  courses: this.state.courseDiscovery.courses.map((entry) =>
+                    entry.repositoryId === course.repositoryId ? next : entry
+                  )
+                }
+              };
             }
+          };
+          update({ ...course, freshness: "verifying", authorization: "unavailable" });
+          try {
+            const verified =
+              alreadyVerified ?? (await this.deps.verifyCourse!({ ...account, course }));
+            if (!(await account.revalidateSession()))
+              throw new Error("Account authorization changed.");
+            if (
+              verified.repositoryId !== course.repositoryId ||
+              verified.organizationId !== course.organizationId ||
+              verified.schemaVersion !== course.schemaVersion ||
+              verified.authorization !== "authorized"
+            )
+              throw new Error(
+                "Course identity or faculty authorization changed. Refresh course access."
+              );
+            // Target readiness uses the existing guarded bootstrap/synchronization implementations.
+            const input = { ...account, course: verified };
+            const bootstrap = this.deps.bootstrapCourse
+              ? await measureGradingPhase("bootstrap", () => this.deps.bootstrapCourse!(input))
+              : undefined;
+            const synchronization =
+              bootstrap?.status === "ready"
+                ? await this.deps.synchronizeCourse?.({ ...input, onProgress: () => {} })
+                : undefined;
+            update({
+              ...verified,
+              ...(synchronization?.metadata ?? {}),
+              bootstrap,
+              synchronization,
+              ...(synchronization?.reason === "authorization_lost" ||
+              synchronization?.reason === "authentication_failed"
+                ? ({ authorization: "unavailable", freshness: "needs_attention" } as const)
+                : ({ freshness: "current" } as const))
+            });
+            if (synchronization?.reason === "authentication_failed")
+              await this.confirmCredential(this.authorization);
+            if (
+              (await account.revalidateSession()) &&
+              generation === this.accountGeneration &&
+              this.state.courseDiscovery.userId === account.userId &&
+              courseCurrent()
+            ) {
+              try {
+                this.deps.saveSnapshot?.(account.userId, this.state.courseDiscovery.courses);
+              } catch {
+                /* The verified session remains usable when display persistence is unavailable. */
+              }
+            }
+          } catch {
+            update({ ...course, authorization: "unavailable", freshness: "needs_attention" });
+            throw new Error(
+              `Course ${course.code} access could not be verified. Check course authorization and retry.`
+            );
           }
-        } catch {
-          update({ ...course, authorization: "unavailable", freshness: "needs_attention" });
-          throw new Error(
-            `Course ${course.code} access could not be verified. Check course authorization and retry.`
-          );
-        }
-      })
+        })
+      )
     );
+    this.targetQueue = work;
     this.targeted.set(course.repositoryId, work);
     try {
       await work;
@@ -861,7 +907,13 @@ export class GithubOAuthSession {
       if (this.authenticationCompletion === completion) this.authenticationCompletion = null;
       this.loadKnownCourses();
       complete();
-      if (this.token && !this.active && !this.stopped) void this.refreshOrganizations();
+      if (
+        this.token &&
+        !this.active &&
+        !this.stopped &&
+        this.state.courseDiscovery.courses.length === 0
+      )
+        void this.refreshOrganizations();
     }
   }
   async signIn(switchAccount = false): Promise<GithubOAuthState> {
@@ -1027,9 +1079,6 @@ export class GithubOAuthSession {
       await this.courseDiscoveryCompletion;
       return this.getState();
     }
-    const beforeScan = new Map(
-      this.state.courseDiscovery.courses.map((course) => [course.repositoryId, course])
-    );
     const controller = new AbortController();
     this.discovery = controller;
     let completeDiscovery!: () => void;
@@ -1162,7 +1211,6 @@ export class GithubOAuthSession {
                           );
                           const preserved =
                             latest &&
-                            latest !== beforeScan.get(course.repositoryId) &&
                             (latest.freshness === "current" || latest.freshness === "verifying") &&
                             course.authorization === "authorized" &&
                             latest.organizationId === course.organizationId &&
@@ -1203,7 +1251,7 @@ export class GithubOAuthSession {
                   /* Display cache failure never grants authority. */
                 }
                 completeDiscovery();
-                if (this.deps.bootstrapCourse) {
+                if (this.deps.bootstrapCourse && !this.deps.verifyCourse) {
                   const bootstrap = this.deps.bootstrapCourse;
                   const pending = courses.courses.filter(
                     (course) =>
@@ -1312,7 +1360,18 @@ export class GithubOAuthSession {
                         }
                       }
                     },
-                    MANAGED_BOOTSTRAP_CONCURRENCY
+                    BACKGROUND_COURSE_CONCURRENCY
+                  );
+                }
+                if (this.deps.verifyCourse) {
+                  await mapBounded(
+                    this.state.courseDiscovery.courses.filter(
+                      (course) =>
+                        course.authorization === "authorized" &&
+                        course.bootstrap?.status === "queued"
+                    ),
+                    (course) => this.authorizeKnownCourse(course, course).catch(() => {}),
+                    BACKGROUND_COURSE_CONCURRENCY
                   );
                 }
               }
@@ -1329,7 +1388,7 @@ export class GithubOAuthSession {
                     diagnostics: [
                       {
                         organizationId: null,
-                        status: "unavailable",
+                        status: "network_unavailable",
                         message: "Course discovery temporarily unavailable. Refresh courses."
                       }
                     ]

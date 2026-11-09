@@ -86,7 +86,7 @@ describe("automatic bootstrap session orchestration", () => {
     expect(JSON.stringify(f.session.getState())).not.toContain("oauth-secret");
     f.session.shutdown();
   });
-  it("publishes asynchronous progress and bounds workers while another course fails", async () => {
+  it("publishes progress and serializes background workers when a course fails", async () => {
     const f = fixture([course(20), course(21), course(22)]);
     let finish!: () => void;
     f.bootstrapCourse.mockImplementationOnce(
@@ -101,10 +101,12 @@ describe("automatic bootstrap session orchestration", () => {
         "bootstrapping"
       )
     );
+    expect(f.session.getState().courseDiscovery.courses[2]?.bootstrap?.status).toBe("queued");
+    expect(f.bootstrapCourse).toHaveBeenCalledOnce();
+    finish();
     await vi.waitFor(() =>
       expect(f.session.getState().courseDiscovery.courses[2]?.bootstrap?.status).toBe("ready")
     );
-    finish();
     await vi.waitFor(() =>
       expect(f.session.getState().courseDiscovery.courses[0]?.bootstrap?.status).toBe("failed")
     );

@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { performance } from "node:perf_hooks";
 
 type Phase =
+  | "dashboard_cache"
   | "bootstrap"
   | "authorization_cache_hit"
   | "credential_restore"
@@ -36,6 +37,8 @@ export interface GradingPerformanceSample {
   readonly durationMs: number;
   readonly phases: Partial<Record<Phase, { count: number; durationMs: number }>>;
 }
+const startupLaunch = performance.now();
+let startupSequence = 0;
 const measurements = new AsyncLocalStorage<GradingPerformanceSample>();
 const record = (phase: Phase, started: number) => {
   const phases = measurements.getStore()?.phases;
@@ -106,6 +109,18 @@ export const measureGradingOperation = async <T>(
 export const measureStartup = <T>(channel: string, operation: () => Promise<T>): Promise<T> =>
   process.env.GRAIDER_STARTUP_PERFORMANCE === "1"
     ? measureGradingOperation(channel, operation, (sample) =>
-        console.info("Graider startup performance", JSON.stringify(sample))
+        console.info(
+          "Graider startup performance",
+          JSON.stringify({
+            ...sample,
+            operationId: ++startupSequence,
+            launchElapsedMs: performance.now() - startupLaunch,
+            activity:
+              channel.startsWith("background") ||
+              measurements.getStore()?.channel.startsWith("background")
+                ? "background"
+                : "foreground"
+          })
+        )
       )
     : operation();

@@ -60,6 +60,10 @@ const getErrorMessage = (result: CourseFolderDashboardResult): string => {
 };
 
 const getResultMessage = (result: CourseFolderDashboardResult): string => {
+  if (result.dashboard?.status === "cached")
+    return result.status === "failure"
+      ? "Cached display — refresh failed. Refresh to retry."
+      : "Cached display — checking course access in the background.";
   if (result.status === "success" && result.dashboard !== null) {
     return getCardCountLabel(result.dashboard.summary.cardCount);
   }

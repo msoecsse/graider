@@ -1,3 +1,4 @@
+import { loadDashboardDisplay, saveDashboardDisplay } from "./dashboardDisplayCache";
 import { managedOperationalFixture } from "./managedOperationalFixtures";
 import { removeGitFixture, GIT_INTEGRATION_TIMEOUT_MS } from "./gitIntegrationFixtures";
 import { ManagedCourseMutationGuard } from "./managedCourseMutationGuard";
@@ -10,7 +11,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GithubOAuthSession } from "./githubOAuthSession";
 import { loadCourseSnapshot, saveCourseSnapshot } from "./courseDiscoverySnapshot";
-import type { RemoteCourse, RemoteCourseDiscovery } from "./remoteCourseTypes";
+import type {
+  ManagedSynchronizationState,
+  RemoteCourse,
+  RemoteCourseDiscovery
+} from "./remoteCourseTypes";
 vi.mock("./githubRemoteRepositories.js", async (original) => ({
   ...(await original<object>()),
   createRemoteRepositoryReader: () => {
@@ -50,7 +55,7 @@ const deferred = <T>() => {
   });
   return { promise, resolve, reject };
 };
-const setup = (cold = false) => {
+const setup = (cold = false, synchronize = false, identityLatencyMs = 0) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "graider-course-startup-"));
   roots.push(root);
   saveCourseSnapshot(root, 42, [course]);
@@ -61,18 +66,43 @@ const setup = (cold = false) => {
   const saveSnapshot = vi.fn((userId: number, courses: readonly RemoteCourse[]) =>
     saveCourseSnapshot(root, userId, courses)
   );
+  const bootstrapCourse = vi.fn(async () => ({
+    status: "ready" as const,
+    diagnostic: null,
+    retryable: false
+  }));
+  const synchronizeCourse = vi.fn(
+    async (): Promise<ManagedSynchronizationState> => ({
+      status: "up_to_date" as const,
+      diagnostic: null,
+      retryable: false
+    })
+  );
   const session = new GithubOAuthSession({
-    store: { load: async () => "fixture-token", save: async () => {}, delete: async () => {} },
+    ...(synchronize ? { bootstrapCourse, synchronizeCourse } : {}),
+    store: {
+      load: async () => {
+        if (identityLatencyMs)
+          await new Promise((resolve) => setTimeout(resolve, identityLatencyMs));
+        return "fixture-token";
+      },
+      save: async () => {},
+      delete: async () => {}
+    },
     secret: () => "fixture-secret",
     openBrowser: async () => {},
     network: {
       exchange: async () => "fixture-token",
-      verifyAccount: async () => ({
-        identity: { id: 42, login: "faculty", name: null },
-        scopes: ["repo", "read:org"],
-        repositoryCapability: true,
-        organizationCapability: true
-      }),
+      verifyAccount: async () => {
+        if (identityLatencyMs)
+          await new Promise((resolve) => setTimeout(resolve, identityLatencyMs));
+        return {
+          identity: { id: 42, login: "faculty", name: null },
+          scopes: ["repo", "read:org"],
+          repositoryCapability: true,
+          organizationCapability: true
+        };
+      },
       discoverOrganizations: async () => ({
         status: "ready",
         organizations: [
@@ -100,6 +130,8 @@ const setup = (cold = false) => {
     scan.resolve({ status: "ready", userId: 42, discoveredAt: null, courses, diagnostics: [] });
   return {
     root,
+    bootstrapCourse,
+    synchronizeCourse,
     scan,
     session,
     verifyCourse,
@@ -125,10 +157,10 @@ describe("cache-first startup", () => {
       expect(await f.session.withLocalCourse(20, 42, async () => action)).toBe(action);
     }
     expect(f.verifyCourse).toHaveBeenCalledOnce();
-    expect(f.session.getState().courseDiscovery.status).toBe("loading");
+    expect(f.session.getState().courseDiscovery.status).toBe("idle");
     const refresh = f.session.refreshOrganizations();
     expect(f.session.getState().courseDiscovery.courses).toHaveLength(1);
-    expect(f.discoverCourses).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(f.discoverCourses).toHaveBeenCalledOnce());
     f.finish([course, { ...course, repositoryId: 21, localFolderIds: [] }]);
     await refresh;
     await vi.waitFor(() => expect(f.session.getState().courseDiscovery.courses).toHaveLength(2));
@@ -149,6 +181,7 @@ describe("cache-first startup", () => {
   it("preserves visible cards after transient failure and rejects unverified cache operations", async () => {
     const f = setup();
     await f.session.restore();
+    void f.session.refreshOrganizations();
     await vi.waitFor(() => expect(f.discoverCourses).toHaveBeenCalledOnce());
     f.scan.reject(new Error("injected outage"));
     await vi.waitFor(() => expect(f.session.getState().courseDiscovery.status).toBe("error"));
@@ -156,6 +189,116 @@ describe("cache-first startup", () => {
     f.verifyCourse.mockRejectedValueOnce(new Error("revoked"));
     await expect(f.session.waitForCourseStartup("folder")).rejects.toThrow("fixture101");
     expect(f.session.getState().courseDiscovery.courses[0].freshness).toBe("needs_attention");
+    f.session.shutdown();
+  });
+  it("keeps the persisted display account-isolated throughout delayed credential and identity restoration", async () => {
+    const IDENTITY_LATENCY_MS = 250;
+    const f = setup(false, false, IDENTITY_LATENCY_MS);
+    vi.useFakeTimers();
+    try {
+      const restoring = f.session.restore();
+      expect(f.session.getState().identity).toBeNull();
+      expect(f.session.getState().courseDiscovery.courses).toEqual([]);
+      await vi.advanceTimersByTimeAsync(IDENTITY_LATENCY_MS);
+      expect(f.session.getState().identity).toBeNull();
+      expect(f.session.getState().courseDiscovery.courses).toEqual([]);
+      await vi.advanceTimersByTimeAsync(IDENTITY_LATENCY_MS);
+      await restoring;
+      expect(f.session.getState().courseDiscovery.courses[0].freshness).toBe("cached");
+      expect(f.verifyCourse).not.toHaveBeenCalled();
+      expect(f.discoverCourses).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      f.session.shutdown();
+    }
+  });
+  it("does not retain mutation authority when targeted synchronization reports authorization loss", async () => {
+    const f = setup(false, true);
+    f.synchronizeCourse.mockResolvedValueOnce({
+      status: "needs_attention",
+      reason: "authorization_lost",
+      diagnostic: "Access revoked",
+      retryable: false
+    });
+    await f.session.restore();
+    await f.session.waitForCourseStartup("folder");
+    expect(f.session.getState().courseDiscovery.courses[0]).toMatchObject({
+      authorization: "unavailable",
+      freshness: "needs_attention"
+    });
+    await expect(f.session.withLocalCourse(20, 42, async () => {})).rejects.toThrow();
+    f.session.shutdown();
+  });
+  it("shares startup synchronization and does not repeat it when broad discovery completes", async () => {
+    const f = setup(false, true);
+    await f.session.restore();
+    f.session.startCourseUpdates();
+    await Promise.all(Array.from({ length: 4 }, () => f.session.waitForCourseStartup("folder")));
+    expect(f.verifyCourse).toHaveBeenCalledOnce();
+    expect(f.bootstrapCourse).toHaveBeenCalledOnce();
+    expect(f.synchronizeCourse).toHaveBeenCalledOnce();
+    f.finish();
+    await vi.waitFor(() => expect(f.session.getState().courseDiscovery.status).toBe("ready"));
+    expect(f.synchronizeCourse).toHaveBeenCalledOnce();
+    await f.session.withLocalCourse(20, 42, async () => {});
+    expect(f.synchronizeCourse).toHaveBeenCalledOnce();
+    f.session.shutdown();
+  });
+  it("restores persistent assignments before stalled authorization and broad HTTP 500 discovery", async () => {
+    const f = setup();
+    saveDashboardDisplay(f.root, 42, [course], {
+      courseFolderId: "folder",
+      courseFolderPath: "fixture-path",
+      status: "success",
+      error: null,
+      refreshedAt: new Date().toISOString(),
+      dashboard: {
+        schemaVersion: 1,
+        commandName: "dashboard",
+        status: "success",
+        exitCode: 0,
+        summary: {},
+        diagnostics: [],
+        cards: [
+          {
+            courseSlug: "fixture101",
+            termSlug: "27s1",
+            assignments: [{ slug: "lab1", title: "Lab 1", studentGrades: "never-persist" }],
+            credential: "never-persist"
+          }
+        ]
+      }
+    });
+    const gate = deferred<RemoteCourse>();
+    f.verifyCourse.mockImplementationOnce(() => gate.promise);
+    await f.session.restore();
+    const cached = loadDashboardDisplay(f.root, 42, f.session.getState().courseDiscovery.courses);
+    expect(cached[0].dashboard?.cards).toMatchObject([{ assignments: [{ slug: "lab1" }] }]);
+    expect(JSON.stringify(cached)).not.toContain("never-persist");
+    expect(f.discoverCourses).not.toHaveBeenCalled();
+    f.session.startCourseUpdates();
+    const opens = Promise.all([
+      f.session.waitForCourseStartup("folder"),
+      f.session.waitForCourseStartup("folder")
+    ]);
+    await vi.waitFor(() => expect(f.verifyCourse).toHaveBeenCalledOnce());
+    expect(
+      loadDashboardDisplay(f.root, 42, f.session.getState().courseDiscovery.courses)
+    ).toHaveLength(1);
+    gate.resolve(course);
+    await opens;
+    await vi.waitFor(() => expect(f.discoverCourses).toHaveBeenCalledOnce());
+    f.scan.reject(new Error("HTTP 500 on page 9"));
+    await vi.waitFor(() => expect(f.session.getState().courseDiscovery.status).toBe("error"));
+    expect(
+      loadDashboardDisplay(f.root, 42, f.session.getState().courseDiscovery.courses)
+    ).toHaveLength(1);
+    expect(loadDashboardDisplay(f.root, 43, [course])).toEqual([]);
+    expect(loadDashboardDisplay(f.root, 42, [{ ...course, defaultBranch: "other" }])).toEqual([]);
+    fs.writeFileSync(path.join(f.root, "dashboard-display-42.json"), '{"version":0}');
+    expect(loadDashboardDisplay(f.root, 42, [course])).toEqual([]);
+    fs.writeFileSync(path.join(f.root, "dashboard-display-42.json"), "invalid");
+    expect(loadDashboardDisplay(f.root, 42, [course])).toEqual([]);
     f.session.shutdown();
   });
   it("isolates account snapshots, strips credentials and rejects corrupt persistence", () => {
@@ -206,6 +349,7 @@ describe("cache-first startup", () => {
     const f = setup();
     await f.session.restore();
     await f.session.waitForCourseStartup("folder");
+    void f.session.refreshOrganizations();
     f.scan.resolve({
       status: "partial_failure",
       userId: 42,
@@ -253,6 +397,7 @@ describe("cache-first startup", () => {
     f.verifyCourse.mockImplementationOnce(() => pending.promise);
     const opening = f.session.waitForCourseStartup("folder");
     await vi.waitFor(() => expect(f.verifyCourse).toHaveBeenCalledOnce());
+    void f.session.refreshOrganizations();
     f.finish([{ ...course, authorization: "not_authorized" }]);
     await vi.waitFor(() => expect(f.session.getState().courseDiscovery.status).toBe("ready"));
     pending.resolve(course);
@@ -305,7 +450,7 @@ it(
         fields: {}
       });
       expect(context).toMatchObject({ userId: 42, repositoryId: 20, cachedCommit: git.head });
-      expect(f.session.getState().courseDiscovery.status).toBe("loading");
+      expect(f.session.getState().courseDiscovery.status).toBe("idle");
       await expect(
         guard.read("folder", git.legacy, async () => "ready", {
           channel: IPC_CHANNELS.loadGradingStudentSnapshot,

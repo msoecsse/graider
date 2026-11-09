@@ -78,6 +78,11 @@ export const DashboardDataProvider = ({
     ) {
       measuredDashboard.current = true;
       performance.measure("graider.dashboard_displayed", { start: 0, end: performance.now() });
+      if (Object.values(refreshResults).some((result) => result.dashboard?.status === "cached"))
+        performance.measure("graider.cached_assignments_displayed", {
+          start: 0,
+          end: performance.now()
+        });
     }
   }, [refreshResults]);
   const [pendingCourseLoads, setPendingCourseLoads] = useState(0);
@@ -89,6 +94,8 @@ export const DashboardDataProvider = ({
       remoteAccount.current = userId;
       accountEpoch.current += 1;
       remoteVersion.current = "";
+      displayFolders.current = [];
+      setCourseFolders([]);
       setRefreshResults({});
       setPendingCourseLoads(0);
       setErrorMessage(null);
@@ -97,6 +104,7 @@ export const DashboardDataProvider = ({
   const remoteFolders = useRef(new Map<string, string>());
   const folderRequests = useRef(new Map<string, number>());
   const hasStartedStartupRefresh = useRef(false);
+  const displayFolders = useRef<CourseFolderRecord[]>([]);
   const isRefreshingAllRef = useRef(false);
 
   useEffect(() => {
@@ -162,11 +170,36 @@ export const DashboardDataProvider = ({
         remoteVersion.current = version;
         if (accountChanged) {
           accountEpoch.current += 1;
+          displayFolders.current = [];
           setRefreshResults({});
           setPendingCourseLoads(0);
         }
         const epoch = accountEpoch.current;
-        const folders = await window.graiderUI.listCourseFolders();
+        const cached = await window.graiderUI.loadDashboardDisplay?.(
+          window.location.hash.split("/")[1]
+        );
+        if (!active || version !== remoteVersion.current || epoch !== accountEpoch.current) return;
+        if (cached?.userId !== undefined && cached.userId !== account) return;
+        if (cached) {
+          setRefreshResults((current) => ({
+            ...Object.fromEntries(cached.results.map((result) => [result.courseFolderId, result])),
+            ...current
+          }));
+          displayFolders.current = cached.results.map((result) => ({
+            id: result.courseFolderId,
+            path: result.courseFolderPath,
+            displayAlias: null,
+            lastOpenedAt: "",
+            lastRefreshedAt: result.refreshedAt,
+            lastDashboardStatus: "cached"
+          }));
+        }
+        const liveFolders = await window.graiderUI.listCourseFolders();
+        const folders = [
+          ...new Map(
+            [...displayFolders.current, ...liveFolders].map((folder) => [folder.id, folder])
+          ).values()
+        ];
         if (!active || version !== remoteVersion.current || epoch !== accountEpoch.current) return;
         setCourseFolders(folders);
         if ((initial || accountChanged) && bindings.size === 0) {
@@ -183,7 +216,9 @@ export const DashboardDataProvider = ({
                 folderRequests.current.set(folder.id, request);
                 setPendingCourseLoads((pending) => pending + 1);
                 try {
-                  const result = await window.graiderUI.refreshCourseFolder(folder.id);
+                  const result = await (
+                    window.graiderUI.refreshCourseDisplay ?? window.graiderUI.refreshCourseFolder
+                  )(folder.id);
                   if (
                     active &&
                     account === remoteAccount.current &&
@@ -234,21 +269,31 @@ export const DashboardDataProvider = ({
   const rememberRefreshResult = (result: CourseFolderDashboardResult): void => {
     setRefreshResults((currentResults) => ({
       ...currentResults,
-      [result.courseFolderId]: result
+      [result.courseFolderId]: result.dashboard
+        ? result
+        : {
+            ...result,
+            dashboard: currentResults[result.courseFolderId]?.dashboard ?? null
+          }
     }));
     applyRefreshResultMetadata(result);
   };
 
   const rememberCombinedDashboardResult = (combinedResult: CombinedDashboardResult): void => {
-    const nextResults = combinedResult.results.reduce<Record<string, CourseFolderDashboardResult>>(
-      (results, result) => ({
-        ...results,
-        [result.courseFolderId]: result
-      }),
-      {}
+    setRefreshResults((current) =>
+      combinedResult.results.reduce<Record<string, CourseFolderDashboardResult>>(
+        (results, result) => ({
+          ...results,
+          [result.courseFolderId]: result.dashboard
+            ? result
+            : {
+                ...result,
+                dashboard: results[result.courseFolderId]?.dashboard ?? null
+              }
+        }),
+        { ...current }
+      )
     );
-
-    setRefreshResults((current) => ({ ...current, ...nextResults }));
     for (const result of combinedResult.results) {
       applyRefreshResultMetadata(result);
     }
@@ -288,7 +333,12 @@ export const DashboardDataProvider = ({
   };
 
   useEffect(() => {
-    if (isLoadingFolders || courseFolders.length === 0 || hasStartedStartupRefresh.current) {
+    if (
+      window.graiderUI.loadDashboardDisplay ||
+      isLoadingFolders ||
+      courseFolders.length === 0 ||
+      hasStartedStartupRefresh.current
+    ) {
       return;
     }
 

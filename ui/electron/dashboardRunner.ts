@@ -351,6 +351,9 @@ export const refreshCourseFolder = async (
     );
   }
 
+  if (options.remoteSources?.some((source) => source.id === courseFolder.id))
+    return refreshKnownCourseFolder(registryPath, courseFolder, "", options);
+
   const tokenResult = await resolveGithubToken({
     runner: options.runner,
     ...(options.env === undefined ? {} : { env: options.env })

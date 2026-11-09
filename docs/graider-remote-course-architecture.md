@@ -4427,3 +4427,36 @@ remote observations. Legacy teams/members and direct collaborators are untouched
 The main-only 9.4E handoff composes this capability behind independent publication
 proof; production controls remain unwired. Slice 9.4 is complete and operational
 schema gates remain **1**; no 9.5 orchestration or publication is introduced.
+
+### Cache-first dashboard startup
+
+After secure credential restoration and live account identity verification, the
+main process reads the account's course discovery snapshot and version 1 dashboard
+display cache. The latter contains only allowlisted course, term, and assignment
+summary fields, with no roster rows, grading documents, diagnostics, credentials,
+or write revision evidence. Writes use a private temporary file and atomic rename;
+size, version, account, shape, and course/source binding checks fail closed.
+
+Display metadata never establishes course authorization or synchronization freshness.
+The existing account/session generation, course authorization, local source validation,
+and mutation revision guards remain authoritative. Local navigation can resolve cached
+cards while operations requiring authority wait for targeted verification. Known-course
+updates run serially and share concurrent target requests; warm startup defers broad
+organization discovery until these updates finish. Automatic dashboard display reads
+use the local read boundary after targeted startup; explicit Refresh retains the
+synchronized read boundary. Discovery preserves established target readiness when
+identity, schema, and branch match. Transient failures retain display data and require
+explicit retry rather than a retry loop. Authoritative revision invalidation is retained.
+
+For opt-in development diagnostics, launch with `GRAIDER_STARTUP_PERFORMANCE=1`.
+Startup logs contain aggregate phase counts/durations, operation IDs, elapsed time
+from instrumentation initialization, and foreground/background classification.
+`cached_dashboard_display_ready` measures main-process cache availability; renderer
+Performance entries `graider.known_courses_displayed`, `graider.dashboard_displayed`,
+and `graider.cached_assignments_displayed` measure actual rendered availability from
+renderer initialization. These clocks are distinct: neither is an OS process-launch
+measurement. Compare them with `oauth_restore`, `background_course_updates`, and
+`background_discovery`; phase counts include instrumented remote requests, fetches,
+local validation, and lock waits. Never infer real faculty startup latency from an
+isolated discovery benchmark. Real application cold/warm runs and cross-platform CI
+remain necessary to establish production performance.
