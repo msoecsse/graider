@@ -48,7 +48,9 @@ export const LOCAL_GRADING_READ_CHANNELS: readonly string[] = Object.freeze([
   IPC_CHANNELS.loadGradingStudentSource,
   IPC_CHANNELS.loadGradingStudentSnapshot
 ]);
+/** Pull uses this local course lease plus its own OAuth and student Git boundary. */
 export const LOCAL_GRADING_MUTATION_CHANNELS: readonly string[] = Object.freeze([
+  IPC_CHANNELS.pullLatestGradingStudentChanges,
   IPC_CHANNELS.prepareGradingWorkspace,
   IPC_CHANNELS.saveGradingStudentViewState,
   IPC_CHANNELS.clearGradingStudentViewState,

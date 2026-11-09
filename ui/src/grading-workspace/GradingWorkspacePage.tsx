@@ -1677,7 +1677,18 @@ export const GradingWorkspacePage = ({
             submission_changed:
               "The repository changed outside Graider. Its expected SHA was preserved. Review the manual changes before continuing.",
             github_auth_unavailable: "GitHub authentication is required to pull latest changes.",
-            grading_state_missing: "Save grading work before updating this repository."
+            student_not_accessible:
+              "This student is outside your assigned sections. Check faculty access.",
+            faculty_identity_required:
+              "Set your faculty identity before updating a student repository.",
+            no_assigned_sections: "Your faculty identity has no assigned sections in this term.",
+            repository_not_recorded: "Download this student repository before pulling changes.",
+            repository_unavailable:
+              "The recorded local student repository is missing or unavailable. Restore its folder before retrying.",
+            registry_error:
+              "The local repository registry could not be read. Review your local workspace configuration.",
+            grading_state_error:
+              "Saved grading state could not be read safely. Restore it before retrying."
           }[updated.status] ??
           "Unable to update this repository safely. Grading work was preserved."
       });

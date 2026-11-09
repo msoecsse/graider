@@ -178,6 +178,11 @@ const isTrustedGitHubHttpsRemote = (remote: string, host: string): boolean => {
 const sameRepositoryRemote = (actual: string, expected: string): boolean => {
   if (actual === expected) return true;
   const identity = (value: string): string | null => {
+    const ssh =
+      /^(?:git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/iu.exec(
+        value
+      );
+    if (ssh?.[1] !== undefined && ssh[2] !== undefined) return `/${ssh[1]}/${ssh[2]}`.toLowerCase();
     if (!isTrustedGitHubHttpsRemote(value, GITHUB_HTTPS_HOST)) return null;
     const url = new URL(value);
     if (url.search !== "" || url.hash !== "") return null;
@@ -1028,17 +1033,25 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
         `Review local changes manually — ${details}. The expected SHA and grading work were preserved.`;
       if (state.workingTree.conflicts.length > 0)
         return { kind: "conflict", message: dirtyMessage(dirtyDetails ?? "unmerged paths") };
-      if (
-        state.head.kind !== "attached" ||
-        state.upstream.kind !== "configured" ||
-        state.upstream.remote === null
-      )
-        throw new GitError("operation_rejected", "pull");
+      if (state.head.kind !== "attached")
+        return {
+          kind: "refused",
+          message:
+            "The student checkout has no attached branch. Review its branch selection manually before pulling."
+        };
+      if (state.upstream.kind !== "configured" || state.upstream.remote === null)
+        return {
+          kind: "refused",
+          message:
+            "The student branch has no configured upstream. Configure its trusted upstream before pulling."
+        };
       const expectedHead = request.expectedHead ?? state.head.commit;
       const external = state.head.commit !== expectedHead;
       const refuse = (message: string): PullUpstreamResult => ({ kind: "refused", message });
       let localEvidence: LocalFastForwardEvidence | null = null;
-      if (external) {
+      const expectedRemote = request.externalFastForward?.expectedRemote;
+      const verifiedUpdate = expectedRemote !== undefined;
+      if (external || verifiedUpdate) {
         if (request.externalFastForward === undefined)
           throw new GitError("operation_rejected", "pull");
         if (state.workingTree.stagedChanges.length > 0)
@@ -1090,20 +1103,39 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
       const remote = await this.remoteUrl(remoteName);
       if (remote === null) throw new GitError("operation_rejected", "pull");
       if (
-        external &&
-        !sameRepositoryRemote(remote, request.externalFastForward?.expectedRemote ?? "")
+        verifiedUpdate &&
+        (!sameRepositoryRemote(remote, expectedRemote) ||
+          !sameRepositoryRemote(
+            (await this.remoteUrl(createRemoteName("origin") ?? remoteName)) ?? "",
+            expectedRemote
+          ))
       )
         return refuse(
           "The upstream remote does not match the student's recorded repository. Review the remote configuration manually."
         );
-      await this.executor.run(
-        this.root,
-        ["fetch", "--no-tags", "--", remote, `refs/heads/${branch}`],
-        "pull",
-        request.authentication === undefined
-          ? {}
-          : { authentication: request.authentication, remote }
-      );
+      await request.revalidate?.();
+      const fetchRemote =
+        verifiedUpdate && !isTrustedGitHubHttpsRemote(remote, GITHUB_HTTPS_HOST)
+          ? expectedRemote
+          : remote;
+      try {
+        await this.executor.run(
+          this.root,
+          ["fetch", "--no-tags", "--", fetchRemote, `refs/heads/${branch}`],
+          "pull",
+          request.authentication === undefined
+            ? {}
+            : { authentication: request.authentication, remote: fetchRemote }
+        );
+      } catch (error) {
+        if (error instanceof GitCommandFailure && /couldn't find remote ref/iu.test(error.stderr))
+          return refuse(
+            "The configured remote branch is unavailable. Review the student's upstream branch before retrying."
+          );
+        throw error instanceof GitError
+          ? error
+          : errorForFailure(error, "pull", "remote_unavailable");
+      }
       if ((await this.resolveHead()) !== state.head.commit) {
         if (external)
           return refuse(
@@ -1112,7 +1144,7 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
         throw new GitError("operation_rejected", "pull");
       }
       let mergeTarget = "FETCH_HEAD";
-      if (external) {
+      if (external || verifiedUpdate) {
         // Freeze the fetched commit: later FETCH_HEAD writes cannot change our evidence.
         mergeTarget = parseObjectId(
           await this.executor.run(
@@ -1174,6 +1206,7 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
           return refuse(
             `Local changes overlap incoming remote changes or their safety cannot be established, and were preserved. ${dirtyDetails ?? "Locally present files require manual review."}`
           );
+        await request.revalidate?.();
         const current = await this.inspect();
         const currentEvidence = await this.localFastForwardEvidence(current.workingTree);
         const currentRemote = await this.remoteUrl(remoteName);
@@ -1184,6 +1217,11 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
         const finalInspection = await this.inspect({ readOnly: true });
         if (
           currentRemote !== remote ||
+          (verifiedUpdate &&
+            !sameRepositoryRemote(
+              (await this.remoteUrl(createRemoteName("origin") ?? remoteName)) ?? "",
+              expectedRemote
+            )) ||
           currentFilesystemCollision ||
           JSON.stringify(finalInspection.head) !== JSON.stringify(current.head) ||
           JSON.stringify(finalInspection.workingTree) !== JSON.stringify(current.workingTree) ||
@@ -1203,12 +1241,13 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
             "The repository changed during inspection. Review local changes before retrying."
           );
       }
+      if (!verifiedUpdate && !external) await request.revalidate?.();
       try {
         await this.executor.run(
           this.root,
           [
             "merge",
-            ...(external ? ["--ff-only"] : []),
+            ...(external || verifiedUpdate ? ["--ff-only"] : []),
             "--no-edit",
             "--no-stat",
             "--no-autostash",
@@ -1227,7 +1266,7 @@ class GitCommandWorkspace implements GitWorkspacePreparer {
           };
         throw error;
       }
-      if (external) {
+      if (external || verifiedUpdate) {
         let preserved = false;
         try {
           const after = await this.inspect();

@@ -293,6 +293,7 @@ export type PullUpstreamResult =
   | { readonly kind: "refused"; readonly message: string };
 
 export interface PullUpstreamRequest {
+  readonly revalidate?: () => Promise<void>;
   readonly externalFastForward?: { readonly expectedRemote: string };
   readonly authentication?: GitAuthenticationContext;
   readonly expectedHead?: string;

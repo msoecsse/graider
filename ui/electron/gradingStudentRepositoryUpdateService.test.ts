@@ -59,6 +59,7 @@ describe("selected student authenticated repository update", () => {
     });
     expect(f.workspace.pullUpstream).toHaveBeenCalledExactlyOnceWith({
       authentication: f.authentication,
+      revalidate: expect.any(Function),
       expectedHead: "a".repeat(40),
       externalFastForward: { expectedRemote: "https://github.com/course/lab1-ada.git" }
     });

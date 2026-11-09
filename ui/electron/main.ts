@@ -59,7 +59,7 @@ import {
   loadGradingStudentDocument,
   isGradingStudentDocumentRequest
 } from "./gradingStudentDocumentService.js";
-import { pullLatestGradingStudentChanges } from "./gradingStudentRepositoryUpdateService.js";
+import { createGradingStudentRepositoryUpdateService } from "./gradingStudentRepositoryUpdateService.js";
 import { BrowserWindow, app, dialog, ipcMain, shell, safeStorage } from "electron";
 import { registerExternalNavigation } from "./externalNavigation.js";
 import { applyAssignmentWithStudentRepositoryAccessPage } from "./assignmentApplyWithAccessPageService.js";
@@ -1463,7 +1463,20 @@ export const registerIpcHandlers = (): void => {
   courseIpc.handle(IPC_CHANNELS.pullLatestGradingStudentChanges, (_event, request: unknown) => {
     if (!isLoadGradingStudentSourceRequest(request) || !isRegisteredAssignmentSetupCourse(request))
       throw new Error("A registered course folder is required for student repository updates.");
-    return pullLatestGradingStudentChanges({ ...request, userDataPath: app.getPath("userData") });
+    if (!oauthSession) return { status: "github_auth_unavailable" };
+    return oauthSession
+      .withAuthenticatedAccount(async (account) =>
+        createGradingStudentRepositoryUpdateService({
+          authenticate: async () => createAuthenticatedProductionGitWorkspace(account.token),
+          revalidate: async () => {
+            if (!(await account.revalidateSession())) throw new Error("GitHub session changed.");
+          }
+        })({ ...request, userDataPath: app.getPath("userData") })
+      )
+      .catch(() => ({
+        status: "github_auth_unavailable",
+        message: "Your GitHub session is unavailable or changed. Sign in again, then retry."
+      }));
   });
   courseIpc.handle(IPC_CHANNELS.loadGradingStudentEvidence, (_event, request: unknown) => {
     if (

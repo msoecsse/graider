@@ -5,9 +5,12 @@ import {
   resolveLocalStudentRepository
 } from "./localRepositoryLocator.js";
 import type { GradingStudentSourceRequest } from "./gradingStudentSourceService.js";
-import { createNodeProcessRunner } from "./commandRunner.js";
-import { authenticateGitPublication } from "./gitPublicationAuthentication.js";
-import type { GitAuthenticationContextRef, GitWorkspaceWriter } from "./gitWorkspaceReader.js";
+import { revalidateCourseOperation } from "./managedCourseOperationContext.js";
+import type {
+  AuthenticatedGitWorkspaceContext,
+  GitAuthenticationContextRef,
+  GitWorkspaceWriter
+} from "./gitWorkspaceReader.js";
 
 export interface RepositoryUpdateWorkspace extends GitWorkspaceWriter {
   resolveHead(): Promise<string>;
@@ -15,6 +18,7 @@ export interface RepositoryUpdateWorkspace extends GitWorkspaceWriter {
   pullUpstream(request: {
     readonly authentication: GitAuthenticationContextRef;
     readonly expectedHead: string;
+    readonly revalidate?: () => Promise<void>;
     readonly externalFastForward?: { readonly expectedRemote: string };
   }): Promise<
     | { readonly kind: "updated" | "conflict"; readonly message?: string }
@@ -30,6 +34,7 @@ export interface RepositoryUpdateBackend {
       studentId: string;
     },
     workspace: {
+      revalidate?(): Promise<void>;
       resolveHead(): Promise<string>;
       readRevisionFile(revision: string, file: string): Promise<string | null>;
       pullUpstream(request: {
@@ -47,14 +52,13 @@ export interface GradingStudentRepositoryUpdateResult {
   readonly message?: string;
 }
 export const createGradingStudentRepositoryUpdateService =
-  (
-    overrides: {
-      resolveFacultyScope?: typeof resolveCurrentFacultyScope;
-      resolveRepository?: typeof resolveLocalStudentRepository;
-      authenticate?: typeof authenticateGitPublication;
-      loadBackend?: () => RepositoryUpdateBackend;
-    } = {}
-  ) =>
+  (overrides: {
+    resolveFacultyScope?: typeof resolveCurrentFacultyScope;
+    resolveRepository?: typeof resolveLocalStudentRepository;
+    authenticate: () => Promise<AuthenticatedGitWorkspaceContext | null>;
+    revalidate?: () => Promise<void>;
+    loadBackend?: () => RepositoryUpdateBackend;
+  }) =>
   async (request: GradingStudentSourceRequest): Promise<GradingStudentRepositoryUpdateResult> => {
     const scope = (overrides.resolveFacultyScope ?? resolveCurrentFacultyScope)(request);
     if (scope.status !== "success") return { status: scope.status };
@@ -65,11 +69,26 @@ export const createGradingStudentRepositoryUpdateService =
       request
     );
     if (repository.status !== "success") return repository;
-    const authenticated = await (overrides.authenticate ?? authenticateGitPublication)({
-      runner: createNodeProcessRunner()
-    });
+    const authenticated = await overrides.authenticate();
     if (authenticated === null) return { status: "github_auth_unavailable" };
     try {
+      const revalidate = async (): Promise<void> => {
+        await revalidateCourseOperation();
+        await overrides.revalidate?.();
+        const currentScope = (overrides.resolveFacultyScope ?? resolveCurrentFacultyScope)(request);
+        const currentRepository = (overrides.resolveRepository ?? resolveLocalStudentRepository)(
+          getLocalRepositoryLocatorPath(request.userDataPath),
+          request
+        );
+        if (
+          currentScope.status !== "success" ||
+          !currentScope.students.some((student) => student.studentId === request.studentId) ||
+          currentRepository.status !== "success" ||
+          currentRepository.localPath !== repository.localPath
+        )
+          throw new Error("Repository authorization changed.");
+      };
+      await revalidate();
       // The production authenticated backend returns the full Git workspace. The
       // publication interface exposes only the subset needed by other services.
       const workspace = (await authenticated.factory.open(
@@ -90,14 +109,18 @@ export const createGradingStudentRepositoryUpdateService =
           studentId: request.studentId
         },
         {
+          revalidate,
           resolveHead: () => workspace.resolveHead(),
           readRevisionFile: (revision, file) => workspace.readRevisionFile(revision, file),
           pullUpstream: (update) =>
-            workspace.pullUpstream({ ...update, authentication: authenticated.authentication })
+            workspace.pullUpstream({
+              ...update,
+              revalidate,
+              authentication: authenticated.authentication
+            })
         }
       );
     } catch {
       return { status: "repository_update_failed" };
     }
   };
-export const pullLatestGradingStudentChanges = createGradingStudentRepositoryUpdateService();

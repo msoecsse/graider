@@ -1174,3 +1174,28 @@ When implementing:
 7. Surface architectural concerns, but do not stop a bounded slice merely because the surrounding architecture is imperfect.
 8. Stop only for a genuine blocker that would make the slice unsafe, impossible, or require violating/duplicating an existing abstraction.
 9. Use TDD and preserve existing Graider safety boundaries.
+
+### Explicit student repository update boundary
+
+`pullLatestGradingStudentChanges` uses the closed local grading mutation guard
+for registered course identity, account generation, safe committed course cache,
+and faculty scope. It remains a guarded mutation, without a synchronized course
+administration transaction, course fetch, or organization discovery. The service
+independently resolves the selected student's trusted local repository locator
+and the assignment manifest mapping before invoking Git.
+
+Main obtains an operation-scoped Dugite credential context from the active,
+verified Graider OAuth session. No token crosses IPC and this action does not
+resolve CLI/environment credentials. Session generation, course revision,
+faculty scope, and locator are revalidated before fetching, applying changes,
+and saving canonical state. Sign-out/replacement invalidates pending leases.
+Both origin and the configured upstream must identify the manifest repository;
+HTTPS and GitHub SSH forms compare by exact owner/name. Fetch uses the canonical
+HTTPS target with OAuth authentication. Only a proven fast-forward is applied,
+using the existing conservative local-file preservation and history checks.
+
+Missing grading state permits a safe pull without creating a record. Existing
+state retains all grading fields and publication status; only submission SHA,
+update history, Updated Since Grading, and conservatively verified source anchors
+change. A persistence or concurrent-state failure preserves feedback and leaves
+the submission consistency guard active. No checks or publications run implicitly.

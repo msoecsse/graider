@@ -677,3 +677,28 @@ failed work. If GitHub is temporarily unavailable, existing summaries remain vis
 and failed updates can be retried. A new session must still verify account identity;
 if that cannot complete, Graider preserves the saved credential and asks you to retry
 when connected. Signing out or switching accounts clears the displayed account data.
+
+### Pull latest changes while grading
+
+Select a student and choose **Pull latest changes** to fetch that student's
+tracked upstream branch and safely advance the downloaded repository. Signing
+into GitHub in Graider is sufficient; GitHub CLI sign-in and environment tokens
+are not required. An unchanged repository reports that it is already up to date.
+
+Saved feedback, deductions, manual adjustments, zero-score overrides, grading
+status, editor position, publication information, and earlier update history are
+preserved. Complete and Published students retain their status and show
+**Updated Since Grading**. Source, annotations, documents, snapshot, and commit
+history refresh in the open workspace. General comments stay general; uncertain
+source anchors remain visible as stale for review.
+
+Pulling does not rerun automated checks or republish feedback. Review the changed
+source and stale anchors, explicitly rerun checks when needed, and review and
+republish feedback when appropriate. Graider asks before discarding an unsaved
+draft. Nonoverlapping local work is retained only when its safety can be proven.
+If local changes, staged files, conflicts, divergent history, or repository
+identity checks block the update, review the repository manually and resolve the
+reported problem before retrying. Graider does not reset, clean, stash, or replace
+the checkout. If Git completes but saving the new submission SHA fails, grading
+remains blocked by its consistency guard until the repository and recorded SHA
+are reconciled; existing grading work remains saved.

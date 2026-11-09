@@ -178,7 +178,7 @@ describeGitIntegration("authorized student repository update", () => {
       });
       expect(pull).toHaveBeenCalledExactlyOnceWith({
         expectedHead: f.sha,
-        ...(mode === "managed" ? {} : { externalFastForward: { expectedRemote: f.remote } })
+        externalFastForward: { expectedRemote: f.remote }
       });
       expect(commit).not.toHaveBeenCalled();
       const updated = f.read();
@@ -264,7 +264,7 @@ describeGitIntegration("authorized student repository update", () => {
         edited.status === "success" && edited.value.appliedComments[2]?.sourceAnchor?.status
       ).toBe("stale");
       f.advance("another insertion\ninserted\nheader\nunique source\nrepeat\nrepeat\nfooter\n");
-      expect((await updateGradingStudentRepository(f.request, f.workspace)).status).toBe("success");
+      expect((await f.update()).status).toBe("success");
       expect(f.read().repositoryUpdates).toHaveLength(2);
       expect(f.read().appliedComments[0]?.sourceAnchor?.originalCommitSha).toBe(f.sha);
       expect(f.read().appliedComments[1]?.sourceAnchor?.status).toBe("stale");
@@ -300,7 +300,7 @@ describeGitIntegration("authorized student repository update", () => {
       untrackedPaths: [],
       conflicts: []
     });
-    expect(await updateGradingStudentRepository(f.request, f.workspace)).toEqual({
+    expect(await f.update()).toEqual({
       status: "unchanged"
     });
     expect(f.read()).toEqual(f.state);
@@ -383,12 +383,12 @@ describeGitIntegration("authorized student repository update", () => {
     const state = { ...f.state, submissionCommitSha: git(f.local, "rev-parse", "HEAD") };
     saveGradingState(f.request, state);
     f.advance("student edits\n");
-    const result = await updateGradingStudentRepository(f.request, f.workspace);
-    expect(result.status).toBe("merge_conflict");
-    expect(result.message).toMatch(/manually/u);
+    const result = await f.update();
+    expect(result.status).toBe("submission_changed");
+    expect(result.message).toMatch(/manual/u);
     expect(f.read()).toEqual(state);
     expect(await f.workspace.resolveHead()).toBe(state.submissionCommitSha);
-    expect((await f.workspace.inspect()).workingTree.conflicts).toHaveLength(1);
+    expect((await f.workspace.inspect()).workingTree.conflicts).toHaveLength(0);
     expect(fs.readFileSync(path.join(f.local, "Main.java"), "utf8")).toContain("instructor edits");
   });
 
@@ -447,7 +447,7 @@ describeGitIntegration("authorized student repository update", () => {
     const f = await fixture();
     f.advance();
     git(f.local, "pull", "--ff-only");
-    const pull = vi.spyOn(f.workspace, "pullUpstream");
+    const pull = vi.spyOn(f.workspace, "pullUpstream").mockClear();
     expect((await updateGradingStudentRepository(f.request, f.workspace)).status).toBe(
       "submission_changed"
     );
@@ -493,8 +493,8 @@ describeGitIntegration("authorized student repository update", () => {
     const f = await fixture();
     f.advance();
     const pull = f.workspace.pullUpstream.bind(f.workspace);
-    vi.spyOn(f.workspace, "pullUpstream").mockImplementation(async () => {
-      const result = await pull();
+    vi.spyOn(f.workspace, "pullUpstream").mockImplementation(async (request) => {
+      const result = await pull(request);
       saveGradingState(f.request, {
         ...f.state,
         manualAdjustments: [
@@ -504,10 +504,80 @@ describeGitIntegration("authorized student repository update", () => {
       });
       return result;
     });
-    expect((await updateGradingStudentRepository(f.request, f.workspace)).status).toBe(
-      "update_state_record_failed"
-    );
+    expect((await f.update()).status).toBe("update_state_record_failed");
     expect(f.read().submissionCommitSha).toBe(f.sha);
     expect(f.read().manualAdjustments[1]?.note).toBe("Concurrent note");
   });
 });
+
+it(
+  "updates an ungraded repository without creating grading state",
+  { timeout: 30_000 },
+  async () => {
+    const f = await fixture();
+    const { createGradingStatePath } = await import("../../../src/grading/grading-state.js");
+    const statePath = createGradingStatePath(f.request);
+    if (statePath.status !== "success") throw new Error("Invalid fixture path");
+    fs.unlinkSync(statePath.value);
+    f.advance();
+    expect(await f.update()).toEqual({ status: "success" });
+    expect(await f.workspace.resolveHead()).toBe(git(f.student, "rev-parse", "HEAD"));
+    expect(loadGradingState(f.request).status).toBe("missing");
+  }
+);
+
+it.each(["in_progress", "complete", "published"] as const)(
+  "preserves %s grading and zero-score override",
+  { timeout: 30_000 },
+  async (status) => {
+    const f = await fixture();
+    const previous = { ...f.state, status, finalScoreOverride: 0 as const };
+    expect(saveGradingState(f.request, previous).status).toBe("success");
+    f.advance();
+    expect(await f.update()).toEqual({ status: "success" });
+    expect(f.read()).toMatchObject({
+      status,
+      finalScoreOverride: 0,
+      updatedSinceGrading: true,
+      manualAdjustments: previous.manualAdjustments,
+      viewState: previous.viewState
+    });
+    expect(calculateGrade(f.read(), rubric)).toEqual(calculateGrade(previous, rubric));
+  }
+);
+
+it("reports a partial update if atomic state persistence fails", { timeout: 30_000 }, async () => {
+  const f = await fixture();
+  f.advance();
+  const rename = vi.spyOn(fs, "renameSync").mockImplementation(() => {
+    throw new Error("simulated storage failure");
+  });
+  try {
+    expect((await f.update()).status).toBe("update_state_record_failed");
+    expect(await f.workspace.resolveHead()).toBe(git(f.student, "rev-parse", "HEAD"));
+    expect(f.read()).toEqual(f.state);
+    expect(
+      resolveGradingSubmissionContext({
+        ...f.request,
+        courseFolderPath: f.root,
+        currentSubmissionCommitSha: await f.workspace.resolveHead()
+      }).status
+    ).toBe("submission_changed");
+  } finally {
+    rename.mockRestore();
+  }
+});
+
+it(
+  "rejects a substituted origin before fetching an ordinary update",
+  { timeout: 30_000 },
+  async () => {
+    const f = await fixture();
+    f.advance();
+    git(f.local, "remote", "set-url", "origin", f.student);
+    expect((await f.update()).status).toBe("submission_changed");
+    expect(await f.workspace.resolveHead()).toBe(f.sha);
+    expect(f.read()).toEqual(f.state);
+    expect(fs.existsSync(path.join(f.local, ".git/FETCH_HEAD"))).toBe(false);
+  }
+);
