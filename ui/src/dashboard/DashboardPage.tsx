@@ -163,6 +163,7 @@ export const DashboardPage = (): ReactElement => {
     removingId,
     errorMessage,
     setErrorMessage,
+    acceptGithubAccount,
     handleOpenCourseFolder,
     handleRefreshCourseFolder,
     handleRefreshDashboard,
@@ -385,9 +386,15 @@ export const DashboardPage = (): ReactElement => {
       : [];
   const remoteCourseCardCount = currentRemoteCourses.filter(
     (course) =>
-      course.localStatus !== "registered_local" &&
+      (course.localStatus !== "registered_local" ||
+        course.freshness === "cached" ||
+        course.freshness === "verifying" ||
+        course.freshness === "needs_attention") &&
       (course.authorization === "authorized" ||
-        course.authorization === "faculty_identity_required")
+        course.authorization === "faculty_identity_required" ||
+        course.freshness === "cached" ||
+        course.freshness === "verifying" ||
+        course.freshness === "needs_attention")
   ).length;
   const visibleCards = filterAndSortDashboardCards(
     aggregatedDashboard.cards,
@@ -503,7 +510,13 @@ export const DashboardPage = (): ReactElement => {
         {!isFacultySettingsOpen ? null : (
           <section className="detail-panel" aria-label="Faculty settings">
             <h2>Faculty settings</h2>
-            <GithubAccountPanel accountState={remote.state} onStateChange={remote.accept} />
+            <GithubAccountPanel
+              accountState={remote.state}
+              onStateChange={(state) => {
+                acceptGithubAccount(state.identity?.id ?? null);
+                remote.accept(state);
+              }}
+            />
             <label>
               Current faculty MSOE username
               <input

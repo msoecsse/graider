@@ -123,6 +123,8 @@ jobs:
           npx vitest run --maxWorkers=2
           electron/gradingLocalPerformance.integration.test.ts
           electron/gradingPerformance.test.ts
+          electron/courseStartup.integration.test.ts
+          electron/remoteCourseDiscovery.test.ts
           electron/githubClientProvider.test.ts
           electron/gradingStudentEvidenceService.test.ts
           electron/managedCourseLeases.test.ts

@@ -10,6 +10,7 @@ export type CourseLocalStatus =
   | "local_origin_mismatch"
   | "local_unverified";
 export interface RemoteCourse {
+  readonly freshness?: "cached" | "verifying" | "current" | "needs_attention";
   readonly bootstrap?: ManagedCourseState;
   readonly synchronization?: ManagedSynchronizationState;
   readonly reconciliation?: ManagedReconciliationState;
@@ -58,6 +59,9 @@ export interface CourseDiscoveryDiagnostic {
   readonly status: CourseDiscoveryProblem;
   readonly message: string;
 }
+/** A transport outage is not evidence that an established session lost course access. */
+export const isTransientCourseDiagnostic = (diagnostic: CourseDiscoveryDiagnostic): boolean =>
+  diagnostic.status === "network_unavailable" || diagnostic.status === "rate_limited";
 export interface RemoteCourseDiscovery {
   readonly status:
     | "idle"

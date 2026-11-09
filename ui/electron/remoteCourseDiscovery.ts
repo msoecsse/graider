@@ -1,3 +1,4 @@
+import { measureGradingPhase } from "./gradingPerformance.js";
 import { readRemoteCourseAccess } from "./remoteCourseAccess.js";
 import { sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import fs from "node:fs";
@@ -94,6 +95,8 @@ export const inspectLocalCourseOrigins = async (
     }
   });
 interface Request {
+  readonly targeted?: boolean;
+  readonly onProgress?: (courses: readonly RemoteCourse[]) => void;
   readonly userId: number;
   readonly organizations: readonly GithubOrganization[];
   readonly username: string | null;
@@ -147,7 +150,11 @@ export const discoverRemoteCourses = async (request: Request): Promise<RemoteCou
   for (const org of request.organizations) {
     if (org.accessStatus === "accessible" && org.membershipState === "active") {
       try {
-        const listed = (await reader.list(org.login)).filter(
+        const listed = (
+          request.targeted
+            ? []
+            : await measureGradingPhase("repository_listing", () => reader.list(org.login))
+        ).filter(
           (repo) =>
             repo.organizationId === org.organizationId &&
             repo.owner.toLowerCase() === org.login.toLowerCase()
@@ -203,7 +210,9 @@ export const discoverRemoteCourses = async (request: Request): Promise<RemoteCou
         }
         const searchIds = new Set<number>();
         try {
-          const search = await reader.search(org.login);
+          const search = request.targeted
+            ? { ids: [], incomplete: false }
+            : await measureGradingPhase("metadata_search", () => reader.search(org.login));
           for (const id of search.ids) searchIds.add(id);
           if (search.incomplete)
             diagnostics.push({
@@ -342,6 +351,7 @@ export const discoverRemoteCourses = async (request: Request): Promise<RemoteCou
         diagnostics.push(diagnostic(org.organizationId, error));
       }
     }
+    request.onProgress?.([...courses.values()]);
   }
   if (diagnostics.some((item) => item.status === "invalid_credential"))
     throw new GithubOAuthError(

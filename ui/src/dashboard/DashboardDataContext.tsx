@@ -44,6 +44,7 @@ export interface DashboardDataValue {
   readonly removingId: string | null;
   readonly errorMessage: string | null;
   readonly setErrorMessage: (message: string | null) => void;
+  readonly acceptGithubAccount: (userId: number | null) => void;
   readonly handleOpenCourseFolder: () => Promise<void>;
   readonly handleRefreshCourseFolder: (id: string) => Promise<void>;
   readonly handleRefreshDashboard: () => Promise<void>;
@@ -67,7 +68,31 @@ export const DashboardDataProvider = ({
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const measuredDashboard = useRef(false);
+  useEffect(() => {
+    if (
+      !measuredDashboard.current &&
+      Object.values(refreshResults).some((result) => result.dashboard) &&
+      typeof performance.measure === "function"
+    ) {
+      measuredDashboard.current = true;
+      performance.measure("graider.dashboard_displayed", { start: 0, end: performance.now() });
+    }
+  }, [refreshResults]);
   const remoteVersion = useRef("");
+  const remoteAccount = useRef<number | null | undefined>(undefined);
+  const accountEpoch = useRef(0);
+  const acceptGithubAccount = (userId: number | null): void => {
+    if (remoteAccount.current !== userId) {
+      remoteAccount.current = userId;
+      accountEpoch.current += 1;
+      remoteVersion.current = "";
+      setRefreshResults({});
+      setErrorMessage(null);
+    }
+  };
+  const remoteFolders = useRef(new Map<string, string>());
+  const folderRequests = useRef(new Map<string, number>());
   const hasStartedStartupRefresh = useRef(false);
   const isRefreshingAllRef = useRef(false);
 
@@ -99,24 +124,76 @@ export const DashboardDataProvider = ({
 
   useEffect(() => {
     let active = true;
+    let pending = false;
     const check = async () => {
-      const state = await window.graiderUI.githubOAuth?.get();
-      if (!active || !state) return;
-      const version = JSON.stringify([
-        state.identity?.id,
-        state.courseDiscovery.courses.map((course) => [
-          course.repositoryId,
-          course.localFolderIds,
-          course.bootstrap?.status
-        ])
-      ]);
-      if (version === remoteVersion.current) return;
-      remoteVersion.current = version;
-      const folders = await window.graiderUI.listCourseFolders();
-      if (!active) return;
-      setCourseFolders(folders);
-      setRefreshResults({});
-      if (folders.length > 0) await runRefreshDashboard();
+      if (pending) return;
+      pending = true;
+      try {
+        const readingEpoch = accountEpoch.current;
+        const state = await window.graiderUI.githubOAuth?.get();
+        if (!active || !state || readingEpoch !== accountEpoch.current) return;
+        const account = state.identity?.id ?? null;
+        const accountChanged =
+          remoteAccount.current !== undefined && remoteAccount.current !== account;
+        remoteAccount.current = account;
+        const bindings = new Map<string, string>();
+        for (const course of state.courseDiscovery.courses) {
+          for (const id of [
+            ...course.localFolderIds,
+            `managed-course:${account}:${course.repositoryId}`
+          ])
+            bindings.set(
+              id,
+              JSON.stringify([
+                course.repositoryId,
+                course.authorization,
+                course.synchronization?.currentCommit
+              ])
+            );
+        }
+        const version = JSON.stringify([account, [...bindings]]);
+        if (version === remoteVersion.current) return;
+        const initial = remoteVersion.current === "";
+        const previous = remoteFolders.current;
+        remoteFolders.current = bindings;
+        remoteVersion.current = version;
+        if (accountChanged) {
+          accountEpoch.current += 1;
+          setRefreshResults({});
+        }
+        const epoch = accountEpoch.current;
+        const folders = await window.graiderUI.listCourseFolders();
+        if (!active || version !== remoteVersion.current || epoch !== accountEpoch.current) return;
+        setCourseFolders(folders);
+        if ((initial || accountChanged) && bindings.size === 0) {
+          if (folders.length > 0) void runRefreshDashboard();
+        } else {
+          void Promise.all(
+            folders
+              .filter(
+                (folder) =>
+                  initial || accountChanged || bindings.get(folder.id) !== previous.get(folder.id)
+              )
+              .map(async (folder) => {
+                const request = (folderRequests.current.get(folder.id) ?? 0) + 1;
+                folderRequests.current.set(folder.id, request);
+                const result = await window.graiderUI.refreshCourseFolder(folder.id);
+                if (
+                  active &&
+                  account === remoteAccount.current &&
+                  epoch === accountEpoch.current &&
+                  request === folderRequests.current.get(folder.id)
+                )
+                  rememberRefreshResult(result);
+              })
+          ).catch(() => {
+            if (active && account === remoteAccount.current && epoch === accountEpoch.current)
+              setErrorMessage("Could not refresh some course folders.");
+          });
+        }
+      } finally {
+        pending = false;
+      }
     };
     const timer = setInterval(() => {
       void check().catch(() => {});
@@ -161,7 +238,7 @@ export const DashboardDataProvider = ({
       {}
     );
 
-    setRefreshResults(nextResults);
+    setRefreshResults((current) => ({ ...current, ...nextResults }));
     for (const result of combinedResult.results) {
       applyRefreshResultMetadata(result);
     }
@@ -172,20 +249,31 @@ export const DashboardDataProvider = ({
       return;
     }
 
-    const startedVersion = remoteVersion.current;
+    const startedAccount = remoteAccount.current;
+    const startedEpoch = accountEpoch.current;
+    const startedRequests = new Map(folderRequests.current);
     isRefreshingAllRef.current = true;
     setIsRefreshingAll(true);
     setErrorMessage(null);
 
     try {
       const result = await window.graiderUI.refreshDashboard();
-      if (startedVersion === remoteVersion.current) rememberCombinedDashboardResult(result);
+      if (startedAccount === remoteAccount.current && startedEpoch === accountEpoch.current)
+        rememberCombinedDashboardResult({
+          ...result,
+          results: result.results.filter(
+            (entry) =>
+              startedRequests.get(entry.courseFolderId) ===
+              folderRequests.current.get(entry.courseFolderId)
+          )
+        });
     } catch (error) {
-      setErrorMessage(getSafeErrorMessage(error));
+      if (startedEpoch === accountEpoch.current) setErrorMessage(getSafeErrorMessage(error));
     } finally {
       isRefreshingAllRef.current = false;
       setIsRefreshingAll(false);
-      if (startedVersion !== remoteVersion.current) void runRefreshDashboard();
+      if (startedAccount !== remoteAccount.current || startedEpoch !== accountEpoch.current)
+        void runRefreshDashboard();
     }
   };
 
@@ -232,19 +320,25 @@ export const DashboardDataProvider = ({
   };
 
   const handleRefreshCourseFolder = async (id: string): Promise<void> => {
-    if (isRefreshingAllRef.current) {
-      return;
-    }
-
+    const account = remoteAccount.current;
+    const epoch = accountEpoch.current;
+    const request = (folderRequests.current.get(id) ?? 0) + 1;
+    folderRequests.current.set(id, request);
     setRefreshingId(id);
     setErrorMessage(null);
 
     try {
-      rememberRefreshResult(await window.graiderUI.refreshCourseFolder(id));
+      const result = await window.graiderUI.refreshCourseFolder(id);
+      if (
+        account === remoteAccount.current &&
+        epoch === accountEpoch.current &&
+        request === folderRequests.current.get(id)
+      )
+        rememberRefreshResult(result);
     } catch (error) {
-      setErrorMessage(getSafeErrorMessage(error));
+      if (epoch === accountEpoch.current) setErrorMessage(getSafeErrorMessage(error));
     } finally {
-      setRefreshingId(null);
+      if (request === folderRequests.current.get(id)) setRefreshingId(null);
     }
   };
 
@@ -284,6 +378,7 @@ export const DashboardDataProvider = ({
     removingId,
     errorMessage,
     setErrorMessage,
+    acceptGithubAccount,
     handleOpenCourseFolder,
     handleRefreshCourseFolder,
     handleRefreshDashboard,

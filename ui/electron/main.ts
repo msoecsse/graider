@@ -1,3 +1,5 @@
+import { loadCourseSnapshot, saveCourseSnapshot } from "./courseDiscoverySnapshot.js";
+import { createGithubOrganizationNetwork } from "./githubOrganizations.js";
 import { inspectLocalManagedCourse } from "./managedCourseLocalRead.js";
 import { courseContextRevision } from "./managedCourseMutationTypes.js";
 import { createMigrationReviewProgressStore } from "./migrationReviewProgress.js";
@@ -25,7 +27,10 @@ import {
   resolvePreservedCopy,
   preservedRecoveryState
 } from "./managedReconciliation.js";
-import { createAuthenticatedProductionGitWorkspace } from "./gitWorkspaceReader.js";
+import {
+  createAuthenticatedProductionGitWorkspace,
+  getProductionGitWorkspaceFactory
+} from "./gitWorkspaceReader.js";
 import {
   bootstrapManagedCourse,
   synchronizeManagedCourse,
@@ -1717,6 +1722,88 @@ registerIpcHandlers();
 app.whenReady().then(async () => {
   const reconciliation = new ManagedReconciliationService();
   const facultyAuth = new GithubOAuthSession({
+    findRegisteredCourse: async (folderId, { token, userId, signal }) => {
+      const folder = listCourseFolders(getCourseRegistryPath(app.getPath("userData"))).find(
+        (entry) => entry.id === folderId
+      );
+      if (!folder) return null;
+      const locals = await inspectLocalCourseOrigins([folder]);
+      const origin = locals[0]?.origin;
+      if (!origin) {
+        const local = await getProductionGitWorkspaceFactory().inspect(folder.path);
+        if (local.kind !== "not_repository")
+          throw new Error(
+            "The selected registered course Git origin could not be verified. Check its source before opening it."
+          );
+        return null;
+      }
+      const org = await createGithubOrganizationNetwork().verifyOrganization(
+        token,
+        origin.owner,
+        signal
+      );
+      const result = await discoverRemoteCourses({
+        targeted: true,
+        userId,
+        organizations: [org],
+        locals,
+        username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+          .currentFacultyMsoeUsername,
+        reader: createRemoteRepositoryReader(token, signal)
+      });
+      const found = result.courses.find((entry) => entry.localFolderIds.includes(folderId)) ?? null;
+      if (!found)
+        throw new Error(
+          "The selected registered course metadata or faculty access could not be verified. Check course access and retry."
+        );
+      const prior = Object.values(
+        loadManagedCatalog(app.getPath("userData"), userId, { readOnly: true }).courses
+      ).find(
+        (entry) =>
+          entry.organizationLogin.toLowerCase() === origin.owner.toLowerCase() &&
+          entry.name.toLowerCase() === origin.name.toLowerCase()
+      );
+      if (
+        found &&
+        prior &&
+        (found.repositoryId !== prior.repositoryId || found.organizationId !== prior.organizationId)
+      )
+        throw new Error("Registered course repository identity changed. Refresh course access.");
+      return found;
+    },
+    loadSnapshot: (userId) => loadCourseSnapshot(app.getPath("userData"), userId),
+    saveSnapshot: (userId, courses) => saveCourseSnapshot(app.getPath("userData"), userId, courses),
+    verifyCourse: async ({ token, userId, course, signal }) => {
+      const org = await createGithubOrganizationNetwork().verifyOrganization(
+        token,
+        course.organizationLogin,
+        signal
+      );
+      if (org.organizationId !== course.organizationId)
+        throw new Error("Organization identity changed.");
+      const registered = listCourseFolders(getCourseRegistryPath(app.getPath("userData")));
+      const result = await discoverRemoteCourses({
+        targeted: true,
+        userId,
+        organizations: [org],
+        username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))
+          .currentFacultyMsoeUsername,
+        managedRegistrations: [
+          {
+            repositoryId: course.repositoryId,
+            organizationId: course.organizationId,
+            folderIds: course.localFolderIds.filter((id) =>
+              registered.some((folder) => folder.id === id)
+            )
+          }
+        ],
+        locals: [],
+        reader: createRemoteRepositoryReader(token, signal)
+      });
+      const verified = result.courses.find((entry) => entry.repositoryId === course.repositoryId);
+      if (!verified) throw new Error("Course authorization unavailable.");
+      return verified;
+    },
     store: createGithubOAuthCredentialStore(
       path.join(app.getPath("userData"), "github-oauth.credential"),
       safeStorage
@@ -1811,7 +1898,7 @@ app.whenReady().then(async () => {
         ? reconciliation.plan(request)
         : reconciliation.apply(request, planId ?? "", confirmed === true);
     },
-    discoverCourses: async (token, userId, organizations, signal) => {
+    discoverCourses: async (token, userId, organizations, signal, onProgress) => {
       const registered = listCourseFolders(getCourseRegistryPath(app.getPath("userData")));
       const managedRegistrations = Object.values(
         loadManagedCatalog(app.getPath("userData"), userId).courses
@@ -1826,6 +1913,7 @@ app.whenReady().then(async () => {
         }));
       const managedIds = new Set(managedRegistrations.flatMap((entry) => entry.folderIds));
       const discovered = await discoverRemoteCourses({
+        onProgress,
         userId,
         organizations,
         username: loadLocalSettings(getLocalSettingsPath(app.getPath("userData")))

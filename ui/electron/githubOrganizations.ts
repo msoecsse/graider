@@ -1,3 +1,4 @@
+import { measureGradingPhase } from "./gradingPerformance.js";
 import {
   provideGithubClient,
   type GithubClientProvider,
@@ -69,9 +70,8 @@ export const createGithubOrganizationNetwork = (
     read: (client: GitHubClient, signal: AbortSignal) => Promise<OrganizationResponse>
   ): Promise<Response> => {
     try {
-      const response = await read(
-        provideClient(token),
-        AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)])
+      const response = await measureGradingPhase("remote_request", () =>
+        read(provideClient(token), AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]))
       );
       return new Response(JSON.stringify(response.data), {
         status: response.status,
@@ -153,6 +153,18 @@ export const createGithubOrganizationNetwork = (
     };
   };
   return {
+    async verifyOrganization(
+      token: string,
+      login: string,
+      signal: AbortSignal
+    ): Promise<GithubOrganization> {
+      const response = await get(token, signal, (client, bounded) =>
+        client.getOrganizationMembership!(login, bounded)
+      );
+      const status = await classifyOrganizationResponse(response);
+      if (status) return failure(status);
+      return normalize(await read(response));
+    },
     async verifyAccount(token: string, signal: AbortSignal): Promise<VerifiedGithubAccount> {
       const response = await withoutGithubAccountVerification(() =>
         get(token, signal, (client, bounded) => client.getOrganizationScopeResponse!(bounded))

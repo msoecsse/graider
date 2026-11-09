@@ -46,7 +46,14 @@ Saving course configuration, publishing, lifecycle changes, synchronization, and
 or readiness checks still require current remote access. Sign-out, account changes,
 known loss of course access, or an unsafe cache prevent cached reads. Startup and
 **Refresh courses** still establish authorization through GitHub; this does not add
-offline startup support. Schema 2 operation availability and section/role restrictions
+offline startup support. After the account is verified, previously discovered cards
+appear from an account-specific local snapshot. Course access labels distinguish
+cached, verifying, current, and needs attention; cached cards do not grant grading
+or publication permission. Opening a registered course verifies that course without
+waiting for organization-wide discovery. New courses continue appearing in the
+background. **Refresh courses** preserves visible cards and assignment results;
+a temporary discovery failure preserves them with an error message. Account changes
+clear the previous account's loaded results. Schema 2 operation availability and section/role restrictions
 remain unchanged.
 
 ## Publish Course Changes

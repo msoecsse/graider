@@ -377,3 +377,99 @@ it("rediscovers a cut-over registration by immutable catalog ID without consulti
   expect(reader.resolveId).toHaveBeenCalledWith(20);
   expect(reader.resolve).not.toHaveBeenCalled();
 });
+
+it("measures targeted access independently of latency-injected student repository pagination", async () => {
+  const STUDENT_COUNT = 1200;
+  const PAGE_SIZE = 100;
+  const NETWORK_LATENCY_MS = 10;
+  const repositories = [
+    repo(),
+    ...Array.from({ length: STUDENT_COUNT }, (_, index) =>
+      repo(index + 100, `27s1-csc1020-lab1-student-${index}`)
+    )
+  ];
+  const otherOrg = { ...org, organizationId: 11, login: "csc2220" };
+  const otherRepo = {
+    ...repo(21),
+    organizationId: 11,
+    owner: otherOrg.login,
+    name: otherOrg.login,
+    fullName: `${otherOrg.login}/${otherOrg.login}`
+  };
+  const f = fixture(repositories);
+  let requests = 0;
+  const network = async <T>(value: T): Promise<T> => {
+    requests += 1;
+    await new Promise((resolve) => setTimeout(resolve, NETWORK_LATENCY_MS));
+    return value;
+  };
+  f.reader.list.mockImplementation(async (login: string) => {
+    const listed =
+      login === org.login
+        ? repositories
+        : [
+            otherRepo,
+            ...repositories.slice(1).map((entry) => ({
+              ...entry,
+              organizationId: otherOrg.organizationId,
+              owner: otherOrg.login
+            }))
+          ];
+    for (let offset = 0; offset < listed.length; offset += PAGE_SIZE)
+      await network(listed.slice(offset, offset + PAGE_SIZE));
+    return listed;
+  });
+  f.reader.search.mockImplementation(() => network({ ids: [], incomplete: false }));
+  f.reader.resolveId.mockImplementation((id: number) =>
+    network(id === otherRepo.id ? otherRepo : repo())
+  );
+  f.reader.revision.mockImplementation(() => network("a".repeat(40)));
+  f.reader.terms.mockImplementation(() => network(["27s1"]));
+  f.reader.file.mockImplementation((_repo, name) =>
+    network(
+      name === "course.yml"
+        ? courseYaml.replace("organization: csc1120", `organization: ${_repo.owner}`)
+        : termYaml
+    )
+  );
+  const request = {
+    ...f.request,
+    organizations: [org, otherOrg],
+    managedRegistrations: [
+      { repositoryId: 20, organizationId: 10, folderIds: ["registered"] },
+      { repositoryId: 21, organizationId: 11, folderIds: ["other-course"] }
+    ]
+  };
+  const before = performance.now();
+  const discovered = await discoverRemoteCourses(request);
+  expect(discovered.courses).toHaveLength(2);
+  expect(discovered.courses.every((course) => course.authorization === "authorized")).toBe(true);
+  const broadMs = performance.now() - before;
+  const broadRequests = requests;
+  requests = 0;
+  f.reader.list.mockClear();
+  f.reader.search.mockClear();
+  const selected = performance.now();
+  expect(
+    (await discoverRemoteCourses({ ...request, organizations: [org], targeted: true })).courses[0]
+  ).toMatchObject({
+    authorization: "authorized",
+    localFolderIds: ["registered"],
+    schemaVersion: 1
+  });
+  const selectedMs = performance.now() - selected;
+  expect(f.reader.list).not.toHaveBeenCalled();
+  expect(f.reader.search).not.toHaveBeenCalled();
+  expect(requests).toBeLessThan(broadRequests);
+  console.info(
+    "Course startup fixture measurement",
+    JSON.stringify({
+      students: STUDENT_COUNT,
+      networkLatencyMs: NETWORK_LATENCY_MS,
+      broadMs,
+      selectedMs,
+      broadRequests,
+      selectedRequests: requests
+    })
+  );
+});

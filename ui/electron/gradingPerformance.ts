@@ -2,6 +2,14 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { performance } from "node:perf_hooks";
 
 type Phase =
+  | "bootstrap"
+  | "authorization_cache_hit"
+  | "credential_restore"
+  | "account_verification"
+  | "cached_courses"
+  | "organization_discovery"
+  | "repository_listing"
+  | "metadata_search"
   | "synchronization"
   | "fetch"
   | "remote_authorization"
@@ -76,7 +84,12 @@ export const measureGradingOperation = async <T>(
   operation: () => Promise<T>,
   report?: (sample: GradingPerformanceSample) => void
 ): Promise<T> => {
-  if (!report && (measurements.getStore() || process.env.GRAIDER_GRADING_PERFORMANCE !== "1"))
+  if (
+    !report &&
+    (measurements.getStore() ||
+      (process.env.GRAIDER_GRADING_PERFORMANCE !== "1" &&
+        process.env.GRAIDER_STARTUP_PERFORMANCE !== "1"))
+  )
     return operation();
   const sample: GradingPerformanceSample = { channel, durationMs: 0, phases: {} };
   const started = performance.now();
@@ -88,3 +101,11 @@ export const measureGradingOperation = async <T>(
     else console.info("Graider grading performance", JSON.stringify(completed));
   }
 };
+
+/** Opt-in startup timeline; aggregate durations/counts only, never identities or errors. */
+export const measureStartup = <T>(channel: string, operation: () => Promise<T>): Promise<T> =>
+  process.env.GRAIDER_STARTUP_PERFORMANCE === "1"
+    ? measureGradingOperation(channel, operation, (sample) =>
+        console.info("Graider startup performance", JSON.stringify(sample))
+      )
+    : operation();

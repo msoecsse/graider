@@ -578,7 +578,13 @@ describe("private course discovery capability and transactional upgrades", () =>
     const session = new GithubOAuthSession({ ...f, discoverCourses });
     await session.restore();
     await session.refreshOrganizations();
-    expect(discoverCourses).toHaveBeenCalledWith(TOKEN, IDENTITY.id, [], expect.any(AbortSignal));
+    expect(discoverCourses).toHaveBeenCalledWith(
+      TOKEN,
+      IDENTITY.id,
+      [],
+      expect.any(AbortSignal),
+      expect.any(Function)
+    );
     expect(session.getState().courseDiscovery.userId).toBe(IDENTITY.id);
     f.network.verifyAccount.mockResolvedValue({
       identity: { login: "second", id: 99, name: null },

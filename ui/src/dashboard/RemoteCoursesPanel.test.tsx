@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { RemoteCoursesPanel } from "./RemoteCoursesPanel";
+import { RemoteCoursesPanel, useRemoteCourses } from "./RemoteCoursesPanel";
 import type { RemoteCourse } from "../../electron/remoteCourseTypes";
 import type { GithubOAuthState } from "../../electron/githubOAuthTypes";
 const course: RemoteCourse = {
@@ -379,4 +379,51 @@ it("does not expose migration review for unauthorized or v2/newer courses", () =
     }
   });
   expect(screen.queryByRole("link", { name: /Review migration/ })).not.toBeInTheDocument();
+});
+
+it("preserves visible course cards during manual refresh and after a transient failure", async () => {
+  let rejectRefresh!: (error: Error) => void;
+  const refreshOrganizations = vi.fn(
+    () =>
+      new Promise<GithubOAuthState>((_resolve, reject) => {
+        rejectRefresh = reject;
+      })
+  );
+  Object.assign(window.graiderUI, {
+    githubOAuth: { get: vi.fn().mockResolvedValue(state), refreshOrganizations }
+  });
+  const View = () => {
+    const remote = useRemoteCourses();
+    return (
+      <RemoteCoursesPanel
+        state={remote.state}
+        onRefresh={() => {
+          void remote.refresh();
+        }}
+        onSettings={() => {}}
+      />
+    );
+  };
+  render(<View />);
+  expect(await screen.findByText("CSC1020 — Data Structures")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh courses" }));
+  expect(screen.getByText("CSC1020 — Data Structures")).toBeInTheDocument();
+  expect(screen.getByText("Discovering remote courses…")).toBeInTheDocument();
+  rejectRefresh(new Error("fixture outage"));
+  expect(await screen.findByText(/Course discovery temporarily unavailable/)).toBeInTheDocument();
+  expect(screen.getByText("CSC1020 — Data Structures")).toBeInTheDocument();
+});
+
+it("shows cached course cards without presenting cached authority as usable", () => {
+  show({
+    ...state,
+    courseDiscovery: {
+      ...state.courseDiscovery,
+      status: "loading",
+      courses: [{ ...course, authorization: "unavailable", freshness: "cached" }]
+    }
+  });
+  expect(screen.getByText("CSC1020 — Data Structures")).toBeInTheDocument();
+  expect(screen.getByText("Course access: cached")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Course details" })).not.toBeInTheDocument();
 });

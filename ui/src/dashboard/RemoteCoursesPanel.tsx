@@ -14,6 +14,17 @@ const STATE_POLL_MS = 500;
 export const useRemoteCourses = () => {
   const [state, setState] = useState<GithubOAuthState | null>(null);
   const generation = useRef(0);
+  const measuredCards = useRef(false);
+  useEffect(() => {
+    if (
+      !measuredCards.current &&
+      state?.courseDiscovery.courses.length &&
+      typeof performance.measure === "function"
+    ) {
+      measuredCards.current = true;
+      performance.measure("graider.known_courses_displayed", { start: 0, end: performance.now() });
+    }
+  }, [state]);
   const accept = useCallback((next: GithubOAuthState) => {
     generation.current += 1;
     setState(next);
@@ -27,7 +38,11 @@ export const useRemoteCourses = () => {
         const current = generation.current;
         try {
           const next = await window.graiderUI.githubOAuth.get();
-          if (mounted && current === generation.current) setState(next);
+          if (mounted && current === generation.current)
+            setState((previous) => {
+              if (previous?.identity?.id !== next.identity?.id) generation.current += 1;
+              return next;
+            });
         } catch {
           /* Account panel reports transport errors; never project provider errors. */
         } finally {
@@ -46,23 +61,25 @@ export const useRemoteCourses = () => {
   }, []);
   const refresh = async () => {
     if (window.graiderUI.githubOAuth) {
-      generation.current += 1;
+      const requestGeneration = ++generation.current;
       setState((current) =>
         current
           ? {
               ...current,
-              courseDiscovery: { ...current.courseDiscovery, courses: [], status: "loading" }
+              courseDiscovery: { ...current.courseDiscovery, status: "loading" }
             }
           : current
       );
       try {
-        accept(await window.graiderUI.githubOAuth.refreshOrganizations());
+        const next = await window.graiderUI.githubOAuth.refreshOrganizations();
+        if (requestGeneration === generation.current) accept(next);
       } catch {
-        setState((current) =>
-          current
-            ? { ...current, courseDiscovery: { ...current.courseDiscovery, status: "error" } }
-            : current
-        );
+        if (requestGeneration === generation.current)
+          setState((current) =>
+            current
+              ? { ...current, courseDiscovery: { ...current.courseDiscovery, status: "error" } }
+              : current
+          );
       }
     }
   };
@@ -93,10 +110,17 @@ export const RemoteCoursesPanel = ({
   const visible =
     current?.courses.filter(
       (course) =>
-        (course.localStatus !== "registered_local" || course.schemaVersion === 2) &&
+        (course.localStatus !== "registered_local" ||
+          course.schemaVersion === 2 ||
+          course.freshness === "cached" ||
+          course.freshness === "verifying" ||
+          course.freshness === "needs_attention") &&
         (course.lifecycle !== "archived" || showArchived) &&
         (course.authorization === "authorized" ||
-          course.authorization === "faculty_identity_required")
+          course.authorization === "faculty_identity_required" ||
+          course.freshness === "cached" ||
+          course.freshness === "verifying" ||
+          course.freshness === "needs_attention")
     ) ?? [];
   const synchronizing =
     current?.courses.filter(
@@ -224,6 +248,9 @@ export const RemoteCoursesPanel = ({
                 {course.code} — {course.title}
               </h3>
               <p>{course.fullName}</p>
+              {course.freshness ? (
+                <p role="status">Course access: {course.freshness.replace("_", " ")}</p>
+              ) : null}
               {course.schemaVersion === 2 &&
               course.authorization === "authorized" &&
               current?.userId ? (
@@ -242,19 +269,25 @@ export const RemoteCoursesPanel = ({
               ) : (
                 <>
                   <p>
-                    {course.bootstrap?.status === "ready"
-                      ? course.synchronization
-                        ? synchronizationLabel(course.synchronization)
-                        : "Cached locally"
-                      : course.bootstrap?.status === "bootstrapping"
-                        ? "Setting up course…"
-                        : course.bootstrap?.status === "queued"
-                          ? "Course setup queued"
-                          : course.bootstrap?.status === "failed"
-                            ? "Course setup failed"
-                            : course.bootstrap?.status === "needs_attention"
-                              ? "Needs attention"
-                              : "Available remotely"}
+                    {course.freshness === "cached"
+                      ? "Cached course metadata; authorization pending"
+                      : course.freshness === "verifying"
+                        ? "Verifying course access…"
+                        : course.freshness === "needs_attention"
+                          ? "Course access needs attention"
+                          : course.bootstrap?.status === "ready"
+                            ? course.synchronization
+                              ? synchronizationLabel(course.synchronization)
+                              : "Cached locally"
+                            : course.bootstrap?.status === "bootstrapping"
+                              ? "Setting up course…"
+                              : course.bootstrap?.status === "queued"
+                                ? "Course setup queued"
+                                : course.bootstrap?.status === "failed"
+                                  ? "Course setup failed"
+                                  : course.bootstrap?.status === "needs_attention"
+                                    ? "Needs attention"
+                                    : "Available remotely"}
                   </p>
                   {course.bootstrap?.status === "ready" &&
                   course.synchronization?.status !== "needs_attention" ? (

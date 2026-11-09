@@ -1,3 +1,4 @@
+import { isTransientCourseDiagnostic } from "./remoteCourseTypes.js";
 import { classifyGradingOperation, measureGradingPhase } from "./gradingPerformance.js";
 import { canonicalFilesystemRoot, sameFilesystemRoot } from "./canonicalFilesystemRoot.js";
 import { publishManagedCourseTransaction } from "./managedCourseTransaction.js";
@@ -397,7 +398,7 @@ export class ManagedCourseMutationGuard {
     managedRequest?: ManagedOperationRequest,
     localGrading = false
   ): Promise<T> {
-    await this.deps.session.waitForCourseStartup?.();
+    await this.deps.session.waitForCourseStartup?.(folderId);
     const remote = this.remoteSelector(folderId);
     classifyGradingOperation({ source: this.isManaged(folderId) ? "managed" : "legacy" });
     const folder = remote ?? this.deps.folders().find((item) => item.id === folderId);
@@ -409,7 +410,10 @@ export class ManagedCourseMutationGuard {
     if (
       this.deps.session
         .getState()
-        .courseDiscovery.diagnostics.some((item) => item.localFolderIds?.includes(String(folderId)))
+        .courseDiscovery.diagnostics.some(
+          (item) =>
+            item.localFolderIds?.includes(String(folderId)) && !isTransientCourseDiagnostic(item)
+        )
     )
       blockMutation(
         "remote_only_mutation_unavailable",
