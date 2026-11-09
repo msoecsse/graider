@@ -94,6 +94,12 @@ jobs:
       - name: Generate Electron backend bridges
         run: npm run build:electron-backends
 
+      - name: Typecheck root
+        run: npm run typecheck:prepared
+
+      - name: Typecheck UI
+        run: npm --prefix ui run typecheck:prepared
+
       - name: Test local grading, cache leases, account invalidation and publication safeguards
         working-directory: ui
         run: >-
