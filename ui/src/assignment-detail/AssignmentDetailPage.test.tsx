@@ -1577,9 +1577,7 @@ describe("AssignmentDetailPage", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.getAllByText("Needs attention").length).toBeGreaterThan(0);
     expect(screen.getByText("Template repository is missing.")).toBeInTheDocument();
-    expect(
-      screen.getByText("GitHub authentication needed for readiness checks.")
-    ).toBeInTheDocument();
+    expect(screen.getByText("Remote readiness checks were not completed.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Assignment facts" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Template" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Grading" })).toBeInTheDocument();

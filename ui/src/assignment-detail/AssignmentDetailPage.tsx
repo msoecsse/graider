@@ -1180,14 +1180,11 @@ export const AssignmentDetailPage = ({
         : "Synchronizing template changes across student repositories..."
       : `Repository ${templateSyncProgress.current} of ${templateSyncProgress.total} · ${templateSyncProgress.studentId} · ${templateSyncProgress.repository}`;
 
-  // Primary action label depends on lifecycle state: blocked (a readiness item
-  // needs attention) takes precedence over apply state, which is otherwise
-  // either "not yet applied" (derive the student count and go to apply) or
-  // "applied" (go grade). The finer-grained applied/submissions/graded/
-  // published split from the design doc is intentionally not implemented here
-  // — see the PR report for why.
+  // Remote readiness restricts mutations; local grading is authorized by the main process.
   const readiness = detail === null ? null : deriveAssignmentReadiness(detail);
-  const isBlocked = readiness?.status === "needs_attention";
+  const isApplied =
+    detail?.applyState.status === "applied" || detail?.applyState.status === "partially_applied";
+  const isBlocked = !isApplied && readiness?.status === "needs_attention";
   // A missing GitHub token is a lesser concern than the readiness checks it
   // merely prevented from running (deriveAssignmentReadiness treats it the
   // same way — see hasNonTokenAttention above) so the primary action features
@@ -1574,8 +1571,11 @@ export const AssignmentDetailPage = ({
 
         {showTokenGuidance ? (
           <section className="detail-guidance" aria-label="GitHub token guidance">
-            <h2>GitHub token required for readiness checks.</h2>
-            <p>Sign in with GitHub CLI using gh auth login, then refresh.</p>
+            <h2>Remote readiness checks unavailable.</h2>
+            <p>
+              Optional template and workflow checks were not completed. Local grading uses your
+              verified Graider session.
+            </p>
           </section>
         ) : null}
 

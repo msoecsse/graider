@@ -55,8 +55,8 @@ export const collectNeedsAttentionItems = (
     items.push(
       createAttentionItem(
         "github-token-required",
-        "GitHub authentication needed for readiness checks.",
-        "Local assignment details are shown, but GitHub-backed template and workflow checks need authentication.",
+        "Remote readiness checks were not completed.",
+        "Local assignment details are available. Optional GitHub template and workflow verification is unavailable.",
         "GitHub readiness"
       )
     );

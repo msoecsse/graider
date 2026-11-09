@@ -179,7 +179,28 @@ export const getAssignmentDetail = async (
       runner: options.runner,
       env: localEnv
     });
-    return { ...result, refreshedAt: (options.now ?? DEFAULT_NOW)().toISOString() };
+    // Credentials are deliberately omitted here, so missing-token diagnostics
+    // describe skipped remote checks, not an invalid OAuth session.
+    const detail =
+      result.detail === null
+        ? null
+        : {
+            ...result.detail,
+            diagnostics: result.detail.diagnostics.map((diagnostic) =>
+              isRecord(diagnostic) &&
+              (diagnostic.code === "github_token_required" ||
+                diagnostic.code === "github_token_missing")
+                ? {
+                    ...diagnostic,
+                    code: "remote_readiness_not_checked",
+                    severity: "info",
+                    message:
+                      "Optional GitHub template and workflow readiness checks were skipped for this local read."
+                  }
+                : diagnostic
+            )
+          };
+    return { ...result, detail, refreshedAt: (options.now ?? DEFAULT_NOW)().toISOString() };
   }
   const tokenResult = await resolveGithubToken({
     runner: options.runner,

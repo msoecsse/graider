@@ -241,6 +241,41 @@ describe("AssignmentDetailPage header actions", () => {
     expect(await screen.findByRole("button", { name: "Continue grading" })).toBeInTheDocument();
   });
 
+  it.each(["applied", "partially_applied"])(
+    "keeps local grading available for %s with remote errors",
+    async (status) => {
+      const onPreviewGrade = vi.fn();
+      mockGraiderUI({
+        getAssignmentDetail: vi.fn().mockResolvedValue(
+          createAssignmentDetailResult(
+            createAssignmentDetailJson({
+              applyState: { status },
+              diagnostics: [
+                {
+                  code: "github_token_required",
+                  severity: "error",
+                  message: "GitHub token required."
+                }
+              ],
+              template: {
+                repository: "owner/template",
+                branch: "main",
+                status: "missing",
+                repositoryStatus: "missing",
+                branchStatus: "missing"
+              }
+            })
+          )
+        )
+      });
+      renderAssignmentDetailPage({ onPreviewGrade });
+      fireEvent.click(await screen.findByRole("button", { name: "Continue grading" }));
+      expect(onPreviewGrade).toHaveBeenCalledOnce();
+      expect(screen.queryByText(/gh auth login/u)).not.toBeInTheDocument();
+      expect(screen.getByText("Template repository is missing.")).toBeInTheDocument();
+    }
+  );
+
   it("shows the specific blocker fix, in the blocked style, when a readiness item needs attention", async () => {
     mockGraiderUI({
       getAssignmentDetail: vi.fn().mockResolvedValue(

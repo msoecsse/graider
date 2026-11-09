@@ -627,3 +627,9 @@ repeating migration warnings. Published courses with incomplete/unverified curre
 access keep a **Needs attention** notice linking to recovery. Deferred student
 identity/grading/comment findings alone do not generate repeated warnings for Ready
 courses, and Ready does not enable operations reserved for later roadmap phases.
+
+Applied and partially applied assignments offer **Continue grading** even when
+optional remote template or workflow readiness checks are unavailable. Local
+grading requires your verified Graider account and authorized local course state;
+it does not require GitHub CLI sign-in or another course synchronization. Remote
+readiness restrictions still apply to GitHub-dependent operations.

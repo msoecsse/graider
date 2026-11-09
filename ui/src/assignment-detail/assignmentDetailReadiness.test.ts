@@ -143,7 +143,7 @@ describe("assignment detail readiness helpers", () => {
 
     expect(deriveAssignmentReadiness(detail).label).toBe("Partially checked");
     expect(collectNeedsAttentionItems(detail)[0]?.title).toBe(
-      "GitHub authentication needed for readiness checks."
+      "Remote readiness checks were not completed."
     );
   });
 

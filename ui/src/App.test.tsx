@@ -1052,14 +1052,21 @@ describe("App routing — each route, and unresolvable slugs", () => {
 
   it("navigates dashboard to assignment detail to the grading workspace and back", async () => {
     mockGraiderUI({
-      getAssignmentDetail: vi
-        .fn()
-        .mockResolvedValue(
-          createAssignmentDetailResult(
-            {},
-            createAssignmentDetailJson({ applyState: { status: "applied" } })
-          )
-        ),
+      getAssignmentDetail: vi.fn().mockResolvedValue(
+        createAssignmentDetailResult(
+          {},
+          createAssignmentDetailJson({
+            applyState: { status: "applied" },
+            diagnostics: [
+              {
+                code: "github_token_required",
+                severity: "error",
+                message: "GitHub token required."
+              }
+            ]
+          })
+        )
+      ),
       prepareGradingWorkspace: vi.fn().mockResolvedValue({
         status: "success",
         assignment: { title: "Lab 02", termCode: "27s1", slug: "lab02" },

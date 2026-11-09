@@ -7,6 +7,7 @@ import { managedOperationalFixture, fixtureGit } from "./managedOperationalFixtu
 import { removeGitFixture, GIT_INTEGRATION_TIMEOUT_MS } from "./gitIntegrationFixtures";
 import { createCourseMutationIpc } from "./courseMutationIpc";
 import { IPC_CHANNELS } from "./ipc";
+import { getAssignmentDetail } from "./assignmentDetailRunner";
 import { createGradingWorkspaceService } from "./gradingWorkspaceService";
 import { createGradingStudentSourceService } from "./gradingStudentSourceService";
 import { createGradingStudentSnapshotService } from "./gradingStudentSnapshotService";
@@ -727,6 +728,56 @@ it.each(["managed", "legacy"] as const)(
     await expect(f.call(IPC_CHANNELS.publishGradingStudentReport)).rejects.toThrow();
     expect(preview).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
+  },
+  GIT_INTEGRATION_TIMEOUT_MS
+);
+
+it(
+  "keeps verified Schema 1 local grading and comment saves independent of skipped remote readiness",
+  async () => {
+    const f = await fixture("legacy");
+    const runner = vi.fn(async () => ({
+      stdout: JSON.stringify({
+        schemaVersion: 1,
+        commandName: "assignment detail",
+        status: "partial_success",
+        exitCode: 0,
+        sections: [],
+        diagnostics: [
+          { code: "github_token_required", severity: "error", message: "GitHub token required" }
+        ]
+      }),
+      stderr: "",
+      exitCode: 0,
+      error: null
+    }));
+    f.ipc.handle(IPC_CHANNELS.getAssignmentDetail, (_event, request) =>
+      getAssignmentDetail(request, { runner, env: {} })
+    );
+    await expect(
+      f.call(IPC_CHANNELS.getAssignmentDetail, {
+        assignmentFile: "terms/27s1/assignments/lab01/assignment.yml"
+      })
+    ).resolves.toMatchObject({
+      detail: { diagnostics: [{ code: "remote_readiness_not_checked", severity: "info" }] }
+    });
+    expect(runner).toHaveBeenCalledOnce();
+    await expect(f.call(IPC_CHANNELS.prepareGradingWorkspace)).resolves.toMatchObject({
+      status: "success"
+    });
+    await expect(
+      f.call(IPC_CHANNELS.addGradingStudentComment, {
+        comment: { id: "hotfix", text: "Feedback", deduction: -3 }
+      })
+    ).resolves.toMatchObject({ status: "success" });
+    expect(f.requests.every((method) => method.mock.calls.length === 0)).toBe(true);
+    f.switchAccount(null);
+    await expect(f.call(IPC_CHANNELS.prepareGradingWorkspace)).rejects.toThrow();
+    await expect(
+      f.call(IPC_CHANNELS.addGradingStudentComment, {
+        comment: { id: "denied", text: "Denied", deduction: -3 }
+      })
+    ).rejects.toThrow();
   },
   GIT_INTEGRATION_TIMEOUT_MS
 );

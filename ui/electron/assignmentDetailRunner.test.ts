@@ -219,8 +219,18 @@ describe("assignmentDetailRunner", () => {
     ]);
   });
   it("omits credential resolution and optional GitHub checks for verified local course reads", async () => {
-    const runner = vi.fn(async () => createProcessResult());
-    await managedCourseOperation.run(
+    const runner = vi.fn(async () =>
+      createProcessResult({
+        stdout: JSON.stringify({
+          ...createAssignmentDetailJson(),
+          diagnostics: [
+            { code: "github_token_required", severity: "error", message: "Run gh auth login" },
+            { code: "config_invalid", severity: "error", message: "Invalid config" }
+          ]
+        })
+      })
+    );
+    const result = await managedCourseOperation.run(
       {
         mode: "local_read",
         cachedCommit: "a".repeat(40),
@@ -240,6 +250,11 @@ describe("assignmentDetailRunner", () => {
           }
         })
     );
+    expect(result.detail?.diagnostics).toEqual([
+      expect.objectContaining({ code: "remote_readiness_not_checked", severity: "info" }),
+      { code: "config_invalid", severity: "error", message: "Invalid config" }
+    ]);
+    expect(JSON.stringify(result.detail)).not.toContain("gh auth login");
     expect(runner).toHaveBeenCalledOnce();
     expect(runner).toHaveBeenCalledWith(
       expect.objectContaining({ command: "graider", env: { PATH: "test-path" } })
