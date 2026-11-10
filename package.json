@@ -31,7 +31,9 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
     "test:hygiene": "node --import tsx scripts/check-test-hygiene.ts",
     "pretest": "npm run test:hygiene",
-    "pretest:watch": "npm run test:hygiene"
+    "pretest:watch": "npm run test:hygiene",
+    "test:migration": "npm run test:hygiene && npm run build:electron-backends && npm run test:migration:root && npm --prefix ui run test:migration",
+    "test:migration:root": "vitest run --maxWorkers=2 tests/unit/migration tests/unit/github/migration-read-adapter.test.ts tests/unit/faculty tests/unit/config"
   },
   "keywords": [
     "github",

@@ -27,7 +27,8 @@
     "test:watch": "vitest",
     "format:check": "prettier . --check",
     "pretest": "npm --prefix .. run test:hygiene",
-    "pretest:watch": "npm --prefix .. run test:hygiene"
+    "pretest:watch": "npm --prefix .. run test:hygiene",
+    "test:migration": "vitest run --maxWorkers=2 electron/migration electron/schemaDiscriminated electron/managedOperationBridge.integration.test.ts electron/managedRuntimeWriteSafety.test.ts electron/courseStartup.integration.test.ts electron/remoteCourseDiscovery.test.ts electron/courseSetupService.test.ts src/migration-review"
   },
   "dependencies": {
     "dompurify": "^3.4.17",

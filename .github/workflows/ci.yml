@@ -146,3 +146,40 @@ jobs:
 
       - name: Test serial issue orchestrator process and recovery safeguards
         run: npx vitest run --maxWorkers=2 tests/unit/orchestrator.test.ts
+
+  migration-regression:
+    name: Migration regression (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+            target: macOS arm64
+          - runner: windows-latest
+            architecture: x64
+            target: Windows x64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Preserve repository line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          architecture: ${{ matrix.architecture }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - name: Verify native target
+        run: node -e "if (process.arch !== '${{ matrix.architecture }}' || process.platform !== '${{ matrix.runner == 'windows-latest' && 'win32' || 'darwin' }}') process.exit(1)"
+      - run: npm ci
+      - run: npm ci --prefix ui
+      - run: npm run build:electron-backends
+      - run: npm run typecheck:prepared
+      - run: npm --prefix ui run typecheck:prepared
+      - name: Complete permanent migration regression suite
+        run: npm run test:migration

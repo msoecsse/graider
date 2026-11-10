@@ -181,3 +181,12 @@ Unless the issue specifies otherwise, report:
 `Assumptions made` should normally be empty. If an unresolved assumption would
 affect behavior or safety, it should have been handled as a human-decision
 blocker instead.
+
+## Permanent migration regression validation
+
+Changes affecting schemas, migration, course management, Git transactions,
+authorization or reconciliation must run `npm run test:migration` from the root,
+in addition to scope-required root/UI validation. Both native CI jobs (macOS arm64
+and Windows x64) must pass before merging or releasing affected changes. This
+suite remains required after Phase 9. See
+[coverage and failure diagnosis](docs/migration-regression.md).

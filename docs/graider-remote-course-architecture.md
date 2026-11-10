@@ -6,6 +6,12 @@
 
 ---
 
+The Slice 9.5 closeout audit and permanent native migration regression coverage
+are recorded in [migration regression validation](migration-regression.md).
+Production migration remains disabled pending the independent release/readiness
+requirements in the migration contract. Phase 9 audit #15 is the next handoff;
+Phase 10 is not started.
+
 ## 1. Purpose
 
 Graider must evolve from a desktop application centered on locally registered course folders into a GitHub-backed faculty application that works naturally across multiple computers and among multiple faculty teaching the same course.

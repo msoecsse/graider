@@ -192,3 +192,12 @@ Stop and report instead of editing when:
   clarification.
 - The repository already has equivalent contract docs that should be extended
   instead of creating parallel guidance.
+
+## Permanent migration regression validation
+
+Changes affecting schemas, migration, course management, Git transactions,
+authorization or reconciliation must run `npm run test:migration` from the root,
+in addition to scope-required root/UI validation. Both native CI jobs (macOS arm64
+and Windows x64) must pass before merging or releasing affected changes. This
+suite remains required after Phase 9. See
+[coverage and failure diagnosis](migration-regression.md).
