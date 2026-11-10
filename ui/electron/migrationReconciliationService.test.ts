@@ -28,8 +28,14 @@ import { parse, stringify } from "yaml";
 // performs 39 pushes, 56 clones and 115 fetches (~18s in isolation). Budget these
 // multi-transaction scenarios separately from individual Git integration cases;
 // keep the deadline bounded and retain the production subprocess/cancel limits.
-const RECONCILIATION_TRANSACTION_BUDGETS = 3;
-const SCENARIO_TIMEOUT_MS = RECONCILIATION_TRANSACTION_BUDGETS * GIT_INTEGRATION_TIMEOUT_MS;
+// Native Windows CI measured 75s and 84s for single full reconciliations;
+// archive/recovery performs two plus independent history/access observations.
+// Allow three such ~90s transactions, rounded to a bounded five-minute budget.
+const DEFAULT_TRANSACTION_BUDGETS = 3;
+const WINDOWS_TRANSACTION_BUDGETS = 10;
+const SCENARIO_TIMEOUT_MS =
+  (process.platform === "win32" ? WINDOWS_TRANSACTION_BUDGETS : DEFAULT_TRANSACTION_BUDGETS) *
+  GIT_INTEGRATION_TIMEOUT_MS;
 
 const roots: string[] = [];
 afterEach(async () => {
