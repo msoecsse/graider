@@ -139,6 +139,7 @@ jobs:
           electron/managedOperationBridge.integration.test.ts
           electron/gradingStudentReportPublicationService.test.ts
           src/grading-workspace/GradingWorkspaceEvidencePanel.test.tsx
+          src/grading-workspace/GradingWorkspaceKeyboardShortcuts.test.tsx
 
       - name: Test actual student Git updates and grading preservation
         run: npx vitest run --maxWorkers=2 tests/unit/grading/grading-student-repository-update.test.ts tests/unit/git/git-command-workspace.test.ts

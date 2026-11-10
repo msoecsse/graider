@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   GradingStudentEvidenceResult,
@@ -39,6 +39,14 @@ vi.mock("./RepositoryDocumentViewer", () => ({
 }));
 
 import { GradingWorkspacePage } from "./GradingWorkspacePage";
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+};
 
 const REQUEST: GradingWorkspacePrepareRequest = {
   courseFolderId: "course-1",
@@ -136,6 +144,7 @@ const evidenceWithFailures = (
 
 const setApis = ({
   workspaceStudents = students,
+  loadSource = vi.fn(({ studentId }: { studentId: string }) => Promise.resolve(source(studentId))),
   loadSnapshot = vi.fn(({ studentId }: { studentId: string }) =>
     Promise.resolve(
       snapshot(
@@ -174,6 +183,7 @@ const setApis = ({
     warnings: []
   })
 }: {
+  readonly loadSource?: ReturnType<typeof vi.fn>;
   readonly loadSnapshot?: ReturnType<typeof vi.fn>;
   readonly loadEvidence?: ReturnType<typeof vi.fn>;
   readonly loadCommitHistory?: ReturnType<typeof vi.fn>;
@@ -192,9 +202,7 @@ const setApis = ({
       rubric,
       students: workspaceStudents
     }),
-    loadGradingStudentSource: vi.fn(({ studentId }: { studentId: string }) =>
-      Promise.resolve(source(studentId))
-    ),
+    loadGradingStudentSource: loadSource,
     loadGradingStudentViewState: vi.fn().mockResolvedValue({
       status: "success",
       studentId: "ada",
@@ -575,6 +583,8 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
   it("A opens and focuses the automated checks panel, and pressing A again returns focus", async () => {
     setApis({ loadEvidence: vi.fn().mockResolvedValue(evidenceWithFailures("ada")) });
     render(<GradingWorkspacePage request={REQUEST} />);
+    await screen.findByTestId("mock-monaco");
+    await screen.findByRole("button", { name: "Mark Complete" });
     const filterButton = await screen.findByRole("button", { name: "To grade 2" });
     filterButton.focus();
     expect(filterButton).toHaveFocus();
@@ -586,6 +596,74 @@ describe("GradingWorkspacePage keyboard shortcuts", () => {
     fireEvent.keyDown(window, { key: "a" });
     expect(filterButton).toHaveFocus();
   });
+
+  it.each(["source", "snapshot"] as const)(
+    "returns Automated Checks focus before and after delayed %s initialization",
+    async (first) => {
+      const sourceResult = deferred<ReturnType<typeof source>>();
+      const snapshotResult = deferred<ReturnType<typeof snapshot>>();
+      const evidenceResult = deferred<GradingStudentEvidenceResult>();
+      setApis({
+        loadSource: vi.fn().mockReturnValue(sourceResult.promise),
+        loadSnapshot: vi.fn().mockReturnValue(snapshotResult.promise),
+        loadEvidence: vi.fn().mockReturnValue(evidenceResult.promise)
+      });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      const filterButton = await screen.findByRole("button", { name: "To grade 2" });
+      await screen.findByText("Loading grading details for ada…");
+      filterButton.focus();
+
+      fireEvent.keyDown(filterButton, { key: "a" });
+      const loading = await screen.findByText("Loading automated checks for ada…");
+      expect(loading).toHaveFocus();
+      fireEvent.keyDown(loading, { key: "a" });
+      expect(filterButton).toHaveFocus();
+
+      await act(async () => {
+        if (first === "source") sourceResult.resolve(source("ada"));
+        else snapshotResult.resolve(snapshot("ada"));
+      });
+      fireEvent.keyDown(filterButton, { key: "a" });
+      expect(loading).toHaveFocus();
+      await act(async () => {
+        sourceResult.resolve(source("ada"));
+        snapshotResult.resolve(snapshot("ada"));
+        evidenceResult.resolve(evidenceWithFailures("ada"));
+      });
+      await screen.findByTestId("mock-monaco");
+      await screen.findByRole("button", { name: "Mark Complete" });
+      expect(screen.getByText("Automated Checks").closest("summary")).toHaveFocus();
+      fireEvent.keyDown(window, { key: "a" });
+      expect(filterButton).toHaveFocus();
+      fireEvent.keyDown(filterButton, { key: "a" });
+      const summary = screen.getByText("Automated Checks").closest("summary");
+      expect(summary).toHaveFocus();
+      fireEvent.keyDown(summary as HTMLElement, { key: "a" });
+      expect(filterButton).toHaveFocus();
+    }
+  );
+
+  it.each(["A", "manual"] as const)(
+    "does not reclaim focus after %s focus return",
+    async (mode) => {
+      const evidenceResult = deferred<GradingStudentEvidenceResult>();
+      setApis({ loadEvidence: vi.fn().mockReturnValue(evidenceResult.promise) });
+      render(<GradingWorkspacePage request={REQUEST} />);
+      await screen.findByTestId("mock-monaco");
+      await screen.findByRole("button", { name: "Mark Complete" });
+      const filterButton = screen.getByRole("button", { name: "To grade 2" });
+      filterButton.focus();
+      fireEvent.keyDown(filterButton, { key: "a" });
+      const loading = await screen.findByText("Loading automated checks for ada…");
+      expect(loading).toHaveFocus();
+      if (mode === "A") fireEvent.keyDown(loading, { key: "a" });
+      else filterButton.focus();
+      expect(filterButton).toHaveFocus();
+      await act(async () => evidenceResult.resolve(evidenceWithFailures("ada")));
+      expect(await screen.findByText("first failure")).toBeInTheDocument();
+      expect(filterButton).toHaveFocus();
+    }
+  );
 
   it("says evidence is still loading instead of focusing an empty panel", async () => {
     const pendingEvidence = new Promise<GradingStudentEvidenceResult>(() => {});

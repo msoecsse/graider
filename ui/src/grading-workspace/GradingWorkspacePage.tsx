@@ -2997,6 +2997,7 @@ export const GradingWorkspacePage = ({
     if (evidencePanelPriorFocusRef.current !== null) {
       const target = evidencePanelPriorFocusRef.current;
       evidencePanelPriorFocusRef.current = null;
+      setEvidenceFocusRequest(undefined);
       target.focus();
       return;
     }

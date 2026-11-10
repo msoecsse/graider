@@ -238,22 +238,32 @@ export const GradingEvidencePanel = ({
   const summaryRef = useRef<HTMLElement>(null);
   const loadingRef = useRef<HTMLParagraphElement>(null);
   const historySummaryRef = useRef<HTMLElement>(null);
+  const lastFocusRequest = useRef<GradingEvidenceFocusRequest | undefined>(undefined);
+  const lastFocusTarget = useRef<HTMLElement | null>(null);
   const hasEvidence = state.status !== "idle" && state.status !== "not_applicable";
   const hasHistory = commitHistory.status !== "idle";
 
   useEffect(() => {
     if (!open || focusRequest === undefined) return;
+    const previous = lastFocusTarget.current;
+    const retainsFocus =
+      previous !== null &&
+      (document.activeElement === previous ||
+        (!previous.isConnected && document.activeElement === document.body));
+    // Follow removal of the focused loading message, but never steal focus
+    // after the user has moved elsewhere while awaiting the response.
+    if (lastFocusRequest.current === focusRequest && !retainsFocus) return;
     sectionRef.current?.scrollIntoView?.({ block: "nearest" });
-    if (focusRequest.target === "history") {
-      historySummaryRef.current?.focus();
-      return;
-    }
-    if (state.status === "loading") {
-      loadingRef.current?.focus();
-      return;
-    }
-    summaryRef.current?.focus();
-  }, [open, focusRequest]);
+    const target =
+      focusRequest.target === "history"
+        ? historySummaryRef.current
+        : state.status === "loading"
+          ? loadingRef.current
+          : summaryRef.current;
+    target?.focus();
+    lastFocusRequest.current = focusRequest;
+    lastFocusTarget.current = target;
+  }, [open, focusRequest, state.status]);
 
   if (!hasEvidence && !hasHistory) return null;
   const studentId =
