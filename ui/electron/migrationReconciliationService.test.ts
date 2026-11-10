@@ -23,6 +23,14 @@ import { changeManagedCourseLifecycle } from "./courseLifecycleService.js";
 import { managedCoursePath } from "./managedCourses.js";
 import { parse, stringify } from "yaml";
 
+// Complete reconciliation publishes each journal step separately and revalidates
+// the growing permanent history each time. The archive/recovery scenario alone
+// performs 39 pushes, 56 clones and 115 fetches (~18s in isolation). Budget these
+// multi-transaction scenarios separately from individual Git integration cases;
+// keep the deadline bounded and retain the production subprocess/cancel limits.
+const RECONCILIATION_TRANSACTION_BUDGETS = 3;
+const SCENARIO_TIMEOUT_MS = RECONCILIATION_TRANSACTION_BUDGETS * GIT_INTEGRATION_TIMEOUT_MS;
+
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(removeGitFixture));
@@ -289,7 +297,7 @@ const fixture = async (lifecycle: "active" | "archived" = "active") => {
   };
 };
 
-describe("shared production journal transaction", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, () => {
+describe("shared production journal transaction", { timeout: SCENARIO_TIMEOUT_MS }, () => {
   it("runs complete reconciliation and retains Ready audit on another machine without additional GitHub or Git writes", async () => {
     const f = await fixture();
     const fixtures = (await import(
@@ -507,7 +515,7 @@ const operationalClient = async () => {
 
 describe(
   "permanent history and explicit current recovery",
-  { timeout: GIT_INTEGRATION_TIMEOUT_MS },
+  { timeout: SCENARIO_TIMEOUT_MS },
   () => {
     it("retains Ready history through archive, independently revalidates a fresh plan and safely unarchives", async () => {
       const f = await fixture("archived");

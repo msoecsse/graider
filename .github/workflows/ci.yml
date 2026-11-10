@@ -126,6 +126,7 @@ jobs:
           src/grading-workspace/GradingWorkspacePublication.test.tsx
           electron/gradingLocalPerformance.integration.test.ts
           electron/gradingPerformance.test.ts
+          electron/migrationReconciliationService.test.ts
           electron/courseStartup.integration.test.ts
           electron/remoteCourseDiscovery.test.ts
           src/dashboard/DashboardDataContext.test.tsx
