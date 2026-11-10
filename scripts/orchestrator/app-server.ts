@@ -5,10 +5,12 @@ import { z } from "zod";
 import { execution, type Issue } from "./contracts.js";
 import { brokerSchema, type Host } from "./host.js";
 import { commandCategory, type Timing } from "./timing.js";
+import type { Approval, ApprovalDecision } from "./approvals.js";
 
 const RPC_TIMEOUT_MS = 60_000;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const MAX_LINE_BYTES = 10_485_760;
+const METHOD_NOT_FOUND = -32601;
 const object = z.record(z.string(), z.unknown());
 const messageSchema = z.object({
   id: z.union([z.string(), z.number()]).optional(),
@@ -17,12 +19,6 @@ const messageSchema = z.object({
   result: z.unknown().optional(),
   error: z.unknown().optional()
 });
-export type Approval = (
-  method: string,
-  id: string,
-  signal: AbortSignal,
-  preview: string
-) => Promise<boolean>;
 export function approvalPreview(params: Record<string, unknown>): string {
   let preview = JSON.stringify({
     command: params.command,
@@ -49,10 +45,12 @@ export function prohibitedApproval(params: Record<string, unknown>): boolean {
   );
 }
 export interface Agent {
+  assertIsolation(): void;
   run(issue: Issue, host: Host): Promise<void>;
   preflight?(issues: Issue[], host: Host): Promise<void>;
 }
-export class AppServer implements Agent {
+/** Raw transport for deterministic protocol fixtures; not an executable supervisor Agent. */
+export class AppServerProtocol {
   constructor(
     private readonly executable: string,
     private readonly approval: Approval,
@@ -117,6 +115,11 @@ export class AppServer implements Agent {
     });
     const rpc = new Rpc(child, host.timing, this.progress);
     const pendingApprovals = new Set<string>();
+    const pendingItems = new Set<string>();
+    const approvalLifetime = new AbortController();
+    const canApprove = (): boolean => !approvalLifetime.signal.aborted;
+    let approvalTail = Promise.resolve();
+    let stopped = false;
     let threadId: string | undefined;
     let turnId: string | undefined;
     let failure: Error | undefined;
@@ -126,115 +129,187 @@ export class AppServer implements Agent {
       finish = resolve;
     });
     const fail = (message: string): void => {
-      failure = new StopError(message);
+      failure ??= new StopError(message);
+      approvalLifetime.abort();
       finish?.();
     };
+    const request = (method: string, params: unknown): Promise<unknown> =>
+      new Promise((resolve, reject) => {
+        const abort = (): void => {
+          reject(failure ?? new StopError("Execution cancelled; do not retry automatically."));
+        };
+        approvalLifetime.signal.addEventListener("abort", abort, { once: true });
+        if (approvalLifetime.signal.aborted) abort();
+        else {
+          void rpc
+            .request(method, params)
+            .then(resolve, reject)
+            .finally(() => {
+              approvalLifetime.signal.removeEventListener("abort", abort);
+            });
+        }
+      });
     const abort = (): void => {
       if (threadId && turnId) rpc.notifyRequest("turn/interrupt", { threadId, turnId });
       fail("Execution cancelled; do not retry automatically.");
     };
     host.signal.addEventListener("abort", abort, { once: true });
+    if (host.signal.aborted) abort();
     rpc.onFailure = fail;
     rpc.onMessage = async (message): Promise<void> => {
-      const params = message.params ?? {};
-      if (message.method === "item/completed") {
-        const item = object.parse(params.item);
-        if (item.type === "agentMessage" && typeof item.text === "string") {
-          try {
-            outcome.ready = z
-              .object({ status: z.literal("ready") })
-              .strict()
-              .safeParse(JSON.parse(item.text) as unknown).success;
-          } catch {
-            outcome.ready = false;
-          }
-        }
-      }
-      if (message.id !== undefined && typeof message.method === "string") {
-        const id = String(message.id);
-        if (message.method === "item/tool/call") {
-          const tool = z
-            .object({ tool: z.literal("repository_development"), arguments: z.unknown() })
-            .parse(params);
-          try {
-            const text = await host.broker(tool.arguments);
-            rpc.respond(message.id, { success: true, contentItems: [{ type: "inputText", text }] });
-          } catch {
-            rpc.respond(message.id, {
-              success: false,
-              contentItems: [
-                { type: "inputText", text: "Delegated operation failed. Stop; no automatic retry." }
-              ]
-            });
-            fail("Delegated operation failed.");
-          }
-        } else {
-          host.timing.start(
-            `approval:${id}`,
-            message.method.includes("requestApproval") ? "approval" : "blocking"
-          );
-          pendingApprovals.add(id);
-          this.progress("awaiting human approval");
-          // Human decisions, permission expansion and unknown protocols are blockers, not routine approvals.
-          if (
-            !["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].includes(
-              message.method
-            )
-          ) {
-            fail(
-              "Human decision or unsupported authorization request requires operator intervention."
-            );
-          } else {
-            if (prohibitedApproval(params)) {
-              fail("Prohibited operation requested; no approval offered.");
+      if (!stopped && canApprove()) {
+        const params = message.params ?? {};
+        if (message.method === "item/completed") {
+          const item = object.parse(params.item);
+          if (item.type === "agentMessage" && typeof item.text === "string") {
+            try {
+              outcome.ready = z
+                .object({ status: z.literal("ready") })
+                .strict()
+                .safeParse(JSON.parse(item.text) as unknown).success;
+            } catch {
+              outcome.ready = false;
             }
-            const accepted =
-              !prohibitedApproval(params) &&
-              (await this.approval(message.method, id, host.signal, approvalPreview(params)));
-            rpc.respond(message.id, { decision: accepted ? "accept" : "decline" });
-            host.timing.end(`approval:${id}`);
-            pendingApprovals.delete(id);
-            if (!accepted) fail("Authorization denied.");
           }
         }
-      } else if (message.method === "turn/completed") {
-        const turn = object.parse(params.turn);
-        if (turn.status !== "completed") fail("Codex turn failed or was interrupted.");
-        finish?.();
-      } else if (message.method === "error") fail("Codex reported an error.");
-      else if (message.method === "item/started" || message.method === "item/completed") {
-        const item = object.parse(params.item);
-        if (
-          typeof item.id === "string" &&
-          typeof item.type === "string" &&
-          !["agentMessage", "reasoning", "userMessage"].includes(item.type)
-        ) {
-          if (message.method === "item/started")
-            host.timing.start(
-              `item:${item.id}`,
-              item.type === "commandExecution" && typeof item.command === "string"
-                ? commandCategory(item.command)
-                : "tool"
-            );
-          else {
-            host.timing.end(`item:${item.id}`);
-            if (item.status === "failed" || item.status === "declined")
-              fail("Codex tool failed or was declined.");
+        if (message.id !== undefined && typeof message.method === "string") {
+          const id = String(message.id);
+          if (message.method === "item/tool/call") {
+            const tool = z
+              .object({ tool: z.literal("repository_development"), arguments: z.unknown() })
+              .parse(params);
+            try {
+              const text = await host.broker(tool.arguments);
+              rpc.respond(message.id, {
+                success: true,
+                contentItems: [{ type: "inputText", text }]
+              });
+            } catch {
+              rpc.respond(message.id, {
+                success: false,
+                contentItems: [
+                  {
+                    type: "inputText",
+                    text: "Delegated operation failed. Stop; no automatic retry."
+                  }
+                ]
+              });
+              fail("Delegated operation failed.");
+            }
+          } else {
+            if (pendingApprovals.has(id)) {
+              fail("Duplicate authorization request.");
+            } else {
+              host.timing.start(
+                `approval:${id}`,
+                message.method.includes("requestApproval") ? "approval" : "blocking"
+              );
+              pendingApprovals.add(id);
+              // Human decisions, permission expansion and unknown protocols are blockers, not routine approvals.
+              if (
+                ![
+                  "item/commandExecution/requestApproval",
+                  "item/fileChange/requestApproval"
+                ].includes(message.method)
+              ) {
+                rpc.respondError(message.id, "Unsupported authorization request.");
+                fail(
+                  "Human decision or unsupported authorization request requires operator intervention."
+                );
+              } else {
+                if (prohibitedApproval(params)) {
+                  rpc.respond(message.id, { decision: "decline" });
+                  fail("Prohibited operation requested; no approval offered.");
+                } else {
+                  const method = message.method;
+                  const requestId = message.id;
+                  approvalTail = approvalTail.then(async () => {
+                    try {
+                      if (canApprove()) {
+                        this.progress("awaiting human approval");
+                        const decision = await this.decide(
+                          method,
+                          id,
+                          approvalLifetime.signal,
+                          approvalPreview(params)
+                        );
+                        // An already resolved/cancelled request can never receive a late grant.
+                        if (canApprove()) {
+                          rpc.respond(requestId, {
+                            decision: decision === "accepted" ? "accept" : "decline"
+                          });
+                          if (decision !== "accepted") {
+                            const reasons = {
+                              denied: "Authorization explicitly denied.",
+                              unavailable:
+                                "Interactive authorization unavailable (noninteractive input or EOF).",
+                              cancelled: "Authorization cancelled.",
+                              invalid: "Authorization answer must be yes or no."
+                            };
+                            fail(reasons[decision]);
+                          }
+                        }
+                      }
+                    } catch {
+                      fail("Authorization input failed; raw diagnostics withheld.");
+                    } finally {
+                      host.timing.end(`approval:${id}`);
+                      pendingApprovals.delete(id);
+                    }
+                  });
+                }
+              }
+              if (failure) {
+                host.timing.end(`approval:${id}`);
+                pendingApprovals.delete(id);
+              }
+            }
           }
+        } else if (message.method === "turn/completed") {
+          const turn = object.parse(params.turn);
+          if (pendingApprovals.size > 0) fail("Codex turn ended with unresolved authorization.");
+          else if (turn.status !== "completed") fail("Codex turn failed or was interrupted.");
+          finish?.();
+        } else if (message.method === "error") fail("Codex reported an error.");
+        else if (message.method === "item/started" || message.method === "item/completed") {
+          const item = object.parse(params.item);
+          if (
+            typeof item.id === "string" &&
+            typeof item.type === "string" &&
+            !["agentMessage", "reasoning", "userMessage"].includes(item.type)
+          ) {
+            if (message.method === "item/started") {
+              pendingItems.add(item.id);
+              host.timing.start(
+                `item:${item.id}`,
+                item.type === "commandExecution" && typeof item.command === "string"
+                  ? commandCategory(item.command)
+                  : "tool"
+              );
+            } else {
+              host.timing.end(`item:${item.id}`);
+              pendingItems.delete(item.id);
+              if (item.status === "failed" || item.status === "declined")
+                fail("Codex tool failed or was declined.");
+            }
+          }
+        } else if (message.method === "serverRequest/resolved") {
+          const id = String(params.requestId);
+          host.timing.end(`approval:${id}`);
+          if (pendingApprovals.has(id)) fail("Authorization resolved before a local decision.");
+          pendingApprovals.delete(id);
         }
-      } else if (message.method === "serverRequest/resolved") {
-        const id = String(params.requestId);
-        host.timing.end(`approval:${id}`);
-        pendingApprovals.delete(id);
       }
     };
     try {
-      await rpc.request("initialize", {
+      if (host.signal.aborted)
+        throw new StopError("Execution cancelled; do not retry automatically.");
+      await request("initialize", {
         clientInfo: { name: "graider_serial_orchestrator", version: "1.0.0" },
         capabilities: { experimentalApi: true }
       });
       rpc.notify("initialized", {});
-      const account = object.parse(await rpc.request("account/read", {}));
+      const account = object.parse(await request("account/read", {}));
       if (!account.account) throw new StopError("Codex authentication unavailable.");
       const selection = execution(issue);
       const catalog = z
@@ -247,7 +322,7 @@ export class AppServer implements Agent {
           ),
           nextCursor: z.string().nullable().optional()
         })
-        .parse(await rpc.request("model/list", { limit: 100 }));
+        .parse(await request("model/list", { limit: 100 }));
       if (
         !catalog.data.some(
           (model) =>
@@ -260,7 +335,7 @@ export class AppServer implements Agent {
         throw new StopError("Required model/effort unavailable; no substitution.");
       const configuration = z
         .object({ config: z.object({ mcp_servers: z.record(z.string(), z.unknown()).optional() }) })
-        .parse(await rpc.request("config/read", {}));
+        .parse(await request("config/read", {}));
       const disabledServers = Object.fromEntries(
         Object.keys(configuration.config.mcp_servers ?? {}).map((name) => [
           name,
@@ -276,7 +351,7 @@ export class AppServer implements Agent {
           sandbox: z.object({ type: z.literal("workspaceWrite"), networkAccess: z.literal(false) })
         })
         .parse(
-          await rpc.request("thread/start", {
+          await request("thread/start", {
             model: selection.model,
             cwd: host.cwd,
             approvalPolicy: "untrusted",
@@ -305,7 +380,7 @@ export class AppServer implements Agent {
       threadId = result.thread.id;
       host.timing.start("codex", "codex");
       const turn = z.object({ turn: z.object({ id: z.string() }) }).parse(
-        await rpc.request("turn/start", {
+        await request("turn/start", {
           threadId,
           model: selection.model,
           effort: selection.effort,
@@ -334,12 +409,57 @@ export class AppServer implements Agent {
       if (failure) throw failure;
       if (!outcome.ready) throw new StopError("Agent did not report a verified ready outcome.");
     } finally {
+      stopped = true;
+      approvalLifetime.abort();
+      await approvalTail;
       if (failure && threadId && turnId) rpc.notifyRequest("turn/interrupt", { threadId, turnId });
       host.signal.removeEventListener("abort", abort);
       for (const id of pendingApprovals) host.timing.end(`approval:${id}`);
       host.timing.end("codex");
       await rpc.close();
+      for (const id of pendingItems) host.timing.end(`item:${id}`);
     }
+  }
+  private decide(
+    method: string,
+    id: string,
+    signal: AbortSignal,
+    preview: string
+  ): Promise<ApprovalDecision> {
+    // Bound callback lifetime even when a terminal implementation ignores cancellation.
+    return new Promise((resolve, reject) => {
+      const abort = (): void => {
+        resolve("cancelled");
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+      else {
+        void Promise.resolve()
+          .then(() => this.approval(method, id, signal, preview))
+          .then(resolve, reject)
+          .finally(() => {
+            signal.removeEventListener("abort", abort);
+          });
+      }
+    });
+  }
+}
+
+export class AppServer extends AppServerProtocol implements Agent {
+  assertIsolation(): void {
+    // A thread sandbox is not proof that native edits or host validation are isolated.
+    // No production adapter currently establishes the faculty's whole-process boundary.
+    throw new StopError(
+      "Issue execution disabled: disposable OS isolation and credential-free validation are not verified on macOS and Windows (#41)."
+    );
+  }
+  override async preflight(issues: Issue[], host: Host): Promise<void> {
+    this.assertIsolation();
+    await super.preflight(issues, host);
+  }
+  override async run(issue: Issue, host: Host): Promise<void> {
+    this.assertIsolation();
+    await super.run(issue, host);
   }
 }
 
@@ -418,6 +538,9 @@ class Rpc {
   }
   respond(id: number | string, result: unknown): void {
     this.send({ id, result });
+  }
+  respondError(id: number | string, message: string): void {
+    this.send({ id, error: { code: METHOD_NOT_FOUND, message } });
   }
   private send(value: unknown): void {
     if (!this.child.stdin.destroyed) this.child.stdin.write(`${JSON.stringify(value)}\n`);

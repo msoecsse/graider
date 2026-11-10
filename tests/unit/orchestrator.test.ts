@@ -3,8 +3,16 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PassThrough } from "node:stream";
+import { spawnSync } from "node:child_process";
+import {
+  TerminalApprovals,
+  type Approval,
+  type ApprovalDecision
+} from "../../scripts/orchestrator/approvals.js";
 import {
   AppServer,
+  AppServerProtocol,
   approvalPreview,
   prohibitedApproval
 } from "../../scripts/orchestrator/app-server.js";
@@ -187,8 +195,8 @@ afterEach(async () => {
     })
   );
 });
-function mockHost(cwd: string, controller = new AbortController()): Host {
-  const host = new Host(fixturePlan(), cwd, controller.signal, new Timing());
+function mockHost(cwd: string, controller = new AbortController(), timing = new Timing()): Host {
+  const host = new Host(fixturePlan(), cwd, controller.signal, timing);
   let currentHead = host.plan.expectedHead;
   const closed = new Set<number>();
   vi.spyOn(host, "permissions").mockResolvedValue(true);
@@ -318,6 +326,7 @@ describe("orchestrator supervision and protocol", () => {
     const host = mockHost(directory);
     const calls: number[] = [];
     const agent = {
+      assertIsolation: () => {},
       run: (value: Issue) => {
         calls.push(value.number);
         if (value.number === AUDIT)
@@ -336,7 +345,7 @@ describe("orchestrator supervision and protocol", () => {
     const directory = await temporary();
     const host = mockHost(directory);
     const run = vi.fn();
-    await supervise(host, { run }, directory, false, true, () => {});
+    await supervise(host, { assertIsolation: () => {}, run }, directory, false, true, () => {});
     expect(run).not.toHaveBeenCalled();
     expect(vi.spyOn(host, "git")).toHaveBeenCalledWith(expect.arrayContaining(["ls-remote"]));
     expect(vi.spyOn(host, "gh")).not.toHaveBeenCalled();
@@ -345,10 +354,12 @@ describe("orchestrator supervision and protocol", () => {
     const directory = await temporary();
     const host = mockHost(directory);
     const run = vi.fn().mockRejectedValue(new Error("interrupted"));
-    await expect(supervise(host, { run }, directory, false, false, () => {})).rejects.toThrow();
-    await expect(supervise(host, { run }, directory, true, false, () => {})).rejects.toThrow(
-      "manual recovery"
-    );
+    await expect(
+      supervise(host, { assertIsolation: () => {}, run }, directory, false, false, () => {})
+    ).rejects.toThrow();
+    await expect(
+      supervise(host, { assertIsolation: () => {}, run }, directory, true, false, () => {})
+    ).rejects.toThrow("manual recovery");
     expect(run).toHaveBeenCalledTimes(1);
   });
   it("stops on unexpected HEAD changes", async () => {
@@ -356,9 +367,9 @@ describe("orchestrator supervision and protocol", () => {
     const host = mockHost(directory);
     vi.spyOn(host, "guard").mockResolvedValue("c".repeat(SHA_LENGTH));
     const run = vi.fn();
-    await expect(supervise(host, { run }, directory, false, false, () => {})).rejects.toThrow(
-      "HEAD"
-    );
+    await expect(
+      supervise(host, { assertIsolation: () => {}, run }, directory, false, false, () => {})
+    ).rejects.toThrow("HEAD");
     expect(run).not.toHaveBeenCalled();
   });
   it("rejects dirty worktrees or unexpected branches before launch", async () => {
@@ -366,7 +377,9 @@ describe("orchestrator supervision and protocol", () => {
     const host = mockHost(directory);
     vi.spyOn(host, "guard").mockRejectedValue(new Error("Unexpected branch or dirty worktree"));
     const run = vi.fn();
-    await expect(supervise(host, { run }, directory, false, false, () => {})).rejects.toThrow();
+    await expect(
+      supervise(host, { assertIsolation: () => {}, run }, directory, false, false, () => {})
+    ).rejects.toThrow();
     expect(run).not.toHaveBeenCalled();
   });
   it("stops queue before implementation for blocked labels or denied permissions", async () => {
@@ -374,10 +387,14 @@ describe("orchestrator supervision and protocol", () => {
     const host = mockHost(directory);
     const run = vi.fn();
     vi.spyOn(host, "permissions").mockResolvedValue(false);
-    await expect(supervise(host, { run }, directory, false, false, () => {})).rejects.toThrow();
+    await expect(
+      supervise(host, { assertIsolation: () => {}, run }, directory, false, false, () => {})
+    ).rejects.toThrow();
     vi.spyOn(host, "permissions").mockResolvedValue(true);
     vi.spyOn(host, "issue").mockResolvedValue({ ...issue, labels: [...issue.labels, "blocked"] });
-    await expect(supervise(host, { run }, directory, false, false, () => {})).rejects.toThrow();
+    await expect(
+      supervise(host, { assertIsolation: () => {}, run }, directory, false, false, () => {})
+    ).rejects.toThrow();
     expect(run).not.toHaveBeenCalled();
   });
   it("holds an exclusive lock and preserves failed locks for recovery", async () => {
@@ -422,9 +439,9 @@ describe("orchestrator supervision and protocol", () => {
     const log = path.join(directory, "protocol with spaces.jsonl");
     const host = mockHost(directory);
     const fixture = fileURLToPath(new URL("../fixtures/orchestrator-server.ts", import.meta.url));
-    const agent = new AppServer(
+    const agent = new AppServerProtocol(
       process.execPath,
-      () => Promise.resolve(false),
+      () => Promise.resolve("denied"),
       () => {},
       [
         "--import",
@@ -450,11 +467,11 @@ describe("orchestrator supervision and protocol", () => {
       const directory = await temporary();
       const controller = new AbortController();
       const host = mockHost(directory, controller);
-      const agent = new AppServer(
+      const agent = new AppServerProtocol(
         process.execPath,
         () => {
           if (scenario === "approval") controller.abort();
-          return Promise.resolve(false);
+          return Promise.resolve("denied");
         },
         (stage) => {
           if (scenario === "cancel" && stage === "starting fresh Codex context")
@@ -500,9 +517,349 @@ describe("orchestrator supervision and protocol", () => {
       })
     );
     await expect(
-      supervise(host, { run: vi.fn() }, directory, true, false, () => {})
+      supervise(host, { assertIsolation: () => {}, run: vi.fn() }, directory, true, false, () => {})
     ).rejects.toThrow();
   });
 });
 const RPC_TEST_CANCEL_MS = 500;
 const ONE_SECOND_MS = 1000;
+
+function fixtureArguments(scenario: string, log?: string): string[] {
+  return [
+    "--import",
+    new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url).href,
+    fileURLToPath(new URL("../fixtures/orchestrator-server.ts", import.meta.url)),
+    scenario,
+    ...(log ? [log] : [])
+  ];
+}
+function protocolAgent(scenario: string, approval: Approval, log?: string): AppServerProtocol {
+  return new AppServerProtocol(
+    process.execPath,
+    approval,
+    () => {},
+    fixtureArguments(scenario, log)
+  );
+}
+
+describe("approval lifecycle regressions", () => {
+  it("cancels an outstanding startup RPC without waiting for its timeout or starting a turn", async () => {
+    const controller = new AbortController();
+    const directory = await temporary();
+    const log = path.join(directory, "setup-protocol.jsonl");
+    let now = 0;
+    const host = mockHost(directory, controller, new Timing(() => now));
+    const result = protocolAgent("cancel-setup", vi.fn(), log).run(issue, host);
+    const rejected = expect(result).rejects.toThrow("Execution cancelled");
+    await vi.waitFor(() => {
+      expect(host.timing.events.some((event) => event.id === "item:setup-wait")).toBe(true);
+    });
+    now = TICK;
+    controller.abort();
+    await rejected;
+    now += TICK;
+    expect(
+      host.timing.snapshot().intervals.find((interval) => interval.id === "item:setup-wait")
+    ).toMatchObject({ start: 0, end: TICK });
+    const protocol = await readFile(log, "utf8");
+    expect(protocol).not.toContain("thread/start");
+    expect(protocol).not.toContain("turn/start");
+  });
+  it("preserves prohibition over later tool, turn and transport failures without a prompt", async () => {
+    const directory = await temporary();
+    const approval = vi.fn<Approval>();
+    const progress = vi.fn();
+    const host = mockHost(directory);
+    const agent = new AppServerProtocol(process.execPath, approval, progress, [
+      "--import",
+      new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url).href,
+      fileURLToPath(new URL("../fixtures/orchestrator-server.ts", import.meta.url)),
+      "prohibited"
+    ]);
+    await expect(agent.run(issue, host)).rejects.toThrow("Prohibited operation");
+    expect(approval).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalledWith("awaiting human approval");
+    expect(host.timing.snapshot().approvals.count).toBe(1);
+  });
+
+  it.each([
+    ["denied", "explicitly denied"],
+    ["unavailable", "Interactive authorization unavailable"],
+    ["cancelled", "Authorization cancelled"],
+    ["invalid", "must be yes or no"]
+  ] as const)("retains the distinct %s reason", async (decision, reason) => {
+    const host = mockHost(await temporary());
+    await expect(
+      protocolAgent("approval", () => Promise.resolve(decision)).run(issue, host)
+    ).rejects.toThrow(reason);
+  });
+
+  it("redacts callback errors and closes their timing interval", async () => {
+    const host = mockHost(await temporary());
+    const result = protocolAgent("approval", () => {
+      throw new Error("fake-secret-not-for-output");
+    }).run(issue, host);
+    await expect(result).rejects.toThrow("Authorization input failed; raw diagnostics withheld.");
+    expect(host.timing.events.filter((event) => event.id === "approval:approval")).toHaveLength(2);
+  });
+
+  it("accepts successive routine command and file approvals with one decision per request", async () => {
+    const host = mockHost(await temporary());
+    const approval = vi.fn<Approval>().mockResolvedValue("accepted");
+    await protocolAgent("successive", approval).run(issue, host);
+    expect(approval.mock.calls.map(([method, id]) => [method, id])).toEqual([
+      ["item/commandExecution/requestApproval", "first"],
+      ["item/fileChange/requestApproval", "second"]
+    ]);
+    expect(host.timing.snapshot().approvals.count).toBe(2);
+  });
+
+  it("serializes concurrent prompts and retains queued wait and exclusive wall time", async () => {
+    let now = 0;
+    const timing = new Timing(() => now);
+    const host = mockHost(await temporary(), new AbortController(), timing);
+    let active = 0;
+    const approval = vi.fn<Approval>().mockImplementation(async (_method, id) => {
+      active += 1;
+      expect(active).toBe(1);
+      await vi.waitFor(() => {
+        expect(timing.snapshot().approvals.count).toBe(2);
+      });
+      now += TICK;
+      active -= 1;
+      expect(id).toBe(approval.mock.calls.length === 1 ? "first" : "second");
+      return "accepted";
+    });
+    await protocolAgent("concurrent", approval).run(issue, host);
+    expect(approval).toHaveBeenCalledTimes(2);
+    const report = timing.snapshot();
+    expect(report.approvals).toEqual({ count: 2, waitsMs: [TICK, 2 * TICK], longestMs: 2 * TICK });
+    expect(report.exclusiveMs.approval).toBe(2 * TICK);
+    expect(Object.values(report.exclusiveMs).reduce((sum, value) => sum + value, 0)).toBe(
+      report.totalMs
+    );
+  });
+
+  it("never displays queued prompts after denial", async () => {
+    const host = mockHost(await temporary());
+    const approval = vi.fn<Approval>().mockImplementation(async () => {
+      await vi.waitFor(() => {
+        expect(host.timing.snapshot().approvals.count).toBe(2);
+      });
+      return "denied";
+    });
+    await expect(protocolAgent("concurrent", approval).run(issue, host)).rejects.toThrow(
+      "explicitly denied"
+    );
+    expect(approval).toHaveBeenCalledTimes(1);
+    expect(host.timing.snapshot().approvals.count).toBe(2);
+    expect(
+      host.timing.events.filter((event) => event.type === "end" && event.id.startsWith("approval:"))
+    ).toHaveLength(2);
+  });
+
+  it("cancels active and queued requests even if the callback ignores its signal", async () => {
+    const controller = new AbortController();
+    const host = mockHost(await temporary(), controller);
+    const approval = vi.fn<Approval>().mockImplementation(async () => {
+      await vi.waitFor(() => {
+        expect(host.timing.snapshot().approvals.count).toBe(2);
+      });
+      controller.abort();
+      return new Promise<ApprovalDecision>(() => {});
+    });
+    await expect(protocolAgent("concurrent", approval).run(issue, host)).rejects.toThrow(
+      "Execution cancelled"
+    );
+    expect(approval).toHaveBeenCalledTimes(1);
+    expect(
+      host.timing.events.filter((event) => event.type === "end" && event.id.startsWith("approval:"))
+    ).toHaveLength(2);
+  });
+
+  it.each([
+    ["resolved", "resolved before a local decision"],
+    ["unresolved", "ended with unresolved authorization"],
+    ["human", "unsupported authorization"]
+  ])("fails closed on %s instead of offering a late grant", async (scenario, reason) => {
+    const host = mockHost(await temporary());
+    const approval = vi.fn<Approval>().mockImplementation(() => new Promise(() => {}));
+    await expect(protocolAgent(scenario, approval).run(issue, host)).rejects.toThrow(reason);
+  });
+
+  it("rejects a pre-cancelled run before thread startup", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const directory = await temporary();
+    const log = path.join(directory, "protocol.jsonl");
+    await expect(
+      protocolAgent("ready", vi.fn(), log).run(issue, mockHost(directory, controller))
+    ).rejects.toThrow("Execution cancelled");
+    // The fixture may start, but receives no initialize/thread/turn request.
+    await expect(readFile(log)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+describe("terminal approval input", () => {
+  function terminalFixture(interactive = true): {
+    input: PassThrough;
+    output: PassThrough;
+    terminal: TerminalApprovals;
+    prompts: string[];
+  } {
+    const input = Object.assign(new PassThrough(), { isTTY: interactive });
+    const output = new PassThrough();
+    const prompts: string[] = [];
+    output.on("data", (data: Buffer) => prompts.push(data.toString()));
+    return { input, output, terminal: new TerminalApprovals(input, output), prompts };
+  }
+  it("keeps successive and concurrent questions serialized on one terminal", async () => {
+    const { input, terminal, prompts } = terminalFixture();
+    try {
+      const signal = new AbortController().signal;
+      const first = terminal.request("command", "first", signal, "preview");
+      const second = terminal.request("file", "second", signal, "preview");
+      await vi.waitFor(() => {
+        expect(prompts).toHaveLength(1);
+      });
+      input.write("yes\nyes\n");
+      await expect(first).resolves.toBe("accepted");
+      await vi.waitFor(() => {
+        expect(prompts).toHaveLength(2);
+      });
+      input.write("no\n");
+      await expect(second).resolves.toBe("denied");
+      const third = terminal.request("command", "third", signal, "preview");
+      await vi.waitFor(() => {
+        expect(prompts).toHaveLength(3);
+      });
+      input.write("yes\n");
+      await expect(third).resolves.toBe("accepted");
+    } finally {
+      terminal.close();
+    }
+  });
+  it("reports noninteractive input without a prompt", async () => {
+    const { terminal, prompts } = terminalFixture(false);
+    await expect(terminal.request("command", "id", new AbortController().signal, "")).resolves.toBe(
+      "unavailable"
+    );
+    expect(prompts).toEqual([]);
+    terminal.close();
+  });
+  it.each(["eof", "cancel", "invalid", "error"])(
+    "handles %s while awaiting input",
+    async (scenario) => {
+      const { input, terminal, prompts } = terminalFixture();
+      const controller = new AbortController();
+      try {
+        const answer = terminal.request("command", "id", controller.signal, "");
+        await vi.waitFor(() => {
+          expect(prompts).toHaveLength(1);
+        });
+        if (scenario === "cancel") controller.abort();
+        else if (scenario === "invalid") input.write("maybe\n");
+        else if (scenario === "error") input.emit("error", new Error("fake input error"));
+        else input.end();
+        await expect(answer).resolves.toBe(
+          scenario === "cancel" ? "cancelled" : scenario === "invalid" ? "invalid" : "unavailable"
+        );
+        if (scenario === "eof")
+          await expect(terminal.request("command", "next", controller.signal, "")).resolves.toBe(
+            "unavailable"
+          );
+      } finally {
+        terminal.close();
+      }
+    }
+  );
+});
+
+describe("unverified isolation execution gate", () => {
+  it.each(["preflight", "run"] as const)(
+    "blocks direct Agent.%s calls before process startup",
+    async (method) => {
+      const directory = await temporary();
+      const canary = path.join(directory, "protected-canary");
+      await writeFile(canary, "supervisor-owned");
+      const agent = new AppServer(
+        process.execPath,
+        vi.fn(),
+        () => {},
+        fixtureArguments("hostile-native-edit", canary)
+      );
+      const host = mockHost(directory);
+      const result = method === "run" ? agent.run(issue, host) : agent.preflight([issue], host);
+      await expect(result).rejects.toThrow("Issue execution disabled");
+      expect(await readFile(canary, "utf8")).toBe("supervisor-owned");
+    }
+  );
+  it("CLI rejects execution before reading a plan or overwriting existing invocation evidence", async () => {
+    const directory = await temporary();
+    const invocation = path.join(directory, "invocation.json");
+    await writeFile(invocation, "preserved failed-run evidence");
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url).href,
+        fileURLToPath(new URL("../../scripts/orchestrator/index.ts", import.meta.url)),
+        "--execute",
+        "--resume",
+        "--plan",
+        path.join(directory, "absent-plan.json"),
+        "--state",
+        directory
+      ],
+      {
+        cwd: directory,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot }
+      }
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Issue execution disabled");
+    expect(await readFile(invocation, "utf8")).toBe("preserved failed-run evidence");
+  });
+  it.each([false, true])(
+    "blocks hostile native editing before startup, including resume=%s",
+    async (resume) => {
+      const directory = await temporary();
+      const canary = path.join(directory, "protected-native-edit-canary");
+      const checkpoint = path.join(directory, "checkpoint.json");
+      await writeFile(canary, "supervisor-owned");
+      await writeFile(checkpoint, "interrupted evidence; never replay");
+      const host = mockHost(directory);
+      const agent = new AppServer(
+        process.execPath,
+        vi.fn(),
+        () => {},
+        fixtureArguments("hostile-native-edit", canary)
+      );
+      const run = vi.spyOn(agent, "run");
+      await expect(supervise(host, agent, directory, resume, false, () => {})).rejects.toThrow(
+        "Issue execution disabled"
+      );
+      expect(run).not.toHaveBeenCalled();
+      expect(await readFile(canary, "utf8")).toBe("supervisor-owned");
+      expect(await readFile(checkpoint, "utf8")).toBe("interrupted evidence; never replay");
+      for (const method of ["permissions", "guard", "broker", "gh", "git"] as const)
+        expect(vi.spyOn(host, method)).not.toHaveBeenCalled();
+    }
+  );
+  it("retains read-only dry-run inspection without starting an agent or host validation", async () => {
+    const directory = await temporary();
+    const host = mockHost(directory);
+    const agent = new AppServer(
+      process.execPath,
+      vi.fn(),
+      () => {},
+      fixtureArguments("hostile-native-edit")
+    );
+    const run = vi.spyOn(agent, "run");
+    await supervise(host, agent, directory, false, true, () => {});
+    expect(run).not.toHaveBeenCalled();
+    expect(vi.spyOn(host, "broker")).not.toHaveBeenCalled();
+    expect(vi.spyOn(host, "gh")).not.toHaveBeenCalled();
+  });
+});

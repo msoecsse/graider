@@ -1,6 +1,5 @@
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import { AppServer } from "./app-server.js";
 import { planSchema } from "./contracts.js";
@@ -8,8 +7,10 @@ import { Host } from "./host.js";
 import { supervise, withLock } from "./runner.js";
 import { Timing } from "./timing.js";
 import { StopError } from "./errors.js";
+import { TerminalApprovals } from "./approvals.js";
 
 const timing = new Timing();
+const approvals = new TerminalApprovals();
 let reportDirectory: string | undefined;
 
 const command = new Command()
@@ -38,6 +39,8 @@ const progress = (stage: string): void => {
   console.log(`[${new Date().toISOString()}] ${stage}`);
 };
 try {
+  const agent = new AppServer(options.codex, approvals.request, progress);
+  if (options.execute) agent.assertIsolation();
   const plan = planSchema.parse(JSON.parse(await readFile(options.plan, "utf8")) as unknown);
   const cwd = await realpath(process.cwd());
   const state = path.resolve(options.state);
@@ -54,23 +57,6 @@ try {
     throw new StopError("State must be outside the worktree.");
   reportDirectory = canonicalState;
   const host = new Host(plan, cwd, abort.signal, timing);
-  const agent = new AppServer(
-    options.codex,
-    async (method, id, signal, preview) => {
-      if (!process.stdin.isTTY) return false;
-      const terminal = createInterface({ input: process.stdin, output: process.stdout });
-      try {
-        const answer = await terminal.question(
-          `${method} request ${id}: ${preview}\nApprove this single request? [yes/no] `,
-          { signal }
-        );
-        return answer === "yes";
-      } finally {
-        terminal.close();
-      }
-    },
-    progress
-  );
   const commonDir = path.resolve(cwd, (await host.git(["rev-parse", "--git-common-dir"])).trim());
   await withLock(path.join(commonDir, "graider-orchestrator.lock"), async () => {
     await supervise(
@@ -94,6 +80,7 @@ try {
   );
   process.exitCode = 1;
 } finally {
+  approvals.close();
   if (reportDirectory) {
     await mkdir(reportDirectory, { recursive: true });
     const report = timing.snapshot();

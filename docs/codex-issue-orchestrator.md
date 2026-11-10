@@ -2,6 +2,13 @@
 
 This developer tool runs outside Graider Electron. It never starts on app launch.
 It implements the workflow in [the agent contract](../agent-workflow-contract.md).
+**Issue execution is disabled under the amended faculty decision in
+[#42](https://github.com/msoecsse/graider/issues/42), tracked by
+[#41](https://github.com/msoecsse/graider/issues/41).** Dry-run inspection remains
+available. `--execute`, including `--resume`, fails before agent startup, checkpoint
+changes or host validation. No plan option overrides this gate. The execution
+workflow below describes the earlier implementation; it is not currently enabled.
+
 Run it only in an exclusively assigned development worktree: its common-Git-directory
 lock excludes other runner instances, but cannot lock unrelated editors or agents.
 Do not run another coding agent in that checkout while the runner owns it.
@@ -98,6 +105,54 @@ from arbitrary text. Never add next-phase work to an audit queue.
 
 ## Execution and authorization
 
+### Amended isolation requirement and current limitation
+
+The Codex 0.167.0 probe demonstrated a native `apply_patch` edit without a broker
+call or approval. A bounded broker cannot constrain native file editing. Do not
+try to suppress that surface with unsupported configuration flags, or use
+post-execution events as a pre-execution enforcement boundary.
+
+The approved replacement is isolated, disposable **per-issue execution**:
+
+- Use an independent disposable copy, with no shared writable Git metadata,
+  credentials or protected paths from the authoritative checkout. A linked Git
+  worktree, copied directory, reduced environment or thread sandbox declaration
+  alone does not prove that boundary.
+- Verify OS enforcement around the entire agent process and every validation
+  descendant on macOS arm64 and Windows x64. Routine operations within that
+  workspace should run without repeated approvals. Keep sandbox/network
+  restrictions; never use unrestricted host execution.
+- Host credentials must remain inaccessible even to modified build scripts,
+  tests, dependency hooks and native file-editing tools. Agent GitHub operations,
+  commits and pushes are forbidden; the supervisor owns those capabilities.
+- Only the supervisor may promote a verified result. Recheck the authoritative
+  baseline and approved paths, file types/content integrity and unsafe deletions,
+  then require isolated validation before promotion. Any isolation, integrity or
+  validation uncertainty stops promotion and execution.
+- Prove hostile native edits, path/link escapes, Git metadata and credential
+  access denial, network denial, hostile validation, cancellation and recovery on
+  both native targets before enabling execution. Preserve failed-run evidence.
+
+The current repository has no verified whole-process isolation adapter or safe
+promotion implementation. A local macOS sandbox launch in the managed development
+environment failed with `sandbox_apply: Operation not permitted`; no installed
+VM/container runtime was found. This is an environment limitation, not proof that
+isolation is impossible elsewhere. Windows enforcement has not been established.
+The official [OS sandbox documentation](https://learn.chatgpt.com/docs/agent-approvals-security)
+describes platform mechanisms; it does not verify this supervisor's boundary.
+Consequently `AppServer.assertIsolation()` fails closed, and both the CLI and
+supervisor reject issue execution before launching an agent or running untrusted
+validation in the authoritative checkout. Protocol fixtures test approval handling
+only; they do not certify OS isolation. Keep #41 open until all isolation,
+promotion, validation and native CI acceptance criteria are met.
+
+The original interrupted #26 checkpoint and lock must never be reused or removed
+by this work. Preserve the original evidence and broker-bypass probe. A new #26
+dry-run plan is deferred until #41 is fully verified and closed. Do not execute
+#26, #15 or Phase 10.
+
+### Earlier execution workflow (disabled)
+
 The runner starts a new app-server process and `thread/start` for every issue.
 It checks Codex authentication and model/effort availability, keeps
 `workspace-write`, restricted network access, and `untrusted` approval policy,
@@ -121,10 +176,19 @@ explicit 403 and authorized fallback select CLI; other connector errors stop.
 It does not replay a failed mutation through another transport. A connector 403
 does not establish that the user's account lacks repository permissions.
 
+The earlier broker delegates GitHub mutations and host validation; these are not
+safe agent capabilities under the amended architecture and remain unreachable
+through the disabled supervisor. They must be replaced before execution is enabled.
+
 Routine delegated operations do not need repeated approval. Other command/file
 approval requests display a redacted preview and ask for a **single-request** yes/no
-decision. No session-wide grant or policy amendment is accepted. Noninteractive
-input declines. Permission-expansion requests, unknown request types, and genuine
+decision. The protocol adapter serializes prompts and retains one terminal for the
+invocation. Only `yes` accepts and `no` explicitly denies. Noninteractive input or
+EOF reports unavailable authorization; cancellation, invalid answers and input
+errors have separate redacted reasons. Unsolicited answers cannot grant later
+requests. The first failure wins, cancels active/queued prompts and prevents late
+grants. No session-wide grant or policy amendment is accepted. Permission-expansion
+requests, unknown request types, and genuine
 human decisions stop for operator intervention. Known destructive requests are
 rejected outright, even if routine delegation exists. Blocked/human-decision issues
 cannot be automatically closed. Sandbox and organization restrictions remain

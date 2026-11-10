@@ -122,6 +122,9 @@ export async function supervise(
   progress: (stage: string) => void
 ): Promise<void> {
   validatePlan(host.plan);
+  // Fail before checkpoints, host validation, GitHub mutations or agent startup.
+  // Dry runs remain read-only. No plan flag can bypass this production gate.
+  if (!dryRun) agent.assertIsolation();
   await selectTransport(undefined, host, host.plan.authorization.cliFallback);
   const initialHead = await host.guard(true);
   const remoteHead = (
