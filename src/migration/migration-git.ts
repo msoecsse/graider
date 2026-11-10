@@ -1,6 +1,10 @@
-import { devNull } from "node:os";
 import { createDugiteGitRunners, type DugiteGitRunners } from "../git/dugite-git-runners.js";
 import { createAuthenticatedDugiteGitWorkspace } from "../git/dugite-git-workspace-context.js";
+// Git for Windows maps this spelling to its null device. Node's Win32 device
+// namespace path is rejected by Git's config reader. This is a Git argument,
+// never a Node filesystem path (see compat/mingw.c in Git for Windows).
+const GIT_NULL_DEVICE = "/dev/null";
+
 /** Same bundled engine/credential resolver, with a fixed migration policy. Neither
  * ambient config nor inherited Git environment may redirect storage, transform
  * candidate bytes, sign, run hooks, or extend an explicit publication refspec.
@@ -23,8 +27,8 @@ export const createMigrationGitRunners = (): DugiteGitRunners => {
       LOCAL_GIT_DIRECTORY: "",
       GIT_EXEC_PATH: "",
       GIT_CONFIG_NOSYSTEM: "1",
-      GIT_CONFIG_SYSTEM: devNull,
-      GIT_CONFIG_GLOBAL: devNull,
+      GIT_CONFIG_SYSTEM: GIT_NULL_DEVICE,
+      GIT_CONFIG_GLOBAL: GIT_NULL_DEVICE,
       GIT_ATTR_NOSYSTEM: "1",
       GIT_NO_REPLACE_OBJECTS: "1",
       GIT_NO_LAZY_FETCH: "1",
@@ -37,7 +41,7 @@ export const createMigrationGitRunners = (): DugiteGitRunners => {
     "-c",
     "core.safecrlf=false",
     "-c",
-    `core.hooksPath=${devNull}`,
+    `core.hooksPath=${GIT_NULL_DEVICE}`,
     "-c",
     "commit.gpgSign=false",
     "-c",

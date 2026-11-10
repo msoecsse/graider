@@ -3,8 +3,13 @@ import type {
   GitCommandRunner,
   GitCommandBinaryRunner
 } from "../../../src/git/git-command-workspace.js";
-import { devNull } from "node:os";
 import { createMigrationGitRunners } from "../../../src/migration/migration-git.js";
+// Exercise the Windows Node spelling on every host. It must never become a
+// Git config/hooks pathname; Git for Windows only translates /dev/null.
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  devNull: String.raw`\\.\nul`
+}));
 const LAST_CALL = -1;
 const captured = vi.hoisted(() => ({
   runGit: vi.fn<GitCommandRunner>(() => Promise.resolve("")),
@@ -34,7 +39,8 @@ describe("migration bundled-Git isolation policy", () => {
         expect(request.env.GIT_DIR).toBeUndefined();
         expect(request.env.GIT_INDEX_FILE).toBeUndefined();
         expect(request.env.GIT_CONFIG_COUNT).toBeUndefined();
-        expect(request.env.GIT_CONFIG_GLOBAL).toBe(devNull);
+        expect(request.env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+        expect(request.env.GIT_CONFIG_SYSTEM).toBe("/dev/null");
         expect(request.env.GIT_NO_REPLACE_OBJECTS).toBe("1");
         expect(request.args).toEqual(
           expect.arrayContaining([
@@ -42,7 +48,7 @@ describe("migration bundled-Git isolation policy", () => {
             "commit.gpgSign=false",
             "push.followTags=false",
             "remote.origin.mirror=false",
-            `core.hooksPath=${devNull}`
+            "core.hooksPath=/dev/null"
           ])
         );
       }
