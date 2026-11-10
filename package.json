@@ -13,6 +13,7 @@
   ],
   "packageManager": "npm@11.13.0",
   "scripts": {
+    "orchestrate": "tsx scripts/orchestrator/index.ts",
     "build": "tsup src/cli/index.ts --format esm --dts --clean --out-dir dist",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",

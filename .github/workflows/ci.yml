@@ -143,3 +143,6 @@ jobs:
 
       - name: Test actual student Git updates and grading preservation
         run: npx vitest run --maxWorkers=2 tests/unit/grading/grading-student-repository-update.test.ts tests/unit/git/git-command-workspace.test.ts
+
+      - name: Test serial issue orchestrator process and recovery safeguards
+        run: npx vitest run --maxWorkers=2 tests/unit/orchestrator.test.ts
