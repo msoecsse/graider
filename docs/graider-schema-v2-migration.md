@@ -1,5 +1,12 @@
 # Graider Schema v1 → v2 Migration and Reconciliation
 
+**Current status: Slice 9.5 is complete; Phase 9 audit #15 is next and has not
+started.** See the [closeout acceptance review and native validation evidence](migration-regression.md#slice-95-closeout-validation-record-26).
+Historical slice summaries retain their original boundaries; #21–#25 composition
+is complete. Production migration remains disabled under §1.2's independent
+technical/release evidence requirements. Passing native regression validation
+does not enable migration or start Phase 10.
+
 **Status:** migration decision contract
 
 **Authority:** [remote course architecture](graider-remote-course-architecture.md) and

@@ -6,10 +6,15 @@
 
 ---
 
-The Slice 9.5 closeout audit and permanent native migration regression coverage
-are recorded in [migration regression validation](migration-regression.md).
+**Slice 9.5 is complete.** The closeout acceptance review and permanent native
+macOS arm64/Windows x64 migration regression evidence are recorded in
+[migration regression validation](migration-regression.md#slice-95-closeout-validation-record-26).
+Earlier slice-local progress notes describe their historical implementation
+boundaries; #21–#25 composition is complete. #43's Windows test-hygiene blocker
+is resolved, and #39 remains a separate intermittent performance reliability
+follow-up with unchanged assertions. Both native grading boundary jobs passed.
 Production migration remains disabled pending the independent release/readiness
-requirements in the migration contract. Phase 9 audit #15 is the next handoff;
+requirements in the migration contract. Phase 9 audit #15 is next and has not started;
 Phase 10 is not started.
 
 ## 1. Purpose

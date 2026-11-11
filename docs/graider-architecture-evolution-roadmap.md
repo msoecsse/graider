@@ -1,5 +1,11 @@
 # Graider Architecture Evolution — Dependency-Ordered Implementation Roadmap
 
+**Current handoff: Slice 9.5 is complete. Phase 9 audit #15 is next and has not
+started.** The [closeout review and native validation evidence](migration-regression.md#slice-95-closeout-validation-record-26)
+supersede earlier slice-local progress notes below. Production migration remains
+disabled under the migration contract's independent release/readiness gates.
+Phase 10 is not started.
+
 ## Guiding Approach
 
 Implement this as a program of small, testable slices rather than one “multi-machine support” branch.
@@ -1189,14 +1195,27 @@ production reconciliation control is added. Both operational schema gates remain
 **1** and Setup emits Schema 1. **Slice 9.4 is complete. Next: Slice 9.5 — Publish
 migrated schema.** Stop here until a separate issue authorizes 9.5.
 
-## Slice 9.5 — Publish migrated schema
+## Slice 9.5 — Publish migrated schema — Complete
+
+Slice 9.5J / #26 completes the publication/cutover compatibility review and
+permanent migration regression requirement. Native macOS arm64 and Windows x64
+validation passed after #43's test-hygiene fix in `6e25c39`; all five jobs in
+[CI run 42976549963](https://github.com/msoecsse/graider/actions/runs/42976549963)
+passed, including unchanged grading performance assertions. The earlier Windows
+closeout blockers are cleared. #39 stays open as a separate intermittent
+performance reliability follow-up, without evidence of a remaining release blocker
+in this validation. See the [acceptance review](migration-regression.md#slice-95-closeout-validation-record-26).
+Phase 9 audit #15 is next; do not start it or Phase 10 as part of #26.
+The implementation summaries below retain each slice's historical boundary;
+completed #21–#25 composition is no longer pending. Phase 3/platform production
+release evidence remains independently required before enabling migration.
 
 Slice 9.5I / #25 supplies the approved faculty execution, autosave, progress,
 results/recovery and permanent-history UI/IPC over the trusted #21/#24/#32 services.
 See the [implementation contract](graider-schema-v2-migration.md#implemented-faculty-execution-and-recovery-composition-slice-95i--25).
 Production migration remains disabled pending independent Phase 3/platform-release
-and operational evidence. #26 closes Slice 9.5; the separate Phase 9 audit #15
-is next after closeout validation. No Phase 10 work is authorized.
+and operational evidence. Slice 9.5 is complete; the separate Phase 9 audit #15
+is next. No Phase 10 work is authorized.
 
 Slice 9.5H / #24 implements durable post-publication reconciliation under
 [approved #31 Decision A](graider-schema-v2-migration.md#41-durable-recovery--approved-decision-a-31).
