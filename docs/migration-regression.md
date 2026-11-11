@@ -51,8 +51,12 @@ be rerun with the appropriate package's `npx vitest run <file> -t <scenario>`.
 These narrower commands do not replace the complete target for acceptance.
 
 Publication/reconciliation fixtures use bundled Git with isolated configuration
-and synthetic local repositories, including paths with spaces. The independent
-audit found a snapshot-reader fixture exception tracked in #45. Check native architecture, Node version,
+and synthetic local repositories, including paths with spaces. #45 routes the
+snapshot-reader fixture through `createMigrationGitRunners()` and retains the
+shared native cleanup helper. Its regressions exercise a fictional hostile global
+signing configuration, empty PATH, inherited Git storage/configuration and exact
+mixed-line-ending bytes. The original audit finding below is historical; #15 must
+independently accept the fix. Check native architecture, Node version,
 dependency installation and subprocess/file-lock errors when diagnosing platform
 failures. Do not replace bundled Git, add credentials, skip tests or weaken assertions.
 Capture complete logs outside the worktree; distinguish assertion failures from
