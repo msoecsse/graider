@@ -477,10 +477,39 @@ describe(
       expect(await f.git(f.remote, ["tag", "--list"])).toBe("");
       expect(f.commands.some((args) => args.includes("push"))).toBe(false);
     });
-    it("verifies the immutable checkpoint remotely before creating any candidate workspace", async () => {
+    it("preflights before checkpointing and validates materialized bytes only after a verified checkpoint", async () => {
       seams.synthetic = true;
       const f = await setup();
+      const checkpointRef = `refs/tags/graider-migration-v1/${f.sha}`;
       let observations = 0;
+      let pureCandidate: Backend.MigrationCandidate | undefined;
+      let candidateRoot: string | undefined;
+      let actualBytesValidated = false;
+      let committed = false;
+      let committedBytesValidated = false;
+      seams.beforeValidation = async (value) => {
+        const context = value as Backend.MigrationPublicationContext;
+        if (!pureCandidate) {
+          pureCandidate = context.candidate;
+          expect(await f.git(f.remote, ["tag", "--list"])).toBe("");
+          expect(
+            fs.existsSync(
+              path.join(f.userData, "managed-courses", String(f.input.userId), ".transactions")
+            )
+          ).toBe(false);
+        }
+        if (context.candidate !== pureCandidate) {
+          expect(candidateRoot).toBeDefined();
+          expect(await f.git(f.remote, ["rev-parse", checkpointRef])).toBe(f.sha);
+          for (const file of context.candidate.files) {
+            expect(
+              fs.readFileSync(path.join(candidateRoot!, ...file.path.split("/"))).toString("base64")
+            ).toBe(file.bytesBase64);
+          }
+          actualBytesValidated = true;
+          if (committed) committedBytesValidated = true;
+        }
+      };
       f.onCommand(async (_cwd, args) => {
         if (args.includes("ls-remote")) {
           observations += 1;
@@ -491,8 +520,27 @@ describe(
               )
             ).toBe(false);
         }
+        if (args.includes("push") && args.some((arg) => arg.endsWith(`:${checkpointRef}`))) {
+          expect(pureCandidate).toBeDefined();
+          expect(candidateRoot).toBeUndefined();
+        }
+        if (args.includes("clone")) {
+          expect(pureCandidate).toBeDefined();
+          expect(await f.git(f.remote, ["rev-parse", checkpointRef])).toBe(f.sha);
+          expect(actualBytesValidated).toBe(false);
+          candidateRoot = args.at(-1);
+        }
+        if (args.includes("commit")) {
+          expect(actualBytesValidated).toBe(true);
+          committed = true;
+        }
+        if (args.includes("push") && args.some((arg) => arg.startsWith("HEAD:refs/heads/"))) {
+          expect(committedBytesValidated).toBe(true);
+          expect(await f.git(f.remote, ["rev-parse", checkpointRef])).toBe(f.sha);
+        }
       });
       expect(await f.service.publish(OWNER, f.request)).toMatchObject({ status: "published" });
+      expect(committedBytesValidated).toBe(true);
       expect(observations).toBeGreaterThanOrEqual(3);
     });
     it("refuses a conflicting checkpoint without changing its reference or authoritative course", async () => {

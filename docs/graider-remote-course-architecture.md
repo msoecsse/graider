@@ -15,8 +15,9 @@ is resolved, and #39 remains a separate intermittent performance reliability
 follow-up with unchanged assertions. Both native grading boundary jobs passed.
 Production migration remains disabled pending the independent release/readiness
 requirements in the migration contract. Independent Phase 9 audit #15 is now
-open/blocked by #44 (checkpoint-order contract) and #45 (migration fixture Git
-isolation); see the [audit record](migration-regression.md#independent-phase-9-audit-15).
+open/blocked by #45 (migration fixture Git isolation). Faculty decision #44 resolves
+the checkpoint-order contract in the
+[migration safety protocol](graider-schema-v2-migration.md#3-migration-safety-protocol); see the [audit record](migration-regression.md#independent-phase-9-audit-15).
 Phase 9 is not closed and Phase 10 is not started.
 
 ## 1. Purpose
@@ -3504,14 +3505,14 @@ The implementation must maintain these invariants:
 
 ### Migration
 
-1. Existing schema-v1 course is discovered.
-2. Graider synchronizes and checkpoints it.
-3. Safe values are migrated automatically.
-4. Faculty identities/coordinators/fallback administrator are confirmed where required.
-5. Existing deadlines/manifests become section-specific state.
-6. Legacy grader configuration is removed.
-7. The migrated repository is validated and pushed.
-8. Older Graider clients refuse to operate on it until upgraded.
+Follow the authoritative [migration safety protocol](graider-schema-v2-migration.md#3-migration-safety-protocol),
+including faculty decision #44: synchronize/analyze authoritative Schema 1, complete
+faculty review and acknowledgement, build the pure candidate and check readiness,
+verify the immutable remote Schema 1 checkpoint, then materialize in isolation,
+validate actual bytes and repeat required checks, publish and reconcile durably.
+Pure preflight writes no candidate files. No candidate file write or authoritative
+Schema 2 publication may precede the verified checkpoint. Older incompatible clients
+refuse normal operation and mutations after publication until upgraded.
 
 ---
 

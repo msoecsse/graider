@@ -60,8 +60,18 @@ resource contention and retain all failure details.
 
 ## Independent Phase 9 audit (#15)
 
-**2026-11-11: open/blocked by [#44](https://github.com/msoecsse/graider/issues/44)
-and [#45](https://github.com/msoecsse/graider/issues/45). Phase 9 is not closed.**
+**2026-11-11: #15 remains open/blocked by [#45](https://github.com/msoecsse/graider/issues/45).
+Phase 9 is not closed.** Faculty decision [#44](https://github.com/msoecsse/graider/issues/44)
+approves the existing reviewed-preflight-before-checkpoint order. Canonical
+[§3](graider-schema-v2-migration.md#3-migration-safety-protocol), the roadmap,
+architecture, faculty guide and #15 acceptance language now reflect that order.
+Publication ordering coverage retains checkpoint-before-workspace assertions and
+also checks pure readiness before checkpoint mutation, actual-byte validation
+before commit and repeated actual-byte validation before publication. Production
+behavior and enablement are unchanged. #15 must independently accept this resolution;
+no audit execution or #45 implementation is included in #44.
+
+The following records the original audit finding, before the #44 resolution.
 This fresh audit reviewed `adad3b44c2dfdb60a3b8b06b89c3584f810a5b92` on
 `remote-course-v2`. It inspected source, test assertions, canonical requirements
 and the faculty guide directly; #26's closeout report was not substituted for
@@ -90,7 +100,7 @@ counterparts, rather than claims based only on issue closure.
 | 9.3 plan/handoff                                       | `assignment-migration-planner.ts` and `assignmentMigrationPlanningService.ts`: exact completed review, ownerless repair, section schedule fan-out and incomplete Apply preservation. Planner and handoff tests reject conflicting/stale input and inferred owners.                                                                                                                                          |
 | 9.4 removal/handoff                                    | `grader-removal-planner.ts`, `graderRemovalHandoffService.ts`, `legacy-grader-reconciliation.ts`: retained inventory/review, numeric managed-resource targeting, verified publication and replacement access before cleanup. Existing tests cover missing proof, unrelated resources and idempotency.                                                                                                       |
 | 9.5 publication                                        | `migration-candidate.ts`, `migration-publication-validation.ts`, `migrationPublicationService.ts` and real local/bare Git tests: full staged candidate, actual-byte and committed-object validation, isolated exact-base transaction, remote acceptance and lost-response recovery. Production readiness provider remains fixed/fail-closed.                                                                |
-| Exact safety order                                     | **Unresolved #44.** #15/§3 demand checkpoint before confirmations and candidate generation; #21 and code require completed reviews/acknowledgement and pure candidate readiness first. Verified checkpoint does precede materialization; no unsafe write-before-checkpoint was observed. Literal criterion cannot be signed off until the conflicting safety contracts are explicitly reconciled.           |
+| Exact safety order                                     | **Original conflict, now resolved by faculty decision #44 above.** At audit time, #15/§3 required checkpoint before confirmations; #21/code required completed reviews and pure readiness first. Checkpoint preceded materialization; no unsafe writes were observed. An explicit faculty decision was required.                                                                                            |
 | No grader desired role or membership-derived authority | Candidate serialization strips obsolete course/manifest fields and retains originals only as audit evidence. `grader-access-review.ts` requires explicit exact section decisions; planner/review/reconciliation tests reject inferred grants, preserve existing relationships and leave teams/members intact.                                                                                               |
 | Recoverable old state                                  | `migration-checkpoint.ts` independently rereads the deterministic remote source tag; conflicts are never moved/deleted. Checkpoint and publication tests cover lost responses, conflicts, exact-source recoverability and checkpoint-before-workspace ordering. Source originals and machine-local limits remain explicit.                                                                                  |
 | Publication identity revalidation                      | `migrationPublicationService.ts` re-enters retained review/grader/acknowledgement closures, observes account/repository/organization/source after awaits and repeats readiness/checkpoint checks before its durable push boundary. Integration assertions cover changed source, account, generation, review, bytes and paths.                                                                               |
@@ -98,7 +108,7 @@ counterparts, rather than claims based only on issue closure.
 | Durable partial reconciliation                         | `migration-reconciliation*.ts`, `migrationReconciliationService.ts`: shared journal, immutable original publication/checkpoint, exact journal revision, creation guards, explicit fresh plans and independent current recovery authority. Tests exercise second-machine recovery, pending invitations, lost outcomes, one winning journal claim and permanent history; accepted v2 is not rolled back.      |
 | Synthetic/no live automated tests                      | Inspected fictional snapshot builders, injected fake GitHub clients/transports and local/bare Git runners. Root Vitest excludes `tests/live` by default. No real credentials or live GitHub calls were needed or used. Technical evidence for successful publication remains test-module-only synthetic evidence.                                                                                           |
 | Native/platform requirements                           | Baseline's five CI jobs passed, including both native migration jobs. **Fixture-isolation acceptance fails under controlled ambient signing configuration (#45)** despite standard suites passing; this is distinct from production runner isolation and #39's performance follow-up.                                                                                                                       |
-| Canonical/faculty documentation                        | Faculty guide matches optional review/autosave, final warning/single acknowledgement, cancellation, distinct outcomes and explicit recovery/history. Current schema/setup status is reconciled in #15. **Canonical safety-order consistency remains #44**; historical slice-local progress notes are explicitly historical.                                                                                 |
+| Canonical/faculty documentation                        | Faculty guide matches optional review/autosave, final warning/single acknowledgement, cancellation, distinct outcomes and explicit recovery/history. Current schema/setup status is reconciled in #15. **Original safety-order conflict is resolved under #44 above**; historical slice-local progress notes are explicitly historical.                                                                     |
 | Required validation                                    | Standard root/UI checks and complete migration regressions are recorded below. An expected failing environmental reproduction establishes #45; green standard/native checks do not waive that requirement.                                                                                                                                                                                                  |
 | Clean/pushed boundary                                  | Started clean at `adad3b4`; only these audit/status Markdown files are intended changes. Final clean-worktree, pushed commit and exact-head CI evidence belong in #15's audit comment, avoiding a self-referential commit claim here.                                                                                                                                                                       |
 
@@ -143,13 +153,13 @@ The existing PDF standard-font advisory remains visible in document tests.
 
 ### Disposition
 
-#44 requires an explicit safety-contract decision under the workflow contract's
-documentation-authority rules. #45 requires a separate focused fixture fix. Neither
-was implemented under this audit. After both close, #15 must independently verify
-their resolutions and required validation before Phase 9 can close. No Phase 10,
+#44's explicit faculty decision is now incorporated as described above; the original
+audit did not choose that order itself. #45 still requires a separate focused
+fixture fix. #15 must independently verify both resolutions and required validation
+before Phase 9 can close. No Phase 10,
 production migration, real-course operation, packaging/release or orchestrator
 execution was started. #39 remains a separate performance follow-up; #41 is unchanged.
-There are no adopted behavioral assumptions; the unresolved order is a blocker.
+There are no adopted behavioral assumptions.
 
 ## Slice 9.5 closeout validation record (#26)
 

@@ -1,10 +1,12 @@
 # Graider Architecture Evolution — Dependency-Ordered Implementation Roadmap
 
 **Current handoff: Slice 9.5 implementation is complete; independent Phase 9
-audit #15 is open/blocked by #44 and #45.** The
+audit #15 remains open/blocked by #45.** The
 [independent audit](migration-regression.md#independent-phase-9-audit-15)
-records the unresolved checkpoint-order contract and regression-fixture isolation
-gaps. Its status supersedes the earlier #26 handoff and slice-local progress notes
+records the regression-fixture isolation gap. Faculty decision #44 resolves the
+checkpoint-order contract through the authoritative
+[migration safety protocol](graider-schema-v2-migration.md#3-migration-safety-protocol).
+The independent audit status supersedes the earlier #26 handoff and slice-local progress notes
 below. Phase 9 is not closed. Production migration remains disabled under the
 migration contract's independent release/readiness gates. Phase 10 is not started.
 
@@ -1228,8 +1230,11 @@ composition. Incorporation resolves #31. #25 execution UI/orchestration remains 
 no #25 work or production migration enablement is included. Phase 3/platform-release
 gates remain unchanged.
 
-Checkpoint old state, write/validate the complete staged Phase 9 candidate, push,
-then enable v2 behavior within the published boundary. The accepted decision in
+Follow the [approved #44 safety order](graider-schema-v2-migration.md#3-migration-safety-protocol):
+synchronize/analyze, complete faculty review/acknowledgement, pure candidate/readiness
+preflight, verified immutable remote Schema 1 checkpoint, isolated materialization,
+full actual-byte validation and repeated checks, then publication and durable reconciliation.
+No candidate file writes or authoritative Schema 2 publication may precede the verified checkpoint. The accepted decision in
 issue #16 is **A — staged Phase 9 publication**. Publication facts, preservation-only
 evidence, blockers and deferred work are defined authoritatively in the
 [migration publication boundary](graider-schema-v2-migration.md#11-phase-9-publication-boundary);

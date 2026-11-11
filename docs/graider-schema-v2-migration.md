@@ -1,11 +1,11 @@
 # Graider Schema v1 → v2 Migration and Reconciliation
 
 **Current status: Slice 9.5 implementation is complete; independent Phase 9
-audit #15 is open/blocked by #44 and #45.** See the
+audit #15 remains open/blocked by #45.** See the
 [independent audit and evidence](migration-regression.md#independent-phase-9-audit-15).
-The checkpoint-order conflict between §3 and the implemented 9.5C/9.5E contracts
-requires an explicit resolution in #44; this audit does not silently revise either
-requirement. #45 covers ambient Git configuration in a regression fixture.
+[Faculty decision #44](https://github.com/msoecsse/graider/issues/44) approves the
+existing reviewed-preflight-before-checkpoint order, now authoritative in §3.
+#45 covers ambient Git configuration in a regression fixture.
 Historical slice summaries retain their original boundaries; #21–#25 composition
 is complete. Production migration remains disabled under §1.2's independent
 technical/release evidence requirements. Passing native regression validation
@@ -203,52 +203,69 @@ remain defined by the roadmap and logical design.
 
 ## 3. Migration safety protocol
 
+[Faculty decision #44](https://github.com/msoecsse/graider/issues/44) approves the
+existing #21 ordering below. Pure candidate construction is an in-memory proposal
+and read-only preflight, distinct from materializing candidate files. Neither
+candidate file writes nor authoritative Schema 2 publication may occur before an
+independently verified immutable remote Schema 1 checkpoint.
+
 The migration executor must follow this order:
 
-1. **Synchronize first.** Authenticate, discover the canonical course/admin
-   repository by immutable remote identity, and update a clean managed working
-   copy. Dirty/divergent state blocks migration until reviewed.
-2. **Analyze without mutation.** Parse schema v1, inspect manifests and relevant
-   immutable GitHub IDs, produce a complete conversion report, and classify
-   safe, confirm, unresolved, and removed items. No course or GitHub state is
-   changed.
-3. **Checkpoint/backup existing remote state.** Create a recoverable,
-   immutable pre-migration reference to the authoritative v1 state before
-   writing candidate v2 data. The exact Git mechanism is an implementation
-   decision, but recoverability must be verified.
-4. **Obtain required confirmations.** At minimum confirm the fallback
-   administrator, unresolved faculty identities, coordinator assignments
-   not reliably present in v1, and ambiguous lifecycle/section mappings required
-   by §1.1. Deferred identity/placement/ownership findings remain explicit; they
-   are not canonical student/grading/comment conversion decisions. Record
-   actor and decision without inventing missing history. Also require the authorized
-   compatibility-consequence acknowledgement defined in §1.2.
-5. **Generate the Phase 9 candidate.** Transform only the canonical domains
-   in §1.1 into a separate candidate representation. Remove grader-role
-   configuration, preserve verified manifest/provenance/history, and retain every
-   unresolved item as Needs attention rather than guessing. Inventory and preserve
-   deferred evidence without canonical conversion; do not rewrite grading paths
-   or synthesize student identity or comment ownership/history.
-6. **Fully validate the Phase 9 candidate.** Validate all required cross-file
-   references and canonical IDs within §1.1, at most one Active term (zero is
-   valid), lifecycle guards, role histories, assignment ownership repair state,
-   section schedules/Apply state, repository mappings and managed-resource
-   identity. Verify deferred evidence preservation and explicit unknowns, not
-   future canonical student IDs or grading paths. Do not publish a partial valid
-   subset of the Phase 9 boundary as if migration succeeded. Revalidate current
-   authorization, immutable repository/organization binding and authoritative
-   remote revision against the reviewed source; stale review requires refresh
+1. **Synchronize and analyze authoritative Schema 1 without mutation.** Authenticate,
+   discover the canonical course/admin repository by immutable remote identity,
+   and synchronize a clean managed copy. Dirty/divergent state blocks migration.
+   Parse the exact authoritative source, inspect manifests and relevant immutable
+   GitHub IDs, produce a complete conversion report, and classify safe, confirm,
+   unresolved and removed items. Analysis changes no course or GitHub state.
+2. **Complete faculty review, confirmations and acknowledgements.** At minimum
+   confirm the fallback administrator, unresolved faculty identities, coordinator
+   assignments not reliably present in v1, and ambiguous lifecycle/section mappings
+   required by §1.1. Complete assignment and grader-access reviews. Deferred
+   identity/placement/ownership findings remain explicit; they are not canonical
+   student/grading/comment conversion decisions. Record actor and decision without
+   inventing history. Require the authorized compatibility-consequence acknowledgement
+   in §1.2 through the single **Upgrade course** action; no extra confirmation is added.
+3. **Build the pure candidate and perform read-only readiness checks.** Transform
+   only §1.1's canonical domains into a separate in-memory representation. Remove
+   grader-role configuration, preserve verified manifest/provenance/history and
+   deferred evidence, and retain unresolved items as Needs attention rather than
+   guessing. Do not rewrite grading paths or synthesize student identity or comment
+   ownership/history. Require all technical, authorization, compatibility,
+   acknowledgement and production-enablement gates in §1.2 before checkpoint
+   mutation. This preflight writes no candidate files and grants no publication authority.
+4. **Create and verify the immutable remote Schema 1 checkpoint.** Preserve the
+   exact authoritative reviewed source in a recoverable remote reference. Independently
+   verify recoverability; conflicting references must never be moved or deleted.
+   Revalidate current source, identity, session and authorization around checkpoint
+   observations/writes. Missing acknowledgement or readiness refuses checkpoint mutation.
+5. **Materialize the candidate in an isolated workspace.** Only after the verified
+   checkpoint, clone the exact reviewed source into the isolated transaction workspace
+   and write only the approved candidate delta. Never stage migration in the active cache.
+6. **Fully validate actual candidate bytes and repeat required checks.** Validate
+   the complete file namespace, bytes, modes, required cross-file references and IDs
+   within §1.1, at most one Active term (zero is valid), lifecycle guards, role
+   histories, assignment ownership repair state, section schedules/Apply state,
+   repository mappings and managed-resource identity. Verify deferred evidence
+   preservation and explicit unknowns, not future canonical student IDs or grading
+   paths. Do not publish a partial valid subset. Independently check committed Git
+   objects and exact single-parent source. Repeat source, account, repository and
+   organization identity, current authorization, trusted handoff/acknowledgement,
+   readiness/production-enablement and remote checkpoint checks before publication,
+   including after awaited observations. Stale source requires refreshed analysis
    and renewed review under the [trusted review contract](graider-remote-course-architecture.md#implemented-review-contract-slice-92--complete).
-   Require the trusted client/readiness and production-enablement conditions in §1.2
-   before publication; revalidate them at the trusted transaction boundary.
-7. **Push only after validation.** Commit with faculty attribution and push the
-   complete validated Phase 9 conversion atomically. Report success only after
-   the remote accepts it. If push fails, restore the managed clone to authoritative remote v1 and
-   retain the reviewed intent only as an explicit retry artifact.
-8. **Require a compatible Graider client thereafter.** Once schema v2 is
-   authoritative, older clients must refuse normal course operation and all
-   mutations, including from stale local caches or legacy paths. They must never
-   overwrite or downgrade Schema v2; see §1.2.
+7. **Publish only after successful validation, then reconcile durably.** Commit
+   with trusted faculty attribution, stage only approved paths and push the complete
+   validated conversion atomically without force. Preserve backend-controlled
+   cancellation during preparation/validation; after the durable non-cancellable
+   publication boundary, establish the authoritative remote outcome even if the
+   window closes or the push response is lost. Never report success without remote
+   acceptance or blindly retry an ambiguous push. Before accepted publication,
+   Schema 1 remains authoritative and a verified checkpoint/retry hint may remain.
+   After acceptance, Schema 2 is authoritative; synchronize the managed cache and
+   perform durable reconciliation under §4. Reconciliation failure retains Schema 2
+   as Published — Needs attention and never rolls it back. Older/incompatible clients
+   must refuse normal operation and all mutations, including stale-cache and legacy
+   paths, without overwriting or downgrading Schema 2; see §1.2.
 
 ## 4. Reconciliation after publication
 
@@ -668,7 +685,9 @@ checkpoint, commit/push, migration executor or publication control is installed 
 
 ### Implemented verified v1 checkpoint and retry infrastructure (Slice 9.5C)
 
-The main-only `createMigrationCheckpointService` obtains the exact retained completed
+Under §3, faculty review and pure candidate/readiness preflight precede checkpoint
+mutation; candidate materialization follows independent verification. The main-only
+`createMigrationCheckpointService` obtains the exact retained completed
 review through `getCheckpointHandoff()`. Its revalidation closure rejects replaced
 analysis/completion, refreshed/closed sessions, stale authoritative source, changed
 account/generation, repository/organization mismatch and lost faculty authorization.
@@ -789,8 +808,9 @@ migration, assignment and grader-removal handoffs, and rebuilds the candidate an
 readiness. Retained snapshot/completion/generation and grader-object identity are checked
 again after awaited observations; identical renewed reviews do not restore old authority.
 
-All technical, authorization, compatibility, acknowledgement and production-enablement
-gates must pass before creating/verifying the #19 immutable remote checkpoint. Only then
+The authoritative ordering is §3: pure in-memory preflight precedes checkpointing;
+actual candidate file validation follows materialization. All technical, authorization,
+compatibility, acknowledgement and production-enablement gates must pass before creating/verifying the #19 immutable remote checkpoint. Only then
 does `managedCourseTransaction` clone the exact source into its isolated workspace and
 materialize the explicit candidate delta. Complete validation checks actual bytes,
 including ignored/unrelated files, before staging. Only approved canonical paths are

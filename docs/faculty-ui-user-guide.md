@@ -582,6 +582,12 @@ migrated course until they update. The single **Upgrade course** button explicit
 acknowledges this consequence for the exact current review; there is no additional
 checkbox, typed phrase or confirmation dialog.
 
+The review and readiness checks happen before Graider creates and verifies the
+immutable remote Schema 1 recovery checkpoint. Only after that checkpoint is
+verified does Graider write the candidate in an isolated workspace, validate its
+actual files and repeat the required safety checks before publishing. Read-only
+preview does not write candidate files or upgrade the authoritative course.
+
 Production migration remains disabled pending independently verified initiating-client
 operational support, Phase 3 signing/distribution/update prerequisites and compatible
 macOS arm64 and Windows x64 production releases. Review completion, acknowledgement,
