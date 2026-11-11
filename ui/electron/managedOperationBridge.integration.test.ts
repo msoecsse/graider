@@ -62,7 +62,21 @@ const fixture = async (actor = 44) => {
   await git(f.writer, ["push", "origin", "main"]);
   await measure("synchronize", async () => f.request.input.resynchronize?.());
   let active = true;
-  currentReader = { ...f.reader, terms: async () => ["27s1", "27s2"] };
+  // Git object IDs identify immutable bytes. Keep branch observations live, but
+  // avoid spawning Git repeatedly to emulate identical remote API blob responses.
+  // Symbolic/omitted revisions still read the current remote on every request.
+  const blobs = new Map<string, string | null>();
+  currentReader = {
+    ...f.reader,
+    terms: async () => ["27s1", "27s2"],
+    file: async (repo, file, revision) => {
+      if (!revision || !/^[a-f0-9]{40}$/iu.test(revision))
+        return f.reader.file(repo, file, revision);
+      const key = JSON.stringify([repo.id, revision, file]);
+      if (!blobs.has(key)) blobs.set(key, await f.reader.file(repo, file, revision));
+      return blobs.get(key)!;
+    }
+  };
   const courseState = { ...f.request.input.course, schemaVersion: 2 };
   const session = {
     mutationGeneration: 1,
@@ -133,6 +147,35 @@ const fixture = async (actor = 44) => {
 };
 
 describe("trusted managed-operation production bridge", () => {
+  it(
+    "reuses only exact-revision fixture blobs while observing remote advancement",
+    async () => {
+      const f = await fixture();
+      const file = vi.spyOn(f.reader, "file");
+      const repo = (await currentReader.resolveId(20))!;
+      const before = await currentReader.revision(repo);
+      const original = await currentReader.file(repo, "course.yml", before);
+      expect(original).toContain("Original title");
+      expect(await currentReader.file(repo, "course.yml", before)).toBe(original);
+      expect(file).toHaveBeenCalledTimes(1);
+      expect(await currentReader.file(repo, "course.yml")).toBe(original);
+      expect(await currentReader.file(repo, "course.yml", "main")).toBe(original);
+      expect(file).toHaveBeenCalledTimes(3);
+      const after = await f.advance();
+      expect(await currentReader.revision(repo)).toBe(after);
+      expect(after).not.toBe(before);
+      expect(await currentReader.file(repo, "course.yml", after)).toContain("Remote winner");
+      expect(await currentReader.file(repo, "course.yml", before)).toBe(original);
+      expect(file).toHaveBeenCalledTimes(4);
+      // Mutable/default references must never reuse the earlier immutable response.
+      expect(await currentReader.file(repo, "course.yml")).toContain("Remote winner");
+      expect(await currentReader.file(repo, "course.yml", "main")).toContain("Remote winner");
+      expect(file).toHaveBeenCalledTimes(6);
+      expect(f.push).not.toHaveBeenCalled();
+      expect(f.legacyHandler).not.toHaveBeenCalled();
+    },
+    GIT_INTEGRATION_TIMEOUT_MS
+  );
   it(
     "reads scoped rosters and comments repeatedly with zero remote authorization requests",
     async () => {
@@ -352,7 +395,7 @@ describe("trusted managed-operation production bridge", () => {
           channel !== IPC_CHANNELS.changeManagedCourseLifecycle &&
           channel !== IPC_CHANNELS.changeManagedTermLifecycle
       )) {
-        await f.measure(channel, async () => {
+        await f.measure("channels", async () => {
           await expect(
             f.invoke(channel, { termCode: "27s2", sectionId: "001" })
           ).rejects.toMatchObject({ result: { reason: "operation_unavailable" } });
