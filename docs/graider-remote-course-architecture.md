@@ -14,8 +14,10 @@ boundaries; #21–#25 composition is complete. #43's Windows test-hygiene blocke
 is resolved, and #39 remains a separate intermittent performance reliability
 follow-up with unchanged assertions. Both native grading boundary jobs passed.
 Production migration remains disabled pending the independent release/readiness
-requirements in the migration contract. Phase 9 audit #15 is next and has not started;
-Phase 10 is not started.
+requirements in the migration contract. Independent Phase 9 audit #15 is now
+open/blocked by #44 (checkpoint-order contract) and #45 (migration fixture Git
+isolation); see the [audit record](migration-regression.md#independent-phase-9-audit-15).
+Phase 9 is not closed and Phase 10 is not started.
 
 ## 1. Purpose
 

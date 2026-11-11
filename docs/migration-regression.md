@@ -50,16 +50,110 @@ Read the failing job's Vitest file/scenario and assertion before retrying. Run
 be rerun with the appropriate package's `npx vitest run <file> -t <scenario>`.
 These narrower commands do not replace the complete target for acceptance.
 
-Real Git fixtures use bundled Git with isolated configuration and synthetic local
-repositories, including paths with spaces. Check native architecture, Node version,
+Publication/reconciliation fixtures use bundled Git with isolated configuration
+and synthetic local repositories, including paths with spaces. The independent
+audit found a snapshot-reader fixture exception tracked in #45. Check native architecture, Node version,
 dependency installation and subprocess/file-lock errors when diagnosing platform
 failures. Do not replace bundled Git, add credentials, skip tests or weaken assertions.
 Capture complete logs outside the worktree; distinguish assertion failures from
 resource contention and retain all failure details.
 
+## Independent Phase 9 audit (#15)
+
+**2026-11-11: open/blocked by [#44](https://github.com/msoecsse/graider/issues/44)
+and [#45](https://github.com/msoecsse/graider/issues/45). Phase 9 is not closed.**
+This fresh audit reviewed `adad3b44c2dfdb60a3b8b06b89c3584f810a5b92` on
+`remote-course-v2`. It inspected source, test assertions, canonical requirements
+and the faculty guide directly; #26's closeout report was not substituted for
+acceptance evidence. No source or test implementation changed.
+
+### Scope and prerequisite reconciliation
+
+#14 and #16–#26 were independently confirmed closed. #15's obsolete prerequisite
+block and incorrect workflow-contract path were corrected. Its Schema 1 language
+now distinguishes discovery/synchronization/metadata and the closed managed bridge
+(1/2), legacy aggregate services (1), new remote setup (2 under approved #30 Option A)
+and standalone folder preparation (deliberately 1). #16 Decision A preserves/defers
+student identity, grading relocation and comment ownership; #29 Option B retains
+trusted initiating-client safeguards, explicit acknowledgement and independent
+production release requirements without an all-installations inventory.
+
+### Acceptance evidence
+
+Paths below identify inspected implementations and their existing regression
+counterparts, rather than claims based only on issue closure.
+
+| #15 criterion                                          | Independent evidence and result                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 9.1 analyzer                                           | `schema-v1-migration-analyzer.ts`, `migration-snapshot-reader.ts`, `preservation-evidence.ts`: exact source binding, immutable analysis, technical blockers and staged preservation. Their root tests assert deterministic analysis, dirty-worktree independence, exact bytes and zero reader mutations. Implementation present; fixture isolation remains #45.                                             |
+| 9.2 review                                             | `migration-review-validation.ts`, `migrationReviewService.ts` and reader/IPC tests: explicit fallback/coordinators/lifecycle/order, verified identity receipts, retained-object handoffs and source/account/generation invalidation. Saved progress cannot restore completion or publication authority.                                                                                                     |
+| 9.3 plan/handoff                                       | `assignment-migration-planner.ts` and `assignmentMigrationPlanningService.ts`: exact completed review, ownerless repair, section schedule fan-out and incomplete Apply preservation. Planner and handoff tests reject conflicting/stale input and inferred owners.                                                                                                                                          |
+| 9.4 removal/handoff                                    | `grader-removal-planner.ts`, `graderRemovalHandoffService.ts`, `legacy-grader-reconciliation.ts`: retained inventory/review, numeric managed-resource targeting, verified publication and replacement access before cleanup. Existing tests cover missing proof, unrelated resources and idempotency.                                                                                                       |
+| 9.5 publication                                        | `migration-candidate.ts`, `migration-publication-validation.ts`, `migrationPublicationService.ts` and real local/bare Git tests: full staged candidate, actual-byte and committed-object validation, isolated exact-base transaction, remote acceptance and lost-response recovery. Production readiness provider remains fixed/fail-closed.                                                                |
+| Exact safety order                                     | **Unresolved #44.** #15/§3 demand checkpoint before confirmations and candidate generation; #21 and code require completed reviews/acknowledgement and pure candidate readiness first. Verified checkpoint does precede materialization; no unsafe write-before-checkpoint was observed. Literal criterion cannot be signed off until the conflicting safety contracts are explicitly reconciled.           |
+| No grader desired role or membership-derived authority | Candidate serialization strips obsolete course/manifest fields and retains originals only as audit evidence. `grader-access-review.ts` requires explicit exact section decisions; planner/review/reconciliation tests reject inferred grants, preserve existing relationships and leave teams/members intact.                                                                                               |
+| Recoverable old state                                  | `migration-checkpoint.ts` independently rereads the deterministic remote source tag; conflicts are never moved/deleted. Checkpoint and publication tests cover lost responses, conflicts, exact-source recoverability and checkpoint-before-workspace ordering. Source originals and machine-local limits remain explicit.                                                                                  |
+| Publication identity revalidation                      | `migrationPublicationService.ts` re-enters retained review/grader/acknowledgement closures, observes account/repository/organization/source after awaits and repeats readiness/checkpoint checks before its durable push boundary. Integration assertions cover changed source, account, generation, review, bytes and paths.                                                                               |
+| Incompatible/older-client gates                        | `remoteCourseAccess.ts`, `remoteCourseMetadataBackend.ts`, `managedCourseMutationGuard.ts`, `coursePublishService.ts` and CLI guards inspect authoritative schema/revision. `schemaDiscriminated*`, managed bridge/runtime safety and faculty/config tests cover immutable-ID v2 authority, unsupported schemas, stale v1 caches and zero downgrade writes. Unavailable operation families remain explicit. |
+| Durable partial reconciliation                         | `migration-reconciliation*.ts`, `migrationReconciliationService.ts`: shared journal, immutable original publication/checkpoint, exact journal revision, creation guards, explicit fresh plans and independent current recovery authority. Tests exercise second-machine recovery, pending invitations, lost outcomes, one winning journal claim and permanent history; accepted v2 is not rolled back.      |
+| Synthetic/no live automated tests                      | Inspected fictional snapshot builders, injected fake GitHub clients/transports and local/bare Git runners. Root Vitest excludes `tests/live` by default. No real credentials or live GitHub calls were needed or used. Technical evidence for successful publication remains test-module-only synthetic evidence.                                                                                           |
+| Native/platform requirements                           | Baseline's five CI jobs passed, including both native migration jobs. **Fixture-isolation acceptance fails under controlled ambient signing configuration (#45)** despite standard suites passing; this is distinct from production runner isolation and #39's performance follow-up.                                                                                                                       |
+| Canonical/faculty documentation                        | Faculty guide matches optional review/autosave, final warning/single acknowledgement, cancellation, distinct outcomes and explicit recovery/history. Current schema/setup status is reconciled in #15. **Canonical safety-order consistency remains #44**; historical slice-local progress notes are explicitly historical.                                                                                 |
+| Required validation                                    | Standard root/UI checks and complete migration regressions are recorded below. An expected failing environmental reproduction establishes #45; green standard/native checks do not waive that requirement.                                                                                                                                                                                                  |
+| Clean/pushed boundary                                  | Started clean at `adad3b4`; only these audit/status Markdown files are intended changes. Final clean-worktree, pushed commit and exact-head CI evidence belong in #15's audit comment, avoiding a self-referential commit claim here.                                                                                                                                                                       |
+
+### Reproduced blocker and validation
+
+#45's selected snapshot-reader scenario fails during fixture `git commit` when
+modern Git is on PATH and a scratch `GIT_CONFIG_GLOBAL` enables signing through a
+fictional unavailable signer. The identical PATH/scenario passes with signing
+disabled in a second scratch config. No real configuration was edited. The host's
+older PATH Git ignored this environment override, so its initial passing result
+did not establish isolation. Diagnostic `-t` filtering deselected 13 other cases;
+no declarations were skipped, focused, deleted or weakened in source.
+
+Baseline [CI run 43024289622](https://github.com/msoecsse/graider/actions/runs/43024289622)
+at `adad3b4` passed Normal checks, both Grading local boundary jobs and both
+Migration regression jobs. Job steps independently confirmed native macOS arm64
+and Windows x64 and complete migration-target execution. Audit documentation's
+exact-head CI outcome is recorded in the final #15 comment.
+
+Local validation uses Node 24.21.0 on native macOS arm64. Complete logs are outside
+the worktree in `/private/tmp/graider-15-validation`.
+
+| Command                                                                     | Local result                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run test:migration`                                                    | Passed: 32 root files / 878 tests; 24 UI files / 308 tests, zero skips. Includes test hygiene and generated backend bridges.                                                                                                 |
+| `npm run typecheck`                                                         | Passed, including backend generation.                                                                                                                                                                                        |
+| `npm run lint`                                                              | Passed; includes UI sources.                                                                                                                                                                                                 |
+| `npm run format:check`                                                      | Passed; rerun after audit documentation edits.                                                                                                                                                                               |
+| `npm test -- --maxWorkers=2` (root)                                         | Passed: 191 files / 3,059 tests, zero skips; test hygiene passed.                                                                                                                                                            |
+| `npm run build`                                                             | Passed.                                                                                                                                                                                                                      |
+| `npm run typecheck` (UI)                                                    | Passed, both renderer and Electron projects.                                                                                                                                                                                 |
+| `npm run format:check` (UI)                                                 | Passed.                                                                                                                                                                                                                      |
+| `npm test -- --maxWorkers=2` (UI)                                           | Passed with loopback permission: 226 files / 2,505 tests, zero skips. Initial sandbox run: 2,495 passed, ten OAuth loopback tests failed because local listener binding was denied.                                          |
+| `npx vitest run electron/githubOAuth.test.ts` (UI, loopback permission)     | Passed: 41 tests, zero skips.                                                                                                                                                                                                |
+| `npm run build` (UI)                                                        | Passed; existing chunk-size advisory retained.                                                                                                                                                                               |
+| `git diff --check`; relative Markdown file links                            | Passed; 72 relative file links resolve.                                                                                                                                                                                      |
+| Selected snapshot-reader scenario with scratch global signing configuration | Expected failure reproduces #45 with Git 2.53.0 on PATH; signing-disabled control passed. Host PATH Git 2.23.0 ignored the override and passed. Test-name filtering deselected 13 other cases in each diagnostic invocation. |
+
+The initial UI listener failure and #45's deliberate environmental reproduction
+are recorded separately; neither is hidden by the successful standard suites.
+The existing PDF standard-font advisory remains visible in document tests.
+
+### Disposition
+
+#44 requires an explicit safety-contract decision under the workflow contract's
+documentation-authority rules. #45 requires a separate focused fixture fix. Neither
+was implemented under this audit. After both close, #15 must independently verify
+their resolutions and required validation before Phase 9 can close. No Phase 10,
+production migration, real-course operation, packaging/release or orchestrator
+execution was started. #39 remains a separate performance follow-up; #41 is unchanged.
+There are no adopted behavioral assumptions; the unresolved order is a blocker.
+
 ## Slice 9.5 closeout validation record (#26)
 
-**Slice 9.5 is complete. Phase 9 audit #15 is next and has not started.**
+**Historical #26 handoff: Slice 9.5 was complete; #15 was next and had not started.**
 This record supersedes the earlier blocked #26 closeout status. Production
 migration remains disabled under the migration contract's independent technical,
 Phase 3 and compatible production-release prerequisites. Native regression success
@@ -101,10 +195,11 @@ tests. Final review confirms:
   checks and complete regression jobs pass on both production targets. Future
   affected changes retain the workflow/development-contract requirement.
 
-No unresolved Slice 9.5 acceptance blocker remains. The issue closeout comment
+At #26 closeout, no unresolved Slice 9.5 acceptance blocker was recorded. The issue closeout comment
 records final local commands/results, pushed documentation commit and its CI
-verification after a clean-worktree check. #15 is a separate audit, not started
-by this review; Phase 10 is not started and orchestrator #41 is unchanged.
+verification after a clean-worktree check. #15's subsequent independent findings
+and current blocked status are recorded above; Phase 10 is not started and
+orchestrator #41 is unchanged.
 
 ### Historical validation before the Windows fix
 

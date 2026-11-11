@@ -1,10 +1,12 @@
 # Graider Architecture Evolution — Dependency-Ordered Implementation Roadmap
 
-**Current handoff: Slice 9.5 is complete. Phase 9 audit #15 is next and has not
-started.** The [closeout review and native validation evidence](migration-regression.md#slice-95-closeout-validation-record-26)
-supersede earlier slice-local progress notes below. Production migration remains
-disabled under the migration contract's independent release/readiness gates.
-Phase 10 is not started.
+**Current handoff: Slice 9.5 implementation is complete; independent Phase 9
+audit #15 is open/blocked by #44 and #45.** The
+[independent audit](migration-regression.md#independent-phase-9-audit-15)
+records the unresolved checkpoint-order contract and regression-fixture isolation
+gaps. Its status supersedes the earlier #26 handoff and slice-local progress notes
+below. Phase 9 is not closed. Production migration remains disabled under the
+migration contract's independent release/readiness gates. Phase 10 is not started.
 
 ## Guiding Approach
 

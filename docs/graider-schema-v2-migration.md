@@ -1,11 +1,15 @@
 # Graider Schema v1 → v2 Migration and Reconciliation
 
-**Current status: Slice 9.5 is complete; Phase 9 audit #15 is next and has not
-started.** See the [closeout acceptance review and native validation evidence](migration-regression.md#slice-95-closeout-validation-record-26).
+**Current status: Slice 9.5 implementation is complete; independent Phase 9
+audit #15 is open/blocked by #44 and #45.** See the
+[independent audit and evidence](migration-regression.md#independent-phase-9-audit-15).
+The checkpoint-order conflict between §3 and the implemented 9.5C/9.5E contracts
+requires an explicit resolution in #44; this audit does not silently revise either
+requirement. #45 covers ambient Git configuration in a regression fixture.
 Historical slice summaries retain their original boundaries; #21–#25 composition
 is complete. Production migration remains disabled under §1.2's independent
 technical/release evidence requirements. Passing native regression validation
-does not enable migration or start Phase 10.
+does not close these audit gaps, enable migration or start Phase 10.
 
 **Status:** migration decision contract
 
