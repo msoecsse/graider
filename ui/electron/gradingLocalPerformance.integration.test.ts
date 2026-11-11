@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
+import { performance } from "node:perf_hooks";
 import { afterEach, expect, it, vi } from "vitest";
 import { managedOperationalFixture, fixtureGit } from "./managedOperationalFixtures";
 import { removeGitFixture, GIT_INTEGRATION_TIMEOUT_MS } from "./gitIntegrationFixtures";
@@ -431,7 +432,12 @@ const WORKLOAD_STUDENTS = 3;
 it.each(["managed", "legacy"] as const)(
   "profiles %s grading with 120 student repositories, 24 assignments and delayed remote calls",
   async (mode) => {
+    const fixtureStarted = performance.now();
     const f = await fixture(mode, true);
+    const fixtureDurationMs = performance.now() - fixtureStarted;
+    const workloadStarted = performance.now();
+    const workerCpuStarted = process.cpuUsage();
+    const eventLoopStarted = performance.eventLoopUtilization();
     expect(
       await f.handlers.get(IPC_CHANNELS.getCourseOperationalMode)!(
         { sender: f.sender },
@@ -464,7 +470,20 @@ it.each(["managed", "legacy"] as const)(
     }
     if (process.env.GRAIDER_GRADING_BENCHMARK === "1")
       process.stdout.write(
-        `${JSON.stringify({ mode, rosterSize: REALISTIC_ROSTER_SIZE, samples: f.samples, remoteReaderCalls: f.requests.reduce((sum, method) => sum + method.mock.calls.length, 0) })}\n`
+        `${JSON.stringify({
+          mode,
+          platform: process.platform,
+          architecture: process.arch,
+          rosterSize: REALISTIC_ROSTER_SIZE,
+          // Fixture creation is outside every sample's unchanged wall-clock budget.
+          fixtureDurationMs,
+          workloadDurationMs: performance.now() - workloadStarted,
+          // Worker-only diagnostics; Git child CPU and host scheduling are not measured here.
+          workerCpuUsageMicros: process.cpuUsage(workerCpuStarted),
+          eventLoop: performance.eventLoopUtilization(eventLoopStarted),
+          samples: f.samples,
+          remoteReaderCalls: f.requests.reduce((sum, method) => sum + method.mock.calls.length, 0)
+        })}\n`
       );
     expect(f.requests.every((method) => method.mock.calls.length === 0)).toBe(true);
     expect(f.openCourseWorkspace).toHaveBeenCalledTimes(
