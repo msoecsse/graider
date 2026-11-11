@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkTestHygiene, inspectTestSource } from "../../scripts/check-test-hygiene.js";
 
@@ -67,6 +67,28 @@ describe("test hygiene guard", () => {
   it("reports actionable source positions", () => {
     expect(inspectTestSource("example.test.ts", '\n  it.skip("disabled", () => {});')).toEqual([
       { file: "example.test.ts", line: 2, column: 3, declaration: "it.skip" }
+    ]);
+  });
+
+  it.each([
+    posix.join("tests", "nested folder", "example.test.tsx"),
+    win32.join("tests", "nested folder", "example.test.tsx"),
+    posix.join("/", "workspace", "tests", "example.test.tsx"),
+    win32.join("C:\\", "workspace", "tests", "example.test.tsx"),
+    join("tests", "nested folder", "example.test.tsx")
+  ])("binds compiler symbols for path %s and preserves the reported filename", (file) => {
+    const source = [
+      'import { test as check } from "vitest";',
+      "const alias = check;",
+      'alias.only("focused", () => {});',
+      "function unrelated(test: { only(): void }) { test.only(); }",
+      'const element = <div title="test.only" />;',
+      'class Fixture { run() { alias.skip("disabled", () => {}); } }'
+    ].join("\n");
+
+    expect(inspectTestSource(file, source)).toEqual([
+      { file, line: 3, column: 1, declaration: "test.only" },
+      { file, line: 6, column: 25, declaration: "test.skip" }
     ]);
   });
 

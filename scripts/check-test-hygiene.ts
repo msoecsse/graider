@@ -29,10 +29,17 @@ export interface HygieneViolation {
 
 /** Parse without resolving dependencies: symbols still distinguish local bindings and imports. */
 export function inspectTestSource(file: string, source: string): HygieneViolation[] {
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  // TypeScript requests normalized paths, including forward slashes on Windows.
+  // A host miss leaves the parsed AST unbound and makes symbol resolution unsafe.
+  const compilerFile = resolve(file.replace(/\\/gu, "/")).replace(/\\/gu, "/");
+  const parsedSource = ts.createSourceFile(compilerFile, source, ts.ScriptTarget.Latest, true);
   const host = ts.createCompilerHost({ noResolve: true });
-  host.getSourceFile = (name) => (name === file ? sourceFile : undefined);
-  const program = ts.createProgram([file], { noResolve: true, noLib: true }, host);
+  host.getSourceFile = (name) => (name === compilerFile ? parsedSource : undefined);
+  const program = ts.createProgram([compilerFile], { noResolve: true, noLib: true }, host);
+  const sourceFile = program.getSourceFile(compilerFile);
+  if (!sourceFile) {
+    throw new Error(`Test hygiene could not load source file: ${file}`);
+  }
   const checker = program.getTypeChecker();
   const violations: HygieneViolation[] = [];
 
