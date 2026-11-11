@@ -1,14 +1,13 @@
 # Graider Architecture Evolution — Dependency-Ordered Implementation Roadmap
 
-**Current handoff: Slice 9.5 implementation is complete; independent Phase 9
-audit #15 remains open/blocked by #45.** The
-[independent audit](migration-regression.md#independent-phase-9-audit-15)
-records the regression-fixture isolation gap. Faculty decision #44 resolves the
-checkpoint-order contract through the authoritative
-[migration safety protocol](graider-schema-v2-migration.md#3-migration-safety-protocol).
-The independent audit status supersedes the earlier #26 handoff and slice-local progress notes
-below. Phase 9 is not closed. Production migration remains disabled under the
-migration contract's independent release/readiness gates. Phase 10 is not started.
+**Phase 9 — Existing-Course Migration is complete.** Independent audit #15
+accepted Slices 9.1–9.5 and independently verified the #44 checkpoint ordering
+and #45 bundled-Git fixture isolation fixes. See the
+[independent audit evidence](migration-regression.md#independent-phase-9-audit-15)
+for source/test findings and validation; exact audit-commit CI evidence is retained
+in #15. This status supersedes earlier handoffs and historical slice-local notes.
+Production migration remains disabled under the migration contract's independent
+release/readiness gates. Phase 10 is not started or authorized by this closeout.
 
 ## Guiding Approach
 
@@ -951,6 +950,9 @@ authoritative order rather than guessing from academic chronology or local files
 
 # Phase 9 — Existing-Course Migration
 
+**Complete:** Slices 9.1–9.5 and independent audit #15 are accepted; see the
+[final audit evidence](migration-regression.md#independent-phase-9-audit-15).
+
 Phase 9 builds on Schema v2, authorization and team reconciliation. Production
 migration may ship only after its implementation safeguards and Phase 3 release/update
 dependencies are verified. The updater and compatible production-release availability
@@ -1209,7 +1211,8 @@ passed, including unchanged grading performance assertions. The earlier Windows
 closeout blockers are cleared. #39 stays open as a separate intermittent
 performance reliability follow-up, without evidence of a remaining release blocker
 in this validation. See the [acceptance review](migration-regression.md#slice-95-closeout-validation-record-26).
-Phase 9 audit #15 is next; do not start it or Phase 10 as part of #26.
+The historical #26 handoff was to independent audit #15, now completed; see the
+[current audit evidence](migration-regression.md#independent-phase-9-audit-15).
 The implementation summaries below retain each slice's historical boundary;
 completed #21–#25 composition is no longer pending. Phase 3/platform production
 release evidence remains independently required before enabling migration.
@@ -1218,8 +1221,8 @@ Slice 9.5I / #25 supplies the approved faculty execution, autosave, progress,
 results/recovery and permanent-history UI/IPC over the trusted #21/#24/#32 services.
 See the [implementation contract](graider-schema-v2-migration.md#implemented-faculty-execution-and-recovery-composition-slice-95i--25).
 Production migration remains disabled pending independent Phase 3/platform-release
-and operational evidence. Slice 9.5 is complete; the separate Phase 9 audit #15
-is next. No Phase 10 work is authorized.
+and operational evidence. Slice 9.5 and independent Phase 9 audit #15
+are complete. No Phase 10 work is authorized.
 
 Slice 9.5H / #24 implements durable post-publication reconciliation under
 [approved #31 Decision A](graider-schema-v2-migration.md#41-durable-recovery--approved-decision-a-31).

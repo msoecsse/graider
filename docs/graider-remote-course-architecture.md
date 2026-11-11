@@ -14,11 +14,12 @@ boundaries; #21–#25 composition is complete. #43's Windows test-hygiene blocke
 is resolved, and #39 remains a separate intermittent performance reliability
 follow-up with unchanged assertions. Both native grading boundary jobs passed.
 Production migration remains disabled pending the independent release/readiness
-requirements in the migration contract. Independent Phase 9 audit #15 is now
-open/blocked by #45 (migration fixture Git isolation). Faculty decision #44 resolves
-the checkpoint-order contract in the
-[migration safety protocol](graider-schema-v2-migration.md#3-migration-safety-protocol); see the [audit record](migration-regression.md#independent-phase-9-audit-15).
-Phase 9 is not closed and Phase 10 is not started.
+requirements in the migration contract. Independent Phase 9 audit #15 is complete,
+including independent acceptance of #44's approved checkpoint ordering and #45's
+bundled-Git fixture isolation. See the
+[migration safety protocol](graider-schema-v2-migration.md#3-migration-safety-protocol)
+and [audit evidence](migration-regression.md#independent-phase-9-audit-15).
+Phase 9 is complete. Phase 10 is not started or authorized by this closeout.
 
 ## 1. Purpose
 

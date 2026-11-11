@@ -55,14 +55,87 @@ and synthetic local repositories, including paths with spaces. #45 routes the
 snapshot-reader fixture through `createMigrationGitRunners()` and retains the
 shared native cleanup helper. Its regressions exercise a fictional hostile global
 signing configuration, empty PATH, inherited Git storage/configuration and exact
-mixed-line-ending bytes. The original audit finding below is historical; #15 must
-independently accept the fix. Check native architecture, Node version,
+mixed-line-ending bytes. The original audit finding below is historical; #15 independently
+accepted the fix against the source and regressions. Check native architecture, Node version,
 dependency installation and subprocess/file-lock errors when diagnosing platform
 failures. Do not replace bundled Git, add credentials, skip tests or weaken assertions.
 Capture complete logs outside the worktree; distinguish assertion failures from
 resource contention and retain all failure details.
 
 ## Independent Phase 9 audit (#15)
+
+**2026-11-11 final independent audit: Phase 9 acceptance is satisfied.**
+The active-session review inspected current source and regression assertions at
+`3ba7027` on `remote-course-v2`, including #44 (`421a935`) and #45 (`3ba7027`).
+Prior implementation completion reports were not substituted for evidence. This
+closeout changes audit/status documentation only; no functionality or test was
+added, removed, skipped or weakened. Final commit, clean/pushed verification and
+all five exact-commit CI job results are recorded in
+[issue #15](https://github.com/msoecsse/graider/issues/15), avoiding a self-referential
+commit claim in this file.
+
+### Final acceptance findings
+
+| Criterion                                      | Independently inspected evidence and conclusion                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 9.1 analysis and preservation                  | `schema-v1-migration-analyzer.ts`, `migration-snapshot-reader.ts`, `preservation-evidence.ts` and their regressions bind exact source/bytes, retain unresolved findings and prove read-only analysis. Student identity, grading relocation and comment ownership remain preservation-only under Decision A.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 9.2 review and authority                       | `migration-review-validation.ts`, `migrationReviewService.ts` and their tests require explicit fallback, coordinators, lifecycle/history and creation order. Main retains verified identity receipts and review objects; source/account/generation/replacement invalidates authority. Saved progress does not restore completion.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 9.3 assignment migration                       | `assignment-migration-planner.ts`, `assignmentMigrationPlanningService.ts` and planner/handoff tests preserve exact owners, ownerless repair state, section schedules, successful partial Apply evidence and source/runtime provenance without inferred ownership or false Complete.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 9.4 grader removal                             | `grader-access-review.ts`, `grader-removal-planner.ts`, `graderRemovalHandoffService.ts`, `legacy-grader-reconciliation.ts` and tests require explicit section decisions and numeric managed targets. Candidate serialization removes grader desired fields. Replacement access is independently verified before legacy grant removal; teams/members and unrelated resources remain intact.                                                                                                                                                                                                                                                                                                                                                                      |
+| #44 safety order                               | `migrationPublicationService.ts` obtains retained reviews/acknowledgement, builds the pure candidate and runs `ready()` before `verifyMigrationCheckpoint()`. Only a verified result permits the isolated transaction/mutator. `beforeStage` validates actual bytes; `beforePush` verifies committed objects, rereads the checkpoint with `create: false`, repeats actual-byte readiness and writes durable intent before non-force publication. The real-Git ordering test asserts preflight before checkpoint push, checkpoint before clone/materialization, actual bytes before commit and committed-byte validation before branch push. Missing acknowledgement/production readiness creates no checkpoint. This matches canonical §3 and the faculty guide. |
+| #45 fixture isolation                          | `migration-snapshot-reader.test.ts` now uses `createMigrationGitRunners()` for fixture setup and exact reads. The hostile-signing test first proves raw bundled Git sees `commit.gpgSign=true`; the fixture/reader then succeed without mutation. The empty-directory PATH test additionally injects global/system config, foreign Git storage and environment config, checks mixed CRLF/LF blob bytes, unchanged trees, empty PATH directory and absence of foreign writes. `migration-git.ts` removes inherited Git variables/config and fixes signing, hooks and line endings; the bundled engine is resolved independently of PATH. Native cleanup assertions remain. All 16 reader tests passed independently.                                              |
+| Recoverable publication / immutable identities | `migration-checkpoint.ts` independently observes exact remote refs, never moves conflicts, and resolves lost responses by rereading. `migration-publication-transaction.ts` checks complete namespace/bytes/modes and exact single-parent source. Publication repeatedly rechecks account, repository, organization, authoritative SHA, retained objects, current authorization and readiness after awaits. Local/bare-Git tests cover races, cancellation, conflicting refs, tampering, rejected/lost pushes and restart without duplicate publication.                                                                                                                                                                                                         |
+| Schema compatibility and trust boundary        | `remoteCourseAccess.ts`, `remoteCourseMetadataBackend.ts`, `managedCourseMutationGuard.ts`, `managedOperationBridge.ts`, legacy publication/CLI guards and schema-discriminated/managed safety tests verify fresh authoritative schema/revision and immutable-ID v2 roles without username fallback. Unsupported schemas and stale v1 caches cannot downgrade v2. Discovery/metadata and closed managed adapters support 1/2; aggregate legacy services retain 1, new remote setup emits 2 and standalone preparation deliberately emits 1. Unavailable operation families fail closed. Execution/review IPC accepts intent only, with Electron-owned sender and strict DTOs.                                                                                    |
+| Durable reconciliation                         | `migration-reconciliation*.ts`, `migrationReconciliationService.ts` and real-Git/composer tests keep source/checkpoint, original publication and journal revision distinct. Shared write-ahead guards require one remote-confirmed winner before creation, survive restart/another machine and resolve unknown outcomes by observation. Current fallback/latest-created-term coordinator authority is rederived. Every descendant is checked; domain changes require an explicit fresh plan preserving audit/guards. Historical Ready is not current access proof. Partial work remains Published — Needs attention; accepted v2 is never rolled back.                                                                                                           |
+| Faculty and canonical documentation            | Reviewed the roadmap, migration contract §§1–5 and implemented sections, architecture migration/6.6/compatibility sections, and faculty guide's review, final confirmation, progress, results and history/recovery flows against source/tests. Optional review/autosave, single acknowledgement, verified checkpoint meaning, backend cancellation boundary and explicit recovery match implementation. Historical slice-local notes are explicitly superseded by current status.                                                                                                                                                                                                                                                                                |
+| Scope and prerequisites                        | #10–#14, #16–#26, #29–#32 and #43–#45 were reconfirmed closed. Both independent blockers are resolved and accepted; no substantive Phase 9 gap remains. #39 remains a separate follow-up; #41 is unchanged. No real courses, live GitHub test resources, production enablement or Phase 10 work were involved.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+
+### Final local and native validation
+
+Local environment: Node 24.21.0, native macOS arm64. Full logs are outside the
+checkout at `/private/tmp/graider-15-final-validation`. Required commands and counts
+are recorded here after completion; the issue closeout records the exact pushed
+commit's five-job CI run and native architecture checks.
+
+| Command                                                                                | Result                                                                                                                                                              |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npx vitest run tests/unit/migration/migration-snapshot-reader.test.ts --maxWorkers=2` | Passed: 1 file / 16 tests, zero skips; includes hostile signing and empty PATH regressions.                                                                         |
+| `npm run test:migration`                                                               | Passed: 32 root files / 880 tests and 24 UI files / 308 tests, zero skips; includes hygiene and bridge generation.                                                  |
+| `npm run typecheck`                                                                    | Passed, including bridge generation.                                                                                                                                |
+| `npm run lint`                                                                         | Passed, root and UI sources.                                                                                                                                        |
+| `npm test -- --maxWorkers=2`                                                           | Passed: 191 files / 3,061 tests, zero skips; hygiene passed.                                                                                                        |
+| `npm run build`                                                                        | Passed.                                                                                                                                                             |
+| `npm --prefix ui run typecheck`                                                        | Passed, renderer and Electron.                                                                                                                                      |
+| `npm --prefix ui test -- --maxWorkers=2`                                               | Passed with loopback permission: 226 files / 2,505 tests, zero skips. Initial sandbox listener failures are recorded below.                                         |
+| `npm --prefix ui run build`                                                            | Passed; existing large-chunk advisory retained.                                                                                                                     |
+| `npm run format:check`; `npm --prefix ui run format:check`                             | Passed, including final audit documentation.                                                                                                                        |
+| `npm run audit`                                                                        | Passed the unchanged high-severity gate with network permission; 1 low / 10 moderate findings tracked below. Initial sandbox DNS denial is retained in `audit.log`. |
+| `git diff --check`; relative Markdown file links                                       | Passed; 78 relative file links resolve.                                                                                                                             |
+
+The initial sandbox UI run passed 2,495 tests and failed ten OAuth tests because
+callback listeners could not bind. The complete suite was rerun with local
+loopback permission; no failure was suppressed or test declaration changed.
+The document tests retain the existing PDF standard-font advisory. The UI build retains the existing large-chunk advisory.
+
+Production migration remains disabled: `migrationPublicationReadiness.ts` uses the
+fixed production validator with no evidence issuer or enablement override. Trusted
+operational support and compatible signed/distributed macOS arm64 and Windows x64
+releases plus Phase 3 update prerequisites remain separate requirements. Phase 9
+completion does not satisfy them or authorize later-phase operations. Stop here;
+Phase 10 has not begun.
+
+The unchanged high-severity dependency audit gate passed. Ten moderate lint
+findings remain tracked by [#28](https://github.com/msoecsse/graider/issues/28).
+The newly observed low-severity `fast-xml-parser` advisory
+`GHSA-474x-hrwr-fgx4` is tracked separately by
+[#46](https://github.com/msoecsse/graider/issues/46). Neither finding is a Phase 9
+migration acceptance gap; no dependencies or audit thresholds changed here.
+
+### Historical initial audit and resolved blockers
+
+The following is retained as historical evidence from the initial independent
+review. Its open/blocked language describes that earlier point only and is superseded
+by the final acceptance above.
 
 **2026-11-11: #15 remains open/blocked by [#45](https://github.com/msoecsse/graider/issues/45).
 Phase 9 is not closed.** Faculty decision [#44](https://github.com/msoecsse/graider/issues/44)
@@ -212,7 +285,7 @@ tests. Final review confirms:
 At #26 closeout, no unresolved Slice 9.5 acceptance blocker was recorded. The issue closeout comment
 records final local commands/results, pushed documentation commit and its CI
 verification after a clean-worktree check. #15's subsequent independent findings
-and current blocked status are recorded above; Phase 10 is not started and
+and final resolution are recorded above; Phase 10 is not started and
 orchestrator #41 is unchanged.
 
 ### Historical validation before the Windows fix
