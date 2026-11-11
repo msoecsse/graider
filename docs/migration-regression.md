@@ -56,3 +56,31 @@ dependency installation and subprocess/file-lock errors when diagnosing platform
 failures. Do not replace bundled Git, add credentials, skip tests or weaken assertions.
 Capture complete logs outside the worktree; distinguish assertion failures from
 resource contention and retain all failure details.
+
+## Slice 9.5 closeout validation record (#26)
+
+Implementation commit: `0b85f5106724d639a3fcb45ed354c4791c09926e`.
+[CI evidence](https://github.com/msoecsse/graider/actions/runs/42911994389).
+
+Local macOS arm64 validation passed: `npm run typecheck`, `npm run lint`,
+`npm run format:check`, `npm test -- --maxWorkers=2` (3,054 tests),
+`npm run build`, `npm --prefix ui run typecheck`, `npm --prefix ui test`
+(2,505 tests), `npm --prefix ui run format:check`, and
+`npm --prefix ui run build`. UI tests required local loopback socket permission;
+the initial sandboxed run failed OAuth callback tests, which passed outside the
+sandbox. The focused CI hardening suite passed all eight tests after adding
+explicit bridge generation and prepared typechecks to the new native jobs.
+
+`npm run test:migration` passed locally: 878 root tests in 32 files and 308 UI
+tests in 24 files. CI normal checks, the complete native macOS arm64 migration
+regression job and the macOS grading boundary job passed.
+
+**Closeout remains blocked.** The native Windows x64 migration job failed before
+tests at the shared test-hygiene guard: TypeScript symbol resolution threw
+`Cannot read properties of undefined (reading 'members')`. See
+[blocker #43](https://github.com/msoecsse/graider/issues/43). The separate Windows
+grading performance job failed at 2,055.68ms versus its 2,000ms budget, covered by
+[existing #39](https://github.com/msoecsse/graider/issues/39).
+Do not mark Slice 9.5 complete or close #26 until required native validation is
+green. Phase 9 audit #15 remains the next handoff after closeout; it has not
+started. Production migration remains disabled, and Phase 10 is not started.
